@@ -17,11 +17,15 @@ import { z }                    from 'zod'
 import {
   getPendingWorkflowInstances,
   processWorkflowAction,
-  getWorkflowConfig,
+  getChainForEntity,
 }                               from '../../lib/workflow-service.js'
 
 const HR_ROLES    = ['super_admin', 'hr_admin']
 const ALLOW_ROLES = [...HR_ROLES, 'manager']
+
+// Workflow types the engine drives (must match the 053 enum + migration 313).
+const WORKFLOW_TYPES = ['leave', 'correction', 'regularisation', 'overtime', 'comp_off'] as const
+const ENTITY_TYPES   = ['leave_request', 'attendance_correction', 'attendance_regularisation', 'overtime_request', 'comp_off_request'] as const
 
 export default async function workflowsRoute(fastify: FastifyInstance) {
   const auth = { preHandler: [fastify.authenticate] }
@@ -33,7 +37,7 @@ export default async function workflowsRoute(fastify: FastifyInstance) {
     }
 
     const querySchema = z.object({
-      workflow_type: z.enum(['leave', 'correction', 'regularisation']).optional(),
+      workflow_type: z.enum(WORKFLOW_TYPES).optional(),
     })
     const parsed = querySchema.safeParse(req.query)
     if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
@@ -59,7 +63,7 @@ export default async function workflowsRoute(fastify: FastifyInstance) {
     }
 
     const schema = z.object({
-      workflow_type:            z.enum(['leave', 'correction', 'regularisation']),
+      workflow_type:            z.enum(WORKFLOW_TYPES),
       level:                    z.number().int().min(1).max(10),
       approver_type:            z.enum(['direct_manager', 'hr_admin', 'super_admin', 'specific_role']),
       specific_role:            z.string().max(50).optional(),
@@ -184,5 +188,23 @@ export default async function workflowsRoute(fastify: FastifyInstance) {
     }
 
     return reply.send({ data: result.value })
+  })
+
+  // ── GET /approvals/chain/:entityType/:entityId ───────────────────────────────
+  // Chain state for ONE entity — drives the inbox/detail stepper. Any authenticated
+  // user may read the chain of a request they can already see. `configured:false`
+  // means the entity follows the legacy single-step path (render the simple state).
+  fastify.get('/approvals/chain/:entityType/:entityId', auth, async (req: any, reply) => {
+    const paramsSchema = z.object({
+      entityType: z.enum(ENTITY_TYPES),
+      entityId:   z.string().uuid(),
+    })
+    const parsed = paramsSchema.safeParse(req.params)
+    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+
+    const chain = await getChainForEntity(
+      fastify.supabase, req.tenantId, parsed.data.entityType, parsed.data.entityId,
+    )
+    return reply.send({ data: chain })
   })
 }

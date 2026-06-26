@@ -275,3 +275,68 @@ export async function getWorkflowConfig(
 
   return data ?? []
 }
+
+// ── entity_type → workflow_type (the canonical map, shared by the orchestrator) ──
+export const ENTITY_WORKFLOW_MAP: Record<EntityType, WorkflowType> = {
+  leave_request:             'leave',
+  attendance_correction:     'correction',
+  attendance_regularisation: 'regularisation',
+  overtime_request:          'overtime',
+  comp_off_request:          'comp_off',
+}
+
+export interface ChainState {
+  configured:     boolean
+  workflow_type:  WorkflowType
+  current_level:  number | null
+  total_levels:   number | null
+  final_approved: boolean | null
+  levels:  Array<{ level: number; approver_type: string; specific_role: string | null; label: string }>
+  actions: Array<{ level: number; action: string; actor_id: string; actor_name: string | null; comments: string | null; acted_at: string }>
+}
+
+/**
+ * Read the full approval-chain state for one entity — for inbox/detail steppers.
+ * `configured:false` means no active chain for this workflow type (the entity
+ * follows the legacy single-step path); the UI should render the simple state.
+ */
+export async function getChainForEntity(
+  supabase:   SupabaseClient,
+  tenantId:   string,
+  entityType: EntityType,
+  entityId:   string,
+): Promise<ChainState> {
+  const workflowType = ENTITY_WORKFLOW_MAP[entityType]
+
+  const cfg = (await getWorkflowConfig(supabase, tenantId, workflowType))
+    .filter((c: any) => c.is_active)
+  const levels = cfg.map((c: any) => ({
+    level: c.level, approver_type: c.approver_type, specific_role: c.specific_role, label: c.label,
+  }))
+
+  const instance = await getWorkflowInstance(supabase, tenantId, entityType, entityId)
+
+  let actions: ChainState['actions'] = []
+  if (instance) {
+    const { data } = await supabase
+      .from('approval_actions')
+      .select('level, action, actor_id, comments, acted_at, profiles(full_name)')
+      .eq('instance_id', instance.id)
+      .eq('tenant_id', tenantId)
+      .order('acted_at', { ascending: true })
+    actions = (data ?? []).map((a: any) => ({
+      level: a.level, action: a.action, actor_id: a.actor_id,
+      actor_name: a.profiles?.full_name ?? null, comments: a.comments, acted_at: a.acted_at,
+    }))
+  }
+
+  return {
+    configured:     levels.length > 0,
+    workflow_type:  workflowType,
+    current_level:  instance?.current_level  ?? (levels.length > 0 ? 1 : null),
+    total_levels:   instance?.total_levels   ?? (levels.length > 0 ? levels.length : null),
+    final_approved: instance?.final_approved ?? null,
+    levels,
+    actions,
+  }
+}

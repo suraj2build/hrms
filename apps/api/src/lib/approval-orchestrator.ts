@@ -35,18 +35,14 @@ import {
   createWorkflowInstance,
   getWorkflowInstance,
   getWorkflowConfig,
+  ENTITY_WORKFLOW_MAP,
   type WorkflowType,
   type EntityType,
 } from './workflow-service.js'
 
-// ── entity_type → workflow_type (deterministic; avoids a schema column) ──────────
-const ENTITY_TO_WORKFLOW: Partial<Record<EntityType, WorkflowType>> = {
-  leave_request:             'leave',
-  attendance_correction:     'correction',
-  attendance_regularisation: 'regularisation',
-  overtime_request:          'overtime',
-  comp_off_request:          'comp_off',
-}
+// entity_type → workflow_type (deterministic; avoids a schema column). Shared with
+// the read surface via ENTITY_WORKFLOW_MAP in workflow-service.
+const ENTITY_TO_WORKFLOW: Record<EntityType, WorkflowType> = ENTITY_WORKFLOW_MAP
 
 // ── Decision contract ────────────────────────────────────────────────────────────
 export type GateDecision =
