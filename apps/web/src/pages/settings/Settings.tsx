@@ -10,11 +10,11 @@
 
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, Link } from 'react-router-dom'
 import {
   Building2, Upload, CheckCircle2, Circle,
   Hash, RefreshCw, AlertCircle, Globe,
-  ArrowRight, Pencil, X, Check,
+  ArrowRight, Pencil, X, Check, Sparkles,
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Badge }        from '@/components/ui/badge'
@@ -786,6 +786,22 @@ export function Settings() {
         }}
       />
 
+
+      {/* AI Assistant — discoverable entry point to /admin/settings/ai */}
+      <Card>
+        <CardContent className="flex items-center gap-3 py-4">
+          <span className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg" style={{ background: 'linear-gradient(135deg, #2E6FE6 0%, #15B8A6 100%)' }}>
+            <Sparkles className="h-4 w-4 text-white" />
+          </span>
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-semibold text-foreground">AI Assistant</p>
+            <p className="text-xs text-muted-foreground">Connect Groq / OpenAI / Gemini to enable the in-app assistant for everyone.</p>
+          </div>
+          <Link to="/admin/settings/ai">
+            <Button size="sm" variant="outline" className="gap-1.5">Configure <ArrowRight className="h-3.5 w-3.5" /></Button>
+          </Link>
+        </CardContent>
+      </Card>
 
       {/* Getting Started Checklist */}
       <GettingStarted data={company} checklist={checklist} onActivate={activate} />

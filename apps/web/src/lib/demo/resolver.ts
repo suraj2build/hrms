@@ -64,6 +64,34 @@ function ok(data: Json, message = 'Saved (demo)') {
   return { data, message }
 }
 
+/**
+ * Scripted assistant reply for the demo portal (no real LLM available). Keyword
+ * matched against the user's message so the floating widget feels alive when
+ * clicking through the demo. Numbers mirror the demo fixtures.
+ */
+function demoAssistantReply(body: unknown): string {
+  const msg = String((body as any)?.message ?? '').toLowerCase()
+  const has = (...ws: string[]) => ws.some(w => msg.includes(w))
+
+  if (has('balance', 'leave left', 'how many leave', 'leaves do i'))
+    return 'You have 8 Casual Leave and 12 Earned Leave remaining this year. You can apply from Me → Leave.'
+  if (has('payslip', 'salary', 'net pay', 'last pay', 'paid'))
+    return 'Your last payslip (May 2026) shows a net pay of ₹86,400. Download it from Pay → Payslips.'
+  if (has('pending', 'approval', 'approve'))
+    return 'You have 3 requests pending your approval: 2 leave requests and 1 attendance regularisation. Open the Approvals inbox to action them.'
+  if (has('headcount', 'how many employee', 'total employee', 'team size', 'strength'))
+    return 'Your organisation currently has 48 active employees — Engineering 18, Sales 12, Operations 10, HR 8.'
+  if (has('on leave', 'who is off', 'who’s off', 'whos off', 'off today', 'off tomorrow'))
+    return 'On leave today: Rahul Verma (Earned Leave) and Anjali Mehta (Casual Leave). Everyone else is available.'
+  if (has('holiday', 'next holiday'))
+    return 'The next holiday is Independence Day on 15 Aug. After that, Gandhi Jayanti on 2 Oct.'
+  if (has('wfh', 'work from home', 'regulari'))
+    return 'To request work-from-home or regularise attendance, go to Work → Attendance and use “Regularise”. Your manager approves it.'
+  if (has('hi', 'hello', 'hey', 'what can you', 'help'))
+    return 'Hi! I’m the CognixHR Assistant. I can answer questions about your leave balance, payslip, pending approvals, holidays, and headcount. (This is a demo — connect a provider key on a live deployment for full answers.)'
+  return 'I’m the CognixHR Assistant (demo). Try asking about your leave balance, last payslip, pending approvals, or headcount. On a live deployment I answer from your real HR data.'
+}
+
 // ── Main resolver ─────────────────────────────────────────────────────────────
 
 export function resolveDemo(endpoint: string, method: string, _body?: unknown): Json {
@@ -71,6 +99,32 @@ export function resolveDemo(endpoint: string, method: string, _body?: unknown): 
   const path = rawPath.replace(/\/+$/, '') || '/'
   const q = parseQuery(rawQs ?? '')
   const m = method.toUpperCase()
+
+  // ── AI Assistant (demo: scripted, no real backend/LLM) ─────────────────────
+  // Handled before the generic write block so POST /assistant/chat returns a real
+  // reply instead of an optimistic {id}. Lets the floating widget + admin panel be
+  // fully explorable in the demo portal.
+  if (path === '/assistant/status') {
+    return { data: { enabled: true, provider: 'groq', model: 'llama-3.3-70b-versatile' } }
+  }
+  if (path === '/assistant/config') {
+    return { data: {
+      provider: 'groq', model: null, enabled: true,
+      has_key: true, key_hint: 'gsk_••••demo', source: 'tenant', env_fallback: false,
+      providers: [
+        { id: 'groq',   label: 'Groq (Llama)',  default_model: 'llama-3.3-70b-versatile' },
+        { id: 'openai', label: 'OpenAI',        default_model: 'gpt-4o-mini' },
+        { id: 'gemini', label: 'Google Gemini', default_model: 'gemini-2.0-flash' },
+      ],
+      updated_at: null,
+    } }
+  }
+  if (path === '/assistant/config/test') {
+    return { data: { ok: true, message: 'Connected — groq:llama-3.3-70b-versatile replied "ok" (demo)' } }
+  }
+  if (path === '/assistant/chat') {
+    return { data: { reply: demoAssistantReply(_body), tools_used: [], model: 'llama-3.3-70b-versatile (demo)' } }
+  }
 
   // ── Writes: optimistic success (no persistence in demo) ────────────────────
   if (m === 'POST' || m === 'PUT' || m === 'PATCH' || m === 'DELETE') {
