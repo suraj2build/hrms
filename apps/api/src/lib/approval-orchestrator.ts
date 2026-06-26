@@ -71,9 +71,61 @@ interface ConfigLevel {
 }
 
 // ── Per-level approver resolution ────────────────────────────────────────────────
+
 /**
- * Does `actor` satisfy the approver requirement of `cfg` for `targetEmployeeId`?
- * Self-approval is always blocked regardless of level config.
+ * Pure check: does a profile with `role` + `employeeId` satisfy the approver
+ * requirement of `cfg` for `targetEmployeeId`? No self-approval / delegation logic —
+ * those are layered on top in actorSatisfiesLevel (self only applies to the real
+ * actor; a delegator standing in is allowed to be e.g. the manager).
+ */
+async function profileSatisfiesLevel(
+  supabase:         SupabaseClient,
+  tenantId:         string,
+  cfg:              ConfigLevel,
+  role:             string | null,
+  employeeId:       string | null,
+  targetEmployeeId: string,
+): Promise<boolean> {
+  switch (cfg.approver_type) {
+    case 'hr_admin':
+      return !!role && ['hr_admin', 'super_admin'].includes(role)
+    case 'super_admin':
+      return role === 'super_admin'
+    case 'specific_role':
+      return !!cfg.specific_role && role === cfg.specific_role
+    case 'direct_manager': {
+      // HR admins may always stand in for the direct-manager level (escape hatch so
+      // a missing/changed manager never deadlocks a chain).
+      if (role && ['hr_admin', 'super_admin'].includes(role)) return true
+      if (!employeeId) return false
+      const { data: target } = await supabase
+        .from('employees')
+        .select('manager_id')
+        .eq('id', targetEmployeeId)
+        .eq('tenant_id', tenantId)
+        .maybeSingle()
+      return (target as { manager_id: string | null } | null)?.manager_id === employeeId
+    }
+    default:
+      return false
+  }
+}
+
+/**
+ * Tokens a delegation's `entity_types` array may use to refer to this workflow.
+ * The delegation UI stores loose values (leave_request / correction / overtime /
+ * comp_off …) that don't cleanly match the engine's entity/workflow ids, so match
+ * generously against any of them.
+ */
+function delegationTokens(entityType: EntityType, workflowType: WorkflowType): string[] {
+  const base = [entityType as string, workflowType as string]
+  if (workflowType === 'regularisation') base.push('correction', 'attendance_correction')
+  return base
+}
+
+/**
+ * Does `actor` satisfy the level — directly, or by an active delegation from
+ * someone who would? Self-approval is always blocked for the real actor.
  */
 async function actorSatisfiesLevel(
   supabase:         SupabaseClient,
@@ -82,7 +134,9 @@ async function actorSatisfiesLevel(
   actorId:          string,
   actorRole:        string,
   targetEmployeeId: string,
-): Promise<{ ok: true } | { ok: false; message: string }> {
+  entityType:       EntityType,
+  workflowType:     WorkflowType,
+): Promise<{ ok: true; viaDelegation?: boolean } | { ok: false; message: string }> {
   // Resolve the actor's own employee record (for self-approval + manager checks).
   const { data: actorProfile } = await supabase
     .from('profiles')
@@ -97,44 +151,49 @@ async function actorSatisfiesLevel(
     return { ok: false, message: 'You cannot approve your own request' }
   }
 
-  switch (cfg.approver_type) {
-    case 'hr_admin':
-      return ['hr_admin', 'super_admin'].includes(actorRole)
-        ? { ok: true }
-        : { ok: false, message: `Level ${cfg.level} requires an HR admin` }
-
-    case 'super_admin':
-      return actorRole === 'super_admin'
-        ? { ok: true }
-        : { ok: false, message: `Level ${cfg.level} requires a super admin` }
-
-    case 'specific_role':
-      return cfg.specific_role && actorRole === cfg.specific_role
-        ? { ok: true }
-        : { ok: false, message: `Level ${cfg.level} requires role '${cfg.specific_role ?? '?'}'` }
-
-    case 'direct_manager': {
-      if (!actorEmployeeId) {
-        return { ok: false, message: `Level ${cfg.level} requires the direct manager, but you have no linked employee record` }
-      }
-      const { data: target } = await supabase
-        .from('employees')
-        .select('manager_id')
-        .eq('id', targetEmployeeId)
-        .eq('tenant_id', tenantId)
-        .maybeSingle()
-      const managerId = (target as { manager_id: string | null } | null)?.manager_id ?? null
-      // HR admins may always stand in for the direct-manager level (escape hatch
-      // so a missing/changed manager never deadlocks a chain).
-      if (managerId === actorEmployeeId || ['hr_admin', 'super_admin'].includes(actorRole)) {
-        return { ok: true }
-      }
-      return { ok: false, message: `Level ${cfg.level} requires the employee's direct manager` }
-    }
-
-    default:
-      return { ok: false, message: `Unknown approver type for level ${cfg.level}` }
+  // Direct authority.
+  if (await profileSatisfiesLevel(supabase, tenantId, cfg, actorRole, actorEmployeeId, targetEmployeeId)) {
+    return { ok: true }
   }
+
+  // Delegated authority: an active delegation to this actor, covering this workflow,
+  // from a delegator who themselves satisfies the level.
+  const nowIso = new Date().toISOString()
+  const { data: delegations } = await supabase
+    .from('approval_delegations')
+    .select('delegator_id, entity_types, valid_from, valid_until, is_active')
+    .eq('tenant_id', tenantId)
+    .eq('delegate_id', actorId)
+    .eq('is_active', true)
+    .lte('valid_from', nowIso)
+    .gte('valid_until', nowIso)
+
+  const tokens = delegationTokens(entityType, workflowType)
+  for (const d of (delegations ?? []) as any[]) {
+    const ets: string[] = Array.isArray(d.entity_types) ? d.entity_types : []
+    const covers = ets.length === 0 || ets.some((e) => tokens.includes(e))
+    if (!covers) continue
+    const { data: delegator } = await supabase
+      .from('profiles')
+      .select('role, employee_id')
+      .eq('id', d.delegator_id)
+      .eq('tenant_id', tenantId)
+      .maybeSingle()
+    const dRole = (delegator as { role: string | null } | null)?.role ?? null
+    const dEmp  = (delegator as { employee_id: string | null } | null)?.employee_id ?? null
+    if (await profileSatisfiesLevel(supabase, tenantId, cfg, dRole, dEmp, targetEmployeeId)) {
+      return { ok: true, viaDelegation: true }
+    }
+  }
+
+  // Tailored failure message by approver type.
+  const msg =
+    cfg.approver_type === 'hr_admin'      ? `Level ${cfg.level} requires an HR admin` :
+    cfg.approver_type === 'super_admin'   ? `Level ${cfg.level} requires a super admin` :
+    cfg.approver_type === 'specific_role' ? `Level ${cfg.level} requires role '${cfg.specific_role ?? '?'}'` :
+    cfg.approver_type === 'direct_manager'? `Level ${cfg.level} requires the employee's direct manager` :
+    `Level ${cfg.level} approver requirement not met`
+  return { ok: false, message: msg }
 }
 
 // ── Lazy get-or-create of the instance ───────────────────────────────────────────
@@ -240,6 +299,7 @@ export async function gateApprove(supabase: SupabaseClient, input: GateInput): P
 
   const auth = await actorSatisfiesLevel(
     supabase, input.tenantId, cfg, input.actorId, input.actorRole, input.targetEmployeeId,
+    input.entityType, workflowType,
   )
   if (!auth.ok) return { kind: 'error', error: { type: 'FORBIDDEN', message: auth.message } }
 
@@ -291,6 +351,7 @@ export async function gateReject(supabase: SupabaseClient, input: GateInput): Pr
 
   const auth = await actorSatisfiesLevel(
     supabase, input.tenantId, cfg, input.actorId, input.actorRole, input.targetEmployeeId,
+    input.entityType, workflowType,
   )
   if (!auth.ok) return { kind: 'error', error: { type: 'FORBIDDEN', message: auth.message } }
 

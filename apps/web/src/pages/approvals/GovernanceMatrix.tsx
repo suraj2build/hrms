@@ -1187,8 +1187,10 @@ export function GovernanceMatrix() {
         <Info className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-warning" />
         <p>
           <span className="font-semibold">Advisory / planning surface.</span>{' '}
-          Matrices, delegations, and overrides here are <span className="font-medium">not</span>{' '}
-          yet enforced at approval time — the live engine reads the chains configured in{' '}
+          <span className="font-medium">Delegations are enforced</span> — the live engine
+          lets a delegate stand in for a configured approver during the active window.
+          Matrices and overrides are <span className="font-medium">not</span> yet enforced;
+          the engine reads its chains from{' '}
           <span className="font-medium">Settings → Approval Workflows</span>. Use Simulate
           to preview routing.
         </p>
