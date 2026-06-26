@@ -9,7 +9,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { useLocation, Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { Sparkles, X, Send, Loader2, Settings } from 'lucide-react'
+import { Sparkles, X, Send, Loader2, Settings, RotateCcw } from 'lucide-react'
 import { api } from '@/lib/api/client'
 import { useAuthStore } from '@/stores/authStore'
 import { DEMO_MODE } from '@/lib/demo'
@@ -25,9 +25,20 @@ export function AssistantWidget() {
   const { pathname } = useLocation()
   const [open, setOpen] = useState(false)
   const [input, setInput] = useState('')
-  const [msgs, setMsgs] = useState<Msg[]>([])
+  // Persist the transcript across page refreshes (sessionStorage = cleared on tab close).
+  const [msgs, setMsgs] = useState<Msg[]>(() => {
+    try {
+      const raw = sessionStorage.getItem('cognixhr-assistant-chat')
+      return raw ? (JSON.parse(raw) as Msg[]) : []
+    } catch { return [] }
+  })
   const [sending, setSending] = useState(false)
   const scrollRef = useRef<HTMLDivElement>(null)
+
+  // Keep the saved transcript in sync (cap to last 50 to bound storage).
+  useEffect(() => {
+    try { sessionStorage.setItem('cognixhr-assistant-chat', JSON.stringify(msgs.slice(-50))) } catch { /* quota / disabled */ }
+  }, [msgs])
 
   const isAdmin = profile?.role === 'super_admin' || profile?.role === 'hr_admin'
   const hidden  = HIDE_ON.some(p => pathname.startsWith(p))
@@ -105,6 +116,11 @@ export function AssistantWidget() {
                 {DEMO_MODE ? 'Demo · sample answers' : status?.data.enabled ? 'Read-only · answers from your data' : 'Not configured'}
               </p>
             </div>
+            {msgs.length > 0 && (
+              <button onClick={() => setMsgs([])} aria-label="New chat" title="Clear chat" className="rounded-md p-1 hover:bg-white/15">
+                <RotateCcw className="h-4 w-4" />
+              </button>
+            )}
             <button onClick={() => setOpen(false)} aria-label="Close" className="rounded-md p-1 hover:bg-white/15">
               <X className="h-4 w-4" />
             </button>

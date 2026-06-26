@@ -138,10 +138,14 @@ export default async function assistantRoutes(fastify: FastifyInstance) {
         err: e?.message, status: e?.status,
         tried: cfgList.map(c => `${c.provider}:${effectiveModel(c)}`),
       }, 'assistant chat failed')
-      const triedDesc = cfgList.map(c => c.provider).join(' → ')
+      const triedDesc = cfgList.map(c => `${c.provider} (${effectiveModel(c)})`).join(' → ')
+      // Pull the most useful detail out of the (last) provider error so the reason
+      // is actually diagnosable instead of a generic "try again".
+      const detail: string = e?.message || e?.errorDetails?.[0]?.reason || ''
       const msg = e?.status === 429 ? 'The assistant is busy (rate limited). Please try again in a moment.'
         : e?.status === 401 ? `The assistant is misconfigured — ${triedDesc} rejected the API key. Ask an admin to re-check the keys in AI settings.`
-        : 'Sorry — I could not answer that just now. Please try again.'
+        : e?.status === 404 ? `The configured model wasn't found (tried ${triedDesc}). Ask an admin to check the model name in AI settings.${detail ? ` Details: ${detail.slice(0, 160)}` : ''}`
+        : `Sorry — I couldn't answer that just now (tried ${triedDesc}).${detail ? ` Reason: ${detail.slice(0, 200)}` : ''}`
       return reply.code(200).send({ data: { reply: msg, error: true } })
     }
   })
