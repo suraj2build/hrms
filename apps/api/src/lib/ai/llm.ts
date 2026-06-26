@@ -194,6 +194,40 @@ export async function chatComplete(
     : chatCompleteOpenAI(config, opts)
 }
 
+export interface FallbackResult {
+  content:    ChatResult
+  usedConfig: AssistantConfig
+  fellBack:   boolean
+}
+
+/**
+ * Try configs in order; if the first fails for any reason, try the next.
+ * Returns which config succeeded so the caller can surface the provider to the user.
+ */
+export async function chatCompleteWithFallback(
+  configs: AssistantConfig[],
+  opts: { messages: ChatMessage[]; tools?: ToolDef[]; temperature?: number; maxTokens?: number },
+  onFallback?: (from: AssistantConfig, reason: string) => void,
+): Promise<FallbackResult> {
+  const usable = configs.filter(c => c.apiKey)
+  if (usable.length === 0) throw new AssistantNotConfiguredError()
+
+  let lastError: any
+  for (let i = 0; i < usable.length; i++) {
+    const cfg = usable[i]!
+    try {
+      const content = await chatComplete(cfg, opts)
+      return { content, usedConfig: cfg, fellBack: i > 0 }
+    } catch (e: any) {
+      lastError = e
+      if (i < usable.length - 1) {
+        onFallback?.(cfg, e?.message ?? 'unknown error')
+      }
+    }
+  }
+  throw lastError
+}
+
 /** Lightweight reachability check for the "Test connection" button. */
 export async function testConnection(config: AssistantConfig): Promise<{ ok: boolean; message: string }> {
   try {

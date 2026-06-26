@@ -32,30 +32,61 @@ export function envConfig(): AssistantConfig {
   return { provider, apiKey, model: envModelFor(provider), enabled: true, source: apiKey ? 'env' : 'none' }
 }
 
+export interface ResolvedConfigs {
+  primary:  AssistantConfig
+  fallback: AssistantConfig | null
+}
+
+type DbRow = {
+  provider: string; api_key: string | null; model: string | null; enabled: boolean
+  fallback_provider: string | null; fallback_api_key: string | null; fallback_model: string | null
+}
+
 /**
- * Resolve the effective config for a tenant: DB row first, else env. A DB row that
- * is present but keyless falls through to env so a half-saved row never disables
- * an env-configured deployment.
+ * Resolve primary + optional fallback configs for a tenant.
+ * Primary: DB row first, else env. Fallback: DB fallback columns (if set).
+ */
+export async function resolveAssistantConfigs(
+  supabase: SupabaseClient,
+  tenantId: string,
+): Promise<ResolvedConfigs> {
+  const { data } = await supabase
+    .from('ai_assistant_config')
+    .select('provider, api_key, model, enabled, fallback_provider, fallback_api_key, fallback_model')
+    .eq('tenant_id', tenantId)
+    .maybeSingle()
+
+  const row = data as DbRow | null
+
+  // ── Primary ────────────────────────────────────────────────────────────────
+  let primary: AssistantConfig
+  if (row && row.api_key) {
+    const provider = (row.provider in PROVIDER_META ? row.provider : 'groq') as ProviderName
+    primary = { provider, apiKey: row.api_key, model: row.model, enabled: row.enabled, source: 'tenant' }
+  } else {
+    const env = envConfig()
+    primary = (row && row.enabled === false) ? { ...env, enabled: false } : env
+  }
+
+  // ── Fallback ───────────────────────────────────────────────────────────────
+  let fallback: AssistantConfig | null = null
+  if (row?.fallback_provider && row?.fallback_api_key) {
+    const fp = (row.fallback_provider in PROVIDER_META ? row.fallback_provider : 'groq') as ProviderName
+    fallback = { provider: fp, apiKey: row.fallback_api_key, model: row.fallback_model ?? null, enabled: true, source: 'tenant' }
+  }
+
+  return { primary, fallback }
+}
+
+/**
+ * Resolve the effective config for a tenant (primary only).
+ * Kept for routes that only need the primary (status, admin config GET).
  */
 export async function resolveAssistantConfig(
   supabase: SupabaseClient,
   tenantId: string,
 ): Promise<AssistantConfig> {
-  const { data } = await supabase
-    .from('ai_assistant_config')
-    .select('provider, api_key, model, enabled')
-    .eq('tenant_id', tenantId)
-    .maybeSingle()
-
-  const row = data as { provider: string; api_key: string | null; model: string | null; enabled: boolean } | null
-  if (row && row.api_key) {
-    const provider = (row.provider in PROVIDER_META ? row.provider : 'groq') as ProviderName
-    return { provider, apiKey: row.api_key, model: row.model, enabled: row.enabled, source: 'tenant' }
-  }
-  // No usable tenant row → env fallback (but honour an explicit tenant 'disabled').
-  const env = envConfig()
-  if (row && row.enabled === false) return { ...env, enabled: false }
-  return env
+  return (await resolveAssistantConfigs(supabase, tenantId)).primary
 }
 
 /** Mask a key for display: keep a short prefix + last 4, hide the middle. */

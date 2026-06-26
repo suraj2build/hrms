@@ -4,20 +4,21 @@
  *   POST /assistant/chat            — role-scoped chat (context-injection + read-tools)
  *   GET  /assistant/status          — is the assistant usable for this tenant?
  *   GET  /assistant/config          — admin: current config (key masked)
- *   PUT  /assistant/config          — admin: set provider/key/model/enabled
- *   POST /assistant/config/test     — admin: test connection
+ *   PUT  /assistant/config          — admin: set provider/key/model/enabled + fallback
+ *   POST /assistant/config/test     — admin: test connection (primary or fallback)
  *
  * The LLM provider key is read server-side only (DB row or env) and never returned
  * to the browser. Chat is rate-limited per the global limiter + a tighter per-route cap.
+ * If the primary provider fails, the request automatically retries with the fallback.
  */
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import {
-  chatComplete, testConnection, AssistantNotConfiguredError,
-  isConfigUsable, effectiveModel, PROVIDER_META,
-  type ChatMessage, type ToolCall,
+  chatComplete, chatCompleteWithFallback, testConnection,
+  AssistantNotConfiguredError, isConfigUsable, effectiveModel, PROVIDER_META,
+  type ChatMessage, type ToolCall, type AssistantConfig,
 } from '../../lib/ai/llm.js'
-import { resolveAssistantConfig, envConfig, maskKey } from '../../lib/ai/config.js'
+import { resolveAssistantConfig, resolveAssistantConfigs, envConfig, maskKey } from '../../lib/ai/config.js'
 import { buildAssistantContext } from '../../lib/ai/assistant-context.js'
 import { ASSISTANT_TOOLS, executeTool } from '../../lib/ai/assistant-tools.js'
 
@@ -61,8 +62,8 @@ export default async function assistantRoutes(fastify: FastifyInstance) {
     const parsed = schema.safeParse(req.body)
     if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
 
-    const cfg = await resolveAssistantConfig(fastify.supabase, req.tenantId)
-    if (!isConfigUsable(cfg)) {
+    const { primary, fallback } = await resolveAssistantConfigs(fastify.supabase, req.tenantId)
+    if (!isConfigUsable(primary) && !fallback) {
       return reply.code(200).send({ data: { reply: null, not_configured: true } })
     }
 
@@ -75,21 +76,39 @@ export default async function assistantRoutes(fastify: FastifyInstance) {
       { role: 'user', content: parsed.data.message },
     ]
 
-    // Only managers/HR get the cross-record tools; employees stay context-only.
     const tools = isManagerOrHr ? ASSISTANT_TOOLS : undefined
     const toolCtx = { supabase: fastify.supabase, caller, employeeId }
     const toolsUsed: string[] = []
 
+    // Build ordered list: primary first, then fallback (if configured)
+    const cfgList = [primary, ...(fallback ? [fallback] : [])].filter(isConfigUsable)
+
     try {
+      // Track the active config across the tool loop — may switch to fallback mid-session
+      let activeConfig = cfgList[0]!
+      let usedFallback = false
+
       // Tool loop — bounded to avoid runaway.
       for (let hop = 0; hop < 4; hop++) {
-        const res = await chatComplete(cfg, { messages, tools, maxTokens: 700 })
+        const { content: res, usedConfig, fellBack } = await chatCompleteWithFallback(
+          hop === 0 ? cfgList : [activeConfig],
+          { messages, tools, maxTokens: 700 },
+          (from, reason) => req.log.warn({ from: from.provider, reason }, 'assistant primary failed, trying fallback'),
+        )
+        if (fellBack) { activeConfig = usedConfig; usedFallback = true }
 
         if (res.toolCalls.length === 0) {
-          return reply.send({ data: { reply: res.content ?? '…', tools_used: toolsUsed, model: effectiveModel(cfg) } })
+          return reply.send({
+            data: {
+              reply:      res.content ?? '…',
+              tools_used: toolsUsed,
+              model:      effectiveModel(activeConfig),
+              provider:   activeConfig.provider,
+              fell_back:  usedFallback,
+            },
+          })
         }
 
-        // Record the assistant's tool-call turn, then execute each and append results.
         messages.push({ role: 'assistant', content: res.content, tool_calls: res.toolCalls })
         for (const call of res.toolCalls as ToolCall[]) {
           let args: any = {}
@@ -99,9 +118,18 @@ export default async function assistantRoutes(fastify: FastifyInstance) {
           messages.push({ role: 'tool', content: result, tool_call_id: call.id })
         }
       }
+
       // Hit the hop cap — make one final no-tools call for a summary.
-      const final = await chatComplete(cfg, { messages, maxTokens: 500 })
-      return reply.send({ data: { reply: final.content ?? '…', tools_used: toolsUsed, model: effectiveModel(cfg) } })
+      const { content: final, usedConfig } = await chatCompleteWithFallback([activeConfig], { messages, maxTokens: 500 })
+      return reply.send({
+        data: {
+          reply:      final.content ?? '…',
+          tools_used: toolsUsed,
+          model:      effectiveModel(usedConfig),
+          provider:   usedConfig.provider,
+          fell_back:  usedFallback,
+        },
+      })
     } catch (e: any) {
       if (e instanceof AssistantNotConfiguredError) {
         return reply.code(200).send({ data: { reply: null, not_configured: true } })
@@ -118,13 +146,14 @@ export default async function assistantRoutes(fastify: FastifyInstance) {
   fastify.get('/assistant/config', hrAuth, async (req: any, reply) => {
     const { data: row } = await fastify.supabase
       .from('ai_assistant_config')
-      .select('provider, api_key, model, enabled, updated_at')
+      .select('provider, api_key, model, enabled, updated_at, fallback_provider, fallback_api_key, fallback_model')
       .eq('tenant_id', req.tenantId)
       .maybeSingle()
     const env = envConfig()
     const r = row as any
     return reply.send({
       data: {
+        // Primary
         provider:   r?.provider ?? env.provider,
         model:      r?.model ?? null,
         enabled:    r?.enabled ?? true,
@@ -132,6 +161,12 @@ export default async function assistantRoutes(fastify: FastifyInstance) {
         key_hint:   maskKey(r?.api_key),
         source:     r?.api_key ? 'tenant' : (env.apiKey ? 'env' : 'none'),
         env_fallback: !!env.apiKey,
+        // Fallback
+        fallback_provider: r?.fallback_provider ?? null,
+        fallback_model:    r?.fallback_model ?? null,
+        has_fallback_key:  !!r?.fallback_api_key,
+        fallback_key_hint: maskKey(r?.fallback_api_key),
+        // Shared
         providers:  Object.entries(PROVIDER_META).map(([id, m]) => ({ id, label: m.label, default_model: m.defaultModel })),
         updated_at: r?.updated_at ?? null,
       },
@@ -144,18 +179,24 @@ export default async function assistantRoutes(fastify: FastifyInstance) {
       provider: z.enum(['groq', 'openai', 'gemini']),
       model:    z.string().max(100).nullable().optional(),
       enabled:  z.boolean(),
-      // Omit api_key to keep the existing one; '' explicitly clears it.
       api_key:  z.string().max(300).optional(),
+      // Fallback — all optional; omit to keep existing
+      fallback_provider: z.enum(['groq', 'openai', 'gemini']).nullable().optional(),
+      fallback_model:    z.string().max(100).nullable().optional(),
+      fallback_api_key:  z.string().max(300).optional(),
     })
     const parsed = schema.safeParse(req.body)
     if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
-    const { provider, model, enabled, api_key } = parsed.data
+    const { provider, model, enabled, api_key, fallback_provider, fallback_model, fallback_api_key } = parsed.data
 
     const patch: Record<string, unknown> = {
       tenant_id: req.tenantId, provider, model: model ?? null, enabled,
       updated_by: req.userId, updated_at: new Date().toISOString(),
     }
-    if (api_key !== undefined) patch.api_key = api_key === '' ? null : api_key
+    if (api_key !== undefined)          patch.api_key          = api_key === '' ? null : api_key
+    if (fallback_provider !== undefined) patch.fallback_provider = fallback_provider ?? null
+    if (fallback_model !== undefined)    patch.fallback_model    = fallback_model ?? null
+    if (fallback_api_key !== undefined)  patch.fallback_api_key  = fallback_api_key === '' ? null : fallback_api_key
 
     const { error } = await fastify.supabase
       .from('ai_assistant_config')
@@ -165,20 +206,23 @@ export default async function assistantRoutes(fastify: FastifyInstance) {
   })
 
   // ── POST /assistant/config/test (admin) ───────────────────────────────────────
-  // Tests the provided key (if any) else the saved/env config — without persisting.
   fastify.post('/assistant/config/test', hrAuth, async (req: any, reply) => {
     const schema = z.object({
       provider: z.enum(['groq', 'openai', 'gemini']).optional(),
       model:    z.string().max(100).nullable().optional(),
       api_key:  z.string().max(300).optional(),
+      // Pass slot: 'fallback' to test the fallback config
+      slot:     z.enum(['primary', 'fallback']).optional(),
     })
     const parsed = schema.safeParse(req.body ?? {})
     if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
 
-    let cfg = await resolveAssistantConfig(fastify.supabase, req.tenantId)
+    const { primary, fallback } = await resolveAssistantConfigs(fastify.supabase, req.tenantId)
+    let cfg: AssistantConfig = parsed.data.slot === 'fallback' ? (fallback ?? primary) : primary
+
     if (parsed.data.provider) cfg = { ...cfg, provider: parsed.data.provider }
     if (parsed.data.model !== undefined) cfg = { ...cfg, model: parsed.data.model }
-    if (parsed.data.api_key) cfg = { ...cfg, apiKey: parsed.data.api_key }   // test an unsaved key
+    if (parsed.data.api_key) cfg = { ...cfg, apiKey: parsed.data.api_key }
 
     if (!cfg.apiKey) return reply.send({ data: { ok: false, message: 'No API key to test — enter one first.' } })
     const result = await testConnection({ ...cfg, enabled: true })
