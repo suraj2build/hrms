@@ -258,6 +258,8 @@ import essSelfServiceRoute                  from './routes/ess/self-service.js'
 import essHomeRoute                         from './routes/ess/home.js'
 import essSignalsRoute                      from './routes/ess/signals.js'
 import essActivityRoute                     from './routes/ess/activity.js'
+import essProgressRoute                     from './routes/ess/progress.js'
+import essReflectionRoute                   from './routes/ess/reflection.js'
 import assistantRoutes                      from './routes/assistant/index.js'
 
 // Routes — Governance Intelligence (Sprint 2)
@@ -741,6 +743,8 @@ async function start() {
   await fastify.register(essHomeRoute,        { prefix: '/ess' })   // GET /ess/home (aggregated home payload)
   await fastify.register(essSignalsRoute,     { prefix: '/ess' })   // GET /ess/signals (Experience Core — "what needs you")
   await fastify.register(essActivityRoute,    { prefix: '/ess' })   // GET /ess/activity (Experience Core — "what happened")
+  await fastify.register(essProgressRoute,    { prefix: '/ess' })   // GET /ess/progress (Experience Core — "am I doing well")
+  await fastify.register(essReflectionRoute,  { prefix: '/ess' })   // GET /ess/reflection (Experience Core — memory-aware insight)
   await fastify.register(essSelfServiceRoute)                       // GET/POST/PUT/DELETE /ess/me/* (P4.1 data ownership)
   await fastify.register(assistantRoutes)                           // AI Assistant: /assistant/chat + /assistant/config
 

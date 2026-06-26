@@ -14,7 +14,7 @@ import { useQuery }     from '@tanstack/react-query'
 import { useNavigate, useLocation } from 'react-router-dom'
 import {
   Clock, CheckCircle2, CalendarCheck, ClipboardEdit, Receipt, CreditCard,
-  LifeBuoy, Award, Inbox, Megaphone, PartyPopper, CalendarDays,
+  LifeBuoy, Award, Inbox, Megaphone, PartyPopper, CalendarDays, Sparkles,
 } from 'lucide-react'
 import { api }          from '@/lib/api/client'
 import { useAuthStore } from '@/stores/authStore'
@@ -42,6 +42,21 @@ interface HomePayload {
   feed_teaser: { id: string; type: string; body: string; created_at: string; author: string }[]
   birthdays: { name: string; days_until: number }[]
   anniversaries: { name: string; years: number; days_until: number }[]
+}
+
+/** GET /ess/progress — the motivational "My Progress" band (Movement 7). */
+interface ProgressPayload {
+  show:    boolean
+  heading: string
+  ambient: string
+  hints:   { label: string; value: string }[]
+}
+
+/** GET /ess/reflection — the memory-aware AI insight (Movement 9). */
+interface Reflection {
+  insight: string | null
+  action?: { label: string; href: string }
+  kind?:   'pay' | 'break' | 'attendance'
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -107,9 +122,17 @@ export function EssHome() {
   const activityQ = useQuery<{ events: ActivityEvent[] }>({
     queryKey: ['ess-activity'], queryFn: () => api.get('/ess/activity'), staleTime: 60_000,
   })
+  const progressQ = useQuery<ProgressPayload>({
+    queryKey: ['ess-progress'], queryFn: () => api.get('/ess/progress'), staleTime: 5 * 60_000,
+  })
+  const reflectionQ = useQuery<Reflection>({
+    queryKey: ['ess-reflection'], queryFn: () => api.get('/ess/reflection'), staleTime: 5 * 60_000,
+  })
 
   const signals = signalsQ.data?.signals ?? []
   const events  = activityQ.data?.events ?? []
+  const progress   = progressQ.data
+  const reflection = reflectionQ.data
   const today   = data?.today
   const kpis    = data?.kpis
   const fullName  = data?.profile?.name ?? auth?.full_name ?? 'there'
@@ -327,6 +350,55 @@ export function EssHome() {
           )}
         </div>
       </div>
+
+      {/* ── Movement 7 — My Progress (motivates, never reports; silent when empty) ── */}
+      {progress?.show && (
+        <div>
+          <Heading>{progress.heading || 'You’re doing well'}</Heading>
+          <AmbientLine>{progress.ambient}</AmbientLine>
+          {progress.hints.length > 0 && (
+            <div className="mt-3 flex flex-wrap gap-x-6 gap-y-1.5 pl-5 text-xs text-muted-foreground">
+              {progress.hints.map((h) => (
+                <span key={h.label}>
+                  {h.label} · <span className="font-medium text-foreground">{h.value}</span>
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Movement 9 — AI reflection (the signature ambient moment, memory-aware) ── */}
+      {reflection?.insight && (
+        <div className="rounded-2xl bg-gradient-to-br from-[#1A4D8F] to-[#15B8A6] p-6 text-white shadow-sm">
+          <p className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wider text-white/80">
+            <Sparkles className="h-3.5 w-3.5" /> Cognix Insight
+          </p>
+          <p className="mt-2 text-base font-medium leading-relaxed">{reflection.insight}</p>
+          {reflection.action && (
+            <button
+              onClick={() => navigate(`${base}${reflection.action!.href}`)}
+              className="mt-4 inline-flex items-center gap-1.5 rounded-full bg-white/15 px-4 py-1.5 text-xs font-semibold text-white backdrop-blur-sm transition hover:bg-white/25"
+            >
+              {reflection.action.label} →
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* ── Movement 10 — Done for today (the calm closer, emotional payoff) ── */}
+      {(() => {
+        const name = fullName.split(' ')[0]
+        const pending = signals.length > 0 || (kpis?.open_actions ?? 0) > 0
+        return (
+          <p className="flex items-center justify-center gap-2 pb-2 pt-1 text-center text-sm text-muted-foreground">
+            <CheckCircle2 className="h-4 w-4 text-success" />
+            {pending
+              ? `A couple of things are still waiting, ${name} — but nothing that can’t wait for coffee.`
+              : `That’s everything, ${name}. You’re all set — have a great day.`}
+          </p>
+        )
+      })()}
     </div>
   )
 }
