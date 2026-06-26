@@ -254,8 +254,13 @@ export default async function assistantRoutes(fastify: FastifyInstance) {
       .upsert(patch, { onConflict: 'tenant_id' })
 
     // If the providers_json column isn't in the PostgREST cache yet, retry without it.
+    // Persist chain[1] in legacy fallback_ columns so it isn't lost.
     if (error && (error.message.includes('providers_json') || error.message.includes('schema cache'))) {
       const { providers_json: _pj, ...safePatch } = patch as any
+      const second = providers_json[1]
+      safePatch.fallback_provider = second?.provider ?? null
+      safePatch.fallback_api_key  = second?.api_key  ?? null
+      safePatch.fallback_model    = second?.model    ?? null
       ;({ error } = await fastify.supabase
         .from('ai_assistant_config')
         .upsert(safePatch, { onConflict: 'tenant_id' }))

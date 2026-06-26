@@ -40,7 +40,7 @@ export function AiAssistantSettings() {
   const qc = useQueryClient()
   const isAdmin = profile?.role === 'super_admin' || profile?.role === 'hr_admin'
 
-  const { data, isLoading } = useQuery<{ data: ConfigResp }>({
+  const { data, isLoading, refetch } = useQuery<{ data: ConfigResp }>({
     queryKey: ['assistant-config'],
     queryFn:  () => api.get('/assistant/config'),
     enabled:  isAdmin,
@@ -89,10 +89,15 @@ export function AiAssistantSettings() {
         ...(r.newKey ? { api_key: r.newKey } : {}),
       })),
     }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['assistant-config'] })
+    onSuccess: async () => {
+      const fresh = await refetch()
+      if (fresh.data) {
+        setRows(fresh.data.data.chain.map(c => ({
+          provider: c.provider, model: c.model ?? '', enabled: c.enabled,
+          has_key: c.has_key, key_hint: c.key_hint, newKey: '',
+        })))
+      }
       qc.invalidateQueries({ queryKey: ['assistant-status'] })
-      setRows(null)  // re-seed from server (clears typed keys, refreshes hints)
       toast.success('AI settings saved')
     },
     onError: (e: Error) => toast.error('Could not save', { description: e.message }),
