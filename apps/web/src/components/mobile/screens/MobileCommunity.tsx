@@ -5,14 +5,22 @@ import { toast } from 'sonner'
 import { api } from '@/lib/api/client'
 import { useAuthStore } from '@/stores/authStore'
 import { glossy } from '../glossy'
+import { MobileWishButton, type WishKind } from './MobileWish'
 
 type Reaction = 'like' | 'celebrate' | 'appreciate' | 'support'
 interface Post {
-  id: string; author_name?: string | null; type: 'update' | 'announcement' | 'recognition'
+  id: string; author_name?: string | null; subject_name?: string | null; subject_employee?: string | null
+  type: string
   title?: string | null; body: string; pinned?: boolean; created_at: string
   reaction_count: number; comment_count: number; my_reaction?: Reaction | null
 }
 interface Comment { id: string; author_name?: string | null; body: string; created_at: string }
+
+// Celebration post types render with festive chrome + a Wish affordance.
+const CELEBRATION: Record<string, { emoji: string; label: string }> = {
+  birthday:    { emoji: '🎂', label: 'Birthday' },
+  anniversary: { emoji: '🎉', label: 'Work Anniversary' },
+}
 
 const REACTIONS: { key: Reaction; emoji: string; label: string }[] = [
   { key: 'like', emoji: '👍', label: 'Like' },
@@ -106,21 +114,34 @@ export function MobileCommunity({ base: _base }: { base: string }) {
 function PostCard({ post, onReact }: { post: Post; onReact: (r: Reaction) => void }) {
   const [showComments, setShowComments] = useState(false)
   const isAnnouncement = post.type === 'announcement' || post.pinned
-  const initials = (post.author_name ?? '?').split(' ').map((s) => s[0]).join('').slice(0, 2).toUpperCase()
+  const celebration = CELEBRATION[post.type]
+  const initials = (post.author_name ?? post.subject_name ?? '?').split(' ').map((s) => s[0]).join('').slice(0, 2).toUpperCase()
+
+  // Header name line: personal wish → "A wished B"; system celebration → subject.
+  const headerName = celebration
+    ? (post.author_name && post.subject_name
+        ? `${post.author_name} wished ${post.subject_name}`
+        : (post.subject_name ?? 'Celebration'))
+    : (post.author_name ?? 'Someone')
 
   return (
-    <div className={`rounded-2xl bg-white p-4 shadow-[0_2px_12px_-4px_rgba(26,77,143,0.12)] ${isAnnouncement ? 'ring-1 ring-[#7C3AED]/30' : ''}`}>
+    <div className={`rounded-2xl bg-white p-4 shadow-[0_2px_12px_-4px_rgba(26,77,143,0.12)] ${isAnnouncement ? 'ring-1 ring-[#7C3AED]/30' : celebration ? 'ring-1 ring-[#15B8A6]/30' : ''}`}>
       <div className="flex items-center gap-2.5">
-        {isAnnouncement ? (
+        {celebration ? (
+          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full text-base" style={glossy('#15B8A6', '#2DD4BF')}>{celebration.emoji}</span>
+        ) : isAnnouncement ? (
           <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl text-white" style={glossy('#7C3AED', '#A78BFA')}><Megaphone className="h-4 w-4" /></span>
         ) : (
           <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full text-[11px] font-bold text-white" style={glossy('#1A4D8F', '#2E6FE6')}>{initials}</span>
         )}
         <div className="min-w-0 flex-1">
-          <p className="truncate text-xs font-bold text-foreground">{post.author_name ?? 'Someone'}</p>
-          <p className="text-[10px] text-muted-foreground">{timeAgo(post.created_at)}</p>
+          <p className="truncate text-xs font-bold text-foreground">{headerName}</p>
+          <p className="text-[10px] text-muted-foreground">{celebration ? `${celebration.label} · ` : ''}{timeAgo(post.created_at)}</p>
         </div>
         {post.pinned && <Pin className="h-3.5 w-3.5 text-[#7C3AED]" />}
+        {celebration && post.subject_employee && (
+          <MobileWishButton subjectEmployeeId={post.subject_employee} name={post.subject_name ?? 'your colleague'} kind={post.type as WishKind} />
+        )}
       </div>
 
       {post.title && <p className="mt-2.5 text-sm font-bold text-[#0F172A]">{post.title}</p>}

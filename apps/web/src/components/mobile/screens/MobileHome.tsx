@@ -10,13 +10,21 @@ import { api } from '@/lib/api/client'
 import { useAuthStore } from '@/stores/authStore'
 import { glossy } from '../glossy'
 import { UpcomingHolidays } from './parts'
+import { MobileWishButton, type WishKind } from './MobileWish'
 import { timeAgo, initials } from '../format'
 
 type Reaction = 'like' | 'celebrate' | 'appreciate' | 'support'
 interface CommunityPost {
-  id: string; author_name?: string | null; type: string; title?: string | null
+  id: string; author_name?: string | null; subject_name?: string | null; subject_employee?: string | null
+  type: string; title?: string | null
   body: string; pinned?: boolean; created_at: string
   reaction_count: number; comment_count: number; my_reaction?: Reaction | null
+}
+
+// Celebration post types render with festive chrome + a Wish affordance.
+const CELEBRATION: Record<string, { emoji: string; label: string }> = {
+  birthday:    { emoji: '🎂', label: 'Birthday' },
+  anniversary: { emoji: '🎉', label: 'Work Anniversary' },
 }
 interface Kudos { id: string; from_name?: string; to_name?: string; badge_code?: string; message: string; points: number; created_at: string }
 interface LeaderRow { rank: number; employee_id: string; name: string; points: number }
@@ -177,18 +185,33 @@ export function MobileHome({ base }: { base: string }) {
 
 function PostCard({ post, onReact, onOpen }: { post: CommunityPost; onReact: (r: Reaction) => void; onOpen: () => void }) {
   const announce = post.type === 'announcement' || post.pinned
+  const celebration = CELEBRATION[post.type]
+  const headerName = celebration
+    ? (post.author_name && post.subject_name
+        ? `${post.author_name} wished ${post.subject_name}`
+        : (post.subject_name ?? 'Celebration'))
+    : (post.author_name ?? 'Someone')
+
   return (
     <div className="overflow-hidden rounded-2xl bg-white shadow-[0_2px_12px_-4px_rgba(26,77,143,0.12)]">
       {announce && <div className="h-1 w-full" style={{ background: 'linear-gradient(90deg,#2E6FE6,#15B8A6)' }} />}
+      {celebration && <div className="h-1 w-full" style={{ background: 'linear-gradient(90deg,#15B8A6,#2DD4BF)' }} />}
       <div className="p-3.5">
         <div className="flex items-center gap-2.5">
-          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full text-xs font-bold text-white" style={glossy(announce ? '#2E6FE6' : '#1A4D8F', announce ? '#15B8A6' : '#2E6FE6')}>
-            {announce ? <Megaphone className="h-4 w-4" /> : initials(post.author_name)}
-          </span>
+          {celebration ? (
+            <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full text-base" style={glossy('#15B8A6', '#2DD4BF')}>{celebration.emoji}</span>
+          ) : (
+            <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full text-xs font-bold text-white" style={glossy(announce ? '#2E6FE6' : '#1A4D8F', announce ? '#15B8A6' : '#2E6FE6')}>
+              {announce ? <Megaphone className="h-4 w-4" /> : initials(post.author_name)}
+            </span>
+          )}
           <div className="min-w-0 flex-1">
-            <p className="truncate text-xs font-bold text-foreground">{post.author_name ?? 'Someone'}</p>
-            <p className="text-[10px] text-muted-foreground">{announce ? 'Announcement · ' : ''}{timeAgo(post.created_at)}</p>
+            <p className="truncate text-xs font-bold text-foreground">{headerName}</p>
+            <p className="text-[10px] text-muted-foreground">{celebration ? `${celebration.label} · ` : announce ? 'Announcement · ' : ''}{timeAgo(post.created_at)}</p>
           </div>
+          {celebration && post.subject_employee && (
+            <MobileWishButton subjectEmployeeId={post.subject_employee} name={post.subject_name ?? 'your colleague'} kind={post.type as WishKind} />
+          )}
         </div>
         {post.title && <p className="mt-2 text-sm font-bold text-[#0F172A]">{post.title}</p>}
         <p className="mt-1 whitespace-pre-wrap text-[13px] leading-relaxed text-foreground/85">{post.body}</p>
