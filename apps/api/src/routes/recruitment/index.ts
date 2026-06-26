@@ -15,6 +15,7 @@ import { z } from 'zod'
 import { randomUUID } from 'crypto'
 import { logAction }    from '../../lib/audit-service.js'
 import { notifyHrAdmins } from '../../lib/notify.js'
+import { isOfferSignoffEnabled } from '../../lib/payroll-flags.js'
 import {
   sendEmail,
   applicationReceivedEmail,
@@ -1876,6 +1877,45 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
     const { data: app } = await fastify.supabase
       .from('applications').select('id, candidate_id, requisition_id').eq('id', appId).eq('tenant_id', req.tenantId).maybeSingle()
     if (!app) return reply.code(404).send({ error: 'NOT_FOUND' })
+
+    // ── Offer sign-off (P2.4, opt-in via OFFER_SIGNOFF_DUAL_CONTROL) ───────────
+    // Four-eyes before an offer reaches the candidate: the first send records a
+    // pending sign-off (maker) and does NOT email; a DIFFERENT authorised user
+    // must call send again to approve and dispatch. Preparer≠approver enforced.
+    if (isOfferSignoffEnabled()) {
+      const { data: pending } = await fastify.supabase
+        .from('maker_checker_log')
+        .select('id, maker_id')
+        .eq('tenant_id', req.tenantId)
+        .eq('entity_type', 'offer_letter')
+        .eq('entity_id', appId)
+        .eq('action', 'offer_send')
+        .eq('status', 'pending')
+        .order('submitted_at', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+
+      if (!pending) {
+        await fastify.supabase.from('maker_checker_log').insert({
+          tenant_id: req.tenantId, entity_type: 'offer_letter', entity_id: appId,
+          action: 'offer_send', maker_id: req.userId, status: 'pending',
+          maker_data: { offered_amount: offered_amount ?? null, recipient_email, joining_date: joining_date ?? null },
+        })
+        return reply.code(202).send({
+          status:  'PENDING_CHECKER',
+          message: 'Offer submitted for sign-off. A different authorised user must approve before it is sent to the candidate.',
+        })
+      }
+      if ((pending as any).maker_id === req.userId) {
+        return reply.code(409).send({
+          error:   'AWAITING_DIFFERENT_CHECKER',
+          message: 'You proposed this offer; a different authorised user must approve it before sending.',
+        })
+      }
+      await fastify.supabase.from('maker_checker_log')
+        .update({ checker_id: req.userId, status: 'approved', reviewed_at: new Date().toISOString() })
+        .eq('id', (pending as any).id)
+    }
 
     const result = await sendEmail({
       to:      recipient_email,

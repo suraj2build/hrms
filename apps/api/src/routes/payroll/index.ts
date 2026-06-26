@@ -1368,7 +1368,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
 
     const { data: run } = await fastify.supabase
       .from('payroll_runs')
-      .select('status, month, created_at')
+      .select('status, month, created_at, created_by')
       .eq('id', id)
       .eq('tenant_id', tenantId)
       .single()
@@ -1444,6 +1444,17 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
           return reply.code(409).send({
             error:   'AWAITING_DIFFERENT_CHECKER',
             message: 'You proposed this finalize; a different authorised user must approve it.',
+          })
+        }
+        // Preparer ≠ approver (P2.4): the person who RAN the payroll
+        // (payroll_runs.created_by) may not be the checker either — otherwise a
+        // third party proposing the finalize would let the preparer self-approve
+        // their own run. Closes the maker-checker gap the proposer-only guard left.
+        // super_admin may override (e.g. tiny team) but it is still audit-logged.
+        if ((run as any).created_by && (run as any).created_by === req.userId && req.userRole !== 'super_admin') {
+          return reply.code(409).send({
+            error:   'PREPARER_CANNOT_APPROVE',
+            message: 'You prepared (ran) this payroll; a different authorised user must approve it.',
           })
         }
         // Checker step — approve the pending proposal, then proceed to finalize.

@@ -27,3 +27,19 @@ export function isPayrollDualControlEnabled(): boolean {
   if (raw == null) return true            // default ON — opt-OUT tightening
   return !OFF_VALUES.has(raw.trim().toLowerCase())
 }
+
+const ON_VALUES = new Set(['on', 'true', '1', 'enabled', 'yes'])
+
+/**
+ * Whether job offers require a four-eyes sign-off before being sent to the
+ * candidate. DEFAULT OFF (opt-IN): offers currently send immediately, so making
+ * sign-off mandatory must be a deliberate choice. Enable by setting
+ * OFFER_SIGNOFF_DUAL_CONTROL to one of the ON values. When enabled, the first
+ * send records a pending maker_checker_log row and a DIFFERENT authorised user
+ * must call send again to approve and actually dispatch the offer.
+ */
+export function isOfferSignoffEnabled(): boolean {
+  const raw = process.env['OFFER_SIGNOFF_DUAL_CONTROL']
+  if (raw == null) return false           // default OFF — opt-IN
+  return ON_VALUES.has(raw.trim().toLowerCase())
+}
