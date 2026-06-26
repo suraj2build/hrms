@@ -50,9 +50,10 @@ export async function resolveAssistantConfigs(
   supabase: SupabaseClient,
   tenantId: string,
 ): Promise<ResolvedConfigs> {
+  // select('*') avoids schema-cache errors when fallback columns are newly added
   const { data } = await supabase
     .from('ai_assistant_config')
-    .select('provider, api_key, model, enabled, fallback_provider, fallback_api_key, fallback_model')
+    .select('*')
     .eq('tenant_id', tenantId)
     .maybeSingle()
 

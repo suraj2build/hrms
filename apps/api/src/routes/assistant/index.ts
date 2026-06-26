@@ -146,7 +146,7 @@ export default async function assistantRoutes(fastify: FastifyInstance) {
   fastify.get('/assistant/config', hrAuth, async (req: any, reply) => {
     const { data: row } = await fastify.supabase
       .from('ai_assistant_config')
-      .select('provider, api_key, model, enabled, updated_at, fallback_provider, fallback_api_key, fallback_model')
+      .select('*')
       .eq('tenant_id', req.tenantId)
       .maybeSingle()
     const env = envConfig()
@@ -198,9 +198,19 @@ export default async function assistantRoutes(fastify: FastifyInstance) {
     if (fallback_model !== undefined)    patch.fallback_model    = fallback_model ?? null
     if (fallback_api_key !== undefined)  patch.fallback_api_key  = fallback_api_key === '' ? null : fallback_api_key
 
-    const { error } = await fastify.supabase
+    let { error } = await fastify.supabase
       .from('ai_assistant_config')
       .upsert(patch, { onConflict: 'tenant_id' })
+
+    // If PostgREST schema cache hasn't refreshed yet, retry without fallback columns
+    // so the primary provider/key/enabled are always saved successfully.
+    if (error && (error.message.includes('fallback_') || error.message.includes('schema cache'))) {
+      const { fallback_provider: _fp, fallback_model: _fm, fallback_api_key: _fk, ...safePatch } = patch as any
+      ;({ error } = await fastify.supabase
+        .from('ai_assistant_config')
+        .upsert(safePatch, { onConflict: 'tenant_id' }))
+    }
+
     if (error) return reply.code(500).send({ error: 'SAVE_FAILED', message: error.message })
     return reply.send({ data: { ok: true } })
   })
