@@ -14,8 +14,10 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { ensureTodaysCelebrations } from '../../lib/community-celebrations.js'
+import { containsProfanity } from '../../lib/profanity.js'
 
 const HR_ROLES = ['super_admin', 'hr_admin']
+const PROFANITY_MSG = 'Your message looks like it contains inappropriate language. Please rephrase.'
 const REACTIONS = ['like', 'celebrate', 'appreciate', 'support'] as const
 
 async function resolveEmployeeId(fastify: FastifyInstance, userId: string, tenantId: string): Promise<string | null> {
@@ -104,6 +106,9 @@ export default async function communityRoutes(fastify: FastifyInstance) {
     })
     const parsed = schema.safeParse(req.body)
     if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+    if (containsProfanity(parsed.data.message)) {
+      return reply.code(400).send({ error: 'PROFANITY_BLOCKED', message: PROFANITY_MSG })
+    }
 
     // Subject must be a real employee in the caller's tenant.
     const { data: subject } = await fastify.supabase
@@ -139,6 +144,9 @@ export default async function communityRoutes(fastify: FastifyInstance) {
     })
     const parsed = schema.safeParse(req.body)
     if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+    if (containsProfanity(parsed.data.body) || containsProfanity(parsed.data.title)) {
+      return reply.code(400).send({ error: 'PROFANITY_BLOCKED', message: PROFANITY_MSG })
+    }
 
     const isHr = HR_ROLES.includes(req.userRole)
     // Announcements + pinning are HR-only; everyone else posts plain updates.
@@ -246,6 +254,9 @@ export default async function communityRoutes(fastify: FastifyInstance) {
     const schema = z.object({ body: z.string().min(1).max(1000) })
     const parsed = schema.safeParse(req.body)
     if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+    if (containsProfanity(parsed.data.body)) {
+      return reply.code(400).send({ error: 'PROFANITY_BLOCKED', message: PROFANITY_MSG })
+    }
 
     const me = await resolveEmployeeId(fastify, req.userId, req.tenantId)
     const { data: post } = await fastify.supabase
@@ -259,5 +270,67 @@ export default async function communityRoutes(fastify: FastifyInstance) {
       .single()
     if (error) return reply.code(500).send({ error: 'INSERT_FAILED', message: 'Failed to add comment' })
     return reply.code(201).send({ data })
+  })
+
+  // ── POST /community/posts/:id/report ─────────────────────────────────────────
+  // Any employee can report a post. One report per reporter per post (UNIQUE);
+  // a repeat report is treated as success (idempotent) rather than an error.
+  fastify.post('/community/posts/:id/report', auth, async (req: any, reply) => {
+    const { id } = req.params as { id: string }
+    const schema = z.object({ reason: z.string().max(500).optional() })
+    const parsed = schema.safeParse(req.body)
+    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+
+    const { data: post } = await fastify.supabase
+      .from('feed_posts').select('id').eq('id', id).eq('tenant_id', req.tenantId).maybeSingle()
+    if (!post) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Post not found' })
+
+    const reporter = await resolveEmployeeId(fastify, req.userId, req.tenantId)
+    const { error } = await fastify.supabase
+      .from('feed_reports')
+      .insert({ tenant_id: req.tenantId, post_id: id, reporter_employee: reporter, reason: parsed.data.reason ?? null })
+    // 23505 = already reported by this person → idempotent success.
+    if (error && error.code !== '23505') {
+      return reply.code(500).send({ error: 'INSERT_FAILED', message: 'Failed to submit report' })
+    }
+    return reply.code(201).send({ message: 'Report submitted' })
+  })
+
+  // ── GET /community/reports (HR only) ─────────────────────────────────────────
+  // Open reports grouped by post, with reporter count + the post body, so HR can
+  // decide whether to hide/remove via PATCH /community/posts/:id.
+  fastify.get('/community/reports', auth, async (req: any, reply) => {
+    if (!HR_ROLES.includes(req.userRole)) {
+      return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR access required' })
+    }
+    const { data: reports, error } = await fastify.supabase
+      .from('feed_reports')
+      .select('id, post_id, reporter_employee, reason, created_at')
+      .eq('tenant_id', req.tenantId).eq('status', 'open')
+      .order('created_at', { ascending: false }).limit(200)
+    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to load reports' })
+
+    const rows = reports ?? []
+    const postIds = [...new Set(rows.map((r: any) => r.post_id))]
+    if (!postIds.length) return reply.send({ data: [] })
+
+    const { data: posts } = await fastify.supabase
+      .from('feed_posts').select('id, body, type, status, author_employee')
+      .eq('tenant_id', req.tenantId).in('id', postIds)
+    const postMap = new Map((posts ?? []).map((p: any) => [p.id, p]))
+
+    // Group reports by post.
+    const grouped = new Map<string, { post_id: string; count: number; reasons: string[]; latest: string }>()
+    for (const r of rows as any[]) {
+      const g = grouped.get(r.post_id) ?? { post_id: r.post_id, count: 0, reasons: [] as string[], latest: r.created_at }
+      g.count += 1
+      if (r.reason) g.reasons.push(r.reason)
+      grouped.set(r.post_id, g)
+    }
+    const data = [...grouped.values()].map((g) => {
+      const p: any = postMap.get(g.post_id)
+      return { ...g, post_body: p?.body ?? null, post_type: p?.type ?? null, post_status: p?.status ?? null }
+    })
+    return reply.send({ data })
   })
 }

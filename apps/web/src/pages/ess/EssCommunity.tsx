@@ -6,13 +6,16 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { Megaphone, Pin, MessageCircle, Send } from 'lucide-react'
+import { Megaphone, Pin, PinOff, MessageCircle, Send, MoreHorizontal, Flag, EyeOff, Trash2 } from 'lucide-react'
 import { api } from '@/lib/api/client'
 import { useAuthStore } from '@/stores/authStore'
 import { PageContainer } from '@/components/layout/PageContainer'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { SectionCard } from '@/components/layout/SectionCard'
 import { Button } from '@/components/ui/button'
+import {
+  DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator,
+} from '@/components/ui/dropdown-menu'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 interface FeedPost {
@@ -105,6 +108,53 @@ function CommentThread({ postId }: { postId: string }) {
   )
 }
 
+// ── Moderation / report menu ────────────────────────────────────────────────────
+function ModerationMenu({ p }: { p: FeedPost }) {
+  const qc = useQueryClient()
+  const { profile } = useAuthStore()
+  const isHr = profile?.role === 'hr_admin' || profile?.role === 'super_admin'
+
+  const refetch = () => qc.invalidateQueries({ queryKey: ['community-feed'] })
+
+  const report = useMutation({
+    mutationFn: () => api.post(`/community/posts/${p.id}/report`, {}),
+    onSuccess: () => toast.success('Reported', { description: 'Thanks — HR will review this post.' }),
+    onError: (e: Error) => toast.error('Could not report', { description: e.message }),
+  })
+  const moderate = useMutation({
+    mutationFn: (patch: Record<string, unknown>) => api.patch(`/community/posts/${p.id}`, patch),
+    onSuccess: () => refetch(),
+    onError: (e: Error) => toast.error('Action failed', { description: e.message }),
+  })
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger className="grid h-7 w-7 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground">
+        <MoreHorizontal className="h-4 w-4" />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-44">
+        <DropdownMenuItem onClick={() => report.mutate()}>
+          <Flag className="mr-2 h-3.5 w-3.5" />Report post
+        </DropdownMenuItem>
+        {isHr && (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={() => moderate.mutate({ pinned: !p.pinned })}>
+              {p.pinned ? <><PinOff className="mr-2 h-3.5 w-3.5" />Unpin</> : <><Pin className="mr-2 h-3.5 w-3.5" />Pin</>}
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => moderate.mutate({ status: 'hidden' })}>
+              <EyeOff className="mr-2 h-3.5 w-3.5" />Hide
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => moderate.mutate({ status: 'removed' })} className="text-destructive focus:text-destructive">
+              <Trash2 className="mr-2 h-3.5 w-3.5" />Remove
+            </DropdownMenuItem>
+          </>
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
+
 // ── Post card ──────────────────────────────────────────────────────────────────
 function PostCard({ p }: { p: FeedPost }) {
   const qc = useQueryClient()
@@ -138,6 +188,7 @@ function PostCard({ p }: { p: FeedPost }) {
         {p.pinned && <Pin className="h-3.5 w-3.5 text-primary" />}
         {isAnnouncement && <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-semibold text-primary">Announcement</span>}
         {celebration && <span className="rounded-full bg-[#15B8A6]/10 px-2 py-0.5 text-[10px] font-semibold text-[#15B8A6]">{celebration.label}</span>}
+        <ModerationMenu p={p} />
       </div>
 
       {p.title && <p className="mt-2.5 text-sm font-semibold text-foreground">{p.title}</p>}
