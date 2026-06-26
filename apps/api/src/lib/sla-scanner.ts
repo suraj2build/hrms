@@ -20,6 +20,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { eventBus }           from './event-bus.js'
+import { ENTITY_WORKFLOW_MAP, type EntityType } from './workflow-service.js'
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -77,6 +78,87 @@ async function writeNotifications(
   await supabase.from('notifications').insert(rows)
 }
 
+// ── Auto-approve pass (P2.2) ────────────────────────────────────────────────────
+/**
+ * Honour `approval_workflow_config.auto_approve_after_hours` for stale instances.
+ *
+ * SAFETY: this only AUTO-ADVANCES intermediate levels — it never auto-finalizes
+ * the underlying entity. A robot must not deduct leave balance or credit pay
+ * unattended, so the FINAL level always needs a human (final-level breaches still
+ * get the SLA-breach notification below). For a multi-level chain this means a
+ * dawdling intermediate approver is skipped after the configured window; the next
+ * level is then notified to act.
+ *
+ * "Time at current level" is the instance's updated_at (bumped each advance by the
+ * 053 trigger), so each level gets its own fresh auto-approve window.
+ */
+async function autoAdvanceStaleInstances(
+  supabase:     SupabaseClient,
+  tenantId:     string,
+  hrProfileIds: string[],
+): Promise<void> {
+  const systemActor = hrProfileIds[0]   // proxy actor for the auto_approved action row
+  if (!systemActor) return
+
+  const { data: instances } = await supabase
+    .from('approval_instances')
+    .select('id, entity_type, current_level, total_levels, updated_at')
+    .eq('tenant_id', tenantId)
+    .is('final_approved', null)
+
+  for (const inst of (instances ?? []) as any[]) {
+    // Final level is never auto-finalized — only intermediate levels auto-advance.
+    if (inst.current_level >= inst.total_levels) continue
+
+    const workflowType = ENTITY_WORKFLOW_MAP[inst.entity_type as EntityType]
+    if (!workflowType) continue
+
+    const { data: cfg } = await supabase
+      .from('approval_workflow_config')
+      .select('auto_approve_after_hours')
+      .eq('tenant_id', tenantId)
+      .eq('workflow_type', workflowType)
+      .eq('level', inst.current_level)
+      .eq('is_active', true)
+      .maybeSingle()
+
+    const hrs = (cfg as { auto_approve_after_hours: number | null } | null)?.auto_approve_after_hours
+    if (!hrs) continue
+
+    const ageHrs = (Date.now() - new Date(inst.updated_at).getTime()) / 3_600_000
+    if (ageHrs < hrs) continue
+
+    const nextLevel = inst.current_level + 1
+    const { error: actErr } = await supabase.from('approval_actions').insert({
+      tenant_id:   tenantId,
+      instance_id: inst.id,
+      level:       inst.current_level,
+      action:      'auto_approved',
+      actor_id:    systemActor,
+      comments:    `Auto-advanced after ${hrs}h without action (SLA auto-approve).`,
+    })
+    if (actErr) continue   // don't advance if we couldn't record the action
+
+    await supabase
+      .from('approval_instances')
+      .update({ current_level: nextLevel })
+      .eq('id', inst.id)
+      .eq('tenant_id', tenantId)
+
+    const dedupeKey = `auto-advance:${inst.id}:${inst.current_level}`
+    if (!notifiedIds.has(dedupeKey)) {
+      await writeNotifications(
+        supabase, tenantId, hrProfileIds,
+        'Approval auto-advanced',
+        `A ${workflowType.replace('_', ' ')} approval auto-advanced from level ${inst.current_level} to ${nextLevel} after ${hrs}h without action.`,
+        '/admin/approvals/workflows',
+        inst.id,
+      ).catch(() => void 0)
+      notifiedIds.add(dedupeKey)
+    }
+  }
+}
+
 // ── Scanner ───────────────────────────────────────────────────────────────────
 
 async function scan(supabase: SupabaseClient): Promise<void> {
@@ -90,6 +172,9 @@ async function scan(supabase: SupabaseClient): Promise<void> {
   for (const tenantId of tenantIds) {
     const hrProfileIds = await fetchHrProfileIds(supabase, tenantId).catch(() => [] as string[])
     if (!hrProfileIds.length) continue
+
+    // ── 0. Auto-advance stale multi-level instances (P2.2) ─────────────────────
+    await autoAdvanceStaleInstances(supabase, tenantId, hrProfileIds).catch(() => void 0)
 
     // ── 1. Overdue leave requests ──────────────────────────────────────────────
     const { data: overLeave } = await supabase
