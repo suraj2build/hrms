@@ -76,7 +76,7 @@ export function effectiveModel(c: AssistantConfig): string {
 // ── Chat message types (OpenAI-compatible shapes used throughout) ─────────────
 export type ChatMessage =
   | { role: 'system' | 'user'; content: string }
-  | { role: 'assistant'; content: string | null; tool_calls?: ToolCall[] }
+  | { role: 'assistant'; content: string | null; tool_calls?: ToolCall[]; _geminiParts?: any[] }
   | { role: 'tool'; content: string; tool_call_id: string }
 
 export interface ToolCall {
@@ -91,8 +91,9 @@ export interface ToolDef {
 }
 
 export interface ChatResult {
-  content:   string | null
-  toolCalls: ToolCall[]
+  content:         string | null
+  toolCalls:       ToolCall[]
+  _geminiRawParts?: any[]  // raw model response parts; caller stores these on the assistant message
 }
 
 export class AssistantNotConfiguredError extends Error {
@@ -102,15 +103,13 @@ export class AssistantNotConfiguredError extends Error {
 // ── Gemini native implementation ───────────────────────────────────────────────
 //
 // Gemini thinking models (e.g. gemini-3.5-flash) attach a thought_signature to
-// every function call in their response. Our tool loop stores messages in the
-// OpenAI-compatible ChatMessage format which drops those thought parts. On the
-// next hop Gemini rejects the conversation with 400 "thought_signature missing".
+// function calls. Our tool loop must round-trip those raw model parts back to
+// Gemini on the next hop — otherwise the API returns 400 "thought_signature missing".
 //
-// Fix: Gemini always runs WITHOUT tools and WITHOUT tool-related history.
-// It answers from the pre-built context snapshot instead (leave balances,
-// payslip, upcoming holidays, etc.). For live lookups (headcount, who is on
-// leave, pending approvals) Groq or OpenAI — which don't have this issue —
-// should be placed first in the provider chain in AI settings.
+// Solution: store the raw candidate.content.parts on the assistant ChatMessage
+// (_geminiParts). When building the next hop's content list we use those raw
+// parts for the model turn instead of reconstructing from tool_calls, so the
+// thought + signature survive across hops.
 
 async function chatCompleteGemini(
   config: AssistantConfig,
@@ -119,38 +118,81 @@ async function chatCompleteGemini(
   const genAI = new GoogleGenerativeAI(config.apiKey!)
 
   const sysMsg = opts.messages.find(m => m.role === 'system')
+  const convMsgs = opts.messages.filter(m => m.role !== 'system')
 
-  // Strip tool-related turns so Gemini sees a clean user↔model conversation.
-  // Tool messages and tool-call-only assistant turns reference signatures we
-  // don't have, so they would cause a 400. Text-only turns are kept.
-  const contents: any[] = []
-  for (const msg of opts.messages) {
-    if (msg.role === 'system') continue
-    if (msg.role === 'tool') continue
-    if (msg.role === 'assistant') {
-      if (!msg.content) continue  // tool-call-only turns have no text — skip
-      contents.push({ role: 'model', parts: [{ text: msg.content }] })
-    } else {
-      contents.push({ role: 'user', parts: [{ text: msg.content }] })
+  // Build tool_call_id → function name so we can name function responses.
+  const callIdToName = new Map<string, string>()
+  for (const m of convMsgs) {
+    if (m.role === 'assistant' && m.tool_calls) {
+      for (const tc of m.tool_calls) callIdToName.set(tc.id, tc.function.name)
     }
   }
+
+  const contents: any[] = []
+  for (const msg of convMsgs) {
+    if (msg.role === 'user') {
+      contents.push({ role: 'user', parts: [{ text: msg.content }] })
+    } else if (msg.role === 'assistant') {
+      // If we stored the raw Gemini parts on a previous hop, use them directly —
+      // this preserves the thought_signature that thinking models require.
+      if (msg._geminiParts?.length) {
+        contents.push({ role: 'model', parts: msg._geminiParts })
+      } else {
+        const parts: any[] = []
+        if (msg.content) parts.push({ text: msg.content })
+        for (const tc of msg.tool_calls ?? []) {
+          let args: Record<string, unknown> = {}
+          try { args = JSON.parse(tc.function.arguments || '{}') } catch { /* noop */ }
+          parts.push({ functionCall: { name: tc.function.name, args } })
+        }
+        if (parts.length) contents.push({ role: 'model', parts })
+      }
+    } else if (msg.role === 'tool') {
+      const fnName = callIdToName.get(msg.tool_call_id) ?? 'unknown'
+      let responseData: unknown = msg.content
+      try { responseData = JSON.parse(msg.content) } catch { /* keep raw */ }
+      contents.push({ role: 'user', parts: [{ functionResponse: { name: fnName, response: { result: responseData } } }] })
+    }
+  }
+
+  const geminiTools = opts.tools?.length ? [{
+    functionDeclarations: opts.tools.map(t => ({
+      name:        t.function.name,
+      description: t.function.description,
+      parameters:  t.function.parameters as any,
+    })),
+  }] as any : undefined
 
   const genModel = genAI.getGenerativeModel({
     model: effectiveModel(config),
     ...(sysMsg ? { systemInstruction: { role: 'system', parts: [{ text: sysMsg.content as string }] } } : {}),
+    ...(geminiTools ? { tools: geminiTools } : {}),
     generationConfig: { temperature: opts.temperature ?? 0.3, maxOutputTokens: opts.maxTokens ?? 700 },
   })
 
   const result = await genModel.generateContent({ contents })
   const candidate = result.response.candidates?.[0]
+  const rawParts: any[] = candidate?.content?.parts ?? []
 
   let textContent: string | null = null
-  for (const part of candidate?.content?.parts ?? []) {
-    if ('text' in part && part.text) textContent = (textContent ?? '') + part.text
+  const toolCalls: ToolCall[] = []
+
+  for (const part of rawParts) {
+    // Skip thought parts in the text we return — they're internal reasoning.
+    if ('text' in part && part.text && !part.thought) {
+      textContent = (textContent ?? '') + part.text
+    }
+    if ('functionCall' in part && part.functionCall) {
+      toolCalls.push({
+        id:   `fc-${part.functionCall.name}-${Date.now()}`,
+        type: 'function',
+        function: { name: part.functionCall.name, arguments: JSON.stringify(part.functionCall.args ?? {}) },
+      })
+    }
   }
 
-  // No tool calls returned — Gemini always answers from context.
-  return { content: textContent, toolCalls: [] }
+  // Return the raw parts so the caller can store them on the assistant message.
+  return { content: textContent, toolCalls, _geminiRawParts: rawParts }
 }
 
 // ── OpenAI-SDK implementation (Groq + OpenAI) ─────────────────────────────────

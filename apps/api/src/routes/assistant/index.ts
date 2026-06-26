@@ -109,7 +109,8 @@ export default async function assistantRoutes(fastify: FastifyInstance) {
           })
         }
 
-        messages.push({ role: 'assistant', content: res.content, tool_calls: res.toolCalls })
+        // Preserve raw Gemini parts so the next hop can re-include the thought_signature.
+        messages.push({ role: 'assistant', content: res.content, tool_calls: res.toolCalls, _geminiParts: res._geminiRawParts })
         for (const call of res.toolCalls as ToolCall[]) {
           let args: any = {}
           try { args = JSON.parse(call.function.arguments || '{}') } catch { /* leave empty */ }
