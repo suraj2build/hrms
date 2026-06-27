@@ -179,6 +179,7 @@ export function MyAssistant() {
 
     <div className="mx-auto max-w-[680px] space-y-8 py-8">
       {/* ── The ask field — the calm front door (always present, never a chat box) ── */}
+      <div className="rounded-2xl border border-border/60 bg-card shadow-sm">
       <form
         onSubmit={e => { e.preventDefault(); void submit(input) }}
         className="rounded-2xl bg-gradient-to-br from-primary/[0.06] to-[#15B8A6]/[0.06] p-5"
@@ -229,6 +230,18 @@ export function MyAssistant() {
           </div>
         )}
       </form>
+      </div>
+
+      {/* ── Empty state — warm, calm, never a nag ── */}
+      {!view && !asking && messages.length === 0 && (
+        <div className="rounded-2xl border border-border/60 bg-card p-8 text-center">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">intelligence · asked</p>
+          <Sparkles className="mx-auto mt-4 h-6 w-6 text-[#15B8A6]" />
+          <p className="mt-3 text-sm text-muted-foreground">
+            Ask me anything — your payslip, your leave, your team. I only answer when you ask.
+          </p>
+        </div>
+      )}
 
       {/* ── Understanding (loading) ── */}
       {asking && !view && (
@@ -260,7 +273,7 @@ export function MyAssistant() {
 
               {/* People before metrics — a FACE when the answer is about a person. */}
               {view.person && (
-                <div className="flex items-center gap-3 rounded-xl border border-border bg-card p-3.5">
+                <div className="flex items-center gap-3 rounded-2xl border border-border bg-card p-3.5">
                   <PersonAvatar name={view.person} size="md" />
                   <p className="text-sm text-foreground">
                     <span className="font-semibold">{view.person}</span>
@@ -321,8 +334,8 @@ export function MyAssistant() {
                 <div
                   className={
                     m.role === 'user'
-                      ? 'max-w-[85%] rounded-xl bg-primary px-3 py-2 text-xs text-primary-foreground'
-                      : 'max-w-[85%] whitespace-pre-wrap rounded-xl bg-muted px-3 py-2 text-xs text-foreground'
+                      ? 'max-w-[85%] rounded-2xl bg-primary px-3 py-2 text-xs text-primary-foreground'
+                      : 'max-w-[85%] whitespace-pre-wrap rounded-2xl bg-muted px-3 py-2 text-xs text-foreground'
                   }
                 >
                   {m.content}

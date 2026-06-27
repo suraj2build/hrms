@@ -116,20 +116,22 @@ export function MyCompany() {
       {/* Celebrating today — faces, with a one-tap Wish (expression, not a task). */}
       {hasCelebrating && (
         <section>
-          <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Celebrating today</h3>
-          <div className="space-y-3">
-            {c.celebrating.map(p => {
-              const canWish = (p.kind === 'birthday' || p.kind === 'anniversary') && !wished[p.id]
-              return (
-                <CelebrationCard
-                  key={p.id}
-                  kind={celebKind(p.kind)}
-                  title={celebTitle(p)}
-                  subtitle={celebSubtitle(p)}
-                  action={canWish ? { label: wish.isPending ? 'Wishing…' : 'Wish', onClick: () => wish.mutate(p) } : undefined}
-                />
-              )
-            })}
+          <p className="mb-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Celebrating today</p>
+          <div className="rounded-2xl border border-border/60 bg-card p-4">
+            <div className="space-y-3">
+              {c.celebrating.map(p => {
+                const canWish = (p.kind === 'birthday' || p.kind === 'anniversary') && !wished[p.id]
+                return (
+                  <CelebrationCard
+                    key={p.id}
+                    kind={celebKind(p.kind)}
+                    title={celebTitle(p)}
+                    subtitle={celebSubtitle(p)}
+                    action={canWish ? { label: wish.isPending ? 'Wishing...' : 'Wish', onClick: () => wish.mutate(p) } : undefined}
+                  />
+                )
+              })}
+            </div>
           </div>
         </section>
       )}
@@ -137,10 +139,10 @@ export function MyCompany() {
       {/* Worth celebrating — broad public recognition, as people lines (faces). */}
       {hasRecognition && (
         <section>
-          <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Worth celebrating</h3>
-          <div className="space-y-3">
+          <p className="mb-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Worth celebrating</p>
+          <div className="rounded-2xl border border-border/60 bg-card p-5">
             {c.recognition.map(r => (
-              <div key={r.id} className="flex items-center gap-3">
+              <div key={r.id} className="flex items-center gap-3 border-b border-border/50 py-3 last:border-0">
                 <PersonAvatar name={r.person} size="sm" />
                 <span className="flex items-center gap-1.5 text-sm text-foreground">
                   <Award className="h-4 w-4 shrink-0 text-warning" /> {r.title}
@@ -153,18 +155,22 @@ export function MyCompany() {
 
       {/* Happening — the company feed, told as a time-grouped narrative (Story). */}
       {hasHappening && (
-        <section className="space-y-6">
-          <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Happening</h3>
-          {c.happening.filter(g => g.events.length > 0).map(g => (
-            <TimeGroup key={g.key} label={g.label}>
-              {g.events.map(ev => (
-                <ActivityItem
-                  key={ev.id}
-                  event={{ id: ev.id, type: ev.type, title: ev.title, body: ev.body, at: ev.at }}
-                />
+        <section>
+          <p className="mb-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Happening</p>
+          <div className="rounded-2xl border border-border/40 bg-card/50 p-5">
+            <div className="space-y-6">
+              {c.happening.filter(g => g.events.length > 0).map(g => (
+                <TimeGroup key={g.key} label={g.label}>
+                  {g.events.map(ev => (
+                    <ActivityItem
+                      key={ev.id}
+                      event={{ id: ev.id, type: ev.type, title: ev.title, body: ev.body, at: ev.at }}
+                    />
+                  ))}
+                </TimeGroup>
               ))}
-            </TimeGroup>
-          ))}
+            </div>
+          </div>
         </section>
       )}
 

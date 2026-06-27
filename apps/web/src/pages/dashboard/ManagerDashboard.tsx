@@ -107,7 +107,7 @@ const T = {
   sub:     'var(--muted-foreground)',
   muted:   'var(--muted-foreground)',
   shadow:  '0 1px 0 rgba(15,16,36,.04),0 1px 3px rgba(15,16,36,.06)',
-  radius:  14,
+  radius:  16,
   mono:    '"Geist Mono",ui-monospace,monospace',
 }
 
@@ -325,6 +325,7 @@ function KPIStrip({ summary }: { summary: TodaySummary }) {
         icon={UserCheck}
         variant="success"
         subtitle={pct(present)}
+        className="rounded-2xl border-border/60 shadow-sm"
       />
       <MetricCard
         label="On Leave"
@@ -332,6 +333,7 @@ function KPIStrip({ summary }: { summary: TodaySummary }) {
         icon={Calendar}
         variant="info"
         subtitle="Approved"
+        className="rounded-2xl border-border/60 shadow-sm"
       />
       <MetricCard
         label="Absent"
@@ -339,6 +341,7 @@ function KPIStrip({ summary }: { summary: TodaySummary }) {
         icon={AlertCircle}
         variant="destructive"
         subtitle={pct(summary.absent)}
+        className="rounded-2xl border-border/60 shadow-sm"
       />
       <MetricCard
         label="Not Marked"
@@ -346,6 +349,7 @@ function KPIStrip({ summary }: { summary: TodaySummary }) {
         icon={Clock}
         variant={summary.not_marked > 0 ? 'warning' : 'neutral'}
         subtitle={summary.not_marked > 0 ? 'Awaiting punch' : 'All marked'}
+        className="rounded-2xl border-border/60 shadow-sm"
       />
     </MetricRow>
   )
@@ -442,19 +446,24 @@ function ApprovalsQueue({
     <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: T.radius, boxShadow: T.shadow }}>
       {/* Head */}
       <div style={{
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between',
         padding: '14px 20px 10px', borderBottom: `1px solid ${T.borderL}`,
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <span style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: '.12em', textTransform: 'uppercase', color: T.sub }}>
-            Approvals Queue
-          </span>
-          {total > 0 && (
-            <span style={{
-              background: 'var(--tint-amber-bg)', color: 'var(--tint-amber-fg)', fontWeight: 700,
-              fontSize: 10, padding: '2px 7px', borderRadius: 999,
-            }}>{total} pending</span>
-          )}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground" style={{ margin: 0 }}>
+            action required
+          </p>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <span style={{ fontSize: 13, fontWeight: 700, letterSpacing: '.04em', color: T.text }}>
+              Approvals Queue
+            </span>
+            {total > 0 && (
+              <span style={{
+                background: 'var(--tint-amber-bg)', color: 'var(--tint-amber-fg)', fontWeight: 700,
+                fontSize: 10, padding: '2px 7px', borderRadius: 999,
+              }}>{total} pending</span>
+            )}
+          </div>
         </div>
         <button
           onClick={() => navigate('/manager/approvals')}
@@ -993,6 +1002,32 @@ function PendingRegularisationCard({ regularisations, navigate }: {
   )
 }
 
+// ── PageHero ──────────────────────────────────────────────────────────────────
+
+function PageHero({ firstName, todaySummary }: { firstName: string; todaySummary: TodaySummary }) {
+  const h = new Date().getHours()
+  const timeGreeting = h < 12 ? 'morning' : h < 17 ? 'afternoon' : 'evening'
+  const teamSummaryLine = todaySummary.total > 0
+    ? `${todaySummary.present} of ${todaySummary.total} team members are in today.`
+    : 'Loading team attendance...'
+
+  return (
+    <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-sky-900 via-blue-900 to-slate-900 px-8 py-10 mb-8 sky-grain">
+      <div
+        aria-hidden
+        className="pointer-events-none absolute -right-16 -top-16 h-[320px] w-[320px] rounded-full bg-white/8 blur-3xl drift-slow"
+      />
+      <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-white/60">care &middot; command</p>
+      <h1 className="serif-hero mt-3 text-[clamp(2rem,4vw,3rem)] leading-none text-white">
+        {`Good ${timeGreeting}, `}<span className="serif-emph">{`${firstName}.`}</span>
+      </h1>
+      <p className="mt-3 text-[15px] text-white/70 max-w-[48ch]">
+        {teamSummaryLine}
+      </p>
+    </div>
+  )
+}
+
 // ── ManagerDashboardPage (root) ───────────────────────────────────────────────
 
 export function ManagerDashboardPage() {
@@ -1087,6 +1122,10 @@ export function ManagerDashboardPage() {
   const regularisations = approvalsResp?.regularisations ?? dashResp?.pending?.regularisations ?? []
   const pendingCount    = leaveRequests.length + regularisations.length
 
+  const firstName = emp?.first_name
+    ?? profile?.full_name?.split(' ')[0]
+    ?? 'Manager'
+
   const teamAttendance = useMemo(() => {
     const map = new Map<string, Map<string, string>>()
     for (const item of (teamAttendanceRaw ?? [])) {
@@ -1117,6 +1156,9 @@ export function ManagerDashboardPage() {
       `}</style>
 
       <div style={{ padding: '18px 22px 36px', background: T.bg, minHeight: '100%', display: 'flex', flexDirection: 'column', gap: 14 }}>
+
+        {/* Cinematic page hero */}
+        <PageHero firstName={firstName} todaySummary={summary} />
 
         {/* Hero card */}
         <CoreIdentity emp={emp} teamSize={summary.total} pendingCount={pendingCount} />

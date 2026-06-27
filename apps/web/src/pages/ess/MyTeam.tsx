@@ -84,10 +84,10 @@ export function MyTeam() {
       {/* Today — who to celebrate, who's away. */}
       {(t.today.celebrations.length > 0 || t.today.out.length > 0) && (
         <section>
-          <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Today</h3>
-          <div className="space-y-3">
+          <p className="mb-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Today</p>
+          <div className="rounded-2xl border border-border/60 bg-card overflow-hidden">
             {t.today.celebrations.map((c, i) => (
-              <div key={`c${i}`} className="flex items-center gap-3">
+              <div key={`c${i}`} className="flex items-center gap-3 border-b border-border/50 py-4 px-5 last:border-0">
                 <PersonAvatar name={c.name} size="md" />
                 <span className="flex items-center gap-1.5 text-sm text-foreground">
                   {c.kind === 'birthday'
@@ -97,7 +97,7 @@ export function MyTeam() {
               </div>
             ))}
             {t.today.out.length > 0 && (
-              <div className="flex items-start gap-3">
+              <div className="flex items-start gap-3 px-5 py-4">
                 <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-muted text-muted-foreground"><Plane className="h-4 w-4" /></span>
                 <span className="text-sm text-muted-foreground">
                   <span className="font-medium text-foreground">{t.today.out.map(o => o.name).join(', ')}</span>
@@ -112,18 +112,20 @@ export function MyTeam() {
       {/* Your people — the roster, as faces. */}
       {!empty && (
         <section>
-          <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Your people</h3>
-          <FaceRow people={peopleAll} />
+          <p className="mb-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Your people</p>
+          <div className="rounded-2xl border border-border/60 bg-card p-5">
+            <FaceRow people={peopleAll} />
+          </div>
         </section>
       )}
 
       {/* Recently — team recognition (who did great work). */}
       {t.recent.length > 0 && (
         <section>
-          <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Recently</h3>
-          <div className="space-y-3">
+          <p className="mb-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Recently</p>
+          <div className="rounded-2xl border border-border/60 bg-card overflow-hidden">
             {t.recent.map(r => (
-              <div key={r.id} className="flex items-center gap-3">
+              <div key={r.id} className="flex items-center gap-3 border-b border-border/50 px-5 py-4 last:border-0">
                 {r.person ? <PersonAvatar name={r.person} size="sm" /> : null}
                 <span className="text-sm text-foreground">{r.title}</span>
               </div>
@@ -135,7 +137,7 @@ export function MyTeam() {
       {/* Manager care — who might need support (one gentle line, never a metric). */}
       {t.manager?.insight && (
         <div className="rounded-2xl bg-gradient-to-br from-[#1A4D8F] to-[#15B8A6] p-6 text-white shadow-sm">
-          <p className="text-[11px] font-medium uppercase tracking-wider text-white/90">A quiet nudge</p>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-white/90">A quiet nudge</p>
           <p className="mt-2 text-base font-medium leading-relaxed">{t.manager.insight}</p>
         </div>
       )}

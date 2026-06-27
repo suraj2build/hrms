@@ -19,6 +19,7 @@ import { api } from '@/lib/api/client'
 import { SignalCard, type Signal } from '@/components/experience/SignalCard'
 import { AmbientLine } from '@/components/experience/AmbientLine'
 import { PillarHero } from '@/components/experience/PillarHero'
+import { DoneForToday } from '@/components/experience/DoneForToday'
 import { LoadingState } from '@/components/layout/LoadingState'
 import { ErrorState } from '@/components/layout/ErrorState'
 
@@ -26,9 +27,11 @@ function Group({ label, signals, onAction }: { label: string; signals: Signal[];
   if (!signals.length) return null
   return (
     <section>
-      <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">{label}</h3>
-      <div className="space-y-2.5">
-        {signals.map(s => <SignalCard key={s.id} signal={s} onAction={onAction} />)}
+      <p className="mb-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">{label}</p>
+      <div className="rounded-2xl border border-border/60 bg-card overflow-hidden">
+        <div className="divide-y divide-border/40">
+          {signals.map(s => <SignalCard key={s.id} signal={s} onAction={onAction} />)}
+        </div>
       </div>
     </section>
   )
@@ -46,7 +49,7 @@ export function MyAttention() {
   if (isLoading) return (
     <>
       <PillarHero sky="sky-night" eyebrow="calm control" title="My Attention" />
-      <div className="mx-auto max-w-[680px] py-8"><LoadingState rows={4} label="Checking what needs you…" /></div>
+      <div className="mx-auto max-w-[680px] py-8"><LoadingState rows={4} label="Checking what needs you..." /></div>
     </>
   )
   if (isError) return <ErrorState title="Couldn't load your attention" onRetry={() => refetch()} />
@@ -65,14 +68,16 @@ export function MyAttention() {
         <PillarHero sky="sky-night" eyebrow="calm control" title="My Attention"
           tagline="Nothing needs you right now. Emptiness here is the reward." />
         <div className="mx-auto flex max-w-[680px] flex-col items-center py-20 text-center motion-safe:animate-in motion-safe:fade-in-0 motion-safe:zoom-in-95 motion-safe:duration-700">
-          <span className="grid h-16 w-16 place-items-center rounded-full bg-success/10 text-success">
-            <CheckCircle2 className="h-8 w-8" />
-          </span>
-          <p className="serif-hero mt-5 text-[1.8rem] text-foreground">Nothing needs you.</p>
-          <p className="mt-2 text-sm text-muted-foreground">You're all clear — enjoy the day.</p>
-          {waiting.length > 0 && (
-            <p className="mt-6 text-xs text-muted-foreground">{waiting[0]!.title} · still with others</p>
-          )}
+          <div className="rounded-2xl bg-success/8 border border-success/20 p-10 text-center mx-auto max-w-sm w-full">
+            <span className="grid h-16 w-16 place-items-center rounded-full bg-success/10 text-success mx-auto">
+              <CheckCircle2 className="h-8 w-8" />
+            </span>
+            <p className="serif-hero mt-5 text-[1.8rem] text-foreground">Nothing needs you.</p>
+            <p className="mt-2 text-sm text-muted-foreground">You're all clear — enjoy the day.</p>
+            {waiting.length > 0 && (
+              <p className="mt-6 text-xs text-muted-foreground">{waiting[0]!.title} · still with others</p>
+            )}
+          </div>
         </div>
       </>
     )
@@ -87,21 +92,15 @@ export function MyAttention() {
       <PillarHero sky="sky-night" eyebrow="calm control" title="My Attention" tagline={focusSentence} />
 
       <div className="mx-auto max-w-[680px] space-y-8 py-8">
-        {needsYou.length > 0 && canWait.length === 0 && (
-          <AmbientLine>Clear these and you're done for the day.</AmbientLine>
-        )}
-        {needsYou.length === 0 && canWait.length > 0 && (
-          <AmbientLine>Nothing pressing — these can wait for coffee.</AmbientLine>
-        )}
+        <AmbientLine>{focusSentence}</AmbientLine>
 
         <Group label="Needs you now" signals={needsYou} onAction={go} />
         <Group label="Can wait" signals={canWait} onAction={go} />
         <Group label="Waiting on others" signals={waiting} onAction={go} />
 
-        <p className="flex items-center justify-center gap-2 pt-1 text-center text-sm text-muted-foreground">
-          <CheckCircle2 className="h-4 w-4 text-success" />
-          Clear these and you're all caught up.
-        </p>
+        <DoneForToday>
+          {needsYou.length + canWait.length} items — clear these and you're all caught up.
+        </DoneForToday>
       </div>
     </>
   )
