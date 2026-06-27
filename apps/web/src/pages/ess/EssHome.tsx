@@ -168,18 +168,76 @@ export function EssHome() {
     : tenureM < 12 ? `${tenureM} month${tenureM > 1 ? 's' : ''} in`
     : `${Math.floor(tenureM / 12)} year${Math.floor(tenureM / 12) > 1 ? 's' : ''} and counting`
 
-  // The Arrival (the threshold) always paints first and stays mounted across the day's
-  // loading/error states, so the door never shows a spinner (EXPERIENCE_ARRIVAL_SPEC.md).
-  // The "deeper" day below is untouched in this pass — you cross into it from the door.
-  // Build the featured celebration kind label
   const celebLabel = (c: typeof celebrations[0]) =>
     c.kind === 'birthday' ? `${c.name.split(' ')[0]}'s birthday`
     : c.kind === 'anniversary' ? `${c.name.split(' ')[0]} turns ${'years' in c ? (c as { years: number }).years : ''}`
     : `${c.name.split(' ')[0]} joined us`
 
+  // ── Hero (time-based, no API needed) ────────────────────────────────────────
+  const hour = new Date().getHours()
+  const skyClass = isWeekend ? 'sky-weekend'
+    : hour < 6 ? 'sky-night'
+    : hour < 9 ? 'sky-dawn'
+    : hour < 12 ? 'sky-morning'
+    : hour < 17 ? 'sky-midday'
+    : hour < 20 ? 'sky-evening'
+    : 'sky-night'
+  const greeting = isWeekend ? 'Happy weekend'
+    : hour < 12 ? 'Good morning'
+    : hour < 17 ? 'Good afternoon'
+    : 'Good evening'
+  const DAYS = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday']
+  const now = new Date()
+  const heroDate = `${DAYS[now.getDay()]} · ${now.getDate()} ${M[now.getMonth()]}`
+  const heroTagline = isWeekend ? 'Rest well — your work will be here on Monday.'
+    : today?.check_in ? 'You\'re in. Have a great day.'
+    : hour < 9 ? 'Make it a great day.'
+    : hour < 17 ? 'You\'re doing great.'
+    : 'Time to wrap up and rest.'
+
   return (
-    <>
-      <div className="w-full">
+    <div className="w-full">
+
+      {/* ── Compact hero — full-bleed sky gradient ── */}
+      <div className={`sky-grain -mx-4 -mt-4 sm:-mx-6 sm:-mt-6 lg:-mx-8 lg:-mt-8 relative flex min-h-[260px] flex-col justify-end overflow-hidden px-6 pb-8 pt-6 sm:px-10 lg:px-12 ${skyClass}`}>
+        {/* Punch in / check-in badge — top right */}
+        <div className="absolute right-6 top-6">
+          {today?.check_in ? (
+            <span className="flex items-center gap-1.5 rounded-full bg-black/30 px-3 py-1.5 text-xs font-medium text-white/90 backdrop-blur-sm">
+              <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />
+              In since {fmtTime(today.check_in)}
+            </span>
+          ) : !isWeekend && !isLoading ? (
+            <button
+              onClick={() => navigate(`${base}/attendance`)}
+              className="flex items-center gap-1.5 rounded-full border border-white/20 bg-black/40 px-4 py-2 text-sm font-semibold text-white backdrop-blur-sm transition hover:bg-black/55"
+            >
+              <Clock className="h-4 w-4" /> Punch in
+            </button>
+          ) : null}
+        </div>
+
+        {/* Date */}
+        <p className="mb-3 text-[11px] font-semibold uppercase tracking-[0.2em] text-white/55">{heroDate}</p>
+
+        {/* Greeting */}
+        <h1 className="serif-hero text-[clamp(2rem,4.5vw,3rem)] leading-none text-white">
+          {greeting}, <span className="serif-emph">{isLoading ? '…' : firstName}.</span>
+        </h1>
+
+        {/* Tagline */}
+        <p className="mt-3 text-[15px] text-white/70">{heroTagline}</p>
+
+        {/* Focus nudge */}
+        {signals.length > 0 && (
+          <p className="mt-4 flex items-center gap-2 text-sm text-white/80">
+            <span className="h-2 w-2 rounded-full bg-amber-400 shadow-[0_0_6px_rgba(251,191,36,0.7)]" />
+            Your focus today: {signals.length} item{signals.length > 1 ? 's' : ''} need{signals.length === 1 ? 's' : ''} your attention.
+          </p>
+        )}
+      </div>
+
+      {/* ── Body ── */}
       {isLoading ? (
         <div className="py-16"><LoadingState rows={5} label="Putting your day together…" /></div>
       ) : isError ? (
@@ -187,7 +245,7 @@ export function EssHome() {
       ) : (
       <>
 
-      {/* Quick actions — the action strip, above everything */}
+      {/* Quick actions */}
       <div className="border-b border-border/40 py-5">
         <QuickActions capabilities={capabilities} onAction={(href) => navigate(`${base}${href}`)} />
       </div>
@@ -405,7 +463,6 @@ export function EssHome() {
 
       </>
       )}
-      </div>
-    </>
+    </div>
   )
 }
