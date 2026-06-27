@@ -4,6 +4,19 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/* Accessibility safety net (WCAG 2.3.3) — honour the OS "reduce motion" setting
+   for ALL animation/transition, including infinite keyframes (op-* pulses, spinners,
+   pings) that aren't individually guarded. Tailwind's motion-safe: variants still
+   work; this is the floor. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
 /*
  * CognixHR Brand — HRMS Design System 2.0
  * Professional, premium, conservative next-gen visual system.
@@ -50,6 +63,12 @@
   --color-warning-foreground: var(--warning-foreground);
   --color-info:               var(--info);
   --color-info-foreground:    var(--info-foreground);
+
+  /* Brand teal — the Experience-Cloud accent (separate from the navy-remapped
+     legacy --accent-teal). brand-teal = fills/washes/gradients/decorative icons;
+     brand-teal-ink = darker, for teal used as readable text (WCAG AA on light). */
+  --color-brand-teal:     var(--brand-teal);
+  --color-brand-teal-ink: var(--brand-teal-ink);
 
   /* Legacy accent aliases — kept for backward compat */
   --color-accent-magenta: var(--accent-magenta);
@@ -159,6 +178,10 @@
   --sidebar-border:             #E3E9F0;
   --sidebar-ring:               #1A4D8F;
 
+  /* ── Brand teal (Experience Cloud accent) ───────────────────── */
+  --brand-teal:     #15B8A6;   /* fills, washes, gradients, decorative icons */
+  --brand-teal-ink: #0B7A6E;   /* readable teal text on light — ~4.7:1 on white */
+
   /* ── Legacy accent aliases → Harmony semantics ───────────────── */
   --accent-magenta: #C93535;
   --accent-coral:   #B07B18;
@@ -249,6 +272,9 @@
   --sidebar-border:             oklch(1    0     0 / 0.08);
   --sidebar-ring:               #5B8FD6;
 
+  /* Brand teal lifts brighter on dark; ink == bright teal (passes on charcoal). */
+  --brand-teal:     #2DD4BF;
+  --brand-teal-ink: #2DD4BF;
   --accent-magenta: oklch(0.68 0.20  25);
   --accent-coral:   oklch(0.82 0.16  75);
   --accent-teal:    oklch(0.65 0.10 260);   /* remapped to light-navy (matches light-mode navy alias) */

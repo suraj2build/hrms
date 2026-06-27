@@ -47,7 +47,7 @@ const TINT: Record<ActivityType, string> = {
   recognition:  'bg-warning/10 text-warning',
   birthday:     'bg-primary/10 text-primary',
   announcement: 'bg-muted text-muted-foreground',
-  lifecycle:    'bg-[#15B8A6]/12 text-[#15B8A6]',
+  lifecycle:    'bg-brand-teal/12 text-brand-teal',
 }
 
 function timeAgo(iso: string): string {
@@ -78,7 +78,7 @@ export function ActivityItem({ event, className, onClick }: { event: ActivityEve
       ) : (
         <span className={cn('mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-xl',
           TINT[event.type] ?? 'bg-muted text-muted-foreground',
-          milestone && 'ring-2 ring-[#15B8A6]/30')}>
+          milestone && 'ring-2 ring-brand-teal/30')}>
           <Icon className="h-4 w-4" />
         </span>
       )}

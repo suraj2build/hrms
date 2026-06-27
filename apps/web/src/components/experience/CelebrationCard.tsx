@@ -43,7 +43,7 @@ export function CelebrationCard({ kind, title, subtitle, action, className }: Ce
   return (
     <div
       className={cn(
-        'relative overflow-hidden rounded-xl border border-[#15B8A6]/25 bg-gradient-to-br from-[#15B8A6]/8 to-primary/5 p-3.5',
+        'relative overflow-hidden rounded-xl border border-brand-teal/25 bg-gradient-to-br from-brand-teal/8 to-primary/5 p-3.5',
         // Subtle one-time rise/fade on mount; disabled for reduced motion.
         'transition-all duration-500 ease-out motion-reduce:transition-none',
         shown ? 'translate-y-0 opacity-100' : 'translate-y-1 opacity-0',
@@ -51,9 +51,9 @@ export function CelebrationCard({ kind, title, subtitle, action, className }: Ce
       )}
     >
       {/* Soft sheen — decorative, very low contrast, no motion dependency. */}
-      <div aria-hidden className="pointer-events-none absolute -right-6 -top-6 h-16 w-16 rounded-full bg-[#15B8A6]/10 blur-2xl" />
+      <div aria-hidden className="pointer-events-none absolute -right-6 -top-6 h-16 w-16 rounded-full bg-brand-teal/10 blur-2xl" />
       <div className="relative flex items-center gap-3">
-        <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-[#15B8A6]/15 text-[#15B8A6]">
+        <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-brand-teal/15 text-brand-teal">
           <Icon className="h-4 w-4" />
         </span>
         <div className="min-w-0 flex-1">
@@ -61,7 +61,7 @@ export function CelebrationCard({ kind, title, subtitle, action, className }: Ce
           {subtitle && <p className="mt-0.5 truncate text-xs text-muted-foreground">{subtitle}</p>}
         </div>
         {action && (
-          <Button size="sm" variant="outline" className="shrink-0 border-[#15B8A6]/40 text-[#15B8A6] hover:bg-[#15B8A6]/10" onClick={action.onClick}>
+          <Button size="sm" variant="outline" className="shrink-0 border-brand-teal/40 text-brand-teal hover:bg-brand-teal/10" onClick={action.onClick}>
             {action.label}
           </Button>
         )}

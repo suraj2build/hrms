@@ -51,7 +51,7 @@ function LookingAhead({ items }: { items: { label: string; detail?: string }[] }
       <div className="space-y-2.5">
         {items.map(it => (
           <div key={it.label} className="flex items-center gap-3">
-            <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-[#15B8A6]/12 text-[#15B8A6]">
+            <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-brand-teal/12 text-brand-teal">
               <CalendarClock className="h-4 w-4" />
             </span>
             <span className="min-w-0">
@@ -79,7 +79,7 @@ export function MyGrowth() {
   return (
     <div className="mx-auto max-w-[860px] space-y-9 py-2">
       {/* Identity — the Focus beat (wash + the person). */}
-      <div className="flex items-center gap-4 rounded-2xl bg-gradient-to-br from-primary/[0.06] to-[#15B8A6]/[0.06] p-6">
+      <div className="flex items-center gap-4 rounded-2xl bg-gradient-to-br from-primary/[0.06] to-brand-teal/[0.06] p-6">
         <PersonAvatar name={person.name ?? 'You'} size="lg" />
         <div className="min-w-0">
           <p className="text-[1.5rem] font-semibold leading-tight text-foreground">{person.name}</p>

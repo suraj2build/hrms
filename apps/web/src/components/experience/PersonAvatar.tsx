@@ -13,7 +13,7 @@ import { cn } from '@/lib/utils'
 // Calm, on-brand tints — deterministic per name so a person keeps one colour.
 const TINTS = [
   'bg-primary/15 text-primary',
-  'bg-[#15B8A6]/15 text-[#15B8A6]',
+  'bg-brand-teal/15 text-brand-teal-ink',
   'bg-info/15 text-info',
   'bg-success/15 text-success',
   'bg-warning/15 text-warning',

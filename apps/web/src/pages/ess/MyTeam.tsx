@@ -67,7 +67,7 @@ export function MyTeam() {
   return (
     <div className="mx-auto max-w-[760px] space-y-8 py-2">
       {/* Focus — one human line about the team right now. */}
-      <div className="rounded-2xl bg-gradient-to-br from-primary/[0.06] to-[#15B8A6]/[0.06] p-6">
+      <div className="rounded-2xl bg-gradient-to-br from-primary/[0.06] to-brand-teal/[0.06] p-6">
         <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Your team</p>
         <p className="mt-2 text-[1.4rem] font-semibold leading-snug text-foreground">{t.focus.sentence}</p>
       </div>
@@ -88,8 +88,8 @@ export function MyTeam() {
                 <PersonAvatar name={c.name} size="md" />
                 <span className="flex items-center gap-1.5 text-sm text-foreground">
                   {c.kind === 'birthday'
-                    ? <><Cake className="h-4 w-4 text-[#15B8A6]" /> It’s <span className="font-semibold">{c.name}</span>’s birthday</>
-                    : <><PartyPopper className="h-4 w-4 text-[#15B8A6]" /> <span className="font-semibold">{c.name}</span> — {c.years ?? ''}-year work anniversary</>}
+                    ? <><Cake className="h-4 w-4 text-brand-teal" /> It’s <span className="font-semibold">{c.name}</span>’s birthday</>
+                    : <><PartyPopper className="h-4 w-4 text-brand-teal" /> <span className="font-semibold">{c.name}</span> — {c.years ?? ''}-year work anniversary</>}
                 </span>
               </div>
             ))}
@@ -132,7 +132,7 @@ export function MyTeam() {
       {/* Manager care — who might need support (one gentle line, never a metric). */}
       {t.manager?.insight && (
         <div className="rounded-2xl bg-gradient-to-br from-[#1A4D8F] to-[#15B8A6] p-6 text-white shadow-sm">
-          <p className="text-[11px] font-medium uppercase tracking-wider text-white/80">A quiet nudge</p>
+          <p className="text-[11px] font-medium uppercase tracking-wider text-white/90">A quiet nudge</p>
           <p className="mt-2 text-base font-medium leading-relaxed">{t.manager.insight}</p>
         </div>
       )}

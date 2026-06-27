@@ -52,9 +52,9 @@ export function JourneyEcho({ count, onOpen }: { count: number; onOpen: () => vo
   return (
     <button
       onClick={onOpen}
-      className="flex w-full items-center gap-3 rounded-2xl bg-[#15B8A6]/[0.06] px-4 py-3 text-left transition-colors hover:bg-[#15B8A6]/[0.10]"
+      className="flex w-full items-center gap-3 rounded-2xl bg-brand-teal/[0.06] px-4 py-3 text-left transition-colors hover:bg-brand-teal/[0.10]"
     >
-      <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-[#15B8A6]/12 text-[#15B8A6]">
+      <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-brand-teal/12 text-brand-teal">
         <Milestone className="h-4 w-4" />
       </span>
       <span className="min-w-0 flex-1">
@@ -73,7 +73,7 @@ export function JourneyRail({ steps, className }: { steps: JourneyStep[]; classN
       <p className="mb-3 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">How you’ve grown</p>
       <div className="relative overflow-x-auto pb-1">
         {/* the spine */}
-        <div className="absolute left-0 right-0 top-[18px] h-px bg-gradient-to-r from-primary/30 via-[#15B8A6]/30 to-transparent" />
+        <div className="absolute left-0 right-0 top-[18px] h-px bg-gradient-to-r from-primary/30 via-brand-teal/30 to-transparent" />
         <ol className="relative flex min-w-max gap-7">
           {steps.map((s) => {
             const Icon = ICON[s.kind] ?? Milestone
@@ -82,7 +82,7 @@ export function JourneyRail({ steps, className }: { steps: JourneyStep[]; classN
                 {s.person ? (
                   <PersonAvatar name={s.person} size="md" className="ring-2 ring-background" />
                 ) : (
-                  <span className="grid h-9 w-9 place-items-center rounded-full bg-[#15B8A6]/12 text-[#15B8A6] ring-2 ring-background">
+                  <span className="grid h-9 w-9 place-items-center rounded-full bg-brand-teal/12 text-brand-teal ring-2 ring-background">
                     <Icon className="h-4 w-4" />
                   </span>
                 )}

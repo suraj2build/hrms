@@ -18,7 +18,7 @@ export interface FocusPanelProps {
 
 export function FocusPanel({ eyebrow, sentence, action, onAction, className }: FocusPanelProps) {
   return (
-    <div className={cn('rounded-2xl bg-gradient-to-br from-primary/[0.06] to-[#15B8A6]/[0.06] p-6', className)}>
+    <div className={cn('rounded-2xl bg-gradient-to-br from-primary/[0.06] to-brand-teal/[0.06] p-6', className)}>
       <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">{eyebrow}</p>
       <p className="mt-2 text-[1.6rem] font-semibold leading-snug text-foreground">{sentence}</p>
       {action && (

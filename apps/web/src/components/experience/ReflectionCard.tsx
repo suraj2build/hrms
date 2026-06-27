@@ -21,9 +21,12 @@ export interface ReflectionCardProps {
 
 export function ReflectionCard({ insight, action, onAction, className }: ReflectionCardProps) {
   if (!insight) return null
+  // Intentional FIXED brand gradient — identical in light & dark; it carries its own
+  // white text, so it must stay a dark navy→teal (a brightening token would worsen
+  // white-on-teal contrast). The one justified literal pair.
   return (
     <div className={cn('rounded-2xl bg-gradient-to-br from-[#1A4D8F] to-[#15B8A6] p-6 text-white shadow-sm', className)}>
-      <p className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wider text-white/80">
+      <p className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wider text-white/90">
         <Sparkles className="h-3.5 w-3.5" /> Cognix Insight
       </p>
       <p className="mt-2 text-base font-medium leading-relaxed">{insight}</p>
