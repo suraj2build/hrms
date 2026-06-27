@@ -48,7 +48,7 @@ export function MyAttention() {
   if (isLoading) return (
     <>
       <PillarHero sky="sky-night" eyebrow="calm control" title="My Attention" />
-      <div className="mx-auto max-w-[680px] py-8"><LoadingState rows={4} label="Checking what needs you..." /></div>
+      <div className="py-8"><LoadingState rows={4} label="Checking what needs you..." /></div>
     </>
   )
   if (isError) return <ErrorState title="Couldn't load your attention" onRetry={() => refetch()} />
@@ -66,7 +66,7 @@ export function MyAttention() {
       <>
         <PillarHero sky="sky-night" eyebrow="calm control" title="My Attention"
           tagline="Nothing needs you right now. Emptiness here is the reward." />
-        <div className="mx-auto flex max-w-[680px] flex-col items-center py-20 text-center motion-safe:animate-in motion-safe:fade-in-0 motion-safe:zoom-in-95 motion-safe:duration-700">
+        <div className="flex flex-col items-center py-20 text-center motion-safe:animate-in motion-safe:fade-in-0 motion-safe:zoom-in-95 motion-safe:duration-700">
           <div className="rounded-2xl bg-success/8 border border-success/20 p-10 text-center mx-auto max-w-sm w-full">
             <span className="grid h-16 w-16 place-items-center rounded-full bg-success/10 text-success mx-auto">
               <CheckCircle2 className="h-8 w-8" />
@@ -90,7 +90,7 @@ export function MyAttention() {
     <>
       <PillarHero sky="sky-night" eyebrow="calm control" title="My Attention" tagline={focusSentence} />
 
-      <div className="mx-auto max-w-[680px] space-y-8 py-8">
+      <div className="space-y-8 py-8">
         <div className="flex items-center gap-3">
           {needsYou.length > 0 && (
             <span className="rounded-full bg-destructive/10 px-3 py-1 text-[11px] font-semibold text-destructive">

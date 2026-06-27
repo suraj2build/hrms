@@ -74,7 +74,7 @@ export function MyGrowth() {
   if (isLoading) return (
     <>
       <PillarHero sky="sky-dawn" eyebrow="possibility · becoming" title="My Growth" />
-      <div className="mx-auto max-w-[860px] py-8"><LoadingState rows={5} label="Bringing your story together..." /></div>
+      <div className="w-full py-8"><LoadingState rows={5} label="Bringing your story together..." /></div>
     </>
   )
   if (isError || !data?.person) return <ErrorState title="Couldn't load your growth" onRetry={() => refetch()} />
@@ -87,7 +87,7 @@ export function MyGrowth() {
       <PillarHero sky="sky-dawn" eyebrow="possibility · becoming" title="My Growth"
         tagline={role ? `${person.name} · ${role}` : person.name ?? ''} />
 
-      <div className="mx-auto max-w-[860px] space-y-8 py-8">
+      <div className="w-full space-y-8 py-8">
         {/* Who I work with — people before fields. */}
         <div className="rounded-2xl border border-border/60 bg-card p-5">
           <PeopleRail sections={[

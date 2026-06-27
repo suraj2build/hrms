@@ -72,7 +72,7 @@ export function MyCompany() {
   if (isLoading) return (
     <>
       <PillarHero sky="sky-midday" eyebrow="belonging" title="My Company" />
-      <div className="mx-auto max-w-[760px] py-8"><LoadingState rows={4} label="Looking across the company…" /></div>
+      <div className="w-full py-8"><LoadingState rows={4} label="Looking across the company…" /></div>
     </>
   )
   if (isError) return <ErrorState title="Couldn't load your company" onRetry={() => refetch()} />
@@ -96,7 +96,7 @@ export function MyCompany() {
     <>
       <PillarHero sky="sky-midday" eyebrow="belonging" title="My Company" tagline={c.focus.sentence} />
 
-    <div className="mx-auto max-w-[760px] space-y-8 py-8">
+    <div className="w-full space-y-8 py-8">
       <button
         onClick={() => navigate(`${base}/community`)}
         className="flex w-full items-center justify-between rounded-2xl border border-dashed border-primary/30 bg-primary/5 px-5 py-4 text-left transition hover:border-primary/50 hover:bg-primary/8"

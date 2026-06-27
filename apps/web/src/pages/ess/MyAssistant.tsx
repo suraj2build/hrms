@@ -175,7 +175,7 @@ export function MyAssistant() {
       <PillarHero sky="sky-evening" eyebrow="intelligence · asked" title="Assistant"
         tagline="Ask anything — your data, your people, your workplace. I only answer when you ask." />
 
-    <div className="mx-auto max-w-[680px] space-y-8 py-8">
+    <div className="space-y-8 py-8">
       {/* ── The ask field — the calm front door (always present, never a chat box) ── */}
       <div className="rounded-2xl border border-border/60 bg-card shadow-sm">
       <form

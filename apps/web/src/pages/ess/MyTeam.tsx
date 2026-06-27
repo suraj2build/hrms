@@ -61,7 +61,7 @@ export function MyTeam() {
   if (isLoading) return (
     <>
       <PillarHero sky="sky-morning" eyebrow="care" title="My Team" />
-      <div className="mx-auto max-w-[760px] py-8"><LoadingState rows={4} label="Bringing your team together…" /></div>
+      <div className="w-full py-8"><LoadingState rows={4} label="Bringing your team together…" /></div>
     </>
   )
   if (isError) return <ErrorState title="Couldn't load your team" onRetry={() => refetch()} />
@@ -74,7 +74,7 @@ export function MyTeam() {
     <>
       <PillarHero sky="sky-morning" eyebrow="care" title="My Team" tagline={t.focus.sentence} />
 
-    <div className="mx-auto max-w-[760px] space-y-8 py-8">
+    <div className="w-full space-y-8 py-8">
       {empty && (
         <p className="py-14 text-center text-sm text-muted-foreground">
           Your team will appear here as it grows — the people you work with, day to day.
