@@ -30,7 +30,7 @@ function Strengths({ items }: { items: { badge: string; label: string; count: nu
       <h3 className="mb-3 text-[15px] font-semibold text-foreground">What I'm known for</h3>
       <div className="flex flex-wrap gap-3">
         {items.map(s => (
-          <div key={s.badge} className="flex items-center gap-3 rounded-2xl bg-gradient-to-br from-amber-50 to-orange-50 border border-orange-100/80 px-4 py-3">
+          <div key={s.badge} className="flex items-center gap-3 rounded-2xl bg-card border border-border/60 px-4 py-3">
             <span className="text-sm font-semibold text-foreground">{s.label}</span>
             {s.count > 1 && <span className="text-xs text-muted-foreground">x{s.count}</span>}
             {s.faces.length > 0 && (

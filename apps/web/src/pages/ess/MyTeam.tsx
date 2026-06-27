@@ -109,12 +109,29 @@ export function MyTeam() {
         </section>
       )}
 
-      {/* Your people — the roster, as faces. */}
+      {/* Your people — the roster, split by relationship. */}
       {!empty && (
         <section>
           <p className="mb-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Your people</p>
-          <div className="rounded-2xl border border-border/60 bg-card p-5">
-            <FaceRow people={peopleAll} />
+          <div className="rounded-2xl border border-border/60 bg-card divide-y divide-border/40 overflow-hidden">
+            {t.roster.manager && (
+              <div className="px-5 py-4">
+                <p className="mb-3 text-[10px] font-semibold uppercase tracking-[0.15em] text-muted-foreground/60">Reports to</p>
+                <FaceRow people={[t.roster.manager]} />
+              </div>
+            )}
+            {t.roster.peers.length > 0 && (
+              <div className="px-5 py-4">
+                <p className="mb-3 text-[10px] font-semibold uppercase tracking-[0.15em] text-muted-foreground/60">Alongside</p>
+                <FaceRow people={t.roster.peers} />
+              </div>
+            )}
+            {t.roster.reports.length > 0 && (
+              <div className="px-5 py-4">
+                <p className="mb-3 text-[10px] font-semibold uppercase tracking-[0.15em] text-muted-foreground/60">Guides</p>
+                <FaceRow people={t.roster.reports} />
+              </div>
+            )}
           </div>
         </section>
       )}

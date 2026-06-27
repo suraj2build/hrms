@@ -33,11 +33,9 @@ const SUGGESTED = [
   'Leave balance',
   'My payslip',
   "Who's off today",
-] as const
-
-const RECENT = [
   'Apply leave',
   'My attendance',
+  'Upcoming holidays',
 ] as const
 
 // ── Action inference (the differentiator) ───────────────────────────────────────
@@ -210,22 +208,12 @@ export function MyAssistant() {
 
         {/* Suggested / Recent — action-first chips, NOT a blinking cursor. */}
         {!view && !asking && (
-          <div className="mt-4 space-y-3">
-            <div>
-              <p className="mb-1.5 text-[11px] font-medium text-muted-foreground">Suggested</p>
-              <div className="flex flex-wrap gap-2">
-                {SUGGESTED.map(s => (
-                  <Chip key={s} label={s} onClick={() => void submit(s)} />
-                ))}
-              </div>
-            </div>
-            <div>
-              <p className="mb-1.5 text-[11px] font-medium text-muted-foreground">Recent</p>
-              <div className="flex flex-wrap gap-2">
-                {RECENT.map(s => (
-                  <Chip key={s} label={s} onClick={() => void submit(s)} muted />
-                ))}
-              </div>
+          <div className="mt-4">
+            <p className="mb-1.5 text-[11px] font-medium text-muted-foreground">Suggested</p>
+            <div className="grid grid-cols-2 gap-2">
+              {SUGGESTED.map(s => (
+                <Chip key={s} label={s} onClick={() => void submit(s)} />
+              ))}
             </div>
           </div>
         )}

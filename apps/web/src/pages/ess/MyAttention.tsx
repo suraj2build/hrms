@@ -17,7 +17,6 @@ import { useNavigate, useLocation } from 'react-router-dom'
 import { CheckCircle2 } from 'lucide-react'
 import { api } from '@/lib/api/client'
 import { SignalCard, type Signal } from '@/components/experience/SignalCard'
-import { AmbientLine } from '@/components/experience/AmbientLine'
 import { PillarHero } from '@/components/experience/PillarHero'
 import { DoneForToday } from '@/components/experience/DoneForToday'
 import { LoadingState } from '@/components/layout/LoadingState'
@@ -92,7 +91,23 @@ export function MyAttention() {
       <PillarHero sky="sky-night" eyebrow="calm control" title="My Attention" tagline={focusSentence} />
 
       <div className="mx-auto max-w-[680px] space-y-8 py-8">
-        <AmbientLine>{focusSentence}</AmbientLine>
+        <div className="flex items-center gap-3">
+          {needsYou.length > 0 && (
+            <span className="rounded-full bg-destructive/10 px-3 py-1 text-[11px] font-semibold text-destructive">
+              {needsYou.length} need{needsYou.length > 1 ? '' : 's'} you now
+            </span>
+          )}
+          {canWait.length > 0 && (
+            <span className="rounded-full bg-warning/10 px-3 py-1 text-[11px] font-semibold text-warning">
+              {canWait.length} can wait
+            </span>
+          )}
+          {waiting.length > 0 && (
+            <span className="rounded-full bg-muted px-3 py-1 text-[11px] font-semibold text-muted-foreground">
+              {waiting.length} with others
+            </span>
+          )}
+        </div>
 
         <Group label="Needs you now" signals={needsYou} onAction={go} />
         <Group label="Can wait" signals={canWait} onAction={go} />
