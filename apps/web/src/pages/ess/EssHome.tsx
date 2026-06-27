@@ -168,9 +168,9 @@ export function EssHome() {
     : tenureM < 12 ? `${tenureM} month${tenureM > 1 ? 's' : ''} in`
     : `${Math.floor(tenureM / 12)} year${Math.floor(tenureM / 12) > 1 ? 's' : ''} and counting`
 
-  const celebLabel = (c: typeof celebrations[0]) =>
+  const celebLabel = (c: { kind: string; name: string; years?: number }) =>
     c.kind === 'birthday' ? `${c.name.split(' ')[0]}'s birthday`
-    : c.kind === 'anniversary' ? `${c.name.split(' ')[0]} turns ${'years' in c ? (c as { years: number }).years : ''}`
+    : c.kind === 'anniversary' ? `${c.name.split(' ')[0]} turns ${c.years ?? ''}`
     : `${c.name.split(' ')[0]} joined us`
 
   // ── Hero (time-based, no API needed) ────────────────────────────────────────
