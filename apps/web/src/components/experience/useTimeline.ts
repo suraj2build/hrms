@@ -11,6 +11,7 @@
 import { useInfiniteQuery } from '@tanstack/react-query'
 import { api } from '@/lib/api/client'
 import type { ActivityEvent } from './ActivityItem'
+import type { JourneyStep } from './JourneyRail'
 
 export type StoryItem = ActivityEvent
 
@@ -27,6 +28,7 @@ export interface ChapterView {
 interface TimelinePage {
   focus:      { eyebrow: string; sentence: string } | null
   reflection: { insight: string | null; kind?: string } | null
+  journey?:   JourneyStep[]
   chapters:   { key: string; title: string; order: number; events: StoryItem[]; folded: StoryItem[]; progress?: ChapterView['progress'] }[]
   nextCursor: string | null
   origin:     { joined_at: string; label: string; first_day: boolean } | null
@@ -87,6 +89,7 @@ export function useTimeline() {
     refetch: q.refetch,
     focus: first?.focus ?? null,
     reflection: first?.reflection ?? null,
+    journey: first?.journey ?? [],
     origin: pages.map(p => p.origin).find(Boolean) ?? null,
     chapters,
     hasNextPage: q.hasNextPage,

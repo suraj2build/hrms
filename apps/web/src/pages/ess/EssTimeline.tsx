@@ -12,6 +12,7 @@
  */
 
 import { FocusPanel } from '@/components/experience/FocusPanel'
+import { JourneyRail } from '@/components/experience/JourneyRail'
 import { ReflectionCard } from '@/components/experience/ReflectionCard'
 import { ProgressBand } from '@/components/experience/ProgressBand'
 import { Chapter } from '@/components/experience/Chapter'
@@ -45,6 +46,9 @@ export function EssTimeline() {
     <div className="mx-auto max-w-[720px] space-y-9 py-2">
       {/* Focus — the journey framing (orients, no action). */}
       {t.focus && <FocusPanel eyebrow={t.focus.eyebrow} sentence={t.focus.sentence} />}
+
+      {/* Journey — the Growth spine: how I've grown, before what happened. */}
+      <JourneyRail steps={t.journey} />
 
       {empty && (
         <p className="py-16 text-center text-sm text-muted-foreground">
