@@ -18,7 +18,7 @@ export function employeeTabs(base: string): MobileTab[] {
   return [
     { key: 'home',      label: 'Home',      icon: Home,       path: `${base}/home` },
     { key: 'flowdesk',  label: 'FlowDesk',  icon: Inbox,      path: `${base}/flowdesk` },
-    { key: 'community', label: 'Community', icon: Users,      path: `${base}/community` },
+    { key: 'community', label: 'Company',   icon: Users,      path: `${base}/company` },
     { key: 'more',      label: 'More',      icon: LayoutGrid, path: `${base}/more` },
   ]
 }

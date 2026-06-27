@@ -1,8 +1,76 @@
-@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=JetBrains+Mono:wght@400;500;600;700&display=swap");
 @import "tailwindcss";
 @import "tw-animate-css";
 
 @custom-variant dark (&:is(.dark *));
+
+/* Accessibility safety net (WCAG 2.3.3) — honour the OS "reduce motion" setting
+   for ALL animation/transition, including infinite keyframes (op-* pulses, spinners,
+   pings) that aren't individually guarded. Tailwind's motion-safe: variants still
+   work; this is the floor. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Experience Cloud Visual Language v2 — "Atmospheres"
+   Depth through light (layered soft shadows), one premium easing, one entrance.
+   ───────────────────────────────────────────────────────────────────────────── */
+@theme inline {
+  --ease-premium: cubic-bezier(0.2, 0.7, 0.2, 1);
+  /* On-sky text — for content rendered over the dark cinematic Arrival fields */
+  --color-on-sky:      var(--on-sky);
+  --color-on-sky-soft: var(--on-sky-soft);
+}
+
+/* Depth — content floats on light, never borders. Two elevations. */
+.shadow-depth {
+  box-shadow: 0 1px 2px -1px rgb(26 77 143 / 0.08), 0 8px 24px -12px rgb(26 77 143 / 0.16);
+}
+.shadow-depth-lg {
+  box-shadow: 0 2px 4px -2px rgb(26 77 143 / 0.10), 0 18px 48px -16px rgb(26 77 143 / 0.22);
+}
+.dark .shadow-depth    { box-shadow: 0 1px 2px -1px rgb(0 0 0 / 0.4), 0 8px 24px -12px rgb(0 0 0 / 0.5); }
+.dark .shadow-depth-lg { box-shadow: 0 2px 4px -2px rgb(0 0 0 / 0.5), 0 18px 48px -16px rgb(0 0 0 / 0.6); }
+
+/* The signature entrance — a short rise + fade, premium easing. Staggered by the
+   component via animation-delay. Honoured only when motion is allowed. */
+@keyframes atmo-rise {
+  from { opacity: 0; transform: translateY(14px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .atmo-rise { animation: atmo-rise 0.52s var(--ease-premium) both; }
+}
+
+/* The Arrival (Home's threshold) — the place breathes. A subliminal, very slow
+   drift of the atmospheric field so the door feels inhabited even in stillness
+   (EXPERIENCE_ARRIVAL_SPEC.md §4.2). Amplitude is deliberately tiny — if a user
+   consciously notices the loop, it's too strong. Stilled under reduce-motion. */
+@keyframes arrival-breathe {
+  0%   { transform: scale(1.04) translate3d(0, 0, 0); opacity: 0.94; }
+  50%  { transform: scale(1.075) translate3d(0, -1.1%, 0); opacity: 1; }
+  100% { transform: scale(1.04) translate3d(0, 0, 0); opacity: 0.94; }
+}
+/* The lights coming up as you step in — a slower, softer rise than atmo-rise. */
+@keyframes arrival-rise {
+  from { opacity: 0; transform: translateY(18px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .arrival-breathe { animation: arrival-breathe 16s ease-in-out infinite; }
+  .arrival-rise    { animation: arrival-rise 0.8s var(--ease-premium) both; }
+}
+/* Under reduce-motion the field is simply present (scaled to hide gradient edges),
+   and content appears without movement — the arrival is just as complete. */
+@media (prefers-reduced-motion: reduce) {
+  .arrival-breathe { transform: scale(1.05); }
+}
 
 /*
  * CognixHR Brand — HRMS Design System 2.0
@@ -16,6 +84,8 @@
   --font-sans:    "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif;
   --font-mono:    "JetBrains Mono", ui-monospace, "Cascadia Code", "Fira Code", monospace;
   --font-display: "Inter", ui-sans-serif, system-ui, sans-serif;
+  /* Visual Language v2 — the display serif that carries the emotional beat (Fraunces). */
+  --font-serif:   "Fraunces", ui-serif, Georgia, "Times New Roman", serif;
 
   --radius-sm:  calc(var(--radius) - 4px);
   --radius-md:  calc(var(--radius) - 2px);
@@ -50,6 +120,12 @@
   --color-warning-foreground: var(--warning-foreground);
   --color-info:               var(--info);
   --color-info-foreground:    var(--info-foreground);
+
+  /* Brand teal — the Experience-Cloud accent (separate from the navy-remapped
+     legacy --accent-teal). brand-teal = fills/washes/gradients/decorative icons;
+     brand-teal-ink = darker, for teal used as readable text (WCAG AA on light). */
+  --color-brand-teal:     var(--brand-teal);
+  --color-brand-teal-ink: var(--brand-teal-ink);
 
   /* Legacy accent aliases — kept for backward compat */
   --color-accent-magenta: var(--accent-magenta);
@@ -159,6 +235,14 @@
   --sidebar-border:             #E3E9F0;
   --sidebar-ring:               #1A4D8F;
 
+  /* ── On-sky tokens — text over the cinematic Arrival fields ─── */
+  --on-sky:      oklch(0.99 0.005 250);           /* near-white; AA on all sky phases */
+  --on-sky-soft: oklch(0.99 0.005 250 / 0.72);   /* 72% for weather + life lines */
+
+  /* ── Brand teal (Experience Cloud accent) ───────────────────── */
+  --brand-teal:     #15B8A6;   /* fills, washes, gradients, decorative icons */
+  --brand-teal-ink: #0B7A6E;   /* readable teal text on light — ~4.7:1 on white */
+
   /* ── Legacy accent aliases → Harmony semantics ───────────────── */
   --accent-magenta: #C93535;
   --accent-coral:   #B07B18;
@@ -249,6 +333,9 @@
   --sidebar-border:             oklch(1    0     0 / 0.08);
   --sidebar-ring:               #5B8FD6;
 
+  /* Brand teal lifts brighter on dark; ink == bright teal (passes on charcoal). */
+  --brand-teal:     #2DD4BF;
+  --brand-teal-ink: #2DD4BF;
   --accent-magenta: oklch(0.68 0.20  25);
   --accent-coral:   oklch(0.82 0.16  75);
   --accent-teal:    oklch(0.65 0.10 260);   /* remapped to light-navy (matches light-mode navy alias) */
@@ -769,6 +856,111 @@
     display: flex;
     flex-direction: column;
   }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   CognixHR Experience Cloud — Cinematic Sky System
+   Atmospheric "skies" for the Arrival threshold. Each sky is a dark, deep
+   gradient — the cinematic philosophy from EXPERIENCE_ARRIVAL_SPEC.md §4.2.
+   Text over these skies must use text-on-sky / text-on-sky-soft (near-white).
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* Time-of-day sky fields — one gradient per Arrival phase */
+.sky-dawn {
+  background:
+    radial-gradient(120% 80% at 15% 10%, oklch(0.92 0.08 70 / 0.95), transparent 60%),
+    radial-gradient(120% 90% at 90% 0%,  oklch(0.86 0.10 25 / 0.85), transparent 55%),
+    linear-gradient(180deg, oklch(0.78 0.10 35) 0%, oklch(0.68 0.13 280) 60%, oklch(0.32 0.10 270) 100%);
+}
+.sky-morning {
+  background:
+    radial-gradient(110% 80% at 80% 15%, oklch(0.92 0.13 75 / 0.95), transparent 55%),
+    radial-gradient(120% 100% at 10% 90%, oklch(0.55 0.16 25 / 0.55), transparent 60%),
+    linear-gradient(180deg, oklch(0.74 0.14 55) 0%, oklch(0.58 0.16 35) 55%, oklch(0.30 0.10 285) 100%);
+}
+.sky-midday {
+  background:
+    radial-gradient(80% 60% at 50% -8%,  oklch(0.62 0.18 250 / 0.90), transparent 58%),
+    radial-gradient(70% 60% at 80% 110%, oklch(0.55 0.14 220 / 0.55), transparent 60%),
+    linear-gradient(180deg, oklch(0.30 0.14 250) 0%, oklch(0.20 0.10 265) 100%);
+}
+.sky-evening {
+  background:
+    radial-gradient(120% 90% at 85% 10%, oklch(0.70 0.18 20 / 0.85), transparent 55%),
+    radial-gradient(120% 100% at 10% 100%, oklch(0.30 0.12 285 / 0.85), transparent 60%),
+    linear-gradient(180deg, oklch(0.55 0.16 30) 0%, oklch(0.38 0.14 305) 55%, oklch(0.20 0.08 270) 100%);
+}
+.sky-night {
+  background:
+    radial-gradient(100% 70% at 20% 10%, oklch(0.36 0.10 260 / 0.9), transparent 60%),
+    radial-gradient(120% 90% at 90% 100%, oklch(0.28 0.10 290 / 0.9), transparent 60%),
+    linear-gradient(180deg, oklch(0.18 0.06 265) 0%, oklch(0.12 0.05 270) 100%);
+}
+.sky-weekend {
+  background:
+    radial-gradient(80% 60% at 20% 30%, oklch(0.65 0.18 184 / 0.55), transparent 60%),
+    radial-gradient(80% 60% at 80% 20%, oklch(0.55 0.18 250 / 0.45), transparent 60%),
+    radial-gradient(80% 70% at 50% 100%, oklch(0.40 0.14 265 / 0.55), transparent 60%),
+    linear-gradient(180deg, oklch(0.18 0.06 265) 0%, oklch(0.12 0.05 270) 100%);
+}
+
+/* Subtle film-grain overlay for cinematic texture */
+.sky-grain {
+  position: relative;
+  isolation: isolate;
+}
+.sky-grain::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 1;
+  opacity: 0.07;
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 0.6 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+}
+
+/* Slow ambient drift — 22s loop, subliminal (EXPERIENCE_ARRIVAL_SPEC.md §4.2) */
+@keyframes drift {
+  0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
+  50%       { transform: translate3d(-2%, 1%, 0) scale(1.04); }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .drift-slow { animation: drift 22s ease-in-out infinite; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .drift-slow { transform: scale(1.02); }
+}
+
+/* Two-voice type system — Fraunces display serif with optical tuning */
+.serif-hero {
+  font-family: var(--font-serif);
+  font-weight: 350;
+  letter-spacing: -0.025em;
+  font-variation-settings: "opsz" 144, "SOFT" 50;
+  line-height: 1.02;
+}
+.serif-emph {
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-weight: 400;
+  font-variation-settings: "opsz" 144, "SOFT" 50;
+}
+
+/* Borderless soft-depth cards — shadow-only, no border line */
+.card-soft {
+  background: var(--color-card);
+  border-radius: var(--radius-2xl);
+  box-shadow: 0 1px 2px rgb(15 23 42 / 0.04), 0 8px 24px -12px rgb(15 23 42 / 0.10);
+}
+.card-lift {
+  background: var(--color-card);
+  border-radius: var(--radius-2xl);
+  box-shadow: 0 4px 12px rgb(15 23 42 / 0.06), 0 24px 60px -20px rgb(15 23 42 / 0.18);
+}
+.card-lift:hover {
+  box-shadow: 0 6px 16px rgb(15 23 42 / 0.08), 0 28px 64px -20px rgb(15 23 42 / 0.22);
+  transform: translateY(-1px);
 }
 
 /* ── Petrol + Teal theme ───────────────────────────────────────────────────── */

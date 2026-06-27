@@ -1,13 +1,16 @@
 import { useNavigate } from 'react-router-dom'
 import {
   User2, FileText, Receipt, Home, Boxes, Landmark, CalendarRange,
-  BookOpen, LifeBuoy, Users2, ChevronRight, LogOut, Award, MessageCircle,
+  BookOpen, LifeBuoy, Users2, ChevronRight, LogOut, Award, MessageCircle, Rocket, Sparkles,
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase/client'
 import { useAuthStore } from '@/stores/authStore'
 import { glossy } from '../glossy'
 
 const links = (base: string) => [
+  { label: 'My Growth', icon: Rocket, to: `${base}/identity`, from: '#1A4D8F', c: '#15B8A6' },
+  { label: 'My Team', icon: Users2, to: `${base}/team`, from: '#15B8A6', c: '#2DD4BF' },
+  { label: 'CognixHR Assistant', icon: Sparkles, to: `${base}/assistant`, from: '#1A4D8F', c: '#2E6FE6' },
   { label: 'Recognition', icon: Award, to: `${base}/recognition`, from: '#7C3AED', c: '#A78BFA' },
   { label: 'Community', icon: MessageCircle, to: `${base}/community`, from: '#2E6FE6', c: '#15B8A6' },
   { label: 'My Profile', icon: User2, to: `${base}/profile`, from: '#2E6FE6', c: '#5C9AFF' },
@@ -18,7 +21,6 @@ const links = (base: string) => [
   { label: 'Loans & Advances', icon: Landmark, to: `${base}/loans`, from: '#1A8050', c: '#34B27B' },
   { label: 'Holidays', icon: CalendarRange, to: `${base}/company-holidays`, from: '#2E6FE6', c: '#5C9AFF' },
   { label: 'Policies', icon: BookOpen, to: `${base}/policies`, from: '#7C3AED', c: '#A78BFA' },
-  { label: 'Team', icon: Users2, to: `${base}/team`, from: '#15B8A6', c: '#2DD4BF' },
   { label: 'HR Support', icon: LifeBuoy, to: `${base}/hr-support`, from: '#B07B18', c: '#D9A441' },
 ]
 

@@ -20,7 +20,7 @@ export function AmbientLine({ children, className }: AmbientLineProps) {
   if (!children) return null
   return (
     <p className={cn('flex items-start gap-2 text-sm leading-relaxed text-muted-foreground', className)}>
-      <Sparkles className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-[#15B8A6]" />
+      <Sparkles className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-brand-teal" />
       <span>{children}</span>
     </p>
   )

@@ -13,7 +13,7 @@ import { cn } from '@/lib/utils'
 // Calm, on-brand tints — deterministic per name so a person keeps one colour.
 const TINTS = [
   'bg-primary/15 text-primary',
-  'bg-[#15B8A6]/15 text-[#15B8A6]',
+  'bg-brand-teal/15 text-brand-teal-ink',
   'bg-info/15 text-info',
   'bg-success/15 text-success',
   'bg-warning/15 text-warning',
@@ -39,12 +39,16 @@ export interface PersonAvatarProps {
   name: string
   size?: keyof typeof SIZES
   className?: string
+  /** Set when an adjacent visible label already announces the name (avoids double
+   *  announcement). Default false → the avatar announces the person's name itself,
+   *  so a face is never a silent, identity-less element for screen readers (C4). */
+  decorative?: boolean
 }
 
-export function PersonAvatar({ name, size = 'md', className }: PersonAvatarProps) {
+export function PersonAvatar({ name, size = 'md', className, decorative = false }: PersonAvatarProps) {
   return (
     <span
-      aria-hidden
+      {...(decorative ? { 'aria-hidden': true } : { role: 'img', 'aria-label': name })}
       title={name}
       className={cn('grid shrink-0 place-items-center rounded-full font-bold', SIZES[size], tintFor(name), className)}
     >

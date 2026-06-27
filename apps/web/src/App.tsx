@@ -14,7 +14,7 @@ import { AssistantWidget } from '@/components/assistant/AssistantWidget'
 
 // ── Layouts ──────────────────────────────────────────────────────────────────
 import { AdminShellV2 }  from '@/components/layout/AdminShellV2'  // /admin/* — V2 shell with domain tabs
-import { EssShell }      from '@/components/layout/EssShell'      // /ess/*   — all authenticated users
+const EssShell = lazy(() => import('@/components/layout/EssShell').then(m => ({ default: m.EssShell })))  // /ess/* — lazy: splits the whole Employee-OS subtree out of the index chunk
 import { ManagerShell }  from '@/components/layout/ManagerShell'  // /manager/* — manager console
 
 // ── Auth pages (always needed, keep eager) ────────────────────────────────────
@@ -24,7 +24,13 @@ import { MobilePreview } from '@/pages/MobilePreview'
 import { AuthCallback } from '@/pages/auth/AuthCallback'
 
 // ── Dashboard (eager — first page after login) ─────────────────────────────────
-import { EssHome }           from '@/pages/ess/EssHome'
+const EssHome     = lazy(() => import('@/pages/ess/EssHome').then(m => ({ default: m.EssHome })))
+const EssTimeline = lazy(() => import('@/pages/ess/EssTimeline').then(m => ({ default: m.EssTimeline })))
+const MyGrowth    = lazy(() => import('@/pages/ess/MyGrowth').then(m => ({ default: m.MyGrowth })))
+const MyAttention = lazy(() => import('@/pages/ess/MyAttention').then(m => ({ default: m.MyAttention })))
+const MyTeam      = lazy(() => import('@/pages/ess/MyTeam').then(m => ({ default: m.MyTeam })))
+const MyCompany   = lazy(() => import('@/pages/ess/MyCompany').then(m => ({ default: m.MyCompany })))
+const MyAssistant = lazy(() => import('@/pages/ess/MyAssistant').then(m => ({ default: m.MyAssistant })))
 // Manager-only dashboards — lazy (only managers hit them; keeps them off the main chunk).
 const ManagerDashboardPage   = lazy(() => import('@/pages/dashboard/ManagerDashboard').then(m => ({ default: m.ManagerDashboardPage })))
 const ManagerTeamPerformance = lazy(() => import('@/pages/dashboard/ManagerTeamPerformance').then(m => ({ default: m.ManagerTeamPerformance })))
@@ -162,7 +168,6 @@ const EssLeaveBalance          = lazy(() => import('@/pages/ess/EssLeaveBalance'
 const EssDocuments             = lazy(() => import('@/pages/ess/EssDocuments').then(m => ({ default: m.EssDocuments })))
 const EssSeparation            = lazy(() => import('@/pages/ess/EssSeparation').then(m => ({ default: m.EssSeparation })))
 const EssOnboarding            = lazy(() => import('@/pages/ess/EssOnboarding').then(m => ({ default: m.EssOnboarding })))
-const EssTeam                  = lazy(() => import('@/pages/ess/EssTeam').then(m => ({ default: m.EssTeam })))
 const EssTeamOff               = lazy(() => import('@/pages/ess/EssTeamOff').then(m => ({ default: m.EssTeamOff })))
 const EssPolicies              = lazy(() => import('@/pages/ess/EssPolicies').then(m => ({ default: m.EssPolicies })))
 const EssHRSupport             = lazy(() => import('@/pages/ess/EssHRSupport').then(m => ({ default: m.EssHRSupport })))
@@ -957,6 +962,11 @@ export default function App() {
                 {/* Employee self-service — /manager/self/* stays inside ManagerShell */}
                 {/* Prevents shell/sidebar switch when manager clicks Employee section items */}
                 <Route path="/manager/self/home"                         element={<EssHome />} />
+                <Route path="/manager/self/timeline"                     element={<EssTimeline />} />
+                <Route path="/manager/self/identity"                     element={<MyGrowth />} />
+                <Route path="/manager/self/attention"                    element={<MyAttention />} />
+                <Route path="/manager/self/company"                      element={<MyCompany />} />
+                <Route path="/manager/self/assistant"                    element={<MyAssistant />} />
                 <Route path="/manager/self/dashboard"                    element={<Navigate to="/manager/self/home" replace />} />
                 <Route path="/manager/self/attendance"                   element={<MyAttendance />} />
                 <Route path="/manager/self/attendance/regularization"    element={<Navigate to="/manager/self/attendance" replace />} />
@@ -997,6 +1007,11 @@ export default function App() {
               <Route element={<EssShell />}>
 
                 <Route path="/ess/home"                   element={<EssHome />} />
+                <Route path="/ess/timeline"               element={<EssTimeline />} />
+                <Route path="/ess/identity"               element={<MyGrowth />} />
+                <Route path="/ess/attention"              element={<MyAttention />} />
+                <Route path="/ess/company"                element={<MyCompany />} />
+                <Route path="/ess/assistant"              element={<MyAssistant />} />
                 <Route path="/ess/dashboard"              element={<Navigate to="/ess/home" replace />} />
                 <Route path="/ess/recognition"            element={<EssRecognition />} />
                 <Route path="/ess/community"              element={<EssCommunity />} />
@@ -1044,7 +1059,7 @@ export default function App() {
                 <Route path="/ess/leave/balance"          element={<EssLeaveBalance />} />
                 <Route path="/ess/documents"              element={<EssDocuments />} />
                 <Route path="/ess/separation"             element={<EssSeparation />} />
-                <Route path="/ess/team"                   element={<EssTeam />} />
+                <Route path="/ess/team"                   element={<MyTeam />} />
                 <Route path="/ess/whos-off"               element={<EssTeamOff />} />
                 <Route path="/ess/policies"               element={<EssPolicies />} />
                 <Route path="/ess/runbooks"               element={<EssRunbooks />} />

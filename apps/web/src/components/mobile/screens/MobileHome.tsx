@@ -9,6 +9,7 @@ import {
 } from 'lucide-react'
 import { api } from '@/lib/api/client'
 import type { Signal } from '@/components/experience/SignalCard'
+import { Arrival } from '@/components/experience/Arrival'
 import { useAuthStore } from '@/stores/authStore'
 import { glossy } from '../glossy'
 import { UpcomingHolidays } from './parts'
@@ -117,7 +118,11 @@ export function MobileHome({ base }: { base: string }) {
   }, [communityData, kudosData])
 
   return (
-    <div className="space-y-4">
+    <>
+      {/* The Arrival — the threshold. Full-bleed; chrome is hidden until you cross
+          (EXPERIENCE_ARRIVAL_SPEC.md). The day below is untouched in this pass. */}
+      <Arrival dayAnchorId="mobile-your-day" />
+      <div id="mobile-your-day" className="space-y-4">
       {/* Today's Focus (Movement 2) — only when something needs attention */}
       {urgentSignal && (
         <button onClick={() => navigate(`${base}${focusHref}`)}
@@ -251,6 +256,23 @@ export function MobileHome({ base }: { base: string }) {
 
       <UpcomingHolidays limit={2} />
 
+      {/* Your story so far → the full Timeline (employee memory) */}
+      <button
+        onClick={() => navigate(`${base}/timeline`)}
+        className="flex w-full items-center justify-between rounded-2xl bg-white px-4 py-3 text-left shadow-[0_2px_12px_-4px_rgba(26,77,143,0.12)]"
+      >
+        <span className="flex items-center gap-2.5">
+          <span className="grid h-9 w-9 place-items-center rounded-xl bg-[#15B8A6]/12 text-[#15B8A6]">
+            <Trophy className="h-4 w-4" />
+          </span>
+          <span className="min-w-0">
+            <span className="block text-[13px] font-semibold text-foreground">Your story</span>
+            <span className="block text-[11px] text-muted-foreground">Revisit everything so far</span>
+          </span>
+        </span>
+        <span className="text-[13px] text-muted-foreground">→</span>
+      </button>
+
       {/* Done for today (Movement 10) — the calm closer */}
       <p className="flex items-center justify-center gap-1.5 pt-1 text-center text-[12px] text-muted-foreground">
         <CheckCircle2 className="h-3.5 w-3.5 text-[#1A8050]" />
@@ -258,7 +280,8 @@ export function MobileHome({ base }: { base: string }) {
           ? 'A couple of things are still waiting — nothing that can’t wait for coffee.'
           : 'That’s everything — you’re all set for today.'}
       </p>
-    </div>
+      </div>
+    </>
   )
 }
 

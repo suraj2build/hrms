@@ -13,7 +13,7 @@ import { useMemo, useEffect } from 'react'
 import { Link, useLocation }  from 'react-router-dom'
 import { useQuery }           from '@tanstack/react-query'
 import {
-  Home, Users, Inbox, Trophy, Megaphone,
+  Home, Users, Inbox, Trophy, Megaphone, Bell, Sparkles,
   CalendarDays, CalendarOff, Scale, Clock,
   Receipt, Calculator, CreditCard, Wallet, ScrollText, ShieldCheck,
   FileText, Mail, Package, BookMarked, HelpCircle, HeadphonesIcon,
@@ -50,7 +50,10 @@ interface NavGroup {
 
 const PILLARS: NavItem[] = [
   { label: 'Home',        icon: Home,      href: '/ess/home',        exact: true },
-  { label: 'Community',   icon: Megaphone, href: '/ess/community'                },
+  { label: 'My Attention',icon: Bell,      href: '/ess/attention'                },
+  { label: 'My Growth',   icon: Rocket,    href: '/ess/identity'                 },
+  { label: 'Assistant',   icon: Sparkles,  href: '/ess/assistant'                },
+  { label: 'Community',   icon: Megaphone, href: '/ess/company'                  },
   { label: 'FlowDesk',    icon: Inbox,     href: '/ess/flowdesk'                 },
   { label: 'Team',        icon: Users,     href: '/ess/team'                     },
   { label: 'Rewards',     icon: Trophy,    href: '/ess/recognition'              },

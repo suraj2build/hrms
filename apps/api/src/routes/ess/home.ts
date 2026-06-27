@@ -23,6 +23,12 @@
 import type { FastifyInstance } from 'fastify'
 import { ensureTodaysCelebrations } from '../../lib/community-celebrations.js'
 
+// Run the (idempotent, write-heavy) celebration generation at most once per tenant
+// per day per instance, and OFF the GET response critical path — it was previously
+// awaited on every /ess/home request (a full-roster scan + N inserts before the main
+// fan-out). Fire-and-forget; the function is idempotent and never throws (RC1 C1).
+const celebrationRunDay = new Map<string, string>()
+
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
 function todayISO(): string {
@@ -76,8 +82,12 @@ export default async function essHomeRoutes(fastify: FastifyInstance) {
     const FAKE_EMP_ID = '00000000-0000-0000-0000-000000000000'
 
     // Ensure today's birthday/anniversary system posts exist so the feed teaser
-    // below picks them up (idempotent, never throws).
-    await ensureTodaysCelebrations(fastify.supabase, tenantId)
+    // picks them up — but at most once per tenant per day, and never blocking the
+    // response (it was awaited on every request — the C1 write-on-GET defect).
+    if (celebrationRunDay.get(tenantId) !== today) {
+      celebrationRunDay.set(tenantId, today)
+      void ensureTodaysCelebrations(fastify.supabase, tenantId).catch(() => {})
+    }
 
     // ── Parallel fan-out (all independent) ──────────────────────────────────
     const [

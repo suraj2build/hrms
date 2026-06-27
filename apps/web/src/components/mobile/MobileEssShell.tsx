@@ -5,17 +5,24 @@ import { Bell, User2, Users } from 'lucide-react'
 import { LogoMark } from '@/components/brand/Logo'
 import { api } from '@/lib/api/client'
 import { useAuthStore } from '@/stores/authStore'
+import { useArrivalStore } from '@/stores/arrivalStore'
 import { resolveGreeting, type DayContext } from '@/components/experience/resolveGreeting'
 import { cn } from '@/lib/utils'
 import { HEADER_GRADIENT } from './glossy'
 import { MobileBottomNav, employeeTabs } from './MobileBottomNav'
 import { MobileHome } from './screens/MobileHome'
+import { EssTimeline } from '@/pages/ess/EssTimeline'
+import { MyGrowth } from '@/pages/ess/MyGrowth'
+import { MyAttention } from '@/pages/ess/MyAttention'
+import { MyTeam } from '@/pages/ess/MyTeam'
+import { MyCompany } from '@/pages/ess/MyCompany'
+import { MyAssistant } from '@/pages/ess/MyAssistant'
+import type { Signal } from '@/components/experience/SignalCard'
 import { MobileAttendance } from './screens/MobileAttendance'
 import { MobileLeave } from './screens/MobileLeave'
 import { MobilePayslip } from './screens/MobilePayslip'
 import { MobileApprovals } from './screens/MobileApprovals'
 import { MobileMore } from './screens/MobileMore'
-import { MobileTeam } from './screens/MobileTeam'
 import { MobileRecognition } from './screens/MobileRecognition'
 import { MobileCommunity } from './screens/MobileCommunity'
 import { MobileFlowDesk } from './screens/MobileFlowDesk'
@@ -56,11 +63,23 @@ export function MobileEssShell({ previewHome = false }: { previewHome?: boolean 
   })
   const greet = resolveGreeting(home?.profile?.name ?? profile?.full_name ?? 'there', home?.context, new Date())
 
+  // The bell badge fires ONLY when something genuinely needs you now (never for
+  // "waiting" or info) — My Attention is meant to reach zero, not accumulate.
+  const { data: sig } = useQuery<{ signals: Signal[] }>({
+    queryKey: ['ess-signals'], queryFn: () => api.get('/ess/signals'), staleTime: 60_000,
+  })
+  const needsYou = (sig?.signals ?? []).some(s => s.intent === 'needs_you')
+
   const onFab = () => navigate(`${base}/attendance`)
+
+  // The Arrival (Home's threshold) hides all chrome — header and bottom nav — until
+  // the employee crosses into the day (EXPERIENCE_ARRIVAL_SPEC.md §2.6 / §5).
+  const atThreshold = useArrivalStore((s) => s.atThreshold)
 
   return (
     <div className="flex min-h-screen flex-col bg-[#EEF3FF]">
-      {/* ── Glossy header ── */}
+      {/* ── Glossy header (hidden at the Arrival threshold) ── */}
+      {!atThreshold && (
       <header className="relative px-5 pb-5 pt-9 text-white" style={{ background: HEADER_GRADIENT }}>
         <div className="pointer-events-none absolute inset-0 opacity-40"
           style={{ background: 'radial-gradient(120% 80% at 80% -10%, rgba(255,255,255,0.45), transparent 60%)' }} />
@@ -74,9 +93,9 @@ export function MobileEssShell({ previewHome = false }: { previewHome?: boolean 
               <span className="block line-clamp-1 text-[11px] text-white/80">{greet.subline}</span>
             </span>
           </span>
-          <button aria-label="Notifications" onClick={() => navigate(`${base}/approvals`)} className="relative">
+          <button aria-label="What needs you" onClick={() => navigate(`${base}/attention`)} className="relative">
             <Bell className="h-5 w-5 text-white/90" />
-            <span className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-[#F5A623] ring-2 ring-[#1A4D8F]" />
+            {needsYou && <span className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-[#F5A623] ring-2 ring-[#1A4D8F]" />}
           </button>
         </div>
 
@@ -97,11 +116,12 @@ export function MobileEssShell({ previewHome = false }: { previewHome?: boolean 
           </div>
         )}
       </header>
+      )}
 
       {/* ── Content ── */}
-      <main className="flex-1 px-4 pb-28 pt-4">
+      <main className={atThreshold ? 'flex-1' : 'flex-1 px-4 pb-28 pt-4'}>
         {persona === 'team' && isManager
-          ? <MobileTeam />
+          ? <MyTeam />
           : (
             <Suspense fallback={<Loader />}>
               {previewHome ? <MobileHome base={base} /> : <MobileRouter base={base} />}
@@ -109,8 +129,8 @@ export function MobileEssShell({ previewHome = false }: { previewHome?: boolean 
           )}
       </main>
 
-      {/* ── Bottom nav (employee persona) ── */}
-      {persona === 'me' && <MobileBottomNav tabs={employeeTabs(base)} onFab={onFab} />}
+      {/* ── Bottom nav (employee persona; hidden at the Arrival threshold) ── */}
+      {persona === 'me' && !atThreshold && <MobileBottomNav tabs={employeeTabs(base)} onFab={onFab} />}
     </div>
   )
 }
@@ -121,6 +141,13 @@ function MobileRouter({ base }: { base: string }) {
   const sub = pathname.replace(base, '') || '/home'
 
   if (sub === '' || sub === '/' || sub.startsWith('/home') || sub.startsWith('/dashboard')) return <MobileHome base={base} />
+  // My Story is the responsive "river" (EssTimeline) — one component, both platforms.
+  if (sub.startsWith('/timeline')) return <EssTimeline />
+  if (sub.startsWith('/identity')) return <MyGrowth />
+  if (sub.startsWith('/attention')) return <MyAttention />
+  if (sub.startsWith('/team')) return <MyTeam />
+  if (sub.startsWith('/company')) return <MyCompany />
+  if (sub.startsWith('/assistant')) return <MyAssistant />
   if (sub.startsWith('/attendance')) return <MobileAttendance base={base} />
   if (sub.startsWith('/leave')) return <MobileLeave base={base} />
   if (sub.startsWith('/compensation')) return <MobilePayslip base={base} />
