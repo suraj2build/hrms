@@ -122,51 +122,58 @@ export function Arrival({ dayAnchorId }: { dayAnchorId: string }) {
     <section
       ref={sectionRef}
       aria-label="Welcome"
-      className="relative isolate flex min-h-[100svh] w-full flex-col overflow-hidden"
+      className={`sky-grain relative flex min-h-[100svh] w-full flex-col overflow-hidden ${view.skyClass}`}
     >
-      {/* The atmospheric field — a living CSS sky. Decorative; the text carries meaning. */}
-      <div
-        aria-hidden
-        className="arrival-breathe absolute inset-0 -z-10 origin-center"
-        style={{ backgroundImage: view.field }}
-      />
+      {/* Slow ambient drift blob — gives the sky life and warmth */}
+      <div aria-hidden className="drift-slow pointer-events-none absolute -right-24 -top-32 h-[560px] w-[560px] rounded-full bg-white/15 blur-3xl" />
+      <div aria-hidden className="pointer-events-none absolute -bottom-40 -left-32 h-[500px] w-[500px] rounded-full bg-black/25 blur-3xl" />
+
+      {/* Warm gold overlay for life moments — birthday, first day, anniversary */}
+      {view.warm && (
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-0"
+          style={{ backgroundImage: 'radial-gradient(70% 60% at 50% 8%, rgba(245,190,110,0.22), transparent 58%)' }}
+        />
+      )}
 
       {/* The greeting block — recognition + the day's weather, vertically centered. */}
-      <div className="mx-auto flex w-full max-w-[680px] flex-1 flex-col justify-center px-6 sm:px-8">
-        <p className="arrival-rise text-[11px] font-semibold uppercase tracking-[0.2em] text-muted-foreground" style={{ animationDelay: '120ms' }}>
+      <div className="relative z-10 mx-auto flex w-full max-w-[680px] flex-1 flex-col justify-center px-6 sm:px-8">
+        <p className="arrival-rise text-[11px] font-semibold uppercase tracking-[0.2em] text-on-sky-soft" style={{ animationDelay: '120ms' }}>
           {view.eyebrow}
         </p>
         <h1
-          className="arrival-rise mt-4 font-serif text-[2.7rem] font-medium leading-[1.05] tracking-[-0.02em] text-foreground sm:text-[3.6rem]"
+          className="arrival-rise serif-hero mt-6 text-[clamp(3rem,7vw,6rem)] text-on-sky"
           style={{ animationDelay: '240ms' }}
         >
           {view.greeting}
         </h1>
-        <p className="arrival-rise mt-4 max-w-[40ch] text-[17px] leading-relaxed text-muted-foreground sm:text-lg" style={{ animationDelay: '380ms' }}>
+        <p className="arrival-rise mt-6 max-w-[42ch] text-[18px] leading-relaxed text-on-sky-soft sm:text-[20px]" style={{ animationDelay: '380ms' }}>
           {view.weather}
         </p>
 
-        {/* Belonging — the faint life of the place. Faces are decorative; the line speaks. */}
-        <div className="arrival-rise mt-10 flex items-center gap-3" style={{ animationDelay: '520ms' }}>
+        {/* Belonging — the faint life of the place. */}
+        <div className="arrival-rise mt-auto pt-16 flex items-center gap-4" style={{ animationDelay: '520ms' }}>
           {life.faces.length > 0 && (
-            <span className="flex -space-x-2">
+            <span className="flex -space-x-3">
               {life.faces.map((f) => (
-                <PersonAvatar key={f} name={f} size="sm" className="ring-2 ring-background/80" decorative />
+                <PersonAvatar key={f} name={f} size="sm" className="ring-2 ring-white/25 hover:scale-110 hover:z-10 transition" decorative />
               ))}
             </span>
           )}
-          <span className="text-sm text-muted-foreground">{life.line}</span>
+          <span className="text-[14px] leading-snug text-on-sky-soft max-w-[28ch]">{life.line}</span>
         </div>
       </div>
 
       {/* The single warm invitation — never a software action. The quiet floor of the door. */}
-      <div className="arrival-rise relative flex shrink-0 items-end justify-center pb-10 pt-4" style={{ animationDelay: '680ms' }}>
+      <div className="arrival-rise relative z-10 flex shrink-0 items-end justify-center pb-12 pt-6" style={{ animationDelay: '680ms' }}>
         <button
           onClick={beginDay}
-          className="group flex flex-col items-center gap-1.5 rounded-full px-4 py-2 text-sm font-medium text-foreground/70 transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2"
+          className="group flex items-center gap-2 text-[12px] font-medium tracking-wide text-on-sky-soft transition-colors hover:text-on-sky focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40 focus-visible:ring-offset-2"
         >
+          <span className="h-px w-8 bg-white/40" />
           <span>Begin your day</span>
-          <ChevronDown className="h-4 w-4 opacity-70 transition-transform group-hover:translate-y-0.5" aria-hidden />
+          <ChevronDown className="h-3.5 w-3.5 opacity-60 transition-transform group-hover:translate-y-0.5" aria-hidden />
         </button>
       </div>
     </section>
