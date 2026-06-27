@@ -260,7 +260,7 @@ export function EssHome() {
         {/* Left: what happened + the company */}
         <div className="lg:col-span-3 space-y-6">
           <Card className="p-6">
-            <Heading>Here’s your day</Heading>
+            <Heading action="Your timeline →" onAction={() => navigate(`${base}/timeline`)}>Here’s your day</Heading>
             <AmbientLine className="mb-4">{dayInsight}</AmbientLine>
             {activityQ.isLoading ? (
               <LoadingState rows={3} compact />

@@ -8,11 +8,12 @@
  */
 
 import * as React from 'react'
-import { Clock, CalendarCheck, CreditCard, Award, Cake, Megaphone, Activity } from 'lucide-react'
+import { Clock, CalendarCheck, CreditCard, Award, Cake, Megaphone, Activity, Milestone } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { PersonAvatar } from './PersonAvatar'
 
-export type ActivityType = 'attendance' | 'leave' | 'payroll' | 'recognition' | 'birthday' | 'announcement'
+export type ActivityType =
+  | 'attendance' | 'leave' | 'payroll' | 'recognition' | 'birthday' | 'announcement' | 'lifecycle'
 
 export interface ActivityEvent {
   id:    string
@@ -22,6 +23,10 @@ export interface ActivityEvent {
   at:    string
   /** When set, the row shows this person's face instead of a type icon. */
   person?: string
+  /** Lifecycle chapter breaks (joined, anniversary) — a warmer, emphasised treatment. */
+  milestone?: boolean
+  /** When set, the row is a link into the module of record (path relative to ESS base). */
+  href?: string
 }
 
 const ICON: Record<ActivityType, React.ComponentType<{ className?: string }>> = {
@@ -31,6 +36,7 @@ const ICON: Record<ActivityType, React.ComponentType<{ className?: string }>> = 
   recognition:  Award,
   birthday:     Cake,
   announcement: Megaphone,
+  lifecycle:    Milestone,
 }
 
 // Subtle per-type icon tint — token-based (one visual system).
@@ -41,6 +47,7 @@ const TINT: Record<ActivityType, string> = {
   recognition:  'bg-warning/10 text-warning',
   birthday:     'bg-primary/10 text-primary',
   announcement: 'bg-muted text-muted-foreground',
+  lifecycle:    'bg-[#15B8A6]/12 text-[#15B8A6]',
 }
 
 function timeAgo(iso: string): string {
@@ -53,19 +60,30 @@ function timeAgo(iso: string): string {
   return `${d}d ago`
 }
 
-export function ActivityItem({ event, className }: { event: ActivityEvent; className?: string }) {
+export function ActivityItem({ event, className, onClick }: { event: ActivityEvent; className?: string; onClick?: () => void }) {
   const Icon = ICON[event.type] ?? Activity
+  const milestone = !!event.milestone
+  const clickable = !!(onClick && event.href)
+
   return (
-    <div className={cn('flex items-start gap-3', className)}>
+    <div
+      role={clickable ? 'button' : undefined}
+      tabIndex={clickable ? 0 : undefined}
+      onClick={clickable ? onClick : undefined}
+      onKeyDown={clickable ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick!() } } : undefined}
+      className={cn('flex items-start gap-3', clickable && 'cursor-pointer rounded-xl -mx-2 px-2 py-1 transition-colors hover:bg-muted/40', className)}
+    >
       {event.person ? (
         <PersonAvatar name={event.person} size="sm" className="mt-0.5" />
       ) : (
-        <span className={cn('mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-xl', TINT[event.type] ?? 'bg-muted text-muted-foreground')}>
+        <span className={cn('mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-xl',
+          TINT[event.type] ?? 'bg-muted text-muted-foreground',
+          milestone && 'ring-2 ring-[#15B8A6]/30')}>
           <Icon className="h-4 w-4" />
         </span>
       )}
       <div className="min-w-0 flex-1">
-        <p className="text-xs font-semibold text-foreground">{event.title}</p>
+        <p className={cn('text-xs text-foreground', milestone ? 'font-bold' : 'font-semibold')}>{event.title}</p>
         {event.body && <p className="mt-0.5 line-clamp-1 text-xs text-muted-foreground">{event.body}</p>}
       </div>
       <span className="shrink-0 text-[10px] text-muted-foreground/70">{timeAgo(event.at)}</span>

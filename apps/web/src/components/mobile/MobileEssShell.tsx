@@ -10,6 +10,7 @@ import { cn } from '@/lib/utils'
 import { HEADER_GRADIENT } from './glossy'
 import { MobileBottomNav, employeeTabs } from './MobileBottomNav'
 import { MobileHome } from './screens/MobileHome'
+import { MobileTimeline } from './screens/MobileTimeline'
 import { MobileAttendance } from './screens/MobileAttendance'
 import { MobileLeave } from './screens/MobileLeave'
 import { MobilePayslip } from './screens/MobilePayslip'
@@ -121,6 +122,7 @@ function MobileRouter({ base }: { base: string }) {
   const sub = pathname.replace(base, '') || '/home'
 
   if (sub === '' || sub === '/' || sub.startsWith('/home') || sub.startsWith('/dashboard')) return <MobileHome base={base} />
+  if (sub.startsWith('/timeline')) return <MobileTimeline base={base} />
   if (sub.startsWith('/attendance')) return <MobileAttendance base={base} />
   if (sub.startsWith('/leave')) return <MobileLeave base={base} />
   if (sub.startsWith('/compensation')) return <MobilePayslip base={base} />

@@ -25,6 +25,7 @@ import { AuthCallback } from '@/pages/auth/AuthCallback'
 
 // ── Dashboard (eager — first page after login) ─────────────────────────────────
 import { EssHome }           from '@/pages/ess/EssHome'
+import { EssTimeline }       from '@/pages/ess/EssTimeline'
 // Manager-only dashboards — lazy (only managers hit them; keeps them off the main chunk).
 const ManagerDashboardPage   = lazy(() => import('@/pages/dashboard/ManagerDashboard').then(m => ({ default: m.ManagerDashboardPage })))
 const ManagerTeamPerformance = lazy(() => import('@/pages/dashboard/ManagerTeamPerformance').then(m => ({ default: m.ManagerTeamPerformance })))
@@ -957,6 +958,7 @@ export default function App() {
                 {/* Employee self-service — /manager/self/* stays inside ManagerShell */}
                 {/* Prevents shell/sidebar switch when manager clicks Employee section items */}
                 <Route path="/manager/self/home"                         element={<EssHome />} />
+                <Route path="/manager/self/timeline"                     element={<EssTimeline />} />
                 <Route path="/manager/self/dashboard"                    element={<Navigate to="/manager/self/home" replace />} />
                 <Route path="/manager/self/attendance"                   element={<MyAttendance />} />
                 <Route path="/manager/self/attendance/regularization"    element={<Navigate to="/manager/self/attendance" replace />} />
@@ -997,6 +999,7 @@ export default function App() {
               <Route element={<EssShell />}>
 
                 <Route path="/ess/home"                   element={<EssHome />} />
+                <Route path="/ess/timeline"               element={<EssTimeline />} />
                 <Route path="/ess/dashboard"              element={<Navigate to="/ess/home" replace />} />
                 <Route path="/ess/recognition"            element={<EssRecognition />} />
                 <Route path="/ess/community"              element={<EssCommunity />} />
