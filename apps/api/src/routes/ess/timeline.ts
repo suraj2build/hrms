@@ -1,100 +1,69 @@
 /**
- * GET /ess/timeline — the Timeline experience: the employee's MEMORY.
+ * GET /ess/timeline — the Timeline experience: the employee's MEMORY, told as a
+ * biography rather than an audit trail.
  *
- * Timeline is not a log, not an audit report, not an activity table. It is the
- * story of the employee's journey (EXPERIENCE_TIMELINE_DESIGN.md). It is a PURE
- * STORY LENS over the canonical Event stream — it imports `projectEvents` from
- * the one Experience Core projection (events.ts) and re-queries no source tables,
- * defines no Timeline-specific event contract, and owns no storage. It only
- * *frames* events as a narrative: time-grouped, milestones chaptered, one
- * memory-aware reflection, a journey-framing focus, and a warm origin at the end.
+ * A pure STORY LENS over the canonical Event stream (events.ts) — it re-queries no
+ * source tables for the stream itself, defines no Timeline-specific event contract,
+ * and owns no storage. The Experience Core and the Event Model are frozen; only the
+ * *telling* evolves here. This lens does four things the raw stream does not:
  *
- * Distinction held (EXPERIENCE_EVENT_MODEL.md §5): the Story lens orders by time
- * and IGNORES severity (memory has no urgency). That is what makes this Timeline
- * and not Notifications, though both drink from the same well.
+ *   1. SELECTS  — memory is selective. Only events worth remembering survive
+ *                 ("would I tell another person about this?"). Company announcements
+ *                 and routine noise are dropped or folded.
+ *   2. TELLS    — records become stories. "Payslip released" → folded; a long break
+ *                 → "You took 5 days off". Context is used where genuine, never faked.
+ *   3. COMPRESSES — repetition collapses. 24 payslip rows become one quiet, expandable
+ *                 chapter summary. Compress repetition, expand meaning.
+ *   4. CHAPTERS — the journey divides itself into narrative eras (Joining, Settling
+ *                 in, year chapters) so it reads as a life, not an endless scroll.
  *
- * Returns the Patterns §3.3 `Event` *view* of each canonical event so the shared
- * `ActivityItem` renders them unchanged.
+ * It orders by time and IGNORES severity — the discipline that keeps this Timeline
+ * and not Notifications, from the same well (EXPERIENCE_EVENT_MODEL.md §5). Rows
+ * carry NO deep-links: a memory is felt, not clicked through (refinement principle 5).
  */
 
 import type { FastifyInstance } from 'fastify'
 import { projectEvents, type ExperienceEvent } from './events.js'
 
-// The Story-view item — Patterns §3.3 Event projection of a canonical ExperienceEvent.
+// The Story-view item — Patterns §3.3 Event projection. No href: memories don't eject.
 interface StoryItem {
   id:         string
-  type:       string            // ← category (ActivityItem is type-agnostic)
-  title:      string            // ← narrative
-  body?:      string            // ← humanised context
+  type:       string
+  title:      string
+  body?:      string
   at:         string
-  person?:    string            // ← the "other" face (giver received / receiver given)
-  milestone?: boolean           // ← flags.milestone (chapter break)
-  href?:      string            // ← deepLink
+  person?:    string
+  milestone?: boolean
 }
-interface ProgressBand {
-  heading: string
-  ambient: string
-  hints:   { label: string; value: string }[]
-}
-interface TimeGroup {
-  key:       string
-  label:     string
+interface ProgressBand { heading: string; ambient: string; hints: { label: string; value: string }[] }
+interface Chapter {
+  key:      string
+  title:    string
+  order:    number          // newest event time in the chapter — client sorts desc
+  events:   StoryItem[]      // the memorable rows (faces, milestones, real breaks)
+  folded:   StoryItem[]      // routine rows compressed behind a summary (expandable)
   progress?: ProgressBand
-  events:    StoryItem[]
 }
 
 function safe<T>(p: PromiseLike<T>, fallback: T): Promise<T> {
   return Promise.resolve(p).then(v => v, () => fallback)
 }
 
-const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December']
+const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
 
-/** Humanise a context value into one short detail line. */
-function detailFor(e: ExperienceEvent): string | undefined {
-  switch (e.action) {
-    case 'leave.approved': {
-      const from = e.context.from, to = e.context.to
-      return from && to ? `${from} → ${to}` : undefined
-    }
-    case 'payroll.released':
-      return e.context.net_pay != null ? `Net ₹${Number(e.context.net_pay).toLocaleString('en-IN')}` : undefined
-    case 'recognition.received':
-      return e.context.message ? `“${e.context.message}”` : undefined
-    case 'announcement.posted':
-      return e.context.body ? String(e.context.body) : undefined
-    default:
-      return undefined
-  }
+// Leave types that denote a life moment — told specifically (their own type name, never invented).
+const LIFE_LEAVE = /maternity|paternity|marriage|wedding|bereavement|sabbatical|adoption|honeymoon/i
+const SICK_LEAVE = /sick|medical/i
+
+function daysBetween(from?: string, to?: string): number {
+  if (!from || !to) return 1
+  const a = new Date(from + 'T00:00:00Z').getTime(), b = new Date(to + 'T00:00:00Z').getTime()
+  if (isNaN(a) || isNaN(b)) return 1
+  return Math.max(1, Math.round((b - a) / 86_400_000) + 1)
 }
-
-/** The "other" person whose face belongs on this row (not the subject themselves). */
-function faceFor(e: ExperienceEvent): string | undefined {
-  if (e.actor && e.actor.kind === 'employee' && e.actor.id !== e.subject.id) return e.actor.name
-  const r = e.relatedPeople[0]
-  if (r && r.kind === 'employee' && r.id !== e.subject.id) return r.name
-  return undefined
-}
-
-function toStory(e: ExperienceEvent): StoryItem {
-  return {
-    id: e.id, type: e.category, title: e.narrative,
-    body: detailFor(e), at: e.at, person: faceFor(e),
-    milestone: e.flags?.milestone || undefined,
-    href: e.deepLink ?? undefined,
-  }
-}
-
-/** Bucket an event into a human time-group, newest periods first. */
-function groupOf(at: string, now: Date): { key: string; label: string } {
-  const d = new Date(at)
-  const sameDay = d.toDateString() === now.toDateString()
-  if (sameDay) return { key: 'today', label: 'Today' }
-  const days = (now.getTime() - d.getTime()) / 86_400_000
-  if (days < 7) return { key: 'week', label: 'This week' }
-  if (d.getFullYear() === now.getFullYear()) {
-    return { key: `m-${d.getFullYear()}-${d.getMonth()}`, label: MONTHS[d.getMonth()]! }
-  }
-  return { key: `y-${d.getFullYear()}`, label: String(d.getFullYear()) }
+function monthYear(iso: string): string {
+  const d = new Date(iso)
+  return isNaN(d.getTime()) ? '' : `${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}`
 }
 
 /** Tenure in words from a join date. */
@@ -111,6 +80,21 @@ function tenureWords(join: string | null, now: Date): string | null {
   return [yp, mp].filter(Boolean).join(' and ') || 'a month'
 }
 
+/** Which narrative chapter (era) an event belongs to. */
+function chapterOf(at: string, join: string | null, now: Date): { key: string; title: string } {
+  const d = new Date(at)
+  if (join) {
+    const jd = new Date(join.length <= 10 ? join + 'T00:00:00Z' : join)
+    if (!isNaN(jd.getTime())) {
+      const days = (d.getTime() - jd.getTime()) / 86_400_000
+      if (days <= 90)  return { key: 'joining',  title: 'Joining' }
+      if (days <= 365) return { key: 'settling', title: 'Settling in' }
+    }
+  }
+  const y = d.getFullYear()
+  return { key: `y-${y}`, title: y === now.getFullYear() ? 'This year' : String(y) }
+}
+
 export default async function essTimelineRoutes(fastify: FastifyInstance) {
   const auth = { preHandler: [fastify.authenticate] }
 
@@ -122,79 +106,147 @@ export default async function essTimelineRoutes(fastify: FastifyInstance) {
     const employeeId = (profileRow as any)?.employee_id ?? null
 
     const cursor = (req.query?.cursor as string) || null
-    const limit  = req.query?.limit ? Number(req.query.limit) : 40
+    const limit  = req.query?.limit ? Number(req.query.limit) : 60
     const firstPage = !cursor
-
-    const { events, nextCursor } = await projectEvents(fastify, { tenantId, employeeId, cursor, limit })
     const now = new Date()
 
-    // Group into the narrative (newest-first; groups in first-seen order).
-    const groupMap = new Map<string, TimeGroup>()
-    for (const e of events) {
-      const g = groupOf(e.at, now)
-      let grp = groupMap.get(g.key)
-      if (!grp) { grp = { key: g.key, label: g.label, events: [] }; groupMap.set(g.key, grp) }
-      grp.events.push(toStory(e))
-    }
-    const groups = [...groupMap.values()]
+    // The canonical stream + the employee's "firsts" (so we can mark them as milestones).
+    const [{ events, nextCursor }, emp, firstSlipId, firstKudosId] = await Promise.all([
+      projectEvents(fastify, { tenantId, employeeId, cursor, limit }),
+      employeeId
+        ? safe(fastify.supabase.from('employees').select('joining_date')
+            .eq('id', employeeId).eq('tenant_id', tenantId).maybeSingle().then(r => r.data as any), null)
+        : Promise.resolve(null),
+      employeeId
+        ? safe(fastify.supabase.from('payroll_slips').select('id')
+            .eq('employee_id', employeeId).eq('tenant_id', tenantId).eq('status', 'finalized')
+            .order('updated_at', { ascending: true }).limit(1).maybeSingle().then(r => (r.data as any)?.id ?? null), null)
+        : Promise.resolve(null),
+      employeeId
+        ? safe(fastify.supabase.from('recognition').select('id')
+            .eq('tenant_id', tenantId).eq('to_employee', employeeId)
+            .order('created_at', { ascending: true }).limit(1).maybeSingle().then(r => (r.data as any)?.id ?? null), null)
+        : Promise.resolve(null),
+    ])
+    const join = (emp?.joining_date as string | null) ?? null
 
-    // First-page framing only — Focus, Reflection, Progress, and the origin marker.
+    // ── Tell each event as a story; decide what's a memory vs routine noise. ──
+    // Returns null to DROP (not worth remembering), { item, folded } otherwise.
+    function tell(e: ExperienceEvent): { item: StoryItem; folded: boolean } | null {
+      const base = { id: e.id, at: e.at }
+
+      switch (e.action) {
+        // Company news is not personal memory — it lives on Home/Community, not here.
+        case 'announcement.posted':
+          return null
+
+        case 'recognition.received': {
+          const first = !!firstKudosId && e.id === `rec:${firstKudosId}`
+          return { item: { ...base, type: 'recognition',
+            title: first ? `Your first recognition — ${e.narrative}` : e.narrative,
+            body: e.context.message ? `“${e.context.message}”` : undefined,
+            person: e.actor?.name, milestone: first || undefined }, folded: false }
+        }
+        case 'recognition.given':
+          return { item: { ...base, type: 'recognition', title: e.narrative, person: e.relatedPeople[0]?.name }, folded: false }
+
+        case 'leave.approved': {
+          const days = daysBetween(String(e.context.from || ''), String(e.context.to || ''))
+          const lt = String(e.context.leave_type || 'leave')
+          let title: string
+          if (LIFE_LEAVE.test(lt))      title = `You took ${lt.toLowerCase()}`
+          else if (SICK_LEAVE.test(lt)) title = days >= 2 ? `You took ${days} days of sick leave` : 'You took a sick day'
+          else                          title = days >= 2 ? `You took ${days} days off` : 'You took a day off'
+          // Single routine days fold into the chapter summary; real breaks & life moments stay.
+          const folded = days < 2 && !LIFE_LEAVE.test(lt)
+          const body = e.context.from && e.context.to && e.context.from !== e.context.to
+            ? `${monthYear(String(e.context.from))}`
+            : undefined
+          return { item: { ...base, type: 'leave', title, body, milestone: LIFE_LEAVE.test(lt) || undefined }, folded }
+        }
+
+        case 'payroll.released': {
+          const first = firstSlipId && e.id === `payroll:${firstSlipId}`
+          if (first) return { item: { ...base, type: 'payroll', title: 'Your first payslip — welcome aboard.', milestone: true }, folded: false }
+          // Routine pay folds into the chapter summary (compress repetition, expand meaning).
+          return { item: { ...base, type: 'payroll', title: `${e.context.month ?? 'Monthly'} payslip`,
+            body: e.context.net_pay != null ? `Net ₹${Number(e.context.net_pay).toLocaleString('en-IN')}` : undefined }, folded: true }
+        }
+
+        case 'employee.joined':
+          return { item: { ...base, type: 'lifecycle', title: 'You joined the team', milestone: true }, folded: false }
+        case 'employee.anniversary':
+          return { item: { ...base, type: 'lifecycle', title: e.narrative, milestone: true }, folded: false }
+
+        default:
+          return { item: { ...base, type: e.category, title: e.narrative }, folded: false }
+      }
+    }
+
+    // ── Group into narrative chapters. ──
+    const chapMap = new Map<string, Chapter>()
+    for (const e of events) {
+      const told = tell(e)
+      if (!told) continue
+      const c = chapterOf(e.at, join, now)
+      let chap = chapMap.get(c.key)
+      if (!chap) { chap = { key: c.key, title: c.title, order: 0, events: [], folded: [] }; chapMap.set(c.key, chap) }
+      ;(told.folded ? chap.folded : chap.events).push(told.item)
+      chap.order = Math.max(chap.order, new Date(e.at).getTime())
+    }
+    const chapters = [...chapMap.values()].sort((a, b) => b.order - a.order)
+
+    // ── First-page framing: Focus · Reflection · Progress · origin. ──
     let focus: { eyebrow: string; sentence: string } | null = null
     let reflection: { insight: string | null; kind?: string } | null = null
-    let origin: { joined_at: string; label: string } | null = null
+    let origin: { joined_at: string; label: string; first_day: boolean } | null = null
 
     if (firstPage) {
-      const emp = employeeId
-        ? await safe(fastify.supabase.from('employees')
-            .select('joining_date').eq('id', employeeId).eq('tenant_id', tenantId).maybeSingle()
-            .then(r => r.data as any), null)
-        : null
-      const join = (emp?.joining_date as string | null) ?? null
       const tenure = tenureWords(join, now)
+      const brandNew = !tenure || tenure === 'less than a month'
 
-      // Focus — the journey framing (no action; this Focus orients).
       focus = {
-        eyebrow: 'YOUR TIMELINE',
-        sentence: tenure && tenure !== 'less than a month'
-          ? `${tenure[0]!.toUpperCase()}${tenure.slice(1)} with the team. Here's the story so far.`
-          : 'Welcome — your story here is just beginning.',
+        eyebrow: 'YOUR JOURNEY',
+        sentence: brandNew
+          ? 'Welcome. Everything from here becomes part of your story.'
+          : `${tenure![0]!.toUpperCase()}${tenure!.slice(1)} with the team. Here's the story so far.`,
       }
 
-      // Accurate counts for Reflection + Progress (cheap, scoped to this year).
       const yearStart = `${now.getFullYear()}-01-01`
       const [givenYr, recvYr] = employeeId ? await Promise.all([
         safe(fastify.supabase.from('recognition').select('id', { count: 'exact', head: true })
-          .eq('tenant_id', tenantId).eq('from_employee', employeeId).gte('created_at', yearStart)
-          .then(r => r.count ?? 0), 0),
+          .eq('tenant_id', tenantId).eq('from_employee', employeeId).gte('created_at', yearStart).then(r => r.count ?? 0), 0),
         safe(fastify.supabase.from('recognition').select('id', { count: 'exact', head: true })
-          .eq('tenant_id', tenantId).eq('to_employee', employeeId).gte('created_at', yearStart)
-          .then(r => r.count ?? 0), 0),
+          .eq('tenant_id', tenantId).eq('to_employee', employeeId).gte('created_at', yearStart).then(r => r.count ?? 0), 0),
       ]) : [0, 0]
 
-      // Reflection — one memory-aware insight, ranked. Speaks across time, never a bare number.
       if ((givenYr as number) >= 3) {
         reflection = { insight: `You've recognised teammates ${givenYr} times this year — that generosity gets noticed.`, kind: 'generosity' }
       } else if ((recvYr as number) >= 3) {
         reflection = { insight: `Your work's been seen — ${recvYr} recognitions came your way this year.`, kind: 'recognised' }
-      } else if (tenure && tenure !== 'less than a month') {
-        reflection = { insight: `${tenure[0]!.toUpperCase()}${tenure.slice(1)} ago, this is where it all began.`, kind: 'tenure' }
+      } else if (!brandNew) {
+        reflection = { insight: `${tenure![0]!.toUpperCase()}${tenure!.slice(1)} ago, this is where it all began.`, kind: 'tenure' }
       } else {
-        reflection = { insight: null }
+        reflection = { insight: null }   // silence — never manufacture significance
       }
 
-      // Progress — light encouragement on the most recent group (never a scorecard).
       const hints: { label: string; value: string }[] = []
       if ((recvYr  as number) > 0) hints.push({ label: 'Recognised this year', value: String(recvYr) })
       if ((givenYr as number) > 0) hints.push({ label: 'Kudos you gave', value: String(givenYr) })
-      if (hints.length && groups.length) {
-        groups[0]!.progress = { heading: 'This year so far', ambient: 'Momentum worth noticing — keep going.', hints }
+      if (hints.length && chapters.length) {
+        chapters[0]!.progress = { heading: 'This year so far', ambient: 'Momentum worth noticing — keep going.', hints }
       }
     }
 
-    // Origin (Closure) — surfaces when the join event is on this page (the deep end).
+    // Origin (Closure) — forward-looking on day one, retrospective once there's a journey.
     const joinEvt = events.find(e => e.action === 'employee.joined')
-    if (joinEvt) origin = { joined_at: joinEvt.at, label: 'This is where it began.' }
+    if (joinEvt) {
+      const days = join ? (now.getTime() - new Date(join.length <= 10 ? join + 'T00:00:00Z' : join).getTime()) / 86_400_000 : 999
+      origin = days <= 31
+        ? { joined_at: joinEvt.at, label: 'Day one. This is where your story begins.', first_day: true }
+        : { joined_at: joinEvt.at, label: 'This is where it began.', first_day: false }
+    }
 
-    return reply.send({ focus, reflection, groups, nextCursor, origin })
+    return reply.send({ focus, reflection, chapters, nextCursor, origin })
   })
 }

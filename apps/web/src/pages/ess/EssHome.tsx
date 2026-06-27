@@ -399,6 +399,23 @@ export function EssHome() {
           </p>
         )
       })()}
+
+      {/* Home narrates into Timeline — today's chapter is part of a longer story. */}
+      {(() => {
+        const m = data?.profile?.tenure_months ?? 0
+        const tenure = m < 1 ? 'Today is day one'
+          : m < 12 ? `${m} month${m > 1 ? 's' : ''} in`
+          : `${Math.floor(m / 12)} year${Math.floor(m / 12) > 1 ? 's' : ''} and counting`
+        return (
+          <button
+            onClick={() => navigate(`${base}/timeline`)}
+            className="mx-auto flex items-center gap-2 pb-1 text-center text-xs text-muted-foreground transition-colors hover:text-foreground"
+          >
+            <Sparkles className="h-3.5 w-3.5 text-[#15B8A6]" />
+            <span>{tenure}. Revisit your journey so far →</span>
+          </button>
+        )
+      })()}
     </div>
   )
 }
