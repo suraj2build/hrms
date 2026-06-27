@@ -158,7 +158,7 @@ export function EssHome() {
       id: `bd_${b.name}`, kind: 'birthday' as const, name: b.name, title: `${b.name}'s birthday`, subtitle: b.days_until === 0 ? 'Today' : 'Tomorrow',
     })),
     ...(data?.anniversaries ?? []).filter((a) => a.days_until <= 1).map((a) => ({
-      id: `an_${a.name}`, kind: 'anniversary' as const, name: a.name, title: `${a.name} · ${a.years}y`, subtitle: a.days_until === 0 ? 'Anniversary today' : 'Anniversary tomorrow',
+      id: `an_${a.name}`, kind: 'anniversary' as const, name: a.name, title: `${a.name} · ${a.years}y`, subtitle: a.days_until === 0 ? 'Anniversary today' : 'Anniversary tomorrow', years: a.years,
     })),
   ].slice(0, 4)
 
@@ -176,7 +176,7 @@ export function EssHome() {
     <>
       <Arrival dayAnchorId="ess-your-day" />
       {/* ── "Today, gently" section — the editorial deeper room ── */}
-      <div id="ess-your-day" className="mx-auto max-w-[760px]">
+      <div id="ess-your-day" className="w-full">
       {isLoading ? (
         <div className="py-16"><LoadingState rows={5} label="Putting your day together…" /></div>
       ) : isError ? (
@@ -186,7 +186,7 @@ export function EssHome() {
       {/* Section header — quiet editorial intro after crossing the Arrival. */}
       <div className="border-b border-border/50 pb-8 pt-10">
         <div className="flex items-center justify-between">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Today, gently</p>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">TODAY, GENTLY</p>
           {today?.check_in ? (
             <span className="flex items-center gap-1.5 rounded-full bg-success/10 px-3 py-1.5 text-xs font-medium text-success">
               <CheckCircle2 className="h-3.5 w-3.5" /> In since {fmtTime(today.check_in)}
@@ -204,148 +204,196 @@ export function EssHome() {
         <AmbientLine className="mt-3">{focalInsight}</AmbientLine>
       </div>
 
-      {/* Quick actions — the action strip */}
+      {/* Quick actions strip */}
       <div className="py-6">
         <QuickActions capabilities={capabilities} onAction={(href) => navigate(`${base}${href}`)} />
       </div>
 
-      {/* The content river — editorial sections, not widget boxes. */}
-      <div className="space-y-12 pb-16">
+      {/* 2-column grid layout */}
+      <div className="mt-2 grid grid-cols-1 gap-8 pb-4 lg:grid-cols-[1fr_360px]">
 
-        {/* What needs you — signals (only when present). */}
-        {signals.length > 0 && (
-          <section>
-            <p className="mb-4 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Worth your attention</p>
-            <div className="space-y-2.5">
-              {signals.map((s) => <SignalCard key={s.id} signal={s} onAction={(href) => navigate(`${base}${href}`)} />)}
-            </div>
-          </section>
-        )}
+        {/* LEFT column */}
+        <div className="space-y-10">
 
-        {/* Celebrations — people first, warm cards. */}
-        {celebrations.length > 0 && (
-          <section>
-            <p className="mb-4 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Celebrating today</p>
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              {celebrations.map((c) => (
-                <CelebrationCard key={c.id} kind={c.kind} title={c.title} subtitle={c.subtitle}
-                  action={{ label: 'Wish', onClick: () => navigate(`${base}/community`) }} />
-              ))}
-            </div>
-          </section>
-        )}
-
-        {/* Your day — the activity moment river. */}
-        <section>
-          <div className="mb-4 flex items-center justify-between">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Your day</p>
-            <button onClick={() => navigate(`${base}/timeline`)}
-              className="text-[11px] font-medium text-primary hover:text-primary/80">
-              Your story →
-            </button>
-          </div>
-          <AmbientLine className="mb-5">{dayInsight}</AmbientLine>
-          {activityQ.isLoading ? (
-            <LoadingState rows={3} compact />
-          ) : events.length === 0 ? (
-            <p className="text-sm text-muted-foreground">A quiet start — your check-ins and approvals will appear here.</p>
-          ) : (
-            <ul className="flex flex-col">
-              {events.map((e) => (
-                <li key={e.id} className="border-b border-border/50 py-5 last:border-0">
-                  <ActivityItem event={e} />
-                </li>
-              ))}
-            </ul>
+          {/* Signals — only when present */}
+          {signals.length > 0 && (
+            <section>
+              <p className="mb-4 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Worth your attention</p>
+              <div className="space-y-2.5">
+                {signals.map((s) => <SignalCard key={s.id} signal={s} onAction={(href) => navigate(`${base}${href}`)} />)}
+              </div>
+            </section>
           )}
-        </section>
 
-        {/* Recognition from teammates. */}
-        {(data?.recognition?.recent ?? []).length > 0 && (
-          <section>
-            <p className="mb-4 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Kind words</p>
-            <div className="space-y-4">
-              {(data?.recognition?.recent ?? []).map((r) => (
-                <div key={r.id} className="flex items-start gap-3">
-                  <PersonAvatar name={r.from_name} size="sm" className="mt-0.5" decorative />
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium text-foreground">
-                      {r.from_name} <span className="font-normal text-muted-foreground">recognized you</span>
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      {BADGE_LABELS[r.badge_code] ?? r.badge_code}{r.points != null ? ` · +${r.points} pts` : ''}
-                    </p>
-                    {r.message && <p className="mt-0.5 line-clamp-2 text-xs italic text-foreground/70">"{r.message}"</p>}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </section>
-        )}
-
-        {/* Around the company — a moments river of community posts. */}
-        {(data?.feed_teaser ?? []).length > 0 && (
+          {/* Your day — the activity moment river */}
           <section>
             <div className="mb-4 flex items-center justify-between">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Around the company</p>
-              <button onClick={() => navigate(`${base}/company`)}
-                className="text-[11px] font-medium text-primary hover:text-primary/80">See all →</button>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Your day</p>
+              <button onClick={() => navigate(`${base}/timeline`)}
+                className="text-[11px] font-medium text-primary hover:text-primary/80">
+                Your story →
+              </button>
             </div>
-            <ul className="flex flex-col">
-              {(data?.feed_teaser ?? []).map((post) => (
-                <li key={post.id} className="group flex items-start gap-4 border-b border-border/50 py-5 last:border-0">
-                  <PersonAvatar name={post.author} size="sm" className="mt-0.5 shrink-0" decorative />
-                  <div className="min-w-0 flex-1">
-                    <p className="text-[15px] leading-snug text-foreground">
-                      <span className="font-medium">{post.author}</span>{' '}
-                      <span className="text-muted-foreground">{post.body}</span>
-                    </p>
-                    <p className="mt-1 text-[12px] text-muted-foreground">{timeAgo(post.created_at)}</p>
-                  </div>
-                </li>
-              ))}
-            </ul>
+            <AmbientLine className="mb-5">{dayInsight}</AmbientLine>
+            {activityQ.isLoading ? (
+              <LoadingState rows={3} compact />
+            ) : events.length === 0 ? (
+              <p className="text-sm text-muted-foreground">A quiet start — your check-ins and approvals will appear here.</p>
+            ) : (
+              <ul className="flex flex-col">
+                {events.map((e) => (
+                  <li key={e.id} className="border-b border-border/50 py-5 last:border-0">
+                    <ActivityItem event={e} />
+                  </li>
+                ))}
+              </ul>
+            )}
           </section>
-        )}
 
-        {/* Progress band and holidays. */}
-        {progress?.show && (
-          <section><ProgressBand data={progress} /></section>
-        )}
+          {/* Recognition from teammates */}
+          {(data?.recognition?.recent ?? []).length > 0 && (
+            <section>
+              <p className="mb-4 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Kind words</p>
+              <div className="space-y-4">
+                {(data?.recognition?.recent ?? []).map((r) => (
+                  <div key={r.id} className="flex items-start gap-3">
+                    <PersonAvatar name={r.from_name} size="sm" className="mt-0.5" decorative />
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-foreground">
+                        {r.from_name} <span className="font-normal text-muted-foreground">recognized you</span>
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {BADGE_LABELS[r.badge_code] ?? r.badge_code}{r.points != null ? ` · +${r.points} pts` : ''}
+                      </p>
+                      {r.message && <p className="mt-0.5 line-clamp-2 text-xs italic text-foreground/70">"{r.message}"</p>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
 
-        {(data?.upcoming_holidays ?? []).length > 0 && (
-          <div className="flex items-center gap-2.5 rounded-2xl border border-border/60 bg-card px-5 py-4 text-sm">
-            <CalendarDays className="h-4 w-4 shrink-0 text-primary" />
-            <span className="text-foreground">
-              Next holiday: <span className="font-medium">{data!.upcoming_holidays[0]!.name}</span>
-            </span>
-            <span className="ml-auto text-xs text-muted-foreground">
-              {data!.upcoming_holidays[0]!.days_until === 0 ? 'Today'
-                : data!.upcoming_holidays[0]!.days_until === 1 ? 'Tomorrow'
-                : `in ${data!.upcoming_holidays[0]!.days_until}d`}
-            </span>
-          </div>
-        )}
+        </div>
 
-        {/* AI reflection — one warm line (ambient, never prompted). */}
-        {reflection?.insight && (
-          <ReflectionCard insight={reflection.insight} action={reflection.action} onAction={(href) => navigate(`${base}${href}`)} />
-        )}
+        {/* RIGHT column */}
+        <div className="space-y-4">
 
-        {/* Closing — a generous editorial bookend. */}
-        <div className="border-t border-border/40 pt-10">
-          <p className="serif-emph text-[clamp(1.2rem,2.5vw,1.6rem)] leading-snug text-foreground/75">
-            {pending
-              ? `"A couple of things are still waiting — nothing that can't wait for coffee."`
-              : `"That's everything. You're all set — have a great day."`}
-          </p>
-          <button onClick={() => navigate(`${base}/timeline`)}
-            className="mt-4 flex items-center gap-2 text-xs text-muted-foreground transition-colors hover:text-foreground">
-            <Sparkles className="h-3.5 w-3.5 text-brand-teal" />
-            <span>{tenureLabel}. Revisit your story →</span>
-          </button>
+          {/* Featured celebration card — first celebration */}
+          {celebrations.length > 0 && (
+            <div className="relative overflow-hidden rounded-2xl border border-orange-200/60 bg-gradient-to-br from-amber-50 via-orange-50 to-rose-50 p-6">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-orange-500/80">Today at CognixHR</p>
+              <h3 className="serif-hero mt-2 text-[1.8rem] leading-tight text-foreground">
+                {celebrations[0].name.split(' ')[0]}{celebrations[0].kind === 'birthday' ? "'s birthday" : celebrations[0].kind === 'anniversary' ? `'s ${'years' in celebrations[0] ? (celebrations[0] as { years: number }).years : ''}yr anniversary` : ' joined us'}
+              </h3>
+              <div className="mt-4 flex items-center gap-3">
+                <PersonAvatar name={celebrations[0].name} size="lg" />
+                <div>
+                  <p className="font-semibold text-foreground">{celebrations[0].name}</p>
+                  <p className="text-xs text-muted-foreground">{celebrations[0].subtitle}</p>
+                </div>
+              </div>
+              <button onClick={() => navigate(`${base}/company`)} className="mt-5 w-full rounded-xl bg-white/70 px-4 py-2.5 text-sm font-semibold text-foreground/80 transition hover:bg-white/90">
+                Send a note →
+              </button>
+            </div>
+          )}
+
+          {/* Also today card — remaining celebrations */}
+          {celebrations.length > 1 && (
+            <div className="rounded-2xl border border-border/60 bg-card p-5">
+              <p className="mb-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Also today</p>
+              <ul className="space-y-3">
+                {celebrations.slice(1).map((c) => (
+                  <li key={c.id} className="flex items-center gap-3">
+                    <PersonAvatar name={c.name} size="sm" />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-semibold text-foreground">{c.name}</p>
+                      <p className="text-xs text-muted-foreground">{c.subtitle}</p>
+                    </div>
+                    <span className="text-base">
+                      {c.kind === 'birthday' ? '🎂' : c.kind === 'anniversary' ? '🎉' : '👋'}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {/* Upcoming holiday pill */}
+          {(data?.upcoming_holidays ?? []).length > 0 && (
+            <div className="flex items-center gap-2.5 rounded-2xl border border-border/60 bg-card px-5 py-4 text-sm">
+              <CalendarDays className="h-4 w-4 shrink-0 text-primary" />
+              <span className="text-foreground">
+                Next holiday: <span className="font-medium">{data!.upcoming_holidays[0]!.name}</span>
+              </span>
+              <span className="ml-auto text-xs text-muted-foreground">
+                {data!.upcoming_holidays[0]!.days_until === 0 ? 'Today'
+                  : data!.upcoming_holidays[0]!.days_until === 1 ? 'Tomorrow'
+                  : `in ${data!.upcoming_holidays[0]!.days_until}d`}
+              </span>
+            </div>
+          )}
+
+          {/* Progress band */}
+          {progress?.show && <ProgressBand data={progress} />}
+
         </div>
       </div>
+
+      {/* "Quietly alive" section — full width company feed */}
+      {(data?.feed_teaser ?? []).length > 0 && (
+        <div className="mt-16 border-t border-border/40 pt-12">
+          <div className="mb-6 flex items-start justify-between">
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Quietly alive</p>
+              <h3 className="serif-hero mt-2 text-[clamp(1.6rem,3vw,2.2rem)] text-foreground">
+                The company, <span className="serif-emph">right now.</span>
+              </h3>
+            </div>
+            <button onClick={() => navigate(`${base}/company`)}
+              className="mt-1 text-[11px] font-medium text-primary hover:text-primary/80">
+              Visit Community →
+            </button>
+          </div>
+          <ul className="flex flex-col">
+            {(data?.feed_teaser ?? []).map((post) => (
+              <li key={post.id} className="group flex items-start gap-4 border-b border-border/50 py-5 last:border-0">
+                <PersonAvatar name={post.author} size="md" className="mt-0.5 shrink-0" decorative />
+                <div className="min-w-0 flex-1">
+                  <p className="text-[15px] leading-snug text-foreground">
+                    <span className="font-medium">{post.author}</span>{' '}
+                    <span className="text-muted-foreground">{post.body}</span>
+                  </p>
+                  <p className="mt-1 text-[12px] text-muted-foreground">{timeAgo(post.created_at)}</p>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {/* AI reflection */}
+      {reflection?.insight && (
+        <div className="mt-8">
+          <ReflectionCard insight={reflection.insight} action={reflection.action} onAction={(href) => navigate(`${base}${href}`)} />
+        </div>
+      )}
+
+      {/* Closing quote */}
+      <div className="mt-14 border-t border-border/40 pb-16 pt-10">
+        <p className="serif-emph text-[clamp(1.3rem,2.5vw,1.8rem)] leading-snug text-foreground/75 max-w-[40ch]">
+          {pending
+            ? `A couple of things are still waiting — nothing that can't wait for coffee.`
+            : `That's everything. You're all set — have a great day.`}
+        </p>
+        <p className="mt-3 text-[13px] text-muted-foreground">CognixHR · {tenureLabel}</p>
+        <button onClick={() => navigate(`${base}/timeline`)}
+          className="mt-4 flex items-center gap-2 text-xs text-muted-foreground transition-colors hover:text-foreground">
+          <Sparkles className="h-3.5 w-3.5 text-brand-teal" />
+          <span>Revisit your story →</span>
+        </button>
+      </div>
+
       </>
       )}
       </div>
