@@ -25,13 +25,12 @@ import { QuickActions, type Capability } from '@/components/experience/QuickActi
 import { CelebrationCard } from '@/components/experience/CelebrationCard'
 import { PersonAvatar } from '@/components/experience/PersonAvatar'
 import { AmbientLine } from '@/components/experience/AmbientLine'
-import { Atmosphere } from '@/components/experience/Atmosphere'
 import { Arrival } from '@/components/experience/Arrival'
 import { Movement } from '@/components/experience/Movement'
 import { FocusPanel } from '@/components/experience/FocusPanel'
 import { ReflectionCard } from '@/components/experience/ReflectionCard'
 import { ProgressBand } from '@/components/experience/ProgressBand'
-import { resolveGreeting, type DayContext } from '@/components/experience/resolveGreeting'
+import { type DayContext } from '@/components/experience/resolveGreeting'
 import { LoadingState } from '@/components/layout/LoadingState'
 import { ErrorState }   from '@/components/layout/ErrorState'
 
@@ -143,18 +142,6 @@ export function EssHome() {
   const kpis    = data?.kpis
   const fullName  = data?.profile?.name ?? auth?.full_name ?? 'there'
 
-  // Dynamic, contextual greeting (EXPERIENCE_HOME_DESIGN.md §3.A) — context
-  // (birthday / first day / payday / holiday) beats time-of-day.
-  const ctx = data?.context
-  const greet = resolveGreeting(fullName, ctx, new Date())
-
-  // Memory touch (§3.D) — "earned, then shown": only render when genuinely true.
-  // Phase 1 derives from data already on the payload; richer habitual-time and
-  // pair-kudos lines arrive with /ess/progress + /ess/reflection.
-  const memoryTouch = ctx?.is_back_from_leave
-    ? null  // already carried by the greeting sub-line, don't repeat
-    : null
-
   // ── Ambient intelligence: one sentence per block, from the employee's own data ──
   const dow = new Date().getDay()
   const isWeekend = dow === 0 || dow === 6
@@ -184,12 +171,6 @@ export function EssHome() {
     return 'Recognition is the easiest way to make someone’s day — try it today.'
   })()
 
-  // Demoted KPIs → one calm contextual sentence (no tiles).
-  const contextBits: string[] = []
-  if (kpis?.leave_days_remaining != null) contextBits.push(`${kpis.leave_days_remaining} day${kpis.leave_days_remaining === 1 ? '' : 's'} of leave left`)
-  if (kpis?.net_pay != null) contextBits.push(`last pay ₹${Number(kpis.net_pay).toLocaleString('en-IN')}`)
-  if (today?.total_hours) contextBits.push(`${today.total_hours} worked today`)
-
   // "What should I do next" — capabilities, context-aware (Regularize promoted on missing punch).
   const hasNoCheckIn = signals.some((s) => s.id === 'no_check_in')
   const capabilities: Capability[] = [
@@ -211,8 +192,6 @@ export function EssHome() {
     })),
   ].slice(0, 4)
 
-  // Visual Language v2 — the "Dawn" atmosphere: a warm, time-aware ambient field with
-  // a serif greeting hero, over a spine of movements that rise in on a tinted canvas.
   const dateLabel = new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long' })
   const firstName = fullName.split(' ')[0]
   const pending   = signals.length > 0 || (kpis?.open_actions ?? 0) > 0
@@ -227,39 +206,29 @@ export function EssHome() {
   return (
     <>
       <Arrival dayAnchorId="ess-your-day" />
-      <div id="ess-your-day" className="mx-auto max-w-[760px] py-4">
+      <div id="ess-your-day" className="mx-auto max-w-[760px] py-8">
       {isLoading ? (
         <LoadingState rows={5} label="Putting your day together…" />
       ) : isError ? (
         <ErrorState title="Couldn’t load your day" onRetry={() => refetch()} />
       ) : (
       <>
-      {/* Atmosphere — the Dawn field: serif greeting hero, punch, ambient, actions. */}
-      <Atmosphere
-        theme="dawn"
-        eyebrow={dateLabel}
-        title={greet.headline}
-        subtitle={`${greet.subline}${data?.profile?.designation ? ` · ${data.profile.designation}` : ''}`}
-        aside={today?.check_in ? (
+      {/* Day entry — quiet anchor after crossing the Arrival threshold. */}
+      <div className="mb-6 flex items-center justify-between">
+        <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">{dateLabel}</p>
+        {today?.check_in ? (
           <span className="flex items-center gap-1.5 rounded-full bg-success/10 px-3 py-1.5 text-xs font-medium text-success">
             <CheckCircle2 className="h-3.5 w-3.5" /> In since {fmtTime(today.check_in)}
           </span>
-        ) : (
+        ) : !isWeekend && (
           <button onClick={() => navigate(`${base}/attendance`)}
             className="flex items-center gap-1.5 rounded-full bg-primary px-3.5 py-1.5 text-xs font-semibold text-primary-foreground transition hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2">
             <Clock className="h-3.5 w-3.5" /> Punch in
           </button>
         )}
-      >
-        <AmbientLine>{focalInsight}</AmbientLine>
-        {memoryTouch && <AmbientLine className="mt-2 text-xs">{memoryTouch}</AmbientLine>}
-        {contextBits.length > 0 && (
-          <p className="mt-2 pl-5 text-xs text-muted-foreground">{contextBits.join(' · ')}</p>
-        )}
-        <div className="mt-6">
-          <QuickActions capabilities={capabilities} onAction={(href) => navigate(`${base}${href}`)} />
-        </div>
-      </Atmosphere>
+      </div>
+      <QuickActions capabilities={capabilities} onAction={(href) => navigate(`${base}${href}`)} />
+      <AmbientLine className="mt-3">{focalInsight}</AmbientLine>
 
       {/* The spine — movements rise in on the tinted canvas. */}
       <div className="mt-10 space-y-10">
