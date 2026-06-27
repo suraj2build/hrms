@@ -28,6 +28,7 @@ import { EssHome }           from '@/pages/ess/EssHome'
 import { EssTimeline }       from '@/pages/ess/EssTimeline'
 import { MyGrowth }          from '@/pages/ess/MyGrowth'
 import { MyAttention }       from '@/pages/ess/MyAttention'
+import { MyTeam }            from '@/pages/ess/MyTeam'
 // Manager-only dashboards — lazy (only managers hit them; keeps them off the main chunk).
 const ManagerDashboardPage   = lazy(() => import('@/pages/dashboard/ManagerDashboard').then(m => ({ default: m.ManagerDashboardPage })))
 const ManagerTeamPerformance = lazy(() => import('@/pages/dashboard/ManagerTeamPerformance').then(m => ({ default: m.ManagerTeamPerformance })))
@@ -165,7 +166,6 @@ const EssLeaveBalance          = lazy(() => import('@/pages/ess/EssLeaveBalance'
 const EssDocuments             = lazy(() => import('@/pages/ess/EssDocuments').then(m => ({ default: m.EssDocuments })))
 const EssSeparation            = lazy(() => import('@/pages/ess/EssSeparation').then(m => ({ default: m.EssSeparation })))
 const EssOnboarding            = lazy(() => import('@/pages/ess/EssOnboarding').then(m => ({ default: m.EssOnboarding })))
-const EssTeam                  = lazy(() => import('@/pages/ess/EssTeam').then(m => ({ default: m.EssTeam })))
 const EssTeamOff               = lazy(() => import('@/pages/ess/EssTeamOff').then(m => ({ default: m.EssTeamOff })))
 const EssPolicies              = lazy(() => import('@/pages/ess/EssPolicies').then(m => ({ default: m.EssPolicies })))
 const EssHRSupport             = lazy(() => import('@/pages/ess/EssHRSupport').then(m => ({ default: m.EssHRSupport })))
@@ -1053,7 +1053,7 @@ export default function App() {
                 <Route path="/ess/leave/balance"          element={<EssLeaveBalance />} />
                 <Route path="/ess/documents"              element={<EssDocuments />} />
                 <Route path="/ess/separation"             element={<EssSeparation />} />
-                <Route path="/ess/team"                   element={<EssTeam />} />
+                <Route path="/ess/team"                   element={<MyTeam />} />
                 <Route path="/ess/whos-off"               element={<EssTeamOff />} />
                 <Route path="/ess/policies"               element={<EssPolicies />} />
                 <Route path="/ess/runbooks"               element={<EssRunbooks />} />

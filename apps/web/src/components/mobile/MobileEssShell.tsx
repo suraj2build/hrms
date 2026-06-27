@@ -13,13 +13,13 @@ import { MobileHome } from './screens/MobileHome'
 import { MobileTimeline } from './screens/MobileTimeline'
 import { MyGrowth } from '@/pages/ess/MyGrowth'
 import { MyAttention } from '@/pages/ess/MyAttention'
+import { MyTeam } from '@/pages/ess/MyTeam'
 import type { Signal } from '@/components/experience/SignalCard'
 import { MobileAttendance } from './screens/MobileAttendance'
 import { MobileLeave } from './screens/MobileLeave'
 import { MobilePayslip } from './screens/MobilePayslip'
 import { MobileApprovals } from './screens/MobileApprovals'
 import { MobileMore } from './screens/MobileMore'
-import { MobileTeam } from './screens/MobileTeam'
 import { MobileRecognition } from './screens/MobileRecognition'
 import { MobileCommunity } from './screens/MobileCommunity'
 import { MobileFlowDesk } from './screens/MobileFlowDesk'
@@ -112,7 +112,7 @@ export function MobileEssShell({ previewHome = false }: { previewHome?: boolean 
       {/* ── Content ── */}
       <main className="flex-1 px-4 pb-28 pt-4">
         {persona === 'team' && isManager
-          ? <MobileTeam />
+          ? <MyTeam />
           : (
             <Suspense fallback={<Loader />}>
               {previewHome ? <MobileHome base={base} /> : <MobileRouter base={base} />}
@@ -135,6 +135,7 @@ function MobileRouter({ base }: { base: string }) {
   if (sub.startsWith('/timeline')) return <MobileTimeline base={base} />
   if (sub.startsWith('/identity')) return <MyGrowth />
   if (sub.startsWith('/attention')) return <MyAttention />
+  if (sub.startsWith('/team')) return <MyTeam />
   if (sub.startsWith('/attendance')) return <MobileAttendance base={base} />
   if (sub.startsWith('/leave')) return <MobileLeave base={base} />
   if (sub.startsWith('/compensation')) return <MobilePayslip base={base} />
