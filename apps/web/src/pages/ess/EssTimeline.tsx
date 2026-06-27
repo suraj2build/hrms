@@ -47,7 +47,7 @@ export function EssTimeline() {
   const [head, ...rest] = t.chapters
 
   return (
-    <div className="mx-auto max-w-[720px] space-y-9 py-2">
+    <div className="mx-auto max-w-[720px] space-y-8 py-2">
       {/* Focus — the journey framing (orients, no action). */}
       {t.focus && <FocusPanel eyebrow={t.focus.eyebrow} sentence={t.focus.sentence} />}
 

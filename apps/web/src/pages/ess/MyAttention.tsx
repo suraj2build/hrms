@@ -59,7 +59,7 @@ export function MyAttention() {
         <span className="grid h-16 w-16 place-items-center rounded-full bg-success/10 text-success">
           <CheckCircle2 className="h-8 w-8" />
         </span>
-        <p className="mt-5 text-[1.4rem] font-semibold text-foreground">Nothing needs you.</p>
+        <h1 className="mt-5 text-[1.6rem] font-semibold text-foreground">Nothing needs you.</h1>
         <p className="mt-1.5 text-sm text-muted-foreground">You’re all clear — enjoy the day.</p>
         {waiting.length > 0 && (
           <p className="mt-6 text-xs text-muted-foreground">{waiting[0]!.title} · still with others</p>
@@ -77,7 +77,7 @@ export function MyAttention() {
       {/* Focus — one synthesising sentence, never a count badge. */}
       <div className="rounded-2xl bg-gradient-to-br from-primary/[0.06] to-[#15B8A6]/[0.06] p-6">
         <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">What needs you</p>
-        <p className="mt-2 text-[1.4rem] font-semibold leading-snug text-foreground">{focusSentence}</p>
+        <h1 className="mt-2 text-[1.6rem] font-semibold leading-snug text-foreground">{focusSentence}</h1>
       </div>
 
       {needsYou.length > 0 && canWait.length === 0 && (

@@ -39,12 +39,16 @@ export interface PersonAvatarProps {
   name: string
   size?: keyof typeof SIZES
   className?: string
+  /** Set when an adjacent visible label already announces the name (avoids double
+   *  announcement). Default false → the avatar announces the person's name itself,
+   *  so a face is never a silent, identity-less element for screen readers (C4). */
+  decorative?: boolean
 }
 
-export function PersonAvatar({ name, size = 'md', className }: PersonAvatarProps) {
+export function PersonAvatar({ name, size = 'md', className, decorative = false }: PersonAvatarProps) {
   return (
     <span
-      aria-hidden
+      {...(decorative ? { 'aria-hidden': true } : { role: 'img', 'aria-label': name })}
       title={name}
       className={cn('grid shrink-0 place-items-center rounded-full font-bold', SIZES[size], tintFor(name), className)}
     >

@@ -37,7 +37,7 @@ function FaceRow({ people }: { people: Party[] }) {
     <div className="flex flex-wrap gap-x-5 gap-y-3">
       {people.map(p => (
         <span key={p.id} className="flex items-center gap-2">
-          <PersonAvatar name={p.name} size="md" />
+          <PersonAvatar name={p.name} size="md" decorative />
           <span className="min-w-0">
             <span className="block text-xs font-medium text-foreground">{p.name}</span>
             {p.subtitle && <span className="block text-[10px] text-muted-foreground">{p.subtitle}</span>}
@@ -69,7 +69,7 @@ export function MyTeam() {
       {/* Focus — one human line about the team right now. */}
       <div className="rounded-2xl bg-gradient-to-br from-primary/[0.06] to-brand-teal/[0.06] p-6">
         <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Your team</p>
-        <p className="mt-2 text-[1.4rem] font-semibold leading-snug text-foreground">{t.focus.sentence}</p>
+        <h1 className="mt-2 text-[1.6rem] font-semibold leading-snug text-foreground">{t.focus.sentence}</h1>
       </div>
 
       {empty && (

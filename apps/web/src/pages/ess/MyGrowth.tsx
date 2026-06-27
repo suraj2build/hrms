@@ -77,12 +77,12 @@ export function MyGrowth() {
     ? `${person.tenure_label} in — and growing.` : 'Just getting started — and growing.'
 
   return (
-    <div className="mx-auto max-w-[860px] space-y-9 py-2">
+    <div className="mx-auto max-w-[860px] space-y-8 py-2">
       {/* Identity — the Focus beat (wash + the person). */}
       <div className="flex items-center gap-4 rounded-2xl bg-gradient-to-br from-primary/[0.06] to-brand-teal/[0.06] p-6">
         <PersonAvatar name={person.name ?? 'You'} size="lg" />
         <div className="min-w-0">
-          <p className="text-[1.5rem] font-semibold leading-tight text-foreground">{person.name}</p>
+          <h1 className="text-[1.6rem] font-semibold leading-tight text-foreground">{person.name}</h1>
           <p className="mt-0.5 text-sm text-muted-foreground">{role ? `${role} · ${tenurePhrase}` : tenurePhrase}</p>
         </div>
       </div>

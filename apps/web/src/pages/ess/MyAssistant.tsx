@@ -172,7 +172,7 @@ export function MyAssistant() {
   const thread = useMemo(() => messages.filter(m => m.content !== '__NOT_CONFIGURED__'), [messages])
 
   return (
-    <div className="mx-auto max-w-[680px] space-y-6 py-2">
+    <div className="mx-auto max-w-[680px] space-y-8 py-2">
       {/* ── The ask field — the calm front door (always present, never a chat box) ── */}
       <form
         onSubmit={e => { e.preventDefault(); void submit(input) }}

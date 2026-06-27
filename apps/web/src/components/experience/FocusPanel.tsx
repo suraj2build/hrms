@@ -20,11 +20,11 @@ export function FocusPanel({ eyebrow, sentence, action, onAction, className }: F
   return (
     <div className={cn('rounded-2xl bg-gradient-to-br from-primary/[0.06] to-brand-teal/[0.06] p-6', className)}>
       <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">{eyebrow}</p>
-      <p className="mt-2 text-[1.6rem] font-semibold leading-snug text-foreground">{sentence}</p>
+      <h1 className="mt-2 text-[1.6rem] font-semibold leading-snug text-foreground">{sentence}</h1>
       {action && (
         <button
           onClick={() => onAction?.(action.href)}
-          className="mt-4 inline-flex items-center gap-1.5 rounded-full bg-primary px-4 py-1.5 text-xs font-semibold text-primary-foreground transition hover:bg-primary/90"
+          className="mt-4 inline-flex items-center gap-1.5 rounded-full bg-primary px-4 py-1.5 text-xs font-semibold text-primary-foreground transition hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2"
         >
           {action.label} →
         </button>

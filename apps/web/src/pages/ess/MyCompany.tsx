@@ -91,7 +91,7 @@ export function MyCompany() {
       {/* Focus — one warm orienting line about the shared world today. */}
       <div className="rounded-2xl bg-gradient-to-br from-primary/[0.06] to-brand-teal/[0.06] p-6">
         <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Across the company</p>
-        <p className="mt-2 text-[1.4rem] font-semibold leading-snug text-foreground">{c.focus.sentence}</p>
+        <h1 className="mt-2 text-[1.6rem] font-semibold leading-snug text-foreground">{c.focus.sentence}</h1>
         {/* Posting / reacting / comments live in the community module of record. */}
         <button
           onClick={() => navigate(`${base}/community`)}

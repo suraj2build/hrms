@@ -26,7 +26,7 @@ export function PeopleRail({
             <div className="flex flex-wrap items-center gap-3">
               {s.people.map(p => (
                 <span key={p.id} className="flex items-center gap-2">
-                  <PersonAvatar name={p.name} size="sm" />
+                  <PersonAvatar name={p.name} size="sm" decorative />
                   <span className="text-xs font-medium text-foreground">{p.name}</span>
                 </span>
               ))}
