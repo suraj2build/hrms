@@ -16,6 +16,7 @@ import { Cake, PartyPopper, Plane } from 'lucide-react'
 import { api } from '@/lib/api/client'
 import { PersonAvatar } from '@/components/experience/PersonAvatar'
 import { AmbientLine } from '@/components/experience/AmbientLine'
+import { PillarHero } from '@/components/experience/PillarHero'
 import { LoadingState } from '@/components/layout/LoadingState'
 import { ErrorState } from '@/components/layout/ErrorState'
 
@@ -57,21 +58,23 @@ export function MyTeam() {
     queryKey: ['ess-team'], queryFn: () => api.get('/ess/team'), staleTime: 2 * 60_000,
   })
 
-  if (isLoading) return <div className="mx-auto max-w-[760px] py-2"><LoadingState rows={4} label="Bringing your team together…" /></div>
-  if (isError)   return <ErrorState title="Couldn’t load your team" onRetry={() => refetch()} />
+  if (isLoading) return (
+    <>
+      <PillarHero sky="sky-morning" eyebrow="care" title="My Team" />
+      <div className="mx-auto max-w-[760px] py-8"><LoadingState rows={4} label="Bringing your team together…" /></div>
+    </>
+  )
+  if (isError) return <ErrorState title="Couldn't load your team" onRetry={() => refetch()} />
 
   const t = data!
   const peopleAll = [...(t.roster.manager ? [t.roster.manager] : []), ...t.roster.peers, ...t.roster.reports]
   const empty = peopleAll.length === 0
 
   return (
-    <div className="mx-auto max-w-[760px] space-y-8 py-2">
-      {/* Focus — one human line about the team right now. */}
-      <div className="rounded-2xl bg-gradient-to-br from-primary/[0.06] to-brand-teal/[0.06] p-6">
-        <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Your team</p>
-        <h1 className="mt-2 text-[1.6rem] font-semibold leading-snug text-foreground">{t.focus.sentence}</h1>
-      </div>
+    <>
+      <PillarHero sky="sky-morning" eyebrow="care" title="My Team" tagline={t.focus.sentence} />
 
+    <div className="mx-auto max-w-[760px] space-y-8 py-8">
       {empty && (
         <p className="py-14 text-center text-sm text-muted-foreground">
           Your team will appear here as it grows — the people you work with, day to day.
@@ -88,7 +91,7 @@ export function MyTeam() {
                 <PersonAvatar name={c.name} size="md" />
                 <span className="flex items-center gap-1.5 text-sm text-foreground">
                   {c.kind === 'birthday'
-                    ? <><Cake className="h-4 w-4 text-brand-teal" /> It’s <span className="font-semibold">{c.name}</span>’s birthday</>
+                    ? <><Cake className="h-4 w-4 text-brand-teal" /> It's <span className="font-semibold">{c.name}</span>'s birthday</>
                     : <><PartyPopper className="h-4 w-4 text-brand-teal" /> <span className="font-semibold">{c.name}</span> — {c.years ?? ''}-year work anniversary</>}
                 </span>
               </div>
@@ -137,5 +140,6 @@ export function MyTeam() {
         </div>
       )}
     </div>
+    </>
   )
 }

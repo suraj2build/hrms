@@ -22,6 +22,7 @@ import { Sparkles, ArrowRight, MessageSquare, Send } from 'lucide-react'
 import { FocusPanel } from '@/components/experience/FocusPanel'
 import { SignalCard, type Signal } from '@/components/experience/SignalCard'
 import { PersonAvatar } from '@/components/experience/PersonAvatar'
+import { PillarHero } from '@/components/experience/PillarHero'
 import { LoadingState } from '@/components/layout/LoadingState'
 import { ErrorState } from '@/components/layout/ErrorState'
 import { useAssistant, type AskOutcome } from '@/components/experience/useAssistant'
@@ -142,7 +143,7 @@ export function MyAssistant() {
     if (instant) {
       setView({
         ask: text,
-        outcome: { kind: 'answer', reply: `Here’s ${instant.title.toLowerCase()}.`, toolsUsed: [] },
+        outcome: { kind: 'answer', reply: `Here's ${instant.title.toLowerCase()}.`, toolsUsed: [] },
         action: instant,
         person: null,
         instant: true,
@@ -172,7 +173,11 @@ export function MyAssistant() {
   const thread = useMemo(() => messages.filter(m => m.content !== '__NOT_CONFIGURED__'), [messages])
 
   return (
-    <div className="mx-auto max-w-[680px] space-y-8 py-2">
+    <>
+      <PillarHero sky="sky-evening" eyebrow="intelligence · asked" title="Assistant"
+        tagline="Ask anything — your data, your people, your workplace. I only answer when you ask." />
+
+    <div className="mx-auto max-w-[680px] space-y-8 py-8">
       {/* ── The ask field — the calm front door (always present, never a chat box) ── */}
       <form
         onSubmit={e => { e.preventDefault(); void submit(input) }}
@@ -237,14 +242,14 @@ export function MyAssistant() {
             <LoadingState rows={2} label="Reading your data…" />
           ) : view.outcome.kind === 'not_configured' ? (
             <ErrorState
-              title="The assistant isn’t switched on yet"
+              title="The assistant isn't switched on yet"
               description="Ask an admin to enable it in Settings → AI Assistant."
               onRetry={newAsk}
               retryLabel="Start over"
             />
           ) : view.outcome.kind === 'error' ? (
             <ErrorState
-              title="Couldn’t answer that just now"
+              title="Couldn't answer that just now"
               description={view.outcome.reply}
               onRetry={() => void submit(view.ask)}
             />
@@ -351,6 +356,7 @@ export function MyAssistant() {
         </div>
       )}
     </div>
+    </>
   )
 }
 

@@ -26,6 +26,7 @@ import { ActivityItem } from '@/components/experience/ActivityItem'
 import { TimeGroup } from '@/components/experience/TimeGroup'
 import { ReflectionCard } from '@/components/experience/ReflectionCard'
 import { DoneForToday } from '@/components/experience/DoneForToday'
+import { PillarHero } from '@/components/experience/PillarHero'
 import { LoadingState } from '@/components/layout/LoadingState'
 import { ErrorState } from '@/components/layout/ErrorState'
 
@@ -68,8 +69,13 @@ export function MyCompany() {
     },
   })
 
-  if (isLoading) return <div className="mx-auto max-w-[760px] py-2"><LoadingState rows={4} label="Looking across the company…" /></div>
-  if (isError)   return <ErrorState title="Couldn’t load your company" onRetry={() => refetch()} />
+  if (isLoading) return (
+    <>
+      <PillarHero sky="sky-midday" eyebrow="belonging" title="My Company" />
+      <div className="mx-auto max-w-[760px] py-8"><LoadingState rows={4} label="Looking across the company…" /></div>
+    </>
+  )
+  if (isError) return <ErrorState title="Couldn't load your company" onRetry={() => refetch()} />
 
   const c = data!
   const hasCelebrating = c.celebrating.length > 0
@@ -80,22 +86,21 @@ export function MyCompany() {
   const celebKind = (k: Celebrating['kind']): 'birthday' | 'anniversary' | 'milestone' =>
     k === 'birthday' ? 'birthday' : k === 'anniversary' ? 'anniversary' : 'milestone'
   const celebTitle = (p: Celebrating): string =>
-    p.kind === 'birthday'    ? `It’s ${p.name}’s birthday`
+    p.kind === 'birthday'    ? `It's ${p.name}'s birthday`
     : p.kind === 'anniversary' ? `${p.name} — ${p.years ?? ''}-year work anniversary`
     : `${p.name} joined us`
   const celebSubtitle = (p: Celebrating): string | undefined =>
     p.kind === 'joined' ? 'Welcome them to the company' : undefined
 
   return (
-    <div className="mx-auto max-w-[760px] space-y-8 py-2">
-      {/* Focus — one warm orienting line about the shared world today. */}
-      <div className="rounded-2xl bg-gradient-to-br from-primary/[0.06] to-brand-teal/[0.06] p-6">
-        <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Across the company</p>
-        <h1 className="mt-2 text-[1.6rem] font-semibold leading-snug text-foreground">{c.focus.sentence}</h1>
-        {/* Posting / reacting / comments live in the community module of record. */}
+    <>
+      <PillarHero sky="sky-midday" eyebrow="belonging" title="My Company" tagline={c.focus.sentence} />
+
+    <div className="mx-auto max-w-[760px] space-y-8 py-8">
+      <div className="flex">
         <button
           onClick={() => navigate(`${base}/community`)}
-          className="mt-4 inline-flex items-center gap-1.5 rounded-full bg-primary px-4 py-1.5 text-xs font-semibold text-primary-foreground transition hover:bg-primary/90"
+          className="inline-flex items-center gap-1.5 rounded-full bg-primary px-4 py-1.5 text-xs font-semibold text-primary-foreground transition hover:bg-primary/90"
         >
           Share something →
         </button>
@@ -169,5 +174,6 @@ export function MyCompany() {
       {/* Closure — a light, warm finish; omitted on a quiet day (silence-as-calm). */}
       {!empty && <DoneForToday>A good place to be part of.</DoneForToday>}
     </div>
+    </>
   )
 }

@@ -17,6 +17,7 @@ import { JourneyRail } from '@/components/experience/JourneyRail'
 import { ReflectionCard } from '@/components/experience/ReflectionCard'
 import { PersonAvatar } from '@/components/experience/PersonAvatar'
 import { DoneForToday } from '@/components/experience/DoneForToday'
+import { PillarHero } from '@/components/experience/PillarHero'
 import { LoadingState } from '@/components/layout/LoadingState'
 import { ErrorState } from '@/components/layout/ErrorState'
 import { CalendarClock } from 'lucide-react'
@@ -25,7 +26,7 @@ function Strengths({ items }: { items: { badge: string; label: string; count: nu
   if (!items.length) return null
   return (
     <section>
-      <h3 className="mb-3 text-[15px] font-semibold text-foreground">What I’m known for</h3>
+      <h3 className="mb-3 text-[15px] font-semibold text-foreground">What I'm known for</h3>
       <div className="flex flex-wrap gap-3">
         {items.map(s => (
           <div key={s.badge} className="flex items-center gap-3 rounded-2xl bg-muted/50 px-4 py-2.5">
@@ -68,8 +69,13 @@ function LookingAhead({ items }: { items: { label: string; detail?: string }[] }
 export function MyGrowth() {
   const { data, isLoading, isError, refetch } = useIdentity()
 
-  if (isLoading) return <div className="mx-auto max-w-[860px] py-2"><LoadingState rows={5} label="Bringing your story together…" /></div>
-  if (isError || !data?.person) return <ErrorState title="Couldn’t load your growth" onRetry={() => refetch()} />
+  if (isLoading) return (
+    <>
+      <PillarHero sky="sky-dawn" eyebrow="possibility · becoming" title="My Growth" />
+      <div className="mx-auto max-w-[860px] py-8"><LoadingState rows={5} label="Bringing your story together…" /></div>
+    </>
+  )
+  if (isError || !data?.person) return <ErrorState title="Couldn't load your growth" onRetry={() => refetch()} />
 
   const { person, reporting, journey, strengths, reflection, lookingAhead } = data
   const role = [person.designation, person.department].filter(Boolean).join(' · ')
@@ -77,17 +83,13 @@ export function MyGrowth() {
     ? `${person.tenure_label} in — and growing.` : 'Just getting started — and growing.'
 
   return (
-    <div className="mx-auto max-w-[860px] space-y-8 py-2">
-      {/* Identity — the Focus beat (wash + the person). */}
-      <div className="flex items-center gap-4 rounded-2xl bg-gradient-to-br from-primary/[0.06] to-brand-teal/[0.06] p-6">
-        <PersonAvatar name={person.name ?? 'You'} size="lg" />
-        <div className="min-w-0">
-          <h1 className="text-[1.6rem] font-semibold leading-tight text-foreground">{person.name}</h1>
-          <p className="mt-0.5 text-sm text-muted-foreground">{role ? `${role} · ${tenurePhrase}` : tenurePhrase}</p>
-        </div>
-      </div>
+    <>
+      <PillarHero sky="sky-dawn" eyebrow="possibility · becoming" title="My Growth"
+        tagline={role ? `${person.name} · ${role}` : person.name ?? ''} />
 
+    <div className="mx-auto max-w-[860px] space-y-8 py-8">
       {/* Who I work with — people before fields. */}
+
       <PeopleRail sections={[
         { label: 'reports to', people: reporting.manager ? [reporting.manager] : [] },
         { label: 'alongside', people: reporting.peers },
@@ -117,5 +119,6 @@ export function MyGrowth() {
         {person.tenure_months < 12 ? 'Still early in the story — the best chapters are ahead.' : 'More chapters ahead — keep growing.'}
       </DoneForToday>
     </div>
+    </>
   )
 }

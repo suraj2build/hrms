@@ -14,11 +14,10 @@ import { useQuery }     from '@tanstack/react-query'
 import { useNavigate, useLocation } from 'react-router-dom'
 import {
   Clock, CheckCircle2, CalendarCheck, ClipboardEdit, Receipt, CreditCard,
-  LifeBuoy, Award, Inbox, Megaphone, PartyPopper, CalendarDays, Sparkles,
+  LifeBuoy, Award, Inbox, CalendarDays, Sparkles,
 } from 'lucide-react'
 import { api }          from '@/lib/api/client'
 import { useAuthStore } from '@/stores/authStore'
-import { cn }           from '@/lib/utils'
 import { SignalCard, type Signal } from '@/components/experience/SignalCard'
 import { ActivityItem, type ActivityEvent } from '@/components/experience/ActivityItem'
 import { QuickActions, type Capability } from '@/components/experience/QuickActions'
@@ -26,8 +25,6 @@ import { CelebrationCard } from '@/components/experience/CelebrationCard'
 import { PersonAvatar } from '@/components/experience/PersonAvatar'
 import { AmbientLine } from '@/components/experience/AmbientLine'
 import { Arrival } from '@/components/experience/Arrival'
-import { Movement } from '@/components/experience/Movement'
-import { FocusPanel } from '@/components/experience/FocusPanel'
 import { ReflectionCard } from '@/components/experience/ReflectionCard'
 import { ProgressBand } from '@/components/experience/ProgressBand'
 import { type DayContext } from '@/components/experience/resolveGreeting'
@@ -92,24 +89,6 @@ const BADGE_LABELS: Record<string, string> = {
   innovator: 'Innovator', problem_solver: 'Problem Solver', culture_ambassador: 'Culture Ambassador',
 }
 
-// ── Sub-components ─────────────────────────────────────────────────────────────
-
-function Card({ children, className }: { children: React.ReactNode; className?: string }) {
-  return <div className={cn('rounded-2xl border border-border/60 bg-card shadow-sm', className)}>{children}</div>
-}
-
-/** Conversational block heading — natural language, not a module label. */
-function Heading({ children, action, onAction }: { children: React.ReactNode; action?: string; onAction?: () => void }) {
-  return (
-    <div className="mb-3 flex items-center justify-between">
-      <h2 className="text-base font-semibold text-foreground">{children}</h2>
-      {action && (
-        <button onClick={onAction} className="text-xs font-medium text-primary hover:text-primary/80">{action}</button>
-      )}
-    </div>
-  )
-}
-
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export function EssHome() {
@@ -148,11 +127,11 @@ export function EssHome() {
 
   const focalInsight = (() => {
     if (today && !today.check_in && !isWeekend)
-      return 'You haven’t checked in yet — punch in, or regularize if you’re working remotely.'
+      return `You haven't checked in yet — punch in, or regularize if you're working remotely.`
     const urgent = signals.find((s) => s.severity !== 'info')
     if (urgent) return `Right now, the thing most worth your attention is to ${lowerFirst(urgent.title)}.`
     if (signals.length > 0) return 'A couple of things could use a glance, but nothing urgent today.'
-    return 'You’re all set — nothing needs you right now. Enjoy the calm.'
+    return `You're all set — nothing needs you right now. Enjoy the calm.`
   })()
 
   const dayInsight = (() => {
@@ -160,15 +139,6 @@ export function EssHome() {
     if (events.some((e) => e.type === 'payroll')) return 'Your salary landed today — and a few other things happened too.'
     if (events.some((e) => e.type === 'recognition')) return 'Someone recognized you today — the good news is just below.'
     return `${events.length} thing${events.length > 1 ? 's have' : ' has'} happened so far today.`
-  })()
-
-  const todayBdays = (data?.birthdays ?? []).filter((b) => b.days_until === 0)
-  const todayAnnis = (data?.anniversaries ?? []).filter((a) => a.days_until === 0)
-  const peopleInsight = (() => {
-    if (todayBdays.length) return `It’s ${todayBdays[0]!.name}’s birthday today — a quick hello means more than you’d think.`
-    if (todayAnnis.length) return `${todayAnnis[0]!.name} marks ${todayAnnis[0]!.years} years today — worth a word of congratulations.`
-    if ((data?.recognition?.total_received ?? 0) > 0) return `You’ve been recognized ${data!.recognition.total_received}× — why not pass it on to someone today?`
-    return 'Recognition is the easiest way to make someone’s day — try it today.'
   })()
 
   // "What should I do next" — capabilities, context-aware (Regularize promoted on missing punch).
@@ -185,14 +155,13 @@ export function EssHome() {
   // Celebrations — composed from existing data (peers to celebrate today/tomorrow).
   const celebrations = [
     ...(data?.birthdays ?? []).filter((b) => b.days_until <= 1).map((b) => ({
-      id: `bd_${b.name}`, kind: 'birthday' as const, name: b.name, title: `${b.name}’s birthday`, subtitle: b.days_until === 0 ? 'Today' : 'Tomorrow',
+      id: `bd_${b.name}`, kind: 'birthday' as const, name: b.name, title: `${b.name}'s birthday`, subtitle: b.days_until === 0 ? 'Today' : 'Tomorrow',
     })),
     ...(data?.anniversaries ?? []).filter((a) => a.days_until <= 1).map((a) => ({
       id: `an_${a.name}`, kind: 'anniversary' as const, name: a.name, title: `${a.name} · ${a.years}y`, subtitle: a.days_until === 0 ? 'Anniversary today' : 'Anniversary tomorrow',
     })),
   ].slice(0, 4)
 
-  const dateLabel = new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long' })
   const firstName = fullName.split(' ')[0]
   const pending   = signals.length > 0 || (kpis?.open_actions ?? 0) > 0
   const tenureM   = data?.profile?.tenure_months ?? 0
@@ -206,67 +175,96 @@ export function EssHome() {
   return (
     <>
       <Arrival dayAnchorId="ess-your-day" />
-      <div id="ess-your-day" className="mx-auto max-w-[760px] py-8">
+      {/* ── "Today, gently" section — the editorial deeper room ── */}
+      <div id="ess-your-day" className="mx-auto max-w-[760px]">
       {isLoading ? (
-        <LoadingState rows={5} label="Putting your day together…" />
+        <div className="py-16"><LoadingState rows={5} label="Putting your day together…" /></div>
       ) : isError ? (
-        <ErrorState title="Couldn’t load your day" onRetry={() => refetch()} />
+        <ErrorState title="Couldn't load your day" onRetry={() => refetch()} />
       ) : (
       <>
-      {/* Day entry — quiet anchor after crossing the Arrival threshold. */}
-      <div className="mb-6 flex items-center justify-between">
-        <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">{dateLabel}</p>
-        {today?.check_in ? (
-          <span className="flex items-center gap-1.5 rounded-full bg-success/10 px-3 py-1.5 text-xs font-medium text-success">
-            <CheckCircle2 className="h-3.5 w-3.5" /> In since {fmtTime(today.check_in)}
-          </span>
-        ) : !isWeekend && (
-          <button onClick={() => navigate(`${base}/attendance`)}
-            className="flex items-center gap-1.5 rounded-full bg-primary px-3.5 py-1.5 text-xs font-semibold text-primary-foreground transition hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2">
-            <Clock className="h-3.5 w-3.5" /> Punch in
-          </button>
-        )}
-      </div>
-      <QuickActions capabilities={capabilities} onAction={(href) => navigate(`${base}${href}`)} />
-      <AmbientLine className="mt-3">{focalInsight}</AmbientLine>
-
-      {/* The spine — movements rise in on the tinted canvas. */}
-      <div className="mt-10 space-y-10">
-        {signals.length > 0 && (
-          <Movement eyebrow="Worth your attention" index={0} className="space-y-2.5">
-            {signals.map((s) => <SignalCard key={s.id} signal={s} onAction={(href) => navigate(`${base}${href}`)} />)}
-          </Movement>
-        )}
-
-        <Movement eyebrow="Here’s your day" index={1}
-          action={{ label: 'Your story →', onClick: () => navigate(`${base}/timeline`) }}>
-          <AmbientLine className="mb-4">{dayInsight}</AmbientLine>
-          {activityQ.isLoading ? (
-            <LoadingState rows={3} compact />
-          ) : events.length === 0 ? (
-            <p className="text-sm text-muted-foreground">Nothing yet — your check-ins, approvals and good news will appear here.</p>
-          ) : (
-            <div className="space-y-4">{events.map((e) => <ActivityItem key={e.id} event={e} />)}</div>
+      {/* Section header — quiet editorial intro after crossing the Arrival. */}
+      <div className="border-b border-border/50 pb-8 pt-10">
+        <div className="flex items-center justify-between">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Today, gently</p>
+          {today?.check_in ? (
+            <span className="flex items-center gap-1.5 rounded-full bg-success/10 px-3 py-1.5 text-xs font-medium text-success">
+              <CheckCircle2 className="h-3.5 w-3.5" /> In since {fmtTime(today.check_in)}
+            </span>
+          ) : !isWeekend && (
+            <button onClick={() => navigate(`${base}/attendance`)}
+              className="flex items-center gap-1.5 rounded-full bg-primary px-3.5 py-1.5 text-xs font-semibold text-primary-foreground transition hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2">
+              <Clock className="h-3.5 w-3.5" /> Punch in
+            </button>
           )}
-        </Movement>
+        </div>
+        <h2 className="serif-hero mt-3 text-[clamp(1.8rem,4vw,2.8rem)] text-foreground">
+          A few things <span className="serif-emph text-primary">worth noticing.</span>
+        </h2>
+        <AmbientLine className="mt-3">{focalInsight}</AmbientLine>
+      </div>
 
-        <Movement eyebrow="Your people" index={2}>
-          <AmbientLine className="mb-4">{peopleInsight}</AmbientLine>
-          {celebrations.length > 0 && (
-            <div className="mb-4 space-y-2.5">
+      {/* Quick actions — the action strip */}
+      <div className="py-6">
+        <QuickActions capabilities={capabilities} onAction={(href) => navigate(`${base}${href}`)} />
+      </div>
+
+      {/* The content river — editorial sections, not widget boxes. */}
+      <div className="space-y-12 pb-16">
+
+        {/* What needs you — signals (only when present). */}
+        {signals.length > 0 && (
+          <section>
+            <p className="mb-4 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Worth your attention</p>
+            <div className="space-y-2.5">
+              {signals.map((s) => <SignalCard key={s.id} signal={s} onAction={(href) => navigate(`${base}${href}`)} />)}
+            </div>
+          </section>
+        )}
+
+        {/* Celebrations — people first, warm cards. */}
+        {celebrations.length > 0 && (
+          <section>
+            <p className="mb-4 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Celebrating today</p>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               {celebrations.map((c) => (
                 <CelebrationCard key={c.id} kind={c.kind} title={c.title} subtitle={c.subtitle}
                   action={{ label: 'Wish', onClick: () => navigate(`${base}/community`) }} />
               ))}
             </div>
-          )}
-          {(data?.recognition?.recent ?? []).length === 0 ? (
-            <button onClick={() => navigate(`${base}/recognition`)}
-              className="flex items-center gap-2 rounded-md text-sm font-medium text-primary transition-colors hover:text-primary/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2">
-              <Award className="h-4 w-4" /> Recognize a teammate
+          </section>
+        )}
+
+        {/* Your day — the activity moment river. */}
+        <section>
+          <div className="mb-4 flex items-center justify-between">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Your day</p>
+            <button onClick={() => navigate(`${base}/timeline`)}
+              className="text-[11px] font-medium text-primary hover:text-primary/80">
+              Your story →
             </button>
+          </div>
+          <AmbientLine className="mb-5">{dayInsight}</AmbientLine>
+          {activityQ.isLoading ? (
+            <LoadingState rows={3} compact />
+          ) : events.length === 0 ? (
+            <p className="text-sm text-muted-foreground">A quiet start — your check-ins and approvals will appear here.</p>
           ) : (
-            <div className="space-y-3">
+            <ul className="flex flex-col">
+              {events.map((e) => (
+                <li key={e.id} className="border-b border-border/50 py-5 last:border-0">
+                  <ActivityItem event={e} />
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+
+        {/* Recognition from teammates. */}
+        {(data?.recognition?.recent ?? []).length > 0 && (
+          <section>
+            <p className="mb-4 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Kind words</p>
+            <div className="space-y-4">
               {(data?.recognition?.recent ?? []).map((r) => (
                 <div key={r.id} className="flex items-start gap-3">
                   <PersonAvatar name={r.from_name} size="sm" className="mt-0.5" decorative />
@@ -277,70 +275,76 @@ export function EssHome() {
                     <p className="text-xs text-muted-foreground">
                       {BADGE_LABELS[r.badge_code] ?? r.badge_code}{r.points != null ? ` · +${r.points} pts` : ''}
                     </p>
-                    {r.message && <p className="mt-0.5 line-clamp-2 text-xs italic text-foreground/70">“{r.message}”</p>}
+                    {r.message && <p className="mt-0.5 line-clamp-2 text-xs italic text-foreground/70">"{r.message}"</p>}
                   </div>
                 </div>
               ))}
             </div>
-          )}
-        </Movement>
-
-        {(data?.feed_teaser ?? []).length > 0 && (
-          <Movement eyebrow="Around the company" index={3}
-            action={{ label: 'See all', onClick: () => navigate(`${base}/company`) }}>
-            <div className="space-y-4">
-              {(data?.feed_teaser ?? []).map((post) => (
-                <div key={post.id} className="flex gap-3">
-                  <PersonAvatar name={post.author} size="sm" className="mt-0.5" decorative />
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium text-foreground">{post.author}</p>
-                    <p className="mt-0.5 line-clamp-2 text-sm text-muted-foreground">{post.body}</p>
-                    <p className="mt-0.5 text-[11px] text-muted-foreground">{timeAgo(post.created_at)}</p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </Movement>
+          </section>
         )}
 
-        {progress?.show && <Movement index={4}><ProgressBand data={progress} /></Movement>}
+        {/* Around the company — a moments river of community posts. */}
+        {(data?.feed_teaser ?? []).length > 0 && (
+          <section>
+            <div className="mb-4 flex items-center justify-between">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Around the company</p>
+              <button onClick={() => navigate(`${base}/company`)}
+                className="text-[11px] font-medium text-primary hover:text-primary/80">See all →</button>
+            </div>
+            <ul className="flex flex-col">
+              {(data?.feed_teaser ?? []).map((post) => (
+                <li key={post.id} className="group flex items-start gap-4 border-b border-border/50 py-5 last:border-0">
+                  <PersonAvatar name={post.author} size="sm" className="mt-0.5 shrink-0" decorative />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[15px] leading-snug text-foreground">
+                      <span className="font-medium">{post.author}</span>{' '}
+                      <span className="text-muted-foreground">{post.body}</span>
+                    </p>
+                    <p className="mt-1 text-[12px] text-muted-foreground">{timeAgo(post.created_at)}</p>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+
+        {/* Progress band and holidays. */}
+        {progress?.show && (
+          <section><ProgressBand data={progress} /></section>
+        )}
 
         {(data?.upcoming_holidays ?? []).length > 0 && (
-          <Movement index={5}>
-            <div className="flex items-center gap-2 text-sm">
-              <CalendarDays className="h-4 w-4 text-primary" />
-              <span className="text-foreground">
-                Next holiday: <span className="font-medium">{data!.upcoming_holidays[0]!.name}</span>
-              </span>
-              <span className="ml-auto text-xs text-muted-foreground">
-                {data!.upcoming_holidays[0]!.days_until === 0 ? 'Today'
-                  : data!.upcoming_holidays[0]!.days_until === 1 ? 'Tomorrow'
-                  : `in ${data!.upcoming_holidays[0]!.days_until}d`}
-              </span>
-            </div>
-          </Movement>
+          <div className="flex items-center gap-2.5 rounded-2xl border border-border/60 bg-card px-5 py-4 text-sm">
+            <CalendarDays className="h-4 w-4 shrink-0 text-primary" />
+            <span className="text-foreground">
+              Next holiday: <span className="font-medium">{data!.upcoming_holidays[0]!.name}</span>
+            </span>
+            <span className="ml-auto text-xs text-muted-foreground">
+              {data!.upcoming_holidays[0]!.days_until === 0 ? 'Today'
+                : data!.upcoming_holidays[0]!.days_until === 1 ? 'Tomorrow'
+                : `in ${data!.upcoming_holidays[0]!.days_until}d`}
+            </span>
+          </div>
         )}
 
+        {/* AI reflection — one warm line (ambient, never prompted). */}
         {reflection?.insight && (
-          <Movement index={6}>
-            <ReflectionCard insight={reflection.insight} action={reflection.action} onAction={(href) => navigate(`${base}${href}`)} />
-          </Movement>
+          <ReflectionCard insight={reflection.insight} action={reflection.action} onAction={(href) => navigate(`${base}${href}`)} />
         )}
 
-        {/* Done for today — the calm closer + the narration into Timeline. */}
-        <Movement index={7} className="pt-2 text-center">
-          <p className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
-            <CheckCircle2 className="h-4 w-4 text-success" />
+        {/* Closing — a generous editorial bookend. */}
+        <div className="border-t border-border/40 pt-10">
+          <p className="serif-emph text-[clamp(1.2rem,2.5vw,1.6rem)] leading-snug text-foreground/75">
             {pending
-              ? `A couple of things are still waiting, ${firstName} — but nothing that can’t wait for coffee.`
-              : `That’s everything, ${firstName}. You’re all set — have a great day.`}
+              ? `"A couple of things are still waiting — nothing that can't wait for coffee."`
+              : `"That's everything. You're all set — have a great day."`}
           </p>
           <button onClick={() => navigate(`${base}/timeline`)}
-            className="mx-auto mt-3 flex items-center gap-2 rounded-md text-xs text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2">
+            className="mt-4 flex items-center gap-2 text-xs text-muted-foreground transition-colors hover:text-foreground">
             <Sparkles className="h-3.5 w-3.5 text-brand-teal" />
-            <span>{tenureLabel}. Revisit your story so far →</span>
+            <span>{tenureLabel}. Revisit your story →</span>
           </button>
-        </Movement>
+        </div>
       </div>
       </>
       )}
