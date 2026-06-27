@@ -5,7 +5,7 @@
  * Admin-role users who land here via /ess/* are allowed (cross-portal preview).
  */
 
-import { Outlet, Navigate, useNavigate } from 'react-router-dom'
+import { Outlet, Navigate, useNavigate, useLocation } from 'react-router-dom'
 import { Suspense, useState } from 'react'
 import { Loader2, AlertTriangle, X } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
@@ -112,10 +112,14 @@ function AnomalyLoginAlert() {
 export function EssShell() {
   const { profile, isBootstrapping } = useAuthStore()
   const isMobile = useIsMobile()
+  const { pathname } = useLocation()
   // The Arrival (Home's threshold) raises this while the door owns the screen. All
   // chrome — sidebar, topbar, warnings, context panel — is hidden until the employee
   // crosses into the day (EXPERIENCE_ARRIVAL_SPEC.md §2.6 / §4.3).
   const atThreshold = useArrivalStore((s) => s.atThreshold)
+  // Home gets the full-width experience — the context panel is replaced by the
+  // inline right column (celebration card, also today, etc).
+  const isHomePage = pathname === '/ess/home' || pathname === '/ess/dashboard' || pathname === '/ess'
 
   // Gate only on the first bootstrap — not on silent token refreshes (TOKEN_REFRESHED).
   if (isBootstrapping) return <LoadingScreen />
@@ -128,7 +132,7 @@ export function EssShell() {
 
   return (
     <CommandPaletteProvider>
-      <div className="flex h-screen overflow-hidden bg-background">
+      <div className="dark flex h-screen overflow-hidden bg-background">
         {!atThreshold && <EmployeeSidebar />}
         <div className="flex flex-col flex-1 overflow-hidden">
           {!atThreshold && <Topbar />}
@@ -142,8 +146,8 @@ export function EssShell() {
                 <Outlet />
               </Suspense>
             </main>
-            {/* Right context panel — birthdays, anniversaries, holidays, kudos */}
-            {!atThreshold && <EssContextPanel />}
+            {/* Right context panel — hidden on home (inline right col handles it) */}
+            {!atThreshold && !isHomePage && <EssContextPanel />}
           </div>
         </div>
       </div>
