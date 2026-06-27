@@ -25,6 +25,8 @@ import { QuickActions, type Capability } from '@/components/experience/QuickActi
 import { CelebrationCard } from '@/components/experience/CelebrationCard'
 import { PersonAvatar } from '@/components/experience/PersonAvatar'
 import { AmbientLine } from '@/components/experience/AmbientLine'
+import { Atmosphere } from '@/components/experience/Atmosphere'
+import { Movement } from '@/components/experience/Movement'
 import { FocusPanel } from '@/components/experience/FocusPanel'
 import { ReflectionCard } from '@/components/experience/ReflectionCard'
 import { ProgressBand } from '@/components/experience/ProgressBand'
@@ -211,179 +213,157 @@ export function EssHome() {
   if (isLoading) return <div className="mx-auto max-w-[820px] py-2"><LoadingState rows={5} label="Putting your day together…" /></div>
   if (isError)   return <ErrorState title="Couldn’t load your day" onRetry={() => refetch()} />
 
-  // One borderless column — the day read as a story, never a grid of cards. Only two
-  // filled panels: the Focus wash and the Reflection gradient (frozen design §3.C).
+  // Visual Language v2 — the "Dawn" atmosphere: a warm, time-aware ambient field with
+  // a serif greeting hero, over a spine of movements that rise in on a tinted canvas.
+  const dateLabel = new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long' })
+  const firstName = fullName.split(' ')[0]
+  const pending   = signals.length > 0 || (kpis?.open_actions ?? 0) > 0
+  const tenureM   = data?.profile?.tenure_months ?? 0
+  const tenureLabel = tenureM < 1 ? 'Today is day one'
+    : tenureM < 12 ? `${tenureM} month${tenureM > 1 ? 's' : ''} in`
+    : `${Math.floor(tenureM / 12)} year${Math.floor(tenureM / 12) > 1 ? 's' : ''} and counting`
+
   return (
-    <div className="mx-auto max-w-[820px] space-y-8 py-2">
-
-      {/* ── Movement 1–2 — TODAY: the one Focus wash (greeting · punch · ambient · actions) ── */}
-      <div className="rounded-2xl bg-gradient-to-br from-primary/[0.06] to-brand-teal/[0.06] p-8">
-        <div className="flex items-start justify-between gap-4">
-          <div className="min-w-0">
-            <h1 className="text-[1.75rem] font-semibold leading-tight tracking-tight text-foreground">{greet.headline}</h1>
-            <p className="mt-1 text-sm text-muted-foreground">
-              {greet.subline}{data?.profile?.designation ? ` · ${data.profile.designation}` : ''}
-            </p>
-            {memoryTouch && <AmbientLine className="mt-2 text-xs">{memoryTouch}</AmbientLine>}
-          </div>
-          {today?.check_in ? (
-            <span className="flex shrink-0 items-center gap-1.5 rounded-full bg-success/10 px-3 py-1.5 text-xs font-medium text-success">
-              <CheckCircle2 className="h-3.5 w-3.5" /> In since {fmtTime(today.check_in)}
-            </span>
-          ) : (
-            <button onClick={() => navigate(`${base}/attendance`)}
-              className="flex shrink-0 items-center gap-1.5 rounded-full bg-primary px-3.5 py-1.5 text-xs font-semibold text-primary-foreground transition hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2">
-              <Clock className="h-3.5 w-3.5" /> Punch in
-            </button>
-          )}
-        </div>
-
-        <div className="mt-4">
-          <AmbientLine>{focalInsight}</AmbientLine>
-          {contextBits.length > 0 && (
-            <p className="mt-2 pl-5 text-xs text-muted-foreground">{contextBits.join(' · ')}</p>
-          )}
-        </div>
-
-        <div className="mt-5">
+    <div className="mx-auto max-w-[760px] py-4">
+      {/* Atmosphere — the Dawn field: serif greeting hero, punch, ambient, actions. */}
+      <Atmosphere
+        theme="dawn"
+        eyebrow={dateLabel}
+        title={greet.headline}
+        subtitle={`${greet.subline}${data?.profile?.designation ? ` · ${data.profile.designation}` : ''}`}
+        aside={today?.check_in ? (
+          <span className="flex items-center gap-1.5 rounded-full bg-success/10 px-3 py-1.5 text-xs font-medium text-success">
+            <CheckCircle2 className="h-3.5 w-3.5" /> In since {fmtTime(today.check_in)}
+          </span>
+        ) : (
+          <button onClick={() => navigate(`${base}/attendance`)}
+            className="flex items-center gap-1.5 rounded-full bg-primary px-3.5 py-1.5 text-xs font-semibold text-primary-foreground transition hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2">
+            <Clock className="h-3.5 w-3.5" /> Punch in
+          </button>
+        )}
+      >
+        <AmbientLine>{focalInsight}</AmbientLine>
+        {memoryTouch && <AmbientLine className="mt-2 text-xs">{memoryTouch}</AmbientLine>}
+        {contextBits.length > 0 && (
+          <p className="mt-2 pl-5 text-xs text-muted-foreground">{contextBits.join(' · ')}</p>
+        )}
+        <div className="mt-6">
           <QuickActions capabilities={capabilities} onAction={(href) => navigate(`${base}${href}`)} />
         </div>
-      </div>
+      </Atmosphere>
 
-      {/* ── Movement 3 — What needs you (silence is calm) ── */}
-      {signals.length > 0 && (
-        <div className="space-y-2.5">
-          <Heading>Worth your attention</Heading>
-          {signals.map((s) => <SignalCard key={s.id} signal={s} onAction={(href) => navigate(`${base}${href}`)} />)}
-        </div>
-      )}
-
-      {/* ── Movement 4 — Here's your day (borderless, no card) ── */}
-      <div>
-        <Heading action="Your story →" onAction={() => navigate(`${base}/timeline`)}>Here’s your day</Heading>
-        <AmbientLine className="mb-4">{dayInsight}</AmbientLine>
-        {activityQ.isLoading ? (
-          <LoadingState rows={3} compact />
-        ) : events.length === 0 ? (
-          <p className="text-sm text-muted-foreground">Nothing yet — your check-ins, approvals and good news will appear here.</p>
-        ) : (
-          <div className="space-y-4">{events.map((e) => <ActivityItem key={e.id} event={e} />)}</div>
+      {/* The spine — movements rise in on the tinted canvas. */}
+      <div className="mt-10 space-y-10">
+        {signals.length > 0 && (
+          <Movement eyebrow="Worth your attention" index={0} className="space-y-2.5">
+            {signals.map((s) => <SignalCard key={s.id} signal={s} onAction={(href) => navigate(`${base}${href}`)} />)}
+          </Movement>
         )}
-      </div>
 
-      {/* ── Movement 5 — Your people (borderless) ── */}
-      <div>
-        <Heading>Your people</Heading>
-        <AmbientLine className="mb-4">{peopleInsight}</AmbientLine>
-        {celebrations.length > 0 && (
-          <div className="mb-4 space-y-2.5">
-            {celebrations.map((c) => (
-              <CelebrationCard key={c.id} kind={c.kind} title={c.title} subtitle={c.subtitle}
-                action={{ label: 'Wish', onClick: () => navigate(`${base}/community`) }} />
-            ))}
-          </div>
-        )}
-        {(data?.recognition?.recent ?? []).length === 0 ? (
-          <button onClick={() => navigate(`${base}/recognition`)}
-            className="flex items-center gap-2 rounded-md text-sm font-medium text-primary transition-colors hover:text-primary/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2">
-            <Award className="h-4 w-4" /> Recognize a teammate
-          </button>
-        ) : (
-          <div className="space-y-3">
-            {(data?.recognition?.recent ?? []).map((r) => (
-              <div key={r.id} className="flex items-start gap-3">
-                <PersonAvatar name={r.from_name} size="sm" className="mt-0.5" />
-                <div className="min-w-0">
-                  <p className="text-sm font-medium text-foreground">
-                    {r.from_name} <span className="font-normal text-muted-foreground">recognized you</span>
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    {BADGE_LABELS[r.badge_code] ?? r.badge_code}{r.points != null ? ` · +${r.points} pts` : ''}
-                  </p>
-                  {r.message && <p className="mt-0.5 line-clamp-2 text-xs italic text-foreground/70">“{r.message}”</p>}
+        <Movement eyebrow="Here’s your day" index={1}
+          action={{ label: 'Your story →', onClick: () => navigate(`${base}/timeline`) }}>
+          <AmbientLine className="mb-4">{dayInsight}</AmbientLine>
+          {activityQ.isLoading ? (
+            <LoadingState rows={3} compact />
+          ) : events.length === 0 ? (
+            <p className="text-sm text-muted-foreground">Nothing yet — your check-ins, approvals and good news will appear here.</p>
+          ) : (
+            <div className="space-y-4">{events.map((e) => <ActivityItem key={e.id} event={e} />)}</div>
+          )}
+        </Movement>
+
+        <Movement eyebrow="Your people" index={2}>
+          <AmbientLine className="mb-4">{peopleInsight}</AmbientLine>
+          {celebrations.length > 0 && (
+            <div className="mb-4 space-y-2.5">
+              {celebrations.map((c) => (
+                <CelebrationCard key={c.id} kind={c.kind} title={c.title} subtitle={c.subtitle}
+                  action={{ label: 'Wish', onClick: () => navigate(`${base}/community`) }} />
+              ))}
+            </div>
+          )}
+          {(data?.recognition?.recent ?? []).length === 0 ? (
+            <button onClick={() => navigate(`${base}/recognition`)}
+              className="flex items-center gap-2 rounded-md text-sm font-medium text-primary transition-colors hover:text-primary/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2">
+              <Award className="h-4 w-4" /> Recognize a teammate
+            </button>
+          ) : (
+            <div className="space-y-3">
+              {(data?.recognition?.recent ?? []).map((r) => (
+                <div key={r.id} className="flex items-start gap-3">
+                  <PersonAvatar name={r.from_name} size="sm" className="mt-0.5" decorative />
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-foreground">
+                      {r.from_name} <span className="font-normal text-muted-foreground">recognized you</span>
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      {BADGE_LABELS[r.badge_code] ?? r.badge_code}{r.points != null ? ` · +${r.points} pts` : ''}
+                    </p>
+                    {r.message && <p className="mt-0.5 line-clamp-2 text-xs italic text-foreground/70">“{r.message}”</p>}
+                  </div>
                 </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
+              ))}
+            </div>
+          )}
+        </Movement>
 
-      {/* ── Movement 6 — From around the company (borderless) ── */}
-      {(data?.feed_teaser ?? []).length > 0 && (
-        <div>
-          <Heading action="See all" onAction={() => navigate(`${base}/company`)}>From around the company</Heading>
-          <div className="space-y-4">
-            {(data?.feed_teaser ?? []).map((post) => (
-              <div key={post.id} className="flex gap-3">
-                <PersonAvatar name={post.author} size="sm" className="mt-0.5" />
-                <div className="min-w-0">
-                  <p className="text-sm font-medium text-foreground">{post.author}</p>
-                  <p className="mt-0.5 line-clamp-2 text-sm text-muted-foreground">{post.body}</p>
-                  <p className="mt-0.5 text-[11px] text-muted-foreground">{timeAgo(post.created_at)}</p>
+        {(data?.feed_teaser ?? []).length > 0 && (
+          <Movement eyebrow="Around the company" index={3}
+            action={{ label: 'See all', onClick: () => navigate(`${base}/company`) }}>
+            <div className="space-y-4">
+              {(data?.feed_teaser ?? []).map((post) => (
+                <div key={post.id} className="flex gap-3">
+                  <PersonAvatar name={post.author} size="sm" className="mt-0.5" decorative />
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-foreground">{post.author}</p>
+                    <p className="mt-0.5 line-clamp-2 text-sm text-muted-foreground">{post.body}</p>
+                    <p className="mt-0.5 text-[11px] text-muted-foreground">{timeAgo(post.created_at)}</p>
+                  </div>
                 </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
+              ))}
+            </div>
+          </Movement>
+        )}
 
-      {/* ── Movement 7 — My Progress (primitive; silent when empty) ── */}
-      {progress?.show && <ProgressBand data={progress} />}
+        {progress?.show && <Movement index={4}><ProgressBand data={progress} /></Movement>}
 
-      {/* ── Holidays — a calm, glanceable line ── */}
-      {(data?.upcoming_holidays ?? []).length > 0 && (
-        <div className="flex items-center gap-2 text-sm">
-          <CalendarDays className="h-4 w-4 text-primary" />
-          <span className="text-foreground">
-            Next holiday: <span className="font-medium">{data!.upcoming_holidays[0]!.name}</span>
-          </span>
-          <span className="ml-auto text-xs text-muted-foreground">
-            {data!.upcoming_holidays[0]!.days_until === 0 ? 'Today'
-              : data!.upcoming_holidays[0]!.days_until === 1 ? 'Tomorrow'
-              : `in ${data!.upcoming_holidays[0]!.days_until}d`}
-          </span>
-        </div>
-      )}
+        {(data?.upcoming_holidays ?? []).length > 0 && (
+          <Movement index={5}>
+            <div className="flex items-center gap-2 text-sm">
+              <CalendarDays className="h-4 w-4 text-primary" />
+              <span className="text-foreground">
+                Next holiday: <span className="font-medium">{data!.upcoming_holidays[0]!.name}</span>
+              </span>
+              <span className="ml-auto text-xs text-muted-foreground">
+                {data!.upcoming_holidays[0]!.days_until === 0 ? 'Today'
+                  : data!.upcoming_holidays[0]!.days_until === 1 ? 'Tomorrow'
+                  : `in ${data!.upcoming_holidays[0]!.days_until}d`}
+              </span>
+            </div>
+          </Movement>
+        )}
 
-      {/* ── Movement 9 — AI reflection (the signature gradient, via the primitive) ── */}
-      {reflection?.insight && (
-        <ReflectionCard
-          insight={reflection.insight}
-          action={reflection.action}
-          onAction={(href) => navigate(`${base}${href}`)}
-        />
-      )}
+        {reflection?.insight && (
+          <Movement index={6}>
+            <ReflectionCard insight={reflection.insight} action={reflection.action} onAction={(href) => navigate(`${base}${href}`)} />
+          </Movement>
+        )}
 
-      {/* ── Movement 10 — Done for today (the calm closer, emotional payoff) ── */}
-      {(() => {
-        const name = fullName.split(' ')[0]
-        const pending = signals.length > 0 || (kpis?.open_actions ?? 0) > 0
-        return (
-          <p className="flex items-center justify-center gap-2 pb-2 pt-1 text-center text-sm text-muted-foreground">
+        {/* Done for today — the calm closer + the narration into Timeline. */}
+        <Movement index={7} className="pt-2 text-center">
+          <p className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
             <CheckCircle2 className="h-4 w-4 text-success" />
             {pending
-              ? `A couple of things are still waiting, ${name} — but nothing that can’t wait for coffee.`
-              : `That’s everything, ${name}. You’re all set — have a great day.`}
+              ? `A couple of things are still waiting, ${firstName} — but nothing that can’t wait for coffee.`
+              : `That’s everything, ${firstName}. You’re all set — have a great day.`}
           </p>
-        )
-      })()}
-
-      {/* Home narrates into Timeline — today's chapter is part of a longer story. */}
-      {(() => {
-        const m = data?.profile?.tenure_months ?? 0
-        const tenure = m < 1 ? 'Today is day one'
-          : m < 12 ? `${m} month${m > 1 ? 's' : ''} in`
-          : `${Math.floor(m / 12)} year${Math.floor(m / 12) > 1 ? 's' : ''} and counting`
-        return (
-          <button
-            onClick={() => navigate(`${base}/timeline`)}
-            className="mx-auto flex items-center gap-2 pb-1 text-center text-xs text-muted-foreground transition-colors hover:text-foreground"
-          >
+          <button onClick={() => navigate(`${base}/timeline`)}
+            className="mx-auto mt-3 flex items-center gap-2 rounded-md text-xs text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2">
             <Sparkles className="h-3.5 w-3.5 text-brand-teal" />
-            <span>{tenure}. Revisit your story so far →</span>
+            <span>{tenureLabel}. Revisit your story so far →</span>
           </button>
-        )
-      })()}
+        </Movement>
+      </div>
     </div>
   )
 }

@@ -1,4 +1,4 @@
-@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=JetBrains+Mono:wght@400;500;600;700&display=swap");
 @import "tailwindcss";
 @import "tw-animate-css";
 
@@ -17,6 +17,34 @@
   }
 }
 
+/* ─────────────────────────────────────────────────────────────────────────────
+   Experience Cloud Visual Language v2 — "Atmospheres"
+   Depth through light (layered soft shadows), one premium easing, one entrance.
+   ───────────────────────────────────────────────────────────────────────────── */
+@theme inline {
+  --ease-premium: cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+/* Depth — content floats on light, never borders. Two elevations. */
+.shadow-depth {
+  box-shadow: 0 1px 2px -1px rgb(26 77 143 / 0.08), 0 8px 24px -12px rgb(26 77 143 / 0.16);
+}
+.shadow-depth-lg {
+  box-shadow: 0 2px 4px -2px rgb(26 77 143 / 0.10), 0 18px 48px -16px rgb(26 77 143 / 0.22);
+}
+.dark .shadow-depth    { box-shadow: 0 1px 2px -1px rgb(0 0 0 / 0.4), 0 8px 24px -12px rgb(0 0 0 / 0.5); }
+.dark .shadow-depth-lg { box-shadow: 0 2px 4px -2px rgb(0 0 0 / 0.5), 0 18px 48px -16px rgb(0 0 0 / 0.6); }
+
+/* The signature entrance — a short rise + fade, premium easing. Staggered by the
+   component via animation-delay. Honoured only when motion is allowed. */
+@keyframes atmo-rise {
+  from { opacity: 0; transform: translateY(14px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .atmo-rise { animation: atmo-rise 0.52s var(--ease-premium) both; }
+}
+
 /*
  * CognixHR Brand — HRMS Design System 2.0
  * Professional, premium, conservative next-gen visual system.
@@ -29,6 +57,8 @@
   --font-sans:    "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif;
   --font-mono:    "JetBrains Mono", ui-monospace, "Cascadia Code", "Fira Code", monospace;
   --font-display: "Inter", ui-sans-serif, system-ui, sans-serif;
+  /* Visual Language v2 — the display serif that carries the emotional beat (Fraunces). */
+  --font-serif:   "Fraunces", ui-serif, Georgia, "Times New Roman", serif;
 
   --radius-sm:  calc(var(--radius) - 4px);
   --radius-md:  calc(var(--radius) - 2px);
