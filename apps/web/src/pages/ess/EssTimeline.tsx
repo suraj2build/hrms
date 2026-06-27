@@ -11,8 +11,9 @@
  * Quality bar: strip the branding and it should read as "the story of my career".
  */
 
+import { useNavigate, useLocation } from 'react-router-dom'
 import { FocusPanel } from '@/components/experience/FocusPanel'
-import { JourneyRail } from '@/components/experience/JourneyRail'
+import { JourneyEcho } from '@/components/experience/JourneyRail'
 import { ReflectionCard } from '@/components/experience/ReflectionCard'
 import { ProgressBand } from '@/components/experience/ProgressBand'
 import { Chapter } from '@/components/experience/Chapter'
@@ -35,6 +36,9 @@ function ChapterBlock({ c, index }: { c: ChapterView; index: number }) {
 
 export function EssTimeline() {
   const t = useTimeline()
+  const navigate = useNavigate()
+  const { pathname } = useLocation()
+  const base = pathname.startsWith('/manager/self') ? '/manager/self' : '/ess'
 
   if (t.isLoading) return <div className="mx-auto max-w-[720px] py-2"><LoadingState rows={5} label="Gathering your story…" /></div>
   if (t.isError)   return <ErrorState title="Couldn’t load your timeline" onRetry={() => t.refetch()} />
@@ -47,8 +51,8 @@ export function EssTimeline() {
       {/* Focus — the journey framing (orients, no action). */}
       {t.focus && <FocusPanel eyebrow={t.focus.eyebrow} sentence={t.focus.sentence} />}
 
-      {/* Journey — the Growth spine: how I've grown, before what happened. */}
-      <JourneyRail steps={t.journey} />
+      {/* Growth spine lives in My Growth now — Timeline keeps a compact echo. */}
+      <JourneyEcho count={t.journey.length} onOpen={() => navigate(`${base}/identity`)} />
 
       {empty && (
         <p className="py-16 text-center text-sm text-muted-foreground">

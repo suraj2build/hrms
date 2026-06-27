@@ -24,6 +24,7 @@
 
 import type { FastifyInstance } from 'fastify'
 import { projectEvents, type ExperienceEvent } from './events.js'
+import { projectJourney, type JourneyStep } from './journey.js'
 
 // The Story-view item — Patterns §3.3 Event projection. No href: memories don't eject.
 interface StoryItem {
@@ -37,18 +38,6 @@ interface StoryItem {
 }
 interface ProgressBand { heading: string; ambient: string; hints: { label: string; value: string }[] }
 
-/**
- * A JourneyStep — one beat of the employee's GROWTH spine (the career biography).
- * Distinct from a memory row: the Journey reads FORWARD (joined → now) and answers
- * "how have I grown?", where Timeline reads backward and answers "what happened?".
- * Only REAL milestones ever appear. Confirmation / promotion / role-change /
- * team-change / learning slot in automatically the day their event sources exist —
- * never fabricated. This is the seed of the Growth lens that Identity will own.
- */
-type JourneyKind =
-  | 'joined' | 'first_payslip' | 'first_recognition' | 'confirmation'
-  | 'promotion' | 'role_change' | 'team_change' | 'learning' | 'anniversary'
-interface JourneyStep { id: string; kind: JourneyKind; label: string; at: string; detail?: string; person?: string }
 interface Chapter {
   key:      string
   title:    string
@@ -123,28 +112,19 @@ export default async function essTimelineRoutes(fastify: FastifyInstance) {
     const firstPage = !cursor
     const now = new Date()
 
-    // The canonical stream + the employee's "firsts" (so we can mark them as milestones
-    // and build the Journey growth spine).
-    const [{ events, nextCursor }, emp, firstSlip, firstKudos] = await Promise.all([
+    // The canonical stream + the shared Growth-spine projector (one source of the
+    // "firsts" and the Journey — no duplicated milestone logic).
+    const [{ events, nextCursor }, emp, jr] = await Promise.all([
       projectEvents(fastify, { tenantId, employeeId, cursor, limit }),
       employeeId
         ? safe(fastify.supabase.from('employees').select('joining_date')
             .eq('id', employeeId).eq('tenant_id', tenantId).maybeSingle().then(r => r.data as any), null)
         : Promise.resolve(null),
-      employeeId
-        ? safe(fastify.supabase.from('payroll_slips').select('id, updated_at')
-            .eq('employee_id', employeeId).eq('tenant_id', tenantId).eq('status', 'finalized')
-            .order('updated_at', { ascending: true }).limit(1).maybeSingle().then(r => (r.data as any) ?? null), null)
-        : Promise.resolve(null),
-      employeeId
-        ? safe(fastify.supabase.from('recognition').select('id, from_employee, created_at')
-            .eq('tenant_id', tenantId).eq('to_employee', employeeId)
-            .order('created_at', { ascending: true }).limit(1).maybeSingle().then(r => (r.data as any) ?? null), null)
-        : Promise.resolve(null),
+      projectJourney(fastify, { tenantId, employeeId, now }),
     ])
     const join = (emp?.joining_date as string | null) ?? null
-    const firstSlipId  = (firstSlip  as any)?.id ?? null
-    const firstKudosId = (firstKudos as any)?.id ?? null
+    const firstSlipId  = jr.firstSlipId
+    const firstKudosId = jr.firstKudosId
 
     // ── Tell each event as a story; decide what's a memory vs routine noise. ──
     // Returns null to DROP (not worth remembering), { item, folded } otherwise.
@@ -254,40 +234,8 @@ export default async function essTimelineRoutes(fastify: FastifyInstance) {
         chapters[0]!.progress = { heading: 'This year so far', ambient: 'Momentum worth noticing — keep going.', hints }
       }
 
-      // ── Journey (the Growth spine) — REAL milestones only, forward-ordered. ──
-      // Pagination-independent: derived from the employee's lifecycle, not the page.
-      const steps: JourneyStep[] = []
-      if (join) {
-        const jat = join.length <= 10 ? join + 'T00:00:00Z' : join
-        const jd = new Date(jat)
-        if (!isNaN(jd.getTime())) {
-          steps.push({ id: 'jny:joined', kind: 'joined', label: 'Joined', at: jat })
-          // Service anniversaries — each completed year, real and dated.
-          const years = Math.floor((now.getTime() - jd.getTime()) / (365.25 * 86_400_000))
-          for (let y = 1; y <= years; y++) {
-            const a = new Date(jd); a.setUTCFullYear(jd.getUTCFullYear() + y)
-            if (a.getTime() > now.getTime()) break
-            steps.push({ id: `jny:anniv:${y}`, kind: 'anniversary', label: y === 1 ? '1 year' : `${y} years`, at: a.toISOString() })
-          }
-        }
-      }
-      if (firstSlip && (firstSlip as any).updated_at) {
-        steps.push({ id: 'jny:first_payslip', kind: 'first_payslip', label: 'First payslip', at: (firstSlip as any).updated_at })
-      }
-      if (firstKudos && (firstKudos as any).created_at) {
-        let giver: string | undefined
-        const gid = (firstKudos as any).from_employee
-        if (gid) {
-          const g = await safe(fastify.supabase.from('employees').select('first_name, last_name')
-            .eq('id', gid).eq('tenant_id', tenantId).maybeSingle().then(r => r.data as any), null)
-          giver = g ? `${g.first_name ?? ''} ${g.last_name ?? ''}`.trim() || undefined : undefined
-        }
-        steps.push({ id: 'jny:first_recognition', kind: 'first_recognition', label: 'First recognition',
-          at: (firstKudos as any).created_at, detail: giver ? `from ${giver}` : undefined, person: giver })
-      }
-      // Forward order (growth reads earliest → latest). Show only when there's a real arc.
-      steps.sort((a, b) => new Date(a.at).getTime() - new Date(b.at).getTime())
-      if (steps.length >= 2) journey = steps
+      // Journey (the Growth spine) — from the shared projector. Show only a real arc.
+      if (jr.steps.length >= 2) journey = jr.steps
     }
 
     // Origin (Closure) — forward-looking on day one, retrospective once there's a journey.

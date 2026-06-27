@@ -8,8 +8,9 @@
  * deep-links; Reflection punctuates after the first chapter.
  */
 
+import { useNavigate } from 'react-router-dom'
 import { FocusPanel } from '@/components/experience/FocusPanel'
-import { JourneyRail } from '@/components/experience/JourneyRail'
+import { JourneyEcho } from '@/components/experience/JourneyRail'
 import { ReflectionCard } from '@/components/experience/ReflectionCard'
 import { ProgressBand } from '@/components/experience/ProgressBand'
 import { Chapter } from '@/components/experience/Chapter'
@@ -28,8 +29,9 @@ function ChapterBlock({ c, index }: { c: ChapterView; index: number }) {
   )
 }
 
-export function MobileTimeline({ base: _base }: { base: string }) {
+export function MobileTimeline({ base }: { base: string }) {
   const t = useTimeline()
+  const navigate = useNavigate()
 
   if (t.isLoading) {
     return (
@@ -54,8 +56,8 @@ export function MobileTimeline({ base: _base }: { base: string }) {
     <div className="space-y-8 pb-4">
       {t.focus && <FocusPanel eyebrow={t.focus.eyebrow} sentence={t.focus.sentence} />}
 
-      {/* Journey — the Growth spine (forward-reading), before the memory. */}
-      <JourneyRail steps={t.journey} />
+      {/* Growth spine lives in My Growth now — Timeline keeps a compact echo. */}
+      <JourneyEcho count={t.journey.length} onOpen={() => navigate(`${base}/identity`)} />
 
       {empty && (
         <p className="py-14 text-center text-sm text-muted-foreground">

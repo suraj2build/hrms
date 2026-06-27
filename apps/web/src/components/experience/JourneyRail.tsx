@@ -42,6 +42,30 @@ function yr(iso: string): string {
   return isNaN(d.getTime()) ? '' : String(d.getUTCFullYear())
 }
 
+/**
+ * JourneyEcho — Timeline's compact echo of the Growth spine after the spine's
+ * canonical home moved to My Growth (Experience Map migration). Memory links to the
+ * growth surface rather than re-rendering the rail, so the two never duplicate.
+ */
+export function JourneyEcho({ count, onOpen }: { count: number; onOpen: () => void }) {
+  if (count < 2) return null
+  return (
+    <button
+      onClick={onOpen}
+      className="flex w-full items-center gap-3 rounded-2xl bg-[#15B8A6]/[0.06] px-4 py-3 text-left transition-colors hover:bg-[#15B8A6]/[0.10]"
+    >
+      <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-[#15B8A6]/12 text-[#15B8A6]">
+        <Milestone className="h-4 w-4" />
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block text-[13px] font-semibold text-foreground">Your growth journey</span>
+        <span className="block text-[11px] text-muted-foreground">{count} milestones so far — see how you’ve grown</span>
+      </span>
+      <span className="text-[13px] text-muted-foreground">→</span>
+    </button>
+  )
+}
+
 export function JourneyRail({ steps, className }: { steps: JourneyStep[]; className?: string }) {
   if (!steps || steps.length < 2) return null
   return (

@@ -50,6 +50,7 @@ interface NavGroup {
 
 const PILLARS: NavItem[] = [
   { label: 'Home',        icon: Home,      href: '/ess/home',        exact: true },
+  { label: 'My Growth',   icon: Rocket,    href: '/ess/identity'                 },
   { label: 'Community',   icon: Megaphone, href: '/ess/community'                },
   { label: 'FlowDesk',    icon: Inbox,     href: '/ess/flowdesk'                 },
   { label: 'Team',        icon: Users,     href: '/ess/team'                     },
