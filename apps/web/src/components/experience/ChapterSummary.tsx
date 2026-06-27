@@ -19,7 +19,7 @@ export function ChapterSummary({ label, items }: { label: string; items: Activit
         onClick={() => setOpen(o => !o)}
         className="flex w-full items-center gap-3 rounded-xl py-1 text-left text-muted-foreground transition-colors hover:text-foreground"
       >
-        <span className="grid h-8 w-8 shrink-0 place-items-center rounded-xl bg-muted text-muted-foreground/70">
+        <span className="grid h-8 w-8 shrink-0 place-items-center rounded-xl bg-muted text-muted-foreground">
           <Receipt className="h-4 w-4" />
         </span>
         <span className="flex-1 text-xs">{label}</span>

@@ -86,7 +86,7 @@ export function ActivityItem({ event, className, onClick }: { event: ActivityEve
         <p className={cn('text-xs text-foreground', milestone ? 'font-bold' : 'font-semibold')}>{event.title}</p>
         {event.body && <p className="mt-0.5 line-clamp-1 text-xs text-muted-foreground">{event.body}</p>}
       </div>
-      <span className="shrink-0 text-[10px] text-muted-foreground/70">{timeAgo(event.at)}</span>
+      <span className="shrink-0 text-[11px] text-muted-foreground">{timeAgo(event.at)}</span>
     </div>
   )
 }

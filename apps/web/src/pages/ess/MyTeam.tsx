@@ -40,7 +40,7 @@ function FaceRow({ people }: { people: Party[] }) {
           <PersonAvatar name={p.name} size="md" decorative />
           <span className="min-w-0">
             <span className="block text-xs font-medium text-foreground">{p.name}</span>
-            {p.subtitle && <span className="block text-[10px] text-muted-foreground">{p.subtitle}</span>}
+            {p.subtitle && <span className="block text-[11px] text-muted-foreground">{p.subtitle}</span>}
           </span>
         </span>
       ))}

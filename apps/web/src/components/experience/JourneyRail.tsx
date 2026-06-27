@@ -87,7 +87,7 @@ export function JourneyRail({ steps, className }: { steps: JourneyStep[]; classN
                   </span>
                 )}
                 <span className="mt-2 text-[12px] font-semibold leading-tight text-foreground">{s.label}</span>
-                <span className="mt-0.5 text-[10px] text-muted-foreground">{s.detail ?? yr(s.at)}</span>
+                <span className="mt-0.5 text-[11px] text-muted-foreground">{s.detail ?? yr(s.at)}</span>
               </li>
             )
           })}
