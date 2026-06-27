@@ -6,7 +6,7 @@
  */
 
 import { Outlet, Navigate, useNavigate, useLocation } from 'react-router-dom'
-import { Suspense, useState } from 'react'
+import { Suspense, useState, useEffect } from 'react'
 import { Loader2, AlertTriangle, X } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
 import { EmployeeSidebar } from './EmployeeSidebar'
@@ -121,6 +121,21 @@ export function EssShell() {
   // inline right column (celebration card, also today, etc).
   const isHomePage = pathname === '/ess/home' || pathname === '/ess/dashboard' || pathname === '/ess'
 
+  // Apply dark theme to the document while ESS is mounted. The existing theme
+  // system uses data-theme on documentElement — we save/restore around the ESS session
+  // so the user's chosen theme comes back when they leave ESS.
+  useEffect(() => {
+    const root = document.documentElement
+    const savedTheme = root.dataset.theme ?? ''
+    const savedScheme = root.style.colorScheme
+    root.dataset.theme = 'dark'
+    root.style.colorScheme = 'dark'
+    return () => {
+      root.dataset.theme = savedTheme
+      root.style.colorScheme = savedScheme
+    }
+  }, [])
+
   // Gate only on the first bootstrap — not on silent token refreshes (TOKEN_REFRESHED).
   if (isBootstrapping) return <LoadingScreen />
 
@@ -132,7 +147,7 @@ export function EssShell() {
 
   return (
     <CommandPaletteProvider>
-      <div className="dark flex h-screen overflow-hidden bg-background">
+      <div className="flex h-screen overflow-hidden bg-background">
         {!atThreshold && <EmployeeSidebar />}
         <div className="flex flex-col flex-1 overflow-hidden">
           {!atThreshold && <Topbar />}
