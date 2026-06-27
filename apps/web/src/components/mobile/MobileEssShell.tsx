@@ -14,6 +14,8 @@ import { MobileTimeline } from './screens/MobileTimeline'
 import { MyGrowth } from '@/pages/ess/MyGrowth'
 import { MyAttention } from '@/pages/ess/MyAttention'
 import { MyTeam } from '@/pages/ess/MyTeam'
+import { MyCompany } from '@/pages/ess/MyCompany'
+import { MyAssistant } from '@/pages/ess/MyAssistant'
 import type { Signal } from '@/components/experience/SignalCard'
 import { MobileAttendance } from './screens/MobileAttendance'
 import { MobileLeave } from './screens/MobileLeave'
@@ -136,6 +138,8 @@ function MobileRouter({ base }: { base: string }) {
   if (sub.startsWith('/identity')) return <MyGrowth />
   if (sub.startsWith('/attention')) return <MyAttention />
   if (sub.startsWith('/team')) return <MyTeam />
+  if (sub.startsWith('/company')) return <MyCompany />
+  if (sub.startsWith('/assistant')) return <MyAssistant />
   if (sub.startsWith('/attendance')) return <MobileAttendance base={base} />
   if (sub.startsWith('/leave')) return <MobileLeave base={base} />
   if (sub.startsWith('/compensation')) return <MobilePayslip base={base} />

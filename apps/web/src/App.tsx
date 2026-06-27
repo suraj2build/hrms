@@ -29,6 +29,8 @@ import { EssTimeline }       from '@/pages/ess/EssTimeline'
 import { MyGrowth }          from '@/pages/ess/MyGrowth'
 import { MyAttention }       from '@/pages/ess/MyAttention'
 import { MyTeam }            from '@/pages/ess/MyTeam'
+import { MyCompany }         from '@/pages/ess/MyCompany'
+import { MyAssistant }       from '@/pages/ess/MyAssistant'
 // Manager-only dashboards — lazy (only managers hit them; keeps them off the main chunk).
 const ManagerDashboardPage   = lazy(() => import('@/pages/dashboard/ManagerDashboard').then(m => ({ default: m.ManagerDashboardPage })))
 const ManagerTeamPerformance = lazy(() => import('@/pages/dashboard/ManagerTeamPerformance').then(m => ({ default: m.ManagerTeamPerformance })))
@@ -963,6 +965,8 @@ export default function App() {
                 <Route path="/manager/self/timeline"                     element={<EssTimeline />} />
                 <Route path="/manager/self/identity"                     element={<MyGrowth />} />
                 <Route path="/manager/self/attention"                    element={<MyAttention />} />
+                <Route path="/manager/self/company"                      element={<MyCompany />} />
+                <Route path="/manager/self/assistant"                    element={<MyAssistant />} />
                 <Route path="/manager/self/dashboard"                    element={<Navigate to="/manager/self/home" replace />} />
                 <Route path="/manager/self/attendance"                   element={<MyAttendance />} />
                 <Route path="/manager/self/attendance/regularization"    element={<Navigate to="/manager/self/attendance" replace />} />
@@ -1006,6 +1010,8 @@ export default function App() {
                 <Route path="/ess/timeline"               element={<EssTimeline />} />
                 <Route path="/ess/identity"               element={<MyGrowth />} />
                 <Route path="/ess/attention"              element={<MyAttention />} />
+                <Route path="/ess/company"                element={<MyCompany />} />
+                <Route path="/ess/assistant"              element={<MyAssistant />} />
                 <Route path="/ess/dashboard"              element={<Navigate to="/ess/home" replace />} />
                 <Route path="/ess/recognition"            element={<EssRecognition />} />
                 <Route path="/ess/community"              element={<EssCommunity />} />
