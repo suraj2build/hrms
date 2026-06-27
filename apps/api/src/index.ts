@@ -260,6 +260,8 @@ import essSignalsRoute                      from './routes/ess/signals.js'
 import essActivityRoute                     from './routes/ess/activity.js'
 import essProgressRoute                     from './routes/ess/progress.js'
 import essReflectionRoute                   from './routes/ess/reflection.js'
+import essEventsRoute                        from './routes/ess/events.js'
+import essTimelineRoute                      from './routes/ess/timeline.js'
 import assistantRoutes                      from './routes/assistant/index.js'
 
 // Routes — Governance Intelligence (Sprint 2)
@@ -745,6 +747,8 @@ async function start() {
   await fastify.register(essActivityRoute,    { prefix: '/ess' })   // GET /ess/activity (Experience Core — "what happened")
   await fastify.register(essProgressRoute,    { prefix: '/ess' })   // GET /ess/progress (Experience Core — "am I doing well")
   await fastify.register(essReflectionRoute,  { prefix: '/ess' })   // GET /ess/reflection (Experience Core — memory-aware insight)
+  await fastify.register(essEventsRoute,       { prefix: '/ess' })   // GET /ess/events (Experience Core — THE canonical Event stream)
+  await fastify.register(essTimelineRoute,     { prefix: '/ess' })   // GET /ess/timeline (Story lens over canonical Events — employee memory)
   await fastify.register(essSelfServiceRoute)                       // GET/POST/PUT/DELETE /ess/me/* (P4.1 data ownership)
   await fastify.register(assistantRoutes)                           // AI Assistant: /assistant/chat + /assistant/config
 
