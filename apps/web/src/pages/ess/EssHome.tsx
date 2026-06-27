@@ -24,7 +24,6 @@ import { QuickActions, type Capability } from '@/components/experience/QuickActi
 import { CelebrationCard } from '@/components/experience/CelebrationCard'
 import { PersonAvatar } from '@/components/experience/PersonAvatar'
 import { AmbientLine } from '@/components/experience/AmbientLine'
-import { Arrival } from '@/components/experience/Arrival'
 import { ReflectionCard } from '@/components/experience/ReflectionCard'
 import { ProgressBand } from '@/components/experience/ProgressBand'
 import { type DayContext } from '@/components/experience/resolveGreeting'
@@ -180,9 +179,7 @@ export function EssHome() {
 
   return (
     <>
-      <Arrival dayAnchorId="ess-your-day" />
-      {/* ── Below-fold: the day unfolds calmly ── */}
-      <div id="ess-your-day" className="w-full">
+      <div className="w-full">
       {isLoading ? (
         <div className="py-16"><LoadingState rows={5} label="Putting your day together…" /></div>
       ) : isError ? (
