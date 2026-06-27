@@ -12,6 +12,8 @@ import { MobileBottomNav, employeeTabs } from './MobileBottomNav'
 import { MobileHome } from './screens/MobileHome'
 import { MobileTimeline } from './screens/MobileTimeline'
 import { MyGrowth } from '@/pages/ess/MyGrowth'
+import { MyAttention } from '@/pages/ess/MyAttention'
+import type { Signal } from '@/components/experience/SignalCard'
 import { MobileAttendance } from './screens/MobileAttendance'
 import { MobileLeave } from './screens/MobileLeave'
 import { MobilePayslip } from './screens/MobilePayslip'
@@ -58,6 +60,13 @@ export function MobileEssShell({ previewHome = false }: { previewHome?: boolean 
   })
   const greet = resolveGreeting(home?.profile?.name ?? profile?.full_name ?? 'there', home?.context, new Date())
 
+  // The bell badge fires ONLY when something genuinely needs you now (never for
+  // "waiting" or info) — My Attention is meant to reach zero, not accumulate.
+  const { data: sig } = useQuery<{ signals: Signal[] }>({
+    queryKey: ['ess-signals'], queryFn: () => api.get('/ess/signals'), staleTime: 60_000,
+  })
+  const needsYou = (sig?.signals ?? []).some(s => s.intent === 'needs_you')
+
   const onFab = () => navigate(`${base}/attendance`)
 
   return (
@@ -76,9 +85,9 @@ export function MobileEssShell({ previewHome = false }: { previewHome?: boolean 
               <span className="block line-clamp-1 text-[11px] text-white/80">{greet.subline}</span>
             </span>
           </span>
-          <button aria-label="Notifications" onClick={() => navigate(`${base}/approvals`)} className="relative">
+          <button aria-label="What needs you" onClick={() => navigate(`${base}/attention`)} className="relative">
             <Bell className="h-5 w-5 text-white/90" />
-            <span className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-[#F5A623] ring-2 ring-[#1A4D8F]" />
+            {needsYou && <span className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-[#F5A623] ring-2 ring-[#1A4D8F]" />}
           </button>
         </div>
 
@@ -125,6 +134,7 @@ function MobileRouter({ base }: { base: string }) {
   if (sub === '' || sub === '/' || sub.startsWith('/home') || sub.startsWith('/dashboard')) return <MobileHome base={base} />
   if (sub.startsWith('/timeline')) return <MobileTimeline base={base} />
   if (sub.startsWith('/identity')) return <MyGrowth />
+  if (sub.startsWith('/attention')) return <MyAttention />
   if (sub.startsWith('/attendance')) return <MobileAttendance base={base} />
   if (sub.startsWith('/leave')) return <MobileLeave base={base} />
   if (sub.startsWith('/compensation')) return <MobilePayslip base={base} />

@@ -1,49 +1,58 @@
 /**
- * GET /ess/signals — the first Experience Core Service.
+ * GET /ess/signals — the Need lens ("what needs you").
  *
- * A Signal is a *current truth about the employee's work that may need attention*,
- * carrying a contextual action. This is the "what needs you" layer that Home
- * composes into ranked cards (EXPERIENCE_CLOUD_UX_BLUEPRINT.md §1.1, §2).
+ * A Signal is a *current truth that may need the employee to act*, carrying a
+ * contextual action. Home composes the top-3 *peek*; My Attention composes the full
+ * set, grouped by INTENT (EXPERIENCE_ATTENTION_DESIGN.md). Reuse-first: projected
+ * from data the platform already owns — no new storage, read + rank only.
  *
- * Reuse-first: signals are PROJECTED from data the platform already owns
- * (attendance, approvals, own requests, documents, leave). No new storage, no
- * new business logic — this service only *reads and ranks*.
+ * Each signal carries an `intent` so My Attention can group it:
+ *   - needs_you  — your decision/action/review (approvals, missing punch, expiring doc)
+ *   - can_wait   — low-urgency, still actionable
+ *   - waiting    — your in-flight request (track only; you can't act)
+ *   - info_only  — pure FYI; EXCLUDED from My Attention (it can't be "cleared", so it
+ *                  would violate the shrink principle), but still available to Home.
  *
- * Scope: tenant + self enforced server-side. Managers additionally get team
- * approval signals. Only the signals Home needs are exposed — the Experience
- * Core grows surface-by-surface, never speculatively.
- *
- * Each signal: { id, type, severity, priority, title, body?, action? }
- *   - priority: higher = surfaced first (deterministic ranking, ML-ready later)
- *   - action.href: a path RELATIVE to the ESS base (the client prefixes it)
+ * Manager approvals are surfaced people-first: individual pending requests with the
+ * requester's face, scoped to direct reports (admins see tenant-wide).
  */
 
 import type { FastifyInstance } from 'fastify'
+import { getDirectReportIds } from '../../lib/manager-scope.js'
 
 type Severity = 'info' | 'warning' | 'critical'
+type Intent   = 'needs_you' | 'can_wait' | 'waiting' | 'info_only'
 
 interface Signal {
   id:       string
   type:     'attendance' | 'approvals' | 'requests' | 'documents' | 'leave'
   severity: Severity
   priority: number
+  intent:   Intent
   title:    string
   body?:    string
+  person?:  string            // requester's name → a face on approval signals
   action?:  { label: string; href: string }
 }
 
-function todayISO(): string {
-  return new Date().toISOString().slice(0, 10)
-}
+function todayISO(): string { return new Date().toISOString().slice(0, 10) }
 function offsetISO(days: number): string {
   const d = new Date(); d.setDate(d.getDate() + days); return d.toISOString().slice(0, 10)
 }
 function isWeekend(): boolean {
-  const dow = new Date().getDay()  // 0 Sun … 6 Sat
+  const dow = new Date().getDay()
   return dow === 0 || dow === 6
 }
-
-/** Adopt a Supabase PromiseLike into a real Promise, defaulting on any error. */
+function daysBetween(from?: string, to?: string): number {
+  if (!from || !to) return 1
+  const a = new Date(from + 'T00:00:00Z').getTime(), b = new Date(to + 'T00:00:00Z').getTime()
+  if (isNaN(a) || isNaN(b)) return 1
+  return Math.max(1, Math.round((b - a) / 86_400_000) + 1)
+}
+function fullName(e: { first_name?: string | null; last_name?: string | null } | null | undefined): string {
+  if (!e) return 'A teammate'
+  return `${e.first_name ?? ''} ${e.last_name ?? ''}`.trim() || 'A teammate'
+}
 function safe<T>(p: PromiseLike<T>, fallback: T): Promise<T> {
   return Promise.resolve(p).then(v => v, () => fallback)
 }
@@ -61,13 +70,12 @@ export default async function essSignalsRoutes(fastify: FastifyInstance) {
     const employeeId = (profileRow as any)?.employee_id as string | null
     const role       = (profileRow as any)?.role as string | null
     const isManager  = ['manager', 'hr_admin', 'super_admin'].includes(role ?? '')
+    const isAdmin    = ['hr_admin', 'super_admin'].includes(role ?? '')
 
-    // Not linked to an employee → no personal signals (managers still get approvals).
     const today    = todayISO()
     const in30Days = offsetISO(30)
 
-    // Parallel, each section defensive — a failing source yields no signal, never a 500.
-    const [todayAtt, ownPendingLeave, ownPendingReg, expiringDocs, leaveBal, mgrLeave, mgrReg] =
+    const [todayAtt, ownPendingLeave, ownPendingReg, expiringDocs, leaveBal, mgrLeaveRows, mgrReg] =
       await Promise.all([
         employeeId
           ? safe(fastify.supabase.from('attendance').select('check_in, check_out, status')
@@ -96,11 +104,22 @@ export default async function essSignalsRoutes(fastify: FastifyInstance) {
               .eq('employee_id', employeeId).eq('tenant_id', tenantId)
               .then(r => (r.data ?? []) as any[]), [] as any[])
           : Promise.resolve([] as any[]),
-        isManager
-          ? safe(fastify.supabase.from('leave_requests').select('id', { count: 'exact', head: true })
-              .eq('tenant_id', tenantId).eq('status', 'pending')
-              .then(r => r.count ?? 0), 0)
-          : Promise.resolve(0),
+        // Manager approvals — individual pending leave, scoped to reports (admins: tenant-wide).
+        isManager && employeeId
+          ? (async () => {
+              let ids: string[] | null = null
+              if (!isAdmin) {
+                ids = await getDirectReportIds(fastify.supabase, tenantId, employeeId)
+                if (!ids.length) return [] as any[]
+              }
+              let q = fastify.supabase.from('leave_requests')
+                .select('id, employee_id, from_date, to_date, leave_types(name)')
+                .eq('tenant_id', tenantId).eq('status', 'pending').order('from_date').limit(6)
+              if (ids) q = q.in('employee_id', ids)
+              const { data } = await q
+              return (data ?? []) as any[]
+            })().catch(() => [] as any[])
+          : Promise.resolve([] as any[]),
         isManager
           ? safe(fastify.supabase.from('attendance_regularisation').select('id', { count: 'exact', head: true })
               .eq('tenant_id', tenantId).eq('status', 'pending')
@@ -110,29 +129,58 @@ export default async function essSignalsRoutes(fastify: FastifyInstance) {
 
     const signals: Signal[] = []
 
-    // 1. Manager — team approvals waiting. Highest urgency.
-    const approvals = (mgrLeave as number) + (mgrReg as number)
-    if (isManager && approvals > 0) {
+    // 1. Manager — team approvals, people-first (one card per requester, a face each).
+    const apprRows = mgrLeaveRows as any[]
+    if (apprRows.length) {
+      const ids = [...new Set(apprRows.map(r => r.employee_id).filter(Boolean))]
+      const nameMap = new Map<string, string>()
+      if (ids.length) {
+        const ppl = await safe(fastify.supabase.from('employees').select('id, first_name, last_name')
+          .eq('tenant_id', tenantId).in('id', ids).then(r => (r.data ?? []) as any[]), [] as any[])
+        for (const p of ppl as any[]) nameMap.set(p.id, fullName(p))
+      }
+      for (const r of apprRows.slice(0, 5)) {
+        const who  = nameMap.get(r.employee_id) ?? 'A teammate'
+        const lt   = Array.isArray(r.leave_types) ? r.leave_types[0] : r.leave_types
+        const days = daysBetween(r.from_date, r.to_date)
+        signals.push({
+          id: `appr_${r.id}`, type: 'approvals', severity: 'warning', priority: 100, intent: 'needs_you',
+          person: who,
+          title: `${who} requested ${days} day${days > 1 ? 's' : ''}${lt?.name ? ` of ${String(lt.name).toLowerCase()}` : ' leave'}`,
+          body: `${r.from_date} → ${r.to_date}`,
+          action: { label: 'Review', href: '/flowdesk' },
+        })
+      }
+      if (apprRows.length > 5) {
+        signals.push({
+          id: 'appr_more', type: 'approvals', severity: 'info', priority: 50, intent: 'can_wait',
+          title: `${apprRows.length - 5} more approval${apprRows.length - 5 > 1 ? 's' : ''} waiting`,
+          body: 'Review the rest in FlowDesk.', action: { label: 'Review', href: '/flowdesk' },
+        })
+      }
+    }
+
+    // 2. Manager — attendance corrections (aggregate).
+    if (isManager && (mgrReg as number) > 0) {
       signals.push({
-        id: 'team_approvals', type: 'approvals', severity: 'warning', priority: 100,
-        title: `${approvals} approval${approvals > 1 ? 's' : ''} awaiting you`,
-        body: 'Review and decide in FlowDesk.',
-        action: { label: 'Review', href: '/flowdesk' },
+        id: 'team_reg', type: 'attendance', severity: 'warning', priority: 95, intent: 'needs_you',
+        title: `${mgrReg} attendance correction${(mgrReg as number) > 1 ? 's' : ''} to review`,
+        body: 'Approve or decline in FlowDesk.', action: { label: 'Review', href: '/flowdesk' },
       })
     }
 
-    // 2. Attendance — punch state (suppressed on weekends; no shift logic needed).
+    // 3. Attendance — punch state (suppressed on weekends).
     if (employeeId && !isWeekend()) {
       if (!todayAtt?.check_in) {
         signals.push({
-          id: 'no_check_in', type: 'attendance', severity: 'warning', priority: 90,
+          id: 'no_check_in', type: 'attendance', severity: 'warning', priority: 90, intent: 'needs_you',
           title: 'You haven’t checked in today',
           body: 'Punch in or raise a regularization if you’re working remotely.',
           action: { label: 'Attendance', href: '/attendance' },
         })
       } else if (todayAtt.check_in && !todayAtt.check_out) {
         signals.push({
-          id: 'no_check_out', type: 'attendance', severity: 'info', priority: 40,
+          id: 'no_check_out', type: 'attendance', severity: 'info', priority: 40, intent: 'can_wait',
           title: 'You’re checked in',
           body: 'Remember to check out at the end of your day.',
           action: { label: 'Attendance', href: '/attendance' },
@@ -140,43 +188,42 @@ export default async function essSignalsRoutes(fastify: FastifyInstance) {
       }
     }
 
-    // 3. Documents expiring within 30 days.
+    // 4. Documents expiring within 30 days.
     for (const doc of (expiringDocs as any[])) {
       const days = Math.max(0, Math.round(
         (new Date(doc.expires_at + 'T12:00:00Z').getTime() - new Date(today + 'T12:00:00Z').getTime()) / 86_400_000))
+      const urgent = days <= 7
       signals.push({
-        id: `doc_expiry_${doc.name}`, type: 'documents', severity: days <= 7 ? 'warning' : 'info', priority: 70,
+        id: `doc_expiry_${doc.name}`, type: 'documents', severity: urgent ? 'warning' : 'info', priority: 70,
+        intent: urgent ? 'needs_you' : 'can_wait',
         title: `${doc.name} expires in ${days} day${days === 1 ? '' : 's'}`,
         body: 'Upload a renewed copy or contact HR.',
         action: { label: 'Documents', href: '/documents' },
       })
     }
 
-    // 4. Zero leave balance (high-confidence; no arbitrary threshold).
+    // 5. Zero leave balance — pure FYI, can't be cleared → info_only (excluded from Attention).
     const totalLeave = (leaveBal as any[]).reduce((s, b) => s + Number(b.balance ?? 0), 0)
     if (employeeId && (leaveBal as any[]).length > 0 && totalLeave <= 0) {
       signals.push({
-        id: 'no_leave', type: 'leave', severity: 'info', priority: 60,
+        id: 'no_leave', type: 'leave', severity: 'info', priority: 60, intent: 'info_only',
         title: 'No leave balance remaining',
         body: 'You’ve used your available leave for now.',
         action: { label: 'Leave', href: '/leave/balance' },
       })
     }
 
-    // 5. Your own requests in progress (gentle, lowest urgency).
+    // 6. Your own requests in progress — waiting on others (track only).
     const ownPending = (ownPendingLeave as number) + (ownPendingReg as number)
     if (ownPending > 0) {
       signals.push({
-        id: 'own_requests', type: 'requests', severity: 'info', priority: 30,
+        id: 'own_requests', type: 'requests', severity: 'info', priority: 30, intent: 'waiting',
         title: `${ownPending} request${ownPending > 1 ? 's' : ''} in progress`,
-        body: 'Track status in FlowDesk.',
-        action: { label: 'Track', href: '/flowdesk' },
+        body: 'Pending with your approver.', action: { label: 'Track', href: '/flowdesk' },
       })
     }
 
-    // Ranked, highest priority first.
     signals.sort((a, b) => b.priority - a.priority)
-
     return reply.send({ signals })
   })
 }

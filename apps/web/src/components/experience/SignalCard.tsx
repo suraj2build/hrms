@@ -17,17 +17,21 @@ import {
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
+import { PersonAvatar } from './PersonAvatar'
 
 export type SignalSeverity = 'info' | 'warning' | 'critical'
 export type SignalType = 'attendance' | 'approvals' | 'requests' | 'documents' | 'leave'
+export type SignalIntent = 'needs_you' | 'can_wait' | 'waiting' | 'info_only'
 
 export interface Signal {
   id:       string
   type:     SignalType
   severity: SignalSeverity
   priority: number
+  intent?:  SignalIntent
   title:    string
   body?:    string
+  person?:  string   // when set, the card leads with this person's face
   action?:  { label: string; href: string }
 }
 
@@ -59,9 +63,13 @@ export function SignalCard({ signal, onAction, className }: SignalCardProps) {
 
   return (
     <div className={cn('flex items-center gap-3 rounded-xl border p-3.5 shadow-sm', accent.card, className)}>
-      <span className={cn('grid h-9 w-9 shrink-0 place-items-center rounded-xl', accent.icon)}>
-        <Icon className="h-4 w-4" />
-      </span>
+      {signal.person ? (
+        <PersonAvatar name={signal.person} size="md" />
+      ) : (
+        <span className={cn('grid h-9 w-9 shrink-0 place-items-center rounded-xl', accent.icon)}>
+          <Icon className="h-4 w-4" />
+        </span>
+      )}
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm font-semibold text-foreground">{signal.title}</p>
         {signal.body && <p className="mt-0.5 line-clamp-1 text-xs text-muted-foreground">{signal.body}</p>}
