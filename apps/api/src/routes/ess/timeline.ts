@@ -203,7 +203,7 @@ export default async function essTimelineRoutes(fastify: FastifyInstance) {
       const brandNew = !tenure || tenure === 'less than a month'
 
       focus = {
-        eyebrow: 'YOUR JOURNEY',
+        eyebrow: 'YOUR STORY',
         sentence: brandNew
           ? 'Welcome. Everything from here becomes part of your story.'
           : `${tenure![0]!.toUpperCase()}${tenure!.slice(1)} with the team. Here's the story so far.`,

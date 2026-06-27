@@ -47,7 +47,7 @@ function LookingAhead({ items }: { items: { label: string; detail?: string }[] }
   if (!items.length) return null
   return (
     <section>
-      <h3 className="mb-3 text-[15px] font-semibold text-foreground">Looking ahead</h3>
+      <h3 className="mb-3 text-[15px] font-semibold text-foreground">Your next chapter</h3>
       <div className="space-y-2.5">
         {items.map(it => (
           <div key={it.label} className="flex items-center gap-3">

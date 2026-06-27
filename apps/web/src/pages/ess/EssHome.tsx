@@ -260,7 +260,7 @@ export function EssHome() {
         {/* Left: what happened + the company */}
         <div className="lg:col-span-3 space-y-6">
           <Card className="p-6">
-            <Heading action="Your timeline →" onAction={() => navigate(`${base}/timeline`)}>Here’s your day</Heading>
+            <Heading action="Your story →" onAction={() => navigate(`${base}/timeline`)}>Here’s your day</Heading>
             <AmbientLine className="mb-4">{dayInsight}</AmbientLine>
             {activityQ.isLoading ? (
               <LoadingState rows={3} compact />
@@ -412,7 +412,7 @@ export function EssHome() {
             className="mx-auto flex items-center gap-2 pb-1 text-center text-xs text-muted-foreground transition-colors hover:text-foreground"
           >
             <Sparkles className="h-3.5 w-3.5 text-[#15B8A6]" />
-            <span>{tenure}. Revisit your journey so far →</span>
+            <span>{tenure}. Revisit your story so far →</span>
           </button>
         )
       })()}

@@ -261,8 +261,8 @@ export function MobileHome({ base }: { base: string }) {
             <Trophy className="h-4 w-4" />
           </span>
           <span className="min-w-0">
-            <span className="block text-[13px] font-semibold text-foreground">Your timeline</span>
-            <span className="block text-[11px] text-muted-foreground">The story of your journey so far</span>
+            <span className="block text-[13px] font-semibold text-foreground">Your story</span>
+            <span className="block text-[11px] text-muted-foreground">Revisit everything so far</span>
           </span>
         </span>
         <span className="text-[13px] text-muted-foreground">→</span>
