@@ -14,7 +14,7 @@ import { AssistantWidget } from '@/components/assistant/AssistantWidget'
 
 // ── Layouts ──────────────────────────────────────────────────────────────────
 import { AdminShellV2 }  from '@/components/layout/AdminShellV2'  // /admin/* — V2 shell with domain tabs
-import { EssShell }      from '@/components/layout/EssShell'      // /ess/*   — all authenticated users
+const EssShell = lazy(() => import('@/components/layout/EssShell').then(m => ({ default: m.EssShell })))  // /ess/* — lazy: splits the whole Employee-OS subtree out of the index chunk
 import { ManagerShell }  from '@/components/layout/ManagerShell'  // /manager/* — manager console
 
 // ── Auth pages (always needed, keep eager) ────────────────────────────────────
@@ -24,13 +24,13 @@ import { MobilePreview } from '@/pages/MobilePreview'
 import { AuthCallback } from '@/pages/auth/AuthCallback'
 
 // ── Dashboard (eager — first page after login) ─────────────────────────────────
-import { EssHome }           from '@/pages/ess/EssHome'
-import { EssTimeline }       from '@/pages/ess/EssTimeline'
-import { MyGrowth }          from '@/pages/ess/MyGrowth'
-import { MyAttention }       from '@/pages/ess/MyAttention'
-import { MyTeam }            from '@/pages/ess/MyTeam'
-import { MyCompany }         from '@/pages/ess/MyCompany'
-import { MyAssistant }       from '@/pages/ess/MyAssistant'
+const EssHome     = lazy(() => import('@/pages/ess/EssHome').then(m => ({ default: m.EssHome })))
+const EssTimeline = lazy(() => import('@/pages/ess/EssTimeline').then(m => ({ default: m.EssTimeline })))
+const MyGrowth    = lazy(() => import('@/pages/ess/MyGrowth').then(m => ({ default: m.MyGrowth })))
+const MyAttention = lazy(() => import('@/pages/ess/MyAttention').then(m => ({ default: m.MyAttention })))
+const MyTeam      = lazy(() => import('@/pages/ess/MyTeam').then(m => ({ default: m.MyTeam })))
+const MyCompany   = lazy(() => import('@/pages/ess/MyCompany').then(m => ({ default: m.MyCompany })))
+const MyAssistant = lazy(() => import('@/pages/ess/MyAssistant').then(m => ({ default: m.MyAssistant })))
 // Manager-only dashboards — lazy (only managers hit them; keeps them off the main chunk).
 const ManagerDashboardPage   = lazy(() => import('@/pages/dashboard/ManagerDashboard').then(m => ({ default: m.ManagerDashboardPage })))
 const ManagerTeamPerformance = lazy(() => import('@/pages/dashboard/ManagerTeamPerformance').then(m => ({ default: m.ManagerTeamPerformance })))
