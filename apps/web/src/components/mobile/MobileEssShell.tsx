@@ -10,7 +10,7 @@ import { cn } from '@/lib/utils'
 import { HEADER_GRADIENT } from './glossy'
 import { MobileBottomNav, employeeTabs } from './MobileBottomNav'
 import { MobileHome } from './screens/MobileHome'
-import { MobileTimeline } from './screens/MobileTimeline'
+import { EssTimeline } from '@/pages/ess/EssTimeline'
 import { MyGrowth } from '@/pages/ess/MyGrowth'
 import { MyAttention } from '@/pages/ess/MyAttention'
 import { MyTeam } from '@/pages/ess/MyTeam'
@@ -134,7 +134,8 @@ function MobileRouter({ base }: { base: string }) {
   const sub = pathname.replace(base, '') || '/home'
 
   if (sub === '' || sub === '/' || sub.startsWith('/home') || sub.startsWith('/dashboard')) return <MobileHome base={base} />
-  if (sub.startsWith('/timeline')) return <MobileTimeline base={base} />
+  // My Story is the responsive "river" (EssTimeline) — one component, both platforms.
+  if (sub.startsWith('/timeline')) return <EssTimeline />
   if (sub.startsWith('/identity')) return <MyGrowth />
   if (sub.startsWith('/attention')) return <MyAttention />
   if (sub.startsWith('/team')) return <MyTeam />
