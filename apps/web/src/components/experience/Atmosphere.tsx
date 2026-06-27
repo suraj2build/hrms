@@ -18,35 +18,45 @@ import { cn } from '@/lib/utils'
 export type AtmosphereTheme =
   | 'dawn' | 'memory' | 'ascent' | 'clarity' | 'warmth' | 'belonging' | 'intelligence'
 
-// Each atmosphere = a tint of light over the navy+teal base. Low-opacity, decorative,
-// dark-safe. Eyebrow accents are dark enough for AA on the field.
+// Each atmosphere = a cinematic field of LIGHT over the navy+teal base — a layered
+// "sky": a radial light-source (the sun/aurora) + an atmospheric wash + a soft vertical
+// scrim. Luminous in light mode, a deep night of the same hue in dark. Headline stays on
+// a controlled-luminance zone (AA). Asset-free now; the same slot accepts hero photography
+// later (EXPERIENCE_MOODBOARD_ALIGNMENT.md §2).
 const ATMO: Record<AtmosphereTheme, { field: string; eyebrow: string }> = {
+  // Dawn — a warm sunrise: a gold sun glow upper-right, a peach wash, cool sky settling.
   dawn: {
-    field: 'radial-gradient(130% 120% at 12% -25%, rgba(245,166,35,0.13), transparent 52%), linear-gradient(135deg, rgba(26,77,143,0.05), rgba(21,184,166,0.09))',
+    field: 'radial-gradient(70% 80% at 82% 6%, rgba(245,184,96,0.30), transparent 60%), radial-gradient(60% 70% at 8% 40%, rgba(240,150,90,0.14), transparent 58%), linear-gradient(178deg, rgba(255,238,214,0.55), rgba(214,232,247,0.28) 62%, transparent)',
     eyebrow: 'text-[#9A6A12]',
   },
+  // Memory — twilight: an indigo dusk with a magenta horizon glow.
   memory: {
-    field: 'radial-gradient(130% 130% at 88% -25%, rgba(26,77,143,0.16), transparent 55%), linear-gradient(135deg, rgba(40,40,120,0.05), rgba(26,77,143,0.07))',
+    field: 'radial-gradient(72% 78% at 84% 4%, rgba(124,92,205,0.26), transparent 58%), radial-gradient(64% 60% at 16% 96%, rgba(200,96,156,0.16), transparent 56%), linear-gradient(178deg, rgba(234,228,250,0.5), transparent 70%)',
     eyebrow: 'text-primary',
   },
+  // Ascent — a teal summit dawn rising from below, brightening upward.
   ascent: {
-    field: 'radial-gradient(120% 130% at 50% 130%, rgba(21,184,166,0.16), transparent 55%), linear-gradient(135deg, rgba(26,77,143,0.05), rgba(21,184,166,0.10))',
+    field: 'radial-gradient(80% 80% at 50% 120%, rgba(21,184,166,0.30), transparent 60%), radial-gradient(60% 60% at 85% 4%, rgba(46,111,230,0.16), transparent 58%), linear-gradient(178deg, rgba(220,243,239,0.5), transparent 70%)',
     eyebrow: 'text-brand-teal-ink',
   },
+  // Clarity — a serene cool calm; the lightest, most spacious field.
   clarity: {
-    field: 'radial-gradient(120% 120% at 50% -30%, rgba(26,77,143,0.07), transparent 55%)',
+    field: 'radial-gradient(90% 70% at 50% -8%, rgba(46,111,230,0.14), transparent 62%), linear-gradient(178deg, rgba(228,238,250,0.55), transparent 72%)',
     eyebrow: 'text-muted-foreground',
   },
+  // Warmth — golden hour: amber light from the side, intimate.
   warmth: {
-    field: 'radial-gradient(130% 120% at 20% -25%, rgba(214,150,60,0.14), transparent 52%), linear-gradient(135deg, rgba(26,77,143,0.04), rgba(21,184,166,0.07))',
+    field: 'radial-gradient(74% 80% at 22% 6%, rgba(245,182,96,0.28), transparent 60%), radial-gradient(60% 64% at 88% 84%, rgba(216,124,92,0.12), transparent 58%), linear-gradient(178deg, rgba(253,241,226,0.5), transparent 70%)',
     eyebrow: 'text-[#9A6A12]',
   },
+  // Belonging — open water: a wide teal-and-blue expanse, bright and panoramic.
   belonging: {
-    field: 'radial-gradient(150% 140% at 80% -30%, rgba(21,184,166,0.14), transparent 55%), linear-gradient(120deg, rgba(26,77,143,0.05), rgba(21,184,166,0.08))',
+    field: 'radial-gradient(84% 78% at 72% -4%, rgba(21,184,166,0.24), transparent 60%), radial-gradient(72% 64% at 14% 96%, rgba(46,111,230,0.14), transparent 58%), linear-gradient(178deg, rgba(224,243,242,0.5), transparent 70%)',
     eyebrow: 'text-brand-teal-ink',
   },
+  // Intelligence — aurora: deep violet meeting a teal spark.
   intelligence: {
-    field: 'radial-gradient(110% 130% at 90% -10%, rgba(21,184,166,0.18), transparent 45%), linear-gradient(135deg, rgba(26,77,143,0.08), rgba(26,77,143,0.03))',
+    field: 'radial-gradient(70% 80% at 84% 0%, rgba(124,58,237,0.26), transparent 56%), radial-gradient(64% 66% at 26% 96%, rgba(21,184,166,0.22), transparent 56%), linear-gradient(135deg, rgba(236,231,251,0.46), transparent 72%)',
     eyebrow: 'text-primary',
   },
 }
@@ -66,22 +76,22 @@ export function Atmosphere({ theme, eyebrow, title, subtitle, aside, children, c
   const a = ATMO[theme]
   return (
     <header
-      className={cn('relative overflow-hidden rounded-[1.75rem] bg-card px-7 py-9 shadow-depth sm:px-10 sm:py-11', className)}
+      className={cn('relative overflow-hidden rounded-[1.9rem] bg-card px-7 py-11 shadow-depth-lg sm:px-12 sm:py-14', className)}
       style={{ backgroundImage: a.field }}
     >
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
           {eyebrow && (
-            <p className={cn('text-[11px] font-semibold uppercase tracking-[0.16em]', a.eyebrow)}>{eyebrow}</p>
+            <p className={cn('text-[11px] font-semibold uppercase tracking-[0.18em]', a.eyebrow)}>{eyebrow}</p>
           )}
-          <h1 className="mt-3 font-serif text-[2rem] font-medium leading-[1.06] tracking-[-0.01em] text-foreground sm:text-[2.4rem]">
+          <h1 className="mt-3.5 font-serif text-[2.4rem] font-medium leading-[1.04] tracking-[-0.015em] text-foreground sm:text-[3rem]">
             {title}
           </h1>
-          {subtitle && <p className="mt-2.5 text-[15px] leading-relaxed text-muted-foreground">{subtitle}</p>}
+          {subtitle && <p className="mt-3 max-w-[44ch] text-[15px] leading-relaxed text-muted-foreground sm:text-base">{subtitle}</p>}
         </div>
         {aside && <div className="shrink-0">{aside}</div>}
       </div>
-      {children && <div className="mt-6">{children}</div>}
+      {children && <div className="mt-7">{children}</div>}
     </header>
   )
 }
