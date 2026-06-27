@@ -13,6 +13,7 @@ import { EmployeeSidebar } from './EmployeeSidebar'
 import { EssContextPanel } from './EssContextPanel'
 import { Topbar } from './Topbar'
 import { useAuthStore } from '@/stores/authStore'
+import { useArrivalStore } from '@/stores/arrivalStore'
 import { EventToast }    from '@/components/notifications'
 import { api }           from '@/lib/api/client'
 import { useIsMobile }   from '@/hooks/useIsMobile'
@@ -111,6 +112,10 @@ function AnomalyLoginAlert() {
 export function EssShell() {
   const { profile, isBootstrapping } = useAuthStore()
   const isMobile = useIsMobile()
+  // The Arrival (Home's threshold) raises this while the door owns the screen. All
+  // chrome — sidebar, topbar, warnings, context panel — is hidden until the employee
+  // crosses into the day (EXPERIENCE_ARRIVAL_SPEC.md §2.6 / §4.3).
+  const atThreshold = useArrivalStore((s) => s.atThreshold)
 
   // Gate only on the first bootstrap — not on silent token refreshes (TOKEN_REFRESHED).
   if (isBootstrapping) return <LoadingScreen />
@@ -124,21 +129,21 @@ export function EssShell() {
   return (
     <CommandPaletteProvider>
       <div className="flex h-screen overflow-hidden bg-background">
-        <EmployeeSidebar />
+        {!atThreshold && <EmployeeSidebar />}
         <div className="flex flex-col flex-1 overflow-hidden">
-          <Topbar />
+          {!atThreshold && <Topbar />}
           {/* Inner Suspense — catches lazy-route chunk loading so the ESS shell
               chrome (Topbar, EmployeeSidebar) stays mounted while pages load. */}
-          <AnomalyLoginAlert />
+          {!atThreshold && <AnomalyLoginAlert />}
           <div className="flex flex-1 overflow-hidden">
-            <main className="min-w-0 flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8">
+            <main className={`min-w-0 flex-1 overflow-y-auto${atThreshold ? '' : ' p-4 sm:p-6 lg:p-8'}`}>
               <EventToast />
               <Suspense fallback={<ShellPageLoader />}>
                 <Outlet />
               </Suspense>
             </main>
             {/* Right context panel — birthdays, anniversaries, holidays, kudos */}
-            <EssContextPanel />
+            {!atThreshold && <EssContextPanel />}
           </div>
         </div>
       </div>

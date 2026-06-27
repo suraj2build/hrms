@@ -5,6 +5,7 @@ import { Bell, User2, Users } from 'lucide-react'
 import { LogoMark } from '@/components/brand/Logo'
 import { api } from '@/lib/api/client'
 import { useAuthStore } from '@/stores/authStore'
+import { useArrivalStore } from '@/stores/arrivalStore'
 import { resolveGreeting, type DayContext } from '@/components/experience/resolveGreeting'
 import { cn } from '@/lib/utils'
 import { HEADER_GRADIENT } from './glossy'
@@ -71,9 +72,14 @@ export function MobileEssShell({ previewHome = false }: { previewHome?: boolean 
 
   const onFab = () => navigate(`${base}/attendance`)
 
+  // The Arrival (Home's threshold) hides all chrome — header and bottom nav — until
+  // the employee crosses into the day (EXPERIENCE_ARRIVAL_SPEC.md §2.6 / §5).
+  const atThreshold = useArrivalStore((s) => s.atThreshold)
+
   return (
     <div className="flex min-h-screen flex-col bg-[#EEF3FF]">
-      {/* ── Glossy header ── */}
+      {/* ── Glossy header (hidden at the Arrival threshold) ── */}
+      {!atThreshold && (
       <header className="relative px-5 pb-5 pt-9 text-white" style={{ background: HEADER_GRADIENT }}>
         <div className="pointer-events-none absolute inset-0 opacity-40"
           style={{ background: 'radial-gradient(120% 80% at 80% -10%, rgba(255,255,255,0.45), transparent 60%)' }} />
@@ -110,9 +116,10 @@ export function MobileEssShell({ previewHome = false }: { previewHome?: boolean 
           </div>
         )}
       </header>
+      )}
 
       {/* ── Content ── */}
-      <main className="flex-1 px-4 pb-28 pt-4">
+      <main className={atThreshold ? 'flex-1' : 'flex-1 px-4 pb-28 pt-4'}>
         {persona === 'team' && isManager
           ? <MyTeam />
           : (
@@ -122,8 +129,8 @@ export function MobileEssShell({ previewHome = false }: { previewHome?: boolean 
           )}
       </main>
 
-      {/* ── Bottom nav (employee persona) ── */}
-      {persona === 'me' && <MobileBottomNav tabs={employeeTabs(base)} onFab={onFab} />}
+      {/* ── Bottom nav (employee persona; hidden at the Arrival threshold) ── */}
+      {persona === 'me' && !atThreshold && <MobileBottomNav tabs={employeeTabs(base)} onFab={onFab} />}
     </div>
   )
 }

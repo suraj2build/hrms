@@ -9,6 +9,7 @@ import {
 } from 'lucide-react'
 import { api } from '@/lib/api/client'
 import type { Signal } from '@/components/experience/SignalCard'
+import { Arrival } from '@/components/experience/Arrival'
 import { useAuthStore } from '@/stores/authStore'
 import { glossy } from '../glossy'
 import { UpcomingHolidays } from './parts'
@@ -117,7 +118,11 @@ export function MobileHome({ base }: { base: string }) {
   }, [communityData, kudosData])
 
   return (
-    <div className="space-y-4">
+    <>
+      {/* The Arrival — the threshold. Full-bleed; chrome is hidden until you cross
+          (EXPERIENCE_ARRIVAL_SPEC.md). The day below is untouched in this pass. */}
+      <Arrival dayAnchorId="mobile-your-day" />
+      <div id="mobile-your-day" className="space-y-4">
       {/* Today's Focus (Movement 2) — only when something needs attention */}
       {urgentSignal && (
         <button onClick={() => navigate(`${base}${focusHref}`)}
@@ -275,7 +280,8 @@ export function MobileHome({ base }: { base: string }) {
           ? 'A couple of things are still waiting — nothing that can’t wait for coffee.'
           : 'That’s everything — you’re all set for today.'}
       </p>
-    </div>
+      </div>
+    </>
   )
 }
 

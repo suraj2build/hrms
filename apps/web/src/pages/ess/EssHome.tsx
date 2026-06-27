@@ -26,6 +26,7 @@ import { CelebrationCard } from '@/components/experience/CelebrationCard'
 import { PersonAvatar } from '@/components/experience/PersonAvatar'
 import { AmbientLine } from '@/components/experience/AmbientLine'
 import { Atmosphere } from '@/components/experience/Atmosphere'
+import { Arrival } from '@/components/experience/Arrival'
 import { Movement } from '@/components/experience/Movement'
 import { FocusPanel } from '@/components/experience/FocusPanel'
 import { ReflectionCard } from '@/components/experience/ReflectionCard'
@@ -210,9 +211,6 @@ export function EssHome() {
     })),
   ].slice(0, 4)
 
-  if (isLoading) return <div className="mx-auto max-w-[820px] py-2"><LoadingState rows={5} label="Putting your day together…" /></div>
-  if (isError)   return <ErrorState title="Couldn’t load your day" onRetry={() => refetch()} />
-
   // Visual Language v2 — the "Dawn" atmosphere: a warm, time-aware ambient field with
   // a serif greeting hero, over a spine of movements that rise in on a tinted canvas.
   const dateLabel = new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long' })
@@ -223,8 +221,19 @@ export function EssHome() {
     : tenureM < 12 ? `${tenureM} month${tenureM > 1 ? 's' : ''} in`
     : `${Math.floor(tenureM / 12)} year${Math.floor(tenureM / 12) > 1 ? 's' : ''} and counting`
 
+  // The Arrival (the threshold) always paints first and stays mounted across the day's
+  // loading/error states, so the door never shows a spinner (EXPERIENCE_ARRIVAL_SPEC.md).
+  // The "deeper" day below is untouched in this pass — you cross into it from the door.
   return (
-    <div className="mx-auto max-w-[760px] py-4">
+    <>
+      <Arrival dayAnchorId="ess-your-day" />
+      <div id="ess-your-day" className="mx-auto max-w-[760px] py-4">
+      {isLoading ? (
+        <LoadingState rows={5} label="Putting your day together…" />
+      ) : isError ? (
+        <ErrorState title="Couldn’t load your day" onRetry={() => refetch()} />
+      ) : (
+      <>
       {/* Atmosphere — the Dawn field: serif greeting hero, punch, ambient, actions. */}
       <Atmosphere
         theme="dawn"
@@ -364,6 +373,9 @@ export function EssHome() {
           </button>
         </Movement>
       </div>
-    </div>
+      </>
+      )}
+      </div>
+    </>
   )
 }

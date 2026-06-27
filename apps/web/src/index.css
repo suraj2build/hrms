@@ -45,6 +45,30 @@
   .atmo-rise { animation: atmo-rise 0.52s var(--ease-premium) both; }
 }
 
+/* The Arrival (Home's threshold) — the place breathes. A subliminal, very slow
+   drift of the atmospheric field so the door feels inhabited even in stillness
+   (EXPERIENCE_ARRIVAL_SPEC.md §4.2). Amplitude is deliberately tiny — if a user
+   consciously notices the loop, it's too strong. Stilled under reduce-motion. */
+@keyframes arrival-breathe {
+  0%   { transform: scale(1.04) translate3d(0, 0, 0); opacity: 0.94; }
+  50%  { transform: scale(1.075) translate3d(0, -1.1%, 0); opacity: 1; }
+  100% { transform: scale(1.04) translate3d(0, 0, 0); opacity: 0.94; }
+}
+/* The lights coming up as you step in — a slower, softer rise than atmo-rise. */
+@keyframes arrival-rise {
+  from { opacity: 0; transform: translateY(18px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .arrival-breathe { animation: arrival-breathe 16s ease-in-out infinite; }
+  .arrival-rise    { animation: arrival-rise 0.8s var(--ease-premium) both; }
+}
+/* Under reduce-motion the field is simply present (scaled to hide gradient edges),
+   and content appears without movement — the arrival is just as complete. */
+@media (prefers-reduced-motion: reduce) {
+  .arrival-breathe { transform: scale(1.05); }
+}
+
 /*
  * CognixHR Brand — HRMS Design System 2.0
  * Professional, premium, conservative next-gen visual system.
