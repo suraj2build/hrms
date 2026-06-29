@@ -7,11 +7,13 @@
  *   POST /pulse/:questionId/respond — respond to an active pulse question
  *
  * Admin endpoints (hr_admin / super_admin):
- *   GET   /admin/dashboard             — 7-day trend, distribution, active pulse stats
+ *   GET   /admin/dashboard             — 7-day trend, distribution, active pulse stats, sentiment summary
  *   GET   /admin/pulse                 — list pulse questions (optional ?status filter)
  *   POST  /admin/pulse                 — create pulse question (starts as draft)
  *   PATCH /admin/pulse/:id             — update status / fields
  *   GET   /admin/pulse/:id/responses   — all responses for a pulse question
+ *   GET   /admin/store-breakdown       — monthly mood scores by store/location
+ *   GET   /admin/sentiment-report      — sentiment distribution + recent negatives
  */
 
 import type { FastifyInstance } from 'fastify'
@@ -35,6 +37,18 @@ export default async function moodRoutes(fastify: FastifyInstance) {
 
   function todayDate(): string {
     return new Date().toISOString().split('T')[0]
+  }
+
+  function detectSentiment(note: string | null | undefined): 'positive' | 'neutral' | 'negative' | null {
+    if (!note?.trim()) return null
+    const t = note.toLowerCase()
+    const posWords = ['great','good','happy','excellent','love','amazing','wonderful','fantastic','proud','motivated','enjoy','positive','satisfied','better','best','excited']
+    const negWords = ['bad','awful','terrible','unhappy','stressed','frustrated','unfair','angry','worst','hate','horrible','disappointed','tired','exhausted','toxic','leave','quit','resign']
+    const posCount = posWords.filter(w => t.includes(w)).length
+    const negCount = negWords.filter(w => t.includes(w)).length
+    if (negCount > posCount) return 'negative'
+    if (posCount > negCount) return 'positive'
+    return 'neutral'
   }
 
   // ── GET /mood/today ──────────────────────────────────────────────────────────
@@ -101,15 +115,18 @@ export default async function moodRoutes(fastify: FastifyInstance) {
       return reply.status(400).send({ error: 'No employee profile linked to your account' })
     }
 
+    const sentiment_label = detectSentiment(note)
+
     const { error } = await supabase
       .from('mood_checkins')
       .upsert(
         {
-          tenant_id:    tenantId,
-          employee_id:  employeeId,
-          mood:         Math.round(mood),
-          note:         note ?? null,
-          checkin_date: todayDate(),
+          tenant_id:       tenantId,
+          employee_id:     employeeId,
+          mood:            Math.round(mood),
+          note:            note ?? null,
+          sentiment_label: sentiment_label,
+          checkin_date:    todayDate(),
         },
         { onConflict: 'tenant_id,employee_id,checkin_date' },
       )
@@ -173,7 +190,11 @@ export default async function moodRoutes(fastify: FastifyInstance) {
       days.push(d.toISOString().split('T')[0])
     }
 
-    const [checkinResult, activeResult] = await Promise.all([
+    const since30d = new Date()
+    since30d.setDate(since30d.getDate() - 7)
+    const since7dStr = since30d.toISOString().split('T')[0]
+
+    const [checkinResult, activeResult, sentimentResult] = await Promise.all([
       supabase
         .from('mood_checkins')
         .select('mood, checkin_date')
@@ -185,6 +206,12 @@ export default async function moodRoutes(fastify: FastifyInstance) {
         .eq('tenant_id', tenantId)
         .eq('status', 'active')
         .order('created_at', { ascending: false }),
+      supabase
+        .from('mood_checkins')
+        .select('sentiment_label')
+        .eq('tenant_id', tenantId)
+        .gte('checkin_date', since7dStr)
+        .not('sentiment_label', 'is', null),
     ])
 
     const checkins = checkinResult.data ?? []
@@ -225,12 +252,118 @@ export default async function moodRoutes(fastify: FastifyInstance) {
       }),
     )
 
+    // Sentiment summary for last 7 days
+    const sentimentRows = sentimentResult.data ?? []
+    const sentCounts = { positive: 0, neutral: 0, negative: 0, total_with_notes: sentimentRows.length }
+    for (const r of sentimentRows) {
+      if (r.sentiment_label === 'positive') sentCounts.positive++
+      else if (r.sentiment_label === 'neutral') sentCounts.neutral++
+      else if (r.sentiment_label === 'negative') sentCounts.negative++
+    }
+
     return reply.send({
       data: {
         trend,
         distribution,
         total_checkins_7d: checkins.length,
         active_pulse:      pulseStats,
+        sentiment_summary: sentCounts,
+      },
+    })
+  })
+
+  // ── GET /mood/admin/store-breakdown ─────────────────────────────────────────
+
+  fastify.get('/admin/store-breakdown', hrAuth, async (req: any, reply) => {
+    const tenantId = req.tenantId
+    const { month } = req.query as { month?: string }  // YYYY-MM format, defaults to current month
+    const targetMonth = month ? month + '-01' : new Date().toISOString().slice(0, 7) + '-01'
+
+    const nextMonthDate = new Date(new Date(targetMonth).getTime() + 32 * 86400000)
+    const nextMonthStr = nextMonthDate.toISOString().slice(0, 7) + '-01'
+
+    const { data } = await supabase
+      .from('mood_store_monthly')
+      .select('work_location_id, score_month, avg_score_100, response_count')
+      .eq('tenant_id', tenantId)
+      .gte('score_month', targetMonth)
+      .lt('score_month', nextMonthStr)
+
+    // Get location names
+    const locIds = [...new Set((data ?? []).map((r: any) => r.work_location_id).filter(Boolean))]
+    const locationNames: Record<string, string> = {}
+    if (locIds.length > 0) {
+      const { data: locs } = await supabase
+        .from('work_locations')
+        .select('id, name')
+        .in('id', locIds)
+      ;(locs ?? []).forEach((l: any) => { locationNames[l.id] = l.name })
+    }
+
+    return reply.send({
+      data: (data ?? []).map((r: any) => ({
+        ...r,
+        location_name: locationNames[r.work_location_id] || 'Unknown Store',
+      })).sort((a: any, b: any) => a.avg_score_100 - b.avg_score_100),  // sorted low to high (low = needs attention)
+    })
+  })
+
+  // ── GET /mood/admin/sentiment-report ────────────────────────────────────────
+
+  fastify.get('/admin/sentiment-report', hrAuth, async (req: any, reply) => {
+    const tenantId = req.tenantId
+
+    const since30d = new Date()
+    since30d.setDate(since30d.getDate() - 30)
+    const since30dStr = since30d.toISOString().split('T')[0]
+
+    const [sentimentResult, negativeNotesResult] = await Promise.all([
+      supabase
+        .from('mood_checkins')
+        .select('sentiment_label')
+        .eq('tenant_id', tenantId)
+        .gte('checkin_date', since30dStr)
+        .not('sentiment_label', 'is', null),
+      supabase
+        .from('mood_checkins')
+        .select('note, checkin_date, employee_id')
+        .eq('tenant_id', tenantId)
+        .eq('sentiment_label', 'negative')
+        .gte('checkin_date', since30dStr)
+        .not('note', 'is', null)
+        .order('checkin_date', { ascending: false })
+        .limit(10),
+    ])
+
+    const rows = sentimentResult.data ?? []
+    const total_with_notes = rows.length
+    let positive = 0, neutral = 0, negative = 0
+    for (const r of rows) {
+      if (r.sentiment_label === 'positive') positive++
+      else if (r.sentiment_label === 'neutral') neutral++
+      else if (r.sentiment_label === 'negative') negative++
+    }
+
+    const positive_pct = total_with_notes > 0 ? Math.round((positive / total_with_notes) * 100) : 0
+    const neutral_pct  = total_with_notes > 0 ? Math.round((neutral  / total_with_notes) * 100) : 0
+    const negative_pct = total_with_notes > 0 ? Math.round((negative / total_with_notes) * 100) : 0
+
+    // Anonymized recent negatives (note + date, no employee name)
+    const recent_negatives = (negativeNotesResult.data ?? []).map((r: any) => ({
+      note:         r.note,
+      checkin_date: r.checkin_date,
+    }))
+
+    return reply.send({
+      data: {
+        positive_pct,
+        neutral_pct,
+        negative_pct,
+        total_with_notes,
+        positive,
+        neutral,
+        negative,
+        recent_negatives,
       },
     })
   })
@@ -243,7 +376,7 @@ export default async function moodRoutes(fastify: FastifyInstance) {
 
     const q = supabase
       .from('pulse_questions')
-      .select('id, question, options, status, starts_at, ends_at, created_at')
+      .select('id, question, options, status, poll_category, starts_at, ends_at, created_at')
       .eq('tenant_id', tenantId)
       .order('created_at', { ascending: false })
 
@@ -259,20 +392,21 @@ export default async function moodRoutes(fastify: FastifyInstance) {
 
   fastify.post('/admin/pulse', hrAuth, async (req: any, reply) => {
     const tenantId = req.tenantId
-    const { question, options, starts_at, ends_at } = req.body as any
+    const { question, options, starts_at, ends_at, poll_category } = req.body as any
 
     if (!question?.trim()) return reply.status(400).send({ error: 'question is required' })
 
     const { data, error } = await supabase
       .from('pulse_questions')
       .insert({
-        tenant_id:  tenantId,
-        question:   question.trim(),
-        options:    options ?? null,
-        starts_at:  starts_at ?? null,
-        ends_at:    ends_at ?? null,
-        status:     'draft',
-        created_by: req.user.id,
+        tenant_id:     tenantId,
+        question:      question.trim(),
+        options:       options ?? null,
+        starts_at:     starts_at ?? null,
+        ends_at:       ends_at ?? null,
+        poll_category: poll_category ?? 'weekly_pulse',
+        status:        'draft',
+        created_by:    req.user.id,
       })
       .select('id')
       .single()
@@ -285,7 +419,7 @@ export default async function moodRoutes(fastify: FastifyInstance) {
       recordId:    data.id,
       action:      'INSERT',
       performedBy: req.user.id,
-      newData:     { question },
+      newData:     { question, poll_category: poll_category ?? 'weekly_pulse' },
     })
 
     return reply.status(201).send({ data })
@@ -298,7 +432,7 @@ export default async function moodRoutes(fastify: FastifyInstance) {
     const { id }   = req.params as { id: string }
     const body     = req.body as Record<string, unknown>
 
-    const allowed = ['question', 'options', 'status', 'starts_at', 'ends_at']
+    const allowed = ['question', 'options', 'status', 'starts_at', 'ends_at', 'poll_category']
     const update: Record<string, unknown> = {}
     for (const k of allowed) {
       if (body[k] !== undefined) update[k] = body[k]
