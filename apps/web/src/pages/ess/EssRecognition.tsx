@@ -1,13 +1,13 @@
 /**
  * EssRecognition — ESS 2.0 "Rewards" pillar surface.
  * Give peer recognition (badge + message) and see the company recognition feed.
- * Backed by /recognition/* (migration 306).
+ * Backed by /recognition/* (migration 306) and /recognition/awards/* (migration 334).
  */
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import {
-  Award, Heart, Users, Lightbulb, Wrench, Sparkles, Gift, Star, PartyPopper, Trophy, Coins,
+  Award, Heart, Users, Lightbulb, Wrench, Sparkles, Gift, Star, PartyPopper, Trophy, Coins, Calendar,
 } from 'lucide-react'
 import { api } from '@/lib/api/client'
 import { PageContainer } from '@/components/layout/PageContainer'
@@ -31,6 +31,17 @@ interface RecognitionRow {
 interface Budget { monthly: number; spent: number; remaining: number }
 interface MeSummary { received: number; given: number; points: number; recent: RecognitionRow[]; budget?: Budget }
 interface LeaderRow { rank: number; employee_id: string; name: string; points: number; count: number }
+
+interface AwardWinner {
+  id: string; period_label: string; declared_at: string | null
+  formal_awards: { id: string; name: string; award_type: string } | null
+  employees: { id: string; first_name: string; last_name: string; employee_code: string; designation: string | null; department: string | null } | null
+}
+
+interface OpenRound {
+  id: string; period_label: string; period_start: string | null; period_end: string | null; status: string; created_at: string
+  formal_awards: { id: string; name: string; description: string | null; eligible_group: string | null; requires_nomination: boolean; monetary_value: number | null; monetary_description: string | null } | null
+}
 
 // ── Icon map (badge.icon stores a lucide name) ─────────────────────────────────
 const ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
@@ -199,6 +210,85 @@ function FeedCard({ r, badges }: { r: RecognitionRow; badges: Badge[] }) {
   )
 }
 
+// ── Award type colour map ──────────────────────────────────────────────────────
+const AWARD_TYPE_COLORS: Record<string, { bg: string; text: string; icon: string }> = {
+  employee_of_month: { bg: 'bg-amber-50 border-amber-200 dark:bg-amber-900/10 dark:border-amber-800/40', text: 'text-amber-700 dark:text-amber-300', icon: 'text-amber-500' },
+  long_service:      { bg: 'bg-teal-50 border-teal-200 dark:bg-teal-900/10 dark:border-teal-800/40',   text: 'text-teal-700 dark:text-teal-300',   icon: 'text-teal-500' },
+  store_of_month:    { bg: 'bg-blue-50 border-blue-200 dark:bg-blue-900/10 dark:border-blue-800/40',   text: 'text-blue-700 dark:text-blue-300',   icon: 'text-blue-500' },
+}
+const defaultColor = { bg: 'bg-purple-50 border-purple-200 dark:bg-purple-900/10 dark:border-purple-800/40', text: 'text-purple-700 dark:text-purple-300', icon: 'text-purple-500' }
+
+function fmtDate(iso: string | null) {
+  if (!iso) return '—'
+  return new Date(iso).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
+}
+
+// ── Nominate Dialog ────────────────────────────────────────────────────────────
+function NominateDialog({ open, onClose, round }: {
+  open: boolean; onClose: () => void; round: OpenRound | null
+}) {
+  const qc = useQueryClient()
+  const [nomineeId, setNomineeId] = useState('')
+  const [justification, setJustification] = useState('')
+
+  const reset = () => { setNomineeId(''); setJustification('') }
+  const awardId = round?.formal_awards?.id ?? ''
+
+  const nominateMut = useMutation({
+    mutationFn: () => api.post(`/recognition/admin/awards/${awardId}/rounds/${round!.id}/nominations`, {
+      nominee_id: nomineeId,
+      justification: justification.trim() || undefined,
+    }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['awards-open'] })
+      toast.success('Nomination submitted!')
+      reset(); onClose()
+    },
+    onError: (e: Error) => toast.error('Could not submit nomination', { description: e.message }),
+  })
+
+  return (
+    <Dialog open={open} onOpenChange={o => { if (!o) { reset(); onClose() } }}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Nominate for {round?.formal_awards?.name}</DialogTitle>
+          <DialogDescription>{round?.period_label}</DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-4 py-1">
+          <div>
+            <label className="mb-1.5 block text-xs font-medium text-muted-foreground">Nominee *</label>
+            <EmployeeSelector
+              value={nomineeId}
+              onChange={(v) => setNomineeId(Array.isArray(v) ? v[0] ?? '' : v)}
+              placeholder="Search by name or code…"
+            />
+          </div>
+          <div>
+            <label className="mb-1.5 block text-xs font-medium text-muted-foreground">Justification</label>
+            <textarea
+              value={justification}
+              onChange={e => setJustification(e.target.value)}
+              rows={3}
+              maxLength={500}
+              placeholder="Why do you nominate this person?"
+              className="w-full resize-none rounded-lg border border-border bg-card p-2.5 text-sm outline-none focus:border-primary"
+            />
+            <div className="mt-1 text-right text-[10px] text-muted-foreground">{justification.length}/500</div>
+          </div>
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" onClick={() => { reset(); onClose() }}>Cancel</Button>
+          <Button disabled={!nomineeId || nominateMut.isPending} onClick={() => nominateMut.mutate()}>
+            {nominateMut.isPending ? 'Submitting…' : 'Submit Nomination'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 type LeaderPeriod = 'monthly' | 'quarterly' | 'ytd' | 'all'
 
 const PERIOD_LABELS: Record<LeaderPeriod, string> = {
@@ -210,8 +300,9 @@ const PERIOD_LABELS: Record<LeaderPeriod, string> = {
 
 // ── Page ───────────────────────────────────────────────────────────────────────
 export function EssRecognition() {
-  const [giveOpen, setGiveOpen]     = useState(false)
-  const [period, setPeriod]         = useState<LeaderPeriod>('monthly')
+  const [giveOpen, setGiveOpen]         = useState(false)
+  const [period, setPeriod]             = useState<LeaderPeriod>('monthly')
+  const [nominateRound, setNominateRound] = useState<OpenRound | null>(null)
 
   const { data: badgesResp } = useQuery<{ data: Badge[] }>({
     queryKey: ['recognition-badges'],
@@ -234,10 +325,24 @@ export function EssRecognition() {
     staleTime: 60_000,
   })
 
-  const badges  = badgesResp?.data ?? []
-  const feed    = feedResp?.data ?? []
-  const me      = meResp?.data
-  const leaders = leaderResp?.data ?? []
+  const { data: winnersResp } = useQuery<{ data: AwardWinner[] }>({
+    queryKey: ['awards-winners'],
+    queryFn:  () => api.get('/recognition/awards/winners'),
+    staleTime: 5 * 60_000,
+  })
+
+  const { data: openRoundsResp } = useQuery<{ data: OpenRound[] }>({
+    queryKey: ['awards-open'],
+    queryFn:  () => api.get('/recognition/awards/open'),
+    staleTime: 2 * 60_000,
+  })
+
+  const badges     = badgesResp?.data ?? []
+  const feed       = feedResp?.data ?? []
+  const me         = meResp?.data
+  const leaders    = leaderResp?.data ?? []
+  const winners    = winnersResp?.data ?? []
+  const openRounds = openRoundsResp?.data ?? []
 
   return (
     <PageContainer>
@@ -324,7 +429,85 @@ export function EssRecognition() {
         )}
       </SectionCard>
 
+      {/* Open Nominations section — only if any open rounds exist */}
+      {openRounds.length > 0 && (
+        <SectionCard
+          title="Open Nominations"
+          description="Current award rounds accepting nominations"
+          icon={<Calendar className="h-4 w-4 text-muted-foreground" />}
+        >
+          <div className="space-y-2.5">
+            {openRounds.map(r => {
+              const award = r.formal_awards
+              return (
+                <div key={r.id} className="flex items-start justify-between gap-3 rounded-xl border border-border/60 bg-card px-4 py-3">
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-foreground">
+                      {award?.name ?? 'Award'}
+                    </p>
+                    <p className="text-[11px] text-muted-foreground mt-0.5">{r.period_label}</p>
+                    {award?.description && (
+                      <p className="text-[11px] text-muted-foreground">{award.description}</p>
+                    )}
+                    {award?.eligible_group && (
+                      <p className="text-[10px] text-muted-foreground mt-0.5">Eligible: {award.eligible_group}</p>
+                    )}
+                  </div>
+                  {award?.requires_nomination !== false && (
+                    <Button size="sm" variant="outline" className="shrink-0 h-7 text-xs"
+                      onClick={() => setNominateRound(r)}
+                    >
+                      Nominate
+                    </Button>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        </SectionCard>
+      )}
+
+      {/* Award Winners Wall */}
+      {winners.length > 0 && (
+        <SectionCard
+          title="Award Winners"
+          description="Recent formal award winners"
+          icon={<Trophy className="h-4 w-4 text-muted-foreground" />}
+        >
+          <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+            {winners.slice(0, 10).map(w => {
+              const awardType = w.formal_awards?.award_type ?? 'custom'
+              const colors = AWARD_TYPE_COLORS[awardType] ?? defaultColor
+              const emp = w.employees
+              return (
+                <div key={w.id} className={`rounded-xl border px-4 py-3 ${colors.bg}`}>
+                  <div className="flex items-start gap-3">
+                    <Trophy className={`h-5 w-5 shrink-0 mt-0.5 ${colors.icon}`} />
+                    <div className="min-w-0">
+                      <p className={`text-xs font-semibold uppercase tracking-wide ${colors.text}`}>
+                        {w.formal_awards?.name ?? 'Award'}
+                      </p>
+                      <p className="mt-1 text-sm font-bold text-foreground">
+                        {emp ? `${emp.first_name} ${emp.last_name}` : 'Winner'}
+                      </p>
+                      {emp?.designation && (
+                        <p className="text-[11px] text-muted-foreground">{emp.designation}</p>
+                      )}
+                      <p className="mt-1 text-[11px] text-muted-foreground">
+                        {w.period_label}
+                        {w.declared_at && ` · ${fmtDate(w.declared_at)}`}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </SectionCard>
+      )}
+
       <GiveDialog open={giveOpen} onOpenChange={setGiveOpen} badges={badges} budget={me?.budget} />
+      <NominateDialog open={!!nominateRound} onClose={() => setNominateRound(null)} round={nominateRound} />
     </PageContainer>
   )
 }

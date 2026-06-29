@@ -451,7 +451,7 @@ export default async function recognitionRoutes(fastify: FastifyInstance) {
     const { name, description, frequency, award_type, monetary_value, monetary_description, eligible_group, requires_nomination } = body
     if (!name?.trim()) return reply.code(400).send({ error: 'name is required' })
     const { data, error } = await fastify.supabase.from('formal_awards')
-      .insert({ tenant_id: req.tenantId, name: name.trim(), description, frequency: frequency || 'monthly', award_type: award_type || 'custom', monetary_value: monetary_value || null, monetary_description, eligible_group, requires_nomination: requires_nomination !== false, created_by: req.user.id })
+      .insert({ tenant_id: req.tenantId, name: name.trim(), description, frequency: frequency || 'monthly', award_type: award_type || 'custom', monetary_value: monetary_value || null, monetary_description, eligible_group, requires_nomination: requires_nomination !== false, created_by: req.userId })
       .select('id').single()
     if (error) return reply.code(500).send({ error: error.message })
     return reply.code(201).send({ data })
@@ -492,7 +492,7 @@ export default async function recognitionRoutes(fastify: FastifyInstance) {
     const { period_label, period_start, period_end } = req.body as any
     if (!period_label?.trim()) return reply.code(400).send({ error: 'period_label is required' })
     const { data, error } = await fastify.supabase.from('award_rounds')
-      .insert({ tenant_id: req.tenantId, award_id: awardId, period_label: period_label.trim(), period_start: period_start || null, period_end: period_end || null, status: 'open', created_by: req.user.id })
+      .insert({ tenant_id: req.tenantId, award_id: awardId, period_label: period_label.trim(), period_start: period_start || null, period_end: period_end || null, status: 'open', created_by: req.userId })
       .select('id').single()
     if (error) return reply.code(500).send({ error: error.message })
     return reply.code(201).send({ data })
@@ -514,16 +514,16 @@ export default async function recognitionRoutes(fastify: FastifyInstance) {
     if (!winner_employee_id) return reply.code(400).send({ error: 'winner_employee_id is required' })
     // Update the round
     const { error: re } = await fastify.supabase.from('award_rounds')
-      .update({ status: 'closed', winner_employee_id, winner_notes: winner_notes || null, declared_at: new Date().toISOString(), declared_by: req.user.id })
+      .update({ status: 'closed', winner_employee_id, winner_notes: winner_notes || null, declared_at: new Date().toISOString(), declared_by: req.userId })
       .eq('tenant_id', req.tenantId).eq('id', roundId)
     if (re) return reply.code(500).send({ error: re.message })
     // Mark winning nomination
     await fastify.supabase.from('award_nominations')
-      .update({ status: 'winner', reviewed_at: new Date().toISOString(), reviewed_by: req.user.id })
+      .update({ status: 'winner', reviewed_at: new Date().toISOString(), reviewed_by: req.userId })
       .eq('tenant_id', req.tenantId).eq('round_id', roundId).eq('nominee_id', winner_employee_id)
     // Mark others not_selected
     await fastify.supabase.from('award_nominations')
-      .update({ status: 'not_selected', reviewed_at: new Date().toISOString(), reviewed_by: req.user.id })
+      .update({ status: 'not_selected', reviewed_at: new Date().toISOString(), reviewed_by: req.userId })
       .eq('tenant_id', req.tenantId).eq('round_id', roundId).eq('status', 'pending')
     return reply.send({ data: { winner_declared: true } })
   })
@@ -548,7 +548,7 @@ export default async function recognitionRoutes(fastify: FastifyInstance) {
     const { nominee_id, justification } = req.body as any
     if (!nominee_id) return reply.code(400).send({ error: 'nominee_id is required' })
     const { data, error } = await fastify.supabase.from('award_nominations')
-      .insert({ tenant_id: req.tenantId, round_id: roundId, nominee_id, nominated_by: req.user.id, justification: justification || null })
+      .insert({ tenant_id: req.tenantId, round_id: roundId, nominee_id, nominated_by: req.userId, justification: justification || null })
       .select('id').single()
     if (error) {
       if (error.code === '23505') return reply.code(409).send({ error: 'This employee is already nominated for this round' })
@@ -563,7 +563,7 @@ export default async function recognitionRoutes(fastify: FastifyInstance) {
     const validStatuses = ['pending','shortlisted','not_selected']
     if (status && !validStatuses.includes(status)) return reply.code(400).send({ error: 'Invalid status' })
     const update: Record<string, unknown> = {}
-    if (status) { update.status = status; update.reviewed_at = new Date().toISOString(); update.reviewed_by = req.user.id }
+    if (status) { update.status = status; update.reviewed_at = new Date().toISOString(); update.reviewed_by = req.userId }
     if (justification !== undefined) update.justification = justification
     const { error } = await fastify.supabase.from('award_nominations').update(update).eq('tenant_id', req.tenantId).eq('id', nomId)
     if (error) return reply.code(500).send({ error: error.message })
@@ -641,7 +641,7 @@ export default async function recognitionRoutes(fastify: FastifyInstance) {
   fastify.post('/recognition/spot-award', { preHandler: fastify.authenticate }, async (req: any, reply) => {
     const { to_employee_id, award_name, message, monetary_value } = req.body as any
     if (!to_employee_id || !award_name?.trim()) return reply.code(400).send({ error: 'to_employee_id and award_name are required' })
-    const empId = await resolveEmployeeId(fastify, req.user.id, req.tenantId)
+    const empId = await resolveEmployeeId(fastify, req.userId, req.tenantId)
     if (!empId) return reply.code(403).send({ error: 'Employee profile not found' })
     const { data, error } = await fastify.supabase.from('spot_awards')
       .insert({ tenant_id: req.tenantId, from_employee_id: empId, to_employee_id, award_name: award_name.trim(), message: message || null, monetary_value: monetary_value || null })
