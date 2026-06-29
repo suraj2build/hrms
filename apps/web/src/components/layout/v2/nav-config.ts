@@ -113,6 +113,7 @@ import {
   BadgeCheck,
   Sparkles,
   Cpu,
+  UserX,
 } from 'lucide-react'
 import type { UserRole } from '@/types'
 
@@ -248,6 +249,7 @@ export const DOMAINS: Domain[] = [
       '/admin/workforce/expiry-management',
       '/admin/benefits',
       '/admin/documents',
+      '/admin/absconding',
     ],
     // Note: /admin/recruitment/* all live here — do not add to other domains.
     defaultRoute: '/admin/employees',
@@ -266,6 +268,7 @@ export const DOMAINS: Domain[] = [
           { id: 'onboarding',            label: 'Onboarding',           route: '/admin/onboarding',            exact: true,  icon: UserPlus,     keywords: ['new hire', 'joining', 'new employee', 'induction', 'pre-joining'] },
           { id: 'onboarding-checklists', label: 'Onboarding Checklists', route: '/admin/onboarding/module',                   icon: GraduationCap, keywords: ['onboarding tasks', 'new hire checklist', 'joining checklist', 'induction tasks'] },
           { id: 'separation-workflow',   label: 'Separation',           route: '/admin/employees/separation',                 icon: LogOut,       keywords: ['exit', 'offboarding', 'resignation', 'termination', 'fnf', 'full and final', 'exit process', 'notice period'] },
+          { id: 'absconding-cases',      label: 'Absconding Cases',     route: '/admin/absconding',                           icon: UserX,        keywords: ['absconding', 'unauthorised absence', 'ua', 'no show', 'absconded', 'abandonment', 'missing employee', 'absent without leave', 'awol'] },
           { id: 'expiry-management',     label: 'Expiry Management',    route: '/admin/workforce/expiry-management',           icon: CalendarClock, keywords: ['expiry', 'lifecycle', 'document expiry', 'visa expiry', 'passport expiry', 'contract expiry', 'contract renewal', 'probation confirmation', 'probation due', 'identity expiry', 'expiring documents', 'work permit', 'renewal due'] },
           { id: 'certifications',        label: 'Certifications',       route: '/admin/workforce/certifications',              icon: BadgeCheck,    keywords: ['certification', 'license', 'professional credential', 'certificate', 'renewal', 'cert expiry', 'license renewal', 'AWS certification', 'professional development', 'compliance certification'] },
         ],

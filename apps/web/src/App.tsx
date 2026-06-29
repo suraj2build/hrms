@@ -72,7 +72,8 @@ const TermsPage         = lazy(() => import('@/pages/legal/LegalPages').then(m =
 const PrivacyPage       = lazy(() => import('@/pages/legal/LegalPages').then(m => ({ default: m.PrivacyPage })))
 const Positions         = lazy(() => import('@/pages/positions/Positions').then(m => ({ default: m.Positions })))
 const OrgChart          = lazy(() => import('@/pages/employees/OrgChart').then(m => ({ default: m.OrgChart })))
-const AdminHelpdesk     = lazy(() => import('@/pages/admin/AdminHelpdesk').then(m => ({ default: m.AdminHelpdesk })))
+const AdminHelpdesk              = lazy(() => import('@/pages/admin/AdminHelpdesk').then(m => ({ default: m.AdminHelpdesk })))
+const AbscondingCaseManagement   = lazy(() => import('@/pages/admin/AbscondingCaseManagement').then(m => ({ default: m.AbscondingCaseManagement })))
 const AdminBenefits     = lazy(() => import('@/pages/admin/AdminBenefits').then(m => ({ default: m.AdminBenefits })))
 const AuditTrail        = lazy(() => import('@/pages/admin/AuditTrail').then(m => ({ default: m.AuditTrail })))
 const AdminRecruitment  = lazy(() => import('@/pages/admin/AdminRecruitment').then(m => ({ default: m.AdminRecruitment })))
@@ -705,7 +706,8 @@ export default function App() {
                 <Route path="/admin/employees/:id"    element={<ProfilePlatform />} />
                 <Route path="/admin/organization"     element={<Organization />} />
                 <Route path="/admin/positions"        element={<Positions />} />
-                <Route path="/admin/helpdesk"         element={<AdminHelpdesk />} />
+                <Route path="/admin/helpdesk"            element={<AdminHelpdesk />} />
+                <Route path="/admin/absconding"          element={<AbscondingCaseManagement />} />
                 <Route path="/admin/benefits"         element={<AdminBenefits />} />
                 <Route path="/admin/audit-trail"      element={<AuditTrail />} />
                 <Route path="/admin/documents"        element={<Documents />} />
