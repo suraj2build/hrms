@@ -57,14 +57,18 @@ alter table survey_questions   enable row level security;
 alter table survey_assignments enable row level security;
 alter table survey_responses   enable row level security;
 
+drop policy if exists "tenant_isolation_surveys" on surveys;
 create policy "tenant_isolation_surveys"
   on surveys using (tenant_id = get_user_tenant_id());
 
+drop policy if exists "tenant_isolation_survey_questions" on survey_questions;
 create policy "tenant_isolation_survey_questions"
   on survey_questions using (tenant_id = get_user_tenant_id());
 
+drop policy if exists "tenant_isolation_survey_assignments" on survey_assignments;
 create policy "tenant_isolation_survey_assignments"
   on survey_assignments using (tenant_id = get_user_tenant_id());
 
+drop policy if exists "tenant_isolation_survey_responses" on survey_responses;
 create policy "tenant_isolation_survey_responses"
   on survey_responses using (tenant_id = get_user_tenant_id());

@@ -18,7 +18,8 @@ CREATE TABLE IF NOT EXISTS formal_awards (
   milestone_years          INTEGER[],
   created_by               UUID        REFERENCES profiles(id) ON DELETE SET NULL,
   created_at               TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at               TIMESTAMPTZ NOT NULL DEFAULT now()
+  updated_at               TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (tenant_id, name)
 );
 
 CREATE TABLE IF NOT EXISTS award_rounds (
@@ -84,11 +85,17 @@ ALTER TABLE award_rounds       ENABLE ROW LEVEL SECURITY;
 ALTER TABLE award_nominations  ENABLE ROW LEVEL SECURITY;
 ALTER TABLE spot_awards        ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "formal_awards_admin"     ON formal_awards;
 CREATE POLICY "formal_awards_admin"     ON formal_awards     FOR ALL USING (tenant_id = get_user_tenant_id() AND get_user_role() IN ('super_admin','hr_admin'));
+DROP POLICY IF EXISTS "award_rounds_admin"      ON award_rounds;
 CREATE POLICY "award_rounds_admin"      ON award_rounds      FOR ALL USING (tenant_id = get_user_tenant_id() AND get_user_role() IN ('super_admin','hr_admin'));
+DROP POLICY IF EXISTS "award_nominations_admin" ON award_nominations;
 CREATE POLICY "award_nominations_admin" ON award_nominations FOR ALL USING (tenant_id = get_user_tenant_id() AND get_user_role() IN ('super_admin','hr_admin'));
-CREATE POLICY "spot_awards_all"         ON spot_awards       FOR SELECT USING (tenant_id = get_user_tenant_id());
-CREATE POLICY "spot_awards_admin"       ON spot_awards       FOR INSERT USING (tenant_id = get_user_tenant_id());
+DROP POLICY IF EXISTS "spot_awards_read"        ON spot_awards;
+CREATE POLICY "spot_awards_read"        ON spot_awards       FOR SELECT USING (tenant_id = get_user_tenant_id());
+DROP POLICY IF EXISTS "spot_awards_admin"       ON spot_awards;
+DROP POLICY IF EXISTS "spot_awards_insert"      ON spot_awards;
+CREATE POLICY "spot_awards_insert"      ON spot_awards       FOR INSERT WITH CHECK (tenant_id = get_user_tenant_id());
 
 -- Seed default formal awards for existing tenants
 INSERT INTO formal_awards (tenant_id, name, description, frequency, award_type, monetary_value, monetary_description, eligible_group, requires_nomination, auto_long_service)
@@ -103,4 +110,4 @@ CROSS JOIN (VALUES
   ('Long Service Award – 3 Years', 'Recognising 3 years of committed service',       'annual',    'long_service',      3000, 'Certificate + Rs.3,000 voucher', 'All employees',      true),
   ('Long Service Award – 5 Years', 'Recognising 5 years of exceptional loyalty',     'annual',    'long_service',      5000, 'Certificate + Rs.5,000 voucher', 'All employees',      true)
 ) AS a(name, description, frequency, award_type, monetary_value, monetary_description, eligible_group, auto_ls)
-ON CONFLICT DO NOTHING;
+ON CONFLICT (tenant_id, name) DO NOTHING;

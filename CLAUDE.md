@@ -26,6 +26,22 @@ any user-facing copy, title, email, marketing, or new code. If you find a stray
 - The Resend test sender address `onboarding@resend.dev` (display name is
   "CognixHR"); real sender is overridden via the `EMAIL_FROM` env var.
 
+## Employee picker / search — UNIVERSAL RULE
+
+**NEVER use raw UUID dropdowns for employee selection.** Every field that picks an employee must use a **search-by-name-or-employee-code** pattern:
+- Show a text input that filters by `employee_code` OR `first_name + last_name` (case-insensitive)
+- Display results as `"EMP001 — Rahul Sharma"` (code + full name)
+- Submit only the resolved `employee_id` UUID to the API
+- This applies everywhere: dialogs, filters, forms, quick-actions — any place a user selects an employee
+
+Existing reusable component: search for `EmployeeSelector` or `EmployeeCombobox` in the web app.  
+If one doesn't exist or doesn't match, build a simple inline combobox that:
+1. `useQuery(['employees'], () => api.get('/employees').then(r => r.data))` to load the list
+2. Filters locally on `code + name` substring match
+3. Renders `<Popover>` + `<Command>` from shadcn/ui
+
+---
+
 ## Tenant licensing — the contract HRMS depends on
 
 Tenant licensing is owned by the **owner portal** (a separate deployment,

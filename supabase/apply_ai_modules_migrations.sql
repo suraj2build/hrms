@@ -14,6 +14,7 @@
 --   329_succession_planning
 --   330_succession_enhancements
 --   331_survey_intelligence
+--   332_helpdesk_absconding_enhancements
 --   334_formal_awards
 --
 -- Safety: fully idempotent — uses IF NOT EXISTS / OR REPLACE / ON CONFLICT DO NOTHING.
@@ -27,41 +28,58 @@ BEGIN;
 -- ─────────────────────────────────────────────────────────────────────────────
 
 CREATE TABLE IF NOT EXISTS absconding_cases (
-  id              UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
-  tenant_id       UUID        NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
-  employee_id     UUID        NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
-  flagged_at      DATE        NOT NULL DEFAULT CURRENT_DATE,
-  days_absent     INTEGER     NOT NULL DEFAULT 0,
-  status          TEXT        NOT NULL DEFAULT 'flagged'
-    CHECK (status IN ('flagged','wl1_sent','wl2_sent','termination_pending','reinstated','terminated')),
-  wl1_sent_at     TIMESTAMPTZ,
-  wl2_sent_at     TIMESTAMPTZ,
-  termination_date DATE,
-  last_known_contact TEXT,
-  fnf_initiated   BOOLEAN     NOT NULL DEFAULT false,
-  asset_recovery_flag BOOLEAN NOT NULL DEFAULT false,
-  notes           TEXT,
-  created_by      UUID        REFERENCES profiles(id) ON DELETE SET NULL,
-  created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
-  UNIQUE (tenant_id, employee_id, flagged_at)
+  id                      UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id               UUID        NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  employee_id             UUID        NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+  status                  TEXT        NOT NULL DEFAULT 'flagged'
+    CHECK (status IN ('flagged','wl1_sent','wl2_sent','termination_pending','terminated','resolved','closed')),
+  first_ua_date           DATE        NOT NULL,
+  last_ua_date            DATE,
+  ua_days_count           INT         NOT NULL DEFAULT 1,
+  flagged_at              DATE,
+  wl1_sent_at             TIMESTAMPTZ,
+  wl1_letter_id           UUID,
+  wl2_sent_at             TIMESTAMPTZ,
+  wl2_letter_id           UUID,
+  termination_letter_id   UUID,
+  employee_response       TEXT,
+  employee_response_at    TIMESTAMPTZ,
+  response_channel        TEXT CHECK (response_channel IN ('email','whatsapp','in_person','letter','phone')),
+  chro_approval_required  BOOLEAN     NOT NULL DEFAULT FALSE,
+  chro_approved_by        UUID        REFERENCES profiles(id),
+  chro_approved_at        TIMESTAMPTZ,
+  chro_remarks            TEXT,
+  resolved_reason         TEXT,
+  separation_id           UUID,
+  assigned_to             UUID        REFERENCES profiles(id),
+  notes                   TEXT,
+  created_by              UUID        NOT NULL REFERENCES profiles(id),
+  created_at              TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at              TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS absconding_communications (
   id          UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
-  tenant_id   UUID        NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
   case_id     UUID        NOT NULL REFERENCES absconding_cases(id) ON DELETE CASCADE,
-  channel     TEXT        NOT NULL DEFAULT 'note'
-    CHECK (channel IN ('phone','whatsapp','email','physical_visit','emergency_contact','note','letter')),
-  summary     TEXT        NOT NULL,
-  outcome     TEXT,
-  logged_by   UUID        REFERENCES profiles(id) ON DELETE SET NULL,
-  logged_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+  tenant_id   UUID        NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  comm_type   TEXT        NOT NULL CHECK (comm_type IN (
+                'letter_generated','email_sent','whatsapp_sent',
+                'call_attempted','employee_response','hr_note','system_event'
+              )),
+  direction   TEXT        NOT NULL CHECK (direction IN ('outbound','inbound','internal')),
+  subject     TEXT,
+  body        TEXT,
+  channel     TEXT,
+  sent_by     UUID        REFERENCES profiles(id),
+  letter_id   UUID,
+  metadata    JSONB       NOT NULL DEFAULT '{}',
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE INDEX IF NOT EXISTS idx_absconding_cases_tenant   ON absconding_cases(tenant_id, status);
-CREATE INDEX IF NOT EXISTS idx_absconding_cases_employee ON absconding_cases(tenant_id, employee_id);
-CREATE INDEX IF NOT EXISTS idx_absconding_comms_case     ON absconding_communications(tenant_id, case_id);
+CREATE INDEX IF NOT EXISTS idx_absconding_cases_tenant       ON absconding_cases(tenant_id, status);
+CREATE INDEX IF NOT EXISTS idx_absconding_cases_employee     ON absconding_cases(tenant_id, employee_id);
+CREATE INDEX IF NOT EXISTS idx_absconding_comms_case         ON absconding_communications(case_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_absconding_comms_tenant       ON absconding_communications(tenant_id, case_id);
 
 ALTER TABLE absconding_cases           ENABLE ROW LEVEL SECURITY;
 ALTER TABLE absconding_communications  ENABLE ROW LEVEL SECURITY;
@@ -79,10 +97,10 @@ CREATE POLICY "absconding_comms_admin"  ON absconding_communications FOR ALL
 -- ─────────────────────────────────────────────────────────────────────────────
 
 ALTER TABLE helpdesk_tickets
-  ADD COLUMN IF NOT EXISTS csat_rating    SMALLINT CHECK (csat_rating BETWEEN 1 AND 5),
-  ADD COLUMN IF NOT EXISTS csat_comment   TEXT,
-  ADD COLUMN IF NOT EXISTS csat_rated_at  TIMESTAMPTZ,
-  ADD COLUMN IF NOT EXISTS merged_into    UUID REFERENCES helpdesk_tickets(id) ON DELETE SET NULL;
+  ADD COLUMN IF NOT EXISTS csat_rating       SMALLINT CHECK (csat_rating BETWEEN 1 AND 5),
+  ADD COLUMN IF NOT EXISTS csat_comment      TEXT,
+  ADD COLUMN IF NOT EXISTS csat_submitted_at TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS merged_into       UUID REFERENCES helpdesk_tickets(id) ON DELETE SET NULL;
 
 CREATE TABLE IF NOT EXISTS helpdesk_sla_policies (
   id               UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -187,48 +205,48 @@ CREATE TABLE IF NOT EXISTS mood_checkins (
   UNIQUE (tenant_id, employee_id, checkin_date)
 );
 
-CREATE TABLE IF NOT EXISTS mood_pulse_questions (
+CREATE TABLE IF NOT EXISTS pulse_questions (
   id          UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id   UUID        NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
   question    TEXT        NOT NULL,
   options     JSONB,
   status      TEXT        NOT NULL DEFAULT 'draft'
     CHECK (status IN ('draft','active','closed')),
-  poll_category TEXT NOT NULL DEFAULT 'weekly_pulse'
-    CHECK (poll_category IN ('weekly_pulse','manager_quality','post_appraisal','onboarding','post_transfer','festival','custom')),
+  starts_at   TIMESTAMPTZ,
+  ends_at     TIMESTAMPTZ,
   created_by  UUID        REFERENCES profiles(id) ON DELETE SET NULL,
   created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE TABLE IF NOT EXISTS mood_pulse_responses (
+CREATE TABLE IF NOT EXISTS pulse_responses (
   id          UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id   UUID        NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
-  question_id UUID        NOT NULL REFERENCES mood_pulse_questions(id) ON DELETE CASCADE,
+  question_id UUID        NOT NULL REFERENCES pulse_questions(id) ON DELETE CASCADE,
   employee_id UUID        NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
-  response    TEXT,
+  response    TEXT        NOT NULL,
   created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
   UNIQUE (tenant_id, question_id, employee_id)
 );
 
-ALTER TABLE mood_checkins        ADD COLUMN IF NOT EXISTS sentiment_label TEXT CHECK (sentiment_label IN ('positive','neutral','negative'));
+ALTER TABLE mood_checkins ADD COLUMN IF NOT EXISTS sentiment_label TEXT CHECK (sentiment_label IN ('positive','neutral','negative'));
 
 CREATE INDEX IF NOT EXISTS idx_mood_checkins_tenant   ON mood_checkins(tenant_id, checkin_date);
 CREATE INDEX IF NOT EXISTS idx_mood_checkins_employee ON mood_checkins(tenant_id, employee_id);
-CREATE INDEX IF NOT EXISTS idx_mood_pulse_tenant      ON mood_pulse_questions(tenant_id, status);
+CREATE INDEX IF NOT EXISTS idx_pulse_questions_tenant ON pulse_questions(tenant_id, status);
 
-ALTER TABLE mood_checkins        ENABLE ROW LEVEL SECURITY;
-ALTER TABLE mood_pulse_questions ENABLE ROW LEVEL SECURITY;
-ALTER TABLE mood_pulse_responses ENABLE ROW LEVEL SECURITY;
+ALTER TABLE mood_checkins   ENABLE ROW LEVEL SECURITY;
+ALTER TABLE pulse_questions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE pulse_responses ENABLE ROW LEVEL SECURITY;
 
-DROP POLICY IF EXISTS "mood_checkins_own"    ON mood_checkins;
-CREATE POLICY "mood_checkins_own"    ON mood_checkins    FOR ALL USING (tenant_id = get_user_tenant_id());
-DROP POLICY IF EXISTS "mood_pulse_admin"     ON mood_pulse_questions;
-CREATE POLICY "mood_pulse_admin"     ON mood_pulse_questions FOR ALL USING (tenant_id = get_user_tenant_id() AND get_user_role() IN ('super_admin','hr_admin'));
-DROP POLICY IF EXISTS "mood_pulse_read"      ON mood_pulse_questions;
-CREATE POLICY "mood_pulse_read"      ON mood_pulse_questions FOR SELECT USING (tenant_id = get_user_tenant_id());
-DROP POLICY IF EXISTS "mood_pulse_responses" ON mood_pulse_responses;
-CREATE POLICY "mood_pulse_responses" ON mood_pulse_responses FOR ALL USING (tenant_id = get_user_tenant_id());
+DROP POLICY IF EXISTS "mood_checkins_own"     ON mood_checkins;
+CREATE POLICY "mood_checkins_own"     ON mood_checkins    FOR ALL USING (tenant_id = get_user_tenant_id());
+DROP POLICY IF EXISTS "pulse_q_admin_all"     ON pulse_questions;
+CREATE POLICY "pulse_q_admin_all"     ON pulse_questions FOR ALL USING (tenant_id = get_user_tenant_id() AND get_user_role() IN ('super_admin','hr_admin'));
+DROP POLICY IF EXISTS "pulse_q_employee_read" ON pulse_questions;
+CREATE POLICY "pulse_q_employee_read" ON pulse_questions FOR SELECT USING (tenant_id = get_user_tenant_id() AND status = 'active');
+DROP POLICY IF EXISTS "pulse_resp_tenant_all" ON pulse_responses;
+CREATE POLICY "pulse_resp_tenant_all" ON pulse_responses FOR ALL USING (tenant_id = get_user_tenant_id());
 
 -- Mood store monthly view
 CREATE OR REPLACE VIEW mood_store_monthly AS
@@ -288,7 +306,7 @@ CREATE TABLE IF NOT EXISTS survey_assignments (
     CHECK (respondent_type IN ('self','peer','manager','direct_report')),
   assigned_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
   completed_at  TIMESTAMPTZ,
-  UNIQUE (survey_id, employee_id)
+  UNIQUE (survey_id, employee_id, respondent_type)
 );
 
 CREATE TABLE IF NOT EXISTS survey_responses (
@@ -305,7 +323,29 @@ ALTER TABLE surveys           ADD COLUMN IF NOT EXISTS survey_type   TEXT NOT NU
 ALTER TABLE surveys           ADD COLUMN IF NOT EXISTS is_anonymous   BOOLEAN NOT NULL DEFAULT false;
 ALTER TABLE surveys           ADD COLUMN IF NOT EXISTS auto_trigger_days INTEGER;
 ALTER TABLE surveys           ADD COLUMN IF NOT EXISTS trigger_event  TEXT;
-ALTER TABLE survey_assignments ADD COLUMN IF NOT EXISTS respondent_type TEXT NOT NULL DEFAULT 'self';
+ALTER TABLE survey_assignments ADD COLUMN IF NOT EXISTS respondent_type TEXT NOT NULL DEFAULT 'self'
+  CHECK (respondent_type IN ('self','peer','manager','direct_report'));
+
+-- Fix unique constraint: drop old (survey_id, employee_id) and replace with
+-- (survey_id, employee_id, respondent_type) to support 360° multi-rater surveys
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'survey_assignments_survey_id_employee_id_key'
+  ) THEN
+    ALTER TABLE survey_assignments DROP CONSTRAINT survey_assignments_survey_id_employee_id_key;
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'survey_assignments_survey_employee_respondent_key'
+  ) THEN
+    ALTER TABLE survey_assignments
+      ADD CONSTRAINT survey_assignments_survey_employee_respondent_key
+      UNIQUE (survey_id, employee_id, respondent_type);
+  END IF;
+END;
+$$;
 
 CREATE INDEX IF NOT EXISTS idx_surveys_tenant          ON surveys(tenant_id, status);
 CREATE INDEX IF NOT EXISTS idx_survey_questions_survey ON survey_questions(survey_id);
@@ -330,7 +370,7 @@ CREATE POLICY "survey_responses_own"  ON survey_responses  FOR ALL USING (tenant
 -- Survey templates (from 331)
 CREATE TABLE IF NOT EXISTS survey_templates (
   id          UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
-  survey_type TEXT        NOT NULL,
+  survey_type TEXT        NOT NULL UNIQUE,
   name        TEXT        NOT NULL,
   description TEXT,
   questions   JSONB       NOT NULL DEFAULT '[]',
@@ -349,7 +389,7 @@ INSERT INTO survey_templates (survey_type, name, description, questions) VALUES
 ('exit_intent','Exit Intent — Retention Check','Anonymous survey for high attrition-risk employees','[{"order_idx":1,"question_text":"How likely are you to be working here in 6 months?","question_type":"rating","required":true},{"order_idx":2,"question_text":"My manager makes me feel valued and supported.","question_type":"rating","required":true},{"order_idx":3,"question_text":"I can see a clear path for my career growth here.","question_type":"rating","required":true},{"order_idx":4,"question_text":"What single change would most likely make you stay?","question_type":"text","required":false}]'::jsonb),
 ('post_appraisal','Post-Appraisal Pulse','Capture reaction to appraisal process (sent within 3 days)','[{"order_idx":1,"question_text":"The appraisal process was fair and transparent.","question_type":"rating","required":true},{"order_idx":2,"question_text":"My performance rating accurately reflects my contributions.","question_type":"rating","required":true},{"order_idx":3,"question_text":"My manager communicated my rating and feedback clearly.","question_type":"rating","required":true},{"order_idx":4,"question_text":"Any comments on the appraisal experience?","question_type":"text","required":false}]'::jsonb),
 ('post_transfer','Post-Transfer Experience','Sent 14 days after a transfer to a new location','[{"order_idx":1,"question_text":"I have settled into my new location well.","question_type":"rating","required":true},{"order_idx":2,"question_text":"My new manager has been supportive during my transition.","question_type":"rating","required":true},{"order_idx":3,"question_text":"I have been well integrated into my new team.","question_type":"rating","required":true},{"order_idx":4,"question_text":"Any concerns about your new location or role?","question_type":"text","required":false}]'::jsonb)
-ON CONFLICT DO NOTHING;
+ON CONFLICT (survey_type) DO NOTHING;
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- 328: Policy RAG (FTS on hr_policies)
@@ -387,14 +427,32 @@ DROP POLICY IF EXISTS "policy_qa_employee_insert" ON policy_qa_logs;
 CREATE POLICY "policy_qa_employee_insert" ON policy_qa_logs FOR INSERT WITH CHECK (tenant_id = get_user_tenant_id());
 
 CREATE OR REPLACE FUNCTION search_policies(
-  p_tenant_id   UUID,
-  p_query       TEXT,
-  p_limit       INT DEFAULT 5
-) RETURNS TABLE (
-  id TEXT, title TEXT, category TEXT, content TEXT, rank REAL
-) LANGUAGE sql STABLE AS $$
+  p_tenant_id UUID,
+  p_query     TEXT,
+  p_limit     INT DEFAULT 5
+)
+RETURNS TABLE (
+  id          UUID,
+  title       TEXT,
+  category    TEXT,
+  description TEXT,
+  content     TEXT,
+  snippet     TEXT,
+  rank        REAL
+)
+LANGUAGE sql STABLE SECURITY DEFINER AS $$
   SELECT
-    id::text, title, category, content,
+    id,
+    title,
+    category,
+    description,
+    content,
+    ts_headline(
+      'english',
+      coalesce(content, description, ''),
+      websearch_to_tsquery('english', p_query),
+      'MaxWords=60, MinWords=20, StartSel=«, StopSel=»'
+    ) AS snippet,
     ts_rank(search_vector, websearch_to_tsquery('english', p_query)) AS rank
   FROM hr_policies
   WHERE tenant_id = p_tenant_id
@@ -542,7 +600,8 @@ CREATE TABLE IF NOT EXISTS formal_awards (
   milestone_years      INTEGER[],
   created_by           UUID        REFERENCES profiles(id) ON DELETE SET NULL,
   created_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at           TIMESTAMPTZ NOT NULL DEFAULT now()
+  updated_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (tenant_id, name)
 );
 
 CREATE TABLE IF NOT EXISTS award_rounds (
@@ -624,7 +683,7 @@ CROSS JOIN (VALUES
   ('Long Service Award – 3 Years', 'Recognising 3 years of committed service',  'annual',  'long_service',      3000::numeric, 'Certificate + Rs.3,000 voucher','All employees'),
   ('Long Service Award – 5 Years', 'Recognising 5 years of exceptional loyalty','annual',  'long_service',      5000::numeric, 'Certificate + Rs.5,000 voucher','All employees')
 ) AS a(name, description, frequency, award_type, monetary_value, monetary_description, eligible_group)
-ON CONFLICT DO NOTHING;
+ON CONFLICT (tenant_id, name) DO NOTHING;
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- Reload PostgREST schema cache

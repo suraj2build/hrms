@@ -15,7 +15,7 @@ ALTER TABLE survey_assignments
 
 CREATE TABLE IF NOT EXISTS survey_templates (
   id            UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
-  survey_type   TEXT        NOT NULL,
+  survey_type   TEXT        NOT NULL UNIQUE,
   name          TEXT        NOT NULL,
   description   TEXT,
   questions     JSONB       NOT NULL DEFAULT '[]',
@@ -84,7 +84,8 @@ INSERT INTO survey_templates (survey_type, name, description, questions, is_syst
   {"order_idx":4,"question_text":"The accommodation and logistics of my transfer were handled well.","question_type":"rating","required":true},
   {"order_idx":5,"question_text":"Any concerns about your new location or role?","question_type":"text","required":false}
 ]'::jsonb, true)
-ON CONFLICT DO NOTHING;
+ON CONFLICT (survey_type) DO NOTHING;
 
 ALTER TABLE survey_templates ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "survey_templates_read" ON survey_templates;
 CREATE POLICY "survey_templates_read" ON survey_templates FOR SELECT USING (true);

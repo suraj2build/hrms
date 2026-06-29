@@ -33,5 +33,6 @@ CROSS JOIN (VALUES
 ON CONFLICT (tenant_id, category) DO NOTHING;
 
 ALTER TABLE helpdesk_category_sla ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "helpdesk_category_sla_admin" ON helpdesk_category_sla;
 CREATE POLICY "helpdesk_category_sla_admin" ON helpdesk_category_sla FOR ALL
   USING (tenant_id = get_user_tenant_id() AND get_user_role() IN ('super_admin','hr_admin'));

@@ -63,7 +63,7 @@ CREATE TABLE IF NOT EXISTS absconding_cases (
 CREATE TABLE IF NOT EXISTS absconding_communications (
   id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   case_id     UUID NOT NULL REFERENCES absconding_cases(id) ON DELETE CASCADE,
-  tenant_id   UUID NOT NULL,
+  tenant_id   UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
   comm_type   TEXT NOT NULL CHECK (comm_type IN (
                 'letter_generated', 'email_sent', 'whatsapp_sent',
                 'call_attempted', 'employee_response', 'hr_note', 'system_event'
@@ -92,6 +92,9 @@ CREATE INDEX IF NOT EXISTS idx_absconding_cases_tenant_created
 CREATE INDEX IF NOT EXISTS idx_absconding_communications_case
   ON absconding_communications(case_id, created_at DESC);
 
+CREATE INDEX IF NOT EXISTS idx_absconding_communications_tenant
+  ON absconding_communications(tenant_id, case_id);
+
 -- ── Trigger: updated_at ──────────────────────────────────────────────────────
 
 CREATE OR REPLACE FUNCTION update_absconding_cases_updated_at()
@@ -106,3 +109,18 @@ DROP TRIGGER IF EXISTS trg_absconding_cases_updated_at ON absconding_cases;
 CREATE TRIGGER trg_absconding_cases_updated_at
   BEFORE UPDATE ON absconding_cases
   FOR EACH ROW EXECUTE FUNCTION update_absconding_cases_updated_at();
+
+-- ── Row-level security ────────────────────────────────────────────────────────
+
+ALTER TABLE absconding_cases           ENABLE ROW LEVEL SECURITY;
+ALTER TABLE absconding_communications  ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "absconding_cases_admin" ON absconding_cases;
+CREATE POLICY "absconding_cases_admin" ON absconding_cases FOR ALL
+  USING (tenant_id = get_user_tenant_id()
+         AND get_user_role() IN ('super_admin','hr_admin'));
+
+DROP POLICY IF EXISTS "absconding_comms_admin" ON absconding_communications;
+CREATE POLICY "absconding_comms_admin" ON absconding_communications FOR ALL
+  USING (tenant_id = get_user_tenant_id()
+         AND get_user_role() IN ('super_admin','hr_admin'));
