@@ -750,6 +750,7 @@ export const DOMAINS: Domain[] = [
       '/admin/trust',
       '/admin/fabric',
       '/admin/policy-library',
+      '/admin/succession',
     ],
     defaultRoute: '/admin/organization',
     groups: [
@@ -760,6 +761,14 @@ export const DOMAINS: Domain[] = [
         items: [
           { id: 'company-settings', label: 'Company Settings', route: '/admin/settings', exact: true, icon: Settings, keywords: ['company setup', 'company profile', 'tenant settings', 'company details', 'organization settings', 'branding'] },
           { id: 'ai-assistant',     label: 'AI Assistant',     route: '/admin/settings/ai',           icon: Sparkles, keywords: ['ai', 'assistant', 'chatbot', 'groq', 'openai', 'gemini', 'llm', 'ai config', 'api key', 'ai settings'] },
+        ],
+      },
+
+      // ── Talent ───────────────────────────────────────────────────────────────
+      {
+        label: 'Talent',
+        items: [
+          { id: 'succession', label: 'Succession Planning', route: '/admin/succession', icon: TrendingUp, badge: 'NEW', keywords: ['succession', 'succession planning', 'talent pipeline', 'leadership pipeline', 'critical roles', 'key person risk', 'successor', 'bench strength', 'readiness'] },
         ],
       },
 
