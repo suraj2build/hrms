@@ -93,6 +93,10 @@ import attendanceRunDetailsRoute      from './routes/attendance/run-details.js'
 import attendanceRegularisationRoute  from './routes/attendance/regularisation.js'
 import wfhRoutes                       from './routes/attendance/wfh.js'
 import recognitionRoutes               from './routes/recognition/index.js'
+import abscondingRoutes               from './routes/absconding/index.js'
+import policyRoutes                   from './routes/policy/index.js'
+import moodRoutes                     from './routes/mood/index.js'
+import surveyRoutes                   from './routes/surveys/index.js'
 import communityRoutes                  from './routes/community/index.js'
 import attendanceLeaveRoute           from './routes/attendance/leave.js'
 import attendanceMusterRoute          from './routes/attendance/muster.js'
@@ -460,6 +464,23 @@ async function start() {
     registerWoCreditScheduler(fastify.supabase)
   }, fastify.log)
 
+  // Absconding case scanner — daily scan for UA employees, auto-escalates state machine
+  await safeRegisterModule('absconding-scanner', async () => {
+    const { scanAndEscalate } = await import('./lib/absconding-engine.js')
+    const TWENTY_FOUR_HOURS = 24 * 60 * 60 * 1_000
+    const runScan = async () => {
+      const { data: tenants } = await fastify.supabase
+        .from('tenants').select('id').in('status', ['active', 'trial'])
+      for (const t of (tenants ?? []) as { id: string }[]) {
+        try { await scanAndEscalate(fastify.supabase, t.id) }
+        catch (e) { fastify.log.error({ tenant: t.id, err: e }, 'absconding scan failed') }
+      }
+    }
+    // Run once at startup (with small delay), then every 24 hours
+    setTimeout(runScan, 60_000)
+    setInterval(runScan, TWENTY_FOUR_HOURS)
+  }, fastify.log)
+
   // Durable job queue — Postgres-backed, crash-safe, multi-instance ready.
   // Must start AFTER supabase plugin is registered (needs the client).
   await safeRegisterModule('durable-queue', async () => {
@@ -716,6 +737,10 @@ async function start() {
   await fastify.register(notificationTemplatesRoute,        { prefix: '/notifications/templates' })  // GET/POST /notifications/templates/*
   await fastify.register(notificationInboxRoute,            { prefix: '/notifications/inbox' })        // GET/POST /notifications/inbox/*
   await fastify.register(helpdeskRoutes,                     { prefix: '/helpdesk' })                  // ESS-05 HR helpdesk tickets — employee + HR-admin endpoints
+  await fastify.register(abscondingRoutes,                   { prefix: '/absconding' })                 // Absconding Case Management — /absconding/cases, /absconding/dashboard
+  await fastify.register(policyRoutes,                       { prefix: '/policies' })                   // Policy KB + Acknowledgement — /policies (employee) + /policies/admin/*
+  await fastify.register(moodRoutes,                         { prefix: '/mood' })                        // Mood Check-ins + Pulse Polls — /mood/today|checkin|pulse/* + /mood/admin/*
+  await fastify.register(surveyRoutes,                       { prefix: '/surveys' })                     // Survey Management — /surveys/my|:id|:id/submit + /surveys/admin/*
   await fastify.register(benefitsRoutes,                     { prefix: '/benefits' })                  // ESS-05 benefits enrolment — plans + employee enrolments
   await fastify.register(recruitmentRoutes,                  { prefix: '/recruitment' })                // RCT-01+ Recruitment & ATS — requisitions, candidates, applications, interviews
   await fastify.register(certificationRoutes,               { prefix: '' })                            // Certification Governance — /certifications/*

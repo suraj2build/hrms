@@ -113,6 +113,10 @@ import {
   BadgeCheck,
   Sparkles,
   Cpu,
+  UserX,
+  SmilePlus,
+  ClipboardList,
+  Award,
 } from 'lucide-react'
 import type { UserRole } from '@/types'
 
@@ -248,6 +252,10 @@ export const DOMAINS: Domain[] = [
       '/admin/workforce/expiry-management',
       '/admin/benefits',
       '/admin/documents',
+      '/admin/absconding',
+      '/admin/mood-pulse',
+      '/admin/surveys',
+      '/admin/recognition',
     ],
     // Note: /admin/recruitment/* all live here — do not add to other domains.
     defaultRoute: '/admin/employees',
@@ -266,6 +274,7 @@ export const DOMAINS: Domain[] = [
           { id: 'onboarding',            label: 'Onboarding',           route: '/admin/onboarding',            exact: true,  icon: UserPlus,     keywords: ['new hire', 'joining', 'new employee', 'induction', 'pre-joining'] },
           { id: 'onboarding-checklists', label: 'Onboarding Checklists', route: '/admin/onboarding/module',                   icon: GraduationCap, keywords: ['onboarding tasks', 'new hire checklist', 'joining checklist', 'induction tasks'] },
           { id: 'separation-workflow',   label: 'Separation',           route: '/admin/employees/separation',                 icon: LogOut,       keywords: ['exit', 'offboarding', 'resignation', 'termination', 'fnf', 'full and final', 'exit process', 'notice period'] },
+          { id: 'absconding-cases',      label: 'Absconding Cases',     route: '/admin/absconding',                           icon: UserX,        keywords: ['absconding', 'unauthorised absence', 'ua', 'no show', 'absconded', 'abandonment', 'missing employee', 'absent without leave', 'awol'] },
           { id: 'expiry-management',     label: 'Expiry Management',    route: '/admin/workforce/expiry-management',           icon: CalendarClock, keywords: ['expiry', 'lifecycle', 'document expiry', 'visa expiry', 'passport expiry', 'contract expiry', 'contract renewal', 'probation confirmation', 'probation due', 'identity expiry', 'expiring documents', 'work permit', 'renewal due'] },
           { id: 'certifications',        label: 'Certifications',       route: '/admin/workforce/certifications',              icon: BadgeCheck,    keywords: ['certification', 'license', 'professional credential', 'certificate', 'renewal', 'cert expiry', 'license renewal', 'AWS certification', 'professional development', 'compliance certification'] },
         ],
@@ -290,6 +299,14 @@ export const DOMAINS: Domain[] = [
           { id: 'req-int-analytics',label: 'Interview Analytics', route: '/admin/recruitment/interview-analytics', icon: Target, keywords: ['interviewer calibration', 'panel consistency', 'leniency', 'inter-rater', 'criterion effectiveness', 'hire accuracy', 'interview quality', 'scorecard analytics'] },
           { id: 'req-qbank',        label: 'Question Bank', route: '/admin/recruitment/question-bank', icon: HelpCircle,    keywords: ['questions', 'interview questions', 'question bank', 'behavioural', 'technical questions'] },
           { id: 'req-hired',        label: 'Hired Pipeline', route: '/admin/recruitment/hired',        icon: BadgeCheck,    keywords: ['hired candidates', 'preboarding', 'offer accepted', 'initiate preboarding', 'joining pipeline', 'new hire pipeline', 'pre-joinee'] },
+        ],
+      },
+      {
+        label: 'Engagement',
+        items: [
+          { id: 'mood-pulse', label: 'Mood & Pulse', route: '/admin/mood-pulse', icon: SmilePlus, keywords: ['mood', 'pulse', 'sentiment', 'check-in', 'employee mood', 'engagement', 'wellbeing', 'happiness', 'pulse survey', 'mood tracker'] },
+          { id: 'surveys',       label: 'Surveys',             route: '/admin/surveys',    icon: ClipboardList, keywords: ['survey', 'questionnaire', 'employee survey', 'feedback form', 'satisfaction survey', 'esat', 'engagement survey', 'polls'] },
+          { id: 'r-and-r',      label: 'Recognition & Rewards', route: '/admin/recognition', icon: Award,         keywords: ['recognition', 'rewards', 'kudos', 'badge', 'points', 'appreciation', 'peer recognition', 'leaderboard', 'r&r', 'r and r', 'celebrate'] },
         ],
       },
     ],
@@ -732,6 +749,7 @@ export const DOMAINS: Domain[] = [
       '/admin/enterprise',
       '/admin/trust',
       '/admin/fabric',
+      '/admin/policy-library',
     ],
     defaultRoute: '/admin/organization',
     groups: [
@@ -742,6 +760,14 @@ export const DOMAINS: Domain[] = [
         items: [
           { id: 'company-settings', label: 'Company Settings', route: '/admin/settings', exact: true, icon: Settings, keywords: ['company setup', 'company profile', 'tenant settings', 'company details', 'organization settings', 'branding'] },
           { id: 'ai-assistant',     label: 'AI Assistant',     route: '/admin/settings/ai',           icon: Sparkles, keywords: ['ai', 'assistant', 'chatbot', 'groq', 'openai', 'gemini', 'llm', 'ai config', 'api key', 'ai settings'] },
+        ],
+      },
+
+      // ── Knowledge Library ────────────────────────────────────────────────────
+      {
+        label: 'Knowledge Library',
+        items: [
+          { id: 'policy-library', label: 'Policy Library', route: '/admin/policy-library', icon: BookOpen, keywords: ['policy', 'policies', 'company policy', 'hr policy', 'acknowledgement', 'conduct', 'leave policy', 'handbook', 'knowledge base', 'kb', 'policy document'] },
         ],
       },
 

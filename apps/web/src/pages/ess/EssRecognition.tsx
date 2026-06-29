@@ -199,9 +199,19 @@ function FeedCard({ r, badges }: { r: RecognitionRow; badges: Badge[] }) {
   )
 }
 
+type LeaderPeriod = 'monthly' | 'quarterly' | 'ytd' | 'all'
+
+const PERIOD_LABELS: Record<LeaderPeriod, string> = {
+  monthly:   'This Month',
+  quarterly: 'This Quarter',
+  ytd:       'This Year',
+  all:       'All Time',
+}
+
 // ── Page ───────────────────────────────────────────────────────────────────────
 export function EssRecognition() {
-  const [giveOpen, setGiveOpen] = useState(false)
+  const [giveOpen, setGiveOpen]     = useState(false)
+  const [period, setPeriod]         = useState<LeaderPeriod>('monthly')
 
   const { data: badgesResp } = useQuery<{ data: Badge[] }>({
     queryKey: ['recognition-badges'],
@@ -219,8 +229,8 @@ export function EssRecognition() {
     staleTime: 30_000,
   })
   const { data: leaderResp } = useQuery<{ data: LeaderRow[] }>({
-    queryKey: ['recognition-leaderboard'],
-    queryFn:  () => api.get('/recognition/leaderboard'),
+    queryKey: ['recognition-leaderboard', period],
+    queryFn:  () => api.get(`/recognition/leaderboard?period=${period}`),
     staleTime: 60_000,
   })
 
@@ -254,8 +264,31 @@ export function EssRecognition() {
         />
       </MetricRow>
 
-      {leaders.length > 0 && (
-        <SectionCard title="Top recognized" description="Most-appreciated colleagues by points">
+      {(leaders.length > 0 || true) && (
+        <SectionCard
+          title="Top recognized"
+          description="Most-appreciated colleagues by points"
+          action={
+            <div className="flex items-center gap-1">
+              {(Object.keys(PERIOD_LABELS) as LeaderPeriod[]).map(p => (
+                <button
+                  key={p}
+                  onClick={() => setPeriod(p)}
+                  className={`rounded-full px-2.5 py-1 text-[11px] font-medium transition-colors ${
+                    period === p
+                      ? 'bg-primary text-primary-foreground'
+                      : 'text-muted-foreground hover:bg-muted'
+                  }`}
+                >
+                  {PERIOD_LABELS[p]}
+                </button>
+              ))}
+            </div>
+          }
+        >
+          {leaders.length === 0 ? (
+            <p className="py-4 text-center text-sm text-muted-foreground">No recognitions in this period.</p>
+          ) : (
           <div className="space-y-1">
             {leaders.slice(0, 5).map(l => (
               <div key={l.employee_id} className="flex items-center gap-3 rounded-lg px-1.5 py-1.5">
@@ -270,6 +303,7 @@ export function EssRecognition() {
               </div>
             ))}
           </div>
+          )}
         </SectionCard>
       )}
 

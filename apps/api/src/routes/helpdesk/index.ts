@@ -13,6 +13,8 @@ import { z } from 'zod'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { notify, notifyHrAdmins } from '../../lib/notify.js'
 import { logAction } from '../../lib/audit-service.js'
+import { resolveAssistantChain } from '../../lib/ai/config.js'
+import { chatCompleteWithFallback } from '../../lib/ai/llm.js'
 
 // Default SLA windows by priority (used when no tenant policy row exists).
 // Response = time to first HR reply; Resolution = time to resolve/close.
@@ -525,5 +527,203 @@ export default async function helpdeskRoutes(fastify: FastifyInstance) {
     })
 
     return reply.send({ data: { updated: rows.length } })
+  })
+
+  // ── CSAT: employee submits satisfaction rating after resolution ─────────────
+  // POST /helpdesk/tickets/:id/csat
+
+  fastify.post('/tickets/:id/csat', auth, async (req: any, reply) => {
+    const schema = z.object({
+      rating:  z.number().int().min(1).max(5),
+      comment: z.string().max(1000).optional(),
+    })
+    const parsed = schema.safeParse(req.body)
+    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+
+    const employeeId = await resolveCallerEmployeeId(fastify, req.userId, req.tenantId)
+    if (!employeeId) return reply.code(403).send({ error: 'PROFILE_NOT_LINKED' })
+
+    const { data: ticket } = await fastify.supabase
+      .from('helpdesk_tickets')
+      .select('id, employee_id, status, csat_submitted_at')
+      .eq('id', req.params.id)
+      .eq('tenant_id', req.tenantId)
+      .maybeSingle()
+
+    if (!ticket) return reply.code(404).send({ error: 'NOT_FOUND' })
+    if ((ticket as any).employee_id !== employeeId) return reply.code(403).send({ error: 'FORBIDDEN' })
+    if (!['resolved', 'closed'].includes((ticket as any).status)) return reply.code(422).send({ error: 'NOT_RESOLVED', message: 'CSAT is only available after resolution' })
+    if ((ticket as any).csat_submitted_at) return reply.code(409).send({ error: 'ALREADY_RATED', message: 'You already rated this ticket' })
+
+    const { error } = await fastify.supabase
+      .from('helpdesk_tickets')
+      .update({ csat_rating: parsed.data.rating, csat_comment: parsed.data.comment ?? null, csat_submitted_at: new Date().toISOString() })
+      .eq('id', req.params.id)
+      .eq('tenant_id', req.tenantId)
+
+    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    return reply.code(201).send({ success: true })
+  })
+
+  // ── AI Suggest: generate a suggested HR reply ──────────────────────────────
+  // GET /helpdesk/tickets/:id/ai-suggest
+
+  fastify.get('/tickets/:id/ai-suggest', hrAdminAuth, async (req: any, reply) => {
+    const { data: ticket } = await fastify.supabase
+      .from('helpdesk_tickets')
+      .select(`
+        id, subject, description, category, priority, status,
+        comments:helpdesk_ticket_comments(author_role, body, is_internal, created_at)
+      `)
+      .eq('id', req.params.id)
+      .eq('tenant_id', req.tenantId)
+      .maybeSingle()
+
+    if (!ticket) return reply.code(404).send({ error: 'NOT_FOUND' })
+
+    const t = ticket as any
+    const publicThread = (t.comments ?? [])
+      .filter((c: any) => !c.is_internal)
+      .sort((a: any, b: any) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
+      .map((c: any) => `[${c.author_role.toUpperCase()}]: ${c.body}`)
+      .join('\n\n')
+
+    const systemPrompt = `You are a helpful HR assistant drafting a professional reply to an employee helpdesk ticket.
+Be empathetic, concise, and action-oriented. Do not include greetings or signatures.
+Category: ${t.category}. Priority: ${t.priority}.`
+
+    const userPrompt = `Ticket subject: "${t.subject}"
+Initial description: ${t.description}
+
+Conversation so far:
+${publicThread || '(No replies yet)'}
+
+Write a helpful, professional HR reply to address the employee's concern:`
+
+    try {
+      const chain = await resolveAssistantChain(fastify.supabase, req.tenantId)
+      if (chain.length === 0) return reply.code(503).send({ error: 'AI_NOT_CONFIGURED', message: 'AI assistant is not configured for this tenant' })
+
+      const result = await chatCompleteWithFallback(chain, {
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user',   content: userPrompt },
+        ],
+        temperature: 0.4,
+        maxTokens:   350,
+      })
+
+      return reply.send({ suggestion: result.content.content?.trim() ?? '' })
+    } catch (e: any) {
+      return reply.code(503).send({ error: 'AI_ERROR', message: e.message ?? 'AI request failed' })
+    }
+  })
+
+  // ── Bulk status update ─────────────────────────────────────────────────────
+  // POST /helpdesk/tickets/bulk-status
+
+  fastify.post('/tickets/bulk-status', hrAdminAuth, async (req: any, reply) => {
+    const schema = z.object({
+      ticket_ids:      z.array(z.string().uuid()).min(1).max(50),
+      status:          z.enum(STATUSES),
+      resolution_note: z.string().max(5000).optional(),
+    })
+    const parsed = schema.safeParse(req.body)
+    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+
+    const now  = new Date().toISOString()
+    const patch: Record<string, any> = { status: parsed.data.status }
+    if (parsed.data.resolution_note) patch.resolution_note = parsed.data.resolution_note
+    if (parsed.data.status === 'resolved') patch.resolved_at = now
+    if (parsed.data.status === 'closed')   patch.closed_at   = now
+
+    const { data, error } = await fastify.supabase
+      .from('helpdesk_tickets')
+      .update(patch)
+      .in('id', parsed.data.ticket_ids)
+      .eq('tenant_id', req.tenantId)
+      .select('id')
+
+    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+
+    await logAction(fastify.supabase, {
+      tenantId:    req.tenantId,
+      tableName:   'helpdesk_tickets',
+      recordId:    req.tenantId,
+      action:      'UPDATE',
+      performedBy: req.userId,
+      newData:     { bulk_status: parsed.data.status, ticket_ids: parsed.data.ticket_ids },
+    })
+
+    return reply.send({ data: { updated: (data ?? []).length } })
+  })
+
+  // ── Merge ticket into another ──────────────────────────────────────────────
+  // POST /helpdesk/tickets/:id/merge
+
+  fastify.post('/tickets/:id/merge', hrAdminAuth, async (req: any, reply) => {
+    const schema = z.object({ merge_into: z.string().uuid() })
+    const parsed = schema.safeParse(req.body)
+    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+    if (parsed.data.merge_into === req.params.id) return reply.code(422).send({ error: 'SELF_MERGE' })
+
+    const { data: target } = await fastify.supabase
+      .from('helpdesk_tickets')
+      .select('id, subject')
+      .eq('id', parsed.data.merge_into)
+      .eq('tenant_id', req.tenantId)
+      .maybeSingle()
+
+    if (!target) return reply.code(404).send({ error: 'TARGET_NOT_FOUND' })
+
+    const { error } = await fastify.supabase
+      .from('helpdesk_tickets')
+      .update({ merged_into: parsed.data.merge_into, status: 'closed' })
+      .eq('id', req.params.id)
+      .eq('tenant_id', req.tenantId)
+
+    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+
+    // Add a system note on the target ticket
+    await fastify.supabase.from('helpdesk_ticket_comments').insert({
+      tenant_id:   req.tenantId,
+      ticket_id:   parsed.data.merge_into,
+      author_id:   req.userId,
+      author_role: 'hr',
+      body:        `Ticket #${req.params.id.slice(-6).toUpperCase()} was merged into this ticket.`,
+      is_internal: true,
+    })
+
+    return reply.send({ success: true, merged_into: parsed.data.merge_into })
+  })
+
+  // ── CSAT stats for admin dashboard ────────────────────────────────────────
+  // GET /helpdesk/stats/csat
+
+  fastify.get('/stats/csat', hrAdminAuth, async (req: any, reply) => {
+    const qs = z.object({ days: z.coerce.number().int().min(1).max(365).optional().default(30) }).safeParse(req.query)
+    const days = qs.success ? qs.data.days : 30
+    const since = new Date()
+    since.setDate(since.getDate() - days)
+
+    const { data } = await fastify.supabase
+      .from('helpdesk_tickets')
+      .select('csat_rating')
+      .eq('tenant_id', req.tenantId)
+      .not('csat_rating', 'is', null)
+      .gte('csat_submitted_at', since.toISOString())
+
+    const ratings = ((data ?? []) as { csat_rating: number }[]).map(r => r.csat_rating)
+    const distribution: Record<number, number> = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 }
+    for (const r of ratings) distribution[r] = (distribution[r] ?? 0) + 1
+
+    const avg = ratings.length ? Math.round((ratings.reduce((s, r) => s + r, 0) / ratings.length) * 10) / 10 : null
+
+    return reply.send({
+      average:      avg,
+      total:        ratings.length,
+      distribution,
+      period_days:  days,
+    })
   })
 }

@@ -25,7 +25,9 @@ import { CelebrationCard } from '@/components/experience/CelebrationCard'
 import { PersonAvatar } from '@/components/experience/PersonAvatar'
 import { AmbientLine } from '@/components/experience/AmbientLine'
 import { ReflectionCard } from '@/components/experience/ReflectionCard'
-import { ProgressBand } from '@/components/experience/ProgressBand'
+import { ProgressBand }        from '@/components/experience/ProgressBand'
+import { MoodCheckinWidget }  from '@/components/mood/MoodCheckinWidget'
+import { SurveyNudge }        from '@/components/surveys/SurveyNudge'
 import { type DayContext } from '@/components/experience/resolveGreeting'
 import { LoadingState } from '@/components/layout/LoadingState'
 import { ErrorState }   from '@/components/layout/ErrorState'
@@ -403,6 +405,12 @@ export function EssHome() {
               </span>
             </div>
           )}
+
+          {/* Survey nudge */}
+          <SurveyNudge />
+
+          {/* Mood check-in */}
+          <MoodCheckinWidget />
 
           {/* Progress band */}
           {progress?.show && <ProgressBand data={progress} />}

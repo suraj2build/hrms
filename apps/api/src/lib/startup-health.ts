@@ -52,6 +52,7 @@ const OPTIONAL_MODULES = [
   'durable-queue',
   'webhook-service',
   'onboarding',
+  'absconding-scanner',
 ] as const
 
 type OptionalModule = typeof OPTIONAL_MODULES[number]

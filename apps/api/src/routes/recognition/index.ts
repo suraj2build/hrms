@@ -11,6 +11,7 @@
 
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
+import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 
 const DEFAULT_BADGES = [
   { code: 'ownership_champion', label: 'Ownership Champion', icon: 'Award',     description: 'Takes end-to-end ownership',          points: 15 },
@@ -34,6 +35,30 @@ async function resolveEmployeeId(fastify: FastifyInstance, userId: string, tenan
 function startOfMonthISO(): string {
   const now = new Date()
   return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString()
+}
+
+/** ISO start of a named period, or null for all-time. */
+function periodStartISO(period: string): string | null {
+  const now = new Date()
+  switch (period) {
+    case 'monthly':
+      return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString()
+    case 'quarterly': {
+      const qMonth = Math.floor(now.getUTCMonth() / 3) * 3
+      return new Date(Date.UTC(now.getUTCFullYear(), qMonth, 1)).toISOString()
+    }
+    case 'ytd':
+      return new Date(Date.UTC(now.getUTCFullYear(), 0, 1)).toISOString()
+    default:
+      return null
+  }
+}
+
+/** ISO string for N days ago (UTC). */
+function daysAgoISO(n: number): string {
+  const d = new Date()
+  d.setUTCDate(d.getUTCDate() - n)
+  return d.toISOString()
 }
 
 /**
@@ -87,7 +112,8 @@ async function enrich(fastify: FastifyInstance, tenantId: string, rows: any[]): 
 }
 
 export default async function recognitionRoutes(fastify: FastifyInstance) {
-  const auth = { preHandler: [fastify.authenticate] }
+  const auth   = { preHandler: [fastify.authenticate] }
+  const hrAuth = { preHandler: [fastify.authenticate, requireRole(...HR_ADMIN_ROLES)] }
 
   // ── GET /recognition/badges ─────────────────────────────────────────────────
   fastify.get('/recognition/badges', auth, async (req: any, reply) => {
@@ -145,9 +171,13 @@ export default async function recognitionRoutes(fastify: FastifyInstance) {
 
   // ── GET /recognition/leaderboard ────────────────────────────────────────────
   fastify.get('/recognition/leaderboard', auth, async (req: any, reply) => {
-    const { data: rows, error } = await fastify.supabase
+    const period   = (req.query as any).period ?? 'all'
+    const since    = periodStartISO(period)
+    let q = fastify.supabase
       .from('recognition').select('to_employee, points')
       .eq('tenant_id', req.tenantId)
+    if (since) q = q.gte('created_at', since)
+    const { data: rows, error } = await q
     if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to load leaderboard' })
 
     const agg = new Map<string, { points: number; count: number }>()
@@ -246,5 +276,161 @@ export default async function recognitionRoutes(fastify: FastifyInstance) {
     }
 
     return reply.code(201).send({ data })
+  })
+
+  // ── Admin: analytics dashboard ─────────────────────────────────────────────
+
+  fastify.get('/recognition/admin/analytics', hrAuth, async (req: any, reply) => {
+    const since30d = daysAgoISO(30)
+    const since7d  = daysAgoISO(7)
+
+    const [all30, all7, budget] = await Promise.all([
+      fastify.supabase
+        .from('recognition')
+        .select('from_employee, to_employee, points, created_at')
+        .eq('tenant_id', req.tenantId)
+        .gte('created_at', since30d),
+      fastify.supabase
+        .from('recognition')
+        .select('id', { count: 'exact', head: true })
+        .eq('tenant_id', req.tenantId)
+        .gte('created_at', since7d),
+      fastify.supabase
+        .from('recognition_budgets')
+        .select('monthly_points')
+        .eq('tenant_id', req.tenantId)
+        .maybeSingle(),
+    ])
+
+    const rows30  = (all30.data ?? []) as any[]
+    const total7d = all7.count ?? 0
+
+    // 30-day daily trend
+    const trendMap: Record<string, number> = {}
+    for (const r of rows30) {
+      const day = (r.created_at as string).slice(0, 10)
+      trendMap[day] = (trendMap[day] ?? 0) + 1
+    }
+    const trend: { date: string; count: number }[] = []
+    for (let i = 29; i >= 0; i--) {
+      const d = new Date(); d.setUTCDate(d.getUTCDate() - i)
+      const date = d.toISOString().slice(0, 10)
+      trend.push({ date, count: trendMap[date] ?? 0 })
+    }
+
+    // Top givers (30d)
+    const giverMap = new Map<string, { points: number; count: number }>()
+    const receiverMap = new Map<string, { points: number; count: number }>()
+    for (const r of rows30) {
+      const g = giverMap.get(r.from_employee) ?? { points: 0, count: 0 }
+      g.points += r.points ?? 0; g.count++
+      giverMap.set(r.from_employee, g)
+
+      const rv = receiverMap.get(r.to_employee) ?? { points: 0, count: 0 }
+      rv.points += r.points ?? 0; rv.count++
+      receiverMap.set(r.to_employee, rv)
+    }
+    const topGiverIds    = [...giverMap.entries()].sort((a, b) => b[1].points - a[1].points).slice(0, 5).map(([id]) => id)
+    const topReceiverIds = [...receiverMap.entries()].sort((a, b) => b[1].points - a[1].points).slice(0, 5).map(([id]) => id)
+    const allIds = [...new Set([...topGiverIds, ...topReceiverIds])]
+
+    const { data: emps } = allIds.length
+      ? await fastify.supabase.from('employees').select('id, first_name, last_name').eq('tenant_id', req.tenantId).in('id', allIds)
+      : { data: [] as any[] }
+    const nameMap = new Map((emps ?? []).map((e: any) => [e.id, `${e.first_name ?? ''} ${e.last_name ?? ''}`.trim()]))
+
+    const topGivers    = topGiverIds.map(id => ({ employee_id: id, name: nameMap.get(id) ?? 'Unknown', ...giverMap.get(id)! }))
+    const topReceivers = topReceiverIds.map(id => ({ employee_id: id, name: nameMap.get(id) ?? 'Unknown', ...receiverMap.get(id)! }))
+
+    return reply.send({
+      data: {
+        total_30d:         rows30.length,
+        total_7d:          total7d,
+        unique_givers_30d: giverMap.size,
+        unique_receivers_30d: receiverMap.size,
+        monthly_budget:    (budget.data as any)?.monthly_points ?? DEFAULT_MONTHLY_BUDGET,
+        trend,
+        top_givers:    topGivers,
+        top_receivers: topReceivers,
+      },
+    })
+  })
+
+  // ── Admin: badge management ────────────────────────────────────────────────
+
+  fastify.get('/recognition/admin/badges', hrAuth, async (req: any, reply) => {
+    await ensureDefaultBadges(fastify, req.tenantId)
+    const { data, error } = await fastify.supabase
+      .from('recognition_badges')
+      .select('code, label, icon, description, points, is_active')
+      .eq('tenant_id', req.tenantId)
+      .order('label')
+    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to load badges' })
+    return reply.send({ data: data ?? [] })
+  })
+
+  fastify.post('/recognition/admin/badges', hrAuth, async (req: any, reply) => {
+    const schema = z.object({
+      code:        z.string().min(1).max(64).regex(/^[a-z0-9_]+$/),
+      label:       z.string().min(1).max(100),
+      description: z.string().max(300).optional(),
+      icon:        z.string().max(50).default('Award'),
+      points:      z.number().int().min(0).max(500),
+    })
+    const parsed = schema.safeParse(req.body)
+    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+
+    const { error } = await fastify.supabase
+      .from('recognition_badges')
+      .insert({ ...parsed.data, tenant_id: req.tenantId, is_active: true })
+
+    if (error) return reply.code(500).send({ error: 'INSERT_FAILED', message: error.message })
+    return reply.code(201).send({ data: { ok: true } })
+  })
+
+  fastify.patch('/recognition/admin/badges/:code', hrAuth, async (req: any, reply) => {
+    const { code } = req.params as { code: string }
+    const schema = z.object({
+      label:       z.string().min(1).max(100).optional(),
+      description: z.string().max(300).optional(),
+      icon:        z.string().max(50).optional(),
+      points:      z.number().int().min(0).max(500).optional(),
+      is_active:   z.boolean().optional(),
+    })
+    const parsed = schema.safeParse(req.body)
+    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+
+    const { error } = await fastify.supabase
+      .from('recognition_badges')
+      .update(parsed.data)
+      .eq('tenant_id', req.tenantId)
+      .eq('code', code)
+
+    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    return reply.send({ data: { ok: true } })
+  })
+
+  // ── Admin: budget configuration ────────────────────────────────────────────
+
+  fastify.get('/recognition/admin/budget', hrAuth, async (req: any, reply) => {
+    const { data } = await fastify.supabase
+      .from('recognition_budgets')
+      .select('monthly_points')
+      .eq('tenant_id', req.tenantId)
+      .maybeSingle()
+    return reply.send({ data: { monthly_points: (data as any)?.monthly_points ?? DEFAULT_MONTHLY_BUDGET } })
+  })
+
+  fastify.patch('/recognition/admin/budget', hrAuth, async (req: any, reply) => {
+    const schema = z.object({ monthly_points: z.number().int().min(0).max(10_000) })
+    const parsed = schema.safeParse(req.body)
+    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+
+    const { error } = await fastify.supabase
+      .from('recognition_budgets')
+      .upsert({ tenant_id: req.tenantId, monthly_points: parsed.data.monthly_points }, { onConflict: 'tenant_id' })
+
+    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    return reply.send({ data: { ok: true } })
   })
 }

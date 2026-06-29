@@ -31,22 +31,27 @@ export interface StandardLetterTemplate {
 
 // Common variables reused across templates.
 const V = {
-  employee_name:   { key: 'employee_name',   label: 'Employee Name',   source: 'employee', required: true },
-  employee_code:   { key: 'employee_code',   label: 'Employee Code',   source: 'employee', required: false },
-  designation:     { key: 'designation',     label: 'Designation',     source: 'employee', required: true },
-  department:      { key: 'department',       label: 'Department',      source: 'employee', required: false },
-  date_of_joining: { key: 'date_of_joining', label: 'Date of Joining', source: 'employee', required: true },
-  ctc_annual:      { key: 'ctc_annual',      label: 'Annual CTC',      source: 'computed', required: false },
-  work_location:   { key: 'work_location',   label: 'Work Location',   source: 'employee', required: false },
-  company_name:    { key: 'company_name',    label: 'Company Name',    source: 'company',  required: true },
-  current_date:    { key: 'current_date',    label: 'Date',            source: 'computed', required: true },
-  last_working_day:{ key: 'last_working_day',label: 'Last Working Day',source: 'manual',   required: false },
-  old_designation: { key: 'old_designation', label: 'Current Designation', source: 'manual', required: false },
-  new_designation: { key: 'new_designation', label: 'New Designation',  source: 'manual',   required: true },
-  effective_date:  { key: 'effective_date',  label: 'Effective Date',   source: 'manual',   required: true },
-  reason:          { key: 'reason',          label: 'Reason / Details', source: 'manual',   required: true },
-  review_period:   { key: 'review_period',   label: 'Review Period',    source: 'manual',   required: true },
-  performance_rating: { key: 'performance_rating', label: 'Rating', source: 'manual', required: false },
+  employee_name:    { key: 'employee_name',    label: 'Employee Name',         source: 'employee', required: true },
+  employee_code:    { key: 'employee_code',    label: 'Employee Code',         source: 'employee', required: false },
+  designation:      { key: 'designation',      label: 'Designation',           source: 'employee', required: true },
+  department:       { key: 'department',        label: 'Department',            source: 'employee', required: false },
+  date_of_joining:  { key: 'date_of_joining',  label: 'Date of Joining',       source: 'employee', required: true },
+  ctc_annual:       { key: 'ctc_annual',       label: 'Annual CTC',            source: 'computed', required: false },
+  work_location:    { key: 'work_location',    label: 'Work Location',         source: 'employee', required: false },
+  company_name:     { key: 'company_name',     label: 'Company Name',          source: 'company',  required: true },
+  current_date:     { key: 'current_date',     label: 'Date',                  source: 'computed', required: true },
+  last_working_day: { key: 'last_working_day', label: 'Last Working Day',      source: 'manual',   required: false },
+  old_designation:  { key: 'old_designation',  label: 'Current Designation',   source: 'manual',   required: false },
+  new_designation:  { key: 'new_designation',  label: 'New Designation',       source: 'manual',   required: true },
+  effective_date:   { key: 'effective_date',   label: 'Effective Date',        source: 'manual',   required: true },
+  reason:           { key: 'reason',           label: 'Reason / Details',      source: 'manual',   required: true },
+  review_period:    { key: 'review_period',    label: 'Review Period',         source: 'manual',   required: true },
+  performance_rating: { key: 'performance_rating', label: 'Rating',            source: 'manual',   required: false },
+  // Absconding-specific
+  absent_from_date: { key: 'absent_from_date', label: 'Absent From Date',      source: 'manual',   required: true },
+  absent_days:      { key: 'absent_days',      label: 'Number of Absent Days', source: 'manual',   required: true },
+  response_deadline:{ key: 'response_deadline',label: 'Response Deadline',     source: 'manual',   required: true },
+  ref_number:       { key: 'ref_number',       label: 'Reference Number',      source: 'computed', required: true },
 } as const
 
 export const STANDARD_LETTER_TEMPLATES: StandardLetterTemplate[] = [
@@ -187,6 +192,78 @@ export const STANDARD_LETTER_TEMPLATES: StandardLetterTemplate[] = [
     variables: [V.employee_name, V.designation, V.review_period, V.current_date, V.company_name],
     requires_approval: true, approval_levels: 1,
   },
+  // ── Absconding Letters ───────────────────────────────────────────────────────
+  {
+    name: 'Absconding Warning Letter 1', code: 'absconding_wl1', category: 'hr_initiated', letter_type: 'absconding_warning',
+    subject_template: 'Warning Letter — Unauthorised Absence (Ref: {{ref_number}})',
+    body_html:
+      '<p style="text-align:right">Ref: {{ref_number}}<br/>Date: {{current_date}}</p>' +
+      '<p>Dear {{employee_name}},</p>' +
+      '<p>This letter is to bring to your notice that you have been absent from work without prior authorisation or intimation ' +
+      'since <strong>{{absent_from_date}}</strong>, totalling <strong>{{absent_days}} days</strong> as on the date of this letter.</p>' +
+      '<p>Your continued absence without approval or information to the company is in violation of the terms of your employment and company policies.</p>' +
+      '<p>You are hereby directed to:</p>' +
+      '<ol>' +
+      '<li>Report to duty <strong>immediately</strong>, or</li>' +
+      '<li>Submit, in writing, a satisfactory explanation for your absence along with supporting evidence, ' +
+      'within <strong>seven (7) days</strong> of receipt of this letter, i.e., by <strong>{{response_deadline}}</strong>.</li>' +
+      '</ol>' +
+      '<p>Failure to respond or report to duty within the stipulated period will be viewed seriously and may result in further disciplinary action, ' +
+      'including termination of your employment on grounds of abandonment of service.</p>' +
+      '<p>This letter serves as your <strong>first and formal warning</strong>. Please treat this as urgent.</p>' +
+      '<p>Regards,<br/>HR Department<br/>{{company_name}}</p>',
+    variables: [V.employee_name, V.designation, V.department, V.absent_from_date, V.absent_days, V.response_deadline, V.ref_number, V.current_date, V.company_name],
+    requires_approval: false, approval_levels: 1,
+  },
+  {
+    name: 'Absconding Warning Letter 2 (Final)', code: 'absconding_wl2', category: 'hr_initiated', letter_type: 'absconding_warning',
+    subject_template: 'Final Warning — Unauthorised Absence & Show-Cause Notice (Ref: {{ref_number}})',
+    body_html:
+      '<p style="text-align:right">Ref: {{ref_number}}<br/>Date: {{current_date}}</p>' +
+      '<p>Dear {{employee_name}},</p>' +
+      '<p>This is to bring to your attention that despite our earlier communication regarding your unauthorised absence ' +
+      'since <strong>{{absent_from_date}}</strong>, you have neither reported to duty nor provided any satisfactory explanation.</p>' +
+      '<p>Your total unauthorised absence now stands at <strong>{{absent_days}} days</strong>, which constitutes a serious ' +
+      'breach of your employment contract and company policies.</p>' +
+      '<p>This letter therefore serves as your <strong>Final Warning and Show-Cause Notice</strong>. You are required to:</p>' +
+      '<ol>' +
+      '<li>Report to duty <strong>immediately</strong> with a written explanation, or</li>' +
+      '<li>Submit a written show-cause reply within <strong>seven (7) days</strong> from the date of this notice, ' +
+      'i.e., by <strong>{{response_deadline}}</strong>, explaining why disciplinary action, including termination of employment, ' +
+      'should not be initiated against you.</li>' +
+      '</ol>' +
+      '<p>Please note that failure to comply within the prescribed period will leave the company with no option but to initiate ' +
+      'termination proceedings for <strong>abandonment of service</strong>, without further notice or reference.</p>' +
+      '<p>For {{company_name}},<br/>HR Department</p>',
+    variables: [V.employee_name, V.designation, V.department, V.absent_from_date, V.absent_days, V.response_deadline, V.ref_number, V.current_date, V.company_name],
+    requires_approval: false, approval_levels: 1,
+  },
+  {
+    name: 'Absconding Termination Letter', code: 'absconding_termination', category: 'hr_initiated', letter_type: 'absconding_termination',
+    subject_template: 'Termination of Employment — Abandonment of Service (Ref: {{ref_number}})',
+    body_html:
+      '<p style="text-align:right">Ref: {{ref_number}}<br/>Date: {{current_date}}</p>' +
+      '<p>Dear {{employee_name}},</p>' +
+      '<p>You are employed with <strong>{{company_name}}</strong> as <strong>{{designation}}</strong> in the ' +
+      '{{department}} department since {{date_of_joining}}.</p>' +
+      '<p>You have been on unauthorised absence from <strong>{{absent_from_date}}</strong>, a period of ' +
+      '<strong>{{absent_days}} days</strong>. The company issued two formal warning letters with show-cause notices ' +
+      '(Ref Nos. as on record), calling upon you to report to duty or submit an explanation. ' +
+      'Despite these communications, you have neither reported to duty nor provided any response.</p>' +
+      '<p>Your prolonged, unexplained absence and wilful abandonment of your duties has severely disrupted business ' +
+      'operations and constitutes a breach of your terms of employment.</p>' +
+      '<p>After careful consideration of all facts, the management has decided to <strong>terminate your employment ' +
+      'with immediate effect from {{current_date}}</strong> on the grounds of <strong>abandonment of service / absconding</strong>.</p>' +
+      '<p>Your Full &amp; Final settlement, including any statutory dues payable, will be processed in accordance with ' +
+      'company policy and applicable law. Please contact the HR department to initiate the settlement process and ' +
+      'return any company property in your possession.</p>' +
+      '<p>This letter is being sent to your last known address and email on record.</p>' +
+      '<p>For {{company_name}},<br/>HR Department<br/>(Authorised Signatory)</p>',
+    variables: [V.employee_name, V.employee_code, V.designation, V.department, V.date_of_joining, V.absent_from_date, V.absent_days, V.ref_number, V.current_date, V.company_name],
+    requires_approval: true, approval_levels: 2,
+  },
+
+  // ── Performance ─────────────────────────────────────────────────────────────
   {
     name: 'Appraisal Letter', code: 'appraisal_letter', category: 'hr_initiated', letter_type: 'appraisal',
     subject_template: 'Performance Appraisal — {{review_period}}',
