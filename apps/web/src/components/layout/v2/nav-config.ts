@@ -210,7 +210,7 @@ export const DOMAINS: Domain[] = [
           { id: 'daily-ops',   label: 'Daily Operations', route: '/admin/daily-ops',           icon: Activity,    keywords: ['daily tasks', 'ops dashboard', 'today ops', 'daily work', 'daily checklist'] },
           { id: 'approvals',   label: 'Approvals Inbox',  route: '/admin/approvals/inbox',     icon: CheckSquare, keywords: ['approve', 'reject', 'pending approvals', 'leave approval', 'attendance approval', 'inbox'] },
           { id: 'notif-inbox', label: 'Inbox',            route: '/admin/notifications/inbox', icon: BookOpen,    keywords: ['notifications', 'alerts', 'messages', 'notification center'] },
-          { id: 'hr-helpdesk', label: 'HR Helpdesk',      route: '/admin/helpdesk',            icon: LifeBuoy,    keywords: ['helpdesk', 'tickets', 'support', 'employee tickets', 'hr support', 'service desk', 'grievance', 'issues'] },
+          { id: 'hr-helpdesk', label: 'HR Helpdesk',      route: '/admin/helpdesk',            icon: LifeBuoy,    badge: 'NEW', keywords: ['helpdesk', 'tickets', 'support', 'employee tickets', 'hr support', 'service desk', 'grievance', 'issues'] },
         ],
       },
       {
@@ -274,7 +274,7 @@ export const DOMAINS: Domain[] = [
           { id: 'onboarding',            label: 'Onboarding',           route: '/admin/onboarding',            exact: true,  icon: UserPlus,     keywords: ['new hire', 'joining', 'new employee', 'induction', 'pre-joining'] },
           { id: 'onboarding-checklists', label: 'Onboarding Checklists', route: '/admin/onboarding/module',                   icon: GraduationCap, keywords: ['onboarding tasks', 'new hire checklist', 'joining checklist', 'induction tasks'] },
           { id: 'separation-workflow',   label: 'Separation',           route: '/admin/employees/separation',                 icon: LogOut,       keywords: ['exit', 'offboarding', 'resignation', 'termination', 'fnf', 'full and final', 'exit process', 'notice period'] },
-          { id: 'absconding-cases',      label: 'Absconding Cases',     route: '/admin/absconding',                           icon: UserX,        keywords: ['absconding', 'unauthorised absence', 'ua', 'no show', 'absconded', 'abandonment', 'missing employee', 'absent without leave', 'awol'] },
+          { id: 'absconding-cases',      label: 'Absconding Cases',     route: '/admin/absconding',                           icon: UserX,        badge: 'NEW', keywords: ['absconding', 'unauthorised absence', 'ua', 'no show', 'absconded', 'abandonment', 'missing employee', 'absent without leave', 'awol'] },
           { id: 'expiry-management',     label: 'Expiry Management',    route: '/admin/workforce/expiry-management',           icon: CalendarClock, keywords: ['expiry', 'lifecycle', 'document expiry', 'visa expiry', 'passport expiry', 'contract expiry', 'contract renewal', 'probation confirmation', 'probation due', 'identity expiry', 'expiring documents', 'work permit', 'renewal due'] },
           { id: 'certifications',        label: 'Certifications',       route: '/admin/workforce/certifications',              icon: BadgeCheck,    keywords: ['certification', 'license', 'professional credential', 'certificate', 'renewal', 'cert expiry', 'license renewal', 'AWS certification', 'professional development', 'compliance certification'] },
         ],
@@ -304,9 +304,9 @@ export const DOMAINS: Domain[] = [
       {
         label: 'Engagement',
         items: [
-          { id: 'mood-pulse', label: 'Mood & Pulse', route: '/admin/mood-pulse', icon: SmilePlus, keywords: ['mood', 'pulse', 'sentiment', 'check-in', 'employee mood', 'engagement', 'wellbeing', 'happiness', 'pulse survey', 'mood tracker'] },
-          { id: 'surveys',       label: 'Surveys',             route: '/admin/surveys',    icon: ClipboardList, keywords: ['survey', 'questionnaire', 'employee survey', 'feedback form', 'satisfaction survey', 'esat', 'engagement survey', 'polls'] },
-          { id: 'r-and-r',      label: 'Recognition & Rewards', route: '/admin/recognition', icon: Award,         keywords: ['recognition', 'rewards', 'kudos', 'badge', 'points', 'appreciation', 'peer recognition', 'leaderboard', 'r&r', 'r and r', 'celebrate'] },
+          { id: 'mood-pulse', label: 'Mood & Pulse', route: '/admin/mood-pulse', icon: SmilePlus, badge: 'NEW', keywords: ['mood', 'pulse', 'sentiment', 'check-in', 'employee mood', 'engagement', 'wellbeing', 'happiness', 'pulse survey', 'mood tracker'] },
+          { id: 'surveys',       label: 'Surveys',             route: '/admin/surveys',    icon: ClipboardList, badge: 'NEW', keywords: ['survey', 'questionnaire', 'employee survey', 'feedback form', 'satisfaction survey', 'esat', 'engagement survey', 'polls'] },
+          { id: 'r-and-r',      label: 'Recognition & Rewards', route: '/admin/recognition', icon: Award,         badge: 'NEW', keywords: ['recognition', 'rewards', 'kudos', 'badge', 'points', 'appreciation', 'peer recognition', 'leaderboard', 'r&r', 'r and r', 'celebrate'] },
         ],
       },
     ],
@@ -767,7 +767,7 @@ export const DOMAINS: Domain[] = [
       {
         label: 'Knowledge Library',
         items: [
-          { id: 'policy-library', label: 'Policy Library', route: '/admin/policy-library', icon: BookOpen, keywords: ['policy', 'policies', 'company policy', 'hr policy', 'acknowledgement', 'conduct', 'leave policy', 'handbook', 'knowledge base', 'kb', 'policy document'] },
+          { id: 'policy-library', label: 'Policy Library', route: '/admin/policy-library', icon: BookOpen, badge: 'NEW', keywords: ['policy', 'policies', 'company policy', 'hr policy', 'acknowledgement', 'conduct', 'leave policy', 'handbook', 'knowledge base', 'kb', 'policy document'] },
         ],
       },
 

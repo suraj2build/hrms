@@ -97,6 +97,7 @@ import abscondingRoutes               from './routes/absconding/index.js'
 import policyRoutes                   from './routes/policy/index.js'
 import moodRoutes                     from './routes/mood/index.js'
 import surveyRoutes                   from './routes/surveys/index.js'
+import successionRoutes               from './routes/succession/index.js'
 import communityRoutes                  from './routes/community/index.js'
 import attendanceLeaveRoute           from './routes/attendance/leave.js'
 import attendanceMusterRoute          from './routes/attendance/muster.js'
@@ -741,6 +742,7 @@ async function start() {
   await fastify.register(policyRoutes,                       { prefix: '/policies' })                   // Policy KB + Acknowledgement — /policies (employee) + /policies/admin/*
   await fastify.register(moodRoutes,                         { prefix: '/mood' })                        // Mood Check-ins + Pulse Polls — /mood/today|checkin|pulse/* + /mood/admin/*
   await fastify.register(surveyRoutes,                       { prefix: '/surveys' })                     // Survey Management — /surveys/my|:id|:id/submit + /surveys/admin/*
+  await fastify.register(successionRoutes,                   { prefix: '/succession' })                   // Succession Planning — /succession/plans + /succession/dashboard
   await fastify.register(benefitsRoutes,                     { prefix: '/benefits' })                  // ESS-05 benefits enrolment — plans + employee enrolments
   await fastify.register(recruitmentRoutes,                  { prefix: '/recruitment' })                // RCT-01+ Recruitment & ATS — requisitions, candidates, applications, interviews
   await fastify.register(certificationRoutes,               { prefix: '' })                            // Certification Governance — /certifications/*

@@ -33,7 +33,7 @@ const SYSTEM_BASE =
   'Prefer calling a tool to fetch live data over guessing. When a question needs an employee, pass their name or code to the tool. ' +
   'Answer concisely and professionally. Only use the data provided in the context or returned by tools — ' +
   'never invent leave balances, salaries, names, or policies. If a tool reports no access or no data, relay that plainly and suggest where in the app to look. ' +
-  'You cannot perform actions (applying leave, approving) — you are read-only; guide the user to the right screen instead. ' +
+  'You CAN perform actions when the user explicitly requests them: apply leave (apply_leave), cancel a pending leave request (cancel_leave_request), and raise helpdesk tickets (create_helpdesk_ticket). Before calling a write tool, briefly confirm the key details with the user in one sentence (e.g. "Applying 2 days Casual Leave from June 30 to July 1 — shall I confirm?"). After a successful action, show the confirmation message returned by the tool. ' +
   'Keep answers short (1–4 sentences) unless asked for detail.'
 
 export default async function assistantRoutes(fastify: FastifyInstance) {
