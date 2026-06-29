@@ -1,6 +1,66 @@
 import type { FastifyInstance } from 'fastify'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 
+// ── Sentiment helpers ──────────────────────────────────────────────────────────
+
+const POSITIVE_WORDS = new Set([
+  'good','great','excellent','amazing','love','like','happy','satisfied','helpful',
+  'easy','positive','better','best','wonderful','fantastic','awesome','clear',
+  'efficient','supportive','collaborative','comfortable','fair','transparent',
+  'motivated','engaged','proud','enjoy','excited','appreciate','smooth','quick',
+  'effective','well','nice','perfect','outstanding','impressive','flexible',
+  'inclusive','respect','trust','growth','opportunity','learn','improve','strong',
+])
+
+const NEGATIVE_WORDS = new Set([
+  'bad','poor','terrible','awful','hate','dislike','unhappy','unsatisfied',
+  'difficult','hard','negative','worse','worst','frustrating','unclear','slow',
+  'confusing','boring','stressed','stress','pressure','unfair','lack','missing',
+  'issue','problem','concern','complaint','disappointed','overwhelmed','burnout',
+  'toxic','micromanage','micromanaging','rigid','bureaucratic','chaotic','messy',
+  'bias','biased','discriminate','ignore','ignored','overwork','overloaded',
+  'underpaid','unappreciated','turnover','leave','quit','resign','waste',
+])
+
+const STOP_WORDS = new Set([
+  'the','a','an','is','are','was','were','be','been','being','have','has','had',
+  'do','does','did','will','would','could','should','may','might','must','shall',
+  'and','or','but','if','because','so','yet','for','nor','as','at','by','in',
+  'of','on','to','up','it','its','i','we','you','he','she','they','my','our',
+  'your','his','her','their','this','that','these','those','what','which','who',
+  'how','when','where','why','all','more','some','any','no','not','very','just',
+  'also','with','from','about','into','than','then','there','here','can','get',
+])
+
+function analyseSentiment(texts: string[]): {
+  positive: number; neutral: number; negative: number; keywords: string[]
+} {
+  let pos = 0, neg = 0, neu = 0
+  const wordFreq: Record<string, number> = {}
+
+  for (const text of texts) {
+    const words = text.toLowerCase().replace(/[^a-z\s]/g, ' ').split(/\s+/).filter(Boolean)
+    let p = 0, n = 0
+    for (const w of words) {
+      if (POSITIVE_WORDS.has(w)) p++
+      if (NEGATIVE_WORDS.has(w)) n++
+      if (!STOP_WORDS.has(w) && w.length > 3) {
+        wordFreq[w] = (wordFreq[w] ?? 0) + 1
+      }
+    }
+    if (p > n)      pos++
+    else if (n > p) neg++
+    else            neu++
+  }
+
+  const keywords = Object.entries(wordFreq)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 8)
+    .map(([w]) => w)
+
+  return { positive: pos, neutral: neu, negative: neg, keywords }
+}
+
 export default async function surveyRoutes(fastify: FastifyInstance) {
   const { supabase } = fastify
   const hrAuth = { preHandler: [fastify.authenticate, requireRole(...HR_ADMIN_ROLES)] }
@@ -346,7 +406,9 @@ export default async function surveyRoutes(fastify: FastifyInstance) {
         for (const v of flat) counts[v] = (counts[v] ?? 0) + 1
         summary = { counts, total: flat.length }
       } else {
-        summary = { answers: responses as string[], count: responses.length }
+        const answers = responses as string[]
+        const sentiment = answers.length ? analyseSentiment(answers) : null
+        summary = { answers, count: answers.length, sentiment }
       }
 
       return { ...q, response_count: responses.length, summary }

@@ -216,11 +216,11 @@ function PostRoleDialog({
 function InterestPanel({ role, onClose }: { role: TalentRole; onClose: () => void }) {
   const qc = useQueryClient()
 
-  const { data, isLoading } = useQuery({
+  const { data: interestsData, isLoading } = useQuery<Interest[]>({
     queryKey: ['talent-interests', role.id],
     queryFn:  () => api.get<{ data: Interest[] }>(`/talent/roles/${role.id}/interests`).then(r => r.data),
   })
-  const interests = data?.data ?? []
+  const interests = interestsData ?? []
 
   const [reviewNote, setReviewNote] = useState('')
 
@@ -329,11 +329,11 @@ export function AdminTalentMarketplace() {
   const [editingRole,  setEditingRole]  = useState<TalentRole | null>(null)
   const [viewingRole,  setViewingRole]  = useState<TalentRole | null>(null)
 
-  const { data, isLoading } = useQuery({
+  const { data: rolesData, isLoading } = useQuery<TalentRole[]>({
     queryKey: ['talent-roles', tab],
     queryFn:  () => api.get<{ data: TalentRole[] }>(`/talent/roles?is_open=${tab === 'open'}`).then(r => r.data),
   })
-  const roles = data?.data ?? []
+  const roles = rolesData ?? []
 
   const closeMutation = useMutation({
     mutationFn: (id: string) => api.post(`/talent/roles/${id}/close`, {}),
@@ -357,7 +357,6 @@ export function AdminTalentMarketplace() {
       <PageHeader
         title="Internal Talent Marketplace"
         subtitle="Post open internal roles and manage your talent pool"
-        icon={<Briefcase className="h-5 w-5 text-blue-600" />}
         actions={
           <Button onClick={() => { setEditingRole(null); setShowPost(true) }}>
             <Plus className="h-4 w-4 mr-1.5" /> Post Role

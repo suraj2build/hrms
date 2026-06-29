@@ -9,7 +9,7 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { Plus, Loader2, Pencil, Power, Users } from 'lucide-react'
+import { Plus, Loader2, Pencil, Power, Users, ShieldCheck, CalendarClock, TrendingUp } from 'lucide-react'
 
 import { PageContainer } from '@/components/layout/PageContainer'
 import { PageHeader }    from '@/components/layout/PageHeader'
@@ -28,6 +28,8 @@ const TYPE_LABEL: Record<PlanType, string> = {
   wellness: 'Wellness', meal: 'Meal', transport: 'Transport', other: 'Other',
 }
 
+type WindowStatus = 'always_open' | 'open' | 'upcoming' | 'closed'
+
 interface Plan {
   id: string
   name: string
@@ -41,6 +43,16 @@ interface Plan {
   enrollment_opens_at: string | null
   enrollment_closes_at: string | null
   is_active: boolean
+  enrolled_count: number
+  total_count: number
+  window_status: WindowStatus
+}
+
+const WINDOW_STATUS_CONFIG: Record<WindowStatus, { label: string; cls: string }> = {
+  always_open: { label: 'Always Open', cls: 'bg-blue-100 text-blue-700' },
+  open:        { label: 'Open Now',    cls: 'bg-green-100 text-green-700' },
+  upcoming:    { label: 'Upcoming',    cls: 'bg-yellow-100 text-yellow-700' },
+  closed:      { label: 'Closed',      cls: 'bg-gray-100 text-gray-500' },
 }
 
 interface Enrollment {
@@ -53,7 +65,7 @@ interface Enrollment {
   benefit_plans?: { name: string; plan_type: PlanType } | null
 }
 
-type PlanForm = Omit<Plan, 'id'>
+type PlanForm = Omit<Plan, 'id' | 'enrolled_count' | 'total_count' | 'window_status'>
 
 const BLANK: PlanForm = {
   name: '', plan_type: 'health', provider: '', description: '',
@@ -133,6 +145,26 @@ export function AdminBenefits() {
         actions={tab === 'plans' && <Button size="sm" onClick={openCreate}><Plus className="h-4 w-4 mr-1" />New Plan</Button>}
       />
 
+      {/* Summary stats */}
+      {plans.length > 0 && (
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+          {[
+            { icon: ShieldCheck,   label: 'Active Plans',   value: plans.filter(p => p.is_active).length, cls: 'text-blue-600' },
+            { icon: CalendarClock, label: 'Open for Enrol', value: plans.filter(p => p.window_status === 'open' || p.window_status === 'always_open').length, cls: 'text-green-600' },
+            { icon: Users,         label: 'Total Enrolled', value: plans.reduce((s, p) => s + (p.enrolled_count ?? 0), 0), cls: 'text-purple-600' },
+            { icon: TrendingUp,    label: 'Enrol Rate',     value: (() => { const total = plans.reduce((s, p) => s + (p.total_count ?? 0), 0); const enrolled = plans.reduce((s, p) => s + (p.enrolled_count ?? 0), 0); return total > 0 ? `${Math.round(enrolled / total * 100)}%` : '—' })(), cls: 'text-orange-500' },
+          ].map(s => (
+            <div key={s.label} className="rounded-xl border border-border/60 bg-card p-4 flex items-center gap-3">
+              <s.icon className={cn('h-5 w-5 shrink-0', s.cls)} />
+              <div>
+                <p className="text-xs text-muted-foreground">{s.label}</p>
+                <p className="text-lg font-bold text-foreground">{s.value}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
       {/* Tabs */}
       <div className="flex items-center gap-1 mb-4 border-b border-border">
         {(['plans', 'enrollments'] as const).map(t => (
@@ -164,13 +196,17 @@ export function AdminBenefits() {
                     <th className="text-left py-2 px-3 text-xs font-medium">Type</th>
                     <th className="text-right py-2 px-3 text-xs font-medium">Cover</th>
                     <th className="text-right py-2 px-3 text-xs font-medium">Emp / Yr</th>
-                    <th className="text-left py-2 px-3 text-xs font-medium">Window</th>
+                    <th className="text-left py-2 px-3 text-xs font-medium">Enrol Window</th>
+                    <th className="text-right py-2 px-3 text-xs font-medium">Enrolled</th>
                     <th className="text-left py-2 px-3 text-xs font-medium">Status</th>
                     <th className="py-2 px-3" />
                   </tr>
                 </thead>
                 <tbody>
-                  {plans.map(p => (
+                  {plans.map(p => {
+                    const ws = p.window_status ?? 'always_open'
+                    const wsCfg = WINDOW_STATUS_CONFIG[ws]
+                    return (
                     <tr key={p.id} className={cn('border-b border-border/50', !p.is_active && 'opacity-50')}>
                       <td className="py-2 px-3">
                         <span className="text-xs font-medium">{p.name}</span>
@@ -179,10 +215,21 @@ export function AdminBenefits() {
                       <td className="py-2 px-3 text-xs">{TYPE_LABEL[p.plan_type]}</td>
                       <td className="py-2 px-3 text-xs text-right">{p.coverage_amount > 0 ? inr(p.coverage_amount) : '—'}</td>
                       <td className="py-2 px-3 text-xs text-right">{p.employee_cost > 0 ? inr(p.employee_cost) : 'Free'}</td>
-                      <td className="py-2 px-3 text-[10px] text-muted-foreground">
-                        {p.enrollment_opens_at || p.enrollment_closes_at
-                          ? `${p.enrollment_opens_at ?? '…'} → ${p.enrollment_closes_at ?? '…'}`
-                          : 'Always open'}
+                      <td className="py-2 px-3 text-[10px]">
+                        <span className={cn('inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium', wsCfg.cls)}>
+                          {wsCfg.label}
+                        </span>
+                        {(p.enrollment_opens_at || p.enrollment_closes_at) && (
+                          <span className="block text-muted-foreground mt-0.5">
+                            {p.enrollment_opens_at ?? '…'} → {p.enrollment_closes_at ?? '…'}
+                          </span>
+                        )}
+                      </td>
+                      <td className="py-2 px-3 text-xs text-right">
+                        <span className="font-medium">{p.enrolled_count ?? 0}</span>
+                        {(p.total_count ?? 0) > 0 && (
+                          <span className="text-muted-foreground text-[10px]">/{p.total_count}</span>
+                        )}
                       </td>
                       <td className="py-2 px-3">
                         <Badge variant={p.is_active ? 'success' : 'secondary'} className="text-[10px]">{p.is_active ? 'Active' : 'Inactive'}</Badge>
@@ -195,7 +242,8 @@ export function AdminBenefits() {
                         )}
                       </td>
                     </tr>
-                  ))}
+                    )
+                  })}
                 </tbody>
               </table>
             </div>

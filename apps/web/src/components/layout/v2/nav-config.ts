@@ -751,6 +751,7 @@ export const DOMAINS: Domain[] = [
       '/admin/fabric',
       '/admin/policy-library',
       '/admin/succession',
+      '/admin/talent-marketplace',
     ],
     defaultRoute: '/admin/organization',
     groups: [
@@ -768,7 +769,8 @@ export const DOMAINS: Domain[] = [
       {
         label: 'Talent',
         items: [
-          { id: 'succession', label: 'Succession Planning', route: '/admin/succession', icon: TrendingUp, badge: 'NEW', keywords: ['succession', 'succession planning', 'talent pipeline', 'leadership pipeline', 'critical roles', 'key person risk', 'successor', 'bench strength', 'readiness'] },
+          { id: 'succession',        label: 'Succession Planning', route: '/admin/succession',        icon: TrendingUp, badge: 'NEW', keywords: ['succession', 'succession planning', 'talent pipeline', 'leadership pipeline', 'critical roles', 'key person risk', 'successor', 'bench strength', 'readiness'] },
+          { id: 'talent-marketplace', label: 'Talent Marketplace',  route: '/admin/talent-marketplace', icon: Briefcase,  badge: 'NEW', keywords: ['talent marketplace', 'internal mobility', 'open roles', 'internal jobs', 'internal recruitment', 'job openings', 'internal career', 'browse roles', 'employee interests', 'interest registration'] },
         ],
       },
 

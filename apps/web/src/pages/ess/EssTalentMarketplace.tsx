@@ -230,17 +230,17 @@ export function EssTalentMarketplace() {
   const [tab,          setTab]          = useState<'browse' | 'my'>('browse')
   const [applyingRole, setApplyingRole] = useState<OpenRole | null>(null)
 
-  const { data: rolesData, isLoading: rolesLoading } = useQuery({
+  const { data: rolesData, isLoading: rolesLoading } = useQuery<OpenRole[]>({
     queryKey: ['talent-browse'],
     queryFn:  () => api.get<{ data: OpenRole[] }>('/talent/browse').then(r => r.data),
   })
-  const roles = rolesData?.data ?? []
+  const roles = rolesData ?? []
 
-  const { data: myData, isLoading: myLoading } = useQuery({
+  const { data: myData, isLoading: myLoading } = useQuery<MyInterest[]>({
     queryKey: ['talent-my-interests'],
     queryFn:  () => api.get<{ data: MyInterest[] }>('/talent/my-interests').then(r => r.data),
   })
-  const myInterests = myData?.data ?? []
+  const myInterests = myData ?? []
 
   const applyMutation = useMutation({
     mutationFn: (body: { role_id: string; cover_note: string; availability: Availability }) =>
@@ -269,7 +269,6 @@ export function EssTalentMarketplace() {
       <PageHeader
         title="Internal Talent Marketplace"
         subtitle="Explore open roles within your organisation and express your interest"
-        icon={<Briefcase className="h-5 w-5 text-blue-600" />}
       />
 
       <Tabs value={tab} onValueChange={v => setTab(v as 'browse' | 'my')} className="mt-6">

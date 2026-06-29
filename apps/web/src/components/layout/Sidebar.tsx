@@ -10,7 +10,7 @@ import {
   DollarSign, Zap, Mail, ShieldAlert, Activity, FlaskConical, TrendingDown,
   Workflow, Globe, Server, Webhook, Layers, Flame, LineChart, Siren, KeyRound,
   FolderUp, UserPlus, ChevronDown, Scale, CreditCard,
-  Receipt, PieChart, Banknote,
+  Receipt, PieChart, Banknote, Briefcase,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { LogoMark, Wordmark } from '@/components/brand/Logo'
@@ -592,10 +592,11 @@ export function Sidebar() {
           </p>
         )}
         {([
-          { to: '/ess/attendance',       icon: CalendarDays, label: 'My Attendance', match: (p: string) => p.startsWith('/ess/attendance') },
-          { to: '/ess/leave/apply',      icon: PlusCircle,   label: 'Apply Leave',   match: (p: string) => p === '/ess/leave/apply' },
-          { to: '/ess/payroll/my-slips', icon: DollarSign,   label: 'My Payslips',   match: (p: string) => p.startsWith('/ess/payroll') },
-          { to: '/ess/profile',          icon: User,         label: 'My Profile',    match: (p: string) => p.startsWith('/ess/profile') },
+          { to: '/ess/attendance',           icon: CalendarDays, label: 'My Attendance',       match: (p: string) => p.startsWith('/ess/attendance') },
+          { to: '/ess/leave/apply',          icon: PlusCircle,   label: 'Apply Leave',         match: (p: string) => p === '/ess/leave/apply' },
+          { to: '/ess/payroll/my-slips',     icon: DollarSign,   label: 'My Payslips',         match: (p: string) => p.startsWith('/ess/payroll') },
+          { to: '/ess/talent-marketplace',   icon: Briefcase,    label: 'Browse Roles',        match: (p: string) => p.startsWith('/ess/talent-marketplace') },
+          { to: '/ess/profile',              icon: User,         label: 'My Profile',          match: (p: string) => p.startsWith('/ess/profile') },
         ] as const).map(({ to, icon: Icon, label, match }) => {
           const active = match(location.pathname)
           return (

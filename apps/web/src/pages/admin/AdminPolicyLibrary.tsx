@@ -212,12 +212,12 @@ export function AdminPolicyLibrary() {
 
   const handleSubmit = () => {
     if (!form.title.trim()) { toast.error('Title is required'); return }
-    const body = {
+    const body: PolicyForm = {
       ...form,
-      description:  form.description  || undefined,
-      content:      form.content      || undefined,
-      file_url:     form.file_url     || undefined,
-      effective_from: form.effective_from || undefined,
+      description:    form.description    || '',
+      content:        form.content        || '',
+      file_url:       form.file_url       || '',
+      effective_from: form.effective_from || '',
     }
     if (editId) {
       updatePolicy.mutate({ id: editId, body })

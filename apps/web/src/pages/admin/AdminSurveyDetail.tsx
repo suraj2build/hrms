@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   ArrowLeft, Users2, Check, X, BarChart2,
   ClipboardList, UserCheck, ChevronDown, ChevronUp,
+  ThumbsUp, ThumbsDown, Minus, Tag,
 } from 'lucide-react'
 import { toast }   from 'sonner'
 import { Button }  from '@/components/ui/button'
@@ -54,6 +55,7 @@ interface QuestionResult {
     total?: number
     // text
     answers?: string[]
+    sentiment?: { positive: number; neutral: number; negative: number; keywords: string[] } | null
   }
 }
 
@@ -142,22 +144,80 @@ function ChoiceResult({ q }: { q: QuestionResult }) {
 
 function TextResult({ q }: { q: QuestionResult }) {
   const [expanded, setExpanded] = useState(false)
-  const answers = q.summary.answers ?? []
-  const shown   = expanded ? answers : answers.slice(0, 3)
+  const answers   = q.summary.answers ?? []
+  const sentiment = q.summary.sentiment
+  const shown     = expanded ? answers : answers.slice(0, 3)
+
   if (!answers.length) return <p className="text-xs text-muted-foreground">No responses yet.</p>
+
+  const total = sentiment ? (sentiment.positive + sentiment.neutral + sentiment.negative) : 0
+
   return (
-    <div className="space-y-1.5">
-      {shown.map((a, i) => (
-        <div key={i} className="rounded-lg bg-background px-3 py-2 text-sm text-foreground">"{a}"</div>
-      ))}
-      {answers.length > 3 && (
-        <button
-          onClick={() => setExpanded(!expanded)}
-          className="flex items-center gap-1 text-xs text-primary hover:underline"
-        >
-          {expanded ? <><ChevronUp className="h-3 w-3" /> Show less</> : <><ChevronDown className="h-3 w-3" /> Show all {answers.length}</>}
-        </button>
+    <div className="space-y-3">
+      {/* Sentiment breakdown */}
+      {sentiment && total > 0 && (
+        <div className="rounded-xl border border-border/50 bg-muted/30 p-4 space-y-3">
+          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Sentiment Analysis</p>
+
+          {/* Bar */}
+          <div className="flex h-2.5 w-full overflow-hidden rounded-full">
+            {sentiment.positive > 0 && (
+              <div className="bg-green-500 transition-all" style={{ width: `${Math.round(sentiment.positive / total * 100)}%` }} />
+            )}
+            {sentiment.neutral > 0 && (
+              <div className="bg-gray-300 transition-all" style={{ width: `${Math.round(sentiment.neutral / total * 100)}%` }} />
+            )}
+            {sentiment.negative > 0 && (
+              <div className="bg-red-400 transition-all" style={{ width: `${Math.round(sentiment.negative / total * 100)}%` }} />
+            )}
+          </div>
+
+          {/* Labels */}
+          <div className="flex gap-4 text-xs">
+            <span className="flex items-center gap-1 text-green-600">
+              <ThumbsUp className="h-3 w-3" />
+              Positive <strong>{Math.round(sentiment.positive / total * 100)}%</strong>
+            </span>
+            <span className="flex items-center gap-1 text-muted-foreground">
+              <Minus className="h-3 w-3" />
+              Neutral <strong>{Math.round(sentiment.neutral / total * 100)}%</strong>
+            </span>
+            <span className="flex items-center gap-1 text-red-500">
+              <ThumbsDown className="h-3 w-3" />
+              Negative <strong>{Math.round(sentiment.negative / total * 100)}%</strong>
+            </span>
+          </div>
+
+          {/* Keywords */}
+          {sentiment.keywords.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 pt-1">
+              <span className="flex items-center gap-1 text-[10px] text-muted-foreground mr-1">
+                <Tag className="h-2.5 w-2.5" /> Top themes:
+              </span>
+              {sentiment.keywords.map(kw => (
+                <span key={kw} className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] text-primary capitalize">
+                  {kw}
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
       )}
+
+      {/* Verbatim responses */}
+      <div className="space-y-1.5">
+        {shown.map((a, i) => (
+          <div key={i} className="rounded-lg bg-background px-3 py-2 text-sm text-foreground border border-border/40">"{a}"</div>
+        ))}
+        {answers.length > 3 && (
+          <button
+            onClick={() => setExpanded(!expanded)}
+            className="flex items-center gap-1 text-xs text-primary hover:underline"
+          >
+            {expanded ? <><ChevronUp className="h-3 w-3" /> Show less</> : <><ChevronDown className="h-3 w-3" /> Show all {answers.length} responses</>}
+          </button>
+        )}
+      </div>
     </div>
   )
 }

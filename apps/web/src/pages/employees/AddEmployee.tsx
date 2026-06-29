@@ -18,6 +18,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { FormField, FormRow, FormSection, FormActions } from '@/components/forms'
 import { PageContainer, PageHeader } from '@/components/layout'
 import { cn, fmtDate } from '@/lib/utils'
+import { EmployeeSelector } from '@/components/filters/EmployeeSelector'
 import type { Department, Designation, Grade } from '@/types'
 
 interface Site         { id: string; name: string; location: string | null }
@@ -72,12 +73,6 @@ export function AddEmployee() {
   const { data: rostersData }    = useQuery<{ data: Roster[] }>({ queryKey: ['rosters'],        queryFn: () => api.get('/masters/rosters'),        staleTime: 60_000 })
   const { data: workLocsData }   = useQuery<{ data: WorkLocation[] }>({ queryKey: ['work-locations'], queryFn: () => api.get('/masters/work-locations'), staleTime: 60_000 })
   const { data: costCentersData }= useQuery<{ data: CostCenter[] }>({ queryKey: ['cost-centers'],   queryFn: () => api.get('/masters/cost-centers'),  staleTime: 60_000 })
-  // Active employees → reporting-manager candidates
-  const { data: managersData }   = useQuery<{ data: Array<{ id: string; first_name: string; last_name: string; employee_code: string }> }>({
-    queryKey: ['employees-manager-options'],
-    queryFn:  () => api.get('/employees?limit=500'),
-    staleTime: 60_000,
-  })
 
   const form1 = useForm<Step1>({ resolver: zodResolver(step1Schema), mode: 'onChange' })
   const form2 = useForm<Step2>({ resolver: zodResolver(step2Schema), mode: 'onChange' })
@@ -299,14 +294,10 @@ export function AddEmployee() {
                 </FormField>
 
                 <FormField label="Reporting Manager" htmlFor="manager_id">
-                  <Select onValueChange={(v) => form2.setValue('manager_id', v)}>
-                    <SelectTrigger id="manager_id"><SelectValue placeholder="Select reporting manager (optional)" /></SelectTrigger>
-                    <SelectContent>
-                      {(managersData?.data ?? []).map((m) => (
-                        <SelectItem key={m.id} value={m.id}>{m.first_name} {m.last_name} #{m.employee_code}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <EmployeeSelector
+                    placeholder="Search manager by name or code…"
+                    onChange={v => form2.setValue('manager_id', typeof v === 'string' ? v : '')}
+                  />
                 </FormField>
 
                 <FormRow cols={2}>

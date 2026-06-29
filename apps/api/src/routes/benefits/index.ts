@@ -166,16 +166,38 @@ export default async function benefitsRoutes(fastify: FastifyInstance) {
   // HR ADMIN
   // ═══════════════════════════════════════════════════════════════════════════
 
-  // GET /benefits/admin/plans — all plans (incl. inactive)
+  // GET /benefits/admin/plans — all plans (incl. inactive) with enrollment counts
   fastify.get('/admin/plans', hrAdminAuth, async (req: any, reply) => {
     const { data, error } = await fastify.supabase
       .from('benefit_plans')
-      .select('*')
+      .select('*, benefit_enrollments(status)')
       .eq('tenant_id', req.tenantId)
       .order('created_at', { ascending: false })
 
     if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
-    return reply.send({ data: data ?? [] })
+
+    const today = new Date().toISOString().slice(0, 10)
+    const plans = ((data ?? []) as any[]).map(p => {
+      const enrollments = (p.benefit_enrollments ?? []) as { status: string }[]
+      const enrolled_count = enrollments.filter(e => e.status === 'enrolled').length
+      const total_count    = enrollments.length
+
+      let window_status: 'always_open' | 'open' | 'upcoming' | 'closed'
+      if (!p.enrollment_opens_at && !p.enrollment_closes_at) {
+        window_status = 'always_open'
+      } else if (today < (p.enrollment_opens_at ?? '')) {
+        window_status = 'upcoming'
+      } else if (p.enrollment_closes_at && today > p.enrollment_closes_at) {
+        window_status = 'closed'
+      } else {
+        window_status = 'open'
+      }
+
+      const { benefit_enrollments: _e, ...rest } = p
+      return { ...rest, enrolled_count, total_count, window_status }
+    })
+
+    return reply.send({ data: plans })
   })
 
   const planSchema = z.object({

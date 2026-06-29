@@ -29,6 +29,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { PageContainer } from '@/components/layout/PageContainer'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { SectionCard } from '@/components/layout/SectionCard'
+import { EmployeeSelector } from '@/components/filters/EmployeeSelector'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -878,18 +879,11 @@ function EmployeeOnboardingTab() {
           <div className="space-y-4 py-2">
             <div className="space-y-1.5">
               <Label>Employee <span className="text-destructive">*</span></Label>
-              <Select value={assignEmpId} onValueChange={setAssignEmpId}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Select employee" />
-                </SelectTrigger>
-                <SelectContent>
-                  {(employees ?? []).map(e => (
-                    <SelectItem key={e.id} value={e.id}>
-                      {e.full_name} ({e.employee_code})
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <EmployeeSelector
+                value={assignEmpId || undefined}
+                onChange={v => setAssignEmpId(typeof v === 'string' ? v : '')}
+                placeholder="Search employee by name or code…"
+              />
             </div>
             <div className="space-y-1.5">
               <Label>Checklist Template <span className="text-destructive">*</span></Label>
