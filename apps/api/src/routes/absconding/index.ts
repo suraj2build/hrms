@@ -288,4 +288,140 @@ export default async function abscondingRoutes(fastify: FastifyInstance) {
       return reply.code(500).send({ error: 'SCAN_FAILED', message: e.message })
     }
   })
+
+  // ── POST /absconding/run-auto-escalation ──────────────────────────────────
+  // Applies Day 3/5/7/14/21 escalation ladder to all open cases for the tenant.
+
+  fastify.post('/run-auto-escalation', hrAuth, async (req: any, reply) => {
+    const tenantId = req.tenantId
+
+    // Fetch all open cases
+    const { data: openCases, error: fetchErr } = await fastify.supabase
+      .from('absconding_cases')
+      .select('id, status, first_ua_date, ua_days_count, employee_id, flagged_at, created_at')
+      .eq('tenant_id', tenantId)
+      .in('status', ['flagged', 'wl1_sent', 'wl2_sent'])
+
+    if (fetchErr) return reply.code(500).send({ error: 'DB_ERROR', message: fetchErr.message })
+
+    const cases = (openCases ?? []) as {
+      id: string
+      status: string
+      first_ua_date: string
+      ua_days_count: number
+      employee_id: string
+      flagged_at: string | null
+      created_at: string
+    }[]
+
+    const escalated: string[] = []
+    let processed = 0
+
+    for (const c of cases) {
+      processed++
+
+      // days_absent = today - flagged_at (fallback to created_at / first_ua_date)
+      const referenceDate = c.flagged_at ?? c.first_ua_date ?? c.created_at
+      const from = new Date(referenceDate)
+      const now  = new Date()
+      from.setHours(0, 0, 0, 0)
+      now.setHours(0, 0, 0, 0)
+      const daysAbsent = Math.max(0, Math.round((now.getTime() - from.getTime()) / 86_400_000))
+
+      try {
+        if (daysAbsent >= 21 && c.status === 'wl2_sent') {
+          // Day 21: escalate to termination_pending
+          await fastify.supabase
+            .from('absconding_cases')
+            .update({ status: 'termination_pending', chro_approval_required: true })
+            .eq('id', c.id)
+            .eq('tenant_id', tenantId)
+
+          await fastify.supabase.from('absconding_communications').insert({
+            case_id:   c.id,
+            tenant_id: tenantId,
+            comm_type: 'system_event',
+            direction: 'internal',
+            subject:   'Termination workflow initiated (Day 21 escalation)',
+            body:      `Auto-escalation: ${daysAbsent} days absent. Termination workflow initiated (Day 21 escalation). CHRO approval required.`,
+            metadata:  { days_absent: daysAbsent, escalation_day: 21 },
+          })
+          escalated.push(c.id)
+        } else if (daysAbsent >= 14 && c.status === 'wl1_sent') {
+          // Day 14: escalate to wl2_sent
+          await fastify.supabase
+            .from('absconding_cases')
+            .update({ status: 'wl2_sent', wl2_sent_at: new Date().toISOString() })
+            .eq('id', c.id)
+            .eq('tenant_id', tenantId)
+
+          await fastify.supabase.from('absconding_communications').insert({
+            case_id:   c.id,
+            tenant_id: tenantId,
+            comm_type: 'letter_generated',
+            direction: 'outbound',
+            subject:   'Warning Letter 2 auto-generated (Day 14 escalation)',
+            body:      `Auto-escalation: ${daysAbsent} days absent. Warning Letter 2 auto-generated (Day 14 escalation).`,
+            metadata:  { days_absent: daysAbsent, escalation_day: 14 },
+          })
+          escalated.push(c.id)
+        } else if (daysAbsent >= 7 && c.status === 'flagged') {
+          // Day 7: escalate to wl1_sent
+          await fastify.supabase
+            .from('absconding_cases')
+            .update({ status: 'wl1_sent', wl1_sent_at: new Date().toISOString() })
+            .eq('id', c.id)
+            .eq('tenant_id', tenantId)
+
+          await fastify.supabase.from('absconding_communications').insert({
+            case_id:   c.id,
+            tenant_id: tenantId,
+            comm_type: 'letter_generated',
+            direction: 'outbound',
+            subject:   'Warning Letter 1 auto-generated (Day 7 escalation)',
+            body:      `Auto-escalation: ${daysAbsent} days absent. Warning Letter 1 auto-generated (Day 7 escalation).`,
+            metadata:  { days_absent: daysAbsent, escalation_day: 7 },
+          })
+          escalated.push(c.id)
+        } else if (daysAbsent >= 3 && daysAbsent < 7 && c.status === 'flagged') {
+          // Day 3: check if we already logged a Day 3 note in the last 2 days
+          const twoDaysAgo = new Date()
+          twoDaysAgo.setDate(twoDaysAgo.getDate() - 2)
+
+          const { data: recentLog } = await fastify.supabase
+            .from('absconding_communications')
+            .select('id')
+            .eq('case_id', c.id)
+            .eq('tenant_id', tenantId)
+            .eq('comm_type', 'system_event')
+            .ilike('subject', '%Day 3 escalation%')
+            .gte('created_at', twoDaysAgo.toISOString())
+            .limit(1)
+
+          if (!recentLog || (recentLog as any[]).length === 0) {
+            await fastify.supabase.from('absconding_communications').insert({
+              case_id:   c.id,
+              tenant_id: tenantId,
+              comm_type: 'system_event',
+              direction: 'internal',
+              subject:   'Day 3 escalation: Potential absconder flag raised',
+              body:      `Day 3 escalation: Potential absconder flag raised. Store Manager to log communication attempt. Employee absent for ${daysAbsent} days.`,
+              metadata:  { days_absent: daysAbsent, escalation_day: 3 },
+            })
+            escalated.push(c.id)
+          }
+        }
+      } catch (err: any) {
+        // Log error but continue processing other cases
+        fastify.log.error({ caseId: c.id, err: err?.message }, 'Auto-escalation error for case')
+      }
+    }
+
+    return reply.send({
+      data: {
+        processed,
+        escalated,
+      },
+    })
+  })
 }
