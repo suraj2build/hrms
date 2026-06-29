@@ -328,14 +328,20 @@ DECLARE
   asn_id UUID;
 BEGIN
   FOR i IN 1..array_length(emps, 1) LOOP
-    asn_id := gen_random_uuid();
-    INSERT INTO survey_assignments (id, survey_id, employee_id, tenant_id, assigned_at, completed_at, respondent_type)
-    VALUES (asn_id, sv1, emps[i], tid,
-            '2025-06-01 09:00:00+05:30',
-            '2025-06-12 14:00:00+05:30',
-            'self')
-    ON CONFLICT (survey_id, employee_id, respondent_type) DO UPDATE SET id = EXCLUDED.id
-    RETURNING id INTO asn_id;
+    -- Idempotent: find existing or create new
+    SELECT id INTO asn_id
+    FROM survey_assignments
+    WHERE survey_id = sv1 AND employee_id = emps[i] AND respondent_type = 'self'
+    LIMIT 1;
+
+    IF asn_id IS NULL THEN
+      asn_id := gen_random_uuid();
+      INSERT INTO survey_assignments (id, survey_id, employee_id, tenant_id, assigned_at, completed_at, respondent_type)
+      VALUES (asn_id, sv1, emps[i], tid,
+              '2025-06-01 09:00:00+05:30',
+              '2025-06-12 14:00:00+05:30',
+              'self');
+    END IF;
 
     -- Rating questions q1..q7
     FOR j IN 1..7 LOOP
@@ -357,12 +363,12 @@ VALUES
   (sv2, e09, tid, 'self'),
   (sv2, e10, tid, 'self'),
   (sv2, e11, tid, 'self')
-ON CONFLICT (survey_id, employee_id, respondent_type) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 -- Exit intent: assign to Arjun (flagged for attrition risk in succession scorecard)
 INSERT INTO survey_assignments (survey_id, employee_id, tenant_id, respondent_type)
 VALUES (sv3, e05, tid, 'self')
-ON CONFLICT (survey_id, employee_id, respondent_type) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- 4. POLICY KNOWLEDGE BASE
