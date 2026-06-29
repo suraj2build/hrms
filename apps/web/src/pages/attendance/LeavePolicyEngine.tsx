@@ -40,6 +40,7 @@ import { cn }             from '@/lib/utils'
 import { PolicyExplainPanel, PolicyScopeMatrix } from '@/components/operational/PolicyChain'
 import type { PolicyResolutionInfo, PolicyResolvedVia, PolicyScopeSummary } from '@/components/operational/PolicyChain'
 import { ContextualHint, ProcessStepGuide } from '@/components/operational/ContextualHint'
+import { EmployeeSelector } from '@/components/filters/EmployeeSelector'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -795,13 +796,12 @@ export function LeavePolicyEngine() {
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1">
                 <label className="text-xs font-medium text-foreground flex items-center gap-1">
-                  <User className="h-3 w-3" />Employee UUID
+                  <User className="h-3 w-3" />Employee
                 </label>
-                <Input
-                  value={simEmpId}
-                  onChange={e => setSimEmpId(e.target.value)}
-                  placeholder="xxxxxxxx-xxxx-…"
-                  className="h-8 text-xs font-mono"
+                <EmployeeSelector
+                  value={simEmpId || undefined}
+                  onChange={v => setSimEmpId(typeof v === 'string' ? v : '')}
+                  placeholder="Search by name or code…"
                 />
               </div>
               <div className="space-y-1">

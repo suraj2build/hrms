@@ -290,12 +290,20 @@ function NewMatrixDialog({ open, onClose }: { open: boolean; onClose: () => void
                   </div>
                   <div className="space-y-1">
                     <label className="text-[10px] text-muted-foreground">Approver Value</label>
-                    <input
-                      value={stage.approver_value}
-                      onChange={e => updateStage(idx, 'approver_value', e.target.value)}
-                      placeholder={stage.approver_type === 'role' ? 'hr_admin' : 'UUID'}
-                      className="flex w-full h-7 rounded border border-input bg-background px-2 text-[10px] text-foreground outline-none"
-                    />
+                    {stage.approver_type === 'employee' ? (
+                      <EmployeeSelector
+                        value={stage.approver_value || undefined}
+                        onChange={v => updateStage(idx, 'approver_value', typeof v === 'string' ? v : '')}
+                        placeholder="Search employee…"
+                      />
+                    ) : (
+                      <input
+                        value={stage.approver_value}
+                        onChange={e => updateStage(idx, 'approver_value', e.target.value)}
+                        placeholder={stage.approver_type === 'role' ? 'hr_admin' : 'manager'}
+                        className="flex w-full h-7 rounded border border-input bg-background px-2 text-[10px] text-foreground outline-none"
+                      />
+                    )}
                   </div>
                   <div className="space-y-1">
                     <label className="text-[10px] text-muted-foreground">SLA (hrs)</label>

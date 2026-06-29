@@ -4,7 +4,7 @@
  * Shows leave accrual / credit history from `leave_accrual_ledger`.
  * Works in two modes:
  *  · ESS mode  — employee sees their own ledger (auto-resolved from profile)
- *  · Admin mode — HR admin can look up any employee via UUID input
+ *  · Admin mode — HR admin can look up any employee via EmployeeSelector (search by name or code)
  *
  * Columns: Accrual Date | Leave Type | Accrual Type | Days | Expires On | Expired | Notes
  * Filters: Leave Type (select), Year (select), Accrual Type (select)
@@ -424,7 +424,7 @@ export function LeaveAccrualLedger() {
             )}
           </div>
           <p className="text-[10px] text-muted-foreground mt-1.5">
-            Copy the employee UUID from the People directory or employee profile URL.
+            Search by employee name or code to load their leave ledger.
           </p>
         </SectionCard>
       )}

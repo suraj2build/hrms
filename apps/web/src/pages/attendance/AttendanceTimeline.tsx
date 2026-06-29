@@ -1265,7 +1265,7 @@ export function AttendanceTimeline() {
         <SectionCard>
           <div className="flex flex-col items-center py-12 gap-3 text-center">
             <Search className="h-8 w-8 text-muted-foreground/30" />
-            <p className="text-sm font-medium">Enter an employee UUID and date to begin</p>
+            <p className="text-sm font-medium">Search an employee and select a date to begin</p>
             <p className="text-xs text-muted-foreground max-w-sm">
               The forensics trace shows every event that shaped the daily attendance record —
               from raw device punches through shift resolution, policy evaluation, to final status.

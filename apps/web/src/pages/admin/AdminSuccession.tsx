@@ -21,6 +21,7 @@ import { Badge }         from '@/components/ui/badge'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { api }           from '@/lib/api/client'
 import { cn }            from '@/lib/utils'
+import { EmployeeSelector } from '@/components/filters/EmployeeSelector'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -1180,12 +1181,11 @@ export function AdminSuccession() {
               </div>
             </div>
             <div>
-              <label className="text-xs font-medium text-muted-foreground mb-1 block">Incumbent Employee ID</label>
-              <input
-                value={planForm.incumbent_id}
-                onChange={e => setPlanForm(f => ({ ...f, incumbent_id: e.target.value }))}
-                placeholder="Employee UUID (optional)"
-                className="w-full text-sm border border-border rounded-md px-3 py-2 bg-background text-foreground font-mono"
+              <label className="text-xs font-medium text-muted-foreground mb-1 block">Incumbent Employee</label>
+              <EmployeeSelector
+                value={planForm.incumbent_id || undefined}
+                onChange={v => setPlanForm(f => ({ ...f, incumbent_id: typeof v === 'string' ? v : '' }))}
+                placeholder="Search incumbent by name or code…"
               />
             </div>
             <div>
@@ -1252,12 +1252,11 @@ export function AdminSuccession() {
               </div>
             </div>
             <div>
-              <label className="text-xs font-medium text-muted-foreground mb-1 block">Incumbent Employee ID</label>
-              <input
-                value={editForm.incumbent_id}
-                onChange={e => setEditForm(f => ({ ...f, incumbent_id: e.target.value }))}
-                placeholder="Employee UUID (optional)"
-                className="w-full text-sm border border-border rounded-md px-3 py-2 bg-background text-foreground font-mono"
+              <label className="text-xs font-medium text-muted-foreground mb-1 block">Incumbent Employee</label>
+              <EmployeeSelector
+                value={editForm.incumbent_id || undefined}
+                onChange={v => setEditForm(f => ({ ...f, incumbent_id: typeof v === 'string' ? v : '' }))}
+                placeholder="Search incumbent by name or code…"
               />
             </div>
             <div>
@@ -1487,12 +1486,11 @@ export function AdminSuccession() {
           </DialogHeader>
           <div className="space-y-4 mt-2">
             <div>
-              <label className="text-xs font-medium text-muted-foreground mb-1 block">Employee ID *</label>
-              <input
-                value={candForm.employee_id}
-                onChange={e => setCandForm(f => ({ ...f, employee_id: e.target.value }))}
-                placeholder="Employee UUID"
-                className="w-full text-sm border border-border rounded-md px-3 py-2 bg-background text-foreground font-mono"
+              <label className="text-xs font-medium text-muted-foreground mb-1 block">Employee *</label>
+              <EmployeeSelector
+                value={candForm.employee_id || undefined}
+                onChange={v => setCandForm(f => ({ ...f, employee_id: typeof v === 'string' ? v : '' }))}
+                placeholder="Search candidate by name or code…"
               />
             </div>
             <div className="grid grid-cols-2 gap-3">
