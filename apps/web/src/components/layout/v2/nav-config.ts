@@ -735,6 +735,7 @@ export const DOMAINS: Domain[] = [
       '/admin/enterprise',
       '/admin/trust',
       '/admin/fabric',
+      '/admin/policy-library',
     ],
     defaultRoute: '/admin/organization',
     groups: [
@@ -745,6 +746,14 @@ export const DOMAINS: Domain[] = [
         items: [
           { id: 'company-settings', label: 'Company Settings', route: '/admin/settings', exact: true, icon: Settings, keywords: ['company setup', 'company profile', 'tenant settings', 'company details', 'organization settings', 'branding'] },
           { id: 'ai-assistant',     label: 'AI Assistant',     route: '/admin/settings/ai',           icon: Sparkles, keywords: ['ai', 'assistant', 'chatbot', 'groq', 'openai', 'gemini', 'llm', 'ai config', 'api key', 'ai settings'] },
+        ],
+      },
+
+      // ── Knowledge Library ────────────────────────────────────────────────────
+      {
+        label: 'Knowledge Library',
+        items: [
+          { id: 'policy-library', label: 'Policy Library', route: '/admin/policy-library', icon: BookOpen, keywords: ['policy', 'policies', 'company policy', 'hr policy', 'acknowledgement', 'conduct', 'leave policy', 'handbook', 'knowledge base', 'kb', 'policy document'] },
         ],
       },
 

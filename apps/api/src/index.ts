@@ -94,6 +94,7 @@ import attendanceRegularisationRoute  from './routes/attendance/regularisation.j
 import wfhRoutes                       from './routes/attendance/wfh.js'
 import recognitionRoutes               from './routes/recognition/index.js'
 import abscondingRoutes               from './routes/absconding/index.js'
+import policyRoutes                   from './routes/policy/index.js'
 import communityRoutes                  from './routes/community/index.js'
 import attendanceLeaveRoute           from './routes/attendance/leave.js'
 import attendanceMusterRoute          from './routes/attendance/muster.js'
@@ -735,6 +736,7 @@ async function start() {
   await fastify.register(notificationInboxRoute,            { prefix: '/notifications/inbox' })        // GET/POST /notifications/inbox/*
   await fastify.register(helpdeskRoutes,                     { prefix: '/helpdesk' })                  // ESS-05 HR helpdesk tickets — employee + HR-admin endpoints
   await fastify.register(abscondingRoutes,                   { prefix: '/absconding' })                 // Absconding Case Management — /absconding/cases, /absconding/dashboard
+  await fastify.register(policyRoutes,                       { prefix: '/policies' })                   // Policy KB + Acknowledgement — /policies (employee) + /policies/admin/*
   await fastify.register(benefitsRoutes,                     { prefix: '/benefits' })                  // ESS-05 benefits enrolment — plans + employee enrolments
   await fastify.register(recruitmentRoutes,                  { prefix: '/recruitment' })                // RCT-01+ Recruitment & ATS — requisitions, candidates, applications, interviews
   await fastify.register(certificationRoutes,               { prefix: '' })                            // Certification Governance — /certifications/*
