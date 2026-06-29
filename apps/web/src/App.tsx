@@ -174,6 +174,10 @@ const EssOnboarding            = lazy(() => import('@/pages/ess/EssOnboarding').
 const EssTeamOff               = lazy(() => import('@/pages/ess/EssTeamOff').then(m => ({ default: m.EssTeamOff })))
 const EssPolicies              = lazy(() => import('@/pages/ess/EssPolicies').then(m => ({ default: m.EssPolicies })))
 const EssHRSupport             = lazy(() => import('@/pages/ess/EssHRSupport').then(m => ({ default: m.EssHRSupport })))
+const EssSurveys               = lazy(() => import('@/pages/ess/EssSurveys').then(m => ({ default: m.EssSurveys })))
+const SurveyTake               = lazy(() => import('@/pages/ess/SurveyTake').then(m => ({ default: m.SurveyTake })))
+const AdminSurveys             = lazy(() => import('@/pages/admin/AdminSurveys').then(m => ({ default: m.AdminSurveys })))
+const AdminSurveyDetail        = lazy(() => import('@/pages/admin/AdminSurveyDetail').then(m => ({ default: m.AdminSurveyDetail })))
 // EssAttendanceCalendar retired — calendar view is embedded inside MyAttendance (/ess/attendance).
 // Route /ess/attendance/calendar → Navigate to /ess/attendance (see below).
 
@@ -712,6 +716,8 @@ export default function App() {
                 <Route path="/admin/absconding"          element={<AbscondingCaseManagement />} />
                 <Route path="/admin/policy-library"      element={<AdminPolicyLibrary />} />
                 <Route path="/admin/mood-pulse"           element={<AdminMoodDashboard />} />
+                <Route path="/admin/surveys"              element={<AdminSurveys />} />
+                <Route path="/admin/surveys/:id"          element={<AdminSurveyDetail />} />
                 <Route path="/admin/benefits"         element={<AdminBenefits />} />
                 <Route path="/admin/audit-trail"      element={<AuditTrail />} />
                 <Route path="/admin/documents"        element={<Documents />} />
@@ -1068,6 +1074,8 @@ export default function App() {
                 <Route path="/ess/team"                   element={<MyTeam />} />
                 <Route path="/ess/whos-off"               element={<EssTeamOff />} />
                 <Route path="/ess/policies"               element={<EssPolicies />} />
+                <Route path="/ess/surveys"                element={<EssSurveys />} />
+                <Route path="/ess/surveys/:id"            element={<SurveyTake />} />
                 <Route path="/ess/runbooks"               element={<EssRunbooks />} />
                 <Route path="/ess/hr-support"             element={<EssHRSupport />} />
                 {/* Attendance Calendar retired — redirect to unified My Attendance workspace */}

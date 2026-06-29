@@ -17,7 +17,7 @@ import {
   CalendarDays, CalendarOff, Scale, Clock,
   Receipt, Calculator, CreditCard, Wallet, ScrollText, ShieldCheck,
   FileText, Mail, Package, BookMarked, HelpCircle, HeadphonesIcon,
-  UserCircle, Rocket, LogOut,
+  UserCircle, Rocket, LogOut, ClipboardList,
   LayoutDashboard, CheckSquare, BarChart3, ArrowUpRight,
   ChevronDown, ChevronRight, ChevronLeft,
 } from 'lucide-react'
@@ -96,6 +96,7 @@ const SERVICE_GROUPS: NavGroup[] = [
       { label: 'My Assets',    icon: Package,        href: '/ess/assets'    },
       { label: 'Policies',     icon: BookMarked,     href: '/ess/policies'  },
       { label: 'How-To Guides',icon: HelpCircle,     href: '/ess/runbooks'  },
+      { label: 'Surveys',      icon: ClipboardList,  href: '/ess/surveys'   },
     ],
   },
   {

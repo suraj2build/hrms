@@ -28,6 +28,7 @@ import { Arrival } from '@/components/experience/Arrival'
 import { ReflectionCard } from '@/components/experience/ReflectionCard'
 import { ProgressBand }        from '@/components/experience/ProgressBand'
 import { MoodCheckinWidget }  from '@/components/mood/MoodCheckinWidget'
+import { SurveyNudge }        from '@/components/surveys/SurveyNudge'
 import { type DayContext } from '@/components/experience/resolveGreeting'
 import { LoadingState } from '@/components/layout/LoadingState'
 import { ErrorState }   from '@/components/layout/ErrorState'
@@ -349,6 +350,9 @@ export function EssHome() {
               </span>
             </div>
           )}
+
+          {/* Survey nudge */}
+          <SurveyNudge />
 
           {/* Mood check-in */}
           <MoodCheckinWidget />
