@@ -156,11 +156,11 @@ export default async function helpdeskRoutes(fastify: FastifyInstance) {
       `${parsed.data.subject} ${parsed.data.description}`,
       parsed.data.category,
     )
-    // Override category if AI is confident and the user left it as default/general
-    const effectiveCategory =
-      aiResult.confidence >= 70 && (parsed.data.category === 'other' || parsed.data.category === 'general')
-        ? aiResult.category
-        : parsed.data.category
+    // Override category if AI is confident and the user left it as default/other
+    const isDefaultCategory = (parsed.data.category as string) === 'other' || (parsed.data.category as string) === 'general'
+    const effectiveCategory = aiResult.confidence >= 70 && isDefaultCategory
+      ? aiResult.category
+      : (parsed.data.category as string)
 
     // Prefer category-based SLA; fall back to priority SLA
     const categorySla = await resolveCategorySla(fastify, req.tenantId, effectiveCategory)
