@@ -6,7 +6,7 @@
 
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Plus, Loader2, MessageSquare, Send, Clock, CheckCircle2, AlertTriangle } from 'lucide-react'
+import { Plus, Loader2, MessageSquare, Send, Clock, CheckCircle2, AlertTriangle, Star } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { PageContainer } from '@/components/layout/PageContainer'
@@ -43,6 +43,9 @@ interface Ticket {
   sla_due_at: string | null
   sla_breached_at: string | null
   resolution_note: string | null
+  csat_rating: number | null
+  csat_comment: string | null
+  csat_submitted_at: string | null
   created_at: string
   updated_at: string
   comments?: Comment[]
@@ -106,6 +109,9 @@ export function EssHelpdesk() {
   useOpenOnParam('new', () => setCreateOpen(true))
   const [openTicketId, setOpenTicketId] = useState<string | null>(null)
   const [reply, setReply] = useState('')
+  const [csatHover, setCsatHover] = useState(0)
+  const [csatRating, setCsatRating] = useState(0)
+  const [csatComment, setCsatComment] = useState('')
 
   const { data: tickets = [], isLoading } = useQuery<Ticket[]>({
     queryKey: ['helpdesk', 'my', statusFilter],
@@ -128,6 +134,19 @@ export function EssHelpdesk() {
       toast.success('Ticket raised — HR has been notified')
     },
     onError: (e: Error) => toast.error('Failed to raise ticket', { description: e.message }),
+  })
+
+  const submitCsat = useMutation({
+    mutationFn: ({ id, rating, comment }: { id: string; rating: number; comment?: string }) =>
+      api.post(`/helpdesk/tickets/${id}/csat`, { rating, comment }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['helpdesk', 'detail', openTicketId] })
+      qc.invalidateQueries({ queryKey: ['helpdesk', 'my'] })
+      setCsatRating(0)
+      setCsatComment('')
+      toast.success('Thank you for your feedback!')
+    },
+    onError: (e: Error) => toast.error('Failed to submit rating', { description: e.message }),
   })
 
   const addComment = useMutation({
@@ -265,7 +284,7 @@ export function EssHelpdesk() {
       </Dialog>
 
       {/* ── Ticket Detail / Thread ────────────────────────────────────────────── */}
-      <Dialog open={!!openTicketId} onOpenChange={o => { if (!o) { setOpenTicketId(null); setReply('') } }}>
+      <Dialog open={!!openTicketId} onOpenChange={o => { if (!o) { setOpenTicketId(null); setReply(''); setCsatRating(0); setCsatComment(''); setCsatHover(0) } }}>
         <DialogContent className="max-w-lg">
           {detail ? (
             <>
@@ -285,6 +304,68 @@ export function EssHelpdesk() {
                   <CheckCircle2 className="h-4 w-4 text-success mt-0.5 shrink-0" />
                   <div><p className="text-xs font-medium text-success">Resolution</p><p className="text-xs text-success mt-0.5">{detail.resolution_note}</p></div>
                 </div>
+              )}
+
+              {/* CSAT prompt — shown once after resolution when not yet rated */}
+              {['resolved', 'closed'].includes(detail.status) && (
+                detail.csat_rating != null ? (
+                  <div className="rounded-md border border-border bg-muted/20 p-3 flex items-center gap-2">
+                    <span className="text-xs text-muted-foreground">Your rating:</span>
+                    <div className="flex items-center gap-0.5">
+                      {[1, 2, 3, 4, 5].map(i => (
+                        <Star key={i} className={cn('h-4 w-4', i <= detail.csat_rating! ? 'fill-warning text-warning' : 'text-muted-foreground/25')} />
+                      ))}
+                    </div>
+                    <span className="text-xs text-muted-foreground ml-1">{detail.csat_rating}/5</span>
+                  </div>
+                ) : (
+                  <div className="rounded-md border border-primary/20 bg-primary/5 p-3 space-y-2">
+                    <p className="text-xs font-medium text-foreground">How satisfied are you with the resolution?</p>
+                    <div className="flex items-center gap-1">
+                      {[1, 2, 3, 4, 5].map(i => (
+                        <button
+                          key={i}
+                          type="button"
+                          onMouseEnter={() => setCsatHover(i)}
+                          onMouseLeave={() => setCsatHover(0)}
+                          onClick={() => setCsatRating(i)}
+                          className="focus:outline-none"
+                          aria-label={`Rate ${i} out of 5`}
+                        >
+                          <Star className={cn(
+                            'h-6 w-6 transition-colors',
+                            i <= (csatHover || csatRating)
+                              ? 'fill-warning text-warning'
+                              : 'text-muted-foreground/30 hover:text-warning/50',
+                          )} />
+                        </button>
+                      ))}
+                      {csatRating > 0 && (
+                        <span className="text-xs text-muted-foreground ml-1">
+                          {['', 'Very dissatisfied', 'Dissatisfied', 'Neutral', 'Satisfied', 'Very satisfied'][csatRating]}
+                        </span>
+                      )}
+                    </div>
+                    {csatRating > 0 && (
+                      <div className="space-y-2">
+                        <input
+                          value={csatComment}
+                          onChange={e => setCsatComment(e.target.value)}
+                          placeholder="Leave a comment (optional)"
+                          className="w-full text-xs border border-border rounded-md px-2 py-1.5 bg-background text-foreground"
+                        />
+                        <Button
+                          size="sm"
+                          disabled={submitCsat.isPending}
+                          onClick={() => submitCsat.mutate({ id: detail.id, rating: csatRating, comment: csatComment || undefined })}
+                        >
+                          {submitCsat.isPending && <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" />}
+                          Submit Rating
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                )
               )}
 
               {/* Thread */}
