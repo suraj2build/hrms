@@ -75,6 +75,7 @@ const OrgChart          = lazy(() => import('@/pages/employees/OrgChart').then(m
 const AdminHelpdesk              = lazy(() => import('@/pages/admin/AdminHelpdesk').then(m => ({ default: m.AdminHelpdesk })))
 const AbscondingCaseManagement   = lazy(() => import('@/pages/admin/AbscondingCaseManagement').then(m => ({ default: m.AbscondingCaseManagement })))
 const AdminPolicyLibrary         = lazy(() => import('@/pages/admin/AdminPolicyLibrary').then(m => ({ default: m.AdminPolicyLibrary })))
+const AdminMoodDashboard         = lazy(() => import('@/pages/admin/AdminMoodDashboard').then(m => ({ default: m.AdminMoodDashboard })))
 const AdminBenefits     = lazy(() => import('@/pages/admin/AdminBenefits').then(m => ({ default: m.AdminBenefits })))
 const AuditTrail        = lazy(() => import('@/pages/admin/AuditTrail').then(m => ({ default: m.AuditTrail })))
 const AdminRecruitment  = lazy(() => import('@/pages/admin/AdminRecruitment').then(m => ({ default: m.AdminRecruitment })))
@@ -710,6 +711,7 @@ export default function App() {
                 <Route path="/admin/helpdesk"            element={<AdminHelpdesk />} />
                 <Route path="/admin/absconding"          element={<AbscondingCaseManagement />} />
                 <Route path="/admin/policy-library"      element={<AdminPolicyLibrary />} />
+                <Route path="/admin/mood-pulse"           element={<AdminMoodDashboard />} />
                 <Route path="/admin/benefits"         element={<AdminBenefits />} />
                 <Route path="/admin/audit-trail"      element={<AuditTrail />} />
                 <Route path="/admin/documents"        element={<Documents />} />

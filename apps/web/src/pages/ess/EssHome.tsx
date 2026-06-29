@@ -26,7 +26,8 @@ import { PersonAvatar } from '@/components/experience/PersonAvatar'
 import { AmbientLine } from '@/components/experience/AmbientLine'
 import { Arrival } from '@/components/experience/Arrival'
 import { ReflectionCard } from '@/components/experience/ReflectionCard'
-import { ProgressBand } from '@/components/experience/ProgressBand'
+import { ProgressBand }        from '@/components/experience/ProgressBand'
+import { MoodCheckinWidget }  from '@/components/mood/MoodCheckinWidget'
 import { type DayContext } from '@/components/experience/resolveGreeting'
 import { LoadingState } from '@/components/layout/LoadingState'
 import { ErrorState }   from '@/components/layout/ErrorState'
@@ -348,6 +349,9 @@ export function EssHome() {
               </span>
             </div>
           )}
+
+          {/* Mood check-in */}
+          <MoodCheckinWidget />
 
           {/* Progress band */}
           {progress?.show && <ProgressBand data={progress} />}

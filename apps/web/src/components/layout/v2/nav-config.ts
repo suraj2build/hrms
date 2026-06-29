@@ -114,6 +114,7 @@ import {
   Sparkles,
   Cpu,
   UserX,
+  SmilePlus,
 } from 'lucide-react'
 import type { UserRole } from '@/types'
 
@@ -250,6 +251,7 @@ export const DOMAINS: Domain[] = [
       '/admin/benefits',
       '/admin/documents',
       '/admin/absconding',
+      '/admin/mood-pulse',
     ],
     // Note: /admin/recruitment/* all live here — do not add to other domains.
     defaultRoute: '/admin/employees',
@@ -293,6 +295,12 @@ export const DOMAINS: Domain[] = [
           { id: 'req-int-analytics',label: 'Interview Analytics', route: '/admin/recruitment/interview-analytics', icon: Target, keywords: ['interviewer calibration', 'panel consistency', 'leniency', 'inter-rater', 'criterion effectiveness', 'hire accuracy', 'interview quality', 'scorecard analytics'] },
           { id: 'req-qbank',        label: 'Question Bank', route: '/admin/recruitment/question-bank', icon: HelpCircle,    keywords: ['questions', 'interview questions', 'question bank', 'behavioural', 'technical questions'] },
           { id: 'req-hired',        label: 'Hired Pipeline', route: '/admin/recruitment/hired',        icon: BadgeCheck,    keywords: ['hired candidates', 'preboarding', 'offer accepted', 'initiate preboarding', 'joining pipeline', 'new hire pipeline', 'pre-joinee'] },
+        ],
+      },
+      {
+        label: 'Engagement',
+        items: [
+          { id: 'mood-pulse', label: 'Mood & Pulse', route: '/admin/mood-pulse', icon: SmilePlus, keywords: ['mood', 'pulse', 'sentiment', 'check-in', 'employee mood', 'engagement', 'wellbeing', 'happiness', 'pulse survey', 'mood tracker'] },
         ],
       },
     ],
