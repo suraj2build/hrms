@@ -15,6 +15,7 @@
 --   330_succession_enhancements
 --   331_survey_intelligence
 --   332_helpdesk_absconding_enhancements
+--   333_mood_intelligence
 --   334_formal_awards
 --
 -- Safety: fully idempotent — uses IF NOT EXISTS / OR REPLACE / ON CONFLICT DO NOTHING.
@@ -684,6 +685,31 @@ CROSS JOIN (VALUES
   ('Long Service Award – 5 Years', 'Recognising 5 years of exceptional loyalty','annual',  'long_service',      5000::numeric, 'Certificate + Rs.5,000 voucher','All employees')
 ) AS a(name, description, frequency, award_type, monetary_value, monetary_description, eligible_group)
 ON CONFLICT (tenant_id, name) DO NOTHING;
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- 333: Mood Intelligence — store breakdown, sentiment, poll types
+-- ─────────────────────────────────────────────────────────────────────────────
+
+ALTER TABLE mood_checkins
+  ADD COLUMN IF NOT EXISTS sentiment_label TEXT
+    CHECK (sentiment_label IN ('positive','neutral','negative'));
+
+ALTER TABLE pulse_questions
+  ADD COLUMN IF NOT EXISTS poll_category TEXT NOT NULL DEFAULT 'weekly_pulse'
+    CHECK (poll_category IN ('weekly_pulse','manager_quality','post_appraisal',
+                             'onboarding','post_transfer','festival','custom'));
+
+CREATE OR REPLACE VIEW mood_store_monthly AS
+SELECT
+  mc.tenant_id,
+  e.work_location_id,
+  date_trunc('month', mc.checkin_date::timestamptz) AS score_month,
+  ROUND(AVG(mc.mood)::numeric * 20, 1) AS avg_score_100,
+  COUNT(*)::int AS response_count
+FROM mood_checkins mc
+JOIN employees e ON e.id = mc.employee_id
+WHERE e.work_location_id IS NOT NULL
+GROUP BY mc.tenant_id, e.work_location_id, date_trunc('month', mc.checkin_date::timestamptz);
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- Reload PostgREST schema cache
