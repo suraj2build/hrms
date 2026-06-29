@@ -5,11 +5,14 @@
  *
  * Employee endpoints (fastify.authenticate):
  *   GET  /                 — published policies (with per-employee ack status)
+ *   GET  /search?q=...     — full-text search across published policies
+ *   POST /ask              — RAG Q&A: AI answer with policy citations
  *   GET  /:id              — single policy with full content + ack status
  *   POST /:id/ack          — employee acknowledges a policy
  *
  * Admin endpoints (hr_admin / super_admin):
  *   GET  /admin/list       — all policies regardless of status
+ *   GET  /admin/qa-logs    — employee Q&A history
  *   GET  /admin/:id/acks   — per-policy acknowledgement stats
  *   POST /                 — create policy (status: draft)
  *   PUT  /:id              — update policy fields
@@ -17,6 +20,7 @@
  *   POST /:id/archive      — archive a published/draft policy
  */
 
+import Anthropic          from '@anthropic-ai/sdk'
 import type { FastifyInstance } from 'fastify'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { logAction }                   from '../../lib/audit-service.js'
@@ -25,6 +29,7 @@ import { notify }                      from '../../lib/notify.js'
 export default async function policyRoutes(fastify: FastifyInstance) {
   const { supabase } = fastify
   const hrAuth = { preHandler: [fastify.authenticate, requireRole(...HR_ADMIN_ROLES)] }
+  const ai     = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
 
   // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -36,6 +41,90 @@ export default async function policyRoutes(fastify: FastifyInstance) {
       .single()
     return data?.employee_id ?? null
   }
+
+  // ── Employee: FTS search across published policies ───────────────────────
+
+  fastify.get('/search', { preHandler: fastify.authenticate }, async (req: any, reply) => {
+    const tenantId = req.tenantId
+    const { q } = req.query as { q?: string }
+
+    if (!q?.trim() || q.trim().length < 2) {
+      return reply.status(400).send({ error: 'q must be at least 2 characters' })
+    }
+
+    const { data, error } = await supabase.rpc('search_policies', {
+      p_tenant_id: tenantId,
+      p_query:     q.trim(),
+      p_limit:     5,
+    })
+
+    if (error) return reply.status(500).send({ error: error.message })
+
+    return reply.send({ data: data ?? [] })
+  })
+
+  // ── Employee: RAG — AI-powered Q&A with policy citations ─────────────────
+
+  fastify.post('/ask', { preHandler: fastify.authenticate }, async (req: any, reply) => {
+    const tenantId = req.tenantId
+    const { question } = req.body as { question?: string }
+
+    if (!question?.trim()) return reply.status(400).send({ error: 'question is required' })
+
+    const employeeId = await getEmployeeId(req.user.id)
+
+    // 1. FTS — find relevant published policies
+    const { data: hits, error: searchErr } = await supabase.rpc('search_policies', {
+      p_tenant_id: tenantId,
+      p_query:     question.trim(),
+      p_limit:     4,
+    })
+    if (searchErr) return reply.status(500).send({ error: searchErr.message })
+
+    type HitRow = { id: string; title: string; category: string; content: string | null; snippet: string }
+    const policies: HitRow[] = (hits ?? []) as HitRow[]
+
+    // 2. Build context for the model
+    const context = policies.length > 0
+      ? policies.map(p =>
+          `[POLICY: ${p.title} (${p.category})]\n${(p.content ?? p.snippet ?? '').slice(0, 2000)}`
+        ).join('\n\n---\n\n')
+      : 'No company policies found that are directly relevant to this question.'
+
+    // 3. Call Claude
+    const msg = await ai.messages.create({
+      model:      'claude-haiku-4-5-20251001',
+      max_tokens: 600,
+      system: `You are a helpful HR assistant for CognixHR. Answer employee questions based ONLY on the company policies provided. Be concise, friendly, and specific. If the answer is not clearly covered in the policies, say so honestly and suggest the employee contact HR directly.`,
+      messages: [{
+        role:    'user',
+        content: `Company policies:\n\n${context}\n\n---\n\nEmployee question: ${question.trim()}\n\nProvide a clear, helpful answer based on the policies above.`,
+      }],
+    })
+
+    const answer = msg.content[0]?.type === 'text'
+      ? msg.content[0].text
+      : 'Unable to generate an answer. Please contact HR directly.'
+
+    const citedIds = policies.map(p => p.id)
+
+    // 4. Log Q&A
+    await supabase.from('policy_qa_logs').insert({
+      tenant_id:        tenantId,
+      employee_id:      employeeId,
+      question:         question.trim(),
+      answer,
+      cited_policy_ids: citedIds,
+      model_used:       'claude-haiku-4-5-20251001',
+    })
+
+    return reply.send({
+      data: {
+        answer,
+        cited_policies: policies.map(p => ({ id: p.id, title: p.title, category: p.category })),
+      },
+    })
+  })
 
   // ── Employee: list published policies with ack status ─────────────────────
 
@@ -115,6 +204,27 @@ export default async function policyRoutes(fastify: FastifyInstance) {
     }))
 
     return reply.send({ data: result })
+  })
+
+  // ── Admin: Q&A logs — what employees asked ───────────────────────────────
+
+  fastify.get('/admin/qa-logs', hrAuth, async (req: any, reply) => {
+    const tenantId = req.tenantId
+    const { limit = 50 } = req.query as { limit?: number }
+
+    const { data, error } = await supabase
+      .from('policy_qa_logs')
+      .select(`
+        id, question, answer, cited_policy_ids, model_used, created_at,
+        employees!policy_qa_logs_employee_id_fkey(first_name, last_name, employee_code)
+      `)
+      .eq('tenant_id', tenantId)
+      .order('created_at', { ascending: false })
+      .limit(Number(limit))
+
+    if (error) return reply.status(500).send({ error: error.message })
+
+    return reply.send({ data: data ?? [] })
   })
 
   // ── Admin: ack stats for a policy ────────────────────────────────────────
