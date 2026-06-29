@@ -178,6 +178,7 @@ const EssSurveys               = lazy(() => import('@/pages/ess/EssSurveys').the
 const SurveyTake               = lazy(() => import('@/pages/ess/SurveyTake').then(m => ({ default: m.SurveyTake })))
 const AdminSurveys             = lazy(() => import('@/pages/admin/AdminSurveys').then(m => ({ default: m.AdminSurveys })))
 const AdminSurveyDetail        = lazy(() => import('@/pages/admin/AdminSurveyDetail').then(m => ({ default: m.AdminSurveyDetail })))
+const AdminRecognition         = lazy(() => import('@/pages/admin/AdminRecognition').then(m => ({ default: m.AdminRecognition })))
 // EssAttendanceCalendar retired — calendar view is embedded inside MyAttendance (/ess/attendance).
 // Route /ess/attendance/calendar → Navigate to /ess/attendance (see below).
 
@@ -718,6 +719,7 @@ export default function App() {
                 <Route path="/admin/mood-pulse"           element={<AdminMoodDashboard />} />
                 <Route path="/admin/surveys"              element={<AdminSurveys />} />
                 <Route path="/admin/surveys/:id"          element={<AdminSurveyDetail />} />
+                <Route path="/admin/recognition"          element={<AdminRecognition />} />
                 <Route path="/admin/benefits"         element={<AdminBenefits />} />
                 <Route path="/admin/audit-trail"      element={<AuditTrail />} />
                 <Route path="/admin/documents"        element={<Documents />} />

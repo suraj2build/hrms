@@ -116,6 +116,7 @@ import {
   UserX,
   SmilePlus,
   ClipboardList,
+  Award,
 } from 'lucide-react'
 import type { UserRole } from '@/types'
 
@@ -254,6 +255,7 @@ export const DOMAINS: Domain[] = [
       '/admin/absconding',
       '/admin/mood-pulse',
       '/admin/surveys',
+      '/admin/recognition',
     ],
     // Note: /admin/recruitment/* all live here — do not add to other domains.
     defaultRoute: '/admin/employees',
@@ -303,7 +305,8 @@ export const DOMAINS: Domain[] = [
         label: 'Engagement',
         items: [
           { id: 'mood-pulse', label: 'Mood & Pulse', route: '/admin/mood-pulse', icon: SmilePlus, keywords: ['mood', 'pulse', 'sentiment', 'check-in', 'employee mood', 'engagement', 'wellbeing', 'happiness', 'pulse survey', 'mood tracker'] },
-          { id: 'surveys',    label: 'Surveys',      route: '/admin/surveys',    icon: ClipboardList, keywords: ['survey', 'questionnaire', 'employee survey', 'feedback form', 'satisfaction survey', 'esat', 'engagement survey', 'polls'] },
+          { id: 'surveys',       label: 'Surveys',             route: '/admin/surveys',    icon: ClipboardList, keywords: ['survey', 'questionnaire', 'employee survey', 'feedback form', 'satisfaction survey', 'esat', 'engagement survey', 'polls'] },
+          { id: 'r-and-r',      label: 'Recognition & Rewards', route: '/admin/recognition', icon: Award,         keywords: ['recognition', 'rewards', 'kudos', 'badge', 'points', 'appreciation', 'peer recognition', 'leaderboard', 'r&r', 'r and r', 'celebrate'] },
         ],
       },
     ],
