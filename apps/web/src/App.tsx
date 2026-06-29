@@ -86,6 +86,7 @@ const AdminQuestionBank           = lazy(() => import('@/pages/admin/AdminQuesti
 const AdminRecruitmentDashboard   = lazy(() => import('@/pages/admin/AdminRecruitmentDashboard').then(m => ({ default: m.AdminRecruitmentDashboard })))
 const AdminInterviewAnalytics     = lazy(() => import('@/pages/admin/AdminInterviewAnalytics').then(m => ({ default: m.AdminInterviewAnalytics })))
 const AdminSuccession             = lazy(() => import('./pages/admin/AdminSuccession').then(m => ({ default: m.AdminSuccession })))
+const AdminTalentMarketplace      = lazy(() => import('./pages/admin/AdminTalentMarketplace').then(m => ({ default: m.AdminTalentMarketplace })))
 const CandidatePortal    = lazy(() => import('@/pages/portal/CandidatePortal').then(m => ({ default: m.CandidatePortal })))
 const Documents         = lazy(() => import('@/pages/documents/Documents').then(m => ({ default: m.Documents })))
 const Reports           = lazy(() => import('@/pages/reports/Reports').then(m => ({ default: m.Reports })))
@@ -273,7 +274,8 @@ const CompensationMaster    = lazy(() => import('@/pages/payroll/CompensationMas
 const CompensationSetup     = lazy(() => import('@/pages/payroll/CompensationSetup').then(m => ({ default: m.CompensationSetup })))
 const FbpReconciliation     = lazy(() => import('@/pages/payroll/FbpReconciliation').then(m => ({ default: m.FbpReconciliation })))
 const EssFBP                = lazy(() => import('@/pages/ess/EssFBP').then(m => ({ default: m.EssFBP })))
-const EssBenefits           = lazy(() => import('@/pages/ess/EssBenefits').then(m => ({ default: m.EssBenefits })))
+const EssBenefits             = lazy(() => import('@/pages/ess/EssBenefits').then(m => ({ default: m.EssBenefits })))
+const EssTalentMarketplace    = lazy(() => import('@/pages/ess/EssTalentMarketplace').then(m => ({ default: m.EssTalentMarketplace })))
 const PayrollLedger         = lazy(() => import('@/pages/payroll/PayrollLedger').then(m => ({ default: m.PayrollLedger })))
 const PayrollGovernance     = lazy(() => import('@/pages/payroll/PayrollGovernance').then(m => ({ default: m.PayrollGovernance })))
 const PayrollValidation     = lazy(() => import('@/pages/payroll/PayrollValidation').then(m => ({ default: m.PayrollValidation })))
@@ -722,6 +724,7 @@ export default function App() {
                 <Route path="/admin/surveys/:id"          element={<AdminSurveyDetail />} />
                 <Route path="/admin/recognition"          element={<AdminRecognition />} />
                 <Route path="/admin/succession"           element={<Suspense fallback={<PageLoader />}><AdminSuccession /></Suspense>} />
+                <Route path="/admin/talent-marketplace"  element={<Suspense fallback={<PageLoader />}><AdminTalentMarketplace /></Suspense>} />
                 <Route path="/admin/benefits"         element={<AdminBenefits />} />
                 <Route path="/admin/audit-trail"      element={<AuditTrail />} />
                 <Route path="/admin/documents"        element={<Documents />} />
@@ -1053,6 +1056,7 @@ export default function App() {
                 <Route path="/ess/compensation"            element={<EssCompensation />} />
                 <Route path="/ess/fbp"                     element={<EssFBP />} />
                 <Route path="/ess/benefits"                element={<EssBenefits />} />
+                <Route path="/ess/talent-marketplace"     element={<EssTalentMarketplace />} />
                 <Route path="/ess/profile"                element={<EssMyProfile />} />
                 <Route path="/ess/letters"                element={<EssLetters />} />
                 <Route path="/ess/operational-center"     element={<EssOperationalCenter />} />

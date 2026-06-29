@@ -442,15 +442,14 @@ $_ack$;
 -- 5. ABSCONDING CASES
 -- ─────────────────────────────────────────────────────────────────────────────
 
--- Case 1: WL1 sent stage (7 days absent)
+-- Case 1: WL1 sent stage (10 days absent)
 INSERT INTO absconding_cases
   (id, tenant_id, employee_id, status, first_ua_date, last_ua_date, ua_days_count,
-   flagged_at, wl1_sent_at, notes, assigned_to, chro_approval_required, created_by)
+   wl1_sent_at, notes, assigned_to, chro_approval_required, created_by)
 VALUES
   (ac1, tid, e07,
    'wl1_sent',
    CURRENT_DATE - 10, CURRENT_DATE - 1, 10,
-   CURRENT_DATE - 10,
    CURRENT_DATE - 3,
    'Ayesha did not report to work from 19 Jun. Attempts to reach via phone and WhatsApp unsuccessful. Warning Letter 1 dispatched on 26 Jun.',
    adm, false, adm)
@@ -472,15 +471,14 @@ VALUES
    adm, '{"attempts": 2}'::jsonb)
 ON CONFLICT DO NOTHING;
 
--- Case 2: Termination pending (21+ days, awaiting CHRO approval)
+-- Case 2: Termination pending (28 days absent, awaiting CHRO approval)
 INSERT INTO absconding_cases
   (id, tenant_id, employee_id, status, first_ua_date, last_ua_date, ua_days_count,
-   flagged_at, wl1_sent_at, wl2_sent_at, notes, assigned_to, chro_approval_required, created_by)
+   wl1_sent_at, wl2_sent_at, notes, assigned_to, chro_approval_required, created_by)
 VALUES
   (ac2, tid, e10,
    'termination_pending',
    CURRENT_DATE - 28, CURRENT_DATE - 1, 28,
-   CURRENT_DATE - 28,
    CURRENT_DATE - 21,
    CURRENT_DATE - 14,
    'Rohan has been UA since 1 Jun. WL1 sent on 8 Jun (no response). WL2 sent on 15 Jun (no response). Case escalated to CHRO for termination approval.',

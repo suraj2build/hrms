@@ -223,6 +223,51 @@ export const ASSISTANT_TOOLS: ToolDef[] = [
       },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'regularize_attendance',
+      description: "Submit an attendance regularization request for the current employee for a specific date (e.g. when they forgot to punch in/out, worked from a client site, had a biometric issue, etc.). Always confirm the date and reason before calling.",
+      parameters: {
+        type: 'object',
+        properties: {
+          date:               { type: 'string', description: 'Date to regularize in YYYY-MM-DD format' },
+          regularization_type: { type: 'string', description: 'Type: missed_punch, forgot_checkout, onsite_duty, biometric_issue, client_visit, wfh, field_work, system_issue. Default: missed_punch' },
+          requested_check_in:  { type: 'string', description: 'Requested check-in time as HH:MM (24h). Optional.' },
+          requested_check_out: { type: 'string', description: 'Requested check-out time as HH:MM (24h). Optional.' },
+          reason:              { type: 'string', description: 'Explanation / remarks for the regularization request' },
+        },
+        required: ['date', 'reason'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_payslip',
+      description: "Get the current employee's payslip summary for a given month, or the most recent finalized payslip if no month is given.",
+      parameters: {
+        type: 'object',
+        properties: {
+          month: { type: 'string', description: 'Month in YYYY-MM format (e.g. 2026-05). Omit for the most recent payslip.' },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'update_contact_info',
+      description: "Update the current employee's personal contact phone number. Use only when the user explicitly asks to update their phone number. Always confirm the number before calling.",
+      parameters: {
+        type: 'object',
+        properties: {
+          phone: { type: 'string', description: 'New phone number (digits, spaces, +, hyphens allowed; 10–15 chars)' },
+        },
+        required: ['phone'],
+      },
+    },
+  },
 ]
 
 interface ToolCtx {
@@ -763,6 +808,116 @@ async function createHelpdeskTicket(ctx: ToolCtx, args: { subject: string; descr
   return `✅ Helpdesk ticket #${ticketRef} created. Subject: "${args.subject}". Category: ${category}, Priority: ${priority}. HR will respond shortly.`
 }
 
+// ── New write tools ──────────────────────────────────────────────────────────
+
+async function regularizeAttendance(ctx: ToolCtx, args: {
+  date: string
+  regularization_type?: string
+  requested_check_in?: string
+  requested_check_out?: string
+  reason: string
+}): Promise<string> {
+  if (!ctx.employeeId) return 'No employee profile linked to your account.'
+  if (!DATE_RE.test(args.date)) return 'Invalid date format. Use YYYY-MM-DD.'
+
+  const validTypes = [
+    'missed_punch', 'forgot_checkout', 'onsite_duty',
+    'biometric_issue', 'client_visit', 'wfh', 'field_work', 'system_issue',
+  ]
+  const regType = args.regularization_type ?? 'missed_punch'
+  if (!validTypes.includes(regType)) {
+    return `Invalid regularization type. Use one of: ${validTypes.join(', ')}`
+  }
+
+  const timeRe = /^\d{2}:\d{2}$/
+  const checkIn  = args.requested_check_in  && timeRe.test(args.requested_check_in)  ? args.requested_check_in  : null
+  const checkOut = args.requested_check_out && timeRe.test(args.requested_check_out) ? args.requested_check_out : null
+
+  const { data, error } = await ctx.supabase
+    .from('attendance_regularisation')
+    .insert({
+      tenant_id:            ctx.caller.tenantId,
+      employee_id:          ctx.employeeId,
+      date:                 args.date,
+      regularization_type:  regType,
+      requested_check_in:   checkIn,
+      requested_check_out:  checkOut,
+      reason:               args.reason.trim(),
+      status:               'pending',
+      submitted_by:         ctx.caller.userId,
+    })
+    .select('id, date, status')
+    .single()
+
+  if (error) return `Failed to submit regularization request: ${error.message}`
+  return `✅ Attendance regularization request submitted for ${args.date} (${regType.replace(/_/g, ' ')}). Status: PENDING. HR will review and approve it shortly.`
+}
+
+async function getPayslip(ctx: ToolCtx, args: { month?: string }): Promise<string> {
+  if (!ctx.employeeId) return 'No employee profile linked to your account.'
+
+  const MONTH_RE_LOCAL = /^\d{4}-\d{2}$/
+  let q = ctx.supabase
+    .from('payroll_slips')
+    .select('id, month, gross_pay, net_pay, total_deductions, lop_days, payable_days, status, created_at')
+    .eq('tenant_id', ctx.caller.tenantId)
+    .eq('employee_id', ctx.employeeId)
+    .eq('status', 'finalized')
+    .order('month', { ascending: false })
+    .limit(1)
+
+  if (args?.month && MONTH_RE_LOCAL.test(args.month)) {
+    q = ctx.supabase
+      .from('payroll_slips')
+      .select('id, month, gross_pay, net_pay, total_deductions, lop_days, payable_days, status, created_at')
+      .eq('tenant_id', ctx.caller.tenantId)
+      .eq('employee_id', ctx.employeeId)
+      .eq('month', args.month)
+      .eq('status', 'finalized')
+      .limit(1)
+  }
+
+  const { data, error } = await q.maybeSingle()
+  if (error) return 'Could not look up payslip right now.'
+  if (!data) {
+    const monthLabel = args?.month ?? 'recent months'
+    return `No finalized payslip found for ${monthLabel}. Your HR team will notify you once payroll is processed.`
+  }
+  const d = data as any
+  const parts = [
+    `Payslip for ${d.month}`,
+    `Gross: ${fmtINR(Number(d.gross_pay))}`,
+    `Deductions: ${fmtINR(Number(d.total_deductions))}`,
+    `Net Pay: ${fmtINR(Number(d.net_pay))}`,
+  ]
+  if (d.lop_days) parts.push(`LOP: ${d.lop_days} day(s)`)
+  if (d.payable_days) parts.push(`Payable days: ${d.payable_days}`)
+  parts.push(`You can download the full payslip from the Payroll → My Payslips section of the app.`)
+  return parts.join(' · ')
+}
+
+async function updateContactInfo(ctx: ToolCtx, args: { phone: string }): Promise<string> {
+  if (!ctx.employeeId) return 'No employee profile linked to your account.'
+
+  const phone = args.phone?.trim() ?? ''
+  if (!phone || phone.length < 7 || phone.length > 20) {
+    return 'Please provide a valid phone number (7–20 characters).'
+  }
+  // Allow digits, spaces, +, -, (, )
+  if (!/^[+\d\s\-().]+$/.test(phone)) {
+    return 'Phone number contains invalid characters. Only digits, spaces, +, -, (, ) are allowed.'
+  }
+
+  const { error } = await ctx.supabase
+    .from('employees')
+    .update({ phone })
+    .eq('tenant_id', ctx.caller.tenantId)
+    .eq('id', ctx.employeeId)
+
+  if (error) return `Failed to update phone number: ${error.message}`
+  return `✅ Your phone number has been updated to ${phone}. This will be reflected in your employee profile.`
+}
+
 /** Execute a tool call by name. Always returns a string (never throws to the loop). */
 export async function executeTool(ctx: ToolCtx, name: string, args: any): Promise<string> {
   try {
@@ -780,10 +935,13 @@ export async function executeTool(ctx: ToolCtx, name: string, args: any): Promis
       case 'get_payroll_cost':      return await getPayrollCost(ctx, args)
       case 'get_payroll_run':       return await getPayrollRun(ctx, args)
       case 'get_compensation':      return await getCompensation(ctx, args)
-      case 'apply_leave':           return await applyLeave(ctx, args)
-      case 'cancel_leave_request':  return await cancelLeaveRequest(ctx, args)
+      case 'apply_leave':            return await applyLeave(ctx, args)
+      case 'cancel_leave_request':   return await cancelLeaveRequest(ctx, args)
       case 'create_helpdesk_ticket': return await createHelpdeskTicket(ctx, args)
-      default:                      return `Unknown tool: ${name}`
+      case 'regularize_attendance':  return await regularizeAttendance(ctx, args)
+      case 'get_payslip':            return await getPayslip(ctx, args)
+      case 'update_contact_info':    return await updateContactInfo(ctx, args)
+      default:                       return `Unknown tool: ${name}`
     }
   } catch {
     return 'That lookup failed — please try rephrasing.'

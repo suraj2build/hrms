@@ -4,6 +4,7 @@ import { randomUUID } from 'crypto'
 import { fetchFullProfile } from '../../lib/employee-profile.js'
 import { SLOW_THRESHOLD_MS } from '../../lib/constants.js'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { notify } from '../../lib/notify.js'
 
 // ── Request schema ─────────────────────────────────────────────────────────────
 const fullCreateSchema = z.object({
@@ -243,6 +244,46 @@ export default async function fullCreateRoute(fastify: FastifyInstance) {
     } else {
       responseBody = rpcData as Record<string, unknown>
     }
+
+    // ── 4b. Auto-notify new joiner about mandatory published policies ───────
+    // Fire-and-forget: fetch the new profile, then send one notification per
+    // published mandatory policy. Does not block or fail the 201 response.
+    void (async () => {
+      try {
+        const { data: newProfile } = await fastify.supabase
+          .from('profiles')
+          .select('id')
+          .eq('tenant_id', tenantId)
+          .eq('employee_id', newEmployeeId)
+          .maybeSingle()
+        if (!newProfile?.id) return
+
+        const { data: mandatoryPolicies } = await fastify.supabase
+          .from('hr_policies')
+          .select('id, title')
+          .eq('tenant_id', tenantId)
+          .eq('status', 'published')
+          .eq('requires_acknowledgement', true)
+        if (!mandatoryPolicies || mandatoryPolicies.length === 0) return
+
+        for (const policy of mandatoryPolicies as Array<{ id: string; title: string }>) {
+          await notify(fastify.supabase, {
+            tenantId,
+            recipientId:  newProfile.id,
+            item_type:    'general',
+            title:        'Policy Acknowledgement Required',
+            summary:      `Please read and acknowledge: ${policy.title}`,
+            severity:     'info',
+            entity_type:  'hr_policy',
+            entity_id:    policy.id,
+            action_route: `/ess/policies?policy=${policy.id}`,
+            action_label: 'View & Acknowledge',
+          })
+        }
+      } catch (e: any) {
+        fastify.log.warn({ err: e?.message, employee_id: newEmployeeId }, 'policy auto-notify for new joiner failed')
+      }
+    })()
 
     // ── 5. Persist idempotency key (fire-and-forget) ────────────────────────
     // Store responseBody WITHOUT request_id so each replay gets a fresh ID.
