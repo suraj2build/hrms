@@ -21,6 +21,26 @@ import { chatCompleteWithFallback } from '../../lib/ai/llm.js'
 const SLA_HOURS: Record<string, number> = { urgent: 4, high: 8, medium: 24, low: 48 }
 const RESOLUTION_HOURS: Record<string, number> = { urgent: 24, high: 48, medium: 72, low: 120 }
 
+// ── AI keyword-based category detection ──────────────────────────────────────
+function detectCategory(text: string, currentCategory: string): { category: string; confidence: number } {
+  const t = text.toLowerCase()
+  const rules: [string[], number][] = [
+    [['salary', 'payslip', 'pay', 'deduction', 'pf', 'esic', 'tds', 'tax', 'bonus', 'incentive', 'arrear'], 90],
+    [['leave', 'absence', 'holiday', 'attendance', 'lop', 'comp off', 'overtime', 'shift'], 85],
+    [['laptop', 'computer', 'system', 'software', 'access', 'login', 'password', 'email', 'network', 'printer', 'hardware', 'vpn'], 85],
+    [['offer letter', 'form 16', 'experience letter', 'noc', 'relieving', 'certificate', 'document'], 80],
+    [['harassment', 'grievance', 'complaint', 'unfair', 'bully', 'discrimination', 'posh'], 90],
+  ]
+  const categoryMap: Record<number, string> = { 0: 'payroll', 1: 'hr_query', 2: 'it_support', 3: 'hr_query', 4: 'grievance' }
+  for (let i = 0; i < rules.length; i++) {
+    const [keywords, conf] = rules[i]
+    if (keywords.some(k => t.includes(k))) {
+      return { category: categoryMap[i], confidence: conf }
+    }
+  }
+  return { category: currentCategory, confidence: 30 }
+}
+
 const CATEGORIES = ['payroll', 'leave', 'attendance', 'it', 'facilities', 'hr_policy', 'other'] as const
 const PRIORITIES = ['low', 'medium', 'high', 'urgent'] as const
 const STATUSES   = ['open', 'in_progress', 'awaiting_employee', 'resolved', 'closed'] as const
@@ -51,6 +71,30 @@ async function resolveSla(
     }
   } catch {
     return fallback
+  }
+}
+
+/**
+ * Resolve SLA windows for a category from helpdesk_category_sla.
+ * Returns null when no category SLA row exists so caller can fall back to priority SLA.
+ */
+async function resolveCategorySla(
+  fastify: any, tenantId: string, category: string,
+): Promise<{ response_hours: number; resolution_hours: number } | null> {
+  try {
+    const { data, error } = await fastify.supabase
+      .from('helpdesk_category_sla')
+      .select('response_hours, resolution_hours')
+      .eq('tenant_id', tenantId)
+      .eq('category', category)
+      .maybeSingle()
+    if (error || !data) return null
+    return {
+      response_hours:   Number((data as any).response_hours),
+      resolution_hours: Number((data as any).resolution_hours),
+    }
+  } catch {
+    return null
   }
 }
 
@@ -107,25 +151,40 @@ export default async function helpdeskRoutes(fastify: FastifyInstance) {
     const parsed = schema.safeParse(req.body)
     if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
 
-    const sla        = await resolveSla(fastify, req.tenantId, parsed.data.priority)
-    const now        = Date.now()
-    const slaDueAt   = new Date(now + sla.response_hours   * 3_600_000).toISOString()
-    const resDueAt   = new Date(now + sla.resolution_hours * 3_600_000).toISOString()
+    // AI category detection
+    const aiResult = detectCategory(
+      `${parsed.data.subject} ${parsed.data.description}`,
+      parsed.data.category,
+    )
+    // Override category if AI is confident and the user left it as default/other
+    const isDefaultCategory = (parsed.data.category as string) === 'other' || (parsed.data.category as string) === 'general'
+    const effectiveCategory = aiResult.confidence >= 70 && isDefaultCategory
+      ? aiResult.category
+      : (parsed.data.category as string)
+
+    // Prefer category-based SLA; fall back to priority SLA
+    const categorySla = await resolveCategorySla(fastify, req.tenantId, effectiveCategory)
+    const sla         = categorySla ?? await resolveSla(fastify, req.tenantId, parsed.data.priority)
+    const now         = Date.now()
+    const slaDueAt    = new Date(now + sla.response_hours   * 3_600_000).toISOString()
+    const resDueAt    = new Date(now + sla.resolution_hours * 3_600_000).toISOString()
 
     const { data, error } = await fastify.supabase
       .from('helpdesk_tickets')
       .insert({
-        tenant_id:        req.tenantId,
-        subject:          parsed.data.subject,
-        description:      parsed.data.description,
-        category:         parsed.data.category,
-        priority:         parsed.data.priority,
-        status:           'open',
-        employee_id:      employeeId,
-        created_by:       req.userId,
-        sla_hours:        sla.response_hours,
-        sla_due_at:       slaDueAt,
-        resolution_due_at: resDueAt,
+        tenant_id:              req.tenantId,
+        subject:                parsed.data.subject,
+        description:            parsed.data.description,
+        category:               effectiveCategory,
+        priority:               parsed.data.priority,
+        status:                 'open',
+        employee_id:            employeeId,
+        created_by:             req.userId,
+        sla_hours:              sla.response_hours,
+        sla_due_at:             slaDueAt,
+        resolution_due_at:      resDueAt,
+        ai_suggested_category:  aiResult.category,
+        ai_routing_confidence:  aiResult.confidence,
       })
       .select()
       .single()
@@ -148,7 +207,7 @@ export default async function helpdeskRoutes(fastify: FastifyInstance) {
       senderId:     req.userId,
       item_type:    'general',
       title:        `New helpdesk ticket: ${parsed.data.subject}`,
-      summary:      `A ${parsed.data.priority} priority ${parsed.data.category} ticket was raised. Response SLA ${sla.response_hours}h, resolution ${sla.resolution_hours}h.`,
+      summary:      `A ${parsed.data.priority} priority ${effectiveCategory} ticket was raised. Response SLA ${sla.response_hours}h, resolution ${sla.resolution_hours}h.${aiResult.confidence >= 70 ? ` AI routing: ${aiResult.category} (${aiResult.confidence}%).` : ''}`,
       severity:     parsed.data.priority === 'urgent' ? 'warning' : 'info',
       entity_type:  'helpdesk_ticket',
       entity_id:    (data as any).id,
@@ -725,5 +784,145 @@ Write a helpful, professional HR reply to address the employee's concern:`
       distribution,
       period_days:  days,
     })
+  })
+
+  // ── POST /helpdesk/tickets/:id/rate — employee rates a resolved ticket ────────
+  // (satisfaction rating 1-5 stars; separate from CSAT which uses csat_* columns)
+
+  fastify.post('/tickets/:id/rate', auth, async (req: any, reply) => {
+    const { id } = req.params as { id: string }
+    const { rating, comment } = req.body as { rating: number; comment?: string }
+    if (!rating || rating < 1 || rating > 5) return reply.status(400).send({ error: 'rating must be 1-5' })
+    const tenantId = req.tenantId
+    // Verify ticket belongs to this tenant and is resolved
+    const { data: ticket } = await fastify.supabase
+      .from('helpdesk_tickets')
+      .select('id, status, employee_id')
+      .eq('id', id)
+      .eq('tenant_id', tenantId)
+      .single()
+    if (!ticket) return reply.status(404).send({ error: 'Ticket not found' })
+    if ((ticket as any).status !== 'resolved') return reply.status(400).send({ error: 'Can only rate resolved tickets' })
+    const { error } = await fastify.supabase
+      .from('helpdesk_tickets')
+      .update({
+        satisfaction_rating:  Math.round(rating),
+        satisfaction_comment: comment || null,
+        satisfaction_rated_at: new Date().toISOString(),
+      })
+      .eq('id', id)
+      .eq('tenant_id', tenantId)
+    if (error) return reply.status(500).send({ error: error.message })
+    return reply.send({ data: { rated: true } })
+  })
+
+  // ── GET /helpdesk/admin/satisfaction-report ───────────────────────────────────
+
+  fastify.get('/admin/satisfaction-report', hrAdminAuth, async (req: any, reply) => {
+    const { data: tickets } = await fastify.supabase
+      .from('helpdesk_tickets')
+      .select('satisfaction_rating, satisfaction_comment, category, resolved_at')
+      .eq('tenant_id', req.tenantId)
+      .not('satisfaction_rating', 'is', null)
+      .order('satisfaction_rated_at', { ascending: false })
+
+    const rows = (tickets ?? []) as { satisfaction_rating: number; satisfaction_comment: string | null; category: string; resolved_at: string | null }[]
+
+    const ratings = rows.map(r => r.satisfaction_rating)
+    const avg_rating = ratings.length
+      ? Math.round((ratings.reduce((s, r) => s + r, 0) / ratings.length) * 10) / 10
+      : null
+
+    // Total resolved (all time)
+    const { count: total_resolved } = await fastify.supabase
+      .from('helpdesk_tickets')
+      .select('id', { count: 'exact', head: true })
+      .eq('tenant_id', req.tenantId)
+      .eq('status', 'resolved')
+
+    // By category
+    const byCat: Record<string, { sum: number; count: number }> = {}
+    for (const r of rows) {
+      if (!byCat[r.category]) byCat[r.category] = { sum: 0, count: 0 }
+      byCat[r.category].sum   += r.satisfaction_rating
+      byCat[r.category].count += 1
+    }
+    const by_category = Object.entries(byCat).map(([category, { sum, count }]) => ({
+      category,
+      avg_rating: Math.round((sum / count) * 10) / 10,
+      count,
+    })).sort((a, b) => b.count - a.count)
+
+    // Recent comments
+    const recent_comments = rows
+      .filter(r => r.satisfaction_comment)
+      .slice(0, 20)
+      .map(r => ({
+        rating:      r.satisfaction_rating,
+        comment:     r.satisfaction_comment,
+        category:    r.category,
+        resolved_at: r.resolved_at,
+      }))
+
+    return reply.send({
+      data: {
+        avg_rating,
+        rated_count:     ratings.length,
+        total_resolved:  total_resolved ?? 0,
+        by_category,
+        recent_comments,
+      },
+    })
+  })
+
+  // ── GET /helpdesk/admin/category-sla — list category SLA windows ─────────────
+
+  fastify.get('/admin/category-sla', hrAdminAuth, async (req: any, reply) => {
+    const { data, error } = await fastify.supabase
+      .from('helpdesk_category_sla')
+      .select('id, category, response_hours, resolution_hours, updated_at')
+      .eq('tenant_id', req.tenantId)
+      .order('category', { ascending: true })
+
+    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    return reply.send({ data: data ?? [] })
+  })
+
+  // ── PUT /helpdesk/admin/category-sla — upsert a category SLA window ──────────
+
+  fastify.put('/admin/category-sla', hrAdminAuth, async (req: any, reply) => {
+    const schema = z.object({
+      category:         z.string().min(1).max(100),
+      response_hours:   z.number().int().min(1).max(720),
+      resolution_hours: z.number().int().min(1).max(2160),
+    })
+    const parsed = schema.safeParse(req.body)
+    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+
+    const { error } = await fastify.supabase
+      .from('helpdesk_category_sla')
+      .upsert(
+        {
+          tenant_id:        req.tenantId,
+          category:         parsed.data.category,
+          response_hours:   parsed.data.response_hours,
+          resolution_hours: parsed.data.resolution_hours,
+          updated_at:       new Date().toISOString(),
+        },
+        { onConflict: 'tenant_id,category' },
+      )
+
+    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+
+    await logAction(fastify.supabase, {
+      tenantId:    req.tenantId,
+      tableName:   'helpdesk_category_sla',
+      recordId:    req.tenantId,
+      action:      'UPDATE',
+      performedBy: req.userId,
+      newData:     parsed.data,
+    })
+
+    return reply.send({ data: { updated: true } })
   })
 }

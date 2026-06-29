@@ -3,11 +3,12 @@ import { useSearchParams } from 'react-router-dom'
 import {
   AlertTriangle, Clock, CheckCircle2, XCircle, FileText,
   UserX, ChevronRight, Send, Phone, Mail, MessageSquare,
-  Shield, Loader2, RefreshCw, Search, Filter, MoreHorizontal,
+  Shield, Loader2, RefreshCw, Search, Filter, MoreHorizontal, Zap,
 } from 'lucide-react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { format, formatDistanceToNow } from 'date-fns'
 import { api } from '@/lib/api/client'
+import { toast } from 'sonner'
 import { PageHeader }     from '@/components/layout/PageHeader'
 import { SubTabs }        from '@/components/ui/SubTabs'
 import { Button }         from '@/components/ui/button'
@@ -213,6 +214,23 @@ export function AbscondingCaseManagement() {
     onSuccess:  () => { qc.invalidateQueries({ queryKey: ['absconding-cases'] }); qc.invalidateQueries({ queryKey: ['absconding-dashboard'] }) },
   })
 
+  const autoEscalateMutation = useMutation({
+    mutationFn: () => api.post<{ data: { processed: number; escalated: string[] } }>('/absconding/run-auto-escalation'),
+    onSuccess: (res) => {
+      const result = (res as any)?.data ?? { processed: 0, escalated: [] }
+      const count = result.escalated?.length ?? 0
+      toast.success(
+        count > 0
+          ? `${count} case${count !== 1 ? 's' : ''} escalated automatically`
+          : 'Auto-escalation complete — no cases needed escalation',
+        { description: `${result.processed ?? 0} open cases scanned.` },
+      )
+      qc.invalidateQueries({ queryKey: ['absconding-cases'] })
+      qc.invalidateQueries({ queryKey: ['absconding-dashboard'] })
+    },
+    onError: (e: Error) => toast.error('Auto-escalation failed', { description: e.message }),
+  })
+
   return (
     <div className="flex flex-col gap-6 p-6">
       <PageHeader
@@ -220,14 +238,26 @@ export function AbscondingCaseManagement() {
         title="Absconding Cases"
         subtitle="Track and manage employees absent without authorisation"
         actions={
-          <Button
-            size="sm" variant="outline"
-            onClick={() => scanMutation.mutate()}
-            disabled={scanMutation.isPending}
-          >
-            {scanMutation.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : <RefreshCw className="h-3.5 w-3.5 mr-1.5" />}
-            Run Scan
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm" variant="outline"
+              onClick={() => autoEscalateMutation.mutate()}
+              disabled={autoEscalateMutation.isPending}
+            >
+              {autoEscalateMutation.isPending
+                ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />
+                : <Zap className="h-3.5 w-3.5 mr-1.5" />}
+              Run Auto-Escalation
+            </Button>
+            <Button
+              size="sm" variant="outline"
+              onClick={() => scanMutation.mutate()}
+              disabled={scanMutation.isPending}
+            >
+              {scanMutation.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : <RefreshCw className="h-3.5 w-3.5 mr-1.5" />}
+              Run Scan
+            </Button>
+          </div>
         }
       />
 

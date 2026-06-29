@@ -175,6 +175,54 @@ export const ASSISTANT_TOOLS: ToolDef[] = [
       },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'apply_leave',
+      description: "Apply for leave on behalf of the current employee. Always confirm the details with the user before calling this. Required: leave_type (e.g. 'Casual Leave', 'Sick Leave'), start_date (YYYY-MM-DD), end_date (YYYY-MM-DD). Optional: reason.",
+      parameters: {
+        type: 'object',
+        properties: {
+          leave_type:  { type: 'string', description: 'Leave type name, e.g. Casual Leave, Sick Leave, Earned Leave' },
+          start_date:  { type: 'string', description: 'Start date YYYY-MM-DD' },
+          end_date:    { type: 'string', description: 'End date YYYY-MM-DD (same as start for single day)' },
+          reason:      { type: 'string', description: 'Optional reason / remarks' },
+        },
+        required: ['leave_type', 'start_date', 'end_date'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'cancel_leave_request',
+      description: "Cancel a pending leave request for the current employee. Use get_leave_requests first to find the request ID if the user hasn't provided it.",
+      parameters: {
+        type: 'object',
+        properties: {
+          request_id: { type: 'string', description: 'UUID of the leave request to cancel' },
+        },
+        required: ['request_id'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'create_helpdesk_ticket',
+      description: "Raise a helpdesk/support ticket on behalf of the current employee. Use for requests like IT support, HR queries, payroll issues, etc.",
+      parameters: {
+        type: 'object',
+        properties: {
+          subject:     { type: 'string', description: 'Short title of the issue (max 120 chars)' },
+          description: { type: 'string', description: 'Detailed description of the problem or request' },
+          category:    { type: 'string', description: 'Category: it_support, hr_query, payroll, general. Default: general' },
+          priority:    { type: 'string', description: 'Priority: low, medium, high. Default: medium' },
+        },
+        required: ['subject', 'description'],
+      },
+    },
+  },
 ]
 
 interface ToolCtx {
@@ -612,6 +660,109 @@ async function getCompensation(ctx: ToolCtx, args: any): Promise<string> {
   return `${fullName(e)} — CTC ${fmtINR(Number(d.ctc_annual))}/yr (${fmtINR(Number(d.ctc_monthly))}/mo)${d.effective_from ? `, effective ${d.effective_from}` : ''}.`
 }
 
+// ── Write tools ───────────────────────────────────────────────────────────────
+
+async function applyLeave(ctx: ToolCtx, args: { leave_type: string; start_date: string; end_date: string; reason?: string }): Promise<string> {
+  if (!ctx.employeeId) return 'No employee profile linked to your account.'
+  if (!DATE_RE.test(args.start_date) || !DATE_RE.test(args.end_date)) return 'Invalid date format. Use YYYY-MM-DD.'
+  if (args.start_date > args.end_date) return 'Start date must be before or equal to end date.'
+
+  // Resolve leave type by name
+  const { data: lt, error: ltErr } = await ctx.supabase
+    .from('leave_types')
+    .select('id, name')
+    .eq('tenant_id', ctx.caller.tenantId)
+    .ilike('name', `%${args.leave_type.trim()}%`)
+    .limit(1)
+    .single()
+
+  if (ltErr || !lt) return `Leave type "${args.leave_type}" not found. Available types can be checked in your leave balance.`
+
+  // Lookup profile_id → user_id for the employee
+  const { data: profile } = await ctx.supabase
+    .from('profiles')
+    .select('id')
+    .eq('tenant_id', ctx.caller.tenantId)
+    .eq('employee_id', ctx.employeeId)
+    .single()
+
+  if (!profile) return 'Could not resolve your profile. Please apply via the Leave page.'
+
+  const { data, error } = await ctx.supabase
+    .from('leave_requests')
+    .insert({
+      tenant_id:     ctx.caller.tenantId,
+      employee_id:   ctx.employeeId,
+      leave_type_id: lt.id,
+      start_date:    args.start_date,
+      end_date:      args.end_date,
+      reason:        args.reason?.trim() || null,
+      status:        'PENDING',
+      applied_by:    ctx.caller.userId,
+      applied_at:    new Date().toISOString(),
+    })
+    .select('id')
+    .single()
+
+  if (error) return `Failed to apply leave: ${error.message}`
+  return `✅ Leave applied successfully! ${lt.name} from ${args.start_date} to ${args.end_date} is now PENDING approval. Request ID: ${data.id}`
+}
+
+async function cancelLeaveRequest(ctx: ToolCtx, args: { request_id: string }): Promise<string> {
+  if (!ctx.employeeId) return 'No employee profile linked to your account.'
+
+  const { data: req, error: fetchErr } = await ctx.supabase
+    .from('leave_requests')
+    .select('id, status, start_date, end_date, leave_types(name)')
+    .eq('tenant_id', ctx.caller.tenantId)
+    .eq('id', args.request_id)
+    .eq('employee_id', ctx.employeeId)
+    .single()
+
+  if (fetchErr || !req) return 'Leave request not found or you do not have permission to cancel it.'
+  if (req.status !== 'PENDING') return `Cannot cancel a request with status ${req.status}. Only PENDING requests can be cancelled.`
+
+  const { error } = await ctx.supabase
+    .from('leave_requests')
+    .update({ status: 'CANCELLED', updated_at: new Date().toISOString() })
+    .eq('id', args.request_id)
+    .eq('tenant_id', ctx.caller.tenantId)
+
+  if (error) return `Failed to cancel: ${error.message}`
+  const typeName = (req.leave_types as any)?.name ?? 'leave'
+  return `✅ ${typeName} request (${req.start_date} → ${req.end_date}) has been cancelled.`
+}
+
+async function createHelpdeskTicket(ctx: ToolCtx, args: { subject: string; description: string; category?: string; priority?: string }): Promise<string> {
+  if (!ctx.employeeId) return 'No employee profile linked to your account.'
+
+  const category = args.category ?? 'general'
+  const priority  = args.priority  ?? 'medium'
+  const validCategories = ['it_support', 'hr_query', 'payroll', 'general']
+  const validPriorities  = ['low', 'medium', 'high']
+  if (!validCategories.includes(category)) return `Invalid category. Use one of: ${validCategories.join(', ')}`
+  if (!validPriorities.includes(priority))  return `Invalid priority. Use one of: ${validPriorities.join(', ')}`
+
+  const { data, error } = await ctx.supabase
+    .from('helpdesk_tickets')
+    .insert({
+      tenant_id:   ctx.caller.tenantId,
+      employee_id: ctx.employeeId,
+      subject:     args.subject.slice(0, 120),
+      description: args.description,
+      category,
+      priority,
+      status:      'open',
+      created_by:  ctx.caller.userId,
+    })
+    .select('id, ticket_number')
+    .single()
+
+  if (error) return `Failed to create ticket: ${error.message}`
+  const ticketRef = (data as any).ticket_number ?? data.id.slice(0, 8)
+  return `✅ Helpdesk ticket #${ticketRef} created. Subject: "${args.subject}". Category: ${category}, Priority: ${priority}. HR will respond shortly.`
+}
+
 /** Execute a tool call by name. Always returns a string (never throws to the loop). */
 export async function executeTool(ctx: ToolCtx, name: string, args: any): Promise<string> {
   try {
@@ -629,6 +780,9 @@ export async function executeTool(ctx: ToolCtx, name: string, args: any): Promis
       case 'get_payroll_cost':      return await getPayrollCost(ctx, args)
       case 'get_payroll_run':       return await getPayrollRun(ctx, args)
       case 'get_compensation':      return await getCompensation(ctx, args)
+      case 'apply_leave':           return await applyLeave(ctx, args)
+      case 'cancel_leave_request':  return await cancelLeaveRequest(ctx, args)
+      case 'create_helpdesk_ticket': return await createHelpdeskTicket(ctx, args)
       default:                      return `Unknown tool: ${name}`
     }
   } catch {

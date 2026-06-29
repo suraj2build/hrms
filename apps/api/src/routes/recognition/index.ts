@@ -433,4 +433,251 @@ export default async function recognitionRoutes(fastify: FastifyInstance) {
     if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
     return reply.send({ data: { ok: true } })
   })
+
+  // ── Formal Award Programs (admin CRUD) ───────────────────────────────────
+
+  fastify.get('/recognition/admin/awards', hrAuth, async (req: any, reply) => {
+    const { data, error } = await fastify.supabase
+      .from('formal_awards')
+      .select('*')
+      .eq('tenant_id', req.tenantId)
+      .order('created_at', { ascending: false })
+    if (error) return reply.code(500).send({ error: error.message })
+    return reply.send({ data: data ?? [] })
+  })
+
+  fastify.post('/recognition/admin/awards', hrAuth, async (req: any, reply) => {
+    const body = req.body as any
+    const { name, description, frequency, award_type, monetary_value, monetary_description, eligible_group, requires_nomination } = body
+    if (!name?.trim()) return reply.code(400).send({ error: 'name is required' })
+    const { data, error } = await fastify.supabase.from('formal_awards')
+      .insert({ tenant_id: req.tenantId, name: name.trim(), description, frequency: frequency || 'monthly', award_type: award_type || 'custom', monetary_value: monetary_value || null, monetary_description, eligible_group, requires_nomination: requires_nomination !== false, created_by: req.userId })
+      .select('id').single()
+    if (error) return reply.code(500).send({ error: error.message })
+    return reply.code(201).send({ data })
+  })
+
+  fastify.patch('/recognition/admin/awards/:id', hrAuth, async (req: any, reply) => {
+    const { id } = req.params as { id: string }
+    const allowed = ['name','description','frequency','award_type','monetary_value','monetary_description','eligible_group','requires_nomination','is_active']
+    const update: Record<string, unknown> = {}
+    for (const k of allowed) { if ((req.body as any)[k] !== undefined) update[k] = (req.body as any)[k] }
+    const { error } = await fastify.supabase.from('formal_awards').update(update).eq('tenant_id', req.tenantId).eq('id', id)
+    if (error) return reply.code(500).send({ error: error.message })
+    return reply.send({ data: { updated: true } })
+  })
+
+  // ── Award Rounds ──────────────────────────────────────────────────────────
+
+  fastify.get('/recognition/admin/awards/:awardId/rounds', hrAuth, async (req: any, reply) => {
+    const { awardId } = req.params as { awardId: string }
+    const { data, error } = await fastify.supabase
+      .from('award_rounds')
+      .select(`*, employees!award_rounds_winner_employee_id_fkey(id, first_name, last_name, employee_code)`)
+      .eq('tenant_id', req.tenantId).eq('award_id', awardId)
+      .order('created_at', { ascending: false })
+    if (error) return reply.code(500).send({ error: error.message })
+    // Attach nomination count
+    const roundIds = (data ?? []).map((r: any) => r.id)
+    const nomCounts: Record<string, number> = {}
+    if (roundIds.length) {
+      const { data: noms } = await fastify.supabase.from('award_nominations').select('round_id').eq('tenant_id', req.tenantId).in('round_id', roundIds)
+      ;(noms ?? []).forEach((n: any) => { nomCounts[n.round_id] = (nomCounts[n.round_id] ?? 0) + 1 })
+    }
+    return reply.send({ data: (data ?? []).map((r: any) => ({ ...r, nomination_count: nomCounts[r.id] ?? 0 })) })
+  })
+
+  fastify.post('/recognition/admin/awards/:awardId/rounds', hrAuth, async (req: any, reply) => {
+    const { awardId } = req.params as { awardId: string }
+    const { period_label, period_start, period_end } = req.body as any
+    if (!period_label?.trim()) return reply.code(400).send({ error: 'period_label is required' })
+    const { data, error } = await fastify.supabase.from('award_rounds')
+      .insert({ tenant_id: req.tenantId, award_id: awardId, period_label: period_label.trim(), period_start: period_start || null, period_end: period_end || null, status: 'open', created_by: req.userId })
+      .select('id').single()
+    if (error) return reply.code(500).send({ error: error.message })
+    return reply.code(201).send({ data })
+  })
+
+  fastify.patch('/recognition/admin/awards/:awardId/rounds/:roundId', hrAuth, async (req: any, reply) => {
+    const { roundId } = req.params as { awardId: string; roundId: string }
+    const allowed = ['status','period_label','period_start','period_end']
+    const update: Record<string, unknown> = {}
+    for (const k of allowed) { if ((req.body as any)[k] !== undefined) update[k] = (req.body as any)[k] }
+    const { error } = await fastify.supabase.from('award_rounds').update(update).eq('tenant_id', req.tenantId).eq('id', roundId)
+    if (error) return reply.code(500).send({ error: error.message })
+    return reply.send({ data: { updated: true } })
+  })
+
+  fastify.post('/recognition/admin/awards/:awardId/rounds/:roundId/declare-winner', hrAuth, async (req: any, reply) => {
+    const { roundId } = req.params as { awardId: string; roundId: string }
+    const { winner_employee_id, winner_notes } = req.body as any
+    if (!winner_employee_id) return reply.code(400).send({ error: 'winner_employee_id is required' })
+    // Update the round
+    const { error: re } = await fastify.supabase.from('award_rounds')
+      .update({ status: 'closed', winner_employee_id, winner_notes: winner_notes || null, declared_at: new Date().toISOString(), declared_by: req.userId })
+      .eq('tenant_id', req.tenantId).eq('id', roundId)
+    if (re) return reply.code(500).send({ error: re.message })
+    // Mark winning nomination
+    await fastify.supabase.from('award_nominations')
+      .update({ status: 'winner', reviewed_at: new Date().toISOString(), reviewed_by: req.userId })
+      .eq('tenant_id', req.tenantId).eq('round_id', roundId).eq('nominee_id', winner_employee_id)
+    // Mark others not_selected
+    await fastify.supabase.from('award_nominations')
+      .update({ status: 'not_selected', reviewed_at: new Date().toISOString(), reviewed_by: req.userId })
+      .eq('tenant_id', req.tenantId).eq('round_id', roundId).eq('status', 'pending')
+    return reply.send({ data: { winner_declared: true } })
+  })
+
+  // ── Nominations ───────────────────────────────────────────────────────────
+
+  fastify.get('/recognition/admin/awards/:awardId/rounds/:roundId/nominations', hrAuth, async (req: any, reply) => {
+    const { roundId } = req.params as { awardId: string; roundId: string }
+    const { data, error } = await fastify.supabase
+      .from('award_nominations')
+      .select(`id, justification, status, created_at,
+        employees!award_nominations_nominee_id_fkey(id, first_name, last_name, employee_code, designation, department),
+        profiles!award_nominations_nominated_by_fkey(id, full_name)`)
+      .eq('tenant_id', req.tenantId).eq('round_id', roundId)
+      .order('created_at', { ascending: false })
+    if (error) return reply.code(500).send({ error: error.message })
+    return reply.send({ data: data ?? [] })
+  })
+
+  fastify.post('/recognition/admin/awards/:awardId/rounds/:roundId/nominations', { preHandler: fastify.authenticate }, async (req: any, reply) => {
+    const { roundId } = req.params as { awardId: string; roundId: string }
+    const { nominee_id, justification } = req.body as any
+    if (!nominee_id) return reply.code(400).send({ error: 'nominee_id is required' })
+    const { data, error } = await fastify.supabase.from('award_nominations')
+      .insert({ tenant_id: req.tenantId, round_id: roundId, nominee_id, nominated_by: req.userId, justification: justification || null })
+      .select('id').single()
+    if (error) {
+      if (error.code === '23505') return reply.code(409).send({ error: 'This employee is already nominated for this round' })
+      return reply.code(500).send({ error: error.message })
+    }
+    return reply.code(201).send({ data })
+  })
+
+  fastify.patch('/recognition/admin/awards/:awardId/rounds/:roundId/nominations/:nomId', hrAuth, async (req: any, reply) => {
+    const { nomId } = req.params as { awardId: string; roundId: string; nomId: string }
+    const { status, justification } = req.body as any
+    const validStatuses = ['pending','shortlisted','not_selected']
+    if (status && !validStatuses.includes(status)) return reply.code(400).send({ error: 'Invalid status' })
+    const update: Record<string, unknown> = {}
+    if (status) { update.status = status; update.reviewed_at = new Date().toISOString(); update.reviewed_by = req.userId }
+    if (justification !== undefined) update.justification = justification
+    const { error } = await fastify.supabase.from('award_nominations').update(update).eq('tenant_id', req.tenantId).eq('id', nomId)
+    if (error) return reply.code(500).send({ error: error.message })
+    return reply.send({ data: { updated: true } })
+  })
+
+  // ── ESS: view open award rounds for nomination ─────────────────────────────
+
+  fastify.get('/recognition/awards/open', { preHandler: fastify.authenticate }, async (req: any, reply) => {
+    const { data, error } = await fastify.supabase
+      .from('award_rounds')
+      .select(`id, period_label, period_start, period_end, status, created_at,
+        formal_awards!award_rounds_award_id_fkey(id, name, description, eligible_group, requires_nomination, monetary_value, monetary_description)`)
+      .eq('tenant_id', req.tenantId).eq('status', 'open')
+      .order('created_at', { ascending: false })
+    if (error) return reply.code(500).send({ error: error.message })
+    return reply.send({ data: data ?? [] })
+  })
+
+  // ── ESS: view recent award winners ────────────────────────────────────────
+
+  fastify.get('/recognition/awards/winners', { preHandler: fastify.authenticate }, async (req: any, reply) => {
+    const { data, error } = await fastify.supabase
+      .from('award_rounds')
+      .select(`id, period_label, declared_at,
+        formal_awards!award_rounds_award_id_fkey(id, name, award_type),
+        employees!award_rounds_winner_employee_id_fkey(id, first_name, last_name, employee_code, designation, department)`)
+      .eq('tenant_id', req.tenantId).eq('status', 'closed')
+      .not('winner_employee_id', 'is', null)
+      .order('declared_at', { ascending: false }).limit(20)
+    if (error) return reply.code(500).send({ error: error.message })
+    return reply.send({ data: data ?? [] })
+  })
+
+  // ── Long Service Alerts (admin) ───────────────────────────────────────────
+
+  fastify.get('/recognition/admin/long-service-alerts', hrAuth, async (req: any, reply) => {
+    // Find employees who hit 1yr, 3yr, or 5yr milestone in the current month
+    const today = new Date()
+    const milestones = [1, 3, 5]
+    const alerts: any[] = []
+    for (const years of milestones) {
+      // Employees whose date_of_joining anniversary (years ago) falls this month
+      const targetYear = today.getFullYear() - years
+      const monthStr = String(today.getMonth() + 1).padStart(2, '0')
+      const lastDay = new Date(targetYear, today.getMonth() + 1, 0).getDate()
+      const from = `${targetYear}-${monthStr}-01`
+      const to   = `${targetYear}-${monthStr}-${String(lastDay).padStart(2, '0')}`
+      const { data } = await fastify.supabase
+        .from('employees')
+        .select('id, first_name, last_name, employee_code, designation, department, date_of_joining')
+        .eq('tenant_id', req.tenantId)
+        .gte('date_of_joining', from)
+        .lte('date_of_joining', to)
+        .not('status', 'eq', 'terminated')
+      ;(data ?? []).forEach((e: any) => alerts.push({ ...e, milestone_years: years }))
+    }
+    return reply.send({ data: alerts })
+  })
+
+  // ── Spot Awards (manager gives to direct report) ──────────────────────────
+
+  fastify.get('/recognition/admin/spot-awards', hrAuth, async (req: any, reply) => {
+    const { data, error } = await fastify.supabase
+      .from('spot_awards')
+      .select(`id, award_name, message, monetary_value, created_at,
+        employees!spot_awards_from_employee_id_fkey(id, first_name, last_name),
+        employees!spot_awards_to_employee_id_fkey(id, first_name, last_name, employee_code, designation)`)
+      .eq('tenant_id', req.tenantId)
+      .order('created_at', { ascending: false }).limit(50)
+    if (error) return reply.code(500).send({ error: error.message })
+    return reply.send({ data: data ?? [] })
+  })
+
+  fastify.post('/recognition/spot-award', { preHandler: fastify.authenticate }, async (req: any, reply) => {
+    const { to_employee_id, award_name, message, monetary_value } = req.body as any
+    if (!to_employee_id || !award_name?.trim()) return reply.code(400).send({ error: 'to_employee_id and award_name are required' })
+    const empId = await resolveEmployeeId(fastify, req.userId, req.tenantId)
+    if (!empId) return reply.code(403).send({ error: 'Employee profile not found' })
+    const { data, error } = await fastify.supabase.from('spot_awards')
+      .insert({ tenant_id: req.tenantId, from_employee_id: empId, to_employee_id, award_name: award_name.trim(), message: message || null, monetary_value: monetary_value || null })
+      .select('id').single()
+    if (error) return reply.code(500).send({ error: error.message })
+    return reply.code(201).send({ data })
+  })
+
+  // ── Admin: overall R&R tracking dashboard ────────────────────────────────
+
+  fastify.get('/recognition/admin/rnr-summary', hrAuth, async (req: any, reply) => {
+    const [awardsRes, roundsRes, nominationsRes, spotRes, peersRes] = await Promise.all([
+      fastify.supabase.from('formal_awards').select('id', { count: 'exact', head: true }).eq('tenant_id', req.tenantId).eq('is_active', true),
+      fastify.supabase.from('award_rounds').select('id, status', { count: 'exact' }).eq('tenant_id', req.tenantId),
+      fastify.supabase.from('award_nominations').select('id, status').eq('tenant_id', req.tenantId),
+      fastify.supabase.from('spot_awards').select('id, monetary_value').eq('tenant_id', req.tenantId),
+      fastify.supabase.from('recognition').select('id, points').eq('tenant_id', req.tenantId).gte('created_at', new Date(new Date().getFullYear(), 0, 1).toISOString()),
+    ])
+    const rounds = (roundsRes.data ?? []) as any[]
+    const nominations = (nominationsRes.data ?? []) as any[]
+    const spotAwards = (spotRes.data ?? []) as any[]
+    const peerRecs = (peersRes.data ?? []) as any[]
+    const totalMonetary = spotAwards.reduce((s: number, a: any) => s + (a.monetary_value ?? 0), 0)
+    return reply.send({
+      data: {
+        active_award_programs: awardsRes.count ?? 0,
+        total_rounds: rounds.length,
+        open_rounds: rounds.filter((r: any) => r.status === 'open').length,
+        closed_rounds: rounds.filter((r: any) => r.status === 'closed').length,
+        total_nominations: nominations.length,
+        pending_nominations: nominations.filter((n: any) => n.status === 'pending').length,
+        spot_awards_given: spotAwards.length,
+        spot_awards_monetary_total: totalMonetary,
+        peer_recognitions_ytd: peerRecs.length,
+        peer_points_ytd: peerRecs.reduce((s: number, r: any) => s + (r.points ?? 0), 0),
+      },
+    })
+  })
 }

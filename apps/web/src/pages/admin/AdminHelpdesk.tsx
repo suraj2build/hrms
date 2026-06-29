@@ -7,7 +7,7 @@
 
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Loader2, MessageSquare, Send, AlertTriangle, Clock, Lock, StickyNote, Sparkles, Star } from 'lucide-react'
+import { Loader2, MessageSquare, Send, AlertTriangle, Clock, Lock, StickyNote, Sparkles, Star, BarChart2 } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { PageContainer } from '@/components/layout/PageContainer'
@@ -47,15 +47,44 @@ interface Ticket {
   resolution_breached_at: string | null
   resolution_note: string | null
   csat_rating: number | null
+  ai_suggested_category: string | null
+  ai_routing_confidence: number | null
+  satisfaction_rating: number | null
   created_at: string
   employees?: { first_name: string; last_name: string; employee_code: string } | null
   comments?: Comment[]
+}
+
+interface SatisfactionReport {
+  avg_rating: number | null
+  rated_count: number
+  total_resolved: number
+  by_category: { category: string; avg_rating: number; count: number }[]
+  recent_comments: { rating: number; comment: string | null; category: string; resolved_at: string | null }[]
+}
+
+interface CategorySla {
+  id: string
+  category: string
+  response_hours: number
+  resolution_hours: number
+  updated_at: string
 }
 
 interface Agent { id: string; full_name: string | null; role: string }
 interface Stats { total: number; open: number; breached: number; resolution_breached: number; by_status: Record<string, number> }
 interface CsatStats { average: number | null; total: number; by_rating: Record<string, number> }
 interface SlaPolicy { priority: TicketPriority; response_hours: number; resolution_hours: number; is_custom: boolean }
+
+function categoryLabel(cat: string): string {
+  const map: Record<string, string> = {
+    it_support: 'IT Support', hr_query: 'HR Query', payroll: 'Payroll',
+    general: 'General', grievance: 'Grievance', payroll_leave: 'Payroll/Leave',
+    leave: 'Leave', attendance: 'Attendance', it: 'IT', facilities: 'Facilities',
+    hr_policy: 'HR Policy', other: 'Other',
+  }
+  return map[cat] ?? cat.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
+}
 
 const STATUSES: TicketStatus[] = ['open', 'in_progress', 'awaiting_employee', 'resolved', 'closed']
 
@@ -108,6 +137,9 @@ export function AdminHelpdesk() {
   const [resNote, setResNote]     = useState('')
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [aiLoading, setAiLoading] = useState(false)
+  const [showSatisfaction, setShowSatisfaction] = useState(false)
+  const [slaTab, setSlaTab] = useState<'priority' | 'category'>('priority')
+  const [catSlaDraft, setCatSlaDraft] = useState<CategorySla[] | null>(null)
 
   const { data: tickets = [], isLoading } = useQuery<Ticket[]>({
     queryKey: ['admin-helpdesk', statusF, priorityF],
@@ -132,6 +164,38 @@ export function AdminHelpdesk() {
     queryFn:  () => api.get<{ data: CsatStats }>('/helpdesk/stats/csat').then(r => r.data),
     enabled:  isAdmin,
   })
+
+  const { data: satisfactionReport } = useQuery<SatisfactionReport>({
+    queryKey: ['admin-helpdesk', 'satisfaction-report'],
+    queryFn:  () => api.get<{ data: SatisfactionReport }>('/helpdesk/admin/satisfaction-report').then(r => r.data),
+    enabled:  isAdmin && showSatisfaction,
+  })
+
+  const { data: categorySlas = [] } = useQuery<CategorySla[]>({
+    queryKey: ['admin-helpdesk', 'category-sla'],
+    queryFn:  () => api.get<{ data: CategorySla[] }>('/helpdesk/admin/category-sla').then(r => r.data ?? []),
+    enabled:  isAdmin,
+  })
+  const catSlaRows = catSlaDraft ?? categorySlas
+
+  const saveCategorySla = useMutation({
+    mutationFn: (row: CategorySla) =>
+      api.put('/helpdesk/admin/category-sla', {
+        category:         row.category,
+        response_hours:   row.response_hours,
+        resolution_hours: row.resolution_hours,
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['admin-helpdesk', 'category-sla'] })
+      setCatSlaDraft(null)
+      toast.success('Category SLA saved')
+    },
+    onError: (e: Error) => toast.error('Failed to save', { description: e.message }),
+  })
+
+  const editCatSla = (category: string, field: 'response_hours' | 'resolution_hours', value: number) => {
+    setCatSlaDraft(catSlaRows.map(r => r.category === category ? { ...r, [field]: value } : r))
+  }
 
   const { data: agents = [] } = useQuery<Agent[]>({
     queryKey: ['admin-helpdesk', 'agents'],
@@ -253,9 +317,14 @@ export function AdminHelpdesk() {
         title="HR Helpdesk"
         subtitle="Employee support tickets — assign, respond, and resolve"
         actions={
-          <Button size="sm" variant="outline" onClick={() => setShowSla(s => !s)}>
-            <Clock className="h-4 w-4 mr-1" /> SLA Policy
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button size="sm" variant="outline" onClick={() => setShowSatisfaction(s => !s)}>
+              <BarChart2 className="h-4 w-4 mr-1" /> Satisfaction
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => setShowSla(s => !s)}>
+              <Clock className="h-4 w-4 mr-1" /> SLA Policy
+            </Button>
+          </div>
         }
       />
 
@@ -287,52 +356,198 @@ export function AdminHelpdesk() {
         </div>
       </div>
 
+      {/* Satisfaction report */}
+      {showSatisfaction && (
+        <SectionCard title="Satisfaction Report" action={
+          <Button size="sm" variant="ghost" onClick={() => setShowSatisfaction(false)}>Hide</Button>
+        }>
+          {satisfactionReport ? (
+            <div className="space-y-4">
+              <div className="grid grid-cols-3 gap-3">
+                <div className="rounded-lg border border-border p-3 text-center">
+                  <p className="text-xs text-muted-foreground mb-1">Avg Rating</p>
+                  <div className="flex items-center justify-center gap-1">
+                    <p className="text-xl font-semibold">{satisfactionReport.avg_rating?.toFixed(1) ?? '—'}</p>
+                    {satisfactionReport.avg_rating != null && <Star className="h-4 w-4 fill-warning text-warning" />}
+                  </div>
+                </div>
+                <div className="rounded-lg border border-border p-3 text-center">
+                  <p className="text-xs text-muted-foreground mb-1">Rated</p>
+                  <p className="text-xl font-semibold">{satisfactionReport.rated_count}</p>
+                </div>
+                <div className="rounded-lg border border-border p-3 text-center">
+                  <p className="text-xs text-muted-foreground mb-1">Total Resolved</p>
+                  <p className="text-xl font-semibold">{satisfactionReport.total_resolved}</p>
+                </div>
+              </div>
+
+              {satisfactionReport.by_category.length > 0 && (
+                <div>
+                  <p className="text-xs font-medium text-muted-foreground mb-2">By Category</p>
+                  <div className="space-y-1.5">
+                    {satisfactionReport.by_category.map(cat => (
+                      <div key={cat.category} className="flex items-center gap-2">
+                        <span className="text-xs w-28 shrink-0">{categoryLabel(cat.category)}</span>
+                        <div className="flex-1 h-2 rounded-full bg-muted/40 overflow-hidden">
+                          <div
+                            className="h-full rounded-full bg-[#15B8A6]"
+                            style={{ width: `${(cat.avg_rating / 5) * 100}%` }}
+                          />
+                        </div>
+                        <span className="text-xs text-muted-foreground w-20 shrink-0">
+                          {cat.avg_rating.toFixed(1)} ({cat.count})
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {satisfactionReport.recent_comments.length > 0 && (
+                <div>
+                  <p className="text-xs font-medium text-muted-foreground mb-2">Recent Comments</p>
+                  <div className="space-y-2 max-h-48 overflow-y-auto">
+                    {satisfactionReport.recent_comments.map((c, i) => (
+                      <div key={i} className="rounded-md border border-border p-2.5 bg-muted/10">
+                        <div className="flex items-center gap-1.5 mb-1">
+                          <CsatStars rating={c.rating} />
+                          <span className="text-[10px] text-muted-foreground">{categoryLabel(c.category)}</span>
+                        </div>
+                        <p className="text-xs text-foreground">{c.comment}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="flex justify-center py-6"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
+          )}
+        </SectionCard>
+      )}
+
       {/* SLA policy editor */}
       {showSla && (
         <SectionCard
           title="SLA Policy"
           action={
             <div className="flex items-center gap-2">
-              {slaDraft && (
-                <Button size="sm" variant="ghost" onClick={() => setSlaDraft(null)} disabled={saveSla.isPending}>Reset</Button>
+              {(slaTab === 'priority' ? slaDraft : catSlaDraft) && (
+                <Button size="sm" variant="ghost"
+                  onClick={() => slaTab === 'priority' ? setSlaDraft(null) : setCatSlaDraft(null)}
+                  disabled={saveSla.isPending || saveCategorySla.isPending}>
+                  Reset
+                </Button>
               )}
-              <Button size="sm" disabled={!slaDraft || saveSla.isPending} onClick={() => slaDraft && saveSla.mutate(slaDraft)}>
-                {saveSla.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Save'}
-              </Button>
+              {slaTab === 'priority' && (
+                <Button size="sm" disabled={!slaDraft || saveSla.isPending} onClick={() => slaDraft && saveSla.mutate(slaDraft)}>
+                  {saveSla.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Save'}
+                </Button>
+              )}
             </div>
           }
         >
-          <p className="text-xs text-muted-foreground mb-3">
-            Hours from ticket creation to first HR response and to resolution, per priority. Applies to newly created tickets.
-          </p>
-          <div className="overflow-x-auto rounded-md border border-border">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-border bg-muted/30 text-muted-foreground">
-                  <th className="text-left py-2 px-3 text-xs font-medium">Priority</th>
-                  <th className="text-left py-2 px-3 text-xs font-medium">Response (h)</th>
-                  <th className="text-left py-2 px-3 text-xs font-medium">Resolution (h)</th>
-                </tr>
-              </thead>
-              <tbody>
-                {policyRows.map(p => (
-                  <tr key={p.priority} className="border-b border-border/50">
-                    <td className="py-2 px-3"><Badge variant="outline" className={cn('text-[10px] capitalize', priorityColor(p.priority))}>{p.priority}</Badge></td>
-                    <td className="py-2 px-3">
-                      <input type="number" min={1} max={720} value={p.response_hours}
-                        onChange={e => editPolicy(p.priority, 'response_hours', Math.max(1, Number(e.target.value) || 1))}
-                        className="w-24 text-xs border border-border rounded-md px-2 py-1 bg-background text-foreground" />
-                    </td>
-                    <td className="py-2 px-3">
-                      <input type="number" min={1} max={2160} value={p.resolution_hours}
-                        onChange={e => editPolicy(p.priority, 'resolution_hours', Math.max(1, Number(e.target.value) || 1))}
-                        className="w-24 text-xs border border-border rounded-md px-2 py-1 bg-background text-foreground" />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          {/* SLA tabs */}
+          <div className="flex gap-1 mb-4 border-b border-border pb-2">
+            <button
+              onClick={() => setSlaTab('priority')}
+              className={cn('px-3 py-1.5 text-xs font-medium rounded-md transition-colors',
+                slaTab === 'priority' ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:text-foreground')}
+            >
+              Priority SLA
+            </button>
+            <button
+              onClick={() => setSlaTab('category')}
+              className={cn('px-3 py-1.5 text-xs font-medium rounded-md transition-colors',
+                slaTab === 'category' ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:text-foreground')}
+            >
+              Category SLA
+            </button>
           </div>
+
+          {slaTab === 'priority' && (
+            <>
+              <p className="text-xs text-muted-foreground mb-3">
+                Hours from ticket creation to first HR response and to resolution, per priority. Applies to newly created tickets.
+              </p>
+              <div className="overflow-x-auto rounded-md border border-border">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-border bg-muted/30 text-muted-foreground">
+                      <th className="text-left py-2 px-3 text-xs font-medium">Priority</th>
+                      <th className="text-left py-2 px-3 text-xs font-medium">Response (h)</th>
+                      <th className="text-left py-2 px-3 text-xs font-medium">Resolution (h)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {policyRows.map(p => (
+                      <tr key={p.priority} className="border-b border-border/50">
+                        <td className="py-2 px-3"><Badge variant="outline" className={cn('text-[10px] capitalize', priorityColor(p.priority))}>{p.priority}</Badge></td>
+                        <td className="py-2 px-3">
+                          <input type="number" min={1} max={720} value={p.response_hours}
+                            onChange={e => editPolicy(p.priority, 'response_hours', Math.max(1, Number(e.target.value) || 1))}
+                            className="w-24 text-xs border border-border rounded-md px-2 py-1 bg-background text-foreground" />
+                        </td>
+                        <td className="py-2 px-3">
+                          <input type="number" min={1} max={2160} value={p.resolution_hours}
+                            onChange={e => editPolicy(p.priority, 'resolution_hours', Math.max(1, Number(e.target.value) || 1))}
+                            className="w-24 text-xs border border-border rounded-md px-2 py-1 bg-background text-foreground" />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+
+          {slaTab === 'category' && (
+            <>
+              <p className="text-xs text-muted-foreground mb-3">
+                Category-specific SLA windows. These take priority over priority-based SLA when a ticket matches.
+              </p>
+              <div className="overflow-x-auto rounded-md border border-border">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-border bg-muted/30 text-muted-foreground">
+                      <th className="text-left py-2 px-3 text-xs font-medium">Category</th>
+                      <th className="text-left py-2 px-3 text-xs font-medium">Response (h)</th>
+                      <th className="text-left py-2 px-3 text-xs font-medium">Resolution (h)</th>
+                      <th className="py-2 px-3" />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {catSlaRows.map(r => (
+                      <tr key={r.category} className="border-b border-border/50">
+                        <td className="py-2 px-3 text-xs font-medium">{categoryLabel(r.category)}</td>
+                        <td className="py-2 px-3">
+                          <input type="number" min={1} max={720} value={r.response_hours}
+                            onChange={e => editCatSla(r.category, 'response_hours', Math.max(1, Number(e.target.value) || 1))}
+                            className="w-24 text-xs border border-border rounded-md px-2 py-1 bg-background text-foreground" />
+                        </td>
+                        <td className="py-2 px-3">
+                          <input type="number" min={1} max={2160} value={r.resolution_hours}
+                            onChange={e => editCatSla(r.category, 'resolution_hours', Math.max(1, Number(e.target.value) || 1))}
+                            className="w-24 text-xs border border-border rounded-md px-2 py-1 bg-background text-foreground" />
+                        </td>
+                        <td className="py-2 px-3">
+                          <Button size="sm" variant="outline"
+                            disabled={saveCategorySla.isPending}
+                            onClick={() => {
+                              const row = catSlaRows.find(x => x.category === r.category)
+                              if (row) saveCategorySla.mutate(row)
+                            }}
+                          >
+                            {saveCategorySla.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Save'}
+                          </Button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
         </SectionCard>
       )}
 
@@ -428,7 +643,16 @@ export function AdminHelpdesk() {
                         </div>
                       </td>
                       <td className="py-2 px-3 text-xs text-muted-foreground">{emp ? `${emp.first_name} ${emp.last_name}` : '—'}</td>
-                      <td className="py-2 px-3 text-xs capitalize">{t.category.replace('_', ' ')}</td>
+                      <td className="py-2 px-3 text-xs">
+                        <div className="flex items-center gap-1">
+                          <span className="capitalize">{t.category.replace(/_/g, ' ')}</span>
+                          {t.ai_suggested_category && t.ai_routing_confidence != null && t.ai_routing_confidence >= 70 && (
+                            <span className="inline-flex items-center gap-0.5 rounded-full bg-teal-50 border border-teal-200 text-teal-700 text-[9px] px-1.5 py-0.5 font-medium">
+                              AI {t.ai_routing_confidence}%
+                            </span>
+                          )}
+                        </div>
+                      </td>
                       <td className="py-2 px-3"><Badge variant="outline" className={cn('text-[10px] capitalize', priorityColor(t.priority))}>{t.priority}</Badge></td>
                       <td className="py-2 px-3"><Badge variant={sb.variant} className="text-[10px]">{sb.label}</Badge></td>
                       <td className="py-2 px-3">
@@ -459,7 +683,12 @@ export function AdminHelpdesk() {
               <div className="flex items-center gap-1.5 -mt-2 flex-wrap">
                 <Badge variant="outline" className={cn('text-[10px] capitalize', priorityColor(detail.priority))}>{detail.priority}</Badge>
                 <Badge variant={statusBadge(detail.status).variant} className="text-[10px]">{statusBadge(detail.status).label}</Badge>
-                <span className="text-[10px] text-muted-foreground capitalize">{detail.category.replace('_', ' ')}</span>
+                <span className="text-[10px] text-muted-foreground capitalize">{detail.category.replace(/_/g, ' ')}</span>
+                {detail.ai_suggested_category && detail.ai_routing_confidence != null && detail.ai_routing_confidence >= 70 && (
+                  <span className="inline-flex items-center gap-0.5 rounded-full bg-teal-50 border border-teal-200 text-teal-700 text-[9px] px-1.5 py-0.5 font-medium">
+                    AI: {categoryLabel(detail.ai_suggested_category)} {detail.ai_routing_confidence}%
+                  </span>
+                )}
                 {detail.employees && <span className="text-[10px] text-muted-foreground">· {detail.employees.first_name} {detail.employees.last_name} ({detail.employees.employee_code})</span>}
                 {detail.sla_breached_at && !['resolved', 'closed'].includes(detail.status) && (
                   <Badge variant="outline" className="text-[10px] text-destructive border-destructive/30 bg-destructive/10 gap-1"><AlertTriangle className="h-3 w-3" />Response SLA breached</Badge>

@@ -129,7 +129,7 @@ export default async function surveyRoutes(fastify: FastifyInstance) {
   fastify.get('/admin', hrAuth, async (_req, reply) => {
     const { data, error } = await supabase
       .from('surveys')
-      .select('id, title, description, status, due_date, created_at')
+      .select('id, title, description, status, due_date, created_at, survey_type, is_anonymous')
       .order('created_at', { ascending: false })
 
     if (error) return reply.status(500).send({ error: error.message })
@@ -362,5 +362,170 @@ export default async function surveyRoutes(fastify: FastifyInstance) {
         questions: questionResults,
       },
     })
+  })
+
+  // ── Admin: list survey templates ───────────────────────────────────────────────
+
+  fastify.get('/admin/templates', hrAuth, async (_req, reply) => {
+    const { data } = await supabase.from('survey_templates').select('*').order('survey_type')
+    return reply.send({ data: data ?? [] })
+  })
+
+  // ── Admin: create survey from template ─────────────────────────────────────────
+
+  fastify.post('/admin/from-template', hrAuth, async (req: any, reply) => {
+    const tenantId = req.tenantId
+    const { template_id, title, due_date, is_anonymous = false } = req.body as any
+
+    const { data: tmpl, error: te } = await supabase
+      .from('survey_templates')
+      .select('*')
+      .eq('id', template_id)
+      .single()
+    if (te || !tmpl) return reply.status(404).send({ error: 'Template not found' })
+
+    const { data: survey, error: se } = await supabase
+      .from('surveys')
+      .insert({
+        tenant_id:   tenantId,
+        title:       title || tmpl.name,
+        description: tmpl.description,
+        status:      'draft',
+        survey_type: tmpl.survey_type,
+        is_anonymous,
+        due_date:    due_date || null,
+        created_by:  (req.user as any).sub,
+      })
+      .select('id')
+      .single()
+    if (se || !survey) return reply.status(500).send({ error: se?.message })
+
+    const questions = (tmpl.questions as any[]).map(q => ({
+      ...q,
+      survey_id: survey.id,
+      tenant_id: tenantId,
+    }))
+    await supabase.from('survey_questions').insert(questions)
+
+    return reply.status(201).send({
+      data: { id: survey.id, title: title || tmpl.name, survey_type: tmpl.survey_type },
+    })
+  })
+
+  // ── Admin: engagement report for annual_engagement surveys ─────────────────────
+
+  fastify.get('/admin/engagement-report/:id', hrAuth, async (req: any, reply) => {
+    const { id }      = req.params as { id: string }
+    const tenantId    = req.tenantId
+
+    const { data: survey } = await supabase
+      .from('surveys')
+      .select('title, survey_type, status')
+      .eq('id', id)
+      .eq('tenant_id', tenantId)
+      .single()
+    if (!survey) return reply.status(404).send({ error: 'Survey not found' })
+
+    // Fetch questions (dimension stored in options JSONB or top-level)
+    const { data: questions } = await supabase
+      .from('survey_questions')
+      .select('id, question_text, question_type, options')
+      .eq('survey_id', id)
+
+    // Fetch responses via assignment join
+    const { data: assignments } = await supabase
+      .from('survey_assignments')
+      .select('id')
+      .eq('survey_id', id)
+
+    const assignmentIds = (assignments ?? []).map((a: any) => a.id)
+    let responses: { question_id: string; response: unknown }[] = []
+
+    if (assignmentIds.length) {
+      const { data: resp } = await supabase
+        .from('survey_responses')
+        .select('question_id, response')
+        .in('assignment_id', assignmentIds)
+      responses = resp ?? []
+    }
+
+    // Build question map — dimension may be a top-level field (from template JSONB) or inside options
+    const qMap = new Map((questions ?? []).map((q: any) => [q.id, q]))
+    const dimScores: Record<string, number[]> = {}
+
+    for (const r of responses) {
+      const q = qMap.get(r.question_id) as any
+      if (!q || q.question_type !== 'rating') continue
+      const dim = q.options?.dimension ?? (q.options as any)?.dimension ?? 'general'
+      if (!dimScores[dim]) dimScores[dim] = []
+      if (typeof r.response === 'number') dimScores[dim].push(r.response)
+    }
+
+    const dimensions = Object.entries(dimScores).map(([key, scores]) => ({
+      dimension:      key,
+      avg_score:      scores.length
+        ? Math.round((scores.reduce((a, b) => a + b, 0) / scores.length) * 10) / 10
+        : null,
+      response_count: scores.length,
+    }))
+
+    const totalScores    = Object.values(dimScores).flat()
+    const engagement_index = totalScores.length
+      ? Math.round((totalScores.reduce((a, b) => a + b, 0) / totalScores.length) * 10)
+      : 0
+
+    return reply.send({
+      data: {
+        survey,
+        dimensions,
+        engagement_index,
+        total_responses: responses.length,
+      },
+    })
+  })
+
+  // ── Admin: trigger lifecycle survey for employees ──────────────────────────────
+
+  fastify.post('/admin/trigger-lifecycle', hrAuth, async (req: any, reply) => {
+    const tenantId                     = req.tenantId
+    const { lifecycle_type, employee_ids } = req.body as {
+      lifecycle_type: string
+      employee_ids?:  string[]
+    }
+
+    // Find active survey of this type for this tenant
+    const { data: survey } = await supabase
+      .from('surveys')
+      .select('id, title')
+      .eq('tenant_id', tenantId)
+      .eq('survey_type', lifecycle_type)
+      .eq('status', 'active')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .single()
+
+    if (!survey) {
+      return reply.status(404).send({
+        error: 'No active survey of this type. Create and activate one first.',
+      })
+    }
+
+    const empIds = employee_ids ?? []
+    if (empIds.length === 0) return reply.status(400).send({ error: 'employee_ids required' })
+
+    const assignments = empIds.map(emp_id => ({
+      survey_id:      survey.id,
+      employee_id:    emp_id,
+      tenant_id:      tenantId,
+      respondent_type: 'self',
+    }))
+
+    const { error } = await supabase
+      .from('survey_assignments')
+      .upsert(assignments, { onConflict: 'survey_id,employee_id', ignoreDuplicates: true })
+
+    if (error) return reply.status(500).send({ error: error.message })
+
+    return reply.send({ data: { assigned: empIds.length, survey_title: survey.title } })
   })
 }

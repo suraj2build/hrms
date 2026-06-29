@@ -30,7 +30,7 @@ function Strengths({ items }: { items: { badge: string; label: string; count: nu
       <h3 className="mb-3 text-[15px] font-semibold text-foreground">What I'm known for</h3>
       <div className="flex flex-wrap gap-3">
         {items.map(s => (
-          <div key={s.badge} className="flex items-center gap-3 rounded-2xl bg-gradient-to-br from-amber-50 to-orange-50 border border-orange-100/80 px-4 py-3">
+          <div key={s.badge} className="flex items-center gap-3 rounded-2xl bg-card border border-border/60 px-4 py-3">
             <span className="text-sm font-semibold text-foreground">{s.label}</span>
             {s.count > 1 && <span className="text-xs text-muted-foreground">x{s.count}</span>}
             {s.faces.length > 0 && (
@@ -74,7 +74,7 @@ export function MyGrowth() {
   if (isLoading) return (
     <>
       <PillarHero sky="sky-dawn" eyebrow="possibility · becoming" title="My Growth" />
-      <div className="mx-auto max-w-[860px] py-8"><LoadingState rows={5} label="Bringing your story together..." /></div>
+      <div className="w-full py-8"><LoadingState rows={5} label="Bringing your story together..." /></div>
     </>
   )
   if (isError || !data?.person) return <ErrorState title="Couldn't load your growth" onRetry={() => refetch()} />
@@ -87,7 +87,7 @@ export function MyGrowth() {
       <PillarHero sky="sky-dawn" eyebrow="possibility · becoming" title="My Growth"
         tagline={role ? `${person.name} · ${role}` : person.name ?? ''} />
 
-      <div className="mx-auto max-w-[860px] space-y-8 py-8">
+      <div className="w-full space-y-8 py-8">
         {/* Who I work with — people before fields. */}
         <div className="rounded-2xl border border-border/60 bg-card p-5">
           <PeopleRail sections={[
