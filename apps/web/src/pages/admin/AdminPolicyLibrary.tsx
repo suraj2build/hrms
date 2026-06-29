@@ -10,7 +10,7 @@ import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Plus, Loader2, FileText, CheckCircle2, Clock, AlertTriangle,
-  BookOpen, BarChart3, Users, Archive, Send, Edit3,
+  BookOpen, BarChart3, Users, Archive, Send, Edit3, Bot, MessageSquare,
 } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -44,6 +44,15 @@ interface Policy {
   published_at:             string | null
   ack_count:                number
   created_at:               string
+}
+
+interface QALog {
+  id:               string
+  question:         string
+  answer:           string
+  cited_policy_ids: string[]
+  created_at:       string
+  employees?:       { first_name: string; last_name: string; employee_code: string } | null
 }
 
 interface AckStats {
@@ -110,6 +119,7 @@ export function AdminPolicyLibrary() {
   const [editId, setEditId]     = useState<string | null>(null)
   const [form, setForm]         = useState<PolicyForm>(emptyForm)
   const [ackViewId, setAckViewId] = useState<string | null>(null)
+  const [qaExpanded, setQaExpanded] = useState(false)
 
   // ── Queries ────────────────────────────────────────────────────────────────
 
@@ -120,6 +130,13 @@ export function AdminPolicyLibrary() {
       return api.get<{ data: Policy[] }>(`/policies/admin/list${qs}`).then(r => r.data ?? [])
     },
     enabled: isAdmin,
+  })
+
+  const { data: qaLogs = [], isLoading: qaLoading } = useQuery<QALog[]>({
+    queryKey: ['policy-qa-logs'],
+    queryFn:  () => api.get<{ data: QALog[] }>('/policies/admin/qa-logs?limit=50').then(r => r.data ?? []),
+    enabled:  isAdmin && qaExpanded,
+    staleTime: 60_000,
   })
 
   const { data: ackStats, isLoading: ackLoading } = useQuery<AckStats>({
@@ -450,6 +467,66 @@ export function AdminPolicyLibrary() {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* ── AI Q&A Logs ──────────────────────────────────────────────────────── */}
+      <SectionCard
+        title="Policy Assistant Q&A Logs"
+        description="Questions employees asked the AI — last 50"
+        action={
+          <button
+            onClick={() => setQaExpanded(o => !o)}
+            className="text-xs text-primary hover:underline"
+          >
+            {qaExpanded ? 'Hide' : 'Show'}
+          </button>
+        }
+      >
+        {!qaExpanded ? (
+          <div className="flex items-center gap-2 py-4 text-sm text-muted-foreground">
+            <Bot className="h-4 w-4" />
+            Click "Show" to load employee Q&A history from the Policy Assistant.
+          </div>
+        ) : qaLoading ? (
+          <div className="flex justify-center py-6"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
+        ) : qaLogs.length === 0 ? (
+          <div className="flex flex-col items-center gap-2 py-10 text-muted-foreground">
+            <MessageSquare className="h-7 w-7" />
+            <p className="text-sm">No Q&A sessions yet.</p>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {qaLogs.map(log => {
+              const emp = log.employees
+              return (
+                <div key={log.id} className="rounded-lg border border-border p-3 space-y-1.5">
+                  <div className="flex items-start justify-between gap-2">
+                    <p className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                      <MessageSquare className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                      {log.question}
+                    </p>
+                    <span className="text-[10px] text-muted-foreground shrink-0">
+                      {new Date(log.created_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-muted-foreground pl-5 line-clamp-2">{log.answer}</p>
+                  <div className="pl-5 flex items-center gap-3">
+                    {emp && (
+                      <span className="text-[10px] text-muted-foreground">
+                        {emp.first_name} {emp.last_name} ({emp.employee_code})
+                      </span>
+                    )}
+                    {log.cited_policy_ids.length > 0 && (
+                      <span className="text-[10px] text-primary">
+                        {log.cited_policy_ids.length} polic{log.cited_policy_ids.length !== 1 ? 'ies' : 'y'} cited
+                      </span>
+                    )}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </SectionCard>
 
       {/* ── Ack stats dialog ──────────────────────────────────────────────────── */}
       <Dialog open={!!ackViewId} onOpenChange={o => { if (!o) setAckViewId(null) }}>

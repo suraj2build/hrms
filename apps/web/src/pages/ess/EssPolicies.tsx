@@ -22,8 +22,9 @@ import { SectionCard }   from '@/components/layout/SectionCard'
 import { Button }        from '@/components/ui/button'
 import { Badge }         from '@/components/ui/badge'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { api }           from '@/lib/api/client'
-import { cn }            from '@/lib/utils'
+import { api }                from '@/lib/api/client'
+import { cn }                from '@/lib/utils'
+import { PolicyAssistant }   from '@/components/policies/PolicyAssistant'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -224,6 +225,9 @@ export function EssPolicies() {
           </div>
         )}
       </SectionCard>
+
+      {/* ── Policy Assistant — AI Q&A ─────────────────────────────────────────── */}
+      <PolicyAssistant onOpenPolicy={openPolicy} />
 
       {/* ── Policy detail dialog ───────────────────────────────────────────────── */}
       <Dialog open={!!openId} onOpenChange={o => { if (!o) closePolicy() }}>
