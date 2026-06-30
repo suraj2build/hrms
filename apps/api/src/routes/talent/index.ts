@@ -118,7 +118,7 @@ export default async function talentRoutes(fastify: FastifyInstance) {
       .from('talent_interests')
       .select(`
         id, status, availability, cover_note, skills, created_at, reviewed_at, reviewer_notes,
-        employees!talent_interests_employee_id_fkey(id, first_name, last_name, employee_code, designation, department)
+        employees!talent_interests_employee_id_fkey(id, first_name, last_name, employee_code, designation:designations(name), department:departments!department_id(name))
       `)
       .eq('tenant_id', req.tenantId)
       .eq('role_id', id)

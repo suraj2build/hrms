@@ -149,7 +149,7 @@ export default async function successionRoutes(fastify: FastifyInstance) {
     const [planResult, candidatesResult] = await Promise.all([
       supabase.from('succession_plans')
         .select(`id, position_title, department, risk_level, status, notes, created_at, updated_at,
-          employees!succession_plans_incumbent_id_fkey(id, first_name, last_name, employee_code, designation)`)
+          employees!succession_plans_incumbent_id_fkey(id, first_name, last_name, employee_code, designation:designations(name))`)
         .eq('tenant_id', tenantId)
         .eq('id', id)
         .single(),
@@ -158,7 +158,7 @@ export default async function successionRoutes(fastify: FastifyInstance) {
           nine_box_performance, nine_box_potential,
           score_performance, score_skill_gap, score_leadership, score_mobility, score_tenure, score_attrition_risk,
           attrition_risk_flag,
-          employees!succession_candidates_employee_id_fkey(id, first_name, last_name, employee_code, designation, department)`)
+          employees!succession_candidates_employee_id_fkey(id, first_name, last_name, employee_code, designation:designations(name), department:departments!department_id(name))`)
         .eq('tenant_id', tenantId)
         .eq('plan_id', id)
         .order('readiness_level')
@@ -277,7 +277,7 @@ export default async function successionRoutes(fastify: FastifyInstance) {
       .from('succession_candidates')
       .select(`
         id, nine_box_performance, nine_box_potential, readiness_level, readiness_score,
-        employees!succession_candidates_employee_id_fkey(id, first_name, last_name, employee_code, designation, department)
+        employees!succession_candidates_employee_id_fkey(id, first_name, last_name, employee_code, designation:designations(name), department:departments!department_id(name))
       `)
       .eq('tenant_id', tenantId)
 
@@ -321,7 +321,7 @@ export default async function successionRoutes(fastify: FastifyInstance) {
         id, plan_id, readiness_level, readiness_score,
         score_performance, score_skill_gap, score_leadership, score_mobility, score_tenure, score_attrition_risk,
         attrition_risk_flag,
-        employees!succession_candidates_employee_id_fkey(id, first_name, last_name, employee_code, designation, department)
+        employees!succession_candidates_employee_id_fkey(id, first_name, last_name, employee_code, designation:designations(name), department:departments!department_id(name))
       `)
       .eq('tenant_id', tenantId)
       .in('plan_id', planIds)
@@ -443,7 +443,7 @@ export default async function successionRoutes(fastify: FastifyInstance) {
     const { data: candidate } = await supabase
       .from('succession_candidates')
       .select(`strengths, gaps, readiness_level, development_plan,
-        employees!succession_candidates_employee_id_fkey(first_name, last_name, designation, department)`)
+        employees!succession_candidates_employee_id_fkey(first_name, last_name, designation:designations(name), department:departments!department_id(name))`)
       .eq('tenant_id', tenantId)
       .eq('id', cid)
       .single()
@@ -507,7 +507,7 @@ export default async function successionRoutes(fastify: FastifyInstance) {
       .from('succession_candidates')
       .select(`id, plan_id, readiness_level, readiness_score,
         score_performance, score_skill_gap, score_leadership, score_mobility, score_tenure, score_attrition_risk,
-        employees!succession_candidates_employee_id_fkey(id, first_name, last_name, designation)`)
+        employees!succession_candidates_employee_id_fkey(id, first_name, last_name, designation:designations(name))`)
       .eq('tenant_id', tenantId)
       .in('plan_id', planIds)
 
@@ -658,7 +658,7 @@ export default async function successionRoutes(fastify: FastifyInstance) {
 
     const { data: candidate } = await supabase
       .from('succession_candidates')
-      .select('gaps, employees!succession_candidates_employee_id_fkey(department, designation)')
+      .select('gaps, employees!succession_candidates_employee_id_fkey(department:departments!department_id(name), designation:designations(name))')
       .eq('id', candidateId).eq('tenant_id', tenantId).single()
 
     if (!candidate) return reply.status(404).send({ error: 'Candidate not found' })
@@ -666,7 +666,7 @@ export default async function successionRoutes(fastify: FastifyInstance) {
     const { data: mentors } = await supabase
       .from('mentor_profiles')
       .select(`id, skill_tags, max_mentees, current_mentees, available, engagement_score,
-        employees!mentor_profiles_employee_id_fkey(id, first_name, last_name, designation, department)`)
+        employees!mentor_profiles_employee_id_fkey(id, first_name, last_name, designation:designations(name), department:departments!department_id(name))`)
       .eq('tenant_id', tenantId)
       .eq('available', true)
       .lt('current_mentees', 9999) // filtered client-side on line below

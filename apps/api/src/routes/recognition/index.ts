@@ -567,7 +567,7 @@ export default async function recognitionRoutes(fastify: FastifyInstance) {
     const { data, error } = await fastify.supabase
       .from('award_nominations')
       .select(`id, justification, status, created_at,
-        employees!award_nominations_nominee_id_fkey(id, first_name, last_name, employee_code, designation, department),
+        employees!award_nominations_nominee_id_fkey(id, first_name, last_name, employee_code, designation:designations(name), department:departments!department_id(name)),
         profiles!award_nominations_nominated_by_fkey(id, full_name)`)
       .eq('tenant_id', req.tenantId).eq('round_id', roundId)
       .order('created_at', { ascending: false })
@@ -673,7 +673,7 @@ export default async function recognitionRoutes(fastify: FastifyInstance) {
       .from('award_rounds')
       .select(`id, period_label, declared_at,
         formal_awards!award_rounds_award_id_fkey(id, name, award_type),
-        employees!award_rounds_winner_employee_id_fkey(id, first_name, last_name, employee_code, designation, department)`)
+        employees!award_rounds_winner_employee_id_fkey(id, first_name, last_name, employee_code, designation:designations(name), department:departments!department_id(name))`)
       .eq('tenant_id', req.tenantId).eq('status', 'closed')
       .not('winner_employee_id', 'is', null)
       .order('declared_at', { ascending: false }).limit(20)
@@ -697,7 +697,7 @@ export default async function recognitionRoutes(fastify: FastifyInstance) {
       const to   = `${targetYear}-${monthStr}-${String(lastDay).padStart(2, '0')}`
       const { data } = await fastify.supabase
         .from('employees')
-        .select('id, first_name, last_name, employee_code, designation, department, date_of_joining')
+        .select('id, first_name, last_name, employee_code, designation:designations(name), department:departments!department_id(name), date_of_joining')
         .eq('tenant_id', req.tenantId)
         .gte('date_of_joining', from)
         .lte('date_of_joining', to)
@@ -714,7 +714,7 @@ export default async function recognitionRoutes(fastify: FastifyInstance) {
       .from('spot_awards')
       .select(`id, award_name, message, monetary_value, created_at,
         employees!spot_awards_from_employee_id_fkey(id, first_name, last_name),
-        employees!spot_awards_to_employee_id_fkey(id, first_name, last_name, employee_code, designation)`)
+        employees!spot_awards_to_employee_id_fkey(id, first_name, last_name, employee_code, designation:designations(name))`)
       .eq('tenant_id', req.tenantId)
       .order('created_at', { ascending: false }).limit(50)
     if (error) return reply.code(500).send({ error: error.message })
