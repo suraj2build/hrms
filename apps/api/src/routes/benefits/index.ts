@@ -88,7 +88,7 @@ export default async function benefitsRoutes(fastify: FastifyInstance) {
         is_nps:          p.plan_type === 'nps',
       }))
 
-    return reply.send({ data: { plans, meta: { employee_band: empBand, esic_eligible: isEsicEligible } } })
+    return reply.send({ data: plans, meta: { employee_band: empBand, esic_eligible: isEsicEligible } })
   })
 
   // GET /benefits/my — caller's enrolments

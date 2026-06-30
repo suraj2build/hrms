@@ -723,7 +723,7 @@ Write a helpful, professional HR reply to address the employee's concern:`
         maxTokens:   350,
       })
 
-      return reply.send({ data: { suggestion: result.content.content?.trim() ?? '' } })
+      return reply.send({ suggestion: result.content.content?.trim() ?? '' })
     } catch (e: any) {
       return reply.code(503).send({ error: 'AI_ERROR', message: e.message ?? 'AI request failed' })
     }
