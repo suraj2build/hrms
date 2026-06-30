@@ -19,6 +19,8 @@
 import type { FastifyInstance } from 'fastify'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { logAction }                   from '../../lib/audit-service.js'
+import { resolveAssistantChain }       from '../../lib/ai/config.js'
+import { chatCompleteWithFallback }    from '../../lib/ai/llm.js'
 
 export default async function moodRoutes(fastify: FastifyInstance) {
   const { supabase } = fastify
@@ -117,16 +119,35 @@ export default async function moodRoutes(fastify: FastifyInstance) {
 
     const sentiment_label = detectSentiment(note)
 
+    // LLM-based theme categorization (best-effort, async)
+    let sentiment_category: string | null = null
+    if (note?.trim()) {
+      try {
+        const chain = await resolveAssistantChain(supabase, tenantId)
+        const { message } = await chatCompleteWithFallback(chain, [
+          {
+            role: 'system',
+            content: 'Categorize this employee feedback into ONE of: Manager Quality, Workload, Compensation, Work Environment, Career Growth, Team Dynamics, Personal, Other. Return ONLY the category name, nothing else.',
+          },
+          { role: 'user', content: note.slice(0, 500) },
+        ])
+        const cat = message?.trim()
+        const valid = ['Manager Quality','Workload','Compensation','Work Environment','Career Growth','Team Dynamics','Personal','Other']
+        if (valid.includes(cat ?? '')) sentiment_category = cat ?? null
+      } catch { /* non-blocking */ }
+    }
+
     const { error } = await supabase
       .from('mood_checkins')
       .upsert(
         {
-          tenant_id:       tenantId,
-          employee_id:     employeeId,
-          mood:            Math.round(mood),
-          note:            note ?? null,
-          sentiment_label: sentiment_label,
-          checkin_date:    todayDate(),
+          tenant_id:          tenantId,
+          employee_id:        employeeId,
+          mood:               Math.round(mood),
+          note:               note ?? null,
+          sentiment_label:    sentiment_label,
+          sentiment_category: sentiment_category,
+          checkin_date:       todayDate(),
         },
         { onConflict: 'tenant_id,employee_id,checkin_date' },
       )
@@ -261,13 +282,28 @@ export default async function moodRoutes(fastify: FastifyInstance) {
       else if (r.sentiment_label === 'negative') sentCounts.negative++
     }
 
+    // Participation rate (current month)
+    const currentMonthStart = new Date().toISOString().slice(0, 7) + '-01'
+    const [respondentResult, totalEmpResult] = await Promise.all([
+      supabase.from('mood_checkins').select('employee_id', { count: 'exact', head: false })
+        .eq('tenant_id', tenantId).gte('checkin_date', currentMonthStart),
+      supabase.from('employees').select('id', { count: 'exact', head: true })
+        .eq('tenant_id', tenantId).eq('status', 'active'),
+    ])
+    const distinctRespondents = new Set((respondentResult.data ?? []).map((r: any) => r.employee_id)).size
+    const totalActive         = totalEmpResult.count ?? 0
+    const participation_rate  = totalActive > 0
+      ? Math.round((distinctRespondents / totalActive) * 100)
+      : 0
+
     return reply.send({
       data: {
         trend,
         distribution,
-        total_checkins_7d: checkins.length,
-        active_pulse:      pulseStats,
-        sentiment_summary: sentCounts,
+        total_checkins_7d:  checkins.length,
+        active_pulse:       pulseStats,
+        sentiment_summary:  sentCounts,
+        participation_rate: { rate: participation_rate, respondents: distinctRespondents, total: totalActive, target: 70 },
       },
     })
   })
@@ -476,6 +512,40 @@ export default async function moodRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', tenantId)
       .eq('question_id', id)
       .order('created_at', { ascending: false })
+
+    if (error) return reply.status(500).send({ error: error.message })
+    return reply.send({ data: data ?? [] })
+  })
+
+  // ── GET /mood/admin/cluster-breakdown ────────────────────────────────────────
+
+  fastify.get('/admin/cluster-breakdown', hrAuth, async (req: any, reply) => {
+    const tenantId = req.tenantId
+    const { month } = req.query as { month?: string }
+    const targetMonth = month ?? new Date().toISOString().slice(0, 7)
+
+    const { data, error } = await supabase
+      .from('mood_cluster_monthly')
+      .select('cluster_id, month, avg_mood, respondent_count')
+      .eq('tenant_id', tenantId)
+      .eq('month', targetMonth)
+
+    if (error) return reply.status(500).send({ error: error.message })
+    return reply.send({ data: data ?? [] })
+  })
+
+  // ── GET /mood/admin/region-breakdown ─────────────────────────────────────────
+
+  fastify.get('/admin/region-breakdown', hrAuth, async (req: any, reply) => {
+    const tenantId = req.tenantId
+    const { month } = req.query as { month?: string }
+    const targetMonth = month ?? new Date().toISOString().slice(0, 7)
+
+    const { data, error } = await supabase
+      .from('mood_region_monthly')
+      .select('region_id, month, avg_mood, respondent_count')
+      .eq('tenant_id', tenantId)
+      .eq('month', targetMonth)
 
     if (error) return reply.status(500).send({ error: error.message })
     return reply.send({ data: data ?? [] })

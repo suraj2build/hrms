@@ -48,11 +48,13 @@ interface TrendPoint {
 }
 
 interface DashboardData {
-  trend:              TrendPoint[]
-  distribution:       Record<string, number>
-  total_checkins_7d:  number
-  active_pulse:       { id: string; question: string; options: string[] | null; status: string; response_count: number; created_at: string }[]
-  sentiment_summary:  SentimentSummary
+  trend:                 TrendPoint[]
+  distribution:          Record<string, number>
+  total_checkins_7d:     number
+  participation_rate_7d?: number
+  total_employees?:      number
+  active_pulse:          { id: string; question: string; options: string[] | null; status: string; response_count: number; created_at: string }[]
+  sentiment_summary:     SentimentSummary
 }
 
 interface PulseQuestion {
@@ -243,11 +245,11 @@ export function AdminMoodDashboard() {
       </div>
 
       {/* Stats strip */}
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         {[
-          { label: 'Check-ins (7d)',           value: dash?.total_checkins_7d ?? '—', icon: SmilePlus },
-          { label: 'Avg Mood (7d)',             value: avg7d !== null ? `${avg7d} / 5` : '—', icon: BarChart2 },
-          { label: 'Active Pulse Questions',    value: dash?.active_pulse?.length ?? 0,  icon: MessageSquare },
+          { label: 'Check-ins (7d)',        value: dash?.total_checkins_7d ?? '—', icon: SmilePlus },
+          { label: 'Avg Mood (7d)',          value: avg7d !== null ? `${avg7d} / 5` : '—', icon: BarChart2 },
+          { label: 'Active Pulse Questions', value: dash?.active_pulse?.length ?? 0, icon: MessageSquare },
         ].map(s => (
           <div key={s.label} className="rounded-2xl border border-border/60 bg-card p-5">
             <div className="mb-2 flex items-center gap-2 text-muted-foreground">
@@ -257,6 +259,31 @@ export function AdminMoodDashboard() {
             <p className="text-2xl font-bold text-foreground">{s.value}</p>
           </div>
         ))}
+        {/* Participation gauge */}
+        <div className="rounded-2xl border border-border/60 bg-card p-5">
+          <div className="mb-2 flex items-center gap-2 text-muted-foreground">
+            <SmilePlus className="h-4 w-4" />
+            <span className="text-xs font-medium">Participation (7d)</span>
+          </div>
+          {dash?.participation_rate_7d != null ? (
+            <>
+              <p className={`text-2xl font-bold ${dash.participation_rate_7d >= 70 ? 'text-success' : 'text-warning'}`}>
+                {dash.participation_rate_7d}%
+              </p>
+              <div className="mt-2 relative h-2 rounded-full bg-muted overflow-visible">
+                <div
+                  className={`h-full rounded-full transition-all ${dash.participation_rate_7d >= 70 ? 'bg-success' : 'bg-warning'}`}
+                  style={{ width: `${Math.min(dash.participation_rate_7d, 100)}%` }}
+                />
+                {/* 70% target marker */}
+                <div className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-0.5 h-3 bg-muted-foreground/50 rounded-full" style={{ left: '70%' }} />
+              </div>
+              <p className="text-[10px] text-muted-foreground mt-1">Target: 70%</p>
+            </>
+          ) : (
+            <p className="text-2xl font-bold text-foreground">—</p>
+          )}
+        </div>
       </div>
 
       {/* Sentiment distribution strip */}

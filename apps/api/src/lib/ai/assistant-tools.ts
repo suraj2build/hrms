@@ -268,6 +268,110 @@ export const ASSISTANT_TOOLS: ToolDef[] = [
       },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'search_policy',
+      description: "Search company HR policies by keyword. Returns policy titles, categories, and relevant excerpts. Use for questions about company rules, leave policy, POSH, dress code, etc.",
+      parameters: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: 'Search term, e.g. "notice period", "work from home", "maternity leave"' },
+        },
+        required: ['query'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_pay_breakdown',
+      description: "Salary structure breakdown for the current employee (basic, HRA, allowances, deductions). Use for questions like 'what is my basic salary' or 'how is my salary calculated'.",
+      parameters: { type: 'object', properties: {} },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_attendance_calendar',
+      description: "Monthly attendance calendar for the current employee — present/absent/leave/holiday per day. Use for questions like 'show me my attendance for May'.",
+      parameters: {
+        type: 'object',
+        properties: {
+          month: { type: 'string', description: 'Month in YYYY-MM format. Defaults to current month.' },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'update_bank_details',
+      description: "Update the current employee's bank account details (account number, IFSC, bank name). Always confirm the details before calling. Use for 'update my bank account' requests.",
+      parameters: {
+        type: 'object',
+        properties: {
+          account_number: { type: 'string', description: 'Bank account number' },
+          ifsc_code:      { type: 'string', description: 'IFSC code (11 characters)' },
+          bank_name:      { type: 'string', description: 'Bank name, e.g. HDFC Bank, SBI' },
+          account_holder: { type: 'string', description: 'Account holder name as per bank records' },
+        },
+        required: ['account_number', 'ifsc_code'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'update_emergency_contact',
+      description: "Update the current employee's emergency contact details. Always confirm the details before calling.",
+      parameters: {
+        type: 'object',
+        properties: {
+          name:         { type: 'string', description: 'Emergency contact full name' },
+          relationship: { type: 'string', description: 'Relationship, e.g. Spouse, Parent, Sibling' },
+          phone:        { type: 'string', description: 'Emergency contact phone number' },
+        },
+        required: ['name', 'phone'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_ticket_status',
+      description: "Check the status and updates of the current employee's helpdesk tickets. Use for 'what happened to my IT ticket' or 'status of my request'.",
+      parameters: {
+        type: 'object',
+        properties: {
+          ticket_number: { type: 'string', description: 'Ticket number like HD-001 (optional — omit to see all recent tickets)' },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'escalate_ticket',
+      description: "Request escalation of a helpdesk ticket that hasn't been resolved in a reasonable time. Always confirm the ticket and reason before calling.",
+      parameters: {
+        type: 'object',
+        properties: {
+          ticket_id: { type: 'string', description: 'Ticket UUID or ticket number' },
+          reason:    { type: 'string', description: 'Reason for escalation request' },
+        },
+        required: ['ticket_id', 'reason'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_onboarding_guide',
+      description: "Get the onboarding checklist and guide for a new joiner. Use for questions like 'what do I need to complete' or 'what is the onboarding process'.",
+      parameters: { type: 'object', properties: {} },
+    },
+  },
 ]
 
 interface ToolCtx {
@@ -918,6 +1022,186 @@ async function updateContactInfo(ctx: ToolCtx, args: { phone: string }): Promise
   return `✅ Your phone number has been updated to ${phone}. This will be reflected in your employee profile.`
 }
 
+// ── New tool implementations ──────────────────────────────────────────────────
+
+async function searchPolicy(ctx: ToolCtx, args: { query?: string }): Promise<string> {
+  const q = args.query?.trim()
+  if (!q) return 'Please provide a search term.'
+
+  const { data } = await ctx.supabase.rpc('search_policies', {
+    p_tenant_id: ctx.caller.tenantId,
+    p_query:     q,
+    p_limit:     3,
+  })
+  if (!data?.length) return `No policies found matching "${q}". Try different keywords or contact HR.`
+
+  return (data as any[]).map((p: any) =>
+    `**${p.title}** (${p.category})\n${(p.snippet ?? p.content ?? '').slice(0, 300)}`
+  ).join('\n\n---\n\n')
+}
+
+async function getPayBreakdown(ctx: ToolCtx): Promise<string> {
+  if (!ctx.employeeId) return 'No employee profile linked to your account.'
+
+  const { data: comp } = await ctx.supabase
+    .from('employee_compensations')
+    .select('basic, hra, special_allowance, pf_employee, pf_employer, esi_employee, esi_employer, professional_tax, gross_salary, net_salary, ctc')
+    .eq('employee_id', ctx.employeeId)
+    .eq('tenant_id', ctx.caller.tenantId)
+    .order('effective_from', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
+  if (!comp) return 'Salary structure not found. Contact HR for your compensation details.'
+  const c = comp as any
+  return `**Your Salary Structure**\n\nBasic: ${fmtINR(c.basic ?? 0)}\nHRA: ${fmtINR(c.hra ?? 0)}\nSpecial Allowance: ${fmtINR(c.special_allowance ?? 0)}\n\n**Deductions**\nPF (Employee): ${fmtINR(c.pf_employee ?? 0)}\nESI (Employee): ${fmtINR(c.esi_employee ?? 0)}\nProfessional Tax: ${fmtINR(c.professional_tax ?? 0)}\n\n**Gross Salary:** ${fmtINR(c.gross_salary ?? 0)}\n**Net Salary:** ${fmtINR(c.net_salary ?? 0)}\n**CTC:** ${fmtINR(c.ctc ?? 0)} per annum`
+}
+
+async function getAttendanceCalendar(ctx: ToolCtx, args: { month?: string }): Promise<string> {
+  if (!ctx.employeeId) return 'No employee profile linked to your account.'
+
+  const month   = args.month || new Date().toISOString().slice(0, 7)
+  if (!MONTH_RE.test(month)) return 'Please provide month as YYYY-MM.'
+
+  const from  = `${month}-01`
+  const toD   = new Date(`${month}-01`)
+  toD.setMonth(toD.getMonth() + 1)
+  toD.setDate(0)
+  const to    = toD.toISOString().slice(0, 10)
+
+  const { data } = await ctx.supabase
+    .from('attendance_records')
+    .select('date, final_status, work_hours')
+    .eq('tenant_id', ctx.caller.tenantId)
+    .eq('employee_id', ctx.employeeId)
+    .gte('date', from)
+    .lte('date', to)
+    .order('date')
+
+  if (!data?.length) return `No attendance records found for ${month}.`
+
+  const lines = (data as any[]).map(r => {
+    const statusLabel: Record<string, string> = {
+      P: 'Present', A: 'Absent', L: 'Leave', H: 'Holiday', WO: 'Week Off', HD: 'Half Day',
+    }
+    const s = statusLabel[r.final_status] ?? r.final_status
+    return `${r.date}: ${s}${r.work_hours ? ` (${r.work_hours}h)` : ''}`
+  })
+
+  return `**Attendance for ${month}**\n\n${lines.join('\n')}`
+}
+
+async function updateBankDetails(ctx: ToolCtx, args: { account_number?: string; ifsc_code?: string; bank_name?: string; account_holder?: string }): Promise<string> {
+  if (!ctx.employeeId) return 'No employee profile linked to your account.'
+
+  const accountNum = args.account_number?.trim()
+  const ifsc       = args.ifsc_code?.trim()
+  if (!accountNum || !ifsc) return 'Account number and IFSC code are required.'
+  if (!/^[A-Z]{4}0[A-Z0-9]{6}$/.test(ifsc.toUpperCase())) {
+    return 'Invalid IFSC code format. Should be 11 characters like HDFC0001234.'
+  }
+
+  const { error } = await ctx.supabase
+    .from('employee_bank_accounts')
+    .upsert({
+      tenant_id:      ctx.caller.tenantId,
+      employee_id:    ctx.employeeId,
+      account_number: accountNum,
+      ifsc_code:      ifsc.toUpperCase(),
+      bank_name:      args.bank_name ?? null,
+      account_holder: args.account_holder ?? null,
+      is_primary:     true,
+      updated_at:     new Date().toISOString(),
+    }, { onConflict: 'tenant_id,employee_id,account_number' })
+
+  if (error) return `Failed to update bank details: ${error.message}`
+  return `Bank account updated: ${accountNum} (${ifsc.toUpperCase()}). Changes will be reflected in your next payroll.`
+}
+
+async function updateEmergencyContact(ctx: ToolCtx, args: { name?: string; relationship?: string; phone?: string }): Promise<string> {
+  if (!ctx.employeeId) return 'No employee profile linked to your account.'
+  if (!args.name?.trim() || !args.phone?.trim()) return 'Name and phone are required.'
+
+  const { error } = await ctx.supabase
+    .from('employees')
+    .update({
+      emergency_contact_name:  args.name.trim(),
+      emergency_contact_phone: args.phone.trim(),
+      emergency_contact_rel:   args.relationship ?? null,
+    })
+    .eq('id', ctx.employeeId)
+    .eq('tenant_id', ctx.caller.tenantId)
+
+  if (error) return `Failed to update emergency contact: ${error.message}`
+  return `Emergency contact updated: ${args.name} (${args.relationship ?? 'N/A'}) — ${args.phone}.`
+}
+
+async function getTicketStatus(ctx: ToolCtx, args: { ticket_number?: string }): Promise<string> {
+  if (!ctx.employeeId) return 'No employee profile linked to your account.'
+
+  let q = ctx.supabase
+    .from('helpdesk_tickets')
+    .select('id, ticket_number, subject, status, category, created_at, updated_at')
+    .eq('tenant_id', ctx.caller.tenantId)
+    .eq('employee_id', ctx.employeeId)
+
+  if (args.ticket_number?.trim()) {
+    q = q.eq('ticket_number', args.ticket_number.trim())
+  } else {
+    q = q.order('created_at', { ascending: false }).limit(5)
+  }
+
+  const { data } = await q
+  if (!data?.length) return args.ticket_number ? `Ticket ${args.ticket_number} not found.` : 'No tickets found.'
+
+  return (data as any[]).map(t =>
+    `**${t.ticket_number ?? t.id.slice(0, 8)}** — ${t.subject}\nStatus: ${t.status} | Category: ${t.category}\nOpened: ${t.created_at?.slice(0, 10)} | Updated: ${t.updated_at?.slice(0, 10)}`
+  ).join('\n\n---\n\n')
+}
+
+async function escalateTicket(ctx: ToolCtx, args: { ticket_id?: string; reason?: string }): Promise<string> {
+  if (!ctx.employeeId) return 'No employee profile linked to your account.'
+  if (!args.ticket_id?.trim() || !args.reason?.trim()) return 'Ticket ID and reason are required.'
+
+  // Find the ticket
+  const { data: ticket } = await ctx.supabase
+    .from('helpdesk_tickets')
+    .select('id, subject, status, employee_id')
+    .or(`id.eq.${args.ticket_id},ticket_number.eq.${args.ticket_id}`)
+    .eq('tenant_id', ctx.caller.tenantId)
+    .maybeSingle()
+
+  if (!ticket) return `Ticket "${args.ticket_id}" not found.`
+  if ((ticket as any).employee_id !== ctx.employeeId && !isHrAdmin(ctx.caller.role)) {
+    return 'You can only escalate your own tickets.'
+  }
+
+  await ctx.supabase.from('helpdesk_comments').insert({
+    tenant_id:  ctx.caller.tenantId,
+    ticket_id:  (ticket as any).id,
+    author_id:  ctx.caller.profileId,
+    body:       `[ESCALATION REQUEST] ${args.reason}`,
+    is_internal: false,
+  }).catch(() => {})
+
+  return `Escalation requested for "${(ticket as any).subject}". HR will review and prioritize your ticket.`
+}
+
+async function getOnboardingGuide(ctx: ToolCtx): Promise<string> {
+  if (!ctx.employeeId) return 'No employee profile linked to your account.'
+
+  const { data: emp } = await ctx.supabase
+    .from('employees')
+    .select('first_name, joining_date, status')
+    .eq('id', ctx.employeeId)
+    .maybeSingle()
+
+  const name = (emp as any)?.first_name ?? 'there'
+  const joiningDate = (emp as any)?.joining_date ?? 'your joining date'
+
+  return `**Welcome, ${name}! Your Onboarding Checklist**\n\n1. Complete your KYC documents (Aadhaar, PAN, bank details)\n2. Update your emergency contact details\n3. Complete mandatory HR policies acknowledgement\n4. Set up your IT equipment with IT support\n5. Complete your benefits enrolment (within 30 days)\n6. Complete the Day 30 pulse survey\n7. Schedule 1:1 with your manager\n8. Complete compliance training\n\n📅 Joining Date: ${joiningDate}\n\nYou can ask me anything about leave, attendance, payroll, or HR policies!`
+}
+
 /** Execute a tool call by name. Always returns a string (never throws to the loop). */
 export async function executeTool(ctx: ToolCtx, name: string, args: any): Promise<string> {
   try {
@@ -941,6 +1225,14 @@ export async function executeTool(ctx: ToolCtx, name: string, args: any): Promis
       case 'regularize_attendance':  return await regularizeAttendance(ctx, args)
       case 'get_payslip':            return await getPayslip(ctx, args)
       case 'update_contact_info':    return await updateContactInfo(ctx, args)
+      case 'search_policy':          return await searchPolicy(ctx, args)
+      case 'get_pay_breakdown':      return await getPayBreakdown(ctx)
+      case 'get_attendance_calendar': return await getAttendanceCalendar(ctx, args)
+      case 'update_bank_details':    return await updateBankDetails(ctx, args)
+      case 'update_emergency_contact': return await updateEmergencyContact(ctx, args)
+      case 'get_ticket_status':      return await getTicketStatus(ctx, args)
+      case 'escalate_ticket':        return await escalateTicket(ctx, args)
+      case 'get_onboarding_guide':   return await getOnboardingGuide(ctx)
       default:                       return `Unknown tool: ${name}`
     }
   } catch {

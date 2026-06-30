@@ -28,7 +28,7 @@ import { cn }            from '@/lib/utils'
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 type PolicyStatus   = 'draft' | 'published' | 'archived'
-type PolicyCategory = 'leave' | 'compensation' | 'conduct' | 'recruitment' | 'learning' | 'health' | 'it' | 'other'
+type PolicyCategory = 'leave' | 'compensation' | 'conduct' | 'recruitment' | 'learning' | 'health' | 'it' | 'posh' | 'compliance' | 'other'
 
 interface Policy {
   id:                       string
@@ -40,6 +40,7 @@ interface Policy {
   status:                   PolicyStatus
   version:                  number
   requires_acknowledgement: boolean
+  is_mandatory?:            boolean
   effective_from:           string | null
   published_at:             string | null
   ack_count:                number
@@ -56,11 +57,12 @@ interface QALog {
 }
 
 interface AckStats {
-  total:        number
-  acknowledged: number
-  pending:      number
-  rate:         number
-  employees:    { id: string; employee_code: string; first_name: string; last_name: string; acknowledged: boolean; acknowledged_at: string | null }[]
+  total:               number
+  acknowledged:        number
+  pending:             number
+  rate:                number
+  employees:           { id: string; employee_code: string; first_name: string; last_name: string; acknowledged: boolean; acknowledged_at: string | null }[]
+  location_breakdown?: { location_id: string; location_name: string; total: number; acknowledged: number; rate: number }[]
 }
 
 const CATEGORIES: { value: PolicyCategory; label: string }[] = [
@@ -71,6 +73,8 @@ const CATEGORIES: { value: PolicyCategory; label: string }[] = [
   { value: 'learning',      label: 'Learning & Development' },
   { value: 'health',        label: 'Health & Wellness' },
   { value: 'it',            label: 'IT & Security' },
+  { value: 'posh',          label: 'POSH' },
+  { value: 'compliance',    label: 'Compliance' },
   { value: 'other',         label: 'Other' },
 ]
 
@@ -102,6 +106,7 @@ const emptyForm = {
   content:                  '',
   file_url:                 '',
   requires_acknowledgement: false,
+  is_mandatory:             false,
   effective_from:           '',
 }
 
@@ -205,6 +210,7 @@ export function AdminPolicyLibrary() {
       content:                  p.content ?? '',
       file_url:                 p.file_url ?? '',
       requires_acknowledgement: p.requires_acknowledgement,
+      is_mandatory:             p.is_mandatory ?? false,
       effective_from:           p.effective_from ?? '',
     })
     setFormOpen(true)
@@ -318,7 +324,10 @@ export function AdminPolicyLibrary() {
                         {p.description && <p className="text-[10px] text-muted-foreground mt-0.5 pl-5 line-clamp-1">{p.description}</p>}
                       </td>
                       <td className="py-2 px-3 text-xs text-muted-foreground">{categoryLabel(p.category)}</td>
-                      <td className="py-2 px-3"><Badge variant={sb.variant} className="text-[10px]">{sb.label}</Badge></td>
+                      <td className="py-2 px-3">
+                        <Badge variant={sb.variant} className="text-[10px]">{sb.label}</Badge>
+                        {p.is_mandatory && <Badge variant="outline" className="ml-1 text-[10px] bg-orange-50 text-orange-700 border-orange-200">Mandatory</Badge>}
+                      </td>
                       <td className="py-2 px-3">
                         {p.requires_acknowledgement && p.status === 'published' ? (
                           <button
@@ -455,6 +464,19 @@ export function AdminPolicyLibrary() {
               </div>
             </label>
 
+            <label className="flex items-center gap-2.5 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={!!form.is_mandatory}
+                onChange={e => setForm(f => ({ ...f, is_mandatory: e.target.checked }))}
+                className="rounded"
+              />
+              <div>
+                <span className="text-sm font-medium">Mandatory policy</span>
+                <p className="text-xs text-muted-foreground">Mark as a statutory/mandatory policy (e.g. POSH, Compliance). Shown with a mandatory badge in the employee portal.</p>
+              </div>
+            </label>
+
             <div className="flex justify-end gap-2 pt-1">
               <Button variant="outline" onClick={() => { setFormOpen(false); setEditId(null); setForm(emptyForm) }}>
                 Cancel
@@ -565,6 +587,26 @@ export function AdminPolicyLibrary() {
                   style={{ width: `${ackStats.rate}%` }}
                 />
               </div>
+
+              {/* Location breakdown */}
+              {(ackStats.location_breakdown ?? []).length > 0 && (
+                <div>
+                  <p className="text-xs font-medium text-muted-foreground mb-2">By Location</p>
+                  <div className="space-y-1.5">
+                    {ackStats.location_breakdown!.map(loc => (
+                      <div key={loc.location_id}>
+                        <div className="flex justify-between text-xs mb-0.5">
+                          <span>{loc.location_name}</span>
+                          <span className="text-muted-foreground">{loc.acknowledged}/{loc.total} ({loc.rate}%)</span>
+                        </div>
+                        <div className="h-1.5 rounded-full bg-muted overflow-hidden">
+                          <div className="h-full rounded-full bg-success transition-all" style={{ width: `${loc.rate}%` }} />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {/* Employee list */}
               <div className="max-h-64 overflow-y-auto space-y-1 rounded-md border border-border">

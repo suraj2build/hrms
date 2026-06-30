@@ -25,6 +25,7 @@ import type { FastifyInstance } from 'fastify'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { logAction }                   from '../../lib/audit-service.js'
 import { notify }                      from '../../lib/notify.js'
+import { WhatsAppProvider }            from '../../lib/whatsapp-provider.js'
 
 export default async function policyRoutes(fastify: FastifyInstance) {
   const { supabase } = fastify
@@ -67,11 +68,14 @@ export default async function policyRoutes(fastify: FastifyInstance) {
 
   fastify.post('/ask', { preHandler: fastify.authenticate }, async (req: any, reply) => {
     const tenantId = req.tenantId
-    const { question } = req.body as { question?: string }
-
+    const { question, language } = req.body as { question?: string; language?: string }
     if (!question?.trim()) return reply.status(400).send({ error: 'question is required' })
 
     const employeeId = await getEmployeeId(req.user.id)
+
+    // Detect language: explicit param > Hindi Devanagari script detection > English
+    const isHindi = language === 'hi' || /[ऀ-ॿ]/.test(question)
+    const lang    = isHindi ? 'Hindi' : 'English'
 
     // 1. FTS — find relevant published policies
     const { data: hits, error: searchErr } = await supabase.rpc('search_policies', {
@@ -95,7 +99,7 @@ export default async function policyRoutes(fastify: FastifyInstance) {
     const msg = await ai.messages.create({
       model:      'claude-haiku-4-5-20251001',
       max_tokens: 600,
-      system: `You are a helpful HR assistant for CognixHR. Answer employee questions based ONLY on the company policies provided. Be concise, friendly, and specific. If the answer is not clearly covered in the policies, say so honestly and suggest the employee contact HR directly.`,
+      system: `You are a helpful HR assistant for CognixHR. Answer employee questions based ONLY on the company policies provided. Respond in ${lang}. Be concise, friendly, and specific. Quote the relevant policy clause when possible. If the answer is not clearly covered in the policies, say so honestly and suggest the employee contact HR directly.`,
       messages: [{
         role:    'user',
         content: `Company policies:\n\n${context}\n\n---\n\nEmployee question: ${question.trim()}\n\nProvide a clear, helpful answer based on the policies above.`,
@@ -236,7 +240,7 @@ export default async function policyRoutes(fastify: FastifyInstance) {
     const [empResult, ackResult] = await Promise.all([
       supabase
         .from('employees')
-        .select('id, employee_code, first_name, last_name')
+        .select('id, employee_code, first_name, last_name, work_location_id')
         .eq('tenant_id', tenantId)
         .in('status', ['active', 'on_leave']),
       supabase
@@ -259,6 +263,36 @@ export default async function policyRoutes(fastify: FastifyInstance) {
     const total        = employees.length
     const acknowledged = employees.filter(e => e.acknowledged).length
 
+    // Location breakdown
+    const locationIds = [...new Set(employees.map(e => e.work_location_id).filter(Boolean))]
+    const locationMap: Record<string, string> = {}
+    if (locationIds.length > 0) {
+      const { data: locs } = await supabase
+        .from('work_locations')
+        .select('id, name')
+        .in('id', locationIds)
+      ;(locs ?? []).forEach(l => { locationMap[l.id] = l.name })
+    }
+
+    const byLocation: Record<string, { name: string; total: number; acknowledged: number }> = {}
+    for (const e of employees) {
+      const locId = e.work_location_id ?? '__unassigned__'
+      if (!byLocation[locId]) {
+        byLocation[locId] = { name: locationMap[locId] ?? 'Unassigned', total: 0, acknowledged: 0 }
+      }
+      byLocation[locId].total++
+      if (e.acknowledged) byLocation[locId].acknowledged++
+    }
+
+    const location_breakdown = Object.entries(byLocation).map(([id, v]) => ({
+      location_id:  id === '__unassigned__' ? null : id,
+      location_name: v.name,
+      total:        v.total,
+      acknowledged: v.acknowledged,
+      pending:      v.total - v.acknowledged,
+      rate:         v.total > 0 ? Math.round((v.acknowledged / v.total) * 100) : 0,
+    }))
+
     return reply.send({
       data: {
         total,
@@ -266,6 +300,7 @@ export default async function policyRoutes(fastify: FastifyInstance) {
         pending: total - acknowledged,
         rate:    total > 0 ? Math.round((acknowledged / total) * 100) : 0,
         employees,
+        location_breakdown,
       },
     })
   })
@@ -436,6 +471,24 @@ export default async function policyRoutes(fastify: FastifyInstance) {
           action_route: `/ess/policies?policy=${id}`,
           action_label: 'View & Acknowledge',
         })
+      }
+
+      // WhatsApp broadcast to all active employees with phone numbers
+      const { data: empPhones } = await supabase
+        .from('employees')
+        .select('id, first_name, phone')
+        .eq('tenant_id', tenantId)
+        .eq('status', 'active')
+        .not('phone', 'is', null)
+
+      const wa = new WhatsAppProvider(supabase)
+      for (const emp of empPhones ?? []) {
+        if (emp.phone) {
+          await wa.sendTemplate(tenantId, emp.phone, 'policy_published', [
+            emp.first_name ?? 'Team',
+            policy.title,
+          ])
+        }
       }
     }
 

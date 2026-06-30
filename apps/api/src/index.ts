@@ -21,6 +21,7 @@ import { registerSlaScanner }            from './lib/sla-scanner.js'
 import { registerIntelligenceScanner }   from './lib/intelligence-scanner.js'
 import { registerDigestScheduler }       from './lib/digest-scheduler.js'
 import { registerWoCreditScheduler }     from './lib/wo-credit-reconciler.js'
+import { registerPollScheduler }         from './lib/poll-scheduler.js'
 import { jobQueue }                      from './lib/job-queue.js'
 import { eventBus }                      from './lib/event-bus.js'
 import type { HrmsEventType }            from './lib/event-bus.js'
@@ -193,6 +194,7 @@ import benefitsRoutes                      from './routes/benefits/index.js'
 import recruitmentRoutes                   from './routes/recruitment/index.js'
 import certificationRoutes                 from './routes/certifications/index.js'
 import securityRoutes                      from './routes/security/index.js'
+import whatsappRoutes                      from './routes/whatsapp/index.js'
 
 // Routes — Upload session lifecycle management
 import uploadSessionRoutes                 from './routes/uploads/index.js'
@@ -466,6 +468,11 @@ async function start() {
     registerWoCreditScheduler(fastify.supabase)
   }, fastify.log)
 
+  // Weekly mood poll scheduler — fires Monday 09:00 per tenant via WhatsApp
+  await safeRegisterModule('poll-scheduler', async () => {
+    registerPollScheduler(fastify.supabase)
+  }, fastify.log)
+
   // Absconding case scanner — daily scan for UA employees, auto-escalates state machine
   await safeRegisterModule('absconding-scanner', async () => {
     const { scanAndEscalate } = await import('./lib/absconding-engine.js')
@@ -527,6 +534,7 @@ async function start() {
   // Public routes — NO JWT required (must be before authPlugin)
   await fastify.register(setupRoute)            // POST /setup (tenant + profile creation on signup)
   await fastify.register(attendanceIngestRoute) // POST /attendance/ingest (device api_key auth)
+  await fastify.register(whatsappRoutes)        // GET+POST /whatsapp/webhook (verified by WHATSAPP_WEBHOOK_SECRET)
   await fastify.register(authPlugin)
   await fastify.register(ownerAuthPlugin)       // platform_admins JWT check (separate from tenant auth)
 

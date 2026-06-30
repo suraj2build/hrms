@@ -21,11 +21,11 @@ import { api } from '@/lib/api/client'
 import { useAuthStore } from '@/stores/authStore'
 import { cn }  from '@/lib/utils'
 
-type PlanType = 'health' | 'term_life' | 'accident' | 'wellness' | 'meal' | 'transport' | 'other'
-const PLAN_TYPES: PlanType[] = ['health', 'term_life', 'accident', 'wellness', 'meal', 'transport', 'other']
+type PlanType = 'health' | 'term_life' | 'accident' | 'wellness' | 'meal' | 'transport' | 'nps' | 'other'
+const PLAN_TYPES: PlanType[] = ['health', 'term_life', 'accident', 'wellness', 'meal', 'transport', 'nps', 'other']
 const TYPE_LABEL: Record<PlanType, string> = {
   health: 'Group Health', term_life: 'Term Life', accident: 'Accident',
-  wellness: 'Wellness', meal: 'Meal', transport: 'Transport', other: 'Other',
+  wellness: 'Wellness', meal: 'Meal', transport: 'Transport', nps: 'NPS', other: 'Other',
 }
 
 type WindowStatus = 'always_open' | 'open' | 'upcoming' | 'closed'
@@ -43,6 +43,9 @@ interface Plan {
   enrollment_opens_at: string | null
   enrollment_closes_at: string | null
   is_active: boolean
+  is_esic?: boolean
+  is_nps?: boolean
+  eligible_bands?: string[]
   enrolled_count: number
   total_count: number
   window_status: WindowStatus
@@ -71,6 +74,7 @@ const BLANK: PlanForm = {
   name: '', plan_type: 'health', provider: '', description: '',
   coverage_amount: 0, employee_cost: 0, employer_cost: 0,
   allows_dependents: false, enrollment_opens_at: null, enrollment_closes_at: null, is_active: true,
+  is_esic: false, is_nps: false, eligible_bands: [],
 }
 
 const inr = (n: number) =>
@@ -119,7 +123,14 @@ export function AdminBenefits() {
   function openCreate() { setEditing(null); setForm(BLANK); setShowForm(true) }
   function openEdit(p: Plan) {
     setEditing(p)
-    setForm({ ...p, provider: p.provider ?? '', description: p.description ?? '' })
+    setForm({
+      ...p,
+      provider: p.provider ?? '',
+      description: p.description ?? '',
+      is_esic: p.is_esic ?? false,
+      is_nps: p.is_nps ?? false,
+      eligible_bands: p.eligible_bands ?? [],
+    })
     setShowForm(true)
   }
   function submit() {
@@ -234,6 +245,8 @@ export function AdminBenefits() {
                       <td className="py-2 px-3">
                         <Badge variant={p.is_active ? 'success' : 'secondary'} className="text-[10px]">{p.is_active ? 'Active' : 'Inactive'}</Badge>
                         {p.allows_dependents && <Badge variant="outline" className="ml-1 text-[10px]">+Deps</Badge>}
+                        {p.is_esic && <Badge variant="outline" className="ml-1 text-[10px] bg-blue-50 text-blue-700 border-blue-200">ESIC</Badge>}
+                        {p.is_nps && <Badge variant="outline" className="ml-1 text-[10px] bg-purple-50 text-purple-700 border-purple-200">NPS</Badge>}
                       </td>
                       <td className="py-2 px-3 text-right whitespace-nowrap">
                         <Button size="sm" variant="ghost" onClick={() => openEdit(p)}><Pencil className="h-3.5 w-3.5" /></Button>
@@ -318,6 +331,26 @@ export function AdminBenefits() {
                 <input type="checkbox" checked={form.allows_dependents} onChange={e => setForm(f => ({ ...f, allows_dependents: e.target.checked }))} />
                 Cover family members
               </label>
+            </Field>
+            <Field label="ESIC Plan">
+              <label className="flex items-center gap-2 text-xs h-[34px]">
+                <input type="checkbox" checked={!!form.is_esic} onChange={e => setForm(f => ({ ...f, is_esic: e.target.checked }))} />
+                Link to ESIC (eligible: gross ≤ ₹21,000)
+              </label>
+            </Field>
+            <Field label="NPS Plan">
+              <label className="flex items-center gap-2 text-xs h-[34px]">
+                <input type="checkbox" checked={!!form.is_nps} onChange={e => setForm(f => ({ ...f, is_nps: e.target.checked }))} />
+                National Pension Scheme
+              </label>
+            </Field>
+            <Field label="Eligible Bands" className="col-span-2">
+              <input
+                value={(form.eligible_bands ?? []).join(', ')}
+                onChange={e => setForm(f => ({ ...f, eligible_bands: e.target.value.split(',').map(s => s.trim()).filter(Boolean) }))}
+                className={inputCls}
+                placeholder="e.g. Band A, Band B (comma-separated, leave blank for all)"
+              />
             </Field>
             <Field label="Enrolment opens">
               <input type="date" value={form.enrollment_opens_at ?? ''} onChange={e => setForm(f => ({ ...f, enrollment_opens_at: e.target.value || null }))} className={inputCls} />

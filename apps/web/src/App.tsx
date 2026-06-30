@@ -86,6 +86,7 @@ const AdminQuestionBank           = lazy(() => import('@/pages/admin/AdminQuesti
 const AdminRecruitmentDashboard   = lazy(() => import('@/pages/admin/AdminRecruitmentDashboard').then(m => ({ default: m.AdminRecruitmentDashboard })))
 const AdminInterviewAnalytics     = lazy(() => import('@/pages/admin/AdminInterviewAnalytics').then(m => ({ default: m.AdminInterviewAnalytics })))
 const AdminSuccession             = lazy(() => import('./pages/admin/AdminSuccession').then(m => ({ default: m.AdminSuccession })))
+const AdminCalibration            = lazy(() => import('./pages/admin/AdminCalibration').then(m => ({ default: m.AdminCalibration })))
 const AdminTalentMarketplace      = lazy(() => import('./pages/admin/AdminTalentMarketplace').then(m => ({ default: m.AdminTalentMarketplace })))
 const CandidatePortal    = lazy(() => import('@/pages/portal/CandidatePortal').then(m => ({ default: m.CandidatePortal })))
 const Documents         = lazy(() => import('@/pages/documents/Documents').then(m => ({ default: m.Documents })))
@@ -724,6 +725,7 @@ export default function App() {
                 <Route path="/admin/surveys/:id"          element={<AdminSurveyDetail />} />
                 <Route path="/admin/recognition"          element={<AdminRecognition />} />
                 <Route path="/admin/succession"           element={<Suspense fallback={<PageLoader />}><AdminSuccession /></Suspense>} />
+                <Route path="/admin/calibration"         element={<Suspense fallback={<PageLoader />}><AdminCalibration /></Suspense>} />
                 <Route path="/admin/talent-marketplace"  element={<Suspense fallback={<PageLoader />}><AdminTalentMarketplace /></Suspense>} />
                 <Route path="/admin/benefits"         element={<AdminBenefits />} />
                 <Route path="/admin/audit-trail"      element={<AuditTrail />} />

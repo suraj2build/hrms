@@ -4,11 +4,11 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   ArrowLeft, Users2, Check, X, BarChart2,
   ClipboardList, UserCheck, ChevronDown, ChevronUp,
-  ThumbsUp, ThumbsDown, Minus, Tag,
+  ThumbsUp, ThumbsDown, Minus, Tag, RefreshCw, MapPin, Loader2,
 } from 'lucide-react'
-import { toast }   from 'sonner'
-import { Button }  from '@/components/ui/button'
-import { api }     from '@/lib/api/client'
+import { toast }  from 'sonner'
+import { Button } from '@/components/ui/button'
+import { api }    from '@/lib/api/client'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -64,6 +64,7 @@ interface ResultsData {
   total_completed: number
   completion_rate: number
   questions:       QuestionResult[]
+  location_breakdown?: { location_id: string; location_name: string; total: number; completed: number; rate: number }[]
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -224,7 +225,7 @@ function TextResult({ q }: { q: QuestionResult }) {
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 
-type Tab = 'overview' | 'assignments' | 'results'
+type Tab = 'overview' | 'assignments' | 'results' | '360-setup'
 
 export function AdminSurveyDetail() {
   const { id }   = useParams<{ id: string }>()
@@ -232,6 +233,8 @@ export function AdminSurveyDetail() {
   const qc       = useQueryClient()
 
   const [tab, setTab] = useState<Tab>('overview')
+  const [setup360Form, setSetup360Form] = useState({ peer_count: 3, self_review: true, manager_review: true, deadline_days: 14 })
+  const [setup360Loading, setSetup360Loading] = useState(false)
 
   const { data: survey, isLoading } = useQuery<SurveyDetail>({
     queryKey:  ['admin-survey', id],
@@ -278,7 +281,22 @@ export function AdminSurveyDetail() {
     { key: 'overview',    label: 'Questions',   icon: ClipboardList },
     { key: 'assignments', label: 'Assignments', icon: UserCheck },
     { key: 'results',     label: 'Results',     icon: BarChart2 },
+    { key: '360-setup',   label: '360° Setup',  icon: RefreshCw },
   ]
+
+  async function handle360Setup() {
+    if (!id) return
+    setSetup360Loading(true)
+    try {
+      await api.post(`/surveys/admin/${id}/360/setup`, setup360Form)
+      toast.success('360° review round created')
+      qc.invalidateQueries({ queryKey: ['admin-survey', id] })
+    } catch (e) {
+      toast.error('Failed to set up 360° review', { description: e instanceof Error ? e.message : 'Unknown error' })
+    } finally {
+      setSetup360Loading(false)
+    }
+  }
 
   const completedCount = survey.assignments.filter(a => a.completed_at).length
 
@@ -474,6 +492,28 @@ export function AdminSurveyDetail() {
                 ))}
               </div>
 
+              {/* Location breakdown */}
+              {(results.location_breakdown ?? []).length > 0 && (
+                <div className="rounded-2xl border border-border/60 bg-card p-6">
+                  <p className="mb-4 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground flex items-center gap-2">
+                    <MapPin className="h-3.5 w-3.5" /> Location Breakdown
+                  </p>
+                  <div className="space-y-3">
+                    {results.location_breakdown!.map(loc => (
+                      <div key={loc.location_id}>
+                        <div className="flex justify-between text-xs mb-1">
+                          <span className="font-medium">{loc.location_name}</span>
+                          <span className="text-muted-foreground">{loc.completed}/{loc.total} · {loc.rate}%</span>
+                        </div>
+                        <div className="h-2 rounded-full bg-muted overflow-hidden">
+                          <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${loc.rate}%` }} />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {/* Per-question results */}
               {results.questions.map((q, i) => (
                 <div key={q.id} className="rounded-2xl border border-border/60 bg-card p-6">
@@ -492,6 +532,51 @@ export function AdminSurveyDetail() {
               ))}
             </>
           )}
+        </div>
+      )}
+
+      {/* Tab: 360° Setup */}
+      {tab === '360-setup' && (
+        <div className="rounded-2xl border border-border/60 bg-card p-6 space-y-5 max-w-lg">
+          <p className="text-sm text-muted-foreground">
+            Create a 360° review round for this survey. Employees nominate peers; HR can view consolidated feedback.
+          </p>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="text-xs font-medium text-muted-foreground mb-1 block">Peer nominations required</label>
+              <input
+                type="number" min={1} max={10}
+                value={setup360Form.peer_count}
+                onChange={e => setSetup360Form(f => ({ ...f, peer_count: Number(e.target.value) || 3 }))}
+                className="w-full text-sm border border-border rounded-md px-2 py-1.5 bg-background"
+              />
+            </div>
+            <div>
+              <label className="text-xs font-medium text-muted-foreground mb-1 block">Deadline (days from now)</label>
+              <input
+                type="number" min={1} max={90}
+                value={setup360Form.deadline_days}
+                onChange={e => setSetup360Form(f => ({ ...f, deadline_days: Number(e.target.value) || 14 }))}
+                className="w-full text-sm border border-border rounded-md px-2 py-1.5 bg-background"
+              />
+            </div>
+          </div>
+          <div className="flex flex-col gap-2">
+            <label className="flex items-center gap-2 text-sm cursor-pointer">
+              <input type="checkbox" checked={setup360Form.self_review}
+                onChange={e => setSetup360Form(f => ({ ...f, self_review: e.target.checked }))} />
+              Include self-review
+            </label>
+            <label className="flex items-center gap-2 text-sm cursor-pointer">
+              <input type="checkbox" checked={setup360Form.manager_review}
+                onChange={e => setSetup360Form(f => ({ ...f, manager_review: e.target.checked }))} />
+              Include manager review
+            </label>
+          </div>
+          <Button onClick={handle360Setup} disabled={setup360Loading}>
+            {setup360Loading ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <RefreshCw className="h-4 w-4 mr-1" />}
+            Create 360° Round
+          </Button>
         </div>
       )}
     </div>

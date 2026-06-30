@@ -13,8 +13,9 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { logAction } from '../../lib/audit-service.js'
+import { InsuranceProvider } from '../../lib/insurance-provider.js'
 
-const PLAN_TYPES = ['health', 'term_life', 'accident', 'wellness', 'meal', 'transport', 'other'] as const
+const PLAN_TYPES = ['health', 'term_life', 'accident', 'wellness', 'meal', 'transport', 'nps', 'other'] as const
 
 async function resolveCallerEmployeeId(fastify: any, userId: string, tenantId: string): Promise<string | null> {
   const { data } = await fastify.supabase
@@ -42,8 +43,25 @@ export default async function benefitsRoutes(fastify: FastifyInstance) {
   // EMPLOYEE (ESS)
   // ═══════════════════════════════════════════════════════════════════════════
 
-  // GET /benefits/plans — active plans with an `is_open` flag
+  // GET /benefits/plans — active plans filtered by employee's designation_band
   fastify.get('/plans', auth, async (req: any, reply) => {
+    const employeeId = await resolveCallerEmployeeId(fastify, req.userId, req.tenantId)
+
+    // Fetch employee's band and salary for ESIC eligibility
+    let empBand: string | null = null
+    let empSalary: number | null = null
+    let isEsicEligible = false
+    if (employeeId) {
+      const { data: emp } = await fastify.supabase
+        .from('employees')
+        .select('designation_band, gross_salary')
+        .eq('id', employeeId)
+        .maybeSingle()
+      empBand      = (emp as any)?.designation_band ?? null
+      empSalary    = (emp as any)?.gross_salary ?? null
+      isEsicEligible = empSalary != null && empSalary <= 21000
+    }
+
     const { data, error } = await fastify.supabase
       .from('benefit_plans')
       .select('*')
@@ -55,8 +73,22 @@ export default async function benefitsRoutes(fastify: FastifyInstance) {
     if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
 
     const today = new Date().toISOString().slice(0, 10)
-    const plans = ((data ?? []) as any[]).map(p => ({ ...p, is_open: isPlanOpen(p, today) }))
-    return reply.send({ data: plans })
+    const plans = ((data ?? []) as any[])
+      .filter(p => {
+        // Band eligibility: if plan has eligible_bands, employee must be in one of them
+        if (p.eligible_bands?.length && empBand) {
+          return p.eligible_bands.includes(empBand)
+        }
+        return true
+      })
+      .map(p => ({
+        ...p,
+        is_open:         isPlanOpen(p, today),
+        is_esic:         p.plan_type === 'health' && isEsicEligible && p.name?.toLowerCase().includes('esic'),
+        is_nps:          p.plan_type === 'nps',
+      }))
+
+    return reply.send({ data: plans, meta: { employee_band: empBand, esic_eligible: isEsicEligible } })
   })
 
   // GET /benefits/my — caller's enrolments
@@ -159,6 +191,12 @@ export default async function benefitsRoutes(fastify: FastifyInstance) {
       newData:     { plan_id: parsed.data.plan_id, status: parsed.data.status, dependents: dependentIds.length },
     })
 
+    // Sync insurance enrolment for health/life/accident plans
+    if (parsed.data.status === 'enrolled' && ['health', 'term_life', 'accident'].includes((plan as any).plan_type)) {
+      const insurer = new InsuranceProvider(fastify.supabase)
+      await insurer.syncEnrolment(employeeId, parsed.data.plan_id, dependentIds).catch(() => { /* non-blocking */ })
+    }
+
     return reply.send({ data })
   })
 
@@ -201,17 +239,20 @@ export default async function benefitsRoutes(fastify: FastifyInstance) {
   })
 
   const planSchema = z.object({
-    name:                 z.string().min(2).max(160),
-    plan_type:            z.enum(PLAN_TYPES).default('health'),
-    provider:             z.string().max(160).optional(),
-    description:          z.string().max(4000).optional(),
-    coverage_amount:      z.number().min(0).default(0),
-    employee_cost:        z.number().min(0).default(0),
-    employer_cost:        z.number().min(0).default(0),
-    allows_dependents:    z.boolean().default(false),
-    enrollment_opens_at:  z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
-    enrollment_closes_at: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
-    is_active:            z.boolean().default(true),
+    name:                      z.string().min(2).max(160),
+    plan_type:                 z.enum(PLAN_TYPES).default('health'),
+    provider:                  z.string().max(160).optional(),
+    description:               z.string().max(4000).optional(),
+    coverage_amount:           z.number().min(0).default(0),
+    employee_cost:             z.number().min(0).default(0),
+    employer_cost:             z.number().min(0).default(0),
+    allows_dependents:         z.boolean().default(false),
+    enrollment_opens_at:       z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+    enrollment_closes_at:      z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+    is_active:                 z.boolean().default(true),
+    eligible_bands:            z.array(z.string()).optional(),
+    employee_contribution_pct: z.number().min(0).max(100).optional(),
+    employer_contribution_pct: z.number().min(0).max(100).optional(),
   })
 
   // POST /benefits/admin/plans — create a plan

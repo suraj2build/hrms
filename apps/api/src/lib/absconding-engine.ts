@@ -16,9 +16,10 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { notify } from './notify.js'
 import { logAction } from './audit-service.js'
+import { generateLetterPDF, uploadPDF } from './pdf-generator.js'
 
 // Days from first_ua_date that trigger each escalation.
-const THRESHOLDS = { flag: 3, wl1: 7, wl2: 14, termination: 21 } as const
+const THRESHOLDS = { flag: 3, second_escalation: 5, wl1: 7, wl2: 14, termination: 21 } as const
 
 export interface ScanResult {
   tenant_id:    string
@@ -105,7 +106,109 @@ async function getHrAdminProfileIds(
   return ((data ?? []) as { id: string }[]).map(p => p.id)
 }
 
+// Fetch merge field data for letter generation
+async function getLetterMergeFields(
+  supabase: SupabaseClient,
+  tenantId: string,
+  employeeId: string,
+): Promise<Record<string, string>> {
+  const { data: emp } = await supabase
+    .from('employees')
+    .select(`
+      first_name, last_name, employee_code, designation,
+      work_locations(name),
+      employees!employees_reporting_manager_id_fkey(first_name, last_name)
+    `)
+    .eq('id', employeeId)
+    .eq('tenant_id', tenantId)
+    .single()
+
+  const { data: tenant } = await supabase
+    .from('tenants')
+    .select('name')
+    .eq('id', tenantId)
+    .single()
+
+  const e = emp as any
+  const managerName = e?.employees
+    ? `${e.employees.first_name ?? ''} ${e.employees.last_name ?? ''}`.trim()
+    : 'HR Manager'
+
+  return {
+    employee_name:  `${e?.first_name ?? ''} ${e?.last_name ?? ''}`.trim(),
+    employee_code:  e?.employee_code ?? '',
+    designation:    e?.designation ?? '',
+    store_name:     e?.work_locations?.name ?? 'Head Office',
+    manager_name:   managerName,
+    company_name:   (tenant as any)?.name ?? 'CognixHR',
+  }
+}
+
 // ── Core operations ──────────────────────────────────────────────────────────
+
+/** Early alert: employee has 1-2 UA days — notify HR without opening a case. */
+export async function notifyEarlyUA(
+  supabase:   SupabaseClient,
+  tenantId:   string,
+  employeeId: string,
+  uaDays:     number,
+): Promise<void> {
+  const hrIds = await getHrAdminProfileIds(supabase, tenantId)
+  const { data: emp } = await supabase
+    .from('employees')
+    .select('first_name, last_name, employee_code')
+    .eq('id', employeeId)
+    .single()
+  const empName = emp ? `${(emp as any).first_name} ${(emp as any).last_name}` : employeeId
+
+  await Promise.all(hrIds.map(id =>
+    notify(supabase, {
+      tenantId,
+      recipientId:  id,
+      item_type:    'incident_alert',
+      title:        'Early UA alert',
+      summary:      `${empName} has been absent without authorisation for ${uaDays} day(s). No case opened yet — watch for continuation.`,
+      severity:     'info',
+      entity_type:  'employees',
+      entity_id:    employeeId,
+      action_route: `/admin/attendance`,
+    })
+  ))
+}
+
+/** Day-5 escalation: case is flagged (Day 3) and now 5 days have passed — escalate to second_escalation. */
+export async function escalateSecond(
+  supabase:  SupabaseClient,
+  caseId:    string,
+  tenantId:  string,
+): Promise<void> {
+  await supabase
+    .from('absconding_cases')
+    .update({ status: 'second_escalation' })
+    .eq('id', caseId)
+    .eq('tenant_id', tenantId)
+
+  const { data: c } = await supabase
+    .from('absconding_cases')
+    .select('employee_id, ua_days_count')
+    .eq('id', caseId)
+    .single()
+
+  const hrIds = await getHrAdminProfileIds(supabase, tenantId)
+  await Promise.all(hrIds.map(id =>
+    notify(supabase, {
+      tenantId,
+      recipientId:  id,
+      item_type:    'escalation',
+      title:        'Absconding — Day 5 escalation',
+      summary:      `Employee has now been absent for ${(c as any)?.ua_days_count ?? 5} consecutive days. Warning Letter 1 will be issued at Day 7 if no response.`,
+      severity:     'warning',
+      entity_type:  'absconding_cases',
+      entity_id:    caseId,
+      action_route: `/admin/absconding?case=${caseId}`,
+    })
+  ))
+}
 
 export async function openCase(
   supabase:   SupabaseClient,
@@ -213,10 +316,29 @@ export async function sendWarningLetter1(
 
   if (!c) throw new Error('Case not found')
   const cas = c as { id: string; employee_id: string; first_ua_date: string; ua_days_count: number; status: string }
-  if (!['flagged'].includes(cas.status)) throw new Error(`Cannot send WL1 in status: ${cas.status}`)
+  if (!['flagged', 'second_escalation'].includes(cas.status)) throw new Error(`Cannot send WL1 in status: ${cas.status}`)
 
-  const refNumber = buildRefNumber(tenantId, caseId)
-  const deadline  = responseDeadlineISO(7)
+  const refNumber   = buildRefNumber(tenantId, caseId)
+  const deadline    = responseDeadlineISO(7)
+  const mergeFields = await getLetterMergeFields(supabase, tenantId, cas.employee_id)
+
+  // Generate PDF
+  let pdfUrl: string | null = null
+  try {
+    const pdfBuffer = await generateLetterPDF({
+      type:      'wl1',
+      tenantId,
+      refNumber,
+      variables: {
+        ...mergeFields,
+        absent_from_date:  cas.first_ua_date,
+        absent_days:       String(cas.ua_days_count),
+        response_deadline: deadline,
+        ref_number:        refNumber,
+      },
+    })
+    pdfUrl = await uploadPDF(pdfBuffer, `absconding/${caseId}/wl1-${todayISO()}.pdf`, supabase)
+  } catch (_) { /* non-blocking */ }
 
   // Insert a letter record via the letters table (existing pattern)
   const { data: letter } = await supabase
@@ -227,11 +349,13 @@ export async function sendWarningLetter1(
       template_code:   'absconding_wl1',
       status:          'generated',
       variables:       {
+        ...mergeFields,
         absent_from_date:  cas.first_ua_date,
         absent_days:       String(cas.ua_days_count),
         response_deadline: deadline,
         ref_number:        refNumber,
       },
+      pdf_url:         pdfUrl,
       generated_by:    hrUserId,
       generated_at:    new Date().toISOString(),
     })
@@ -290,8 +414,26 @@ export async function sendWarningLetter2(
   const cas = c as { id: string; employee_id: string; first_ua_date: string; ua_days_count: number; status: string }
   if (!['wl1_sent'].includes(cas.status)) throw new Error(`Cannot send WL2 in status: ${cas.status}`)
 
-  const refNumber = buildRefNumber(tenantId, caseId) + '-WL2'
-  const deadline  = responseDeadlineISO(7)
+  const refNumber   = buildRefNumber(tenantId, caseId) + '-WL2'
+  const deadline    = responseDeadlineISO(7)
+  const mergeFields = await getLetterMergeFields(supabase, tenantId, cas.employee_id)
+
+  let pdfUrl: string | null = null
+  try {
+    const pdfBuffer = await generateLetterPDF({
+      type:      'wl2',
+      tenantId,
+      refNumber,
+      variables: {
+        ...mergeFields,
+        absent_from_date:  cas.first_ua_date,
+        absent_days:       String(cas.ua_days_count),
+        response_deadline: deadline,
+        ref_number:        refNumber,
+      },
+    })
+    pdfUrl = await uploadPDF(pdfBuffer, `absconding/${caseId}/wl2-${todayISO()}.pdf`, supabase)
+  } catch (_) { /* non-blocking */ }
 
   const { data: letter } = await supabase
     .from('letters')
@@ -301,11 +443,13 @@ export async function sendWarningLetter2(
       template_code: 'absconding_wl2',
       status:        'generated',
       variables:     {
+        ...mergeFields,
         absent_from_date:  cas.first_ua_date,
         absent_days:       String(cas.ua_days_count),
         response_deadline: deadline,
         ref_number:        refNumber,
       },
+      pdf_url:       pdfUrl,
       generated_by:  hrUserId,
       generated_at:  new Date().toISOString(),
     })
@@ -450,7 +594,24 @@ export async function processTermination(
   }
 
   // Approval — generate termination letter + create separation record
-  const refNumber = buildRefNumber(tenantId, caseId) + '-TERM'
+  const refNumber   = buildRefNumber(tenantId, caseId) + '-TERM'
+  const mergeFields = await getLetterMergeFields(supabase, tenantId, cas.employee_id)
+
+  let pdfUrl: string | null = null
+  try {
+    const pdfBuffer = await generateLetterPDF({
+      type:      'termination',
+      tenantId,
+      refNumber,
+      variables: {
+        ...mergeFields,
+        absent_from_date: cas.first_ua_date,
+        absent_days:      String(cas.ua_days_count),
+        ref_number:       refNumber,
+      },
+    })
+    pdfUrl = await uploadPDF(pdfBuffer, `absconding/${caseId}/termination-${todayISO()}.pdf`, supabase)
+  } catch (_) { /* non-blocking */ }
 
   const { data: letter } = await supabase
     .from('letters')
@@ -460,10 +621,12 @@ export async function processTermination(
       template_code: 'absconding_termination',
       status:        'generated',
       variables:     {
+        ...mergeFields,
         absent_from_date: cas.first_ua_date,
         absent_days:      String(cas.ua_days_count),
         ref_number:       refNumber,
       },
+      pdf_url:       pdfUrl,
       generated_by:  chroUserId,
       generated_at:  new Date().toISOString(),
     })
@@ -496,6 +659,13 @@ export async function processTermination(
     .eq('id', cas.employee_id)
     .eq('tenant_id', tenantId)
 
+  // Check asset recovery requirement
+  const { data: caseData } = await supabase
+    .from('absconding_cases')
+    .select('asset_recovery_required')
+    .eq('id', caseId)
+    .single()
+
   // Close the case
   await supabase
     .from('absconding_cases')
@@ -509,6 +679,33 @@ export async function processTermination(
     })
     .eq('id', caseId)
     .eq('tenant_id', tenantId)
+
+  // Auto-flag FnF in the separation record
+  if (sepId) {
+    await supabase
+      .from('employee_separation')
+      .update({ fnf_status: 'pending' })
+      .eq('id', sepId)
+      .eq('tenant_id', tenantId)
+  }
+
+  // Notify HR if asset recovery is required
+  if ((caseData as any)?.asset_recovery_required) {
+    const hrIds = await getHrAdminProfileIds(supabase, tenantId)
+    await Promise.all(hrIds.map(id =>
+      notify(supabase, {
+        tenantId,
+        recipientId:  id,
+        item_type:    'general',
+        title:        'Asset recovery required',
+        summary:      `Employee ${cas.employee_id} has been terminated. Asset recovery is marked as required. Please follow up to retrieve company assets.`,
+        severity:     'warning',
+        entity_type:  'absconding_cases',
+        entity_id:    caseId,
+        action_route: `/admin/absconding?case=${caseId}`,
+      })
+    ))
+  }
 
   await supabase.from('absconding_communications').insert({
     case_id:   caseId,
@@ -576,29 +773,41 @@ export async function scanAndEscalate(
 ): Promise<ScanResult> {
   const result: ScanResult = { tenant_id: tenantId, cases_opened: 0, cases_wl1: 0, cases_wl2: 0, cases_term: 0, errors: [] }
 
-  // 1. Find employees with ≥3 consecutive UA days and no open case
+  // 1. Find employees with ≥1 consecutive UA day — early alert at 1-2, flag at 3+
   try {
-    const threeAgo = new Date()
-    threeAgo.setDate(threeAgo.getDate() - THRESHOLDS.flag)
+    const windowStart = new Date()
+    windowStart.setDate(windowStart.getDate() - THRESHOLDS.termination - 1)
 
     const { data: uaEmployees } = await supabase
       .from('attendance_records')
-      .select('employee_id, date')
+      .select('employee_id')
       .eq('tenant_id', tenantId)
       .in('final_status', ['A', 'UA', 'absent'])
       .lte('date', todayISO())
-      .gte('date', threeAgo.toISOString().slice(0, 10))
+      .gte('date', windowStart.toISOString().slice(0, 10))
 
     const candidateIds = [...new Set(((uaEmployees ?? []) as { employee_id: string }[]).map(r => r.employee_id))]
 
+    // Track employees with already-open cases (skip them)
+    const { data: existingCases } = await supabase
+      .from('absconding_cases')
+      .select('employee_id')
+      .eq('tenant_id', tenantId)
+      .not('status', 'in', '("terminated","resolved","closed")')
+    const openCaseEmployees = new Set(((existingCases ?? []) as { employee_id: string }[]).map(c => c.employee_id))
+
     for (const empId of candidateIds) {
+      if (openCaseEmployees.has(empId)) continue
       try {
-        const uaDays = await getConsecutiveUaDays(supabase, tenantId, empId, threeAgo.toISOString().slice(0, 10))
+        const uaDays = await getConsecutiveUaDays(supabase, tenantId, empId, windowStart.toISOString().slice(0, 10))
         if (uaDays >= THRESHOLDS.flag) {
           const firstUa = new Date()
           firstUa.setDate(firstUa.getDate() - uaDays + 1)
           const opened = await openCase(supabase, tenantId, empId, firstUa.toISOString().slice(0, 10))
           if (opened) result.cases_opened++
+        } else if (uaDays >= 1) {
+          // Early UA alert (1-2 days) — notify HR but don't open case
+          await notifyEarlyUA(supabase, tenantId, empId, uaDays)
         }
       } catch (e) {
         result.errors.push(`openCase ${empId}: ${e}`)
@@ -614,14 +823,16 @@ export async function scanAndEscalate(
       .from('absconding_cases')
       .select('id, status, first_ua_date, ua_days_count, employee_id')
       .eq('tenant_id', tenantId)
-      .in('status', ['flagged', 'wl1_sent', 'wl2_sent'])
+      .in('status', ['flagged', 'second_escalation', 'wl1_sent', 'wl2_sent'])
 
     for (const c of (openCases ?? []) as { id: string; status: string; first_ua_date: string; ua_days_count: number; employee_id: string }[]) {
       try {
         await updateUaCount(supabase, c.id, tenantId)
         const days = daysSince(c.first_ua_date)
 
-        if (c.status === 'flagged' && days >= THRESHOLDS.wl1) {
+        if (c.status === 'flagged' && days >= THRESHOLDS.second_escalation) {
+          await escalateSecond(supabase, c.id, tenantId)
+        } else if ((c.status === 'flagged' || c.status === 'second_escalation') && days >= THRESHOLDS.wl1) {
           await sendWarningLetter1(supabase, c.id, tenantId, 'system')
           result.cases_wl1++
         } else if (c.status === 'wl1_sent' && days >= THRESHOLDS.wl2) {

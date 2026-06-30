@@ -24,6 +24,7 @@
  */
 
 import type { FastifyInstance } from 'fastify'
+import Anthropic from '@anthropic-ai/sdk'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { logAction } from '../../lib/audit-service.js'
 
@@ -69,6 +70,7 @@ function readinessTier(score: number): string {
 export default async function successionRoutes(fastify: FastifyInstance) {
   const { supabase } = fastify
   const hrAuth = { preHandler: [fastify.authenticate, requireRole(...HR_ADMIN_ROLES)] }
+  const ai     = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
 
   // ── Dashboard ─────────────────────────────────────────────────────────────
 
@@ -430,5 +432,256 @@ export default async function successionRoutes(fastify: FastifyInstance) {
 
     if (error) return reply.status(500).send({ error: error.message })
     return reply.send({ data: { deleted: true } })
+  })
+
+  // ── IDP AI generator ──────────────────────────────────────────────────────
+
+  fastify.post('/plans/:id/candidates/:cid/idp/ai-generate', hrAuth, async (req: any, reply) => {
+    const tenantId = req.tenantId
+    const { cid }  = req.params as { id: string; cid: string }
+
+    const { data: candidate } = await supabase
+      .from('succession_candidates')
+      .select(`strengths, gaps, readiness_level, development_plan,
+        employees!succession_candidates_employee_id_fkey(first_name, last_name, designation, department)`)
+      .eq('tenant_id', tenantId)
+      .eq('id', cid)
+      .single()
+
+    if (!candidate) return reply.status(404).send({ error: 'Candidate not found' })
+    const c = candidate as any
+
+    const msg = await ai.messages.create({
+      model:      'claude-haiku-4-5-20251001',
+      max_tokens: 800,
+      system: 'You are an HR succession planning expert. Generate practical IDP actions. Return ONLY a JSON array of objects with keys: action_type (course|stretch|mentoring|project|certification), description (concise action, max 120 chars), target_months (number).',
+      messages: [{
+        role:    'user',
+        content: `Generate 5 IDP actions for:\nName: ${c.employees?.first_name} ${c.employees?.last_name}\nRole: ${c.employees?.designation} (${c.employees?.department})\nReadiness: ${c.readiness_level}\nStrengths: ${c.strengths || 'N/A'}\nGaps: ${c.gaps || 'N/A'}\nCurrent plan: ${c.development_plan || 'None'}`,
+      }],
+    })
+
+    const raw = msg.content[0]?.type === 'text' ? msg.content[0].text.trim() : '[]'
+    let actions: any[] = []
+    try { actions = JSON.parse(raw.replace(/```json|```/g, '').trim()) } catch (_) {}
+
+    return reply.send({ data: actions })
+  })
+
+  // ── What-If scenario ──────────────────────────────────────────────────────
+
+  fastify.post('/what-if', hrAuth, async (req: any, reply) => {
+    const tenantId = req.tenantId
+    const { departing_employee_id } = req.body as { departing_employee_id: string }
+    if (!departing_employee_id) return reply.status(400).send({ error: 'departing_employee_id is required' })
+
+    // Find succession plans where this employee is the incumbent
+    const { data: plans } = await supabase
+      .from('succession_plans')
+      .select(`id, position_title, department, risk_level, status`)
+      .eq('tenant_id', tenantId)
+      .eq('incumbent_id', departing_employee_id)
+      .eq('status', 'active')
+
+    if (!plans?.length) {
+      return reply.send({ data: { plans: [], message: 'No active succession plans for this employee' } })
+    }
+
+    const planIds = plans.map(p => p.id)
+    const { data: candidates } = await supabase
+      .from('succession_candidates')
+      .select(`id, plan_id, readiness_level, readiness_score,
+        score_performance, score_skill_gap, score_leadership, score_mobility, score_tenure, score_attrition_risk,
+        employees!succession_candidates_employee_id_fkey(id, first_name, last_name, designation)`)
+      .eq('tenant_id', tenantId)
+      .in('plan_id', planIds)
+
+    const candsByPlan: Record<string, any[]> = {}
+    for (const c of candidates ?? []) {
+      if (!candsByPlan[c.plan_id]) candsByPlan[c.plan_id] = []
+      candsByPlan[c.plan_id].push({ ...c, weighted_score: computeWeightedScore(c) })
+    }
+
+    const result = plans.map(plan => ({
+      plan,
+      top_successor:    (candsByPlan[plan.id] ?? []).sort((a, b) => b.weighted_score - a.weighted_score)[0] ?? null,
+      ready_now_count:  (candsByPlan[plan.id] ?? []).filter(c => c.readiness_level === 'ready_now').length,
+      coverage_risk:    (candsByPlan[plan.id] ?? []).length === 0 ? 'critical' : plan.risk_level,
+    }))
+
+    return reply.send({ data: result })
+  })
+
+  // ── Calibration sessions ──────────────────────────────────────────────────
+
+  fastify.get('/calibration', hrAuth, async (req: any, reply) => {
+    const tenantId = req.tenantId
+    const { data, error } = await supabase
+      .from('calibration_sessions')
+      .select('id, title, status, created_at, created_by, closed_at')
+      .eq('tenant_id', tenantId)
+      .order('created_at', { ascending: false })
+    if (error) return reply.status(500).send({ error: error.message })
+    return reply.send({ data: data ?? [] })
+  })
+
+  fastify.post('/calibration', hrAuth, async (req: any, reply) => {
+    const tenantId = req.tenantId
+    const { title, participants } = req.body as { title: string; participants?: string[] }
+    if (!title?.trim()) return reply.status(400).send({ error: 'title is required' })
+
+    const { data, error } = await supabase
+      .from('calibration_sessions')
+      .insert({
+        tenant_id:    tenantId,
+        title:        title.trim(),
+        participants: participants ?? [],
+        status:       'open',
+        created_by:   req.user.id,
+      })
+      .select('id')
+      .single()
+
+    if (error) return reply.status(500).send({ error: error.message })
+    return reply.status(201).send({ data })
+  })
+
+  fastify.get('/calibration/:sessionId', hrAuth, async (req: any, reply) => {
+    const { sessionId } = req.params as { sessionId: string }
+    const tenantId      = req.tenantId
+
+    const [sessionResult, changesResult] = await Promise.all([
+      supabase.from('calibration_sessions')
+        .select('id, title, status, created_at, participants, closed_at')
+        .eq('id', sessionId).eq('tenant_id', tenantId).single(),
+      supabase.from('calibration_changes')
+        .select(`id, field_changed, old_value, new_value, notes, created_at,
+          employees!calibration_changes_candidate_id_fkey(first_name, last_name, employee_code)`)
+        .eq('session_id', sessionId).eq('tenant_id', tenantId)
+        .order('created_at', { ascending: false }),
+    ])
+
+    if (sessionResult.error || !sessionResult.data) return reply.status(404).send({ error: 'Session not found' })
+    return reply.send({ data: { ...sessionResult.data, changes: changesResult.data ?? [] } })
+  })
+
+  fastify.post('/calibration/:sessionId/changes', hrAuth, async (req: any, reply) => {
+    const { sessionId } = req.params as { sessionId: string }
+    const tenantId      = req.tenantId
+    const { candidate_id, field_changed, old_value, new_value, notes } = req.body as any
+    if (!candidate_id || !field_changed) return reply.status(400).send({ error: 'candidate_id and field_changed required' })
+
+    const { data, error } = await supabase
+      .from('calibration_changes')
+      .insert({
+        session_id:    sessionId,
+        tenant_id:     tenantId,
+        changed_by:    req.user.id,
+        candidate_id,
+        field_changed,
+        old_value:     old_value ?? null,
+        new_value:     new_value ?? null,
+        notes:         notes ?? null,
+      })
+      .select('id')
+      .single()
+
+    if (error) return reply.status(500).send({ error: error.message })
+
+    // Apply the change to the candidate record
+    if (field_changed && new_value !== undefined) {
+      const validFields = ['readiness_level','score_performance','score_skill_gap','score_leadership','score_mobility','score_tenure','score_attrition_risk','nine_box_performance','nine_box_potential']
+      if (validFields.includes(field_changed)) {
+        await supabase.from('succession_candidates')
+          .update({ [field_changed]: new_value })
+          .eq('id', candidate_id).eq('tenant_id', tenantId)
+      }
+    }
+
+    return reply.status(201).send({ data })
+  })
+
+  fastify.patch('/calibration/:sessionId/close', hrAuth, async (req: any, reply) => {
+    const { sessionId } = req.params as { sessionId: string }
+    const { error } = await supabase
+      .from('calibration_sessions')
+      .update({ status: 'closed', closed_at: new Date().toISOString() })
+      .eq('id', sessionId).eq('tenant_id', req.tenantId)
+    if (error) return reply.status(500).send({ error: error.message })
+    return reply.send({ data: { closed: true } })
+  })
+
+  // ── Mentor matching ────────────────────────────────────────────────────────
+
+  fastify.get('/mentor-match/:candidateId', hrAuth, async (req: any, reply) => {
+    const { candidateId } = req.params as { candidateId: string }
+    const tenantId        = req.tenantId
+
+    const { data: candidate } = await supabase
+      .from('succession_candidates')
+      .select('gaps, employees!succession_candidates_employee_id_fkey(department, designation)')
+      .eq('id', candidateId).eq('tenant_id', tenantId).single()
+
+    if (!candidate) return reply.status(404).send({ error: 'Candidate not found' })
+
+    const { data: mentors } = await supabase
+      .from('mentor_profiles')
+      .select(`id, skill_tags, max_mentees, current_mentees, available, engagement_score,
+        employees!mentor_profiles_employee_id_fkey(id, first_name, last_name, designation, department)`)
+      .eq('tenant_id', tenantId)
+      .eq('available', true)
+      .lt('current_mentees', supabase.raw ? 'max_mentees' : 9999) // filter client-side below
+
+    const cGaps: string[] = ((candidate as any).gaps ?? '').toLowerCase().split(/[,\s]+/).filter(Boolean)
+
+    const scored = ((mentors ?? []) as any[])
+      .filter(m => m.current_mentees < m.max_mentees)
+      .map(m => {
+        const tags: string[] = m.skill_tags ?? []
+        const overlap = tags.filter(t => cGaps.some(g => t.toLowerCase().includes(g))).length
+        return { ...m, match_score: overlap * 10 + (m.engagement_score ?? 0) }
+      })
+      .sort((a, b) => b.match_score - a.match_score)
+      .slice(0, 5)
+
+    return reply.send({ data: scored })
+  })
+
+  // ── 9-Box auto-plot from appraisal data ───────────────────────────────────
+
+  fastify.post('/nine-box/auto-plot', hrAuth, async (req: any, reply) => {
+    const tenantId = req.tenantId
+
+    // Fetch candidates with appraisal data
+    const { data: candidates } = await supabase
+      .from('succession_candidates')
+      .select('id, employee_id')
+      .eq('tenant_id', tenantId)
+
+    if (!candidates?.length) return reply.send({ data: { plotted: 0 } })
+
+    let plotted = 0
+    for (const c of candidates as any[]) {
+      // Get latest appraisal score
+      const { data: appraisal } = await supabase
+        .from('appraisals')
+        .select('final_rating, potential_rating')
+        .eq('employee_id', c.employee_id)
+        .eq('tenant_id', tenantId)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+
+      if (!appraisal) continue
+      const perf      = Math.min(3, Math.max(1, Math.ceil(((appraisal as any).final_rating ?? 3) / (10 / 3))))
+      const potential = Math.min(3, Math.max(1, Math.ceil(((appraisal as any).potential_rating ?? 2) / (10 / 3))))
+
+      await supabase.from('succession_candidates')
+        .update({ nine_box_performance: perf, nine_box_potential: potential })
+        .eq('id', c.id).eq('tenant_id', tenantId)
+      plotted++
+    }
+
+    return reply.send({ data: { plotted } })
   })
 }

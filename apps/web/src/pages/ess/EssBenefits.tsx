@@ -26,7 +26,7 @@ import { cn }  from '@/lib/utils'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
-type PlanType = 'health' | 'term_life' | 'accident' | 'wellness' | 'meal' | 'transport' | 'other'
+type PlanType = 'health' | 'term_life' | 'accident' | 'wellness' | 'meal' | 'transport' | 'nps' | 'other'
 
 interface Plan {
   id: string
@@ -41,6 +41,8 @@ interface Plan {
   enrollment_opens_at: string | null
   enrollment_closes_at: string | null
   is_open: boolean
+  is_esic?: boolean
+  is_nps?: boolean
 }
 
 interface Enrollment {
@@ -66,6 +68,7 @@ const PLAN_META: Record<PlanType, { label: string; icon: React.ComponentType<{ c
   wellness:  { label: 'Wellness',      icon: Sparkles,   tint: 'text-success bg-success/10 border-success/30' },
   meal:      { label: 'Meal',          icon: Utensils,   tint: 'text-accent-coral bg-accent-coral/10 border-accent-coral/30' },
   transport: { label: 'Transport',     icon: Bus,        tint: 'text-accent-teal bg-accent-teal/10 border-accent-teal/30' },
+  nps:       { label: 'NPS',           icon: Shield,     tint: 'text-purple-600 bg-purple-50 border-purple-200' },
   other:     { label: 'Benefit',       icon: Gift,       tint: 'text-accent-violet bg-accent-violet/10 border-accent-violet/30' },
 }
 
@@ -159,6 +162,16 @@ export function EssBenefits() {
                     ) : null}
                   </div>
 
+                  {plan.is_esic && (
+                    <div className="mt-1 rounded-md border border-blue-200 bg-blue-50 px-2 py-1 text-[10px] text-blue-700 font-medium">
+                      ESIC — Statutory benefit for eligible employees (gross ≤ ₹21,000)
+                    </div>
+                  )}
+                  {plan.is_nps && (
+                    <div className="mt-1 rounded-md border border-purple-200 bg-purple-50 px-2 py-1 text-[10px] text-purple-700 font-medium">
+                      National Pension Scheme (NPS)
+                    </div>
+                  )}
                   <p className="mt-2 text-sm font-semibold text-foreground">{plan.name}</p>
                   <p className="text-[11px] text-muted-foreground">{meta.label}{plan.provider ? ` · ${plan.provider}` : ''}</p>
 

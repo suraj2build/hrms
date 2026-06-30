@@ -11,6 +11,7 @@ import {
   Users, TrendingUp, AlertTriangle, Shield,
   Plus, ChevronRight, Loader2, UserCheck, Clock, Target,
   Edit2, Trash2, X, CheckCircle2, Brain, Award, Layers,
+  Sparkles, GitFork,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { PageContainer } from '@/components/layout/PageContainer'
@@ -476,6 +477,13 @@ function IDPSection({
     onError:   (e: Error) => toast.error('Failed', { description: e.message }),
   })
 
+  const aiGenerateMut = useMutation({
+    mutationFn: () =>
+      api.post(`/succession/plans/${planId}/candidates/${candidate.id}/idp/ai-generate`, {}),
+    onSuccess: () => { invalidate(); toast.success('AI IDP actions generated') },
+    onError:   (e: Error) => toast.error('AI generation failed', { description: e.message }),
+  })
+
   return (
     <div className="mt-3 rounded-lg border border-border/50 bg-muted/10">
       <div className="flex items-center justify-between px-3 py-2 border-b border-border/40">
@@ -486,12 +494,25 @@ function IDPSection({
             <span className="text-[10px] font-normal text-muted-foreground">({actions.length})</span>
           )}
         </span>
-        <button
-          onClick={() => setAddOpen(v => !v)}
-          className="text-[10px] text-primary hover:underline"
-        >
-          + Add
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => aiGenerateMut.mutate()}
+            disabled={aiGenerateMut.isPending}
+            title="Generate IDP actions using AI"
+            className="flex items-center gap-0.5 text-[10px] text-purple-600 hover:underline disabled:opacity-50"
+          >
+            {aiGenerateMut.isPending
+              ? <Loader2 className="h-3 w-3 animate-spin" />
+              : <Sparkles className="h-3 w-3" />}
+            AI Generate
+          </button>
+          <button
+            onClick={() => setAddOpen(v => !v)}
+            className="text-[10px] text-primary hover:underline"
+          >
+            + Add
+          </button>
+        </div>
       </div>
 
       {addOpen && (
@@ -700,7 +721,17 @@ function ScorecardSection({
 
 // ── Tab type ──────────────────────────────────────────────────────────────────
 
-type Tab = 'plans' | 'nine-box' | 'ai-recommendations'
+type Tab = 'plans' | 'nine-box' | 'ai-recommendations' | 'what-if'
+
+interface WhatIfResult {
+  departing_employee: { id: string; name: string; employee_code: string }
+  affected_plans: {
+    plan_id: string
+    position_title: string
+    risk_level: RiskLevel
+    top_candidates: { id: string; name: string; readiness_level: ReadinessLevel; readiness_score: number | null }[]
+  }[]
+}
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
@@ -721,6 +752,10 @@ export function AdminSuccession() {
   const [detailId, setDetailId]     = useState<string | null>(null)
   const [addCandOpen, setAddCandOpen] = useState(false)
   const [candForm, setCandForm]     = useState(emptyCandidateForm)
+
+  // What-If scenario
+  const [whatIfEmpId, setWhatIfEmpId]       = useState<string | null>(null)
+  const [whatIfResult, setWhatIfResult]     = useState<WhatIfResult | null>(null)
 
   // Candidate scorecard edit dialog
   const [scorecardCand, setScorecardCand]   = useState<Candidate | null>(null)
@@ -857,6 +892,14 @@ export function AdminSuccession() {
     onError: (e: Error) => toast.error('Failed to update scorecard', { description: e.message }),
   })
 
+  const whatIfMut = useMutation({
+    mutationFn: (empId: string) =>
+      api.post<{ data: WhatIfResult }>('/succession/what-if', { departing_employee_id: empId })
+        .then(r => r.data),
+    onSuccess: (result) => { setWhatIfResult(result) },
+    onError:   (e: Error) => toast.error('What-if analysis failed', { description: e.message }),
+  })
+
   // ── Handlers ───────────────────────────────────────────────────────────────
 
   const handleCreatePlan = () => {
@@ -937,6 +980,7 @@ export function AdminSuccession() {
     { id: 'plans',            label: 'Plans',             icon: <TrendingUp className="h-3.5 w-3.5" /> },
     { id: 'nine-box',         label: '9-Box Grid',        icon: <Layers className="h-3.5 w-3.5" /> },
     { id: 'ai-recommendations', label: 'AI Recommendations', icon: <Brain className="h-3.5 w-3.5" /> },
+    { id: 'what-if',          label: 'What-If Scenario',  icon: <GitFork className="h-3.5 w-3.5" /> },
   ]
 
   // ── Render ─────────────────────────────────────────────────────────────────
@@ -1137,6 +1181,85 @@ export function AdminSuccession() {
           ) : (
             <AIRecommendationsPanel data={aiRecs} />
           )}
+        </SectionCard>
+      )}
+
+      {/* ── What-If Scenario tab ────────────────────────────────────────────── */}
+      {activeTab === 'what-if' && (
+        <SectionCard
+          title="What-If Scenario"
+          description="Simulate the impact of a key employee departure on your succession coverage"
+        >
+          <div className="space-y-4 max-w-lg">
+            <div>
+              <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Select departing employee</label>
+              <EmployeeSelector
+                value={whatIfEmpId ?? undefined}
+                onChange={v => {
+                  setWhatIfEmpId(typeof v === 'string' ? v : null)
+                  setWhatIfResult(null)
+                }}
+                placeholder="Search employee by name or code…"
+              />
+            </div>
+            <Button
+              size="sm"
+              disabled={!whatIfEmpId || whatIfMut.isPending}
+              onClick={() => whatIfEmpId && whatIfMut.mutate(whatIfEmpId)}
+            >
+              {whatIfMut.isPending
+                ? <><Loader2 className="h-4 w-4 animate-spin mr-1.5" />Analysing…</>
+                : <><GitFork className="h-4 w-4 mr-1.5" />Run Analysis</>}
+            </Button>
+
+            {whatIfResult && (
+              <div className="mt-2 space-y-3">
+                <p className="text-sm font-medium text-foreground">
+                  Impact analysis — departure of{' '}
+                  <span className="text-primary">{whatIfResult.departing_employee.name}</span>
+                  <span className="text-muted-foreground text-xs ml-1">({whatIfResult.departing_employee.employee_code})</span>
+                </p>
+
+                {whatIfResult.affected_plans.length === 0 ? (
+                  <p className="text-sm text-muted-foreground rounded-lg border border-dashed border-border p-4 text-center">
+                    No succession plans are affected by this departure.
+                  </p>
+                ) : (
+                  <div className="space-y-3">
+                    {whatIfResult.affected_plans.map(plan => (
+                      <div key={plan.plan_id} className="rounded-lg border border-border overflow-hidden">
+                        <div className="flex items-center justify-between px-3 py-2 bg-muted/20">
+                          <p className="text-xs font-medium">{plan.position_title}</p>
+                          <span className={cn(
+                            'inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium',
+                            riskBadgeClass(plan.risk_level),
+                          )}>
+                            {riskLabel(plan.risk_level)} Risk
+                          </span>
+                        </div>
+                        {plan.top_candidates.length === 0 ? (
+                          <p className="text-[11px] text-destructive px-3 py-2 italic">No successors identified — gap risk!</p>
+                        ) : (
+                          <div className="divide-y divide-border/30">
+                            {plan.top_candidates.map((tc, i) => (
+                              <div key={tc.id} className="flex items-center gap-2 px-3 py-1.5">
+                                <span className="text-[10px] text-muted-foreground w-4">#{i + 1}</span>
+                                <span className="text-xs font-medium flex-1">{tc.name}</span>
+                                <ReadinessBadge level={tc.readiness_level} />
+                                {tc.readiness_score != null && (
+                                  <span className="text-[10px] text-muted-foreground">{tc.readiness_score}</span>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         </SectionCard>
       )}
 

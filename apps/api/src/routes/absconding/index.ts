@@ -424,4 +424,60 @@ export default async function abscondingRoutes(fastify: FastifyInstance) {
       },
     })
   })
+
+  // ── GET /absconding/cases/:caseId/letters/:letterId/download ─────────────
+
+  fastify.get('/cases/:caseId/letters/:letterId/download', hrAuth, async (req: any, reply) => {
+    const { caseId, letterId } = req.params as { caseId: string; letterId: string }
+
+    const { data: letter, error } = await fastify.supabase
+      .from('letters')
+      .select('pdf_url, template_code, employee_id')
+      .eq('id', letterId)
+      .eq('tenant_id', req.tenantId)
+      .maybeSingle()
+
+    if (error || !letter) return reply.code(404).send({ error: 'Letter not found' })
+
+    // Verify the letter belongs to the case
+    const { data: caseRow } = await fastify.supabase
+      .from('absconding_cases')
+      .select('employee_id')
+      .eq('id', caseId)
+      .eq('tenant_id', req.tenantId)
+      .single()
+
+    if (!caseRow || (caseRow as any).employee_id !== (letter as any).employee_id) {
+      return reply.code(403).send({ error: 'Letter does not belong to this case' })
+    }
+
+    const pdfUrl = (letter as any).pdf_url
+    if (!pdfUrl) {
+      return reply.code(404).send({ error: 'PDF not generated for this letter', template_code: (letter as any).template_code })
+    }
+
+    return reply.send({ data: { pdf_url: pdfUrl } })
+  })
+
+  // ── PATCH /absconding/cases/:caseId/asset-recovery ───────────────────────
+
+  fastify.patch('/cases/:caseId/asset-recovery', hrAuth, async (req: any, reply) => {
+    const { caseId } = req.params as { caseId: string }
+    const { required, notes } = req.body as { required?: boolean; notes?: string }
+
+    const update: Record<string, unknown> = {}
+    if (required !== undefined) update.asset_recovery_required = required
+    if (notes !== undefined)    update.asset_recovery_notes = notes
+
+    if (Object.keys(update).length === 0) return reply.code(400).send({ error: 'Nothing to update' })
+
+    const { error } = await fastify.supabase
+      .from('absconding_cases')
+      .update(update)
+      .eq('id', caseId)
+      .eq('tenant_id', req.tenantId)
+
+    if (error) return reply.code(500).send({ error: error.message })
+    return reply.send({ data: { updated: true } })
+  })
 }

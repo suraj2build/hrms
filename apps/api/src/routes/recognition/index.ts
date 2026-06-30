@@ -12,6 +12,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { WhatsAppProvider } from '../../lib/whatsapp-provider.js'
 
 const DEFAULT_BADGES = [
   { code: 'ownership_champion', label: 'Ownership Champion', icon: 'Award',     description: 'Takes end-to-end ownership',          points: 15 },
@@ -263,7 +264,6 @@ export default async function recognitionRoutes(fastify: FastifyInstance) {
     if (error) return reply.code(500).send({ error: 'INSERT_FAILED', message: 'Failed to record recognition' })
 
     // Public recognition also flows into the Community feed (blueprint intent).
-    // Best-effort: a feed failure must not fail the recognition itself.
     if (parsed.data.visibility === 'public') {
       const toName = `${(recipient as any).first_name ?? ''} ${(recipient as any).last_name ?? ''}`.trim() || 'a colleague'
       await fastify.supabase.from('feed_posts').insert({
@@ -271,8 +271,26 @@ export default async function recognitionRoutes(fastify: FastifyInstance) {
         author_employee: fromEmployee,
         type:            'recognition',
         title:           badgeLabel,
-        body:            `👏 Recognized ${toName}${parsed.data.message ? ` — ${parsed.data.message}` : ''}`,
+        body:            `Recognized ${toName}${parsed.data.message ? ` — ${parsed.data.message}` : ''}`,
       }).then(undefined, () => { /* feed best-effort */ })
+    }
+
+    // WhatsApp notification to recipient if they have a phone
+    if (parsed.data.badge_code) {
+      const { data: empRow } = await fastify.supabase
+        .from('employees')
+        .select('phone, first_name')
+        .eq('id', parsed.data.to_employee)
+        .eq('tenant_id', req.tenantId)
+        .maybeSingle()
+      if ((empRow as any)?.phone) {
+        const wa = new WhatsAppProvider(fastify.supabase)
+        await wa.sendTemplate(req.tenantId, (empRow as any).phone, 'peer_badge_received', [
+          (empRow as any).first_name ?? 'Team member',
+          badgeLabel ?? parsed.data.badge_code,
+          parsed.data.message,
+        ])
+      }
     }
 
     return reply.code(201).send({ data })
@@ -509,13 +527,15 @@ export default async function recognitionRoutes(fastify: FastifyInstance) {
   })
 
   fastify.post('/recognition/admin/awards/:awardId/rounds/:roundId/declare-winner', hrAuth, async (req: any, reply) => {
-    const { roundId } = req.params as { awardId: string; roundId: string }
+    const { awardId, roundId } = req.params as { awardId: string; roundId: string }
     const { winner_employee_id, winner_notes } = req.body as any
     if (!winner_employee_id) return reply.code(400).send({ error: 'winner_employee_id is required' })
     // Update the round
-    const { error: re } = await fastify.supabase.from('award_rounds')
+    const { data: round, error: re } = await fastify.supabase.from('award_rounds')
       .update({ status: 'closed', winner_employee_id, winner_notes: winner_notes || null, declared_at: new Date().toISOString(), declared_by: req.userId })
       .eq('tenant_id', req.tenantId).eq('id', roundId)
+      .select('period_label, formal_awards!award_rounds_award_id_fkey(name)')
+      .single()
     if (re) return reply.code(500).send({ error: re.message })
     // Mark winning nomination
     await fastify.supabase.from('award_nominations')
@@ -525,6 +545,18 @@ export default async function recognitionRoutes(fastify: FastifyInstance) {
     await fastify.supabase.from('award_nominations')
       .update({ status: 'not_selected', reviewed_at: new Date().toISOString(), reviewed_by: req.userId })
       .eq('tenant_id', req.tenantId).eq('round_id', roundId).eq('status', 'pending')
+    // WhatsApp to winner
+    const { data: winner } = await fastify.supabase
+      .from('employees').select('phone, first_name').eq('id', winner_employee_id).eq('tenant_id', req.tenantId).maybeSingle()
+    if ((winner as any)?.phone) {
+      const wa = new WhatsAppProvider(fastify.supabase)
+      const awardName = (round as any)?.formal_awards?.name ?? 'award'
+      await wa.sendTemplate(req.tenantId, (winner as any).phone, 'award_winner', [
+        (winner as any).first_name ?? 'Team member',
+        awardName,
+        (round as any)?.period_label ?? '',
+      ])
+    }
     return reply.send({ data: { winner_declared: true } })
   })
 
@@ -568,6 +600,57 @@ export default async function recognitionRoutes(fastify: FastifyInstance) {
     const { error } = await fastify.supabase.from('award_nominations').update(update).eq('tenant_id', req.tenantId).eq('id', nomId)
     if (error) return reply.code(500).send({ error: error.message })
     return reply.send({ data: { updated: true } })
+  })
+
+  // ── Admin: multi-level nomination approval ───────────────────────────────────
+  // Level 1 approval (HR admin), level 2 approval (owner/CHRO)
+
+  fastify.post('/recognition/admin/nominations/:nomId/approve', hrAuth, async (req: any, reply) => {
+    const { nomId } = req.params as { nomId: string }
+    const schema = z.object({
+      level:   z.enum(['1', '2']),
+      approve: z.boolean(),
+      notes:   z.string().max(1000).optional(),
+    })
+    const parsed = schema.safeParse(req.body)
+    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+
+    const { level, approve, notes } = parsed.data
+    const now = new Date().toISOString()
+
+    const { data: nom, error: fetchErr } = await fastify.supabase
+      .from('award_nominations')
+      .select('id, status, nominee_id, approval_level')
+      .eq('tenant_id', req.tenantId)
+      .eq('id', nomId)
+      .maybeSingle()
+
+    if (fetchErr || !nom) return reply.code(404).send({ error: 'Nomination not found' })
+
+    let update: Record<string, unknown> = {}
+    if (level === '1') {
+      if (!approve) {
+        update = { status: 'not_selected', reviewed_at: now, reviewed_by: req.userId, approval_level: 0 }
+      } else {
+        update = { status: 'level_2_pending', approved_by_l1: req.userId, l1_approved_at: now, approval_level: 1 }
+      }
+    } else {
+      if (!approve) {
+        update = { status: 'not_selected', reviewed_at: now, reviewed_by: req.userId }
+      } else {
+        update = { status: 'shortlisted', approved_by_l2: req.userId, l2_approved_at: now, reviewed_at: now, reviewed_by: req.userId, approval_level: 2 }
+      }
+    }
+
+    const { error: upErr } = await fastify.supabase
+      .from('award_nominations')
+      .update(update)
+      .eq('tenant_id', req.tenantId)
+      .eq('id', nomId)
+
+    if (upErr) return reply.code(500).send({ error: upErr.message })
+
+    return reply.send({ data: { ok: true, new_status: update.status ?? 'unchanged' } })
   })
 
   // ── ESS: view open award rounds for nomination ─────────────────────────────

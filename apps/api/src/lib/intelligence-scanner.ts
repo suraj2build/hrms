@@ -5,15 +5,25 @@
  * operational intelligence events so event-bus-automation subscribers
  * can write audit logs and notify HR managers.
  *
- * Eight scan targets (each runs per-tenant):
- *   1. Repeated late arrival patterns  → repeated.late.pattern.detected
- *   2. Burnout risk (OT + no weekly-off) → burnout.risk.detected
- *   3. Staffing shortages              → staffing.shortage.detected
- *   4. Payroll blockers (upcoming run) → payroll.blocker.detected
- *   5. Attendance risk score           → attendance.risk.detected
- *   6. Compliance filing deadlines     → compliance.deadline.alert
- *   7. Lifecycle expiry (contracts, docs, probation) → lifecycle.expiry.alert
- *   8. Exit intent survey auto-trigger → HR inbox notification + survey_assignment
+ * Eighteen scan targets (each runs per-tenant):
+ *   1.  Repeated late arrival patterns  → repeated.late.pattern.detected
+ *   2.  Burnout risk (OT + no weekly-off) → burnout.risk.detected
+ *   3.  Staffing shortages              → staffing.shortage.detected
+ *   4.  Payroll blockers (upcoming run) → payroll.blocker.detected
+ *   5.  Attendance risk score           → attendance.risk.detected
+ *   6.  Compliance filing deadlines     → compliance.deadline.alert
+ *   7.  Lifecycle expiry (contracts, docs, probation) → lifecycle.expiry.alert
+ *   8.  Exit intent survey auto-trigger → HR inbox + survey_assignment
+ *   9.  Auto polls (event-based: onboarding D30/60/90, post-transfer, post-appraisal)
+ *   10. Mood theme alerts (3+ employees same store, same LLM theme, negative)
+ *   11. Benefits enrolment open/close transitions
+ *   12. New joiner mandatory policy assignment
+ *   13. Onboarding surveys (D30/60/90 auto-assign)
+ *   14. Post-appraisal surveys (3-day window)
+ *   15. Post-transfer surveys (14-day window)
+ *   16. Survey negative cluster detection
+ *   17. Onboarding score degradation signal
+ *   18. Succession candidate attrition risk cross-check
  *
  * Architecture:
  *   - Scans every SCAN_INTERVAL_MS (6 hours)
@@ -693,6 +703,439 @@ async function scanExitIntentSurveys(supabase: SupabaseClient, tenantId: string)
   })
 }
 
+// ── Helpers for survey auto-trigger ──────────────────────────────────────────
+
+/** Find or create an active survey of the given type from the system template. */
+async function findOrCreateSurvey(
+  supabase: SupabaseClient, tenantId: string, surveyType: string,
+): Promise<string | null> {
+  const { data: active } = await supabase
+    .from('surveys').select('id')
+    .eq('tenant_id', tenantId).eq('survey_type', surveyType).eq('status', 'active')
+    .order('created_at', { ascending: false }).limit(1)
+
+  if (active?.[0]?.id) return active[0].id
+
+  const { data: tmpl } = await supabase
+    .from('survey_templates').select('name, description, questions')
+    .eq('survey_type', surveyType).maybeSingle()
+  if (!tmpl) return null
+
+  const due = new Date(); due.setDate(due.getDate() + 14)
+  const { data: newS } = await supabase.from('surveys').insert({
+    tenant_id: tenantId, title: tmpl.name, description: tmpl.description,
+    status: 'active', survey_type: surveyType, is_anonymous: false,
+    due_date: due.toISOString().slice(0, 10),
+  }).select('id').single()
+  if (!newS) return null
+
+  const qRows = ((tmpl.questions as any[]) ?? []).map((q: any) => ({
+    ...q, survey_id: newS.id, tenant_id: tenantId,
+  }))
+  if (qRows.length) await supabase.from('survey_questions').insert(qRows)
+  return newS.id
+}
+
+/** Auto-assign a survey to employees, honouring cooldownDays. */
+async function autoAssignSurvey(
+  supabase: SupabaseClient, tenantId: string, surveyId: string,
+  employeeIds: string[], surveyType: string, cooldownDays: number,
+): Promise<string[]> {
+  if (!employeeIds.length) return []
+
+  const cooldownFrom = new Date(); cooldownFrom.setDate(cooldownFrom.getDate() - cooldownDays)
+
+  const { data: allSurveys } = await supabase.from('surveys').select('id')
+    .eq('tenant_id', tenantId).eq('survey_type', surveyType)
+  const surveyIds = (allSurveys ?? []).map((s: any) => s.id as string)
+
+  const alreadyAssigned = new Set<string>()
+  if (surveyIds.length) {
+    const { data: recent } = await supabase.from('survey_assignments').select('employee_id')
+      .in('survey_id', surveyIds).in('employee_id', employeeIds)
+      .gte('assigned_at', cooldownFrom.toISOString())
+    for (const a of (recent ?? []) as any[]) alreadyAssigned.add(a.employee_id)
+  }
+
+  const toAssign = employeeIds.filter(id => !alreadyAssigned.has(id))
+  if (!toAssign.length) return []
+
+  await supabase.from('survey_assignments').upsert(
+    toAssign.map(empId => ({ survey_id: surveyId, employee_id: empId, tenant_id: tenantId, respondent_type: 'self' })),
+    { onConflict: 'survey_id,employee_id', ignoreDuplicates: true },
+  )
+  return toAssign
+}
+
+// ── Scanner 9 — Auto polls (event-based) ─────────────────────────────────────
+
+async function scanAutoPolls(supabase: SupabaseClient, tenantId: string): Promise<void> {
+  const today = new Date().toISOString().slice(0, 10)
+
+  // Post-appraisal polls (3 days after completion)
+  const appraisalDate = new Date(); appraisalDate.setDate(appraisalDate.getDate() - 3)
+  const appraisalDateStr = appraisalDate.toISOString().slice(0, 10)
+  const { data: appraisals } = await supabase
+    .from('performance_appraisals').select('employee_id')
+    .eq('tenant_id', tenantId).eq('status', 'completed')
+    .gte('completed_at', `${appraisalDateStr}T00:00:00Z`)
+    .lte('completed_at', `${appraisalDateStr}T23:59:59Z`)
+  if (appraisals?.length) {
+    const key = `auto-poll:post_appraisal:${tenantId}:${today}`
+    if (shouldEmit(key)) {
+      const empIds = (appraisals as any[]).map((a: any) => a.employee_id as string)
+      const surveyId = await findOrCreateSurvey(supabase, tenantId, 'post_appraisal')
+      if (surveyId) await autoAssignSurvey(supabase, tenantId, surveyId, empIds, 'post_appraisal', 90)
+    }
+  }
+
+  // Post-transfer polls (14 days after transfer)
+  const transferDate = new Date(); transferDate.setDate(transferDate.getDate() - 14)
+  const { data: transfers } = await supabase
+    .from('employee_transfers').select('employee_id')
+    .eq('tenant_id', tenantId)
+    .eq('effective_date', transferDate.toISOString().slice(0, 10))
+  if (transfers?.length) {
+    const key = `auto-poll:post_transfer:${tenantId}:${today}`
+    if (shouldEmit(key)) {
+      const empIds = (transfers as any[]).map((t: any) => t.employee_id as string)
+      const surveyId = await findOrCreateSurvey(supabase, tenantId, 'post_transfer')
+      if (surveyId) await autoAssignSurvey(supabase, tenantId, surveyId, empIds, 'post_transfer', 90)
+    }
+  }
+}
+
+// ── Scanner 10 — Mood theme alerts ───────────────────────────────────────────
+
+async function scanMoodThemeAlerts(supabase: SupabaseClient, tenantId: string): Promise<void> {
+  const sevenDaysAgo = new Date(); sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7)
+  const week = `${new Date().getFullYear()}-W${String(Math.ceil(new Date().getDate() / 7)).padStart(2, '0')}`
+
+  const { data: checkins } = await supabase
+    .from('mood_checkins').select('employee_id, sentiment_category, employees!inner(work_location_id, tenant_id)')
+    .eq('tenant_id', tenantId).eq('sentiment_label', 'negative')
+    .gte('checkin_date', sevenDaysAgo.toISOString().slice(0, 10))
+    .not('sentiment_category', 'is', null)
+
+  if (!checkins?.length) return
+
+  // Group by location + category
+  const groups = new Map<string, { locationId: string; category: string; employees: Set<string> }>()
+  for (const c of checkins as any[]) {
+    const locationId = c.employees?.work_location_id
+    const category   = c.sentiment_category
+    if (!locationId || !category) continue
+    const key = `${locationId}:${category}`
+    if (!groups.has(key)) groups.set(key, { locationId, category, employees: new Set() })
+    groups.get(key)!.employees.add(c.employee_id)
+  }
+
+  for (const [, grp] of groups) {
+    if (grp.employees.size < 3) continue
+    const dedupKey = `mood-theme:${tenantId}:${grp.locationId}:${grp.category}:${week}`
+    if (!shouldEmit(dedupKey)) continue
+
+    await notifyHrAdmins(supabase, {
+      tenantId, item_type: 'general', severity: 'warning',
+      title:    `3+ employees in same location reported ${grp.category} concerns`,
+      summary:  `${grp.employees.size} employees at location ${grp.locationId} logged negative mood with theme "${grp.category}" in the past 7 days.`,
+      entity_type: 'work_location', entity_id: grp.locationId,
+      action_route: '/admin/mood', action_label: 'View Mood Dashboard',
+      metadata: { category: grp.category, employee_count: grp.employees.size, location_id: grp.locationId },
+    })
+  }
+}
+
+// ── Scanner 11 — Benefits enrolment open/close ────────────────────────────────
+
+async function scanBenefitsEnrolment(supabase: SupabaseClient, tenantId: string): Promise<void> {
+  const now = new Date().toISOString()
+
+  // Plans that should open
+  const { data: toOpen } = await supabase.from('benefit_plans')
+    .select('id, name').eq('tenant_id', tenantId).neq('status', 'open')
+    .lte('enrollment_opens_at', now).not('enrollment_opens_at', 'is', null)
+  for (const plan of (toOpen ?? []) as any[]) {
+    const key = `benefits-enrolment-open:${tenantId}:${plan.id}`
+    if (!shouldEmit(key)) continue
+    await supabase.from('benefit_plans').update({ status: 'open' }).eq('id', plan.id)
+    await notifyHrAdmins(supabase, {
+      tenantId, item_type: 'general', severity: 'info',
+      title:    `Benefits enrolment opened: ${plan.name}`,
+      summary:  `The enrolment window for "${plan.name}" is now open. Notify employees to update their coverage.`,
+      entity_type: 'benefit_plan', entity_id: plan.id,
+      action_route: '/admin/benefits', action_label: 'View Benefits',
+    })
+  }
+
+  // Plans that should close
+  const { data: toClose } = await supabase.from('benefit_plans')
+    .select('id, name').eq('tenant_id', tenantId).eq('status', 'open')
+    .lte('enrollment_closes_at', now).not('enrollment_closes_at', 'is', null)
+  for (const plan of (toClose ?? []) as any[]) {
+    const key = `benefits-enrolment-close:${tenantId}:${plan.id}`
+    if (!shouldEmit(key)) continue
+    await supabase.from('benefit_plans').update({ status: 'active' }).eq('id', plan.id)
+    await notifyHrAdmins(supabase, {
+      tenantId, item_type: 'general', severity: 'info',
+      title:    `Benefits enrolment closed: ${plan.name}`,
+      summary:  `The enrolment window for "${plan.name}" has closed.`,
+      entity_type: 'benefit_plan', entity_id: plan.id,
+      action_route: '/admin/benefits', action_label: 'View Benefits',
+    })
+  }
+}
+
+// ── Scanner 12 — New joiner mandatory policy assignment ───────────────────────
+
+async function scanNewJoinerPolicyAssignment(supabase: SupabaseClient, tenantId: string): Promise<void> {
+  const today = new Date().toISOString().slice(0, 10)
+
+  const { data: newJoiners } = await supabase.from('employees')
+    .select('id, first_name, last_name, phone').eq('tenant_id', tenantId)
+    .eq('status', 'active').eq('joining_date', today)
+  if (!newJoiners?.length) return
+
+  const { data: mandatoryPolicies } = await supabase.from('hr_policies')
+    .select('id').eq('tenant_id', tenantId).eq('is_mandatory', true).eq('status', 'published')
+  if (!mandatoryPolicies?.length) return
+
+  const key = `new-joiner-policies:${tenantId}:${today}`
+  if (!shouldEmit(key)) return
+
+  for (const emp of newJoiners as any[]) {
+    for (const policy of mandatoryPolicies as any[]) {
+      await supabase.from('policy_acknowledgements').upsert(
+        { tenant_id: tenantId, policy_id: policy.id, employee_id: emp.id },
+        { onConflict: 'tenant_id,policy_id,employee_id', ignoreDuplicates: true },
+      )
+    }
+  }
+
+  await notifyHrAdmins(supabase, {
+    tenantId, item_type: 'general', severity: 'info',
+    title:    `${newJoiners.length} new joiner(s) — mandatory policies assigned`,
+    summary:  `${mandatoryPolicies.length} mandatory polic${mandatoryPolicies.length === 1 ? 'y' : 'ies'} auto-assigned to today's joiners.`,
+    entity_type: 'employee', action_route: '/admin/policies', action_label: 'View Policies',
+  })
+}
+
+// ── Scanner 13 — Onboarding surveys (D30/60/90) ───────────────────────────────
+
+async function scanOnboardingSurveys(supabase: SupabaseClient, tenantId: string): Promise<void> {
+  const today = new Date()
+  const todayStr = today.toISOString().slice(0, 10)
+
+  for (const [days, type] of [[30, 'onboarding_d30'], [60, 'onboarding_d60'], [90, 'onboarding_d90']] as [number, string][]) {
+    const target = new Date(today); target.setDate(target.getDate() - days)
+    const targetDate = target.toISOString().slice(0, 10)
+
+    const { data: emps } = await supabase.from('employees')
+      .select('id').eq('tenant_id', tenantId).eq('status', 'active').eq('joining_date', targetDate)
+    if (!emps?.length) continue
+
+    const key = `onboarding-survey:${type}:${tenantId}:${todayStr}`
+    if (!shouldEmit(key)) continue
+
+    const surveyId = await findOrCreateSurvey(supabase, tenantId, type)
+    if (!surveyId) continue
+
+    const empIds = (emps as any[]).map((e: any) => e.id as string)
+    const assigned = await autoAssignSurvey(supabase, tenantId, surveyId, empIds, type, 30)
+    if (!assigned.length) continue
+
+    await notifyHrAdmins(supabase, {
+      tenantId, item_type: 'general', severity: 'info',
+      title:    `Onboarding Day-${days} survey assigned to ${assigned.length} employee(s)`,
+      summary:  `Auto-triggered ${type.replace('_', ' ').toUpperCase()} for ${assigned.length} employee(s) who joined ${days} days ago.`,
+      entity_type: 'survey', entity_id: surveyId,
+      action_route: '/admin/surveys', action_label: 'View Surveys',
+    })
+  }
+}
+
+// ── Scanner 14 — Post-appraisal surveys ──────────────────────────────────────
+
+async function scanPostAppraisalSurveys(supabase: SupabaseClient, tenantId: string): Promise<void> {
+  const todayStr = new Date().toISOString().slice(0, 10)
+  const threeAgo = new Date(); threeAgo.setDate(threeAgo.getDate() - 3)
+  const dateStr  = threeAgo.toISOString().slice(0, 10)
+
+  const { data: appraisals } = await supabase.from('performance_appraisals')
+    .select('employee_id').eq('tenant_id', tenantId).eq('status', 'completed')
+    .gte('completed_at', `${dateStr}T00:00:00Z`).lte('completed_at', `${dateStr}T23:59:59Z`)
+  if (!appraisals?.length) return
+
+  const key = `post-appraisal-survey:${tenantId}:${todayStr}`
+  if (!shouldEmit(key)) return
+
+  const surveyId = await findOrCreateSurvey(supabase, tenantId, 'post_appraisal')
+  if (!surveyId) return
+
+  const empIds = [...new Set((appraisals as any[]).map((a: any) => a.employee_id as string))]
+  await autoAssignSurvey(supabase, tenantId, surveyId, empIds, 'post_appraisal', 90)
+}
+
+// ── Scanner 15 — Post-transfer surveys ───────────────────────────────────────
+
+async function scanPostTransferSurveys(supabase: SupabaseClient, tenantId: string): Promise<void> {
+  const todayStr    = new Date().toISOString().slice(0, 10)
+  const fourteenAgo = new Date(); fourteenAgo.setDate(fourteenAgo.getDate() - 14)
+
+  const { data: transfers } = await supabase.from('employee_transfers')
+    .select('employee_id').eq('tenant_id', tenantId)
+    .eq('effective_date', fourteenAgo.toISOString().slice(0, 10))
+  if (!transfers?.length) return
+
+  const key = `post-transfer-survey:${tenantId}:${todayStr}`
+  if (!shouldEmit(key)) return
+
+  const surveyId = await findOrCreateSurvey(supabase, tenantId, 'post_transfer')
+  if (!surveyId) return
+
+  const empIds = [...new Set((transfers as any[]).map((t: any) => t.employee_id as string))]
+  await autoAssignSurvey(supabase, tenantId, surveyId, empIds, 'post_transfer', 90)
+}
+
+// ── Scanner 16 — Survey negative cluster detection ────────────────────────────
+
+async function scanSurveyNegativeClusters(supabase: SupabaseClient, tenantId: string): Promise<void> {
+  const thirtyAgo = new Date(); thirtyAgo.setDate(thirtyAgo.getDate() - 30)
+
+  const { data: analyses } = await supabase
+    .from('survey_response_analysis').select('id, themes, response_id')
+    .eq('sentiment', 'negative').eq('urgency', 'high')
+    .gte('analyzed_at', thirtyAgo.toISOString())
+  if (!analyses?.length) return
+
+  const week = `W${String(Math.ceil(new Date().getDate() / 7)).padStart(2, '0')}`
+
+  // Group by location + theme
+  const groups = new Map<string, { locationId: string; theme: string; count: number }>()
+  for (const a of analyses as any[]) {
+    // This is a simplified approach; full version would join through assignments/employees
+    for (const theme of (a.themes ?? []) as string[]) {
+      const groupKey = `${theme}`
+      const existing = groups.get(groupKey) ?? { locationId: 'global', theme, count: 0 }
+      existing.count++
+      groups.set(groupKey, existing)
+    }
+  }
+
+  for (const [, grp] of groups) {
+    if (grp.count < 3) continue
+    const dedupKey = `survey-negative-cluster:${tenantId}:${grp.theme}:${week}`
+    if (!shouldEmit(dedupKey)) continue
+
+    await notifyHrAdmins(supabase, {
+      tenantId, item_type: 'general', severity: 'critical',
+      title:    `Negative survey theme cluster: "${grp.theme}"`,
+      summary:  `${grp.count} high-urgency negative responses mentioning "${grp.theme}" in the last 30 days. Review survey results for patterns.`,
+      entity_type: 'survey', action_route: '/admin/surveys', action_label: 'View Survey Results',
+      metadata: { theme: grp.theme, count: grp.count },
+    })
+  }
+}
+
+// ── Scanner 17 — Onboarding score degradation ─────────────────────────────────
+
+async function scanOnboardingDegradation(supabase: SupabaseClient, tenantId: string): Promise<void> {
+  const month = currentMonth()
+
+  // Find employees who have completed both D30 and D60 surveys
+  const { data: d30Results } = await supabase
+    .from('survey_assignments').select('employee_id, surveys!inner(survey_type, tenant_id)')
+    .eq('surveys.tenant_id', tenantId).eq('surveys.survey_type', 'onboarding_d30')
+    .not('completed_at', 'is', null)
+
+  const { data: d60Results } = await supabase
+    .from('survey_assignments').select('employee_id, surveys!inner(survey_type, tenant_id)')
+    .eq('surveys.tenant_id', tenantId).eq('surveys.survey_type', 'onboarding_d60')
+    .not('completed_at', 'is', null)
+
+  if (!d30Results?.length || !d60Results?.length) return
+
+  const d60EmpIds = new Set((d60Results as any[]).map((r: any) => r.employee_id as string))
+  const bothIds   = (d30Results as any[])
+    .filter((r: any) => d60EmpIds.has(r.employee_id))
+    .map((r: any) => r.employee_id as string)
+
+  if (!bothIds.length) return
+
+  // For each employee, fetch average scores from both surveys
+  for (const empId of bothIds) {
+    const key = `onboarding-degradation:${tenantId}:${empId}:${month}`
+    if (!shouldEmit(key)) continue
+
+    // Get avg scores from survey_responses via assignments
+    const { data: d30Responses } = await supabase
+      .from('survey_responses').select('response_value')
+      .eq('employee_id', empId).eq('response_type', 'rating')
+      .in('survey_type', ['onboarding_d30'])
+    const { data: d60Responses } = await supabase
+      .from('survey_responses').select('response_value')
+      .eq('employee_id', empId).eq('response_type', 'rating')
+      .in('survey_type', ['onboarding_d60'])
+
+    if (!d30Responses?.length || !d60Responses?.length) continue
+
+    const d30Avg = (d30Responses as any[]).reduce((s: number, r: any) => s + Number(r.response_value ?? 0), 0) / d30Responses.length
+    const d60Avg = (d60Responses as any[]).reduce((s: number, r: any) => s + Number(r.response_value ?? 0), 0) / d60Responses.length
+
+    if (d30Avg - d60Avg < 1.0) continue  // no significant drop
+
+    await notifyHrAdmins(supabase, {
+      tenantId, item_type: 'general', severity: 'warning',
+      title:    `Onboarding score dropped for employee ${empId}`,
+      summary:  `Day-30 avg score was ${d30Avg.toFixed(1)} but Day-60 dropped to ${d60Avg.toFixed(1)} — possible early attrition risk.`,
+      entity_type: 'employee', entity_id: empId,
+      action_route: '/admin/surveys', action_label: 'View Surveys',
+      metadata: { d30_avg: d30Avg, d60_avg: d60Avg, drop: d30Avg - d60Avg },
+    })
+  }
+}
+
+// ── Scanner 18 — Succession candidate attrition risk ─────────────────────────
+
+async function scanSuccessionAttritionRisk(supabase: SupabaseClient, tenantId: string): Promise<void> {
+  const month = currentMonth()
+
+  const { data: candidates } = await supabase.from('succession_candidates')
+    .select('id, employee_id, succession_plan_id')
+    .eq('tenant_id', tenantId)
+    .in('readiness_status', ['ready_now', 'ready_12m'])
+  if (!candidates?.length) return
+
+  const threeMonthsAgo = new Date()
+  threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3)
+
+  for (const candidate of candidates as any[]) {
+    const key = `succession-attrition:${tenantId}:${candidate.id}:${month}`
+    if (!shouldEmit(key)) continue
+
+    const { data: checkins } = await supabase.from('mood_checkins')
+      .select('mood').eq('tenant_id', tenantId).eq('employee_id', candidate.employee_id)
+      .gte('checkin_date', threeMonthsAgo.toISOString().slice(0, 10))
+    if (!checkins?.length || checkins.length < 3) continue
+
+    const avg = (checkins as any[]).reduce((s: number, c: any) => s + Number(c.mood ?? 3), 0) / checkins.length
+    if (avg > 2.5) continue  // not at risk
+
+    // Set attrition_risk_flag
+    await supabase.from('succession_candidates')
+      .update({ attrition_risk_flag: true }).eq('id', candidate.id)
+
+    await notifyHrAdmins(supabase, {
+      tenantId, item_type: 'general', severity: 'warning',
+      title:    `Succession Risk: Ready-Now candidate shows high attrition risk`,
+      summary:  `Candidate ${candidate.employee_id} (succession plan ${candidate.succession_plan_id}) has mood avg of ${avg.toFixed(1)}/5 over last 3 months — at risk of leaving.`,
+      entity_type: 'succession_candidate', entity_id: candidate.id,
+      action_route: '/admin/succession', action_label: 'View Succession Plans',
+      metadata: { employee_id: candidate.employee_id, mood_avg: avg, plan_id: candidate.succession_plan_id },
+    })
+  }
+}
+
 // ── Main scan orchestrator ─────────────────────────────────────────────────────
 
 async function runAllScans(supabase: SupabaseClient): Promise<void> {
@@ -709,6 +1152,16 @@ async function runAllScans(supabase: SupabaseClient): Promise<void> {
       scanComplianceDeadlines(supabase, tenantId),
       scanLifecycleExpiry(supabase, tenantId),
       scanExitIntentSurveys(supabase, tenantId),
+      scanAutoPolls(supabase, tenantId),
+      scanMoodThemeAlerts(supabase, tenantId),
+      scanBenefitsEnrolment(supabase, tenantId),
+      scanNewJoinerPolicyAssignment(supabase, tenantId),
+      scanOnboardingSurveys(supabase, tenantId),
+      scanPostAppraisalSurveys(supabase, tenantId),
+      scanPostTransferSurveys(supabase, tenantId),
+      scanSurveyNegativeClusters(supabase, tenantId),
+      scanOnboardingDegradation(supabase, tenantId),
+      scanSuccessionAttritionRisk(supabase, tenantId),
     ])
   }
 }

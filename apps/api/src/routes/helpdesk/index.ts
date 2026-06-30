@@ -15,6 +15,7 @@ import { notify, notifyHrAdmins } from '../../lib/notify.js'
 import { logAction } from '../../lib/audit-service.js'
 import { resolveAssistantChain } from '../../lib/ai/config.js'
 import { chatCompleteWithFallback } from '../../lib/ai/llm.js'
+import { WhatsAppProvider } from '../../lib/whatsapp-provider.js'
 
 // Default SLA windows by priority (used when no tenant policy row exists).
 // Response = time to first HR reply; Resolution = time to resolve/close.
@@ -22,26 +23,42 @@ const SLA_HOURS: Record<string, number> = { urgent: 4, high: 8, medium: 24, low:
 const RESOLUTION_HOURS: Record<string, number> = { urgent: 24, high: 48, medium: 72, low: 120 }
 
 // ── AI keyword-based category detection ──────────────────────────────────────
-function detectCategory(text: string, currentCategory: string): { category: string; confidence: number } {
-  const t = text.toLowerCase()
-  const rules: [string[], number][] = [
-    [['salary', 'payslip', 'pay', 'deduction', 'pf', 'esic', 'tds', 'tax', 'bonus', 'incentive', 'arrear'], 90],
-    [['leave', 'absence', 'holiday', 'attendance', 'lop', 'comp off', 'overtime', 'shift'], 85],
-    [['laptop', 'computer', 'system', 'software', 'access', 'login', 'password', 'email', 'network', 'printer', 'hardware', 'vpn'], 85],
-    [['offer letter', 'form 16', 'experience letter', 'noc', 'relieving', 'certificate', 'document'], 80],
-    [['harassment', 'grievance', 'complaint', 'unfair', 'bully', 'discrimination', 'posh'], 90],
-  ]
-  const categoryMap: Record<number, string> = { 0: 'payroll', 1: 'hr_query', 2: 'it_support', 3: 'hr_query', 4: 'grievance' }
-  for (let i = 0; i < rules.length; i++) {
-    const [keywords, conf] = rules[i]
-    if (keywords.some(k => t.includes(k))) {
-      return { category: categoryMap[i], confidence: conf }
-    }
-  }
-  return { category: currentCategory, confidence: 30 }
+const TEAM_MAP: Record<string, string> = {
+  payroll:    'HR-Payroll',
+  leave:      'HR-Operations',
+  attendance: 'HR-Operations',
+  it:         'IT-Support',
+  facilities: 'Admin',
+  posh:       'ICC',
+  compliance: 'Compliance',
+  hr_policy:  'HR-Operations',
+  grievance:  'HR-Manager',
+  other:      'HR-Operations',
 }
 
-const CATEGORIES = ['payroll', 'leave', 'attendance', 'it', 'facilities', 'hr_policy', 'other'] as const
+function detectCategory(text: string, currentCategory: string): { category: string; confidence: number; suggested_team: string } {
+  const t = text.toLowerCase()
+  const rules: [string[], string, number][] = [
+    [['salary', 'payslip', 'pay', 'deduction', 'pf', 'esic', 'tds', 'tax', 'bonus', 'incentive', 'arrear'], 'payroll', 90],
+    [['leave', 'absence', 'holiday', 'lop', 'comp off'], 'leave', 85],
+    [['attendance', 'shift', 'overtime', 'punch', 'biometric'], 'attendance', 85],
+    [['laptop', 'computer', 'system', 'software', 'access', 'login', 'password', 'email', 'network', 'printer', 'hardware', 'vpn'], 'it', 85],
+    [['harassment', 'sexual', 'posh', 'icc'], 'posh', 95],
+    [['statutory', 'compliance', 'labour law', 'epf filing', 'esic filing'], 'compliance', 85],
+    [['policy', 'handbook', 'rule', 'notice period', 'probation'], 'hr_policy', 80],
+    [['grievance', 'complaint', 'unfair', 'bully', 'discrimination'], 'grievance', 85],
+    [['offer letter', 'form 16', 'experience letter', 'noc', 'relieving', 'certificate', 'document'], 'hr_policy', 80],
+  ]
+  for (const [keywords, category, conf] of rules) {
+    if (keywords.some(k => t.includes(k))) {
+      return { category, confidence: conf, suggested_team: TEAM_MAP[category] ?? 'HR-Operations' }
+    }
+  }
+  const fallback = TEAM_MAP[currentCategory] ?? 'HR-Operations'
+  return { category: currentCategory, confidence: 30, suggested_team: fallback }
+}
+
+const CATEGORIES = ['payroll', 'leave', 'attendance', 'it', 'facilities', 'hr_policy', 'grievance', 'posh', 'compliance', 'other'] as const
 const PRIORITIES = ['low', 'medium', 'high', 'urgent'] as const
 const STATUSES   = ['open', 'in_progress', 'awaiting_employee', 'resolved', 'closed'] as const
 
@@ -185,16 +202,42 @@ export default async function helpdeskRoutes(fastify: FastifyInstance) {
         resolution_due_at:      resDueAt,
         ai_suggested_category:  aiResult.category,
         ai_routing_confidence:  aiResult.confidence,
+        ai_suggested_team:      aiResult.suggested_team,
       })
       .select()
       .single()
 
     if (error) return reply.code(500).send({ error: 'INSERT_FAILED', message: error.message })
 
+    const ticketId     = (data as any).id
+    const ticketNumber = (data as any).ticket_number ?? ticketId.slice(0, 8).toUpperCase()
+
+    // Auto-acknowledgement system comment
+    const ackComment = `Your query has been received. Ticket ${ticketNumber} is assigned to our ${aiResult.suggested_team} team. Expected response within ${sla.response_hours}h, resolution within ${sla.resolution_hours}h.`
+    await fastify.supabase.from('helpdesk_ticket_comments').insert({
+      tenant_id:   req.tenantId,
+      ticket_id:   ticketId,
+      author_id:   req.userId,
+      author_role: 'system',
+      body:        ackComment,
+      is_internal: false,
+    })
+
+    // WhatsApp auto-acknowledgement
+    const { data: empWithPhone } = await fastify.supabase
+      .from('employees').select('phone').eq('id', employeeId).eq('tenant_id', req.tenantId).maybeSingle()
+    if ((empWithPhone as any)?.phone) {
+      const wa = new WhatsAppProvider(fastify.supabase)
+      await wa.sendTemplate(req.tenantId, (empWithPhone as any).phone, 'ticket_acknowledgement', {
+        ticket_number: ticketNumber,
+        sla_hours:     String(sla.response_hours),
+      })
+    }
+
     await logAction(fastify.supabase, {
       tenantId:    req.tenantId,
       tableName:   'helpdesk_tickets',
-      recordId:    (data as any).id,
+      recordId:    ticketId,
       action:      'INSERT',
       performedBy: req.userId,
       onBehalfOf:  employeeId,
@@ -210,7 +253,7 @@ export default async function helpdeskRoutes(fastify: FastifyInstance) {
       summary:      `A ${parsed.data.priority} priority ${effectiveCategory} ticket was raised. Response SLA ${sla.response_hours}h, resolution ${sla.resolution_hours}h.${aiResult.confidence >= 70 ? ` AI routing: ${aiResult.category} (${aiResult.confidence}%).` : ''}`,
       severity:     parsed.data.priority === 'urgent' ? 'warning' : 'info',
       entity_type:  'helpdesk_ticket',
-      entity_id:    (data as any).id,
+      entity_id:    ticketId,
       action_route: '/admin/helpdesk',
       action_label: 'Open helpdesk queue',
     })
@@ -354,7 +397,7 @@ export default async function helpdeskRoutes(fastify: FastifyInstance) {
   // HR ADMIN
   // ═══════════════════════════════════════════════════════════════════════════
 
-  // GET /helpdesk/tickets?status=&priority=&assigned_to=&mine=
+  // GET /helpdesk/tickets?status=&priority=&assigned_to=&mine=&sort=sla_urgency
   fastify.get('/tickets', hrAdminAuth, async (req: any, reply) => {
     const qs = z.object({
       status:      z.string().optional(),
@@ -362,15 +405,18 @@ export default async function helpdeskRoutes(fastify: FastifyInstance) {
       category:    z.string().optional(),
       assigned_to: z.string().optional(),
       mine:        z.string().optional(),
+      sort:        z.string().optional(),
     }).safeParse(req.query)
+
+    const f = qs.data ?? {}
+    const sortBySla = f.sort === 'sla_urgency'
 
     let q = fastify.supabase
       .from('helpdesk_tickets')
       .select('*, employees(first_name, last_name, employee_code)')
       .eq('tenant_id', req.tenantId)
-      .order('created_at', { ascending: false })
+      .order(sortBySla ? 'sla_due_at' : 'created_at', { ascending: sortBySla })
 
-    const f = qs.data ?? {}
     if (f.status && f.status !== 'all')     q = q.eq('status', f.status)
     if (f.priority && f.priority !== 'all') q = q.eq('priority', f.priority)
     if (f.category && f.category !== 'all') q = q.eq('category', f.category)
@@ -923,6 +969,120 @@ Write a helpful, professional HR reply to address the employee's concern:`
       newData:     parsed.data,
     })
 
+    return reply.send({ data: { updated: true } })
+  })
+
+  // ── GET /helpdesk/tickets/:id/ai-suggest — similar resolved tickets ───────────
+
+  fastify.get('/tickets/:id/ai-suggest', hrAdminAuth, async (req: any, reply) => {
+    const { id } = req.params as { id: string }
+
+    const { data: ticket } = await fastify.supabase
+      .from('helpdesk_tickets').select('category, subject, description')
+      .eq('id', id).eq('tenant_id', req.tenantId).maybeSingle()
+    if (!ticket) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Ticket not found' })
+
+    const { data: similar } = await fastify.supabase
+      .from('helpdesk_tickets')
+      .select('id, ticket_number, subject, description, resolution_note, resolved_at')
+      .eq('tenant_id', req.tenantId)
+      .eq('category', (ticket as any).category)
+      .eq('status', 'resolved')
+      .not('resolution_note', 'is', null)
+      .order('resolved_at', { ascending: false })
+      .limit(5)
+
+    if (!similar?.length) return reply.send({ data: { suggestion: null, similar_tickets: [] } })
+
+    try {
+      const chain  = await resolveAssistantChain(fastify.supabase, req.tenantId)
+      const examples = (similar as any[]).map((t: any, i: number) =>
+        `Example ${i + 1}:\nSubject: ${t.subject}\nResolution: ${t.resolution_note}`
+      ).join('\n\n')
+
+      const { message } = await chatCompleteWithFallback(chain, [
+        { role: 'system', content: 'You are an HR helpdesk assistant. Based on past resolved tickets, suggest a concise resolution for the new ticket. Be specific and actionable. Max 200 words.' },
+        { role: 'user', content: `New ticket subject: ${(ticket as any).subject}\nDescription: ${(ticket as any).description}\n\nPast similar resolutions:\n${examples}\n\nSuggest a resolution:` },
+      ])
+      return reply.send({ data: { suggestion: message, similar_tickets: similar } })
+    } catch {
+      return reply.send({ data: { suggestion: null, similar_tickets: similar } })
+    }
+  })
+
+  // ── POST /helpdesk/tickets/:id/promote-to-kb — promote resolved ticket to KB ──
+
+  fastify.post('/tickets/:id/promote-to-kb', hrAdminAuth, async (req: any, reply) => {
+    const { id } = req.params as { id: string }
+
+    const { data: ticket } = await fastify.supabase
+      .from('helpdesk_tickets')
+      .select('id, subject, description, resolution_note, status, kb_promoted')
+      .eq('id', id).eq('tenant_id', req.tenantId).maybeSingle()
+
+    if (!ticket) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Ticket not found' })
+    if ((ticket as any).status !== 'resolved' && (ticket as any).status !== 'closed')
+      return reply.code(400).send({ error: 'INVALID_STATE', message: 'Only resolved tickets can be promoted to KB' })
+    if ((ticket as any).kb_promoted)
+      return reply.code(409).send({ error: 'ALREADY_PROMOTED', message: 'Ticket already promoted to KB' })
+
+    let kbSummary = (ticket as any).resolution_note ?? ''
+    try {
+      const chain  = await resolveAssistantChain(fastify.supabase, req.tenantId)
+      const { message } = await chatCompleteWithFallback(chain, [
+        { role: 'system', content: 'Convert this helpdesk ticket into a concise FAQ entry. Format: Q: <question>\\nA: <answer>. Max 150 words.' },
+        { role: 'user', content: `Subject: ${(ticket as any).subject}\nResolution: ${(ticket as any).resolution_note ?? 'N/A'}` },
+      ])
+      kbSummary = message
+    } catch { /* use raw resolution note as fallback */ }
+
+    // Insert into hr_policies as an FAQ entry
+    await fastify.supabase.from('hr_policies').insert({
+      tenant_id:    req.tenantId,
+      title:        (ticket as any).subject,
+      content:      kbSummary,
+      category:     'faq',
+      status:       'published',
+      created_by:   req.userId,
+      is_mandatory: false,
+    })
+
+    // Mark the ticket as promoted
+    await fastify.supabase.from('helpdesk_tickets').update({
+      kb_promoted:    true,
+      kb_promoted_at: new Date().toISOString(),
+      kb_summary:     kbSummary,
+    }).eq('id', id).eq('tenant_id', req.tenantId)
+
+    return reply.send({ data: { kb_summary: kbSummary } })
+  })
+
+  // ── Escalation Matrix CRUD ─────────────────────────────────────────────────────
+
+  fastify.get('/escalation-matrix', hrAdminAuth, async (req: any, reply) => {
+    const { data, error } = await fastify.supabase
+      .from('helpdesk_escalation_matrix').select('*')
+      .eq('tenant_id', req.tenantId).order('category').order('level')
+    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    return reply.send({ data: data ?? [] })
+  })
+
+  fastify.put('/escalation-matrix', hrAdminAuth, async (req: any, reply) => {
+    const schema = z.object({
+      category:           z.string().min(1),
+      level:              z.number().int().min(1).max(2),
+      assignee_role:      z.string().min(1),
+      notify_after_hours: z.number().int().min(1).default(24),
+    })
+    const parsed = schema.safeParse(req.body)
+    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+
+    const { error } = await fastify.supabase.from('helpdesk_escalation_matrix').upsert({
+      tenant_id:          req.tenantId,
+      ...parsed.data,
+    }, { onConflict: 'tenant_id,category,level' })
+
+    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
     return reply.send({ data: { updated: true } })
   })
 }

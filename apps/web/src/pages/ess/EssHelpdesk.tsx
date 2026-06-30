@@ -35,6 +35,7 @@ interface Comment {
 
 interface Ticket {
   id: string
+  ticket_number?: string
   subject: string
   description: string
   category: string
@@ -58,6 +59,7 @@ const CATEGORIES = [
   { value: 'it', label: 'IT' },
   { value: 'facilities', label: 'Facilities' },
   { value: 'hr_policy', label: 'HR Policy' },
+  { value: 'posh', label: 'POSH Complaint' },
   { value: 'other', label: 'Other' },
 ]
 const PRIORITIES = [
@@ -219,7 +221,10 @@ export function EssHelpdesk() {
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
-                      <p className="text-sm font-medium text-foreground truncate">{t.subject}</p>
+                      <div className="flex items-center gap-1.5">
+                        {t.ticket_number && <span className="text-[10px] font-mono text-muted-foreground shrink-0">[{t.ticket_number}]</span>}
+                        <p className="text-sm font-medium text-foreground truncate">{t.subject}</p>
+                      </div>
                       <p className="text-xs text-muted-foreground truncate mt-0.5">{t.description}</p>
                     </div>
                     <div className="flex items-center gap-1.5 shrink-0">

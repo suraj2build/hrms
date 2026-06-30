@@ -7,7 +7,7 @@
 
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Loader2, MessageSquare, Send, AlertTriangle, Clock, Lock, StickyNote, Sparkles, Star, BarChart2 } from 'lucide-react'
+import { Loader2, MessageSquare, Send, AlertTriangle, Clock, Lock, StickyNote, Sparkles, Star, BarChart2, BookMarked, ArrowUpDown, Network } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { PageContainer } from '@/components/layout/PageContainer'
@@ -35,6 +35,7 @@ interface Comment {
 
 interface Ticket {
   id: string
+  ticket_number?: string
   subject: string
   description: string
   category: string
@@ -50,6 +51,7 @@ interface Ticket {
   ai_suggested_category: string | null
   ai_routing_confidence: number | null
   satisfaction_rating: number | null
+  kb_promoted?: boolean
   created_at: string
   employees?: { first_name: string; last_name: string; employee_code: string } | null
   comments?: Comment[]
@@ -81,7 +83,7 @@ function categoryLabel(cat: string): string {
     it_support: 'IT Support', hr_query: 'HR Query', payroll: 'Payroll',
     general: 'General', grievance: 'Grievance', payroll_leave: 'Payroll/Leave',
     leave: 'Leave', attendance: 'Attendance', it: 'IT', facilities: 'Facilities',
-    hr_policy: 'HR Policy', other: 'Other',
+    hr_policy: 'HR Policy', other: 'Other', posh: 'POSH', compliance: 'Compliance',
   }
   return map[cat] ?? cat.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
 }
@@ -138,8 +140,9 @@ export function AdminHelpdesk() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [aiLoading, setAiLoading] = useState(false)
   const [showSatisfaction, setShowSatisfaction] = useState(false)
-  const [slaTab, setSlaTab] = useState<'priority' | 'category'>('priority')
+  const [slaTab, setSlaTab] = useState<'priority' | 'category' | 'escalation'>('priority')
   const [catSlaDraft, setCatSlaDraft] = useState<CategorySla[] | null>(null)
+  const [slaUrgencySort, setSlaUrgencySort] = useState(false)
 
   const { data: tickets = [], isLoading } = useQuery<Ticket[]>({
     queryKey: ['admin-helpdesk', statusF, priorityF],
@@ -272,6 +275,22 @@ export function AdminHelpdesk() {
       toast.success(`${vars.ids.length} ticket(s) marked as ${statusBadge(vars.status).label}`)
     },
     onError: (e: Error) => toast.error('Bulk update failed', { description: e.message }),
+  })
+
+  const promoteKb = useMutation({
+    mutationFn: (id: string) => api.post(`/helpdesk/tickets/${id}/promote-to-kb`, {}),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['admin-helpdesk', 'detail', openId] })
+      invalidate()
+      toast.success('Ticket promoted to Knowledge Base')
+    },
+    onError: (e: Error) => toast.error('Failed to promote', { description: e.message }),
+  })
+
+  const { data: escalationMatrix = [] } = useQuery<{ role: string; sla_hours: number; escalation_order: number }[]>({
+    queryKey: ['admin-helpdesk', 'escalation-matrix'],
+    queryFn:  () => api.get<{ data: { role: string; sla_hours: number; escalation_order: number }[] }>('/helpdesk/escalation-matrix').then(r => r.data ?? []),
+    enabled:  isAdmin && slaTab === 'escalation',
   })
 
   const handleAiSuggest = async () => {
@@ -463,6 +482,13 @@ export function AdminHelpdesk() {
             >
               Category SLA
             </button>
+            <button
+              onClick={() => setSlaTab('escalation')}
+              className={cn('px-3 py-1.5 text-xs font-medium rounded-md transition-colors',
+                slaTab === 'escalation' ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:text-foreground')}
+            >
+              Escalation Matrix
+            </button>
           </div>
 
           {slaTab === 'priority' && (
@@ -548,6 +574,40 @@ export function AdminHelpdesk() {
               </div>
             </>
           )}
+          {slaTab === 'escalation' && (
+            <>
+              <p className="text-xs text-muted-foreground mb-3">
+                Escalation order defines who gets notified when SLA is breached.
+              </p>
+              {escalationMatrix.length === 0 ? (
+                <div className="flex items-center gap-2 py-6 text-sm text-muted-foreground">
+                  <Network className="h-4 w-4" />
+                  <span>No escalation matrix configured. Contact system admin.</span>
+                </div>
+              ) : (
+                <div className="overflow-x-auto rounded-md border border-border">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-border bg-muted/30 text-muted-foreground">
+                        <th className="text-left py-2 px-3 text-xs font-medium">Order</th>
+                        <th className="text-left py-2 px-3 text-xs font-medium">Role</th>
+                        <th className="text-left py-2 px-3 text-xs font-medium">Escalates after (h)</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {[...escalationMatrix].sort((a, b) => a.escalation_order - b.escalation_order).map(row => (
+                        <tr key={row.escalation_order} className="border-b border-border/50">
+                          <td className="py-2 px-3 text-xs font-semibold">#{row.escalation_order}</td>
+                          <td className="py-2 px-3 text-xs capitalize">{row.role.replace(/_/g, ' ')}</td>
+                          <td className="py-2 px-3 text-xs">{row.sla_hours}h</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </>
+          )}
         </SectionCard>
       )}
 
@@ -555,6 +615,14 @@ export function AdminHelpdesk() {
         title="Ticket Queue"
         action={
           <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              variant={slaUrgencySort ? 'default' : 'outline'}
+              onClick={() => setSlaUrgencySort(v => !v)}
+              title="Sort by SLA urgency (breached first)"
+            >
+              <ArrowUpDown className="h-3.5 w-3.5 mr-1" />SLA Urgency
+            </Button>
             <select value={statusF} onChange={e => setStatusF(e.target.value)} className="text-sm border border-border rounded-md px-3 py-2 bg-background text-foreground">
               <option value="all">All statuses</option>
               {STATUSES.map(s => <option key={s} value={s}>{statusBadge(s).label}</option>)}
@@ -590,7 +658,17 @@ export function AdminHelpdesk() {
           <div className="flex flex-col items-center gap-2 py-12 text-center text-muted-foreground">
             <MessageSquare className="h-8 w-8" /><p className="text-sm">No tickets match the filters.</p>
           </div>
-        ) : (
+        ) : (() => {
+          const sorted = slaUrgencySort
+            ? [...tickets].sort((a, b) => {
+                const aBreached = a.sla_breached_at && !['resolved', 'closed'].includes(a.status) ? 0 : 1
+                const bBreached = b.sla_breached_at && !['resolved', 'closed'].includes(b.status) ? 0 : 1
+                if (aBreached !== bBreached) return aBreached - bBreached
+                const PRIO = { urgent: 0, high: 1, medium: 2, low: 3 }
+                return (PRIO[a.priority] ?? 99) - (PRIO[b.priority] ?? 99)
+              })
+            : tickets
+          return (
           <div className="overflow-x-auto rounded-md border border-border">
             <table className="w-full text-sm">
               <thead>
@@ -614,7 +692,7 @@ export function AdminHelpdesk() {
                 </tr>
               </thead>
               <tbody>
-                {tickets.map(t => {
+                {sorted.map(t => {
                   const sb = statusBadge(t.status)
                   const breached = t.sla_breached_at && !['resolved', 'closed'].includes(t.status)
                   const emp = t.employees
@@ -639,6 +717,7 @@ export function AdminHelpdesk() {
                       <td className="py-2 px-3">
                         <div className="flex items-center gap-1.5">
                           {breached && <AlertTriangle className="h-3.5 w-3.5 text-destructive shrink-0" />}
+                          {t.ticket_number && <span className="text-[10px] font-mono text-muted-foreground">[{t.ticket_number}]</span>}
                           <span className="text-xs font-medium text-foreground">{t.subject}</span>
                         </div>
                       </td>
@@ -671,7 +750,8 @@ export function AdminHelpdesk() {
               </tbody>
             </table>
           </div>
-        )}
+          )
+        })()}
       </SectionCard>
 
       {/* ── Detail / manage ───────────────────────────────────────────────────── */}
@@ -679,7 +759,12 @@ export function AdminHelpdesk() {
         <DialogContent className="max-w-xl">
           {detail ? (
             <>
-              <DialogHeader><DialogTitle className="pr-6">{detail.subject}</DialogTitle></DialogHeader>
+              <DialogHeader>
+                <DialogTitle className="pr-6">
+                  {detail.ticket_number && <span className="text-sm font-mono text-muted-foreground mr-2">[{detail.ticket_number}]</span>}
+                  {detail.subject}
+                </DialogTitle>
+              </DialogHeader>
               <div className="flex items-center gap-1.5 -mt-2 flex-wrap">
                 <Badge variant="outline" className={cn('text-[10px] capitalize', priorityColor(detail.priority))}>{detail.priority}</Badge>
                 <Badge variant={statusBadge(detail.status).variant} className="text-[10px]">{statusBadge(detail.status).label}</Badge>
@@ -760,6 +845,23 @@ export function AdminHelpdesk() {
                 <div className="rounded-md border border-success/30 bg-success/10 p-2.5 text-xs text-success">
                   <span className="font-medium">Resolution:</span> {detail.resolution_note}
                 </div>
+              )}
+
+              {/* KB Promote */}
+              {['resolved', 'closed'].includes(detail.status) && (
+                <Button
+                  size="sm"
+                  variant={detail.kb_promoted ? 'secondary' : 'outline'}
+                  className="w-full gap-1.5"
+                  disabled={!!detail.kb_promoted || promoteKb.isPending}
+                  onClick={() => promoteKb.mutate(detail.id)}
+                >
+                  {promoteKb.isPending
+                    ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    : <BookMarked className="h-3.5 w-3.5" />
+                  }
+                  {detail.kb_promoted ? 'Promoted to Knowledge Base' : 'Promote to KB'}
+                </Button>
               )}
 
               {/* Thread */}

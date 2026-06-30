@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify'
+import Anthropic from '@anthropic-ai/sdk'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 
 // ── Sentiment helpers ──────────────────────────────────────────────────────────
@@ -64,6 +65,7 @@ function analyseSentiment(texts: string[]): {
 export default async function surveyRoutes(fastify: FastifyInstance) {
   const { supabase } = fastify
   const hrAuth = { preHandler: [fastify.authenticate, requireRole(...HR_ADMIN_ROLES)] }
+  const ai     = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
 
   async function getEmployeeId(profileId: string): Promise<string | null> {
     const { data } = await supabase
@@ -180,6 +182,48 @@ export default async function surveyRoutes(fastify: FastifyInstance) {
       .from('survey_assignments')
       .update({ completed_at: new Date().toISOString() })
       .eq('id', assignment.id)
+
+    // LLM sentiment analysis for text responses (best-effort, async)
+    const textResponses = responses
+      .filter(r => typeof r.response === 'string' && (r.response as string).trim().length > 10)
+      .map(r => r.response as string)
+
+    if (textResponses.length > 0) {
+      ;(async () => {
+        try {
+          const msg = await ai.messages.create({
+            model:      'claude-haiku-4-5-20251001',
+            max_tokens: 300,
+            system: 'You are an HR analytics assistant. Analyze survey text responses and return JSON only.',
+            messages: [{
+              role:    'user',
+              content: `Analyze these survey text responses and return ONLY JSON with keys: sentiment ("positive"|"neutral"|"negative"), urgency ("low"|"medium"|"high"), themes (array of max 3 short strings).\n\nResponses:\n${textResponses.join('\n---\n')}`,
+            }],
+          })
+          const raw = msg.content[0]?.type === 'text' ? msg.content[0].text.trim() : '{}'
+          const parsed = JSON.parse(raw.replace(/```json|```/g, '').trim())
+
+          // Store analysis for each text response
+          for (const r of rows.filter(rr => typeof rr.response === 'string' && (rr.response as string).trim().length > 10)) {
+            const { data: savedResp } = await supabase
+              .from('survey_responses')
+              .select('id')
+              .eq('assignment_id', assignment.id)
+              .eq('question_id', r.question_id)
+              .maybeSingle()
+            if (savedResp?.id) {
+              await supabase.from('survey_response_analysis').upsert({
+                response_id: savedResp.id,
+                tenant_id:   assignment.tenant_id,
+                sentiment:   parsed.sentiment ?? 'neutral',
+                themes:      parsed.themes ?? [],
+                urgency:     parsed.urgency ?? 'low',
+              }, { onConflict: 'response_id' })
+            }
+          }
+        } catch (_) { /* non-blocking */ }
+      })()
+    }
 
     return reply.send({ data: { ok: true } })
   })
@@ -414,6 +458,27 @@ export default async function surveyRoutes(fastify: FastifyInstance) {
       return { ...q, response_count: responses.length, summary }
     })
 
+    // Location breakdown
+    const { data: assignedEmps } = await supabase
+      .from('survey_assignments')
+      .select('id, completed_at, employee_id, employees(work_location_id, work_locations(id, name))')
+      .eq('survey_id', id)
+    const locMap: Record<string, { name: string; total: number; completed: number }> = {}
+    for (const a of (assignedEmps ?? []) as any[]) {
+      const locId   = a.employees?.work_location_id ?? '__none__'
+      const locName = a.employees?.work_locations?.name ?? 'Unassigned'
+      if (!locMap[locId]) locMap[locId] = { name: locName, total: 0, completed: 0 }
+      locMap[locId].total++
+      if (a.completed_at) locMap[locId].completed++
+    }
+    const location_breakdown = Object.entries(locMap).map(([id, v]) => ({
+      location_id: id === '__none__' ? null : id,
+      location_name: v.name,
+      total: v.total,
+      completed: v.completed,
+      rate: v.total > 0 ? Math.round(v.completed / v.total * 100) : 0,
+    }))
+
     return reply.send({
       data: {
         total_assigned:   totalAssigned,
@@ -421,7 +486,8 @@ export default async function surveyRoutes(fastify: FastifyInstance) {
         completion_rate:  totalAssigned
           ? Math.round(totalCompleted / totalAssigned * 100)
           : 0,
-        questions: questionResults,
+        questions:         questionResults,
+        location_breakdown,
       },
     })
   })
@@ -589,5 +655,136 @@ export default async function surveyRoutes(fastify: FastifyInstance) {
     if (error) return reply.status(500).send({ error: error.message })
 
     return reply.send({ data: { assigned: empIds.length, survey_title: survey.title } })
+  })
+
+  // ── 360° Feedback: Admin setup round ─────────────────────────────────────────
+
+  fastify.post('/admin/:id/360/setup', hrAuth, async (req: any, reply) => {
+    const { id }        = req.params as { id: string }
+    const tenantId      = req.tenantId
+    const { nominee_id, peers_required = 3 } = req.body as any
+    if (!nominee_id) return reply.status(400).send({ error: 'nominee_id is required' })
+
+    const { data: round, error } = await supabase
+      .from('feedback_360_rounds')
+      .insert({
+        survey_id:      id,
+        nominee_id,
+        tenant_id:      tenantId,
+        peers_required: Number(peers_required),
+        status:         'open',
+      })
+      .select('id')
+      .single()
+
+    if (error) return reply.status(500).send({ error: error.message })
+    return reply.status(201).send({ data: round })
+  })
+
+  fastify.get('/admin/360/:roundId/approve', hrAuth, async (req: any, reply) => {
+    const { roundId } = req.params as { roundId: string }
+    const tenantId    = req.tenantId
+
+    const { data: nominators } = await supabase
+      .from('feedback_360_nominators')
+      .select('id, employee_id, type, employees(first_name, last_name, employee_code)')
+      .eq('round_id', roundId)
+      .eq('tenant_id', tenantId)
+
+    return reply.send({ data: nominators ?? [] })
+  })
+
+  fastify.post('/admin/360/:roundId/approve', hrAuth, async (req: any, reply) => {
+    const { roundId } = req.params as { roundId: string }
+    const tenantId    = req.tenantId
+    const { nominator_ids, status = 'approved' } = req.body as { nominator_ids: string[]; status?: string }
+
+    await supabase
+      .from('feedback_360_rounds')
+      .update({ status })
+      .eq('id', roundId)
+      .eq('tenant_id', tenantId)
+
+    return reply.send({ data: { ok: true, approved: nominator_ids?.length ?? 0 } })
+  })
+
+  fastify.get('/admin/:id/360-report/:employeeId', hrAuth, async (req: any, reply) => {
+    const { id, employeeId } = req.params as { id: string; employeeId: string }
+    const tenantId           = req.tenantId
+
+    const { data: round } = await supabase
+      .from('feedback_360_rounds')
+      .select('id, peers_required, status, nominee_id')
+      .eq('survey_id', id)
+      .eq('nominee_id', employeeId)
+      .eq('tenant_id', tenantId)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+
+    if (!round) return reply.status(404).send({ error: '360 round not found' })
+
+    const { data: nominators } = await supabase
+      .from('feedback_360_nominators')
+      .select('id, employee_id, type, employees(first_name, last_name)')
+      .eq('round_id', (round as any).id)
+      .eq('tenant_id', tenantId)
+
+    return reply.send({ data: { round, nominators: nominators ?? [] } })
+  })
+
+  // ── 360°: ESS — submit nominations ───────────────────────────────────────────
+
+  fastify.get('/my/360/nominations', { preHandler: [fastify.authenticate] }, async (req: any, reply) => {
+    const empId    = await getEmployeeId((req.user as any).sub)
+    const tenantId = (req.user as any).tenantId ?? req.tenantId
+    if (!empId) return reply.status(403).send({ error: 'Employee profile not found' })
+
+    const { data } = await supabase
+      .from('feedback_360_rounds')
+      .select('id, status, peers_required, survey_id, surveys(title)')
+      .eq('nominee_id', empId)
+      .eq('tenant_id', tenantId)
+      .order('created_at', { ascending: false })
+
+    return reply.send({ data: data ?? [] })
+  })
+
+  fastify.post('/my/360/:roundId/nominate', { preHandler: [fastify.authenticate] }, async (req: any, reply) => {
+    const { roundId } = req.params as { roundId: string }
+    const tenantId    = (req.user as any).tenantId ?? req.tenantId
+    const empId       = await getEmployeeId((req.user as any).sub)
+    if (!empId) return reply.status(403).send({ error: 'Employee profile not found' })
+
+    const { peer_ids } = req.body as { peer_ids: string[] }
+    if (!peer_ids?.length) return reply.status(400).send({ error: 'peer_ids required' })
+
+    const { data: round } = await supabase
+      .from('feedback_360_rounds')
+      .select('nominee_id, peers_required, status')
+      .eq('id', roundId)
+      .eq('tenant_id', tenantId)
+      .single()
+
+    if (!round || (round as any).nominee_id !== empId) {
+      return reply.status(403).send({ error: 'Round not found or not yours' })
+    }
+    if ((round as any).status !== 'open') {
+      return reply.status(400).send({ error: 'Nominations are closed' })
+    }
+
+    const rows = peer_ids.map(pid => ({
+      round_id:    roundId,
+      tenant_id:   tenantId,
+      employee_id: pid,
+      type:        'peer',
+    }))
+
+    const { error } = await supabase
+      .from('feedback_360_nominators')
+      .upsert(rows, { onConflict: 'round_id,employee_id', ignoreDuplicates: true })
+
+    if (error) return reply.status(500).send({ error: error.message })
+    return reply.send({ data: { nominated: rows.length } })
   })
 }
