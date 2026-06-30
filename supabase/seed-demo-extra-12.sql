@@ -138,7 +138,7 @@ ON CONFLICT (tenant_id, employee_id, plan_id) DO NOTHING;
 INSERT INTO talent_roles (id, tenant_id, title, department, location, description,
   skills_required, experience_min, is_open, closes_at, created_by)
 VALUES
-  ('t0000000-0000-0000-0000-000000000001',
+  ('f0000000-0000-0000-0000-000000000001',
    'd0000000-0000-0000-0000-000000000001',
    'Senior Product Manager', 'Product', 'Bangalore / Remote',
    'Lead the roadmap for our flagship HRMS modules. You will work closely with engineering, design, and HR operations teams to define and ship high-impact features. Ideal for someone with a strong grasp of SaaS product cycles and a passion for workforce technology.',
@@ -146,7 +146,7 @@ VALUES
    4, true, (now() + interval '45 days')::date,
    'd0000000-0000-0000-0000-0000000000a1'),
 
-  ('t0000000-0000-0000-0000-000000000002',
+  ('f0000000-0000-0000-0000-000000000002',
    'd0000000-0000-0000-0000-000000000001',
    'Engineering Lead — Platform', 'Engineering', 'Hyderabad',
    'Own the core infrastructure and API platform. Lead a team of 4–6 engineers, drive technical decisions, code reviews, and reliability improvements. Strong TypeScript and PostgreSQL background essential.',
@@ -154,7 +154,7 @@ VALUES
    6, true, (now() + interval '30 days')::date,
    'd0000000-0000-0000-0000-0000000000a1'),
 
-  ('t0000000-0000-0000-0000-000000000003',
+  ('f0000000-0000-0000-0000-000000000003',
    'd0000000-0000-0000-0000-000000000001',
    'Data Scientist — People Analytics', 'Analytics', 'Bangalore',
    'Build predictive models for attrition, performance, and hiring. Work with HR data to surface actionable workforce insights. Experience with Python, scikit-learn, and time-series forecasting preferred.',
@@ -162,7 +162,7 @@ VALUES
    3, true, (now() + interval '60 days')::date,
    'd0000000-0000-0000-0000-0000000000a1'),
 
-  ('t0000000-0000-0000-0000-000000000004',
+  ('f0000000-0000-0000-0000-000000000004',
    'd0000000-0000-0000-0000-000000000001',
    'HR Business Partner — Technology', 'Human Resources', 'Pune / Remote',
    'Partner with the Technology division to manage talent, performance, and engagement. Act as a strategic advisor to technology leads and drive organisation-wide HR initiatives.',
@@ -170,7 +170,7 @@ VALUES
    5, true, (now() + interval '30 days')::date,
    'd0000000-0000-0000-0000-0000000000a1'),
 
-  ('t0000000-0000-0000-0000-000000000005',
+  ('f0000000-0000-0000-0000-000000000005',
    'd0000000-0000-0000-0000-000000000001',
    'Finance Analyst — FP&A', 'Finance', 'Mumbai',
    'Own financial modelling, forecasting, and variance analysis for the SaaS business. Work with CFO on board presentations and investor reporting.',
@@ -188,22 +188,22 @@ ON CONFLICT (id) DO NOTHING;
 -- Senior PM role
 INSERT INTO talent_interests (tenant_id, role_id, employee_id, cover_note, skills, availability, status)
 VALUES
-  ('d0000000-0000-0000-0000-000000000001','t0000000-0000-0000-0000-000000000001',
+  ('d0000000-0000-0000-0000-000000000001','f0000000-0000-0000-0000-000000000001',
    'e0000000-0000-0000-0000-000000000001',
    'I have been leading end-to-end feature discovery for the Attendance module over the past 18 months. Eager to take on a broader product scope.',
    ARRAY['Product Strategy','Agile','Data Analysis'], 'immediate', 'shortlisted'),
 
-  ('d0000000-0000-0000-0000-000000000001','t0000000-0000-0000-0000-000000000001',
+  ('d0000000-0000-0000-0000-000000000001','f0000000-0000-0000-0000-000000000001',
    'e0000000-0000-0000-0000-000000000004',
    'With my background in HR operations, I can bridge the gap between what HR teams need and what the product delivers.',
    ARRAY['Stakeholder Management','Roadmapping'], '1_month', 'interested'),
 
-  ('d0000000-0000-0000-0000-000000000001','t0000000-0000-0000-0000-000000000001',
+  ('d0000000-0000-0000-0000-000000000001','f0000000-0000-0000-0000-000000000001',
    'e0000000-0000-0000-0000-000000000006',
    'I have been involved in several cross-functional projects and feel ready to step into a product leadership role.',
    ARRAY['Agile','Data Analysis'], '3_months', 'interested'),
 
-  ('d0000000-0000-0000-0000-000000000001','t0000000-0000-0000-0000-000000000001',
+  ('d0000000-0000-0000-0000-000000000001','f0000000-0000-0000-0000-000000000001',
    'e0000000-0000-0000-0000-000000000009',
    'My experience in data analytics and understanding customer pain points translates well to a PM role.',
    ARRAY['Data Analysis','Stakeholder Management'], '1_month', 'not_selected')
@@ -212,17 +212,17 @@ ON CONFLICT (role_id, employee_id) DO NOTHING;
 -- Engineering Lead role
 INSERT INTO talent_interests (tenant_id, role_id, employee_id, cover_note, skills, availability, status)
 VALUES
-  ('d0000000-0000-0000-0000-000000000001','t0000000-0000-0000-0000-000000000002',
+  ('d0000000-0000-0000-0000-000000000001','f0000000-0000-0000-0000-000000000002',
    'e0000000-0000-0000-0000-000000000002',
    'I have been architecting our microservices layer and leading code reviews informally. Ready to formalise this into a team lead role.',
    ARRAY['TypeScript','Node.js','PostgreSQL','System Design'], 'immediate', 'shortlisted'),
 
-  ('d0000000-0000-0000-0000-000000000001','t0000000-0000-0000-0000-000000000002',
+  ('d0000000-0000-0000-0000-000000000001','f0000000-0000-0000-0000-000000000002',
    'e0000000-0000-0000-0000-000000000005',
    'Six years of backend experience with a focus on high-availability systems. Looking for a leadership challenge.',
    ARRAY['TypeScript','PostgreSQL','System Design','Team Leadership'], '1_month', 'interested'),
 
-  ('d0000000-0000-0000-0000-000000000001','t0000000-0000-0000-0000-000000000002',
+  ('d0000000-0000-0000-0000-000000000001','f0000000-0000-0000-0000-000000000002',
    'e0000000-0000-0000-0000-000000000008',
    'Strong interest in taking ownership of the platform infrastructure.',
    ARRAY['Node.js','PostgreSQL'], '3_months', 'interested')
@@ -231,12 +231,12 @@ ON CONFLICT (role_id, employee_id) DO NOTHING;
 -- Data Scientist role
 INSERT INTO talent_interests (tenant_id, role_id, employee_id, cover_note, skills, availability, status)
 VALUES
-  ('d0000000-0000-0000-0000-000000000001','t0000000-0000-0000-0000-000000000003',
+  ('d0000000-0000-0000-0000-000000000001','f0000000-0000-0000-0000-000000000003',
    'e0000000-0000-0000-0000-000000000003',
    'Completed two internal analytics projects using Python and trained a churn model. Deeply interested in people analytics.',
    ARRAY['Python','Machine Learning','SQL','Statistics'], '1_month', 'interested'),
 
-  ('d0000000-0000-0000-0000-000000000001','t0000000-0000-0000-0000-000000000003',
+  ('d0000000-0000-0000-0000-000000000001','f0000000-0000-0000-0000-000000000003',
    'e0000000-0000-0000-0000-00000000000b',
    'I hold a post-graduate diploma in data science and have been contributing to our BI dashboard.',
    ARRAY['Python','SQL','Data Visualisation'], '3_months', 'interested')
@@ -245,12 +245,12 @@ ON CONFLICT (role_id, employee_id) DO NOTHING;
 -- HRBP role
 INSERT INTO talent_interests (tenant_id, role_id, employee_id, cover_note, skills, availability, status)
 VALUES
-  ('d0000000-0000-0000-0000-000000000001','t0000000-0000-0000-0000-000000000004',
+  ('d0000000-0000-0000-0000-000000000001','f0000000-0000-0000-0000-000000000004',
    'e0000000-0000-0000-0000-000000000007',
    'HRBP for the Operations function for the past two years. Ready to partner with the Technology division.',
    ARRAY['HRBP','Performance Management','Employee Relations'], 'immediate', 'selected'),
 
-  ('d0000000-0000-0000-0000-000000000001','t0000000-0000-0000-0000-000000000004',
+  ('d0000000-0000-0000-0000-000000000001','f0000000-0000-0000-0000-000000000004',
    'e0000000-0000-0000-0000-00000000000c',
    'Strong interest in moving into an HRBP role from my current generalist position.',
    ARRAY['Talent Development','HRBP'], '1_month', 'withdrawn')
@@ -264,7 +264,7 @@ ON CONFLICT (role_id, employee_id) DO NOTHING;
 INSERT INTO succession_plans (id, tenant_id, position_title, department, incumbent_id,
   risk_level, status, notes, created_by)
 VALUES
-  ('s0000000-0000-0000-0000-000000000001',
+  ('c0000000-0000-0000-0000-000000000001',
    'd0000000-0000-0000-0000-000000000001',
    'Chief Operating Officer', 'Operations',
    'e0000000-0000-0000-0000-000000000001',
@@ -272,7 +272,7 @@ VALUES
    'Priya is the key decision-maker for all operations. Succession coverage is essential before Series B fundraise.',
    'd0000000-0000-0000-0000-0000000000a1'),
 
-  ('s0000000-0000-0000-0000-000000000002',
+  ('c0000000-0000-0000-0000-000000000002',
    'd0000000-0000-0000-0000-000000000001',
    'Head of Engineering', 'Engineering',
    'e0000000-0000-0000-0000-000000000005',
@@ -280,7 +280,7 @@ VALUES
    'Arjun leads the 40-person engineering org. Two strong internal candidates identified.',
    'd0000000-0000-0000-0000-0000000000a1'),
 
-  ('s0000000-0000-0000-0000-000000000003',
+  ('c0000000-0000-0000-0000-000000000003',
    'd0000000-0000-0000-0000-000000000001',
    'Head of Sales', 'Sales',
    'e0000000-0000-0000-0000-00000000000c',
@@ -296,9 +296,9 @@ ON CONFLICT (id) DO NOTHING;
 
 DO $$
 DECLARE
-  sp_coo  UUID := 's0000000-0000-0000-0000-000000000001';
-  sp_eng  UUID := 's0000000-0000-0000-0000-000000000002';
-  sp_sales UUID := 's0000000-0000-0000-0000-000000000003';
+  sp_coo  UUID := 'c0000000-0000-0000-0000-000000000001';
+  sp_eng  UUID := 'c0000000-0000-0000-0000-000000000002';
+  sp_sales UUID := 'c0000000-0000-0000-0000-000000000003';
   v_tenant UUID := 'd0000000-0000-0000-0000-000000000001';
   v_admin  UUID := 'd0000000-0000-0000-0000-0000000000a1';
   e02 UUID := 'e0000000-0000-0000-0000-000000000002';
