@@ -5,9 +5,14 @@
 ALTER TABLE mood_checkins
   ADD COLUMN IF NOT EXISTS sentiment_category TEXT;
 
+-- ── Add cluster_id + region_id to work_locations ─────────────────────────────
+-- work_locations (migration 010) only has city/state; these nullable columns
+-- let admins assign stores to named clusters and regions for mood analytics.
+ALTER TABLE work_locations
+  ADD COLUMN IF NOT EXISTS cluster_id TEXT,
+  ADD COLUMN IF NOT EXISTS region_id  TEXT;
+
 -- ── Cluster and region breakdown views ────────────────────────────────────────
--- These rely on work_locations having cluster_id + region_id fields.
--- If those columns don't exist they just produce NULLs gracefully.
 
 CREATE OR REPLACE VIEW mood_cluster_monthly AS
 SELECT
