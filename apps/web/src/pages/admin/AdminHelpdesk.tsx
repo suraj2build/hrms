@@ -75,7 +75,7 @@ interface CategorySla {
 
 interface Agent { id: string; full_name: string | null; role: string }
 interface Stats { total: number; open: number; breached: number; resolution_breached: number; by_status: Record<string, number> }
-interface CsatStats { average: number | null; total: number; by_rating: Record<string, number> }
+interface CsatStats { average: number | null; total: number; distribution: Record<string, number> }
 interface SlaPolicy { priority: TicketPriority; response_hours: number; resolution_hours: number; is_custom: boolean }
 
 function categoryLabel(cat: string): string {
@@ -145,11 +145,12 @@ export function AdminHelpdesk() {
   const [slaUrgencySort, setSlaUrgencySort] = useState(false)
 
   const { data: tickets = [], isLoading } = useQuery<Ticket[]>({
-    queryKey: ['admin-helpdesk', statusF, priorityF],
+    queryKey: ['admin-helpdesk', statusF, priorityF, slaUrgencySort],
     queryFn:  () => {
       const params = new URLSearchParams()
       if (statusF !== 'all')   params.set('status', statusF)
       if (priorityF !== 'all') params.set('priority', priorityF)
+      if (slaUrgencySort)      params.set('sort', 'sla_urgency')
       const qsStr = params.toString()
       return api.get<{ data: Ticket[] }>(`/helpdesk/tickets${qsStr ? `?${qsStr}` : ''}`).then(r => r.data ?? [])
     },
@@ -287,9 +288,9 @@ export function AdminHelpdesk() {
     onError: (e: Error) => toast.error('Failed to promote', { description: e.message }),
   })
 
-  const { data: escalationMatrix = [] } = useQuery<{ role: string; sla_hours: number; escalation_order: number }[]>({
+  const { data: escalationMatrix = [] } = useQuery<{ id: string; category: string; level: number; assignee_role: string; notify_after_hours: number }[]>({
     queryKey: ['admin-helpdesk', 'escalation-matrix'],
-    queryFn:  () => api.get<{ data: { role: string; sla_hours: number; escalation_order: number }[] }>('/helpdesk/escalation-matrix').then(r => r.data ?? []),
+    queryFn:  () => api.get<{ data: { id: string; category: string; level: number; assignee_role: string; notify_after_hours: number }[] }>('/helpdesk/escalation-matrix').then(r => r.data ?? []),
     enabled:  isAdmin && slaTab === 'escalation',
   })
 
@@ -297,9 +298,9 @@ export function AdminHelpdesk() {
     if (!openId) return
     setAiLoading(true)
     try {
-      const result = await api.get<{ data: { suggestion: string } }>(`/helpdesk/tickets/${openId}/ai-suggest`)
-      if (result.data?.suggestion) {
-        setReply(result.data.suggestion)
+      const result = await api.get<{ suggestion: string }>(`/helpdesk/tickets/${openId}/ai-draft-reply`)
+      if (result.suggestion) {
+        setReply(result.suggestion)
         toast.success('AI suggestion ready — edit before sending')
       }
     } catch (e) {
@@ -589,17 +590,19 @@ export function AdminHelpdesk() {
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="border-b border-border bg-muted/30 text-muted-foreground">
-                        <th className="text-left py-2 px-3 text-xs font-medium">Order</th>
+                        <th className="text-left py-2 px-3 text-xs font-medium">Category</th>
+                        <th className="text-left py-2 px-3 text-xs font-medium">Level</th>
                         <th className="text-left py-2 px-3 text-xs font-medium">Role</th>
                         <th className="text-left py-2 px-3 text-xs font-medium">Escalates after (h)</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {[...escalationMatrix].sort((a, b) => a.escalation_order - b.escalation_order).map(row => (
-                        <tr key={row.escalation_order} className="border-b border-border/50">
-                          <td className="py-2 px-3 text-xs font-semibold">#{row.escalation_order}</td>
-                          <td className="py-2 px-3 text-xs capitalize">{row.role.replace(/_/g, ' ')}</td>
-                          <td className="py-2 px-3 text-xs">{row.sla_hours}h</td>
+                      {[...escalationMatrix].sort((a, b) => a.level - b.level).map(row => (
+                        <tr key={row.id} className="border-b border-border/50">
+                          <td className="py-2 px-3 text-xs capitalize">{row.category.replace(/_/g, ' ')}</td>
+                          <td className="py-2 px-3 text-xs font-semibold">#{row.level}</td>
+                          <td className="py-2 px-3 text-xs capitalize">{row.assignee_role.replace(/_/g, ' ')}</td>
+                          <td className="py-2 px-3 text-xs">{row.notify_after_hours}h</td>
                         </tr>
                       ))}
                     </tbody>

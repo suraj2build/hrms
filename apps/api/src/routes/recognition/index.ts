@@ -630,13 +630,13 @@ export default async function recognitionRoutes(fastify: FastifyInstance) {
     let update: Record<string, unknown> = {}
     if (level === '1') {
       if (!approve) {
-        update = { status: 'not_selected', reviewed_at: now, reviewed_by: req.userId, approval_level: 0 }
+        update = { status: 'rejected', reviewed_at: now, reviewed_by: req.userId, approval_level: 1, approved_by_l1: null, l1_approved_at: null }
       } else {
         update = { status: 'level_2_pending', approved_by_l1: req.userId, l1_approved_at: now, approval_level: 1 }
       }
     } else {
       if (!approve) {
-        update = { status: 'not_selected', reviewed_at: now, reviewed_by: req.userId }
+        update = { status: 'rejected', reviewed_at: now, reviewed_by: req.userId, approval_level: 1 }
       } else {
         update = { status: 'shortlisted', approved_by_l2: req.userId, l2_approved_at: now, reviewed_at: now, reviewed_by: req.userId, approval_level: 2 }
       }

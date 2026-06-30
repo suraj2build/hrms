@@ -15,7 +15,7 @@ ALTER TABLE award_nominations
 
 ALTER TABLE award_nominations
   ADD CONSTRAINT award_nominations_status_check
-  CHECK (status IN ('pending','level_2_pending','approved','rejected','winner'));
+  CHECK (status IN ('pending','level_2_pending','shortlisted','not_selected','approved','rejected','winner'));
 
 -- ── Best Billing Associate formal award seed ──────────────────────────────────
 INSERT INTO formal_awards (tenant_id, name, frequency, eligibility_group,

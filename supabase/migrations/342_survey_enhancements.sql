@@ -94,13 +94,15 @@ CREATE TABLE IF NOT EXISTS feedback_360_rounds (
   nominee_id     UUID        NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
   peers_required INT         NOT NULL DEFAULT 3,
   status         TEXT        NOT NULL DEFAULT 'nomination_open'
-                             CHECK (status IN ('nomination_open','approved','surveys_sent','closed')),
+                             CHECK (status IN ('open','nomination_open','approved','surveys_sent','closed')),
+  deadline_at    TIMESTAMPTZ,
   created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
   UNIQUE (survey_id, nominee_id)
 );
 
 CREATE TABLE IF NOT EXISTS feedback_360_nominators (
   id          UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id   UUID        NOT NULL REFERENCES tenants(id),
   round_id    UUID        NOT NULL REFERENCES feedback_360_rounds(id) ON DELETE CASCADE,
   employee_id UUID        NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
   type        TEXT        NOT NULL CHECK (type IN ('peer','manager','direct_report')),

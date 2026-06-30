@@ -144,7 +144,7 @@ export default async function policyRoutes(fastify: FastifyInstance) {
       .order('category')
       .order('title')
 
-    if (category) q.eq('category', category)
+    if (category) q = q.eq('category', category)
 
     const { data: policies, error } = await q
     if (error) return reply.status(500).send({ error: error.message })
@@ -179,11 +179,11 @@ export default async function policyRoutes(fastify: FastifyInstance) {
 
     const q = supabase
       .from('hr_policies')
-      .select('id, title, category, description, status, requires_acknowledgement, effective_from, published_at, version, created_at')
+      .select('id, title, category, description, status, requires_acknowledgement, effective_from, published_at, version, created_at, is_mandatory')
       .eq('tenant_id', tenantId)
       .order('created_at', { ascending: false })
 
-    if (status) q.eq('status', status)
+    if (status) q = q.eq('status', status)
 
     const { data, error } = await q
     if (error) return reply.status(500).send({ error: error.message })
@@ -350,6 +350,7 @@ export default async function policyRoutes(fastify: FastifyInstance) {
       file_url,
       requires_acknowledgement = false,
       effective_from,
+      is_mandatory = false,
     } = req.body as any
 
     if (!title?.trim()) return reply.status(400).send({ error: 'title is required' })
@@ -365,6 +366,7 @@ export default async function policyRoutes(fastify: FastifyInstance) {
         file_url,
         requires_acknowledgement,
         effective_from: effective_from || null,
+        is_mandatory,
         created_by:     req.user.id,
         status:         'draft',
       })
@@ -394,7 +396,7 @@ export default async function policyRoutes(fastify: FastifyInstance) {
 
     const allowed = [
       'title','category','description','content',
-      'file_url','requires_acknowledgement','effective_from',
+      'file_url','requires_acknowledgement','effective_from','is_mandatory',
     ]
     const update: Record<string, unknown> = {}
     for (const k of allowed) {

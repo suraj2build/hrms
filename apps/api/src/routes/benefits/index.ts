@@ -191,10 +191,14 @@ export default async function benefitsRoutes(fastify: FastifyInstance) {
       newData:     { plan_id: parsed.data.plan_id, status: parsed.data.status, dependents: dependentIds.length },
     })
 
-    // Sync insurance enrolment for health/life/accident plans
-    if (parsed.data.status === 'enrolled' && ['health', 'term_life', 'accident'].includes((plan as any).plan_type)) {
-      const insurer = new InsuranceProvider(fastify.supabase)
-      await insurer.syncEnrolment(employeeId, parsed.data.plan_id, dependentIds).catch(() => { /* non-blocking */ })
+    // Sync insurance enrolment/unenrolment for health/life/accident plans
+    if (['health', 'term_life', 'accident'].includes((plan as any).plan_type)) {
+      const insurer = new InsuranceProvider(fastify.supabase, req.tenantId)
+      if (parsed.data.status === 'enrolled') {
+        await insurer.syncEnrolment(employeeId, parsed.data.plan_id, dependentIds).catch(() => { /* non-blocking */ })
+      } else if (parsed.data.status === 'waived') {
+        await insurer.syncUnenrolment(employeeId, parsed.data.plan_id).catch(() => { /* non-blocking */ })
+      }
     }
 
     return reply.send({ data })
@@ -232,7 +236,14 @@ export default async function benefitsRoutes(fastify: FastifyInstance) {
       }
 
       const { benefit_enrollments: _e, ...rest } = p
-      return { ...rest, enrolled_count, total_count, window_status }
+      return {
+        ...rest,
+        enrolled_count,
+        total_count,
+        window_status,
+        is_esic: p.plan_type === 'health' && p.name?.toLowerCase().includes('esic'),
+        is_nps:  p.plan_type === 'nps',
+      }
     })
 
     return reply.send({ data: plans })

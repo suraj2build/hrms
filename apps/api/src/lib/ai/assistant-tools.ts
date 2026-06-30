@@ -216,7 +216,7 @@ export const ASSISTANT_TOOLS: ToolDef[] = [
         properties: {
           subject:     { type: 'string', description: 'Short title of the issue (max 120 chars)' },
           description: { type: 'string', description: 'Detailed description of the problem or request' },
-          category:    { type: 'string', description: 'Category: it_support, hr_query, payroll, general. Default: general' },
+          category:    { type: 'string', description: 'Category: payroll, leave, attendance, it, facilities, hr_policy, posh, grievance, compliance, other. Default: other' },
           priority:    { type: 'string', description: 'Priority: low, medium, high. Default: medium' },
         },
         required: ['subject', 'description'],
@@ -837,18 +837,20 @@ async function applyLeave(ctx: ToolCtx, args: { leave_type: string; start_date: 
 
   if (!profile) return 'Could not resolve your profile. Please apply via the Leave page.'
 
+  const computed_days = Math.ceil((new Date(args.end_date).getTime() - new Date(args.start_date).getTime()) / 86400000) + 1
+
   const { data, error } = await ctx.supabase
     .from('leave_requests')
     .insert({
       tenant_id:     ctx.caller.tenantId,
       employee_id:   ctx.employeeId,
       leave_type_id: lt.id,
-      start_date:    args.start_date,
-      end_date:      args.end_date,
+      from_date:     args.start_date,
+      to_date:       args.end_date,
+      computed_days,
       reason:        args.reason?.trim() || null,
       status:        'PENDING',
-      applied_by:    ctx.caller.userId,
-      applied_at:    new Date().toISOString(),
+      requested_by:  ctx.caller.userId,
     })
     .select('id')
     .single()
@@ -862,7 +864,7 @@ async function cancelLeaveRequest(ctx: ToolCtx, args: { request_id: string }): P
 
   const { data: req, error: fetchErr } = await ctx.supabase
     .from('leave_requests')
-    .select('id, status, start_date, end_date, leave_types(name)')
+    .select('id, status, from_date, to_date, leave_types(name)')
     .eq('tenant_id', ctx.caller.tenantId)
     .eq('id', args.request_id)
     .eq('employee_id', ctx.employeeId)
@@ -879,15 +881,15 @@ async function cancelLeaveRequest(ctx: ToolCtx, args: { request_id: string }): P
 
   if (error) return `Failed to cancel: ${error.message}`
   const typeName = (req.leave_types as any)?.name ?? 'leave'
-  return `✅ ${typeName} request (${req.start_date} → ${req.end_date}) has been cancelled.`
+  return `✅ ${typeName} request (${req.from_date} → ${req.to_date}) has been cancelled.`
 }
 
 async function createHelpdeskTicket(ctx: ToolCtx, args: { subject: string; description: string; category?: string; priority?: string }): Promise<string> {
   if (!ctx.employeeId) return 'No employee profile linked to your account.'
 
-  const category = args.category ?? 'general'
+  const category = args.category ?? 'other'
   const priority  = args.priority  ?? 'medium'
-  const validCategories = ['it_support', 'hr_query', 'payroll', 'general']
+  const validCategories = ['payroll', 'leave', 'attendance', 'it', 'facilities', 'hr_policy', 'posh', 'grievance', 'compliance', 'other']
   const validPriorities  = ['low', 'medium', 'high']
   if (!validCategories.includes(category)) return `Invalid category. Use one of: ${validCategories.join(', ')}`
   if (!validPriorities.includes(priority))  return `Invalid priority. Use one of: ${validPriorities.join(', ')}`
@@ -1043,18 +1045,16 @@ async function searchPolicy(ctx: ToolCtx, args: { query?: string }): Promise<str
 async function getPayBreakdown(ctx: ToolCtx): Promise<string> {
   if (!ctx.employeeId) return 'No employee profile linked to your account.'
 
-  const { data: comp } = await ctx.supabase
-    .from('employee_compensations')
-    .select('basic, hra, special_allowance, pf_employee, pf_employer, esi_employee, esi_employer, professional_tax, gross_salary, net_salary, ctc')
+  const { data } = await ctx.supabase
+    .from('employee_compensation_components')
+    .select('component_name, amount, component_type')
     .eq('employee_id', ctx.employeeId)
     .eq('tenant_id', ctx.caller.tenantId)
-    .order('effective_from', { ascending: false })
-    .limit(1)
-    .maybeSingle()
+    .order('component_type')
 
-  if (!comp) return 'Salary structure not found. Contact HR for your compensation details.'
-  const c = comp as any
-  return `**Your Salary Structure**\n\nBasic: ${fmtINR(c.basic ?? 0)}\nHRA: ${fmtINR(c.hra ?? 0)}\nSpecial Allowance: ${fmtINR(c.special_allowance ?? 0)}\n\n**Deductions**\nPF (Employee): ${fmtINR(c.pf_employee ?? 0)}\nESI (Employee): ${fmtINR(c.esi_employee ?? 0)}\nProfessional Tax: ${fmtINR(c.professional_tax ?? 0)}\n\n**Gross Salary:** ${fmtINR(c.gross_salary ?? 0)}\n**Net Salary:** ${fmtINR(c.net_salary ?? 0)}\n**CTC:** ${fmtINR(c.ctc ?? 0)} per annum`
+  if (!data?.length) return 'Salary structure not found. Contact HR for your compensation details.'
+  const lines = (data as any[]).map(c => `${c.component_name}: ${fmtINR(Number(c.amount ?? 0))}`)
+  return `**Your Salary Structure**\n\n${lines.join('\n')}`
 }
 
 async function getAttendanceCalendar(ctx: ToolCtx, args: { month?: string }): Promise<string> {
@@ -1070,8 +1070,8 @@ async function getAttendanceCalendar(ctx: ToolCtx, args: { month?: string }): Pr
   const to    = toD.toISOString().slice(0, 10)
 
   const { data } = await ctx.supabase
-    .from('attendance_records')
-    .select('date, final_status, work_hours')
+    .from('attendance_daily')
+    .select('date, status, in_time, out_time')
     .eq('tenant_id', ctx.caller.tenantId)
     .eq('employee_id', ctx.employeeId)
     .gte('date', from)
@@ -1082,10 +1082,12 @@ async function getAttendanceCalendar(ctx: ToolCtx, args: { month?: string }): Pr
 
   const lines = (data as any[]).map(r => {
     const statusLabel: Record<string, string> = {
-      P: 'Present', A: 'Absent', L: 'Leave', H: 'Holiday', WO: 'Week Off', HD: 'Half Day',
+      present: 'Present', absent: 'Absent', leave: 'Leave', holiday: 'Holiday',
+      week_off: 'Week Off', half_day: 'Half Day',
     }
-    const s = statusLabel[r.final_status] ?? r.final_status
-    return `${r.date}: ${s}${r.work_hours ? ` (${r.work_hours}h)` : ''}`
+    const s = statusLabel[r.status] ?? r.status
+    const hours = r.in_time && r.out_time ? ` (${r.in_time}–${r.out_time})` : ''
+    return `${r.date}: ${s}${hours}`
   })
 
   return `**Attendance for ${month}**\n\n${lines.join('\n')}`
@@ -1102,17 +1104,14 @@ async function updateBankDetails(ctx: ToolCtx, args: { account_number?: string; 
   }
 
   const { error } = await ctx.supabase
-    .from('employee_bank_accounts')
+    .from('employee_bank_statutory')
     .upsert({
-      tenant_id:      ctx.caller.tenantId,
       employee_id:    ctx.employeeId,
+      tenant_id:      ctx.caller.tenantId,
       account_number: accountNum,
       ifsc_code:      ifsc.toUpperCase(),
       bank_name:      args.bank_name ?? null,
-      account_holder: args.account_holder ?? null,
-      is_primary:     true,
-      updated_at:     new Date().toISOString(),
-    }, { onConflict: 'tenant_id,employee_id,account_number' })
+    }, { onConflict: 'tenant_id,employee_id' })
 
   if (error) return `Failed to update bank details: ${error.message}`
   return `Bank account updated: ${accountNum} (${ifsc.toUpperCase()}). Changes will be reflected in your next payroll.`
@@ -1123,14 +1122,15 @@ async function updateEmergencyContact(ctx: ToolCtx, args: { name?: string; relat
   if (!args.name?.trim() || !args.phone?.trim()) return 'Name and phone are required.'
 
   const { error } = await ctx.supabase
-    .from('employees')
-    .update({
-      emergency_contact_name:  args.name.trim(),
-      emergency_contact_phone: args.phone.trim(),
-      emergency_contact_rel:   args.relationship ?? null,
-    })
-    .eq('id', ctx.employeeId)
-    .eq('tenant_id', ctx.caller.tenantId)
+    .from('emergency_contacts')
+    .upsert({
+      employee_id:  ctx.employeeId,
+      tenant_id:    ctx.caller.tenantId,
+      name:         args.name.trim(),
+      phone:        args.phone.trim(),
+      relationship: args.relationship ?? null,
+      is_primary:   true,
+    }, { onConflict: 'employee_id,tenant_id' })
 
   if (error) return `Failed to update emergency contact: ${error.message}`
   return `Emergency contact updated: ${args.name} (${args.relationship ?? 'N/A'}) — ${args.phone}.`
@@ -1172,11 +1172,11 @@ async function escalateTicket(ctx: ToolCtx, args: { ticket_id?: string; reason?:
     .maybeSingle()
 
   if (!ticket) return `Ticket "${args.ticket_id}" not found.`
-  if ((ticket as any).employee_id !== ctx.employeeId && !isHrAdmin(ctx.caller.role)) {
+  if ((ticket as any).employee_id !== ctx.employeeId && !isHrAdmin(ctx.caller.userRole)) {
     return 'You can only escalate your own tickets.'
   }
 
-  await ctx.supabase.from('helpdesk_comments').insert({
+  await ctx.supabase.from('helpdesk_ticket_comments').insert({
     tenant_id:  ctx.caller.tenantId,
     ticket_id:  (ticket as any).id,
     author_id:  ctx.caller.profileId,
@@ -1194,6 +1194,7 @@ async function getOnboardingGuide(ctx: ToolCtx): Promise<string> {
     .from('employees')
     .select('first_name, joining_date, status')
     .eq('id', ctx.employeeId)
+    .eq('tenant_id', ctx.caller.tenantId)
     .maybeSingle()
 
   const name = (emp as any)?.first_name ?? 'there'

@@ -475,6 +475,14 @@ export default async function successionRoutes(fastify: FastifyInstance) {
     const { departing_employee_id } = req.body as { departing_employee_id: string }
     if (!departing_employee_id) return reply.status(400).send({ error: 'departing_employee_id is required' })
 
+    // Fetch the departing employee's info
+    const { data: deptEmployee } = await supabase
+      .from('employees')
+      .select('id, first_name, last_name, employee_code')
+      .eq('id', departing_employee_id)
+      .eq('tenant_id', tenantId)
+      .maybeSingle()
+
     // Find succession plans where this employee is the incumbent
     const { data: plans } = await supabase
       .from('succession_plans')
@@ -484,7 +492,14 @@ export default async function successionRoutes(fastify: FastifyInstance) {
       .eq('status', 'active')
 
     if (!plans?.length) {
-      return reply.send({ data: { plans: [], message: 'No active succession plans for this employee' } })
+      return reply.send({
+        data: {
+          departing_employee: deptEmployee
+            ? { id: deptEmployee.id, name: `${deptEmployee.first_name} ${deptEmployee.last_name}`, employee_code: deptEmployee.employee_code }
+            : { id: departing_employee_id, name: 'Unknown', employee_code: '' },
+          affected_plans: [],
+        },
+      })
     }
 
     const planIds = plans.map(p => p.id)
@@ -502,14 +517,27 @@ export default async function successionRoutes(fastify: FastifyInstance) {
       candsByPlan[c.plan_id].push({ ...c, weighted_score: computeWeightedScore(c) })
     }
 
-    const result = plans.map(plan => ({
-      plan,
-      top_successor:    (candsByPlan[plan.id] ?? []).sort((a, b) => b.weighted_score - a.weighted_score)[0] ?? null,
-      ready_now_count:  (candsByPlan[plan.id] ?? []).filter(c => c.readiness_level === 'ready_now').length,
-      coverage_risk:    (candsByPlan[plan.id] ?? []).length === 0 ? 'critical' : plan.risk_level,
-    }))
+    const affected_plans = plans.map(plan => {
+      const sorted = (candsByPlan[plan.id] ?? []).sort((a, b) => b.weighted_score - a.weighted_score)
+      const top_candidates = sorted.map((c: any) => ({
+        id:              c.employees?.id ?? c.id,
+        name:            c.employees ? `${c.employees.first_name} ${c.employees.last_name}` : 'Unknown',
+        readiness_level: c.readiness_level,
+        readiness_score: c.readiness_score ?? null,
+      }))
+      return {
+        plan_id:        plan.id,
+        position_title: plan.position_title,
+        risk_level:     plan.risk_level,
+        top_candidates,
+      }
+    })
 
-    return reply.send({ data: result })
+    const departing_employee = deptEmployee
+      ? { id: deptEmployee.id, name: `${deptEmployee.first_name} ${deptEmployee.last_name}`, employee_code: deptEmployee.employee_code }
+      : { id: departing_employee_id, name: 'Unknown', employee_code: '' }
+
+    return reply.send({ data: { departing_employee, affected_plans } })
   })
 
   // ── Calibration sessions ──────────────────────────────────────────────────
@@ -568,8 +596,19 @@ export default async function successionRoutes(fastify: FastifyInstance) {
   fastify.post('/calibration/:sessionId/changes', hrAuth, async (req: any, reply) => {
     const { sessionId } = req.params as { sessionId: string }
     const tenantId      = req.tenantId
-    const { candidate_id, field_changed, old_value, new_value, notes } = req.body as any
-    if (!candidate_id || !field_changed) return reply.status(400).send({ error: 'candidate_id and field_changed required' })
+    const { employee_id, field_changed, old_value, new_value, notes } = req.body as any
+    if (!employee_id || !field_changed) return reply.status(400).send({ error: 'employee_id and field_changed required' })
+
+    // Look up the succession_candidates row for this employee in this tenant
+    const { data: candRow } = await supabase
+      .from('succession_candidates')
+      .select('id')
+      .eq('employee_id', employee_id)
+      .eq('tenant_id', tenantId)
+      .limit(1)
+      .maybeSingle()
+    const candidate_id = candRow?.id
+    if (!candidate_id) return reply.status(404).send({ error: 'No succession candidate found for this employee' })
 
     const { data, error } = await supabase
       .from('calibration_changes')

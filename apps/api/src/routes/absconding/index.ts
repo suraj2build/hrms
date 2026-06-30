@@ -300,7 +300,7 @@ export default async function abscondingRoutes(fastify: FastifyInstance) {
       .from('absconding_cases')
       .select('id, status, first_ua_date, ua_days_count, employee_id, flagged_at, created_at')
       .eq('tenant_id', tenantId)
-      .in('status', ['flagged', 'wl1_sent', 'wl2_sent'])
+      .in('status', ['flagged', 'second_escalation', 'wl1_sent', 'wl2_sent'])
 
     if (fetchErr) return reply.code(500).send({ error: 'DB_ERROR', message: fetchErr.message })
 

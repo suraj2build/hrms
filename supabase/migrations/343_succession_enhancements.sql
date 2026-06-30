@@ -22,7 +22,7 @@ CREATE TABLE IF NOT EXISTS calibration_changes (
   old_value     TEXT,
   new_value     TEXT,
   notes         TEXT,
-  changed_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 ALTER TABLE calibration_sessions ENABLE ROW LEVEL SECURITY;

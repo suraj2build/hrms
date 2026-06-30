@@ -115,14 +115,14 @@ export function AdminCalibration() {
   const addChange = useMutation({
     mutationFn: (payload: {
       sessionId:     string
-      candidate_id:  string
+      employee_id:   string
       field_changed: string
       old_value:     string
       new_value:     string
       notes:         string
     }) =>
       api.post(`/succession/calibration/${payload.sessionId}/changes`, {
-        candidate_id:  payload.candidate_id,
+        employee_id:   payload.employee_id,
         field_changed: payload.field_changed,
         old_value:     payload.old_value  || undefined,
         new_value:     payload.new_value  || undefined,
@@ -490,7 +490,7 @@ export function AdminCalibration() {
                   if (!changeNewVal.trim()) { toast.error('New value is required'); return }
                   addChange.mutate({
                     sessionId:     detailId,
-                    candidate_id:  changeCandId,
+                    employee_id:   changeCandId,
                     field_changed: changeField,
                     old_value:     changeOldVal,
                     new_value:     changeNewVal,

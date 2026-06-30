@@ -44,7 +44,7 @@ ALTER TABLE benefit_plans
 
 ALTER TABLE benefit_plans
   ADD CONSTRAINT benefit_plans_plan_type_check
-  CHECK (plan_type IN ('health','life','dental','vision','nps','other'));
+  CHECK (plan_type IN ('health','term_life','accident','wellness','meal','transport','nps','other'));
 
 -- ── Insurance outbox ─────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS insurance_outbox (

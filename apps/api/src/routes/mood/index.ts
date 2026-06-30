@@ -296,14 +296,18 @@ export default async function moodRoutes(fastify: FastifyInstance) {
       ? Math.round((distinctRespondents / totalActive) * 100)
       : 0
 
+    const participationData = { rate: participation_rate, respondents: distinctRespondents, total: totalActive, target: 70 }
+
     return reply.send({
       data: {
         trend,
         distribution,
-        total_checkins_7d:  checkins.length,
-        active_pulse:       pulseStats,
-        sentiment_summary:  sentCounts,
-        participation_rate: { rate: participation_rate, respondents: distinctRespondents, total: totalActive, target: 70 },
+        total_checkins_7d:    checkins.length,
+        active_pulse:         pulseStats,
+        sentiment_summary:    sentCounts,
+        participation_rate_7d: participationData.rate,
+        total_employees:      participationData.total,
+        participation_rate:   participationData,
       },
     })
   })

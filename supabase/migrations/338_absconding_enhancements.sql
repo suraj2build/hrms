@@ -7,8 +7,8 @@ ALTER TABLE absconding_cases
 
 ALTER TABLE absconding_cases
   ADD CONSTRAINT absconding_cases_status_check
-  CHECK (status IN ('open','flagged','second_escalation','warning_letter_1','warning_letter_2',
-                    'termination_notice','terminated','rejoined','closed'));
+  CHECK (status IN ('open','flagged','second_escalation','wl1_sent','wl2_sent',
+                    'termination_pending','terminated','rejoined','closed'));
 
 -- ── Asset recovery tracking ───────────────────────────────────────────────────
 ALTER TABLE absconding_cases

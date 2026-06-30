@@ -662,18 +662,25 @@ export default async function surveyRoutes(fastify: FastifyInstance) {
   fastify.post('/admin/:id/360/setup', hrAuth, async (req: any, reply) => {
     const { id }        = req.params as { id: string }
     const tenantId      = req.tenantId
-    const { nominee_id, peers_required = 3 } = req.body as any
-    if (!nominee_id) return reply.status(400).send({ error: 'nominee_id is required' })
+    const { peer_count = 3, deadline_days, self_review, manager_review } = req.body as any
+
+    const deadline_at = deadline_days
+      ? new Date(Date.now() + Number(deadline_days) * 86400000).toISOString()
+      : null
+
+    const insertRow: Record<string, unknown> = {
+      survey_id:      id,
+      tenant_id:      tenantId,
+      peers_required: Number(peer_count),
+      status:         'open',
+    }
+    if (deadline_at !== null)         insertRow.deadline_at     = deadline_at
+    if (self_review    !== undefined) insertRow.self_review     = Boolean(self_review)
+    if (manager_review !== undefined) insertRow.manager_review  = Boolean(manager_review)
 
     const { data: round, error } = await supabase
       .from('feedback_360_rounds')
-      .insert({
-        survey_id:      id,
-        nominee_id,
-        tenant_id:      tenantId,
-        peers_required: Number(peers_required),
-        status:         'open',
-      })
+      .insert(insertRow)
       .select('id')
       .single()
 
@@ -742,12 +749,36 @@ export default async function surveyRoutes(fastify: FastifyInstance) {
 
     const { data } = await supabase
       .from('feedback_360_rounds')
-      .select('id, status, peers_required, survey_id, surveys(title)')
+      .select('id, status, peers_required, deadline_at, survey_id, surveys(title)')
       .eq('nominee_id', empId)
       .eq('tenant_id', tenantId)
       .order('created_at', { ascending: false })
 
-    return reply.send({ data: data ?? [] })
+    const rounds = data ?? []
+
+    // Fetch peer nominations already submitted by this employee for each round
+    const roundIds = rounds.map((r: any) => r.id)
+    let nominatorMap: Record<string, string[]> = {}
+    if (roundIds.length) {
+      const { data: nominators } = await supabase
+        .from('feedback_360_nominators')
+        .select('round_id, employee_id')
+        .in('round_id', roundIds)
+        .eq('tenant_id', tenantId)
+      for (const n of nominators ?? []) {
+        if (!nominatorMap[(n as any).round_id]) nominatorMap[(n as any).round_id] = []
+        nominatorMap[(n as any).round_id].push((n as any).employee_id)
+      }
+    }
+
+    const mapped = rounds.map((r: any) => ({
+      ...r,
+      peer_count:     r.peers_required,
+      survey:         r.surveys,
+      my_nominations: nominatorMap[r.id] ?? [],
+    }))
+
+    return reply.send({ data: mapped })
   })
 
   fastify.post('/my/360/:roundId/nominate', { preHandler: [fastify.authenticate] }, async (req: any, reply) => {
@@ -756,8 +787,8 @@ export default async function surveyRoutes(fastify: FastifyInstance) {
     const empId       = await getEmployeeId((req.user as any).sub)
     if (!empId) return reply.status(403).send({ error: 'Employee profile not found' })
 
-    const { peer_ids } = req.body as { peer_ids: string[] }
-    if (!peer_ids?.length) return reply.status(400).send({ error: 'peer_ids required' })
+    const { employee_ids } = req.body as { employee_ids: string[] }
+    if (!employee_ids?.length) return reply.status(400).send({ error: 'employee_ids required' })
 
     const { data: round } = await supabase
       .from('feedback_360_rounds')
@@ -773,7 +804,7 @@ export default async function surveyRoutes(fastify: FastifyInstance) {
       return reply.status(400).send({ error: 'Nominations are closed' })
     }
 
-    const rows = peer_ids.map(pid => ({
+    const rows = employee_ids.map(pid => ({
       round_id:    roundId,
       tenant_id:   tenantId,
       employee_id: pid,

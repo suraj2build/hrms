@@ -19,7 +19,7 @@ const TEMPLATE_PREVIEWS: Record<string, (v: Record<string, string>) => string> =
   policy_published:      (v) => `New HR Policy: ${v.title ?? ''}. Please read and acknowledge.`,
   peer_recognition:      (v) => `${v.giver_name ?? ''} appreciated you! "${v.message ?? ''}"`,
   formal_award_won:      (v) => `Congratulations! You are the winner of ${v.award_name ?? ''}.`,
-  new_joiner_policies:   (v) => `Welcome to Citykart, ${v.name ?? ''}! Please acknowledge your mandatory policies.`,
+  new_joiner_policies:   (v) => `Welcome to CognixHR, ${v.name ?? ''}! Please acknowledge your mandatory policies.`,
 }
 
 export class WhatsAppProvider {
@@ -118,21 +118,35 @@ export class WhatsAppProvider {
     phone: string,
     text: string,
   ): Promise<void> {
-    await this.supabase.from('whatsapp_outbox').insert({
-      tenant_id:     tenantId,
-      to_phone:      phone,
-      template_name: '_text',
-      variables:     { text },
-      body_preview:  text.slice(0, 200),
-      status:        'pending',
-    })
+    const { data: outboxRow, error: insertError } = await this.supabase
+      .from('whatsapp_outbox')
+      .insert({
+        tenant_id:     tenantId,
+        to_phone:      phone,
+        template_name: '_text',
+        variables:     { text },
+        body_preview:  text.slice(0, 200),
+        status:        'pending',
+      })
+      .select('id')
+      .single()
+
+    if (insertError) {
+      console.error('[WhatsApp] outbox insert failed:', insertError.message)
+      return
+    }
 
     const apiToken   = process.env.WHATSAPP_API_TOKEN
     const phoneNumId = process.env.WHATSAPP_PHONE_NUMBER_ID
-    if (!apiToken || !phoneNumId) return
+    const outboxId   = outboxRow?.id
+
+    if (!apiToken || !phoneNumId) {
+      // Logged to outbox; no live delivery until credentials are set
+      return
+    }
 
     try {
-      await fetch(
+      const res = await fetch(
         `https://graph.facebook.com/${WA_API_VERSION}/${phoneNumId}/messages`,
         {
           method:  'POST',
@@ -145,8 +159,25 @@ export class WhatsAppProvider {
           }),
         },
       )
-    } catch {
-      // non-blocking
+
+      if (res.ok) {
+        await this.supabase
+          .from('whatsapp_outbox')
+          .update({ status: 'sent', sent_at: new Date().toISOString() })
+          .eq('id', outboxId)
+      } else {
+        const body = await res.text()
+        await this.supabase
+          .from('whatsapp_outbox')
+          .update({ status: 'failed', error_message: body.slice(0, 500) })
+          .eq('id', outboxId)
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err)
+      await this.supabase
+        .from('whatsapp_outbox')
+        .update({ status: 'failed', error_message: msg.slice(0, 500) })
+        .eq('id', outboxId)
     }
   }
 }

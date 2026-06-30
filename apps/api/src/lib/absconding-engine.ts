@@ -117,7 +117,7 @@ async function getLetterMergeFields(
     .select(`
       first_name, last_name, employee_code, designation,
       work_locations(name),
-      employees!employees_reporting_manager_id_fkey(first_name, last_name)
+      manager:employees!employees_reporting_manager_id_fkey(first_name, last_name)
     `)
     .eq('id', employeeId)
     .eq('tenant_id', tenantId)
@@ -130,8 +130,8 @@ async function getLetterMergeFields(
     .single()
 
   const e = emp as any
-  const managerName = e?.employees
-    ? `${e.employees.first_name ?? ''} ${e.employees.last_name ?? ''}`.trim()
+  const managerName = e?.manager
+    ? `${e.manager.first_name ?? ''} ${e.manager.last_name ?? ''}`.trim()
     : 'HR Manager'
 
   return {

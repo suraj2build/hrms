@@ -47,14 +47,67 @@ export class InsuranceProvider {
       const status = res.ok ? 'sent' : 'failed'
       const err    = res.ok ? undefined : (await res.text()).slice(0, 500)
 
-      await this.supabase.from('insurance_outbox')
-        .update({ status, sent_at: new Date().toISOString(), error_message: err })
+      const { data: row } = await this.supabase
+        .from('insurance_outbox')
+        .select('id')
         .eq('tenant_id', this.tenantId)
         .eq('event_type', 'enrolment_sync')
         .order('created_at', { ascending: false })
         .limit(1)
+        .maybeSingle()
+
+      if (row?.id) {
+        await this.supabase
+          .from('insurance_outbox')
+          .update({ status, sent_at: new Date().toISOString(), error_message: err })
+          .eq('id', row.id)
+      }
     } catch (err: unknown) {
       console.error('[insurance-provider] sync failed:', err)
+    }
+  }
+
+  async syncUnenrolment(employeeId: string, planId: string): Promise<void> {
+    const payload = { employee_id: employeeId, plan_id: planId }
+
+    await this.supabase.from('insurance_outbox').insert({
+      tenant_id:     this.tenantId,
+      provider_name: process.env.INSURANCE_PROVIDER_NAME ?? 'GMC',
+      event_type:    'unenrolment_sync',
+      payload,
+      status:        'pending',
+    })
+
+    const apiKey = process.env.INSURANCE_API_KEY
+    const apiUrl = process.env.INSURANCE_API_URL
+    if (!apiKey || !apiUrl) return
+
+    try {
+      const res = await fetch(`${apiUrl}/unenrolments`, {
+        method:  'POST',
+        headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+        body:    JSON.stringify(payload),
+      })
+      const status = res.ok ? 'sent' : 'failed'
+      const err    = res.ok ? undefined : (await res.text()).slice(0, 500)
+
+      const { data: row } = await this.supabase
+        .from('insurance_outbox')
+        .select('id')
+        .eq('tenant_id', this.tenantId)
+        .eq('event_type', 'unenrolment_sync')
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+
+      if (row?.id) {
+        await this.supabase
+          .from('insurance_outbox')
+          .update({ status, sent_at: new Date().toISOString(), error_message: err })
+          .eq('id', row.id)
+      }
+    } catch (err: unknown) {
+      console.error('[insurance-provider] unenrolment sync failed:', err)
     }
   }
 

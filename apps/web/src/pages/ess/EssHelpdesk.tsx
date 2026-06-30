@@ -59,6 +59,8 @@ const CATEGORIES = [
   { value: 'it', label: 'IT' },
   { value: 'facilities', label: 'Facilities' },
   { value: 'hr_policy', label: 'HR Policy' },
+  { value: 'grievance', label: 'Grievance' },
+  { value: 'compliance', label: 'Compliance' },
   { value: 'posh', label: 'POSH Complaint' },
   { value: 'other', label: 'Other' },
 ]

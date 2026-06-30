@@ -13,13 +13,13 @@ CREATE OR REPLACE VIEW mood_cluster_monthly AS
 SELECT
   mc.tenant_id,
   COALESCE(wl.cluster_id::TEXT, 'unknown') AS cluster_id,
-  TO_CHAR(mc.checkin_date, 'YYYY-MM')      AS month,
-  ROUND(AVG(mc.mood)::NUMERIC, 2)          AS avg_mood,
+  DATE_TRUNC('month', mc.submitted_at)::date AS score_month,
+  ROUND(AVG(mc.mood)::numeric * 20, 1)    AS avg_score_100,
   COUNT(DISTINCT mc.employee_id)           AS respondent_count
 FROM mood_checkins mc
 LEFT JOIN employees  e  ON e.id = mc.employee_id
 LEFT JOIN work_locations wl ON wl.id = e.work_location_id
-GROUP BY mc.tenant_id, COALESCE(wl.cluster_id::TEXT, 'unknown'), TO_CHAR(mc.checkin_date, 'YYYY-MM')
+GROUP BY mc.tenant_id, COALESCE(wl.cluster_id::TEXT, 'unknown'), DATE_TRUNC('month', mc.submitted_at)::date
 HAVING COUNT(DISTINCT mc.employee_id) >= 5;
 
 CREATE OR REPLACE VIEW mood_region_monthly AS

@@ -187,8 +187,9 @@ export function EssSurveys() {
                   </div>
 
                   <EmployeeSelector
-                    value={picked[0] ?? null}
-                    onChange={empId => {
+                    value={undefined}
+                    onChange={rawVal => {
+                      const empId = Array.isArray(rawVal) ? rawVal[0] : rawVal
                       if (!empId || picked.includes(empId)) return
                       if (picked.length >= needed) {
                         toast.error(`You can nominate at most ${needed} peer${needed !== 1 ? 's' : ''}`)
@@ -205,7 +206,7 @@ export function EssSurveys() {
                         <div key={eid} className="flex items-center justify-between rounded-md border border-border/50 bg-muted/20 px-3 py-1.5">
                           <div className="flex items-center gap-2">
                             <Users2 className="h-3.5 w-3.5 text-muted-foreground" />
-                            <span className="text-xs text-foreground">Peer #{i + 1} — {eid}</span>
+                            <span className="text-xs text-foreground">Peer #{i + 1}</span>
                           </div>
                           <button
                             onClick={() => setNominations(prev => ({ ...prev, [round.id]: picked.filter((_, j) => j !== i) }))}
