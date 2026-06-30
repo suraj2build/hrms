@@ -45,9 +45,18 @@ If one doesn't exist or doesn't match, build a simple inline combobox that:
 ## Context Rail — FROZEN at RC1
 
 `apps/web/src/components/layout/EssContextPanel.tsx`
+Visibility gate: `apps/web/src/components/layout/EssShell.tsx` (`showContextRail`)
 
 The ESS Context Rail is **feature-frozen**. Do not add new sections, cards, CTAs,
 or data sources without explicit product approval.
+
+**Visible on Pillar pages only** (experience/overview pages — not service section pages):
+`/ess/attention`, `/ess/identity`, `/ess/assistant`, `/ess/company`, `/ess/flowdesk`,
+`/ess/team`, `/ess/recognition`
+
+Hidden on Home (`/ess/home` — has its own inline right column) and all Service section
+pages (Leave, Attendance, Pay, Documents, Assets, etc.) — task-oriented pages don't
+benefit from the rail.
 
 **Approved sections (do not remove or restructure):**
 - Approvals — managers only, directly actionable

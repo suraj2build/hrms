@@ -121,6 +121,20 @@ export function EssShell() {
   // inline right column (celebration card, also today, etc).
   const isHomePage = pathname === '/ess/home' || pathname === '/ess/dashboard' || pathname === '/ess'
 
+  // Context Rail is only shown on Pillar pages (overview/experience pages).
+  // Service section pages (Leave, Attendance, Pay, Documents, etc.) are task-oriented
+  // and don't benefit from the rail — hiding it gives forms and tables more room.
+  const PILLAR_PATHS = new Set([
+    '/ess/attention',
+    '/ess/identity',
+    '/ess/assistant',
+    '/ess/company',
+    '/ess/flowdesk',
+    '/ess/team',
+    '/ess/recognition',
+  ])
+  const showContextRail = PILLAR_PATHS.has(pathname)
+
   // Apply dark theme to the document while ESS is mounted. The existing theme
   // system uses data-theme on documentElement — we save/restore around the ESS session
   // so the user's chosen theme comes back when they leave ESS.
@@ -161,8 +175,8 @@ export function EssShell() {
                 <Outlet />
               </Suspense>
             </main>
-            {/* Right context panel — hidden on home (inline right col handles it) */}
-            {!atThreshold && !isHomePage && <EssContextPanel />}
+            {/* Right context panel — Pillar pages only; hidden on Service section pages */}
+            {!atThreshold && showContextRail && <EssContextPanel />}
           </div>
         </div>
       </div>
