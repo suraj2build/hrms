@@ -129,6 +129,11 @@ export default async function helpdeskRoutes(fastify: FastifyInstance) {
   const auth        = { preHandler: [fastify.authenticate] }
   const hrAdminAuth = { preHandler: [fastify.authenticate, requireRole(...HR_ADMIN_ROLES)] }
 
+  // ── Build-verification ping (unauthenticated) ─────────────────────────────
+  fastify.get('/ping', async (_req, reply) =>
+    reply.send({ ok: true, build: 'v3-csat-sla', routes: ['stats/csat', 'admin/satisfaction-report', 'admin/category-sla'] })
+  )
+
   // ═══════════════════════════════════════════════════════════════════════════
   // EMPLOYEE (ESS)
   // ═══════════════════════════════════════════════════════════════════════════
