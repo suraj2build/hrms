@@ -106,4 +106,7 @@ FROM tenants t,
        ('posh', 4, 120),
        ('compliance', 8, 48)
      ) AS v(category, response_hours, resolution_hours)
-ON CONFLICT (tenant_id, category) DO NOTHING;
+WHERE NOT EXISTS (
+  SELECT 1 FROM helpdesk_category_sla h
+  WHERE h.tenant_id = t.id AND h.category = v.category
+);

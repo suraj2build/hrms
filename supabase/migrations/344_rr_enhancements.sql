@@ -18,10 +18,8 @@ ALTER TABLE award_nominations
   CHECK (status IN ('pending','level_2_pending','shortlisted','not_selected','approved','rejected','winner'));
 
 -- ── Best Billing Associate formal award seed ──────────────────────────────────
-INSERT INTO formal_awards (tenant_id, name, frequency, eligibility_group,
-                            approver_role, monetary_value, currency)
-SELECT id, 'Best Billing Associate', 'monthly', 'Billing Associates',
-       'cluster_manager', 500, 'INR'
+INSERT INTO formal_awards (tenant_id, name, frequency, eligible_group, monetary_value)
+SELECT id, 'Best Billing Associate', 'monthly', 'Billing Associates', 500
 FROM tenants
 WHERE id = 'd0000000-0000-0000-0000-000000000001'
-ON CONFLICT DO NOTHING;
+ON CONFLICT (tenant_id, name) DO NOTHING;

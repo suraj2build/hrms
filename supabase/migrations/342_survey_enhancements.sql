@@ -3,25 +3,34 @@
 -- and expands the Annual Engagement Survey to 35 questions.
 
 -- ── Onboarding D60 + D90 templates ───────────────────────────────────────────
-INSERT INTO survey_templates (survey_type, name, description, questions, is_system) VALUES
-('onboarding_d60', 'Onboarding Pulse – Day 60', 'Settling-in check at 60 days', '[
-  {"order_idx":1,"question_text":"How clearly do you understand your key performance expectations?","question_type":"rating","required":true},
-  {"order_idx":2,"question_text":"How well have you settled into your team?","question_type":"rating","required":true},
-  {"order_idx":3,"question_text":"How adequate was the training you have received so far?","question_type":"rating","required":true},
-  {"order_idx":4,"question_text":"How effectively does your manager communicate with you?","question_type":"rating","required":true},
-  {"order_idx":5,"question_text":"How aligned do you feel with the organisation values and culture?","question_type":"rating","required":true},
-  {"order_idx":6,"question_text":"What is one thing that would improve your experience at work right now?","question_type":"text","required":false}
-]'::jsonb, true),
-('onboarding_d90', 'Onboarding Pulse – Day 90', 'Three-month experience check', '[
-  {"order_idx":1,"question_text":"Do you feel you are contributing meaningfully in your role?","question_type":"rating","required":true},
-  {"order_idx":2,"question_text":"How likely are you to recommend this organisation as a great place to work?","question_type":"rating","required":true},
-  {"order_idx":3,"question_text":"How supported do you feel in achieving your targets?","question_type":"rating","required":true},
-  {"order_idx":4,"question_text":"How clear is your career growth path here?","question_type":"rating","required":true},
-  {"order_idx":5,"question_text":"How satisfied are you with the recognition you receive for good work?","question_type":"rating","required":true},
-  {"order_idx":6,"question_text":"What is working well for you here?","question_type":"text","required":false},
-  {"order_idx":7,"question_text":"What is one thing the organisation could do better to support you?","question_type":"text","required":false}
-]'::jsonb, true)
-ON CONFLICT (survey_type) DO NOTHING;
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM survey_templates WHERE survey_type = 'onboarding_d60') THEN
+    INSERT INTO survey_templates (survey_type, name, description, questions, is_system) VALUES
+    ('onboarding_d60', 'Onboarding Pulse – Day 60', 'Settling-in check at 60 days', '[
+      {"order_idx":1,"question_text":"How clearly do you understand your key performance expectations?","question_type":"rating","required":true},
+      {"order_idx":2,"question_text":"How well have you settled into your team?","question_type":"rating","required":true},
+      {"order_idx":3,"question_text":"How adequate was the training you have received so far?","question_type":"rating","required":true},
+      {"order_idx":4,"question_text":"How effectively does your manager communicate with you?","question_type":"rating","required":true},
+      {"order_idx":5,"question_text":"How aligned do you feel with the organisation values and culture?","question_type":"rating","required":true},
+      {"order_idx":6,"question_text":"What is one thing that would improve your experience at work right now?","question_type":"text","required":false}
+    ]'::jsonb, true);
+  END IF;
+
+  IF NOT EXISTS (SELECT 1 FROM survey_templates WHERE survey_type = 'onboarding_d90') THEN
+    INSERT INTO survey_templates (survey_type, name, description, questions, is_system) VALUES
+    ('onboarding_d90', 'Onboarding Pulse – Day 90', 'Three-month experience check', '[
+      {"order_idx":1,"question_text":"Do you feel you are contributing meaningfully in your role?","question_type":"rating","required":true},
+      {"order_idx":2,"question_text":"How likely are you to recommend this organisation as a great place to work?","question_type":"rating","required":true},
+      {"order_idx":3,"question_text":"How supported do you feel in achieving your targets?","question_type":"rating","required":true},
+      {"order_idx":4,"question_text":"How clear is your career growth path here?","question_type":"rating","required":true},
+      {"order_idx":5,"question_text":"How satisfied are you with the recognition you receive for good work?","question_type":"rating","required":true},
+      {"order_idx":6,"question_text":"What is working well for you here?","question_type":"text","required":false},
+      {"order_idx":7,"question_text":"What is one thing the organisation could do better to support you?","question_type":"text","required":false}
+    ]'::jsonb, true);
+  END IF;
+END;
+$$;
 
 -- ── Expand Annual Engagement Survey to 35 questions ──────────────────────────
 UPDATE survey_templates
