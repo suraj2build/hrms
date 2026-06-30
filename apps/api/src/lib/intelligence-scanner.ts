@@ -5,12 +5,15 @@
  * operational intelligence events so event-bus-automation subscribers
  * can write audit logs and notify HR managers.
  *
- * Five scan targets (each runs per-tenant, per-active-employee):
+ * Eight scan targets (each runs per-tenant):
  *   1. Repeated late arrival patterns  → repeated.late.pattern.detected
  *   2. Burnout risk (OT + no weekly-off) → burnout.risk.detected
  *   3. Staffing shortages              → staffing.shortage.detected
  *   4. Payroll blockers (upcoming run) → payroll.blocker.detected
  *   5. Attendance risk score           → attendance.risk.detected
+ *   6. Compliance filing deadlines     → compliance.deadline.alert
+ *   7. Lifecycle expiry (contracts, docs, probation) → lifecycle.expiry.alert
+ *   8. Exit intent survey auto-trigger → HR inbox notification + survey_assignment
  *
  * Architecture:
  *   - Scans every SCAN_INTERVAL_MS (6 hours)
@@ -505,6 +508,191 @@ async function scanLifecycleExpiry(supabase: SupabaseClient, tenantId: string): 
   }
 }
 
+// ── Scanner 8 — Exit Intent Survey Auto-Trigger ───────────────────────────────
+// Employees with persistently low mood (avg ≤ 2.5/5) in 2+ of the last 3 full
+// calendar months are auto-enrolled in the tenant's active exit_intent survey.
+// If no active survey exists the scanner creates one from the system template.
+// Each employee is enrolled at most once every 90 days.
+
+const EXIT_MOOD_THRESHOLD   = 2.5   // avg mood score ≤ this → at-risk month
+const EXIT_MONTHS_REQUIRED  = 2     // must be at-risk in this many of the last 3 months
+const EXIT_COOLDOWN_DAYS    = 90    // do not re-assign sooner than this
+
+async function scanExitIntentSurveys(supabase: SupabaseClient, tenantId: string): Promise<void> {
+  const now = new Date()
+
+  // Last 3 full calendar month strings: ['2026-04', '2026-05', '2026-06']
+  const months: string[] = []
+  for (let i = 2; i >= 0; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1)
+    months.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`)
+  }
+  const fromDate = `${months[0]}-01`
+
+  // Fetch all mood check-ins in the 3-month window for this tenant
+  const { data: checkins } = await supabase
+    .from('mood_checkins')
+    .select('employee_id, mood, checkin_date')
+    .eq('tenant_id', tenantId)
+    .gte('checkin_date', fromDate)
+
+  if (!checkins?.length) return
+
+  // Aggregate per employee per month: { empId → { 'YYYY-MM' → { sum, count } } }
+  const byEmpMonth = new Map<string, Map<string, { sum: number; count: number }>>()
+  for (const row of checkins) {
+    const month = (row.checkin_date as string).slice(0, 7)
+    if (!months.includes(month)) continue
+    let empMap = byEmpMonth.get(row.employee_id)
+    if (!empMap) { empMap = new Map(); byEmpMonth.set(row.employee_id, empMap) }
+    const cur = empMap.get(month) ?? { sum: 0, count: 0 }
+    cur.sum   += row.mood as number
+    cur.count += 1
+    empMap.set(month, cur)
+  }
+
+  // Find employees at-risk (low avg mood) in 2+ months; require ≥ 3 check-ins per month
+  const atRiskEmployees: string[] = []
+  for (const [empId, empMap] of byEmpMonth) {
+    let riskMonths = 0
+    for (const month of months) {
+      const m = empMap.get(month)
+      if (m && m.count >= 3 && m.sum / m.count <= EXIT_MOOD_THRESHOLD) riskMonths++
+    }
+    if (riskMonths >= EXIT_MONTHS_REQUIRED) atRiskEmployees.push(empId)
+  }
+  if (!atRiskEmployees.length) return
+
+  // ── Find or create the tenant's active exit_intent survey ──────────────────
+
+  const { data: activeSurveys } = await supabase
+    .from('surveys')
+    .select('id, title')
+    .eq('tenant_id', tenantId)
+    .eq('survey_type', 'exit_intent')
+    .eq('status', 'active')
+    .order('created_at', { ascending: false })
+    .limit(1)
+
+  let surveyId   = activeSurveys?.[0]?.id   ?? null
+  let surveyTitle = activeSurveys?.[0]?.title ?? 'Exit Intent Survey'
+
+  if (!surveyId) {
+    // Try to auto-create from the system template
+    const { data: tmpl } = await supabase
+      .from('survey_templates')
+      .select('name, description, questions')
+      .eq('survey_type', 'exit_intent')
+      .maybeSingle()
+
+    if (!tmpl) return   // no template — cannot proceed
+
+    const due = new Date(now)
+    due.setDate(due.getDate() + 14)
+    const dueDate = due.toISOString().slice(0, 10)
+
+    const { data: newSurvey } = await supabase
+      .from('surveys')
+      .insert({
+        tenant_id:    tenantId,
+        title:        tmpl.name,
+        description:  tmpl.description,
+        status:       'active',
+        survey_type:  'exit_intent',
+        is_anonymous: true,
+        due_date:     dueDate,
+      })
+      .select('id')
+      .single()
+
+    if (!newSurvey) return
+
+    surveyId    = newSurvey.id
+    surveyTitle = tmpl.name
+
+    const qRows = ((tmpl.questions as any[]) ?? []).map(q => ({
+      ...q,
+      survey_id: newSurvey.id,
+      tenant_id: tenantId,
+    }))
+    if (qRows.length) await supabase.from('survey_questions').insert(qRows)
+  }
+
+  // ── Skip employees assigned to any exit_intent survey in the last 90 days ──
+
+  const cooldownFrom = new Date(now)
+  cooldownFrom.setDate(cooldownFrom.getDate() - EXIT_COOLDOWN_DAYS)
+  const cooldownStr = cooldownFrom.toISOString()
+
+  const { data: allExitSurveys } = await supabase
+    .from('surveys')
+    .select('id')
+    .eq('tenant_id', tenantId)
+    .eq('survey_type', 'exit_intent')
+
+  const exitSurveyIds = (allExitSurveys ?? []).map((s: any) => s.id as string)
+
+  const recentlyAssigned = new Set<string>()
+  if (exitSurveyIds.length) {
+    const { data: recent } = await supabase
+      .from('survey_assignments')
+      .select('employee_id')
+      .in('survey_id', exitSurveyIds)
+      .in('employee_id', atRiskEmployees)
+      .gte('assigned_at', cooldownStr)
+
+    for (const a of recent ?? []) recentlyAssigned.add(a.employee_id)
+  }
+
+  const toAssign = atRiskEmployees.filter(id => !recentlyAssigned.has(id))
+  if (!toAssign.length) return
+
+  // ── Dedup: emit only once per (surveyId, tenantId) batch per process lifetime
+
+  const scanKey = `exit-intent-survey:${tenantId}:${surveyId}:${months[2]}`
+  if (!shouldEmit(scanKey)) return
+
+  // ── Assign survey ──────────────────────────────────────────────────────────
+
+  const assignRows = toAssign.map(empId => ({
+    survey_id:       surveyId as string,
+    employee_id:     empId,
+    tenant_id:       tenantId,
+    respondent_type: 'self',
+  }))
+
+  const { error } = await supabase
+    .from('survey_assignments')
+    .upsert(assignRows, { onConflict: 'survey_id,employee_id', ignoreDuplicates: true })
+
+  if (error) return   // don't block the loop on a DB error
+
+  // ── Notify HR admins ───────────────────────────────────────────────────────
+
+  const { data: emps } = await supabase
+    .from('employees')
+    .select('first_name, last_name, employee_code')
+    .in('id', toAssign)
+    .eq('tenant_id', tenantId)
+
+  const nameList = (emps ?? [])
+    .map((e: any) => `${e.first_name} ${e.last_name} (${e.employee_code})`)
+    .join(', ')
+
+  await notifyHrAdmins(supabase, {
+    tenantId,
+    item_type:    'general',
+    severity:     'warning',
+    title:        `Exit Intent Survey auto-assigned to ${toAssign.length} employee${toAssign.length > 1 ? 's' : ''}`,
+    summary:      `AI detected persistently low mood (2+ of the last 3 months) for: ${nameList}. The "${surveyTitle}" survey has been auto-assigned for retention insight.`,
+    entity_type:  'survey',
+    entity_id:    surveyId,
+    action_route: '/admin/surveys',
+    action_label: 'View Surveys',
+    metadata:     { category: 'exit_intent', auto_triggered: true, employee_count: toAssign.length },
+  })
+}
+
 // ── Main scan orchestrator ─────────────────────────────────────────────────────
 
 async function runAllScans(supabase: SupabaseClient): Promise<void> {
@@ -520,6 +708,7 @@ async function runAllScans(supabase: SupabaseClient): Promise<void> {
       scanAttendanceRisk(supabase, tenantId),
       scanComplianceDeadlines(supabase, tenantId),
       scanLifecycleExpiry(supabase, tenantId),
+      scanExitIntentSurveys(supabase, tenantId),
     ])
   }
 }
