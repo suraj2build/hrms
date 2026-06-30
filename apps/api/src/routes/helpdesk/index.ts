@@ -830,10 +830,12 @@ Write a helpful, professional HR reply to address the employee's concern:`
     const avg = ratings.length ? Math.round((ratings.reduce((s, r) => s + r, 0) / ratings.length) * 10) / 10 : null
 
     return reply.send({
-      average:      avg,
-      total:        ratings.length,
-      distribution,
-      period_days:  days,
+      data: {
+        average:      avg,
+        total:        ratings.length,
+        distribution,
+        period_days:  days,
+      },
     })
   })
 
