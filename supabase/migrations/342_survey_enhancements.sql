@@ -142,7 +142,7 @@ CREATE POLICY "f360_nominators_write" ON feedback_360_nominators FOR ALL
       AND r.tenant_id = get_user_tenant_id()
       AND (
         get_user_role() IN ('super_admin','hr_admin','manager')
-        OR r.nominee_id = get_user_employee_id()
+        OR r.nominee_id = (SELECT employee_id FROM profiles WHERE id = auth.uid())
       )
   ));
 
