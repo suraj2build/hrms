@@ -53,6 +53,7 @@ const OPTIONAL_MODULES = [
   'webhook-service',
   'onboarding',
   'absconding-scanner',
+  'poll-scheduler',
 ] as const
 
 type OptionalModule = typeof OPTIONAL_MODULES[number]

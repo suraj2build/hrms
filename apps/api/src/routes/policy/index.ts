@@ -136,7 +136,7 @@ export default async function policyRoutes(fastify: FastifyInstance) {
     const tenantId = req.tenantId
     const { category } = req.query as { category?: string }
 
-    const q = supabase
+    let q = supabase
       .from('hr_policies')
       .select('id, title, category, description, status, requires_acknowledgement, effective_from, published_at, version')
       .eq('tenant_id', tenantId)
@@ -177,7 +177,7 @@ export default async function policyRoutes(fastify: FastifyInstance) {
     const tenantId = req.tenantId
     const { status } = req.query as { status?: string }
 
-    const q = supabase
+    let q = supabase
       .from('hr_policies')
       .select('id, title, category, description, status, requires_acknowledgement, effective_from, published_at, version, created_at, is_mandatory')
       .eq('tenant_id', tenantId)
@@ -486,10 +486,10 @@ export default async function policyRoutes(fastify: FastifyInstance) {
       const wa = new WhatsAppProvider(supabase)
       for (const emp of empPhones ?? []) {
         if (emp.phone) {
-          await wa.sendTemplate(tenantId, emp.phone, 'policy_published', [
-            emp.first_name ?? 'Team',
-            policy.title,
-          ])
+          await wa.sendTemplate(tenantId, emp.phone, 'policy_published', {
+            name:  emp.first_name ?? 'Team',
+            title: policy.title,
+          })
         }
       }
     }

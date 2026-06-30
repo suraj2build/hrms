@@ -88,7 +88,7 @@ export default async function surveyRoutes(fastify: FastifyInstance) {
   // ── ESS: list my assigned surveys ──────────────────────────────────────────────
 
   fastify.get('/my', { preHandler: [fastify.authenticate] }, async (req, reply) => {
-    const empId = await getEmployeeId((req.user as any).sub)
+    const empId = await getEmployeeId((req as any).userId)
     if (!empId) return reply.send({ data: [] })
 
     const { data, error } = await supabase
@@ -108,7 +108,7 @@ export default async function surveyRoutes(fastify: FastifyInstance) {
 
   fastify.get('/:id', { preHandler: [fastify.authenticate] }, async (req, reply) => {
     const { id } = req.params as { id: string }
-    const empId = await getEmployeeId((req.user as any).sub)
+    const empId = await getEmployeeId((req as any).userId)
     if (!empId) return reply.status(403).send({ error: 'Employee profile not found' })
 
     const { data: assignment } = await supabase
@@ -152,7 +152,7 @@ export default async function surveyRoutes(fastify: FastifyInstance) {
     const { responses } = req.body as {
       responses: { question_id: string; response: unknown }[]
     }
-    const empId = await getEmployeeId((req.user as any).sub)
+    const empId = await getEmployeeId((req as any).userId)
     if (!empId) return reply.status(403).send({ error: 'Employee profile not found' })
 
     const { data: assignment } = await supabase
@@ -278,7 +278,7 @@ export default async function surveyRoutes(fastify: FastifyInstance) {
         order_idx:     number
       }[]
     }
-    const profileId = (req.user as any).sub
+    const profileId = (req as any).userId
     const tenantId  = await getTenantId(profileId)
     if (!tenantId) return reply.status(400).send({ error: 'Tenant not found' })
 
@@ -366,7 +366,7 @@ export default async function surveyRoutes(fastify: FastifyInstance) {
       employee_ids?: string[]
       assign_all?:   boolean
     }
-    const profileId = (req.user as any).sub
+    const profileId = (req as any).userId
     const tenantId  = await getTenantId(profileId)
     if (!tenantId) return reply.status(400).send({ error: 'Tenant not found' })
 
@@ -522,7 +522,7 @@ export default async function surveyRoutes(fastify: FastifyInstance) {
         survey_type: tmpl.survey_type,
         is_anonymous,
         due_date:    due_date || null,
-        created_by:  (req.user as any).sub,
+        created_by:  (req as any).userId,
       })
       .select('id')
       .single()
@@ -743,7 +743,7 @@ export default async function surveyRoutes(fastify: FastifyInstance) {
   // ── 360°: ESS — submit nominations ───────────────────────────────────────────
 
   fastify.get('/my/360/nominations', { preHandler: [fastify.authenticate] }, async (req: any, reply) => {
-    const empId    = await getEmployeeId((req.user as any).sub)
+    const empId    = await getEmployeeId((req as any).userId)
     const tenantId = (req.user as any).tenantId ?? req.tenantId
     if (!empId) return reply.status(403).send({ error: 'Employee profile not found' })
 
@@ -784,7 +784,7 @@ export default async function surveyRoutes(fastify: FastifyInstance) {
   fastify.post('/my/360/:roundId/nominate', { preHandler: [fastify.authenticate] }, async (req: any, reply) => {
     const { roundId } = req.params as { roundId: string }
     const tenantId    = (req.user as any).tenantId ?? req.tenantId
-    const empId       = await getEmployeeId((req.user as any).sub)
+    const empId       = await getEmployeeId((req as any).userId)
     if (!empId) return reply.status(403).send({ error: 'Employee profile not found' })
 
     const { employee_ids } = req.body as { employee_ids: string[] }

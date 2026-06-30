@@ -285,11 +285,11 @@ export default async function recognitionRoutes(fastify: FastifyInstance) {
         .maybeSingle()
       if ((empRow as any)?.phone) {
         const wa = new WhatsAppProvider(fastify.supabase)
-        await wa.sendTemplate(req.tenantId, (empRow as any).phone, 'peer_badge_received', [
-          (empRow as any).first_name ?? 'Team member',
-          badgeLabel ?? parsed.data.badge_code,
-          parsed.data.message,
-        ])
+        await wa.sendTemplate(req.tenantId, (empRow as any).phone, 'peer_badge_received', {
+          name:    (empRow as any).first_name ?? 'Team member',
+          badge:   badgeLabel ?? parsed.data.badge_code,
+          message: parsed.data.message,
+        })
       }
     }
 
@@ -551,11 +551,11 @@ export default async function recognitionRoutes(fastify: FastifyInstance) {
     if ((winner as any)?.phone) {
       const wa = new WhatsAppProvider(fastify.supabase)
       const awardName = (round as any)?.formal_awards?.name ?? 'award'
-      await wa.sendTemplate(req.tenantId, (winner as any).phone, 'award_winner', [
-        (winner as any).first_name ?? 'Team member',
-        awardName,
-        (round as any)?.period_label ?? '',
-      ])
+      await wa.sendTemplate(req.tenantId, (winner as any).phone, 'award_winner', {
+        name:       (winner as any).first_name ?? 'Team member',
+        award_name: awardName,
+        period:     (round as any)?.period_label ?? '',
+      })
     }
     return reply.send({ data: { winner_declared: true } })
   })

@@ -1005,10 +1005,10 @@ Write a helpful, professional HR reply to address the employee's concern:`
         `Example ${i + 1}:\nSubject: ${t.subject}\nResolution: ${t.resolution_note}`
       ).join('\n\n')
 
-      const { content: llmResult } = await chatCompleteWithFallback(chain, [
+      const { content: llmResult } = await chatCompleteWithFallback(chain, { messages: [
         { role: 'system', content: 'You are an HR helpdesk assistant. Based on past resolved tickets, suggest a concise resolution for the new ticket. Be specific and actionable. Max 200 words.' },
         { role: 'user', content: `New ticket subject: ${(ticket as any).subject}\nDescription: ${(ticket as any).description}\n\nPast similar resolutions:\n${examples}\n\nSuggest a resolution:` },
-      ])
+      ] })
       return reply.send({ data: { suggestion: llmResult.content?.trim() ?? null, similar_tickets: similar } })
     } catch {
       return reply.send({ data: { suggestion: null, similar_tickets: similar } })
@@ -1034,10 +1034,10 @@ Write a helpful, professional HR reply to address the employee's concern:`
     let kbSummary = (ticket as any).resolution_note ?? ''
     try {
       const chain  = await resolveAssistantChain(fastify.supabase, req.tenantId)
-      const { content: llmResult } = await chatCompleteWithFallback(chain, [
+      const { content: llmResult } = await chatCompleteWithFallback(chain, { messages: [
         { role: 'system', content: 'Convert this helpdesk ticket into a concise FAQ entry. Format: Q: <question>\\nA: <answer>. Max 150 words.' },
         { role: 'user', content: `Subject: ${(ticket as any).subject}\nResolution: ${(ticket as any).resolution_note ?? 'N/A'}` },
-      ])
+      ] })
       kbSummary = llmResult.content?.trim() ?? kbSummary
     } catch { /* use raw resolution note as fallback */ }
 

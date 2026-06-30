@@ -124,14 +124,14 @@ export default async function moodRoutes(fastify: FastifyInstance) {
     if (note?.trim()) {
       try {
         const chain = await resolveAssistantChain(supabase, tenantId)
-        const { message } = await chatCompleteWithFallback(chain, [
+        const { content: moodResult } = await chatCompleteWithFallback(chain, { messages: [
           {
             role: 'system',
             content: 'Categorize this employee feedback into ONE of: Manager Quality, Workload, Compensation, Work Environment, Career Growth, Team Dynamics, Personal, Other. Return ONLY the category name, nothing else.',
           },
           { role: 'user', content: note.slice(0, 500) },
-        ])
-        const cat = message?.trim()
+        ] })
+        const cat = moodResult.content?.trim()
         const valid = ['Manager Quality','Workload','Compensation','Work Environment','Career Growth','Team Dynamics','Personal','Other']
         if (valid.includes(cat ?? '')) sentiment_category = cat ?? null
       } catch { /* non-blocking */ }

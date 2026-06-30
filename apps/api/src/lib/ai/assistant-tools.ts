@@ -1179,10 +1179,10 @@ async function escalateTicket(ctx: ToolCtx, args: { ticket_id?: string; reason?:
   await ctx.supabase.from('helpdesk_ticket_comments').insert({
     tenant_id:  ctx.caller.tenantId,
     ticket_id:  (ticket as any).id,
-    author_id:  ctx.caller.profileId,
+    author_id:  ctx.caller.userId,
     body:       `[ESCALATION REQUEST] ${args.reason}`,
     is_internal: false,
-  }).catch(() => {})
+  })
 
   return `Escalation requested for "${(ticket as any).subject}". HR will review and prioritize your ticket.`
 }

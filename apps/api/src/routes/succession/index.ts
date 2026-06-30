@@ -669,7 +669,7 @@ export default async function successionRoutes(fastify: FastifyInstance) {
         employees!mentor_profiles_employee_id_fkey(id, first_name, last_name, designation, department)`)
       .eq('tenant_id', tenantId)
       .eq('available', true)
-      .lt('current_mentees', supabase.raw ? 'max_mentees' : 9999) // filter client-side below
+      .lt('current_mentees', 9999) // filtered client-side on line below
 
     const cGaps: string[] = ((candidate as any).gaps ?? '').toLowerCase().split(/[,\s]+/).filter(Boolean)
 
