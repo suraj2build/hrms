@@ -57,7 +57,7 @@ export default async function abscondingRoutes(fastify: FastifyInstance) {
         employee:employees!employee_id(
           id, employee_code, first_name, last_name, status,
           department:departments!department_id(name),
-          designation
+          designation:designations(name)
         ),
         assigned_to_profile:profiles!assigned_to(id, full_name, avatar_url)
       `, { count: 'exact' })
@@ -133,7 +133,7 @@ export default async function abscondingRoutes(fastify: FastifyInstance) {
           id, employee_code, first_name, last_name, status, date_of_joining, work_email,
           personal_phone, personal_email,
           department:departments!department_id(name),
-          designation,
+          designation:designations(name),
           manager:employees!manager_id(first_name, last_name)
         ),
         assigned_to_profile:profiles!assigned_to(id, full_name, avatar_url),
