@@ -42,6 +42,33 @@ If one doesn't exist or doesn't match, build a simple inline combobox that:
 
 ---
 
+## Context Rail — FROZEN at RC1
+
+`apps/web/src/components/layout/EssContextPanel.tsx`
+
+The ESS Context Rail is **feature-frozen**. Do not add new sections, cards, CTAs,
+or data sources without explicit product approval.
+
+**Approved sections (do not remove or restructure):**
+- Approvals — managers only, directly actionable
+- Birthdays & Milestones — time-sensitive, hidden when empty
+- Upcoming Holidays — always a valid planning signal
+- Recent Kudos — hidden when empty
+
+**Do not re-add (explicitly removed at RC1):**
+- "Recognise a teammate" CTA — promotional, not contextual
+- Kudos empty state — noise, not signal
+
+**Deferred (P2 — needs product approval before implementation):**
+- Wish persistence across navigation
+- Page-aware / context-sensitive rail content
+- Dynamic signal cards (payslip date, expiring leave, etc.)
+- Recommendation ordering logic
+
+These will be revisited after launch, based on observed employee behavior.
+
+---
+
 ## Tenant licensing — the contract HRMS depends on
 
 Tenant licensing is owned by the **owner portal** (a separate deployment,

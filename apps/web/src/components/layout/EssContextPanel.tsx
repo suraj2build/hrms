@@ -4,6 +4,25 @@
  *
  * Design principle: every section must answer "does this genuinely help the
  * employee with what they're doing right now?" If not, it doesn't belong here.
+ *
+ * ── FROZEN — RC1 approved ────────────────────────────────────────────────────
+ * The Context Rail is feature-frozen as of RC1. Do NOT add new sections, cards,
+ * CTAs, or data sources without explicit product approval.
+ *
+ * Current sections (and why each earns its place):
+ *   • Approvals      — managers only; directly actionable work waiting on them
+ *   • Birthdays & Milestones — time-sensitive human signal; hidden when empty
+ *   • Upcoming Holidays     — always a valid planning signal
+ *   • Recent Kudos          — positive reinforcement; hidden when empty
+ *
+ * What was intentionally removed (do not re-add):
+ *   • "Recognise a teammate" CTA — promotional, not contextual; sidebar covers it
+ *   • Kudos empty state — "No kudos yet" is noise, not signal
+ *
+ * Remaining P2 items (wish persistence, page-aware content, dynamic cards) are
+ * deferred until real employee behavior is observed post-launch. They require
+ * product approval before implementation.
+ * ─────────────────────────────────────────────────────────────────────────────
  */
 
 import { useRef, useEffect, useState } from 'react'
