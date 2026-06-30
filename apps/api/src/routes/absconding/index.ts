@@ -57,7 +57,7 @@ export default async function abscondingRoutes(fastify: FastifyInstance) {
         employee:employees!employee_id(
           id, employee_code, first_name, last_name, status,
           department:departments!department_id(name),
-          designation:positions!position_id(title)
+          designation
         ),
         assigned_to_profile:profiles!assigned_to(id, full_name, avatar_url)
       `, { count: 'exact' })
@@ -113,10 +113,12 @@ export default async function abscondingRoutes(fastify: FastifyInstance) {
     const recentCount = all.filter(c => new Date(c.created_at) >= thirtyAgo).length
 
     return reply.send({
-      counts,
-      total_open:    OPEN_STATUSES.reduce((s, k) => s + (counts[k] ?? 0), 0),
-      avg_ua_days:   avgDays,
-      opened_30d:    recentCount,
+      data: {
+        counts,
+        total_open:  OPEN_STATUSES.reduce((s, k) => s + (counts[k] ?? 0), 0),
+        avg_ua_days: avgDays,
+        opened_30d:  recentCount,
+      },
     })
   })
 
@@ -131,7 +133,7 @@ export default async function abscondingRoutes(fastify: FastifyInstance) {
           id, employee_code, first_name, last_name, status, date_of_joining, work_email,
           personal_phone, personal_email,
           department:departments!department_id(name),
-          designation:positions!position_id(title),
+          designation,
           manager:employees!manager_id(first_name, last_name)
         ),
         assigned_to_profile:profiles!assigned_to(id, full_name, avatar_url),

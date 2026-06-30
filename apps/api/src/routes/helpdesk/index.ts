@@ -723,7 +723,7 @@ Write a helpful, professional HR reply to address the employee's concern:`
         maxTokens:   350,
       })
 
-      return reply.send({ suggestion: result.content.content?.trim() ?? '' })
+      return reply.send({ data: { suggestion: result.content.content?.trim() ?? '' } })
     } catch (e: any) {
       return reply.code(503).send({ error: 'AI_ERROR', message: e.message ?? 'AI request failed' })
     }
@@ -804,7 +804,7 @@ Write a helpful, professional HR reply to address the employee's concern:`
       is_internal: true,
     })
 
-    return reply.send({ success: true, merged_into: parsed.data.merge_into })
+    return reply.send({ data: { success: true, merged_into: parsed.data.merge_into } })
   })
 
   // ── CSAT stats for admin dashboard ────────────────────────────────────────

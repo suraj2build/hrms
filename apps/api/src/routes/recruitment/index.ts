@@ -1008,7 +1008,7 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
       appStats.total++
     }
 
-    return reply.send({ requisitions: reqStats, applications: appStats })
+    return reply.send({ data: { requisitions: reqStats, applications: appStats } })
   })
 
   // ── Analytics ─────────────────────────────────────────────────────────────
@@ -1094,16 +1094,18 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
       .sort((a, b) => b.count - a.count)
 
     return reply.send({
-      funnel,
-      avg_time_to_hire:  avg(hireTimes),
-      avg_time_to_offer: avg(offerTimes),
-      requisitions:      reqStats,
-      interviews:        interviewStats,
-      pass_rate:         passRate,
-      source_breakdown:  sourceBreakdown,
-      recent_30d_applications: recent30d,
-      total_applications:      (appRows ?? []).length,
-      total_requisitions:      (reqRows ?? []).length,
+      data: {
+        funnel,
+        avg_time_to_hire:  avg(hireTimes),
+        avg_time_to_offer: avg(offerTimes),
+        requisitions:      reqStats,
+        interviews:        interviewStats,
+        pass_rate:         passRate,
+        source_breakdown:  sourceBreakdown,
+        recent_30d_applications: recent30d,
+        total_applications:      (appRows ?? []).length,
+        total_requisitions:      (reqRows ?? []).length,
+      },
     })
   })
 
@@ -1602,7 +1604,7 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
         .order('created_at', { ascending: true }),
     ])
 
-    return reply.send({ rounds: rounds ?? [], activity: activity ?? [] })
+    return reply.send({ data: { rounds: rounds ?? [], activity: activity ?? [] } })
   })
 
   // ── Question Bank — Categories ────────────────────────────────────────────
@@ -1784,7 +1786,7 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
       count: rows.length,
     }
 
-    return reply.send({ data: scores ?? [], aggregate: agg })
+    return reply.send({ data: { scores: scores ?? [], aggregate: agg } })
   })
 
   fastify.post('/interviews/:id/scorecard', auth, async (req: any, reply) => {
