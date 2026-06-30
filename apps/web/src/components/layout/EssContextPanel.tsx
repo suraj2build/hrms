@@ -1,18 +1,21 @@
 /**
- * EssContextPanel — right-side context rail for ESS desktop shell.
- * Shown on xl+ screens only. Flat-section layout with dividers.
+ * EssContextPanel — right-side Context Rail for ESS desktop shell.
+ * Shown on xl+ screens only. Hidden on /ess/home (home has its own right column).
+ *
+ * Design principle: every section must answer "does this genuinely help the
+ * employee with what they're doing right now?" If not, it doesn't belong here.
  */
 
-import { useState } from 'react'
+import { useRef, useEffect, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import {
-  Cake, PartyPopper, Star, CalendarDays, Award, CheckSquare, Gift,
-  ChevronRight, Loader2, Check, Send,
+  Cake, PartyPopper, CalendarDays, Award, CheckSquare, Check, Send, Loader2,
 } from 'lucide-react'
 import { api } from '@/lib/api/client'
 import { useAuthStore } from '@/stores/authStore'
+import { useUIStore } from '@/stores/uiStore'
 import { PersonAvatar } from '@/components/experience/PersonAvatar'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
@@ -53,6 +56,13 @@ const BADGE_LABELS: Record<string, string> = {
   culture_ambassador: 'Culture Ambassador',
 }
 
+// P0: humanise unknown badge codes (e.g. "best_buddy" → "Best Buddy")
+// rather than showing raw snake_case to the user.
+function humaniseBadge(code: string): string {
+  return BADGE_LABELS[code]
+    ?? code.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
+}
+
 const firstNameOf = (full: string) => full.trim().split(/\s+/)[0] || full
 
 // ── Section header ────────────────────────────────────────────────────────────
@@ -72,7 +82,7 @@ function SectionHead({ label, icon: Icon, action, onAction }: {
       {action && (
         <button onClick={onAction}
           className="flex shrink-0 items-center gap-0.5 text-[10px] font-semibold text-primary transition-colors hover:text-primary/80">
-          {action}<ChevronRight className="h-3 w-3" />
+          {action}
         </button>
       )}
     </div>
@@ -149,21 +159,54 @@ function WishButton({ employeeId, name, kind, years }: {
   )
 }
 
+// ── Scroll fade — bottom gradient when the rail overflows ─────────────────────
+
+function useScrollFade(ref: React.RefObject<HTMLElement | null>) {
+  const [faded, setFaded] = useState(false)
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    // Show fade only while unscrolled content remains below the viewport
+    function check() {
+      if (!el) return
+      setFaded(el.scrollHeight - el.scrollTop - el.clientHeight > 16)
+    }
+    check()
+    el.addEventListener('scroll', check, { passive: true })
+    const ro = new ResizeObserver(check)
+    ro.observe(el)
+    return () => { el.removeEventListener('scroll', check); ro.disconnect() }
+  }, [ref])
+  return faded
+}
+
 // ── Panel ─────────────────────────────────────────────────────────────────────
 
 export function EssContextPanel() {
-  const navigate = useNavigate()
+  const navigate  = useNavigate()
   const { profile } = useAuthStore()
-  const isManager = ['manager', 'hr_admin', 'super_admin'].includes(profile?.role ?? '')
+  const { activeRole } = useUIStore()
 
+  // P0: respect activeRole so managers in employee-mode don't see the Approvals block
+  const hasManagerRole = ['manager', 'hr_admin', 'super_admin'].includes(profile?.role ?? '')
+  const isManager = hasManagerRole && activeRole !== 'employee'
+
+  // P0: use the shared ['ess-home'] cache key — same key as EssHome / Arrival /
+  // MobileEssShell so the Rail reuses the already-cached response instead of
+  // firing a second request with a different key.
   const { data, isLoading } = useQuery<EssHomePayload>({
-    queryKey:  ['ess-home-panel'],
+    queryKey:  ['ess-home'],
     queryFn:   () => api.get('/ess/home'),
-    staleTime: 5 * 60_000,
+    staleTime: 2 * 60_000,
   })
 
+  // P0: scroll fade indicator
+  const scrollRef = useRef<HTMLElement>(null)
+  const showFade  = useScrollFade(scrollRef as React.RefObject<HTMLElement>)
+
+  // P1: width is 260px (was 280px) — saves 20px of content area
   const skeletonAside = (
-    <aside className="hidden xl:flex w-[280px] shrink-0 flex-col border-l border-border/50 bg-card">
+    <aside className="hidden xl:flex w-[260px] shrink-0 flex-col border-l border-border/50 bg-card">
       <div className="flex flex-col gap-4 p-4 pt-5">
         {[80, 140, 60].map((h, i) => (
           <div key={i} style={{ height: h }} className="animate-pulse rounded-xl bg-muted/40" />
@@ -174,20 +217,23 @@ export function EssContextPanel() {
 
   if (isLoading) return skeletonAside
 
-  const birthdays     = data?.birthdays          ?? []
-  const anniversaries = data?.anniversaries      ?? []
-  const holidays      = data?.upcoming_holidays  ?? []
-  const recognition   = data?.recognition?.recent ?? []
-  const approvalsCnt  = data?.kpis?.pending_approvals ?? 0
+  const birthdays      = data?.birthdays         ?? []
+  const anniversaries  = data?.anniversaries     ?? []
+  const holidays       = data?.upcoming_holidays ?? []
+  const recognition    = data?.recognition?.recent ?? []
+  const approvalsCnt   = data?.kpis?.pending_approvals ?? 0
   const hasCelebrations = birthdays.length > 0 || anniversaries.length > 0
 
   return (
-    <aside className="hidden xl:flex w-[280px] shrink-0 flex-col overflow-y-auto border-l border-border/50 bg-card">
+    <aside
+      ref={scrollRef as React.RefObject<HTMLDivElement>}
+      className="relative hidden xl:flex w-[260px] shrink-0 flex-col overflow-y-auto border-l border-border/50 bg-card"
+    >
 
       {/* Pending approvals — managers only */}
       {isManager && (
         <div className="border-b border-border/40 px-4 py-5">
-          <SectionHead label="Approvals" icon={CheckSquare} action="View" onAction={() => navigate('/ess/flowdesk')} />
+          <SectionHead label="Approvals" icon={CheckSquare} action="View all" onAction={() => navigate('/ess/flowdesk')} />
           {approvalsCnt === 0 ? (
             <p className="text-[11px] text-muted-foreground">Nothing waiting on you.</p>
           ) : (
@@ -237,7 +283,8 @@ export function EssContextPanel() {
       <div className="border-b border-border/40 px-4 py-5">
         <SectionHead label="Upcoming Holidays" icon={CalendarDays} action="All" onAction={() => navigate('/ess/company-holidays')} />
         {holidays.length === 0 ? (
-          <p className="text-[11px] text-muted-foreground">No holidays in the next 60 days.</p>
+          // P0: removed hardcoded "60 days" — the window is an API detail, not a UI fact
+          <p className="text-[11px] text-muted-foreground">No upcoming holidays.</p>
         ) : (
           <div className="space-y-2.5">
             {holidays.slice(0, 4).map((h) => (
@@ -255,24 +302,17 @@ export function EssContextPanel() {
         )}
       </div>
 
-      {/* Recent kudos */}
-      <div className="border-b border-border/40 px-4 py-5">
-        <SectionHead label="Recent Kudos" icon={Award} action="All" onAction={() => navigate('/ess/recognition')} />
-        {recognition.length === 0 ? (
-          <div className="flex flex-col gap-2">
-            <p className="text-[11px] text-muted-foreground">No kudos yet.</p>
-            <button onClick={() => navigate('/ess/recognition')}
-              className="flex items-center gap-1 text-[10px] font-semibold text-primary hover:text-primary/80">
-              <Gift className="h-3 w-3" />Give recognition
-            </button>
-          </div>
-        ) : (
+      {/* Recent kudos — P1: hidden entirely when empty; only shown when there's something to show */}
+      {recognition.length > 0 && (
+        <div className="border-b border-border/40 px-4 py-5">
+          <SectionHead label="Recent Kudos" icon={Award} action="All" onAction={() => navigate('/ess/recognition')} />
           <div className="space-y-2">
             {recognition.slice(0, 3).map((r) => (
               <div key={r.id} className="rounded-xl border border-[#15B8A6]/15 bg-[#15B8A6]/5 px-3 py-2">
                 <div className="flex items-center justify-between gap-2">
+                  {/* P0: humanise unknown badge codes instead of showing raw snake_case */}
                   <p className="min-w-0 truncate text-[11px] font-semibold text-foreground">
-                    {BADGE_LABELS[r.badge_code] ?? r.badge_code ?? 'Kudos'}
+                    {humaniseBadge(r.badge_code ?? '')}
                   </p>
                   {r.points != null && (
                     <span className="shrink-0 text-[10px] font-bold text-[#15B8A6]">+{r.points}pts</span>
@@ -285,17 +325,17 @@ export function EssContextPanel() {
               </div>
             ))}
           </div>
-        )}
-      </div>
+        </div>
+      )}
 
-      {/* Recognise nudge */}
-      <div className="px-4 py-5">
-        <button onClick={() => navigate('/ess/recognition')}
-          className="flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-primary/25 bg-primary/5 px-3 py-2.5 transition-colors hover:border-primary/40 hover:bg-primary/8">
-          <Star className="h-3.5 w-3.5 shrink-0 text-primary" />
-          <span className="text-[11px] font-semibold text-primary">Recognise a teammate</span>
-        </button>
-      </div>
+      {/* P1: "Recognise a teammate" CTA removed — it was not contextual. The sidebar
+          already provides a direct link to /ess/recognition. The Rail is not a
+          marketing channel. */}
+
+      {/* P0: bottom scroll fade — tells the user there's more content below */}
+      {showFade && (
+        <div className="pointer-events-none sticky bottom-0 h-8 w-full bg-gradient-to-t from-card to-transparent" />
+      )}
 
     </aside>
   )
