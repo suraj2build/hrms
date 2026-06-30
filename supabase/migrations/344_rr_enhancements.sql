@@ -22,4 +22,8 @@ INSERT INTO formal_awards (tenant_id, name, frequency, eligible_group, monetary_
 SELECT id, 'Best Billing Associate', 'monthly', 'Billing Associates', 500
 FROM tenants
 WHERE id = 'd0000000-0000-0000-0000-000000000001'
-ON CONFLICT (tenant_id, name) DO NOTHING;
+  AND NOT EXISTS (
+    SELECT 1 FROM formal_awards fa
+    WHERE fa.tenant_id = 'd0000000-0000-0000-0000-000000000001'
+      AND fa.name = 'Best Billing Associate'
+  );

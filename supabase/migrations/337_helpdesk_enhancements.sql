@@ -96,7 +96,10 @@ FROM tenants,
        ('other', 1, 'hr_admin', 48),
        ('other', 2, 'hr_manager', 72)
      ) AS t(cat, lvl, role, hours)
-ON CONFLICT (tenant_id, category, level) DO NOTHING;
+WHERE NOT EXISTS (
+  SELECT 1 FROM helpdesk_escalation_matrix m
+  WHERE m.tenant_id = tenants.id AND m.category = t.cat AND m.level = t.lvl
+);
 
 -- Update category SLA entries to include posh/compliance
 INSERT INTO helpdesk_category_sla (tenant_id, category, response_hours, resolution_hours)
