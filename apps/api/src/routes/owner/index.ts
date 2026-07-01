@@ -51,6 +51,7 @@
 
 import crypto from 'node:crypto'
 import type { FastifyInstance } from 'fastify'
+import { z } from 'zod'
 import { testConnection, effectiveModel, type AssistantConfig } from '../../lib/ai/llm.js'
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -118,6 +119,42 @@ function slugify(name: string): string {
     .replace(/^-+|-+$/g, '')
     .slice(0, 50)
 }
+
+// ── Request body schemas (ISSUE-047) ─────────────────────────────────────────
+
+const TENANT_PLANS = ['standard', 'enterprise'] as const
+
+const createTenantSchema = z.object({
+  name:              z.string().min(1, 'name is required'),
+  plan:              z.enum(TENANT_PLANS).default('standard'),
+  per_employee_rate: z.number().min(0).default(0),
+  billing_email:     z.string().email('Invalid billing email').nullish(),
+  notes:             z.string().max(2000).nullish(),
+  country:           z.string().max(5).default('IN'),
+})
+
+// PATCH accepts a subset of create fields, all optional (partial update)
+const patchTenantSchema = z.object({
+  plan:              z.enum(TENANT_PLANS).optional(),
+  per_employee_rate: z.number().min(0).optional(),
+  billing_email:     z.string().email('Invalid billing email').nullish(),
+  notes:             z.string().max(2000).nullish(),
+  country:           z.string().max(5).optional(),
+})
+
+const licenseSchema = z.object({
+  months: z.coerce.number().int().min(1, 'months must be at least 1').max(120).default(12),
+})
+
+const suspendSchema = z.object({
+  reason: z.string().max(1000).nullish(),
+})
+
+// Approve-request creates a tenant — reuses the same plan values as creation
+const approveRequestSchema = z.object({
+  plan:              z.enum(TENANT_PLANS).default('standard'),
+  per_employee_rate: z.number().min(0).default(0),
+})
 
 // ── Route Registration ────────────────────────────────────────────────────────
 
@@ -204,18 +241,11 @@ export default async function ownerRoutes(fastify: FastifyInstance) {
 
   // POST /owner/tenants — create tenant + optional super_admin account
   fastify.post('/owner/tenants', ownerOnlyAuth, async (req: any, reply) => {
-    const body          = req.body as any
-    const name          = String(body.name ?? '').trim()
-    const plan          = body.plan ?? 'standard'
-    const per_employee_rate = Number(body.per_employee_rate ?? 0)
-    const billing_email = body.billing_email ?? null
-    const notes         = body.notes ?? null
-    const country       = body.country ?? 'IN'
-
-    if (!name) return reply.code(400).send({ error: 'VALIDATION', message: 'name is required' })
-    if (!['standard', 'enterprise'].includes(plan)) {
-      return reply.code(400).send({ error: 'VALIDATION', message: 'plan must be standard or enterprise' })
+    const parsed = createTenantSchema.safeParse(req.body)
+    if (!parsed.success) {
+      return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message ?? 'Invalid request body' })
     }
+    const { name, plan, per_employee_rate, billing_email, notes, country } = parsed.data
 
     // Generate unique slug
     let baseSlug = slugify(name)
@@ -235,8 +265,8 @@ export default async function ownerRoutes(fastify: FastifyInstance) {
         slug,
         plan,
         per_employee_rate,
-        billing_email: billing_email || null,
-        notes: notes || null,
+        billing_email: billing_email ?? null,
+        notes:         notes ?? null,
         country,
         status: 'trial',
         trial_ends_at: new Date(Date.now() + 30 * 86400_000).toISOString(),
@@ -301,18 +331,19 @@ export default async function ownerRoutes(fastify: FastifyInstance) {
   // PATCH /owner/tenants/:id
   fastify.patch('/owner/tenants/:id', ownerAuth, async (req: any, reply) => {
     const { id } = req.params
-    const body   = req.body as any
-
-    const allowed: Record<string, unknown> = {}
-    if (body.plan               != null) allowed.plan               = body.plan
-    if (body.per_employee_rate  != null) allowed.per_employee_rate  = Number(body.per_employee_rate)
-    if (body.billing_email      != null) allowed.billing_email      = body.billing_email || null
-    if (body.notes              != null) allowed.notes              = body.notes || null
-    if (body.country            != null) allowed.country            = String(body.country).toUpperCase().slice(0, 5)
-
-    if (allowed.plan && !['standard', 'enterprise'].includes(allowed.plan as string)) {
-      return reply.code(400).send({ error: 'VALIDATION', message: 'Invalid plan' })
+    const parsed = patchTenantSchema.safeParse(req.body)
+    if (!parsed.success) {
+      return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message ?? 'Invalid request body' })
     }
+
+    const fields = parsed.data
+    const allowed: Record<string, unknown> = {}
+    if (fields.plan              !== undefined) allowed.plan              = fields.plan
+    if (fields.per_employee_rate !== undefined) allowed.per_employee_rate = fields.per_employee_rate
+    if (fields.billing_email     !== undefined) allowed.billing_email     = fields.billing_email ?? null
+    if (fields.notes             !== undefined) allowed.notes             = fields.notes ?? null
+    if (fields.country           !== undefined) allowed.country           = fields.country.toUpperCase().slice(0, 5)
+
     if (Object.keys(allowed).length === 0) {
       return reply.code(400).send({ error: 'NO_FIELDS', message: 'No updatable fields provided' })
     }
@@ -331,8 +362,11 @@ export default async function ownerRoutes(fastify: FastifyInstance) {
   // POST /owner/tenants/:id/license
   fastify.post('/owner/tenants/:id/license', ownerOnlyAuth, async (req: any, reply) => {
     const { id }      = req.params
-    const body        = req.body as any
-    const months      = Math.max(1, Number(body.months ?? 12))
+    const parsed      = licenseSchema.safeParse(req.body)
+    if (!parsed.success) {
+      return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message ?? 'Invalid request body' })
+    }
+    const { months }  = parsed.data
     const now         = new Date()
     const expiresAt   = new Date(now)
     expiresAt.setMonth(expiresAt.getMonth() + months)
@@ -364,10 +398,13 @@ export default async function ownerRoutes(fastify: FastifyInstance) {
   // POST /owner/tenants/:id/suspend
   fastify.post('/owner/tenants/:id/suspend', ownerOnlyAuth, async (req: any, reply) => {
     const { id } = req.params
-    const body   = (req.body as any) ?? {}   // body is null when no payload sent
+    const parsed = suspendSchema.safeParse(req.body ?? {})
+    if (!parsed.success) {
+      return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message ?? 'Invalid request body' })
+    }
     const { data, error } = await fastify.supabase
       .from('tenants')
-      .update({ status: 'suspended', notes: body.reason ?? null })
+      .update({ status: 'suspended', notes: parsed.data.reason ?? null })
       .eq('id', id).select('id, status').single()
     if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
     return reply.send({ data })
@@ -700,7 +737,10 @@ export default async function ownerRoutes(fastify: FastifyInstance) {
   // POST /owner/requests/:id/approve — creates a tenant automatically
   fastify.post('/owner/requests/:id/approve', ownerOnlyAuth, async (req: any, reply) => {
     const { id }   = req.params
-    const body     = req.body as any
+    const parsed   = approveRequestSchema.safeParse(req.body ?? {})
+    if (!parsed.success) {
+      return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message ?? 'Invalid request body' })
+    }
 
     // Fetch request
     const { data: reqData, error: reqErr } = await fastify.supabase
@@ -716,8 +756,7 @@ export default async function ownerRoutes(fastify: FastifyInstance) {
 
     // Create tenant
     const slug = slugify(reqData.company_name) + '-' + Date.now().toString(36)
-    const plan = body.plan ?? 'standard'
-    const per_employee_rate = Number(body.per_employee_rate ?? 0)
+    const { plan, per_employee_rate } = parsed.data
 
     const { data: tenant, error: tenantErr } = await fastify.supabase
       .from('tenants')
