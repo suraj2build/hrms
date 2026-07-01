@@ -20,6 +20,7 @@ import { Label }    from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Printer, Send, Loader2, FileText } from 'lucide-react'
 import { toast } from 'sonner'
+import { escapeHtml } from '@/lib/sanitize'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -56,11 +57,23 @@ function buildOfferHtml(opts: {
   refNo:        string
   date:         string
 }): string {
+  // Escape all user-controlled values before interpolating into the HTML document.
+  // refNo and date are computed from UUID + Date.toLocaleDateString — inherently safe.
+  const companyName   = escapeHtml(opts.companyName)
+  const candidateName = escapeHtml(opts.candidateName)
+  const firstName     = escapeHtml(opts.firstName)
+  const jobTitle      = escapeHtml(opts.jobTitle)
+  const department    = escapeHtml(opts.department)
+  const startDate     = escapeHtml(opts.startDate)
+  const compensation  = escapeHtml(opts.compensation).replace(/\n/g, '<br/>')
+  const extraTerms    = escapeHtml(opts.extraTerms).replace(/\n/g, '<br/>')
+  const { refNo, date } = opts
+
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
-<title>Offer Letter — ${opts.candidateName}</title>
+<title>Offer Letter — ${candidateName}</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body {
@@ -136,42 +149,42 @@ function buildOfferHtml(opts: {
   <!-- Letterhead -->
   <div class="letterhead">
     <div>
-      <div class="company-name">${opts.companyName}<span> ✦</span></div>
+      <div class="company-name">${companyName}<span> ✦</span></div>
       <div class="company-sub">Human Resources Department</div>
     </div>
     <div class="ref-date">
-      <div>Ref: ${opts.refNo}</div>
-      <div>Date: ${opts.date}</div>
+      <div>Ref: ${refNo}</div>
+      <div>Date: ${date}</div>
     </div>
   </div>
 
   <!-- Recipient -->
   <div class="recipient-block">
-    <strong>${opts.candidateName}</strong><br/>
+    <strong>${candidateName}</strong><br/>
     [Candidate Address]<br/>
     [City, State]
   </div>
 
   <!-- Subject -->
   <div class="subject-line">
-    Subject: Letter of Offer — ${opts.jobTitle}
+    Subject: Letter of Offer — ${jobTitle}
   </div>
 
   <!-- Body -->
-  <p>Dear ${opts.firstName},</p>
+  <p>Dear ${firstName},</p>
 
   <p>
     We are pleased to inform you that following your interaction with our recruitment team,
     we are delighted to extend this offer of employment for the position of
-    <strong>${opts.jobTitle}</strong> at <strong>${opts.companyName}</strong>.
+    <strong>${jobTitle}</strong> at <strong>${companyName}</strong>.
   </p>
 
   <!-- Details table -->
   <table class="details-table">
-    <tr><td>Designation</td><td>${opts.jobTitle}</td></tr>
-    <tr><td>Department</td><td>${opts.department || '—'}</td></tr>
+    <tr><td>Designation</td><td>${jobTitle}</td></tr>
+    <tr><td>Department</td><td>${department || '—'}</td></tr>
     <tr><td>Employment Type</td><td>Full-Time, Permanent</td></tr>
-    <tr><td>Date of Joining</td><td>${opts.startDate || '[To be confirmed]'}</td></tr>
+    <tr><td>Date of Joining</td><td>${startDate || '[To be confirmed]'}</td></tr>
     <tr><td>Reporting Location</td><td>[Office / Remote — to be confirmed]</td></tr>
   </table>
 
@@ -180,7 +193,7 @@ function buildOfferHtml(opts: {
   <p><strong>Compensation &amp; Benefits:</strong></p>
   <div class="comp-box">
     <div class="comp-label">CTC / Remuneration Details</div>
-    ${opts.compensation.replace(/\n/g, '<br/>')}
+    ${compensation}
   </div>` : `
   <p>
     The compensation structure, benefits, and other remuneration details will be
@@ -201,16 +214,16 @@ function buildOfferHtml(opts: {
   </p>
   <p>
     You will be required to maintain strict confidentiality regarding all information,
-    processes, and data pertaining to ${opts.companyName} and its clients.
+    processes, and data pertaining to ${companyName} and its clients.
   </p>
 
-  ${opts.extraTerms ? `<p>${opts.extraTerms.replace(/\n/g, '<br/>')}</p>` : ''}
+  ${opts.extraTerms ? `<p>${extraTerms}</p>` : ''}
 
   <p>
     Kindly sign and return a copy of this letter as your acceptance of this offer
     within <strong>5 (five) working days</strong> from the date of this letter.
   </p>
-  <p>We look forward to welcoming you to the ${opts.companyName} family.</p>
+  <p>We look forward to welcoming you to the ${companyName} family.</p>
 
   <!-- Signature -->
   <div class="signature-block">
@@ -218,7 +231,7 @@ function buildOfferHtml(opts: {
     <div class="sig-line">
       Authorised Signatory<br/>
       Human Resources<br/>
-      ${opts.companyName}
+      ${companyName}
     </div>
   </div>
 
@@ -226,8 +239,8 @@ function buildOfferHtml(opts: {
   <div class="acceptance">
     <p><strong>Acceptance of Offer</strong></p>
     <p>
-      I, <strong>${opts.candidateName}</strong>, accept the offer of employment as
-      <strong>${opts.jobTitle}</strong> at <strong>${opts.companyName}</strong> on the
+      I, <strong>${candidateName}</strong>, accept the offer of employment as
+      <strong>${jobTitle}</strong> at <strong>${companyName}</strong> on the
       terms and conditions set out above.
     </p>
     <div style="display:flex;gap:80px;margin-top:36px;">
