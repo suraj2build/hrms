@@ -106,7 +106,7 @@ export default async function auditRoutes(fastify: FastifyInstance) {
           reply.header('Content-Disposition', 'attachment; filename="audit-export.csv"')
           return reply.send('event_id,event_type,module,entity_type,entity_id,actor_id,severity,timestamp,correlation_id\n')
         }
-        return reply.send({ events: [], total: 0, error: error.message })
+        return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
       }
 
       const events = data ?? []
@@ -135,7 +135,7 @@ export default async function auditRoutes(fastify: FastifyInstance) {
       return reply.send({ events, total: events.length, exported_at: new Date().toISOString() })
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err)
-      return reply.send({ events: [], total: 0, error: message })
+      return reply.code(500).send({ error: 'INTERNAL_ERROR', message })
     }
   })
 

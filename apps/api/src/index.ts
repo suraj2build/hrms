@@ -413,6 +413,9 @@ async function start() {
     })
   })
 
+  // ── Global error sanitizer — strips raw DB messages from 5xx responses ──────
+  await fastify.register(import('./plugins/error-sanitizer.js'))
+
   // ── Wire loggers into in-process infrastructure ──────────────────────────────
   jobQueue.setLogger(fastify.log as any)
   eventBus.setLogger(fastify.log as any)
