@@ -34,7 +34,7 @@ const whatsappRoutes: FastifyPluginAsync = async (fastify) => {
   })
 
   // ── POST /whatsapp/webhook — inbound messages ─────────────────────────────────
-  fastify.post('/whatsapp/webhook', { config: { rawBody: true } }, async (req, reply) => {
+  fastify.post('/whatsapp/webhook', { config: { rawBody: true, rateLimit: { max: Number(process.env.WHATSAPP_WEBHOOK_RATE_LIMIT ?? 300), timeWindow: '1 minute' } } }, async (req, reply) => {
     // Verify Meta HMAC-SHA256 signature before processing the payload.
     // Header: X-Hub-Signature-256: sha256=<hex digest of HMAC-SHA256(appSecret, rawBody)>
     const appSecret = process.env.WHATSAPP_APP_SECRET
