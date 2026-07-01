@@ -16,9 +16,10 @@ declare module 'fastify' {
 }
 
 interface ProfileCacheEntry {
-  tenantId:  string
-  role:      string
-  expiresAt: number
+  tenantId:   string
+  role:       string
+  employeeId: string | null
+  expiresAt:  number
 }
 
 // Per-user profile cache (5-min TTL) — avoids DB hit on every request
@@ -77,8 +78,9 @@ const authPlugin: FastifyPluginAsync = async (fastify) => {
       // Check cache first
       const cached = profileCache.get(userId)
       if (cached && cached.expiresAt > Date.now()) {
-        request.tenantId = cached.tenantId
-        request.userRole = cached.role
+        request.tenantId   = cached.tenantId
+        request.userRole   = cached.role
+        request.employeeId = cached.employeeId
         return
       }
 
@@ -104,9 +106,10 @@ const authPlugin: FastifyPluginAsync = async (fastify) => {
       }
 
       profileCache.set(userId, {
-        tenantId:  profile.tenant_id,
-        role:      profile.role,
-        expiresAt: Date.now() + CACHE_TTL,
+        tenantId:   profile.tenant_id,
+        role:       profile.role,
+        employeeId: (profile as any).employee_id ?? null,
+        expiresAt:  Date.now() + CACHE_TTL,
       })
 
       request.tenantId = profile.tenant_id
