@@ -69,7 +69,7 @@ export default async function auditRoutes(fastify: FastifyInstance) {
   })
 
   // GET /enterprise/audit/export
-  fastify.get('/audit/export', { preHandler: [fastify.authenticate] }, async (req, reply) => {
+  fastify.get('/audit/export', hrAdminAuth, async (req, reply) => {
     try {
       const query = req.query as Record<string, string | undefined>
       const org_id = (req as any).tenantId as string | undefined
@@ -140,7 +140,7 @@ export default async function auditRoutes(fastify: FastifyInstance) {
   })
 
   // GET /enterprise/audit/stats
-  fastify.get('/audit/stats', { preHandler: [fastify.authenticate] }, async (req, reply) => {
+  fastify.get('/audit/stats', hrAdminAuth, async (req, reply) => {
     try {
       const query  = req.query as Record<string, string | undefined>
       const org_id = (req as any).tenantId as string | undefined
