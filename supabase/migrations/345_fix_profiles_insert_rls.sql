@@ -1,0 +1,26 @@
+-- ============================================================
+-- SECURITY FIX — ISSUE-001
+-- profiles_insert_own RLS privilege escalation
+-- ============================================================
+--
+-- The profiles_insert_own policy allowed any authenticated Supabase
+-- user to INSERT a profiles row with any role (including 'super_admin'
+-- or 'hr_admin') and any tenant_id, using the public anon key.
+--
+-- The only constraint was: id = auth.uid()
+-- There was no constraint on the role, tenant_id, or any other field.
+--
+-- The legitimate profile creation path (POST /setup, API onboarding,
+-- owner provisioning) uses the service-role Supabase client which
+-- bypasses RLS entirely. No client-side code ever calls
+-- supabase.from('profiles').insert() directly.
+--
+-- This policy therefore served no legitimate purpose and created a
+-- complete privilege-escalation vector: any signup user could grant
+-- themselves super_admin on any tenant.
+--
+-- Fix: drop the policy. Profile inserts are exclusively service-role
+-- operations and are not subject to RLS.
+-- ============================================================
+
+DROP POLICY IF EXISTS "profiles_insert_own" ON profiles;
