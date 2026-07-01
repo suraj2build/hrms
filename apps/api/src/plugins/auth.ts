@@ -37,6 +37,8 @@ function verifySupabaseJwt(token: string, secret: string): { sub: string } | nul
     if (expected !== sigB64) return null
     const payload = JSON.parse(Buffer.from(payloadB64, 'base64url').toString())
     if (payload.exp && payload.exp < Math.floor(Date.now() / 1000)) return null
+    if (!payload.sub || typeof payload.sub !== 'string') return null
+    if (payload.aud && payload.aud !== 'authenticated') return null
     return { sub: payload.sub }
   } catch {
     return null
