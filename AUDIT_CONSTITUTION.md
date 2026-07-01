@@ -211,6 +211,19 @@ for CPU-intensive per-item work that cannot be fully batched.
   route code are the **primary** isolation mechanism for API traffic.
 - Never call `fastify.supabase.auth.getUser()` inside a business-logic route — only in auth.ts.
 
+### 6.6 Employee Lifecycle vs. Authentication State (AF-001)
+
+`employees.status` and `profiles.is_active` are **independent state machines with no automatic
+synchronization.** Setting `employees.status = 'separated'` through any separation workflow does
+not touch `profiles.is_active` or Supabase Auth. This is a documented architectural finding.
+
+- Do not add synchronization logic between the two state machines in a security-fix commit.
+  The correct fix requires a product decision on revocation stage. See `ARCHITECTURE_FINDINGS.md` AF-001.
+- The ISSUE-023 fix (adding `is_active` to the auth plugin) addresses explicitly deactivated
+  accounts; it does not address the lifecycle sync gap.
+- SOC2 control CC6.3 in `supabase/migrations/122_compliance_controls.sql` claims this is
+  `'implemented'` — it is not. Do not represent it as implemented in any audit response.
+
 ---
 
 ## 7. Issue Priority Order
@@ -340,5 +353,5 @@ Update this table after each issue is committed and pushed.
 
 ---
 
-*Last updated: 2026-07-01 after ISSUE-021 closure.*
-*Next open issue: ISSUE-022 (JWT iss/aud claim validation).*
+*Last updated: 2026-07-01 after ISSUE-022 closure and AF-001 filing.*
+*Next open issue: ISSUE-023 (deactivated accounts valid until JWT expiry — scoped to auth plugin is_active check only; see AF-001 for lifecycle sync gap).*
