@@ -19,6 +19,7 @@ interface ProfileCacheEntry {
   tenantId:   string
   role:       string
   employeeId: string | null
+  isActive:   boolean
   expiresAt:  number
 }
 
@@ -80,6 +81,9 @@ const authPlugin: FastifyPluginAsync = async (fastify) => {
       // Check cache first
       const cached = profileCache.get(userId)
       if (cached && cached.expiresAt > Date.now()) {
+        if (!cached.isActive) {
+          return reply.code(401).send({ error: 'Unauthorized', message: 'Account is deactivated' })
+        }
         request.tenantId   = cached.tenantId
         request.userRole   = cached.role
         request.employeeId = cached.employeeId
@@ -89,7 +93,7 @@ const authPlugin: FastifyPluginAsync = async (fastify) => {
       // Cache miss — one DB lookup
       const { data: profile } = await fastify.supabase
         .from('profiles')
-        .select('tenant_id, role, employee_id')
+        .select('tenant_id, role, employee_id, is_active')
         .eq('id', userId)
         .single()
 
@@ -107,10 +111,15 @@ const authPlugin: FastifyPluginAsync = async (fastify) => {
         })
       }
 
+      if (!(profile as any).is_active) {
+        return reply.code(401).send({ error: 'Unauthorized', message: 'Account is deactivated' })
+      }
+
       profileCache.set(userId, {
         tenantId:   profile.tenant_id,
         role:       profile.role,
         employeeId: (profile as any).employee_id ?? null,
+        isActive:   (profile as any).is_active ?? true,
         expiresAt:  Date.now() + CACHE_TTL,
       })
 
