@@ -494,8 +494,8 @@ async function start() {
       }
     }
     // Run once at startup (with small delay), then every 24 hours
-    setTimeout(runScan, 60_000)
-    setInterval(runScan, TWENTY_FOUR_HOURS)
+    setTimeout(() => runScan().catch(e => fastify.log.error({ err: e }, '[absconding] scan error')), 60_000)
+    setInterval(() => runScan().catch(e => fastify.log.error({ err: e }, '[absconding] scan error')), TWENTY_FOUR_HOURS)
   }, fastify.log)
 
   // Durable job queue — Postgres-backed, crash-safe, multi-instance ready.

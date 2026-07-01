@@ -99,7 +99,7 @@ export default async function assistantRoutes(fastify: FastifyInstance) {
     }
     const meter = (cfg: AssistantConfig) => {
       if (usageTotals.total === 0) return
-      void fastify.supabase.from('ai_usage_log').insert({
+      fastify.supabase.from('ai_usage_log').insert({
         tenant_id:         req.tenantId,
         provider:          cfg.provider,
         model:             effectiveModel(cfg),
@@ -110,7 +110,7 @@ export default async function assistantRoutes(fastify: FastifyInstance) {
         user_id:           req.userId,
       }).then(({ error }: any) => {
         if (error) req.log.warn({ err: error.message }, 'ai usage metering insert failed')
-      })
+      }, () => {})
     }
 
     try {

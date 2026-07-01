@@ -90,7 +90,7 @@ export default async function operationsRoutes(fastify: FastifyInstance) {
       created_by:        (req as any).userId,
     })
     // Persist simulation run (fire-and-forget)
-    void fastify.supabase.from('simulation_runs').insert({
+    fastify.supabase.from('simulation_runs').insert({
       org_id:           run.org_id,
       simulation_type:  run.simulation_type,
       label:            run.label,
@@ -98,7 +98,7 @@ export default async function operationsRoutes(fastify: FastifyInstance) {
       result_summary:   run.result_summary,
       created_at:       run.created_at,
       created_by:       run.created_by ?? null,
-    })
+    }).then(undefined, () => {})
     return run
   })
 
@@ -114,11 +114,11 @@ export default async function operationsRoutes(fastify: FastifyInstance) {
       affected_count:  Number(body.affected_count) || 0,
       created_by:      (req as any).userId,
     })
-    void fastify.supabase.from('simulation_runs').insert({
+    fastify.supabase.from('simulation_runs').insert({
       org_id: run.org_id, simulation_type: run.simulation_type, label: run.label,
       input_params: run.input_params, result_summary: run.result_summary,
       created_at: run.created_at, created_by: run.created_by ?? null,
-    })
+    }).then(undefined, () => {})
     return run
   })
 
@@ -134,11 +134,11 @@ export default async function operationsRoutes(fastify: FastifyInstance) {
       weeks:                 Number(body.weeks) || 4,
       created_by:            (req as any).userId,
     })
-    void fastify.supabase.from('simulation_runs').insert({
+    fastify.supabase.from('simulation_runs').insert({
       org_id: run.org_id, simulation_type: run.simulation_type, label: run.label,
       input_params: run.input_params, result_summary: run.result_summary,
       created_at: run.created_at, created_by: run.created_by ?? null,
-    })
+    }).then(undefined, () => {})
     return run
   })
 

@@ -75,11 +75,11 @@ export default async function fabricRoutes(fastify: FastifyInstance) {
       estimated_admin_hours: Number(body.estimated_admin_hours) || 0,
       created_by:       (req as any).userId,
     })
-    void fastify.supabase.from('simulation_runs').insert({
+    fastify.supabase.from('simulation_runs').insert({
       org_id: run.org_id, simulation_type: run.simulation_type, label: run.label,
       input_params: run.input_params, result_summary: run.result_summary,
       created_at: run.created_at, created_by: run.created_by ?? null,
-    })
+    }).then(undefined, () => {})
     return run
   })
 
@@ -94,11 +94,11 @@ export default async function fabricRoutes(fastify: FastifyInstance) {
       weeks_ahead:        Number(body.weeks_ahead) || 12,
       created_by:         (req as any).userId,
     })
-    void fastify.supabase.from('simulation_runs').insert({
+    fastify.supabase.from('simulation_runs').insert({
       org_id: run.org_id, simulation_type: run.simulation_type, label: run.label,
       input_params: run.input_params, result_summary: run.result_summary,
       created_at: run.created_at, created_by: run.created_by ?? null,
-    })
+    }).then(undefined, () => {})
     return run
   })
 
