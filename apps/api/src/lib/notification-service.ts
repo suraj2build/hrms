@@ -69,11 +69,11 @@ const EVENT_LABEL: Record<ApprovalEventType, string> = {
 }
 
 const INBOX_DETAILS: Record<ApprovalEventType, { entityType: string; actionRoute: string }> = {
-  leave_approved:            { entityType: 'leave_request',               actionRoute: '/leave/my-requests'     },
-  leave_rejected:            { entityType: 'leave_request',               actionRoute: '/leave/my-requests'     },
-  leave_cancelled:           { entityType: 'leave_request',               actionRoute: '/leave/my-requests'     },
-  regularisation_approved:   { entityType: 'attendance_regularisation',   actionRoute: '/attendance'             },
-  regularisation_rejected:   { entityType: 'attendance_regularisation',   actionRoute: '/attendance'             },
+  leave_approved:            { entityType: 'leave_request',               actionRoute: '/ess/leave'        },
+  leave_rejected:            { entityType: 'leave_request',               actionRoute: '/ess/leave'        },
+  leave_cancelled:           { entityType: 'leave_request',               actionRoute: '/ess/leave'        },
+  regularisation_approved:   { entityType: 'attendance_regularisation',   actionRoute: '/ess/attendance'   },
+  regularisation_rejected:   { entityType: 'attendance_regularisation',   actionRoute: '/ess/attendance'   },
 }
 
 function buildSummary(payload: ApprovalNotificationPayload): string {
@@ -118,7 +118,10 @@ async function dispatch(payload: ApprovalNotificationPayload): Promise<void> {
     .eq('tenant_id',   payload.tenantId)
     .maybeSingle()
 
-  if (!prof) return   // no linked profile (e.g. employee not yet onboarded to auth)
+  if (!prof) {
+    console.warn(JSON.stringify({ level: 'warn', service: 'notification', msg: 'profile_not_found', employeeId: payload.employeeId, tenantId: payload.tenantId, type: payload.type }))
+    return
+  }
 
   const details = INBOX_DETAILS[payload.type]
 
