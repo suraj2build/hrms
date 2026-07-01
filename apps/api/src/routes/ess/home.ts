@@ -22,6 +22,7 @@
 
 import type { FastifyInstance } from 'fastify'
 import { ensureTodaysCelebrations } from '../../lib/community-celebrations.js'
+import { getDirectReportIds } from '../../lib/manager-scope.js'
 
 // Run the (idempotent, write-heavy) celebration generation at most once per tenant
 // per day per instance, and OFF the GET response critical path — it was previously
@@ -236,13 +237,27 @@ export default async function essHomeRoutes(fastify: FastifyInstance) {
     // ── Team approvals count (managers only, fast — second fan-out) ───────────
     let pendingApprovalsCount = 0
     if (isManager) {
-      const [la, ra] = await Promise.all([
-        fastify.supabase.from('leave_requests').select('id', { count: 'exact', head: true })
-          .eq('tenant_id', tenantId).eq('status', 'pending'),
-        fastify.supabase.from('attendance_regularisation').select('id', { count: 'exact', head: true })
-          .eq('tenant_id', tenantId).eq('status', 'pending'),
-      ])
-      pendingApprovalsCount = (la.count ?? 0) + (ra.count ?? 0)
+      if (role === 'manager' && employeeId) {
+        const reportIds = await getDirectReportIds(fastify.supabase, tenantId, employeeId)
+        if (reportIds.length > 0) {
+          const [la, ra] = await Promise.all([
+            fastify.supabase.from('leave_requests').select('id', { count: 'exact', head: true })
+              .eq('tenant_id', tenantId).eq('status', 'pending').in('employee_id', reportIds),
+            fastify.supabase.from('attendance_regularisation').select('id', { count: 'exact', head: true })
+              .eq('tenant_id', tenantId).eq('status', 'pending').in('employee_id', reportIds),
+          ])
+          pendingApprovalsCount = (la.count ?? 0) + (ra.count ?? 0)
+        }
+      } else {
+        // hr_admin / super_admin: tenant-wide count is appropriate
+        const [la, ra] = await Promise.all([
+          fastify.supabase.from('leave_requests').select('id', { count: 'exact', head: true })
+            .eq('tenant_id', tenantId).eq('status', 'pending'),
+          fastify.supabase.from('attendance_regularisation').select('id', { count: 'exact', head: true })
+            .eq('tenant_id', tenantId).eq('status', 'pending'),
+        ])
+        pendingApprovalsCount = (la.count ?? 0) + (ra.count ?? 0)
+      }
     }
 
     // ── Leave balance ─────────────────────────────────────────────────────────
