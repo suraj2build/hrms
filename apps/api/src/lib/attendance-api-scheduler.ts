@@ -29,7 +29,7 @@ function resolvePath(obj: unknown, path?: string | null): unknown {
   return cur
 }
 
-async function runDueSources(supabase: SupabaseClient): Promise<void> {
+export async function runDueSources(supabase: SupabaseClient): Promise<void> {
   // Find active sources whose next fetch is overdue
   const now = new Date()
 

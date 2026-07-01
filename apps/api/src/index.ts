@@ -22,6 +22,10 @@ import { registerIntelligenceScanner }   from './lib/intelligence-scanner.js'
 import { registerDigestScheduler }       from './lib/digest-scheduler.js'
 import { registerWoCreditScheduler }     from './lib/wo-credit-reconciler.js'
 import { registerPollScheduler }         from './lib/poll-scheduler.js'
+import { scan as runSlaScan }            from './lib/sla-scanner.js'
+import { runAllScans as runIntelligenceScan } from './lib/intelligence-scanner.js'
+import { runDueSources as runAttendanceSources } from './lib/attendance-api-scheduler.js'
+import { monthlyAccrualJob }             from './lib/leave-jobs.js'
 import { jobQueue }                      from './lib/job-queue.js'
 import { eventBus }                      from './lib/event-bus.js'
 import type { HrmsEventType }            from './lib/event-bus.js'
@@ -497,6 +501,37 @@ async function start() {
     setTimeout(() => runScan().catch(e => fastify.log.error({ err: e }, '[absconding] scan error')), 60_000)
     setInterval(() => runScan().catch(e => fastify.log.error({ err: e }, '[absconding] scan error')), TWENTY_FOUR_HOURS)
   }, fastify.log)
+
+  // Register durable queue handlers before start() — without these, every enqueued
+  // job dead-letters immediately (ISSUE-011). Handlers close over fastify.supabase
+  // which is available here because supabasePlugin was registered above.
+  durableQueue.register('process-attendance', async (_payload, _job) => {
+    await runAttendanceSources(fastify.supabase)
+  })
+  durableQueue.register('leave-accrual', async (_payload, job) => {
+    const tenantId = job.tenant_id
+    if (!tenantId) { fastify.log.warn('[durable-queue] leave-accrual: missing tenant_id — skipping'); return }
+    const now   = new Date()
+    const year  = typeof _payload.year  === 'number' ? _payload.year  : now.getUTCFullYear()
+    const month = typeof _payload.month === 'number' ? _payload.month : now.getUTCMonth() + 1
+    await monthlyAccrualJob(fastify.supabase, tenantId, year, month, typeof _payload.triggered_by === 'string' ? _payload.triggered_by : null)
+  })
+  durableQueue.register('sla-scan', async (_payload, _job) => {
+    await runSlaScan(fastify.supabase)
+  })
+  // detect-anomalies is event-driven (registerAnomalyHandlers wires bus listeners);
+  // no standalone scan function exists — complete without action on manual trigger.
+  durableQueue.register('detect-anomalies', async (_payload, _job) => {
+    fastify.log.info('[durable-queue] detect-anomalies: event-driven handler — no standalone scan to run')
+  })
+  durableQueue.register('intelligence-scan', async (_payload, _job) => {
+    await runIntelligenceScan(fastify.supabase)
+  })
+  // event-automation is reactive (registerEventBusAutomation wires bus listeners);
+  // no standalone scan function exists — complete without action on manual trigger.
+  durableQueue.register('event-automation', async (_payload, _job) => {
+    fastify.log.info('[durable-queue] event-automation: event-driven handler — no standalone scan to run')
+  })
 
   // Durable job queue — Postgres-backed, crash-safe, multi-instance ready.
   // Must start AFTER supabase plugin is registered (needs the client).

@@ -176,7 +176,7 @@ async function autoAdvanceStaleInstances(
 
 // ── Scanner ───────────────────────────────────────────────────────────────────
 
-async function scan(supabase: SupabaseClient): Promise<void> {
+export async function scan(supabase: SupabaseClient): Promise<void> {
   const cutoffLeave      = new Date(Date.now() - LEAVE_SLA_HOURS      * 3_600_000).toISOString()
   const cutoffCorrection = new Date(Date.now() - CORRECTION_SLA_HOURS * 3_600_000).toISOString()
 

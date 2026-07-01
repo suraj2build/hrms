@@ -1138,7 +1138,7 @@ async function scanSuccessionAttritionRisk(supabase: SupabaseClient, tenantId: s
 
 // ── Main scan orchestrator ─────────────────────────────────────────────────────
 
-async function runAllScans(supabase: SupabaseClient): Promise<void> {
+export async function runAllScans(supabase: SupabaseClient): Promise<void> {
   const tenantIds = await fetchTenantIds(supabase).catch(() => [] as string[])
   if (!tenantIds.length) return
 
