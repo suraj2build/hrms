@@ -27,9 +27,9 @@ import { eventBus }                      from './lib/event-bus.js'
 import type { HrmsEventType }            from './lib/event-bus.js'
 import { durableQueue }                  from './lib/durable-queue.js'
 import { WebhookService }                from './lib/webhook-service.js'
-registerNotificationHandlers()
-// Note: registerAnomalyHandlers(supabase) is called below inside start(), AFTER
-// the supabase plugin is registered, because it needs the Supabase client.
+// Note: registerNotificationHandlers(supabase) and registerAnomalyHandlers(supabase)
+// are called below inside start(), AFTER the supabase plugin is registered,
+// because they need the Supabase client.
 
 // Routes — Sprint 1
 import employeeOptionsRoute from './routes/employees/options.js'
@@ -424,6 +424,11 @@ async function start() {
   // Required checks (env-vars, database, auth) will process.exit(1) if they fail.
   // Optional module checks degrade gracefully and disable the module.
   await startupHealthChecks(fastify.supabase, fastify.log)
+
+  // Notification handlers — approval decisions → employee inbox (must follow supabase plugin)
+  await safeRegisterModule('notification-handlers', async () => {
+    registerNotificationHandlers(fastify.supabase)
+  }, fastify.log)
 
   // Onboarding orchestrator — wires onboarding → events, trust, notifications, checklist
   await safeRegisterModule('onboarding', async () => {

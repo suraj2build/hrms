@@ -24,9 +24,11 @@
  *   OneSignal (push), or Supabase Realtime (in-app).
  */
 
+import type { SupabaseClient }                   from '@supabase/supabase-js'
 import { eventService }                          from './event-service.js'
 import type { ApprovalEventPayload,
               LeaveCancelledPayload }             from './event-service.js'
+import { notify }                                from './notify.js'
 
 // ── Notification payload ───────────────────────────────────────────────────────
 
@@ -51,6 +53,11 @@ export interface ApprovalNotificationPayload {
   metadata?:  Record<string, unknown>
 }
 
+// ── Module-level state ─────────────────────────────────────────────────────────
+
+// Supabase client injected at registration time (see registerNotificationHandlers).
+let _supabase: SupabaseClient | null = null
+
 // ── Internal helpers ───────────────────────────────────────────────────────────
 
 const EVENT_LABEL: Record<ApprovalEventType, string> = {
@@ -61,40 +68,74 @@ const EVENT_LABEL: Record<ApprovalEventType, string> = {
   regularisation_rejected:   'Attendance correction rejected',
 }
 
+const INBOX_DETAILS: Record<ApprovalEventType, { entityType: string; actionRoute: string }> = {
+  leave_approved:            { entityType: 'leave_request',               actionRoute: '/leave/my-requests'     },
+  leave_rejected:            { entityType: 'leave_request',               actionRoute: '/leave/my-requests'     },
+  leave_cancelled:           { entityType: 'leave_request',               actionRoute: '/leave/my-requests'     },
+  regularisation_approved:   { entityType: 'attendance_regularisation',   actionRoute: '/attendance'             },
+  regularisation_rejected:   { entityType: 'attendance_regularisation',   actionRoute: '/attendance'             },
+}
+
+function buildSummary(payload: ApprovalNotificationPayload): string {
+  const m = payload.metadata ?? {}
+  switch (payload.type) {
+    case 'leave_approved':
+    case 'leave_rejected': {
+      const lt    = m.leave_type ? ` (${m.leave_type})` : ''
+      const dates = m.from_date && m.to_date ? `: ${m.from_date} – ${m.to_date}` : ''
+      const verb  = payload.type === 'leave_approved' ? 'approved' : 'rejected'
+      return `Your leave request${lt}${dates} has been ${verb}.`
+    }
+    case 'leave_cancelled':
+      return `Your leave request has been cancelled.`
+    case 'regularisation_approved':
+    case 'regularisation_rejected': {
+      const date = m.date ? ` for ${m.date}` : ''
+      const verb = payload.type === 'regularisation_approved' ? 'approved' : 'rejected'
+      return `Your attendance correction${date} has been ${verb}.`
+    }
+    default:
+      return EVENT_LABEL[payload.type]
+  }
+}
+
 /**
- * Core dispatch stub — replace with a real provider when ready.
- * Must never throw.
+ * Core dispatcher — writes an inbox_items row so the employee sees the decision
+ * in their notification bell. Must never throw.
+ *
+ * Future channels (email, WhatsApp, push) can be added here alongside the
+ * inbox write without changing any call sites.
  */
 async function dispatch(payload: ApprovalNotificationPayload): Promise<void> {
-  // ── TODO: integrate real notification provider ──────────────────────────────
-  //
-  // Example with Resend (email):
-  //   await resend.emails.send({
-  //     from:    'noreply@yourhrms.com',
-  //     to:      employeeEmail,
-  //     subject: EVENT_LABEL[payload.type],
-  //     html:    renderApprovalEmail(payload),
-  //   })
-  //
-  // Example with Supabase Realtime (in-app):
-  //   await supabase.channel('notifications').send({
-  //     type: 'broadcast', event: payload.type, payload,
-  //   })
-  //
-  // ───────────────────────────────────────────────────────────────────────────
+  if (!_supabase) return   // supabase not yet injected; skip silently
 
-  // Structured log — makes events observable even without a real provider
-  console.log(JSON.stringify({
-    level:       'info',
-    service:     'notification',
-    event:       payload.type,
-    label:       EVENT_LABEL[payload.type],
-    tenant_id:   payload.tenantId,
-    employee_id: payload.employeeId,
-    request_id:  payload.requestId,
-    actor_id:    payload.actorId,
-    ...(payload.metadata ?? {}),
-  }))
+  // inbox_items.recipient_id expects profiles.id, but the event carries
+  // employees.id (the HR entity key). Resolve via profiles.employee_id.
+  const { data: prof } = await _supabase
+    .from('profiles')
+    .select('id')
+    .eq('employee_id', payload.employeeId)
+    .eq('tenant_id',   payload.tenantId)
+    .maybeSingle()
+
+  if (!prof) return   // no linked profile (e.g. employee not yet onboarded to auth)
+
+  const details = INBOX_DETAILS[payload.type]
+
+  await notify(_supabase, {
+    tenantId:     payload.tenantId,
+    recipientId:  (prof as any).id,
+    senderId:     payload.actorId,
+    item_type:    'approval_request',
+    title:        EVENT_LABEL[payload.type],
+    summary:      buildSummary(payload),
+    severity:     'info',
+    entity_type:  details.entityType,
+    entity_id:    payload.requestId,
+    action_route: details.actionRoute,
+    action_label: 'View Request',
+    metadata:     payload.metadata,
+  })
 }
 
 // ── Public API ─────────────────────────────────────────────────────────────────
@@ -126,7 +167,8 @@ export async function notifyApprovalDecision(
  *   - Errors are caught inside notifyApprovalDecision() and swallowed.
  *   - A broken handler does not affect other handlers or the caller.
  */
-export function registerNotificationHandlers(): void {
+export function registerNotificationHandlers(supabase: SupabaseClient): void {
+  _supabase = supabase
   // ── leave.approved ──────────────────────────────────────────────────────────
   eventService.registerHandler('leave.approved', async (payload: ApprovalEventPayload) => {
     await notifyApprovalDecision({
