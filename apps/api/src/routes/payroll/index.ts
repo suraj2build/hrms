@@ -495,6 +495,17 @@ async function fetchAdvanceLoanDeductions(
   return results
 }
 
+// Max employees processed concurrently during payroll runs.
+// Limits Supabase PostgREST connection pressure while still giving ~10× speedup
+// over sequential processing (200 employees: ~40 s sequential → ~4 s concurrent).
+const PAYROLL_CONCURRENCY = 10
+
+async function runConcurrent<T>(items: T[], fn: (item: T) => Promise<void>): Promise<void> {
+  for (let i = 0; i < items.length; i += PAYROLL_CONCURRENCY) {
+    await Promise.all(items.slice(i, i + PAYROLL_CONCURRENCY).map(fn))
+  }
+}
+
 export default async function payrollRoutes(fastify: FastifyInstance) {
   const auth        = { preHandler: [fastify.authenticate] }
   const hrAdminAuth = { preHandler: [fastify.authenticate, requireRole(...HR_ADMIN_ROLES)] }
@@ -684,7 +695,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
 
       const dryResults: DryRunResult[] = []
 
-      for (const emp of empList) {
+      await runConcurrent(empList, async (emp) => {
         try {
           const [compensation, attendance] = await Promise.all([
             fetchActiveCompensation(fastify.supabase, tenantId, emp.id, runPeriodEnd),
@@ -704,7 +715,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
               error:         compValidation.blocking_errors[0],
               validation_errors: compValidation.blocking_errors,
             })
-            continue
+            return
           }
 
           const advLoanDeductions = await fetchAdvanceLoanDeductions(
@@ -737,7 +748,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
             error:         err?.message ?? 'Unexpected error',
           })
         }
-      }
+      })
 
       const okCount   = dryResults.filter(r => r.status === 'ok').length
       const failCount = dryResults.filter(r => r.status === 'failed').length
@@ -819,7 +830,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
     const succeededSlips: PayrollSlipResult[] = []
     const failedEmployees: FailedEmployee[]   = []
 
-    for (const emp of empList) {
+    await runConcurrent(empList, async (emp) => {
       const empCtx = { employee_id: emp.id, employee_code: emp.employee_code, month, run_id: runId }
 
       try {
@@ -850,7 +861,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
             failure_stage: 'data_fetch',
             reason,
           })
-          continue
+          return
         }
 
         // ── Stage 1.5: Fetch advance / loan deductions for this employee ─────
@@ -883,7 +894,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
             reason,
             details:       { errors: compValidation.blocking_errors },
           })
-          continue
+          return
         }
 
         // Non-blocking compensation warnings — surfaced in logs, do not skip employee
@@ -933,7 +944,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
             reason:        `Slip payload validation failed: ${slipValid.errors[0]}`,
             details:       { validation_errors: slipValid.errors },
           })
-          continue
+          return
         }
 
         // ── Stage 5: DB insert ────────────────────────────────────────────
@@ -977,7 +988,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
               hint:    insertErr.hint,
             },
           })
-          continue
+          return
         }
 
         // ── Stage 6: Slip inserted — log success forensics ────────────────
@@ -1013,7 +1024,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
           details:       { stack: unexpectedErr?.stack },
         })
       }
-    }
+    })
 
     // ── Aggregate totals from succeeded slips only ───────────────────────────
     const totalGross      = round2(succeededSlips.reduce((s, r) => s + r.gross_pay,        0))
@@ -2716,7 +2727,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
     const succeededRetry: string[] = []
     const failedRetry: FailedEmployee[] = []
 
-    for (const emp of empList) {
+    await runConcurrent(empList, async (emp) => {
       const empCtx = { employee_id: emp.id, employee_code: emp.employee_code, month: run.month, run_id: id }
       try {
         const [compensation, attendance] = await Promise.all([
@@ -2734,7 +2745,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
             failure_stage: 'compensation_validation',
             reason:        compVal.blocking_errors[0],
           })
-          continue
+          return
         }
 
         const result  = await computeSlipWithStatutory(fastify.supabase, tenantId, { tenantId, employeeId: emp.id, month: run.month, compensation, attendance, total_working_days }, run.month)
@@ -2748,7 +2759,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
             failure_stage: 'slip_validation',
             reason:        slipVal.errors[0],
           })
-          continue
+          return
         }
 
         // Delete existing slip (if re-inserted from a previous partial retry)
@@ -2763,7 +2774,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
             failure_stage: 'db_insert',
             reason:        insertErr.message,
           })
-          continue
+          return
         }
 
         succeededRetry.push(emp.id)
@@ -2784,7 +2795,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
           reason:        unexpectedErr?.message ?? 'Unexpected error',
         })
       }
-    }
+    })
 
     // Insert new blockers for newly failed employees
     if (failedRetry.length > 0) {
