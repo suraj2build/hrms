@@ -488,21 +488,19 @@ async function start() {
     registerPollScheduler(fastify.supabase)
   }, fastify.log)
 
-  // Absconding case scanner — daily scan for UA employees, auto-escalates state machine
+  // Absconding case scanner — daily scan for UA employees, auto-escalates state machine.
+  // Scheduling only: sets up enqueue timers. Handler registered below with other durable handlers.
   await safeRegisterModule('absconding-scanner', async () => {
-    const { scanAndEscalate } = await import('./lib/absconding-engine.js')
     const TWENTY_FOUR_HOURS = 24 * 60 * 60 * 1_000
-    const runScan = async () => {
-      const { data: tenants } = await fastify.supabase
-        .from('tenants').select('id').in('status', ['active', 'trial'])
-      for (const t of (tenants ?? []) as { id: string }[]) {
-        try { await scanAndEscalate(fastify.supabase, t.id) }
-        catch (e) { fastify.log.error({ tenant: t.id, err: e }, 'absconding scan failed') }
-      }
+    const enqueue = () => {
+      const key = `detect-absconding:${new Date().toISOString().slice(0, 10)}`
+      durableQueue.enqueue('detect-absconding', {}, { idempotencyKey: key }).catch(
+        e => fastify.log.error({ err: e }, '[absconding] enqueue error'),
+      )
     }
-    // Run once at startup (with small delay), then every 24 hours
-    setTimeout(() => runScan().catch(e => fastify.log.error({ err: e }, '[absconding] scan error')), 60_000)
-    setInterval(() => runScan().catch(e => fastify.log.error({ err: e }, '[absconding] scan error')), TWENTY_FOUR_HOURS)
+    // Enqueue once at startup (with small delay), then every 24 hours
+    setTimeout(enqueue, 60_000)
+    setInterval(enqueue, TWENTY_FOUR_HOURS)
   }, fastify.log)
 
   // Register durable queue handlers before start() — without these, every enqueued
@@ -538,6 +536,15 @@ async function start() {
   })
   durableQueue.register('send-pulse-poll', async (_payload, _job) => {
     await runPollTick(fastify.supabase)
+  })
+  durableQueue.register('detect-absconding', async (_payload, _job) => {
+    const { scanAndEscalate } = await import('./lib/absconding-engine.js')
+    const { data: tenants } = await fastify.supabase
+      .from('tenants').select('id').in('status', ['active', 'trial'])
+    for (const t of (tenants ?? []) as { id: string }[]) {
+      try { await scanAndEscalate(fastify.supabase, t.id) }
+      catch (e) { fastify.log.error({ tenant: t.id, err: e }, 'absconding scan failed') }
+    }
   })
   // event-automation is reactive (registerEventBusAutomation wires bus listeners);
   // no standalone scan function exists — complete without action on manual trigger.
