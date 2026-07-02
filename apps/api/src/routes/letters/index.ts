@@ -42,6 +42,7 @@ import { STANDARD_LETTER_TEMPLATES } from '../../lib/standard-letter-templates.j
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { logAction } from '../../lib/audit-service.js'
+import { z } from 'zod'
 
 // ── Embedded-employee normaliser ──────────────────────────────────────────────
 // employees has no `full_name` / `designation` columns (name is first+last,
@@ -202,6 +203,66 @@ function renderTemplate(
   return { body, subject, missing }
 }
 
+// ── Request validation schemas ────────────────────────────────────────────────
+
+const approvalChainItemSchema = z.object({
+  level:         z.number().int().min(1),
+  approver_role: z.string().min(1),
+  label:         z.string().optional(),
+})
+
+const createTemplateSchema = z.object({
+  name:              z.string().min(1, 'name is required'),
+  code:              z.string().min(1, 'code is required'),
+  category:          z.enum(['hr_initiated', 'ess_requestable']).default('hr_initiated'),
+  letter_type:       z.string().min(1, 'letter_type is required'),
+  subject_template:  z.string().max(500).default(''),
+  body_html:         z.string().max(100_000).default(''),
+  variables:         z.array(z.unknown()).default([]),
+  requires_approval: z.boolean().default(false),
+  approval_levels:   z.number().int().min(1).max(10).default(1),
+  approval_chain:    z.array(approvalChainItemSchema).default([]),
+})
+
+// All fields optional for PATCH semantics; approval_chain stays optional so
+// absence means "do not touch existing chain" (existing guard checks !== undefined)
+const updateTemplateSchema = z.object({
+  name:              z.string().min(1).optional(),
+  code:              z.string().min(1).optional(),
+  category:          z.enum(['hr_initiated', 'ess_requestable']).optional(),
+  letter_type:       z.string().min(1).optional(),
+  subject_template:  z.string().max(500).optional(),
+  body_html:         z.string().max(100_000).optional(),
+  variables:         z.array(z.unknown()).optional(),
+  requires_approval: z.boolean().optional(),
+  approval_levels:   z.number().int().min(1).max(10).optional(),
+  is_active:         z.boolean().optional(),
+  approval_chain:    z.array(approvalChainItemSchema).optional(),
+})
+
+const generateLetterSchema = z.object({
+  template_id: z.string().uuid('template_id must be a valid UUID'),
+  employee_id: z.string().uuid('employee_id must be a valid UUID'),
+  extra_vars:  z.record(z.string(), z.string()).default({}),
+})
+
+const commentBodySchema = z.object({
+  comments: z.string().max(1000).optional(),
+})
+
+const essRequestSchema = z.object({
+  template_id: z.string().uuid('template_id must be a valid UUID'),
+  reason:      z.string().max(500).default(''),
+})
+
+const fulfillSchema = z.object({
+  extra_vars: z.record(z.string(), z.string()).default({}),
+})
+
+const rejectSchema = z.object({
+  reason: z.string().max(1000).default(''),
+})
+
 // ── Plugin ────────────────────────────────────────────────────────────────────
 
 export default async function lettersRoutes(fastify: FastifyInstance) {
@@ -257,17 +318,16 @@ export default async function lettersRoutes(fastify: FastifyInstance) {
   // POST /letters/templates
   fastify.post('/letters/templates', hrAdminAuth, async (req, reply) => {
     const { tenantId, userId } = req as any
-    const body = req.body as any
-    const {
-      name, code, category = 'hr_initiated', letter_type,
-      subject_template = '', body_html = '', variables = [],
-      requires_approval = false, approval_levels = 1,
-      approval_chain = [],
-    } = body
-
-    if (!name || !code || !letter_type) {
-      return reply.status(400).send({ error: 'name, code, and letter_type are required' })
+    const parsed = createTemplateSchema.safeParse(req.body)
+    if (!parsed.success) {
+      return reply.status(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message ?? 'Invalid request body' })
     }
+    const {
+      name, code, category, letter_type,
+      subject_template, body_html, variables,
+      requires_approval, approval_levels,
+      approval_chain,
+    } = parsed.data
 
     // Resolve created_by via employee record
     const { data: emp } = await supabase
@@ -335,7 +395,10 @@ export default async function lettersRoutes(fastify: FastifyInstance) {
   fastify.put('/letters/templates/:id', hrAdminAuth, async (req, reply) => {
     const { tenantId, userId } = req as any
     const { id }               = req.params as any
-    const body                 = req.body as any
+    const parsed = updateTemplateSchema.safeParse(req.body)
+    if (!parsed.success) {
+      return reply.status(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message ?? 'Invalid request body' })
+    }
 
     const { data: emp } = await supabase
       .from('profiles').select('id:employee_id').eq('id', userId).eq('tenant_id', tenantId).single()
@@ -345,7 +408,7 @@ export default async function lettersRoutes(fastify: FastifyInstance) {
       subject_template, body_html, variables,
       requires_approval, approval_levels, is_active,
       approval_chain,
-    } = body
+    } = parsed.data
 
     const patch: Record<string, unknown> = { updated_by: emp?.id ?? null }
     if (name              !== undefined) patch.name              = name
@@ -421,11 +484,11 @@ export default async function lettersRoutes(fastify: FastifyInstance) {
   // POST /letters/generate
   fastify.post('/letters/generate', hrAdminAuth, async (req, reply) => {
     const { tenantId, userId } = req as any
-    const { template_id, employee_id, extra_vars = {} } = req.body as any
-
-    if (!template_id || !employee_id) {
-      return reply.status(400).send({ error: 'template_id and employee_id are required' })
+    const parsed = generateLetterSchema.safeParse(req.body)
+    if (!parsed.success) {
+      return reply.status(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message ?? 'Invalid request body' })
     }
+    const { template_id, employee_id, extra_vars } = parsed.data
 
     // Fetch template
     const { data: tmpl, error: tmplErr } = await supabase
@@ -574,7 +637,11 @@ export default async function lettersRoutes(fastify: FastifyInstance) {
   fastify.post('/letters/issued/:letterId/approve', hrAdminAuth, async (req, reply) => {
     const { tenantId, userId } = req as any
     const { letterId }         = req.params as any
-    const { comments }         = req.body as any ?? {}
+    const parsed = commentBodySchema.safeParse(req.body ?? {})
+    if (!parsed.success) {
+      return reply.status(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message ?? 'Invalid request body' })
+    }
+    const { comments } = parsed.data
 
     const { data: letter } = await supabase
       .from('generated_letters')
@@ -625,7 +692,11 @@ export default async function lettersRoutes(fastify: FastifyInstance) {
   fastify.post('/letters/issued/:letterId/reject', hrAdminAuth, async (req, reply) => {
     const { tenantId, userId } = req as any
     const { letterId }         = req.params as any
-    const { comments = '' }    = req.body as any ?? {}
+    const parsed = commentBodySchema.safeParse(req.body ?? {})
+    if (!parsed.success) {
+      return reply.status(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message ?? 'Invalid request body' })
+    }
+    const { comments = '' } = parsed.data
 
     const { data: actor } = await supabase
       .from('profiles').select('id:employee_id').eq('id', userId).eq('tenant_id', tenantId).single()
@@ -784,9 +855,11 @@ export default async function lettersRoutes(fastify: FastifyInstance) {
   // POST /letters/ess/request
   fastify.post('/letters/ess/request', { preHandler: [fastify.authenticate] }, async (req, reply) => {
     const { tenantId, userId } = req as any
-    const { template_id, reason = '' } = req.body as any
-
-    if (!template_id) return reply.status(400).send({ error: 'template_id is required' })
+    const parsed = essRequestSchema.safeParse(req.body)
+    if (!parsed.success) {
+      return reply.status(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message ?? 'Invalid request body' })
+    }
+    const { template_id, reason } = parsed.data
 
     const { data: emp } = await supabase
       .from('profiles').select('id:employee_id').eq('id', userId).eq('tenant_id', tenantId).single()
@@ -879,7 +952,11 @@ export default async function lettersRoutes(fastify: FastifyInstance) {
   fastify.post('/letters/requests/:id/fulfill', hrAdminAuth, async (req, reply) => {
     const { tenantId, userId } = req as any
     const { id }               = req.params as any
-    const { extra_vars = {} }  = req.body as any ?? {}
+    const parsed = fulfillSchema.safeParse(req.body ?? {})
+    if (!parsed.success) {
+      return reply.status(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message ?? 'Invalid request body' })
+    }
+    const { extra_vars } = parsed.data
 
     const { data: request } = await supabase
       .from('letter_requests')
@@ -947,7 +1024,11 @@ export default async function lettersRoutes(fastify: FastifyInstance) {
   fastify.post('/letters/requests/:id/reject', hrAdminAuth, async (req, reply) => {
     const { tenantId, userId } = req as any
     const { id }               = req.params as any
-    const { reason = '' }      = req.body as any ?? {}
+    const parsed = rejectSchema.safeParse(req.body ?? {})
+    if (!parsed.success) {
+      return reply.status(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message ?? 'Invalid request body' })
+    }
+    const { reason } = parsed.data
 
     const { data: processor } = await supabase
       .from('profiles').select('id:employee_id').eq('id', userId).eq('tenant_id', tenantId).single()
