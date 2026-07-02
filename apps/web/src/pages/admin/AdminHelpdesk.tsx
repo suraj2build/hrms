@@ -143,6 +143,8 @@ export function AdminHelpdesk() {
   const [slaTab, setSlaTab] = useState<'priority' | 'category' | 'escalation'>('priority')
   const [catSlaDraft, setCatSlaDraft] = useState<CategorySla[] | null>(null)
   const [slaUrgencySort, setSlaUrgencySort] = useState(false)
+  const [agentSearch, setAgentSearch]       = useState('')
+  const [agentDropOpen, setAgentDropOpen]   = useState(false)
 
   const { data: tickets = [], isLoading } = useQuery<Ticket[]>({
     queryKey: ['admin-helpdesk', statusF, priorityF, slaUrgencySort],
@@ -804,14 +806,44 @@ export function AdminHelpdesk() {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="text-[11px] font-medium text-muted-foreground mb-1 block">Assigned to</label>
-                  <select
-                    value={detail.assigned_to ?? ''}
-                    onChange={e => assign.mutate({ id: detail.id, assigned_to: e.target.value || null })}
-                    className="w-full text-xs border border-border rounded-md px-2 py-1.5 bg-background text-foreground"
-                  >
-                    <option value="">Unassigned</option>
-                    {agents.map(a => <option key={a.id} value={a.id}>{a.full_name ?? 'Unassigned'}</option>)}
-                  </select>
+                  <div className="relative">
+                    {agentDropOpen ? (
+                      <>
+                        <input
+                          autoFocus
+                          value={agentSearch}
+                          onChange={e => setAgentSearch(e.target.value)}
+                          onBlur={() => setAgentDropOpen(false)}
+                          placeholder="Search by name…"
+                          className="w-full text-xs border border-border rounded-md px-2 py-1.5 bg-background text-foreground"
+                        />
+                        <div className="absolute z-10 mt-0.5 w-full rounded-md border border-border bg-background shadow-md max-h-40 overflow-y-auto">
+                          <div
+                            onMouseDown={e => { e.preventDefault(); assign.mutate({ id: detail.id, assigned_to: null }); setAgentDropOpen(false); setAgentSearch('') }}
+                            className="px-2 py-1.5 text-xs cursor-pointer hover:bg-muted/50 text-muted-foreground"
+                          >Unassigned</div>
+                          {agents
+                            .filter(a => !agentSearch || (a.full_name ?? '').toLowerCase().includes(agentSearch.toLowerCase()))
+                            .map(a => (
+                              <div key={a.id}
+                                onMouseDown={e => { e.preventDefault(); assign.mutate({ id: detail.id, assigned_to: a.id }); setAgentDropOpen(false); setAgentSearch('') }}
+                                className="px-2 py-1.5 text-xs cursor-pointer hover:bg-muted/50"
+                              >{a.full_name}</div>
+                            ))
+                          }
+                        </div>
+                      </>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => { setAgentSearch(''); setAgentDropOpen(true) }}
+                        className="w-full text-xs border border-border rounded-md px-2 py-1.5 bg-background text-foreground text-left flex items-center justify-between"
+                      >
+                        <span>{detail.assigned_to ? (agents.find(a => a.id === detail.assigned_to)?.full_name ?? 'Assigned') : <span className="text-muted-foreground">Unassigned</span>}</span>
+                        <span className="text-muted-foreground text-[10px]">▾</span>
+                      </button>
+                    )}
+                  </div>
                 </div>
                 <div>
                   <label className="text-[11px] font-medium text-muted-foreground mb-1 block">Status</label>
