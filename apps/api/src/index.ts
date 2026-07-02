@@ -28,6 +28,7 @@ import { runDueSources as runAttendanceSources } from './lib/attendance-api-sche
 import { tick as runDigestTick }         from './lib/digest-scheduler.js'
 import { tick as runWoCreditTick }       from './lib/wo-credit-reconciler.js'
 import { runPollTick }                   from './lib/poll-scheduler.js'
+import { tick as runLeaveSchedulerTick } from './lib/leave-scheduler.js'
 import { monthlyAccrualJob }             from './lib/leave-jobs.js'
 import { jobQueue }                      from './lib/job-queue.js'
 import { eventBus }                      from './lib/event-bus.js'
@@ -536,6 +537,9 @@ async function start() {
   })
   durableQueue.register('send-pulse-poll', async (_payload, _job) => {
     await runPollTick(fastify.supabase)
+  })
+  durableQueue.register('leave-scheduler-tick', async (_payload, _job) => {
+    await runLeaveSchedulerTick(fastify.supabase)
   })
   durableQueue.register('detect-absconding', async (_payload, _job) => {
     const { scanAndEscalate } = await import('./lib/absconding-engine.js')

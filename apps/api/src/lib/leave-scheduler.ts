@@ -32,6 +32,7 @@ import {
 import { runMonthlyAccrual, processCarryForward } from './accrual-engine.js'
 import { runEventGrantsForTenant }                from './leave-event-engine.js'
 import { runLeaveReconciliation }                  from './leave-reconciliation.js'
+import { durableQueue }                            from './durable-queue.js'
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -175,7 +176,7 @@ async function expireStaleUploadSessions(supabase: SupabaseClient): Promise<void
 
 // ── Main tick ──────────────────────────────────────────────────────────────────
 
-async function tick(supabase: SupabaseClient): Promise<void> {
+export async function tick(supabase: SupabaseClient): Promise<void> {
   tickCount++
 
   const now       = new Date()
@@ -356,19 +357,20 @@ async function restoreState(supabase: SupabaseClient): Promise<void> {
  * Call once after the Supabase plugin is registered in Fastify startup.
  */
 export function registerLeaveScheduler(supabase: SupabaseClient): void {
-  // Register the interval unconditionally BEFORE the startup promise chain so
-  // the scheduler survives a startup failure (DB unavailable, restoreState()
-  // throws, initial tick() throws). Previously the interval was inside the
-  // .then() and would never be registered if startup failed. (ISSUE-025)
+  // Periodic enqueue — interval stays as lightweight ticker; durable queue
+  // provides crash recovery and retry for the actual work. (ISSUE-028)
+  // Hourly idempotency key prevents duplicate runs on concurrent ticks.
   setInterval(() => {
-    tick(supabase).catch((err: Error) => {
-      console.error('[leave-scheduler] tick error:', err.message)
+    const key = `leave-scheduler-tick:${new Date().toISOString().slice(0, 13)}`
+    durableQueue.enqueue('leave-scheduler-tick', {}, { idempotencyKey: key }).catch((err: Error) => {
+      console.error('[leave-scheduler] enqueue error:', err.message)
       writeHeartbeat(supabase, 'error', { tick: tickCount }, err.message).catch(() => undefined)
     })
   }, TICK_MS)
 
-  // Restore state and run the first tick. Errors here no longer abort the
-  // interval; we still log them and write a heartbeat for observability.
+  // Restore state and run the first tick directly — ensures the ran.* guard
+  // is populated before the first durable job fires and provides immediate
+  // startup behavior if the process restarted mid-day.
   restoreState(supabase)
     .then(() => tick(supabase))
     .then(() => console.log(`📅 Leave scheduler active — ticking every ${TICK_MS / 60_000} min`))
