@@ -351,6 +351,7 @@ Update this table after each issue is committed and pushed.
 | ISSUE-026 | event-bus-automation error boundaries | VERIFIED CLEAN — no code changes needed | 2026-07-01 |
 | ISSUE-035 | Absconding scanner missing .catch() | COVERED BY ISSUE-012 — timers already wrapped in index.ts | 2026-07-02 |
 | ISSUE-025 | leave-scheduler startup crash | hoist setInterval before promise chain in leave-scheduler.ts | 2026-07-02 |
+| ISSUE-040 | roster-calendar engine-call handlers no try/catch | 8 engine-calling handlers wrapped; route-specific safe messages; server-side logging; CRUD handlers unchanged | 2026-07-02 |
 
 ---
 
@@ -368,4 +369,4 @@ Update this table after each issue is committed and pushed.
 
 ---
 
-*Last updated: 2026-07-02. Phase 1 (Critical Security) fully closed. ISSUE-025 closed. Phase 2 next: ISSUE-040 (roster-calendar.ts + letters/index.ts). ISSUE-028 (raw setInterval schedulers) remains open.*
+*Last updated: 2026-07-02. Phase 1 (Critical Security) fully closed. ISSUE-025 and ISSUE-040 closed. Phase 2 next: ISSUE-041 (letters/index.ts mutation validation). ISSUE-028 (raw setInterval schedulers) remains open.*
