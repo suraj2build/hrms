@@ -388,6 +388,8 @@ export default async function reimbursementsRoutes(fastify: FastifyInstance) {
       employee_id: z.string().uuid().optional(),
       status: z.string().optional(),
       month: z.string().optional(),
+      limit:  z.coerce.number().int().min(1).max(500).default(50),
+      offset: z.coerce.number().int().min(0).default(0),
     })
 
     const parsed = querySchema.safeParse(req.query)
@@ -417,10 +419,14 @@ export default async function reimbursementsRoutes(fastify: FastifyInstance) {
       }
     }
 
+    const limit  = parsed.data.limit
+    const offset = parsed.data.offset
+
     let q = fastify.supabase
       .from('reimbursement_claims')
-      .select('*, employees(id, first_name, last_name, employee_code), reimbursement_categories(id, name, code, category_type)')
+      .select('*, employees(id, first_name, last_name, employee_code), reimbursement_categories(id, name, code, category_type)', { count: 'exact' })
       .eq('tenant_id', req.tenantId)
+      .order('created_at', { ascending: false })
 
     if (isHrAdmin) {
       // HR admin can filter by any supplied employee_id
@@ -460,10 +466,11 @@ export default async function reimbursementsRoutes(fastify: FastifyInstance) {
       const lastDay = new Date(year, mon, 0).toISOString().slice(0, 10)
       q = q.gte('expense_date', firstDay).lte('expense_date', lastDay)
     }
+    q = q.range(offset, offset + limit - 1)
 
-    const { data, error } = await q
+    const { data, count, error } = await q
     if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
-    return reply.send({ data: data ?? [] })
+    return reply.send({ data: data ?? [], total: count ?? 0, limit, offset })
   })
 
   // ── POST /payroll/reimbursements/claims ───────────────────────────────────────
@@ -808,9 +815,14 @@ export default async function reimbursementsRoutes(fastify: FastifyInstance) {
       employee_id: z.string().uuid().optional(),
       status: z.string().optional(),
       month:  z.string().optional(),
+      limit:  z.coerce.number().int().min(1).max(500).default(50),
+      offset: z.coerce.number().int().min(0).default(0),
     })
     const parsed = querySchema.safeParse(req.query)
     if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+
+    const limit  = parsed.data.limit
+    const offset = parsed.data.offset
 
     let q = fastify.supabase
       .from('reimbursement_claims')
@@ -824,6 +836,7 @@ export default async function reimbursementsRoutes(fastify: FastifyInstance) {
       const [year, mon] = parsed.data.month.split('-').map(Number)
       q = q.gte('expense_date', `${parsed.data.month}-01`).lte('expense_date', new Date(year, mon, 0).toISOString().slice(0, 10))
     }
+    q = q.range(offset, offset + limit - 1)
 
     const { data, count, error } = await q
     if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
@@ -841,7 +854,7 @@ export default async function reimbursementsRoutes(fastify: FastifyInstance) {
         claim_month:   (c.expense_date ?? c.claim_date ?? c.created_at ?? '').slice(0, 7) || null,
       }
     })
-    return reply.send({ data: rows, total: count ?? 0 })
+    return reply.send({ data: rows, total: count ?? 0, limit, offset })
   })
 
   /**

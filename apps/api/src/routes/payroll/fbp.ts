@@ -208,20 +208,26 @@ export default async function fbpRoutes(fastify: FastifyInstance) {
       status:         z.string().optional(),
       financial_year: z.string().optional(),
       quarter:        z.coerce.number().optional(),
+      limit:          z.coerce.number().int().min(1).max(500).default(200),
+      offset:         z.coerce.number().int().min(0).default(0),
     }).safeParse(req.query)
+
+    const limit  = qs.success ? qs.data.limit  : 200
+    const offset = qs.success ? qs.data.offset : 0
 
     let q = fastify.supabase
       .from('fbp_bill_submissions')
-      .select('*, salary_components(id, name, code), employees!inner(id, first_name, last_name, employee_code)')
+      .select('*, salary_components(id, name, code), employees!inner(id, first_name, last_name, employee_code)', { count: 'exact' })
       .eq('tenant_id', req.tenantId)
-      .order('created_at', { ascending: false }).limit(500)
+      .order('created_at', { ascending: false })
     if (qs.success && qs.data.status)         q = q.eq('status', qs.data.status)
     if (qs.success && qs.data.financial_year) q = q.eq('financial_year', qs.data.financial_year)
     if (qs.success && qs.data.quarter)        q = q.eq('quarter', qs.data.quarter)
+    q = q.range(offset, offset + limit - 1)
 
-    const { data, error } = await q
+    const { data, count, error } = await q
     if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
-    return reply.send({ data: data ?? [] })
+    return reply.send({ data: data ?? [], total: count ?? 0, limit, offset })
   })
 
   // ── HR: approve submission (approved_amount may differ from claimed) ──────────

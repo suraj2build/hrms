@@ -146,12 +146,14 @@ export function AdminMoodDashboard() {
     staleTime: 60_000,
   })
 
-  const { data: responsesData, isLoading: responsesLoading } = useQuery<{ response: string; created_at: string }[]>({
+  const { data: responsesResp, isLoading: responsesLoading } = useQuery<{ data: { response: string; created_at: string }[]; total: number }>({
     queryKey: ['mood-pulse-responses', expandedQ],
-    queryFn:  () => api.get<{ data: { response: string; created_at: string }[] }>(`/mood/admin/pulse/${expandedQ}/responses`).then(r => r.data),
+    queryFn:  () => api.get<{ data: { response: string; created_at: string }[]; total: number }>(`/mood/admin/pulse/${expandedQ}/responses`),
     enabled:  !!expandedQ,
     staleTime: 30_000,
   })
+  const responsesData  = responsesResp?.data
+  const responsesTotal = responsesResp?.total ?? 0
 
   const { data: storeBreakdown, isLoading: storeLoading } = useQuery<StoreBreakdownRow[]>({
     queryKey: ['mood-store-breakdown', storeMonth],
@@ -454,16 +456,23 @@ export function AdminMoodDashboard() {
                         ) : !responsesData?.length ? (
                           <p className="text-xs text-muted-foreground">No responses yet.</p>
                         ) : (
-                          <div className="space-y-2 max-h-48 overflow-y-auto">
-                            {responsesData.map((r, i) => (
-                              <div key={i} className="rounded-lg bg-background px-3 py-2">
-                                <p className="text-sm text-foreground">"{r.response}"</p>
-                                <p className="mt-0.5 text-[10px] text-muted-foreground">
-                                  {new Date(r.created_at).toLocaleDateString()}
-                                </p>
-                              </div>
-                            ))}
-                          </div>
+                          <>
+                            {responsesTotal > responsesData.length && (
+                              <p className="mb-2 text-[10px] text-muted-foreground">
+                                Showing first {responsesData.length} of {responsesTotal} responses
+                              </p>
+                            )}
+                            <div className="space-y-2 max-h-48 overflow-y-auto">
+                              {responsesData.map((r, i) => (
+                                <div key={i} className="rounded-lg bg-background px-3 py-2">
+                                  <p className="text-sm text-foreground">"{r.response}"</p>
+                                  <p className="mt-0.5 text-[10px] text-muted-foreground">
+                                    {new Date(r.created_at).toLocaleDateString()}
+                                  </p>
+                                </div>
+                              ))}
+                            </div>
+                          </>
                         )}
                       </div>
                     )}

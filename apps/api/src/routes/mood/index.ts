@@ -529,15 +529,24 @@ export default async function moodRoutes(fastify: FastifyInstance) {
     const tenantId = req.tenantId
     const { id }   = req.params as { id: string }
 
-    const { data, error } = await supabase
+    const qs = z.object({
+      limit:  z.coerce.number().int().min(1).max(500).default(50),
+      offset: z.coerce.number().int().min(0).default(0),
+    }).safeParse(req.query)
+
+    const limit  = qs.success ? qs.data.limit  : 50
+    const offset = qs.success ? qs.data.offset : 0
+
+    const { data, count, error } = await supabase
       .from('pulse_responses')
-      .select('id, response, created_at, employee_id')
+      .select('id, response, created_at, employee_id', { count: 'exact' })
       .eq('tenant_id', tenantId)
       .eq('question_id', id)
       .order('created_at', { ascending: false })
+      .range(offset, offset + limit - 1)
 
     if (error) return reply.status(500).send({ error: error.message })
-    return reply.send({ data: data ?? [] })
+    return reply.send({ data: data ?? [], total: count ?? 0, limit, offset })
   })
 
   // ── GET /mood/admin/cluster-breakdown ────────────────────────────────────────

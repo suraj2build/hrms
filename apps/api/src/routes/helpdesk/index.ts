@@ -143,20 +143,36 @@ export default async function helpdeskRoutes(fastify: FastifyInstance) {
     const employeeId = await resolveCallerEmployeeId(fastify, req.userId, req.tenantId)
     if (!employeeId) return reply.code(403).send({ error: 'PROFILE_NOT_LINKED', message: 'Your profile is not linked to an employee record' })
 
-    const qs = z.object({ status: z.string().optional() }).safeParse(req.query)
+    const qs = z.object({
+      status: z.string().optional(),
+      limit:  z.coerce.number().int().min(1).max(200).default(50),
+      offset: z.coerce.number().int().min(0).default(0),
+    }).safeParse(req.query)
+
+    const limit  = qs.success ? qs.data.limit  : 50
+    const offset = qs.success ? qs.data.offset : 0
+
+    // Count open tickets regardless of current status filter (badge always shows total open)
+    const openCountQ = fastify.supabase
+      .from('helpdesk_tickets')
+      .select('id', { count: 'exact', head: true })
+      .eq('tenant_id', req.tenantId)
+      .eq('employee_id', employeeId)
+      .not('status', 'in', '("resolved","closed")')
 
     let q = fastify.supabase
       .from('helpdesk_tickets')
-      .select('*')
+      .select('*', { count: 'exact' })
       .eq('tenant_id', req.tenantId)
       .eq('employee_id', employeeId)
       .order('created_at', { ascending: false })
 
-    if (qs.data?.status && qs.data.status !== 'all') q = q.eq('status', qs.data.status)
+    if (qs.success && qs.data.status && qs.data.status !== 'all') q = q.eq('status', qs.data.status)
+    q = q.range(offset, offset + limit - 1)
 
-    const { data, error } = await q
+    const [{ data, count, error }, { count: openCount }] = await Promise.all([q, openCountQ])
     if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
-    return reply.send({ data: data ?? [] })
+    return reply.send({ data: data ?? [], total: count ?? 0, open_count: openCount ?? 0, limit, offset })
   })
 
   // POST /helpdesk/tickets — employee creates a ticket

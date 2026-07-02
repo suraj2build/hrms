@@ -228,20 +228,32 @@ export default async function leaveRequestsRoutes(fastify: FastifyInstance) {
       return reply.send({ total: count ?? 0 })
     }
 
-    const result = await listLeaveRequests(fastify.supabase, req.tenantId, {
-      employeeId,
-      status:    parsed.data.status,
-      fromDate:  (parsed.data as any).from_date,
-      toDate:    (parsed.data as any).to_date,
-      limit:     parsed.data.limit,
-      offset:    parsed.data.offset,
-    })
+    let countQ = fastify.supabase
+      .from('leave_requests')
+      .select('id', { count: 'exact', head: true })
+      .eq('tenant_id', req.tenantId)
+    if (employeeId)                        countQ = countQ.eq('employee_id', employeeId) as any
+    if (parsed.data.status)                countQ = countQ.eq('status', parsed.data.status) as any
+    if ((parsed.data as any).from_date)    countQ = countQ.gte('from_date', (parsed.data as any).from_date) as any
+    if ((parsed.data as any).to_date)      countQ = countQ.lte('to_date', (parsed.data as any).to_date) as any
+
+    const [result, { count }] = await Promise.all([
+      listLeaveRequests(fastify.supabase, req.tenantId, {
+        employeeId,
+        status:    parsed.data.status,
+        fromDate:  (parsed.data as any).from_date,
+        toDate:    (parsed.data as any).to_date,
+        limit:     parsed.data.limit,
+        offset:    parsed.data.offset,
+      }),
+      countQ,
+    ])
 
     if (!result.ok) {
       return reply.code(500).send({ error: result.error.type, message: result.error.message })
     }
 
-    return reply.send({ data: result.value })
+    return reply.send({ data: result.value, total: count ?? 0, limit: parsed.data.limit, offset: parsed.data.offset })
   })
 
   // ── GET /leave-requests/:id ─────────────────────────────────────────────────

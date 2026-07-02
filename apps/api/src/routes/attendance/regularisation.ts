@@ -231,7 +231,12 @@ export default async function regularisationRoute(fastify: FastifyInstance) {
   // ── GET /attendance/regularisation/my ────────────────────────────────────────
   // Employee views their own correction requests (optionally filtered by date range).
   fastify.get('/attendance/regularisation/my', auth, async (req, reply) => {
-    const { from, to } = req.query as { from?: string; to?: string }
+    const qs = (req.query as Record<string, string | undefined>)
+    const from   = qs.from
+    const to     = qs.to
+    const status = qs.status
+    const limit  = Math.min(500, Math.max(1, parseInt(qs.limit ?? '100', 10) || 100))
+    const offset = Math.max(0, parseInt(qs.offset ?? '0', 10) || 0)
 
     const { data: profile } = await fastify.supabase
       .from('profiles')
@@ -244,6 +249,13 @@ export default async function regularisationRoute(fastify: FastifyInstance) {
       return reply.send([])
     }
 
+    const pendingCountQ = fastify.supabase
+      .from('attendance_regularisation')
+      .select('id', { count: 'exact', head: true })
+      .eq('tenant_id', req.tenantId)
+      .eq('employee_id', profile.employee_id)
+      .eq('status', 'pending')
+
     let query = fastify.supabase
       .from('attendance_regularisation')
       .select('id, date, regularization_type, requested_check_in, requested_check_out, reason, status, rejection_reason, approved_at, created_at', { count: 'exact' })
@@ -251,17 +263,19 @@ export default async function regularisationRoute(fastify: FastifyInstance) {
       .eq('employee_id', profile.employee_id)
       .order('date', { ascending: false })
 
-    if (from) query = query.gte('date', from)
-    if (to)   query = query.lte('date', to)
+    if (from)   query = query.gte('date', from)
+    if (to)     query = query.lte('date', to)
+    if (status) query = query.eq('status', status)
+    query = query.range(offset, offset + limit - 1)
 
-    const { data, count, error } = await query
+    const [{ data, count, error }, { count: pendingCount }] = await Promise.all([query, pendingCountQ])
 
     if (error) {
       req.log.error({ err: error }, 'regularisation my-list query failed')
       return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch requests' })
     }
 
-    return reply.send({ data: data ?? [], total: count ?? 0 })
+    return reply.send({ data: data ?? [], total: count ?? 0, pending_count: pendingCount ?? 0, limit, offset })
   })
 
   // ── GET /attendance/regularisation/pending ────────────────────────────────────
