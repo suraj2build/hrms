@@ -292,6 +292,7 @@ export default async function regularisationRoute(fastify: FastifyInstance) {
       .eq('tenant_id', req.tenantId)
       .eq('status', 'pending')
       .order('created_at', { ascending: false })
+      .limit(500)
 
     if (error) {
       req.log.error({ err: error }, 'regularisation pending query failed')
@@ -377,6 +378,7 @@ export default async function regularisationRoute(fastify: FastifyInstance) {
     else query = query.eq('status', 'pending')
     if (from) query = query.gte('date', from)
     if (to)   query = query.lte('date', to)
+    query = query.limit(200)
 
     const { data, count, error } = await query
 
