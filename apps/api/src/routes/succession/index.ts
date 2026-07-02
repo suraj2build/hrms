@@ -23,6 +23,7 @@
  *   GET /dashboard           — summary stats (plan count, risk breakdown, ready-now count)
  */
 
+import { z } from 'zod'
 import type { FastifyInstance } from 'fastify'
 import Anthropic from '@anthropic-ai/sdk'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
@@ -66,6 +67,86 @@ function readinessTier(score: number): string {
   if (score >= 4) return 'Ready in 24 Months'
   return 'Not Yet'
 }
+
+// ── Body schemas ─────────────────────────────────────────────────────────────
+
+const CreatePlanSchema = z.object({
+  position_title: z.string().min(1, 'position_title is required'),
+  department: z.string().optional().nullable(),
+  incumbent_id: z.string().uuid().optional().nullable(),
+  risk_level: z.string().optional(),
+  notes: z.string().optional().nullable(),
+})
+
+const UpdatePlanSchema = z.object({
+  position_title: z.string().optional(),
+  department: z.string().optional().nullable(),
+  incumbent_id: z.string().uuid().optional().nullable(),
+  risk_level: z.string().optional(),
+  notes: z.string().optional().nullable(),
+})
+
+const AddCandidateSchema = z.object({
+  employee_id: z.string().uuid('employee_id must be a valid UUID'),
+  readiness_level: z.string().optional(),
+  readiness_score: z.number().min(0).max(100).optional().nullable(),
+  strengths: z.string().optional().nullable(),
+  gaps: z.string().optional().nullable(),
+  development_plan: z.string().optional().nullable(),
+  notes: z.string().optional().nullable(),
+})
+
+const UpdateCandidateSchema = z.object({
+  readiness_level: z.string().optional(),
+  readiness_score: z.number().optional().nullable(),
+  strengths: z.string().optional().nullable(),
+  gaps: z.string().optional().nullable(),
+  development_plan: z.string().optional().nullable(),
+  notes: z.string().optional().nullable(),
+  nine_box_performance: z.number().int().min(1).max(3).optional().nullable(),
+  nine_box_potential: z.number().int().min(1).max(3).optional().nullable(),
+  score_performance: z.number().min(0).max(10).optional().nullable(),
+  score_skill_gap: z.number().min(0).max(10).optional().nullable(),
+  score_leadership: z.number().min(0).max(10).optional().nullable(),
+  score_mobility: z.number().min(0).max(10).optional().nullable(),
+  score_tenure: z.number().min(0).max(10).optional().nullable(),
+  score_attrition_risk: z.number().min(0).max(10).optional().nullable(),
+  attrition_risk_flag: z.boolean().optional().nullable(),
+})
+
+const AddIdpActionSchema = z.object({
+  action_type: z.string().optional(),
+  description: z.string().min(1, 'description is required'),
+  target_date: z.string().optional().nullable(),
+})
+
+const UpdateIdpActionSchema = z.object({
+  completed_at: z.string().optional().nullable(),
+  description: z.string().optional(),
+  target_date: z.string().optional().nullable(),
+  action_type: z.string().optional(),
+})
+
+const CreateCalibrationSchema = z.object({
+  title: z.string().min(1, 'title is required'),
+  participants: z.array(z.string().uuid()).optional(),
+})
+
+const CalibrationChangeSchema = z.object({
+  employee_id: z.string().uuid('employee_id must be a valid UUID'),
+  field_changed: z.enum([
+    'readiness_level', 'score_performance', 'score_skill_gap', 'score_leadership',
+    'score_mobility', 'score_tenure', 'score_attrition_risk',
+    'nine_box_performance', 'nine_box_potential',
+  ]),
+  old_value: z.unknown().optional(),
+  new_value: z.unknown().optional(),
+  notes: z.string().optional().nullable(),
+})
+
+const WhatIfSchema = z.object({
+  departing_employee_id: z.string().uuid('departing_employee_id must be a valid UUID'),
+})
 
 export default async function successionRoutes(fastify: FastifyInstance) {
   const { supabase } = fastify
@@ -174,8 +255,9 @@ export default async function successionRoutes(fastify: FastifyInstance) {
 
   fastify.post('/plans', hrAuth, async (req: any, reply) => {
     const tenantId = req.tenantId
-    const { position_title, department, incumbent_id, risk_level = 'medium', notes } = req.body as any
-    if (!position_title?.trim()) return reply.status(400).send({ error: 'position_title is required' })
+    const parsed = CreatePlanSchema.safeParse(req.body)
+    if (!parsed.success) return reply.status(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message ?? 'Invalid request body' })
+    const { position_title, department, incumbent_id, risk_level = 'medium', notes } = parsed.data
 
     const { data, error } = await supabase
       .from('succession_plans')
@@ -194,7 +276,9 @@ export default async function successionRoutes(fastify: FastifyInstance) {
   fastify.put('/plans/:id', hrAuth, async (req: any, reply) => {
     const tenantId = req.tenantId
     const { id } = req.params as { id: string }
-    const body = req.body as Record<string, unknown>
+    const parsed = UpdatePlanSchema.safeParse(req.body)
+    if (!parsed.success) return reply.status(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message ?? 'Invalid request body' })
+    const body = parsed.data as Record<string, unknown>
     const allowed = ['position_title', 'department', 'incumbent_id', 'risk_level', 'notes']
     const update: Record<string, unknown> = {}
     for (const k of allowed) { if (body[k] !== undefined) update[k] = body[k] }
@@ -222,8 +306,9 @@ export default async function successionRoutes(fastify: FastifyInstance) {
   fastify.post('/plans/:id/candidates', hrAuth, async (req: any, reply) => {
     const tenantId = req.tenantId
     const { id: plan_id } = req.params as { id: string }
-    const { employee_id, readiness_level = 'ready_3_5_years', readiness_score, strengths, gaps, development_plan, notes } = req.body as any
-    if (!employee_id) return reply.status(400).send({ error: 'employee_id is required' })
+    const parsed = AddCandidateSchema.safeParse(req.body)
+    if (!parsed.success) return reply.status(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message ?? 'Invalid request body' })
+    const { employee_id, readiness_level = 'ready_3_5_years', readiness_score, strengths, gaps, development_plan, notes } = parsed.data
 
     const { data, error } = await supabase
       .from('succession_candidates')
@@ -241,7 +326,9 @@ export default async function successionRoutes(fastify: FastifyInstance) {
   fastify.put('/plans/:id/candidates/:cid', hrAuth, async (req: any, reply) => {
     const tenantId = req.tenantId
     const { cid } = req.params as { id: string; cid: string }
-    const body = req.body as Record<string, unknown>
+    const parsed = UpdateCandidateSchema.safeParse(req.body)
+    if (!parsed.success) return reply.status(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message ?? 'Invalid request body' })
+    const body = parsed.data as Record<string, unknown>
     const allowed = [
       'readiness_level', 'readiness_score', 'strengths', 'gaps', 'development_plan', 'notes',
       'nine_box_performance', 'nine_box_potential',
@@ -377,8 +464,9 @@ export default async function successionRoutes(fastify: FastifyInstance) {
   fastify.post('/plans/:id/candidates/:cid/idp', hrAuth, async (req: any, reply) => {
     const tenantId = req.tenantId
     const { cid } = req.params as { id: string; cid: string }
-    const { action_type = 'course', description, target_date } = req.body as any
-    if (!description?.trim()) return reply.status(400).send({ error: 'description is required' })
+    const parsed = AddIdpActionSchema.safeParse(req.body)
+    if (!parsed.success) return reply.status(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message ?? 'Invalid request body' })
+    const { action_type = 'course', description, target_date } = parsed.data
 
     const { data, error } = await supabase
       .from('succession_idp_actions')
@@ -402,7 +490,9 @@ export default async function successionRoutes(fastify: FastifyInstance) {
   fastify.patch('/plans/:id/candidates/:cid/idp/:aid', hrAuth, async (req: any, reply) => {
     const tenantId = req.tenantId
     const { aid } = req.params as { id: string; cid: string; aid: string }
-    const body = req.body as Record<string, unknown>
+    const parsed = UpdateIdpActionSchema.safeParse(req.body)
+    if (!parsed.success) return reply.status(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message ?? 'Invalid request body' })
+    const body = parsed.data as Record<string, unknown>
     const allowed = ['completed_at', 'description', 'target_date', 'action_type']
     const update: Record<string, unknown> = {}
     for (const k of allowed) { if (body[k] !== undefined) update[k] = body[k] }
@@ -472,8 +562,9 @@ export default async function successionRoutes(fastify: FastifyInstance) {
 
   fastify.post('/what-if', hrAuth, async (req: any, reply) => {
     const tenantId = req.tenantId
-    const { departing_employee_id } = req.body as { departing_employee_id: string }
-    if (!departing_employee_id) return reply.status(400).send({ error: 'departing_employee_id is required' })
+    const parsed = WhatIfSchema.safeParse(req.body)
+    if (!parsed.success) return reply.status(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message ?? 'Invalid request body' })
+    const { departing_employee_id } = parsed.data
 
     // Fetch the departing employee's info
     const { data: deptEmployee } = await supabase
@@ -555,8 +646,9 @@ export default async function successionRoutes(fastify: FastifyInstance) {
 
   fastify.post('/calibration', hrAuth, async (req: any, reply) => {
     const tenantId = req.tenantId
-    const { title, participants } = req.body as { title: string; participants?: string[] }
-    if (!title?.trim()) return reply.status(400).send({ error: 'title is required' })
+    const parsed = CreateCalibrationSchema.safeParse(req.body)
+    if (!parsed.success) return reply.status(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message ?? 'Invalid request body' })
+    const { title, participants } = parsed.data
 
     const { data, error } = await supabase
       .from('calibration_sessions')
@@ -596,8 +688,9 @@ export default async function successionRoutes(fastify: FastifyInstance) {
   fastify.post('/calibration/:sessionId/changes', hrAuth, async (req: any, reply) => {
     const { sessionId } = req.params as { sessionId: string }
     const tenantId      = req.tenantId
-    const { employee_id, field_changed, old_value, new_value, notes } = req.body as any
-    if (!employee_id || !field_changed) return reply.status(400).send({ error: 'employee_id and field_changed required' })
+    const parsed = CalibrationChangeSchema.safeParse(req.body)
+    if (!parsed.success) return reply.status(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message ?? 'Invalid request body' })
+    const { employee_id, field_changed, old_value, new_value, notes } = parsed.data
 
     // Look up the succession_candidates row for this employee in this tenant
     const { data: candRow } = await supabase

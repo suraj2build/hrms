@@ -23,6 +23,7 @@
  *
  * Auth: hr_admin / super_admin only.
  */
+import { z } from 'zod'
 import type { FastifyInstance } from 'fastify'
 import { createHash }             from 'crypto'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
@@ -75,21 +76,23 @@ function addOneDay(date: string): string {
   return d.toISOString().slice(0, 10)
 }
 
+// ── Body schemas ─────────────────────────────────────────────────────────────
+
+const UploadBodySchema = z.object({
+  csv_content: z.string().min(1, 'csv_content is required and must be a non-empty string'),
+})
+
 // ── Route ─────────────────────────────────────────────────────────────────────
 
 export default async function attendanceUploadRoute(fastify: FastifyInstance) {
   const adminAuth = { preHandler: [fastify.authenticate, requireRole(...HR_ADMIN_ROLES)] }
 
   fastify.post('/attendance/upload', adminAuth, async (req: any, reply) => {
-    const body = req.body as Record<string, unknown>
-    const csvContent = body?.csv_content
-
-    if (typeof csvContent !== 'string' || !csvContent.trim()) {
-      return reply.code(400).send({
-        error:   'MISSING_BODY',
-        message: 'csv_content is required and must be a non-empty string',
-      })
+    const parsed = UploadBodySchema.safeParse(req.body)
+    if (!parsed.success) {
+      return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message ?? 'Invalid request body' })
     }
+    const csvContent = parsed.data.csv_content
 
     // ── 1. Split into lines ─────────────────────────────────────────────────
     const allLines = csvContent.split(/\r?\n/).map((l) => l.trim()).filter(Boolean)

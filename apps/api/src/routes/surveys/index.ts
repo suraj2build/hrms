@@ -1,3 +1,4 @@
+import { z } from 'zod'
 import type { FastifyInstance } from 'fastify'
 import Anthropic from '@anthropic-ai/sdk'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
@@ -61,6 +62,68 @@ function analyseSentiment(texts: string[]): {
 
   return { positive: pos, neutral: neu, negative: neg, keywords }
 }
+
+// ── Body schemas ─────────────────────────────────────────────────────────────
+
+const SubmitSurveySchema = z.object({
+  responses: z.array(z.object({
+    question_id: z.string(),
+    response: z.unknown(),
+  })),
+})
+
+const CreateSurveySchema = z.object({
+  title: z.string().min(1, 'title is required'),
+  description: z.string().nullable().optional(),
+  due_date: z.string().nullable().optional(),
+  questions: z.array(z.object({
+    question_text: z.string(),
+    question_type: z.string(),
+    options: z.array(z.string()).nullable().optional(),
+    required: z.boolean().optional(),
+    order_idx: z.number().optional(),
+  })).optional(),
+})
+
+const UpdateSurveySchema = z.object({
+  title: z.string().optional(),
+  description: z.string().optional(),
+  status: z.string().optional(),
+  due_date: z.string().optional(),
+})
+
+const AssignSurveySchema = z.object({
+  employee_ids: z.array(z.string()).optional(),
+  assign_all: z.boolean().optional(),
+})
+
+const FromTemplateSchema = z.object({
+  template_id: z.string().min(1, 'template_id is required'),
+  title: z.string().optional(),
+  due_date: z.string().nullable().optional(),
+  is_anonymous: z.boolean().optional(),
+})
+
+const TriggerLifecycleSchema = z.object({
+  lifecycle_type: z.string().min(1, 'lifecycle_type is required'),
+  employee_ids: z.array(z.string()).optional(),
+})
+
+const Setup360Schema = z.object({
+  peer_count: z.number().int().min(1).optional(),
+  deadline_days: z.number().int().min(1).optional(),
+  self_review: z.boolean().optional(),
+  manager_review: z.boolean().optional(),
+})
+
+const Approve360Schema = z.object({
+  nominator_ids: z.array(z.string()),
+  status: z.string().optional(),
+})
+
+const Nominate360Schema = z.object({
+  employee_ids: z.array(z.string()).min(1, 'employee_ids is required'),
+})
 
 export default async function surveyRoutes(fastify: FastifyInstance) {
   const { supabase } = fastify
@@ -149,9 +212,9 @@ export default async function surveyRoutes(fastify: FastifyInstance) {
 
   fastify.post('/:id/submit', { preHandler: [fastify.authenticate] }, async (req, reply) => {
     const { id } = req.params as { id: string }
-    const { responses } = req.body as {
-      responses: { question_id: string; response: unknown }[]
-    }
+    const parsed = SubmitSurveySchema.safeParse(req.body)
+    if (!parsed.success) return reply.status(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message ?? 'Invalid request body' })
+    const { responses } = parsed.data
     const empId = await getEmployeeId((req as any).userId)
     if (!empId) return reply.status(403).send({ error: 'Employee profile not found' })
 
@@ -266,18 +329,9 @@ export default async function surveyRoutes(fastify: FastifyInstance) {
   // ── Admin: create survey ───────────────────────────────────────────────────────
 
   fastify.post('/admin', hrAuth, async (req, reply) => {
-    const { title, description, due_date, questions } = req.body as {
-      title:       string
-      description: string | null
-      due_date:    string | null
-      questions:   {
-        question_text: string
-        question_type: string
-        options:       string[] | null
-        required:      boolean
-        order_idx:     number
-      }[]
-    }
+    const parsed = CreateSurveySchema.safeParse(req.body)
+    if (!parsed.success) return reply.status(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message ?? 'Invalid request body' })
+    const { title, description, due_date, questions } = parsed.data
     const profileId = (req as any).userId
     const tenantId  = await getTenantId(profileId)
     if (!tenantId) return reply.status(400).send({ error: 'Tenant not found' })
@@ -345,9 +399,9 @@ export default async function surveyRoutes(fastify: FastifyInstance) {
 
   fastify.patch('/admin/:id', hrAuth, async (req, reply) => {
     const { id } = req.params as { id: string }
-    const updates = req.body as Partial<{
-      title: string; description: string; status: string; due_date: string
-    }>
+    const parsed = UpdateSurveySchema.safeParse(req.body)
+    if (!parsed.success) return reply.status(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message ?? 'Invalid request body' })
+    const updates = parsed.data
 
     const { error } = await supabase
       .from('surveys')
@@ -362,10 +416,9 @@ export default async function surveyRoutes(fastify: FastifyInstance) {
 
   fastify.post('/admin/:id/assign', hrAuth, async (req, reply) => {
     const { id } = req.params as { id: string }
-    const { employee_ids, assign_all } = req.body as {
-      employee_ids?: string[]
-      assign_all?:   boolean
-    }
+    const parsed = AssignSurveySchema.safeParse(req.body)
+    if (!parsed.success) return reply.status(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message ?? 'Invalid request body' })
+    const { employee_ids, assign_all } = parsed.data
     const profileId = (req as any).userId
     const tenantId  = await getTenantId(profileId)
     if (!tenantId) return reply.status(400).send({ error: 'Tenant not found' })
@@ -503,7 +556,9 @@ export default async function surveyRoutes(fastify: FastifyInstance) {
 
   fastify.post('/admin/from-template', hrAuth, async (req: any, reply) => {
     const tenantId = req.tenantId
-    const { template_id, title, due_date, is_anonymous = false } = req.body as any
+    const parsed = FromTemplateSchema.safeParse(req.body)
+    if (!parsed.success) return reply.status(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message ?? 'Invalid request body' })
+    const { template_id, title, due_date, is_anonymous = false } = parsed.data
 
     const { data: tmpl, error: te } = await supabase
       .from('survey_templates')
@@ -616,10 +671,9 @@ export default async function surveyRoutes(fastify: FastifyInstance) {
 
   fastify.post('/admin/trigger-lifecycle', hrAuth, async (req: any, reply) => {
     const tenantId                     = req.tenantId
-    const { lifecycle_type, employee_ids } = req.body as {
-      lifecycle_type: string
-      employee_ids?:  string[]
-    }
+    const parsed = TriggerLifecycleSchema.safeParse(req.body)
+    if (!parsed.success) return reply.status(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message ?? 'Invalid request body' })
+    const { lifecycle_type, employee_ids } = parsed.data
 
     // Find active survey of this type for this tenant
     const { data: survey } = await supabase
@@ -662,7 +716,9 @@ export default async function surveyRoutes(fastify: FastifyInstance) {
   fastify.post('/admin/:id/360/setup', hrAuth, async (req: any, reply) => {
     const { id }        = req.params as { id: string }
     const tenantId      = req.tenantId
-    const { peer_count = 3, deadline_days, self_review, manager_review } = req.body as any
+    const parsed = Setup360Schema.safeParse(req.body ?? {})
+    if (!parsed.success) return reply.status(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message ?? 'Invalid request body' })
+    const { peer_count = 3, deadline_days, self_review, manager_review } = parsed.data
 
     const deadline_at = deadline_days
       ? new Date(Date.now() + Number(deadline_days) * 86400000).toISOString()
@@ -704,7 +760,9 @@ export default async function surveyRoutes(fastify: FastifyInstance) {
   fastify.post('/admin/360/:roundId/approve', hrAuth, async (req: any, reply) => {
     const { roundId } = req.params as { roundId: string }
     const tenantId    = req.tenantId
-    const { nominator_ids, status = 'approved' } = req.body as { nominator_ids: string[]; status?: string }
+    const parsed = Approve360Schema.safeParse(req.body)
+    if (!parsed.success) return reply.status(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message ?? 'Invalid request body' })
+    const { nominator_ids, status = 'approved' } = parsed.data
 
     await supabase
       .from('feedback_360_rounds')
@@ -787,8 +845,9 @@ export default async function surveyRoutes(fastify: FastifyInstance) {
     const empId       = await getEmployeeId((req as any).userId)
     if (!empId) return reply.status(403).send({ error: 'Employee profile not found' })
 
-    const { employee_ids } = req.body as { employee_ids: string[] }
-    if (!employee_ids?.length) return reply.status(400).send({ error: 'employee_ids required' })
+    const parsed = Nominate360Schema.safeParse(req.body)
+    if (!parsed.success) return reply.status(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message ?? 'Invalid request body' })
+    const { employee_ids } = parsed.data
 
     const { data: round } = await supabase
       .from('feedback_360_rounds')

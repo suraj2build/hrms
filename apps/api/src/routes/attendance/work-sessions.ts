@@ -7,6 +7,7 @@
  * All routes require HR Admin or Super Admin role.
  */
 
+import { z } from 'zod'
 import type { FastifyInstance } from 'fastify'
 import {
   buildDaySessionReport,
@@ -15,6 +16,17 @@ import {
   pairPunches,
   resolveAttendanceBusinessDate,
 } from '../../lib/work-session-engine.js'
+
+// ── Body schemas ─────────────────────────────────────────────────────────────
+
+const PairSessionsBodySchema = z.object({
+  employee_id: z.string().uuid(),
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'date must be in YYYY-MM-DD format'),
+})
+
+const LockSessionBodySchema = z.object({
+  payroll_run_id: z.string().uuid().optional(),
+})
 
 // ── Auth helpers ──────────────────────────────────────────────────────────────
 
@@ -341,11 +353,10 @@ export default async function workSessionRoutes(fastify: FastifyInstance) {
 
   fastify.post('/attendance/sessions/pair', auth, async (req: any, reply) => {
     if (!requireHrAdmin(req, reply)) return
-    const { employee_id, date } = req.body as { employee_id?: string; date?: string }
+    const parsed = PairSessionsBodySchema.safeParse(req.body)
+    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message ?? 'Invalid request body' })
+    const { employee_id, date } = parsed.data
     const tenantId = req.tenantId as string
-
-    if (!employee_id) return reply.code(400).send({ error: 'employee_id is required' })
-    if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return reply.code(400).send({ error: 'date (YYYY-MM-DD) is required' })
 
     let report: Awaited<ReturnType<typeof buildDaySessionReport>>
     try {
@@ -404,7 +415,9 @@ export default async function workSessionRoutes(fastify: FastifyInstance) {
   fastify.post('/attendance/sessions/:sessionId/lock', auth, async (req: any, reply) => {
     if (!requireHrAdmin(req, reply)) return
     const { sessionId } = req.params as { sessionId: string }
-    const { payroll_run_id } = (req.body ?? {}) as { payroll_run_id?: string }
+    const parsed = LockSessionBodySchema.safeParse(req.body ?? {})
+    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message ?? 'Invalid request body' })
+    const { payroll_run_id } = parsed.data
     const tenantId = req.tenantId as string
 
     // Check current state
