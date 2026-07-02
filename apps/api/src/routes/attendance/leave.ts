@@ -30,6 +30,17 @@ import { isLeaveLedgerShadowEnabled, recordShadowDrift } from '../../lib/leave-l
 
 const dateRe = /^\d{4}-\d{2}-\d{2}$/
 
+async function runConcurrent<T>(items: T[], fn: (item: T) => Promise<void>, concurrency = 10): Promise<void> {
+  const queue = [...items]
+  const workers = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
+    while (queue.length > 0) {
+      const item = queue.shift()!
+      await fn(item)
+    }
+  })
+  await Promise.all(workers)
+}
+
 const applySchema = z.object({
   leave_type_id: z.string().uuid('leave_type_id must be a UUID'),
   from_date:     z.string().regex(dateRe, 'from_date must be YYYY-MM-DD'),
@@ -546,19 +557,18 @@ export default async function leaveRoute(fastify: FastifyInstance) {
     // Non-blocking: approval is already committed above; this is a best-effort queue entry.
     try {
       const affectedMonths = [...new Set(leaveDates.map((d: string) => d.slice(0, 7)))]
-      for (const month of affectedMonths) {
-        const { data: freeze } = await fastify.supabase
-          .from('payroll_freeze_log')
-          .select('id')
-          .eq('tenant_id', req.tenantId)
-          .eq('freeze_month', month)
-          .eq('action', 'freeze')
-          .is('unfrozen_at', null)
-          .limit(1)
-          .maybeSingle()
-
-        if (freeze) {
-          await fastify.supabase.from('payroll_adjustments').insert({
+      // Batch-check all affected months in one query instead of N per-month queries
+      const { data: frozenRows } = await fastify.supabase
+        .from('payroll_freeze_log')
+        .select('freeze_month')
+        .eq('tenant_id', req.tenantId)
+        .in('freeze_month', affectedMonths)
+        .eq('action', 'freeze')
+        .is('unfrozen_at', null)
+      const frozenSet = new Set((frozenRows ?? []).map((r: { freeze_month: string }) => r.freeze_month))
+      if (frozenSet.size > 0) {
+        await fastify.supabase.from('payroll_adjustments').insert(
+          [...frozenSet].map(month => ({
             tenant_id:       req.tenantId,
             employee_id:     app.employee_id,
             locked_month:    month,
@@ -568,8 +578,8 @@ export default async function leaveRoute(fastify: FastifyInstance) {
             source_id:       app.id,
             status:          'pending',
             created_by:      req.userId,
-          })
-        }
+          }))
+        )
       }
     } catch (err) {
       req.log.warn({ err }, 'payroll freeze guard check failed — approval committed')
@@ -1403,7 +1413,7 @@ export default async function leaveRoute(fastify: FastifyInstance) {
     // and deduct leave balance for paid leave. (Was: raw calendar expansion, no balance,
     // no source flag — turned rest days into LOP and skipped balance.)
     const dailyRows: Array<Record<string, unknown>> = []
-    for (const emp_id of employee_ids) {
+    await runConcurrent(employee_ids, async (emp_id) => {
       let workingDates: string[] = dates
       try {
         const wd = await computeWorkingLeaveDays(fastify.supabase, req.tenantId, emp_id, from_date, to_date)
@@ -1451,7 +1461,7 @@ export default async function leaveRoute(fastify: FastifyInstance) {
           computed_source: 'leave_approval',
         })
       }
-    }
+    })
     const { error: dailyErr } = await fastify.supabase
       .from('attendance_daily')
       .upsert(dailyRows, { onConflict: 'tenant_id,employee_id,date' })
