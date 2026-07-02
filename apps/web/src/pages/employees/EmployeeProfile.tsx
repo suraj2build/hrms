@@ -37,6 +37,7 @@ import { Input } from '@/components/ui/input'
 import { DateInput } from '@/components/ui/date-input'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { EmployeeSelector } from '@/components/filters/EmployeeSelector'
@@ -479,6 +480,7 @@ export function EmployeeProfile() {
   const [, setSection]  = useState<Section>('core')
   const [subTab,   setSubTab]   = useState('profile')
   const [visited,  setVisited]  = useState(new Set<Section>(['core']))
+  const [cdlg, setCdlg] = useState<{ msg: string; act: () => void } | null>(null)
 
   // ── Core query ─────────────────────────────────────────────────────────────
   const { data: fpData, isLoading } = useQuery<FullProfile>({
@@ -951,16 +953,14 @@ export function EmployeeProfile() {
     if (!id || !fromDate) return
     const today = new Date().toISOString().slice(0, 10)
     const from  = fromDate > today ? today : fromDate
-    if (!window.confirm(
-      `${label.charAt(0).toUpperCase() + label.slice(1)} updated, effective ${fmtDate(fromDate)}.\n\n` +
-      `Recompute this employee's attendance from ${fmtDate(from)} to today so the new ${label} drives attendance & payroll?`,
-    )) return
-    api.post('/attendance/recompute', { employee_id: id, from_date: from, to_date: today })
+    const recomputeMsg = `${label.charAt(0).toUpperCase() + label.slice(1)} updated, effective ${fmtDate(fromDate)}.\n\nRecompute this employee's attendance from ${fmtDate(from)} to today so the new ${label} drives attendance & payroll?`
+    setCdlg({ msg: recomputeMsg, act: () => api.post('/attendance/recompute', { employee_id: id, from_date: from, to_date: today })
       .then((r: unknown) => {
         toast.success('Attendance recomputed', { description: `${(r as { rows_upserted?: number })?.rows_upserted ?? 0} day(s) updated for the new ${label}.` })
         qc.invalidateQueries({ queryKey: ['employee-full', id] })
       })
       .catch((e: unknown) => toast.error('Recompute failed', { description: e instanceof Error ? e.message : undefined }))
+    })
   }
 
   const orgMutation = useMutation({
@@ -3178,8 +3178,7 @@ export function EmployeeProfile() {
                                   title="Delete compensation record"
                                   disabled={deleteCompMutation.isPending}
                                   onClick={() => {
-                                    if (window.confirm(`Delete the compensation record effective ${fmtDate(h.effective_from)} (CTC ${fmtMoney(h.ctc_annual)})?${h.is_active ? '\n\nThis is the ACTIVE record — the most recent remaining record will become active.' : ''}\n\nThis cannot be undone.`))
-                                      deleteCompMutation.mutate(h.id)
+                                    setCdlg({ msg: `Delete the compensation record effective ${fmtDate(h.effective_from)} (CTC ${fmtMoney(h.ctc_annual)})?${h.is_active ? '\n\nThis is the ACTIVE record — the most recent remaining record will become active.' : ''}\n\nThis cannot be undone.`, act: () => deleteCompMutation.mutate(h.id) })
                                   }}
                                 >
                                   <Trash2 className="h-3.5 w-3.5" />
@@ -5024,7 +5023,7 @@ export function EmployeeProfile() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
+      <ConfirmDialog open={!!cdlg} message={cdlg?.msg ?? ''} title="Confirm" confirmLabel="Delete" destructive onConfirm={() => { cdlg?.act(); setCdlg(null) }} onCancel={() => setCdlg(null)} />
     </div>
   )
 }

@@ -20,6 +20,7 @@ import { SectionCard }   from '@/components/layout/SectionCard'
 import { Button }        from '@/components/ui/button'
 import { Badge }         from '@/components/ui/badge'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { api }           from '@/lib/api/client'
 import { cn }            from '@/lib/utils'
 import { EmployeeSelector } from '@/components/filters/EmployeeSelector'
@@ -441,6 +442,7 @@ function IDPSection({
   const qc = useQueryClient()
   const [addOpen, setAddOpen] = useState(false)
   const [idpForm, setIdpForm] = useState(emptyIDPForm)
+  const [cdlg, setCdlg] = useState<{ msg: string; act: () => void } | null>(null)
 
   const { data: actions = [], isLoading } = useQuery<IDPAction[]>({
     queryKey: ['succession-idp', planId, candidate.id],
@@ -602,7 +604,7 @@ function IDPSection({
                 )}
                 <button
                   onClick={() => {
-                    if (window.confirm('Delete this IDP action?')) deleteAction.mutate(a.id)
+                    setCdlg({ msg: 'Delete this IDP action?', act: () => deleteAction.mutate(a.id) })
                   }}
                   title="Delete"
                   className="p-0.5 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors"
@@ -614,6 +616,7 @@ function IDPSection({
           ))}
         </div>
       )}
+      <ConfirmDialog open={!!cdlg} message={cdlg?.msg ?? ''} title="Confirm" confirmLabel="Delete" destructive onConfirm={() => { cdlg?.act(); setCdlg(null) }} onCancel={() => setCdlg(null)} />
     </div>
   )
 }
@@ -761,6 +764,7 @@ export function AdminSuccession() {
   const [scorecardCand, setScorecardCand]   = useState<Candidate | null>(null)
   const [scorecardPlanId, setScorecardPlanId] = useState<string | null>(null)
   const [scorecardForm, setScorecardForm]   = useState(emptyScorecardForm)
+  const [cdlg2, setCdlg2] = useState<{ msg: string; act: () => void } | null>(null)
 
   // ── Queries ────────────────────────────────────────────────────────────────
 
@@ -1127,9 +1131,7 @@ export function AdminSuccession() {
                               <button
                                 onClick={e => {
                                   e.stopPropagation()
-                                  if (window.confirm(`Archive "${plan.position_title}"? This cannot be undone.`)) {
-                                    archivePlan.mutate(plan.id)
-                                  }
+                                  setCdlg2({ msg: `Archive "${plan.position_title}"? This cannot be undone.`, act: () => archivePlan.mutate(plan.id) })
                                 }}
                                 className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-destructive transition-colors"
                                 title="Archive plan"
@@ -1472,9 +1474,7 @@ export function AdminSuccession() {
                   className="text-destructive border-destructive/30 hover:bg-destructive/10"
                   disabled={archivePlan.isPending}
                   onClick={() => {
-                    if (window.confirm(`Archive "${planDetail.position_title}"?`)) {
-                      archivePlan.mutate(planDetail.id)
-                    }
+                    setCdlg2({ msg: `Archive "${planDetail.position_title}"?`, act: () => archivePlan.mutate(planDetail.id) })
                   }}
                 >
                   Archive Plan
@@ -1556,9 +1556,7 @@ export function AdminSuccession() {
                               </button>
                               <button
                                 onClick={() => {
-                                  if (window.confirm('Remove this candidate from the succession pool?')) {
-                                    removeCandidate.mutate({ planId: planDetail.id, cid: c.id })
-                                  }
+                                  setCdlg2({ msg: 'Remove this candidate from the succession pool?', act: () => removeCandidate.mutate({ planId: planDetail.id, cid: c.id }) })
                                 }}
                                 className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-destructive transition-colors"
                                 title="Remove candidate"
@@ -1707,6 +1705,7 @@ export function AdminSuccession() {
           </div>
         </DialogContent>
       </Dialog>
+      <ConfirmDialog open={!!cdlg2} message={cdlg2?.msg ?? ''} title="Confirm" confirmLabel="Confirm" destructive onConfirm={() => { cdlg2?.act(); setCdlg2(null) }} onCancel={() => setCdlg2(null)} />
     </PageContainer>
   )
 }

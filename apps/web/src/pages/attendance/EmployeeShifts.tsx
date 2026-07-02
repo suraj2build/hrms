@@ -45,6 +45,7 @@ import { Badge }                                         from '@/components/ui/b
 import { api }                                           from '@/lib/api/client'
 import { useAuthStore }                                  from '@/stores/authStore'
 import { cn }                                            from '@/lib/utils'
+import { ConfirmDialog }                                 from '@/components/ui/ConfirmDialog'
 import { PeriodLockBanner }                              from '@/components/layout/PeriodLockBanner'
 import { usePeriodLock }                                 from '@/hooks/usePeriodLock'
 import {
@@ -124,6 +125,7 @@ export function EmployeeShifts() {
   const [errors,         setErrors]         = useState<Partial<Record<keyof AssignForm, string>>>({})
   const [success,        setSuccess]        = useState(false)
   const [historyEmpId,   setHistoryEmpId]   = useState<string | null>(null)
+  const [cdlg, setCdlg] = useState<{ msg: string; act: () => void } | null>(null)
 
   // ── Queries ──────────────────────────────────────────────────────────────────
 
@@ -318,10 +320,10 @@ export function EmployeeShifts() {
             disabled={clearMutation.isPending}
             onClick={e => {
               e.stopPropagation()
-              if (window.confirm(`Remove shift override from ${row.name}?`)) {
+              setCdlg({ msg: `Remove shift override from ${row.name}?`, act: () => {
                 clearMutation.mutate(row.assignment_id!)
                 if (form.employee_id === row.employee_id) clearSelection()
-              }
+              } })
             }}
           >
             <X className="h-3.5 w-3.5" />
@@ -608,6 +610,7 @@ export function EmployeeShifts() {
         </div>
 
       </div>
+      <ConfirmDialog open={!!cdlg} message={cdlg?.msg ?? ''} title="Confirm" confirmLabel="Remove" destructive onConfirm={() => { cdlg?.act(); setCdlg(null) }} onCancel={() => setCdlg(null)} />
     </PageContainer>
   )
 }

@@ -19,6 +19,7 @@ import { SectionCard }   from '@/components/layout/SectionCard'
 import { Button }        from '@/components/ui/button'
 import { Badge }         from '@/components/ui/badge'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { api }           from '@/lib/api/client'
 import { cn }            from '@/lib/utils'
 import { EmployeeSelector } from '@/components/filters/EmployeeSelector'
@@ -83,6 +84,7 @@ export function AdminCalibration() {
   const [changeOldVal,     setChangeOldVal]     = useState('')
   const [changeNewVal,     setChangeNewVal]     = useState('')
   const [changeNotes,      setChangeNotes]      = useState('')
+  const [cdlg, setCdlg] = useState<{ msg: string; act: () => void } | null>(null)
 
   // ── Queries ────────────────────────────────────────────────────────────────
 
@@ -334,9 +336,7 @@ export function AdminCalibration() {
                       className="text-destructive border-destructive/30 hover:bg-destructive/10"
                       disabled={closeSession.isPending}
                       onClick={() => {
-                        if (window.confirm('Close this calibration session? This cannot be undone.')) {
-                          closeSession.mutate(detail.id)
-                        }
+                        setCdlg({ msg: 'Close this calibration session? This cannot be undone.', act: () => closeSession.mutate(detail.id) })
                       }}
                     >
                       {closeSession.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <X className="h-3.5 w-3.5 mr-1" />}
@@ -508,6 +508,7 @@ export function AdminCalibration() {
           </div>
         </DialogContent>
       </Dialog>
+      <ConfirmDialog open={!!cdlg} message={cdlg?.msg ?? ''} title="Confirm" confirmLabel="Close Session" destructive onConfirm={() => { cdlg?.act(); setCdlg(null) }} onCancel={() => setCdlg(null)} />
     </PageContainer>
   )
 }

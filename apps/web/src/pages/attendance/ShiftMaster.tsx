@@ -32,6 +32,7 @@ import { api }                                             from '@/lib/api/clien
 import { useAuthStore }                                    from '@/stores/authStore'
 import { usePeriodLock }                                   from '@/hooks/usePeriodLock'
 import { cn }                                              from '@/lib/utils'
+import { ConfirmDialog }                                   from '@/components/ui/ConfirmDialog'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -80,6 +81,7 @@ export function ShiftMaster() {
   const [showForm, setShowForm] = useState(false)
   const [errors,   setErrors]   = useState<Partial<Record<keyof FormState, string>>>({})
   const [search,   setSearch]   = useState('')
+  const [cdlg, setCdlg] = useState<{ msg: string; act: () => void } | null>(null)
 
   // ── Period lock awareness ─────────────────────────────────────────────────
   const currentMonth = new Date().toISOString().slice(0, 7)
@@ -175,9 +177,7 @@ export function ShiftMaster() {
   }
 
   function confirmDelete(s: Shift) {
-    if (window.confirm(`Delete shift "${s.name}"? This cannot be undone.`)) {
-      deleteMutation.mutate(s.id)
-    }
+    setCdlg({ msg: `Delete shift "${s.name}"? This cannot be undone.`, act: () => deleteMutation.mutate(s.id) })
   }
 
   // ── Render ────────────────────────────────────────────────────────────────────
@@ -489,6 +489,7 @@ export function ShiftMaster() {
           </div>
         )}
       </SectionCard>
+      <ConfirmDialog open={!!cdlg} message={cdlg?.msg ?? ''} title="Confirm" confirmLabel="Delete" destructive onConfirm={() => { cdlg?.act(); setCdlg(null) }} onCancel={() => setCdlg(null)} />
     </PageContainer>
   )
 }

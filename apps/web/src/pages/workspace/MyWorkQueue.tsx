@@ -23,6 +23,7 @@ import {
   CheckCircle2, XCircle, AlarmClock, ChevronsUp, ArrowUpRight,
   Search, Keyboard, RefreshCw, Loader2, AlertCircle,
 } from 'lucide-react'
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 
 // ── Filter chips ───────────────────────────────────────────────────────────────
 
@@ -367,6 +368,7 @@ export function MyWorkQueue() {
   const [drawerEmpId,  setDrawerEmpId]  = useState<string | null>(null)
   const [drawerItem,   setDrawerItem]   = useState<OperationalQueueItem | null>(null)
   const [drawerOpen,   setDrawerOpen]   = useState(false)
+  const [cdlg, setCdlg] = useState<{ msg: string; act: () => void } | null>(null)
 
   // ── KPI counts ─────────────────────────────────────────────────────────────
   const kpis = useMemo(() => {
@@ -581,14 +583,14 @@ export function MyWorkQueue() {
       <BulkActionBar
         selectedIds={selectedIds}
         onApproveAll={() => {
-          if (window.confirm(`Approve ${selectedIds.size} selected items?`)) bulkApprove(selectedIdsArray)
+          setCdlg({ msg: `Approve ${selectedIds.size} selected items?`, act: () => bulkApprove(selectedIdsArray) })
         }}
         onRejectAll={() => {
-          if (window.confirm(`Reject ${selectedIds.size} selected items?`)) bulkReject(selectedIdsArray)
+          setCdlg({ msg: `Reject ${selectedIds.size} selected items?`, act: () => bulkReject(selectedIdsArray) })
         }}
         onSnoozeAll={() => bulkSnooze(selectedIdsArray)}
         onEscalateAll={() => {
-          if (window.confirm(`Escalate ${selectedIds.size} selected items?`)) bulkEscalate(selectedIdsArray)
+          setCdlg({ msg: `Escalate ${selectedIds.size} selected items?`, act: () => bulkEscalate(selectedIdsArray) })
         }}
         onClear={clearSelected}
       />
@@ -607,6 +609,7 @@ export function MyWorkQueue() {
           setDrawerEmpId(null)
         }}
       />
+      <ConfirmDialog open={!!cdlg} message={cdlg?.msg ?? ''} title="Confirm" confirmLabel="Confirm" onConfirm={() => { cdlg?.act(); setCdlg(null) }} onCancel={() => setCdlg(null)} />
     </div>
   )
 }

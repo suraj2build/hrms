@@ -27,6 +27,7 @@ import { DateInput }     from '@/components/ui/date-input'
 import { api }           from '@/lib/api/client'
 import { useAuthStore }  from '@/stores/authStore'
 import { cn }            from '@/lib/utils'
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { StatutoryMonthPicker, useStatutoryMonth } from '@/components/compliance/StatutoryMonthPicker'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -163,6 +164,7 @@ export function PTAXManagement() {
   const [filterEnabled, setFilterEnabled]         = useState(false)
   const [showAddState, setShowAddState]           = useState(false)
   const [newStateCode, setNewStateCode]           = useState('')
+  const [cdlg, setCdlg] = useState<{ msg: string; act: () => void } | null>(null)
   const [newStateName, setNewStateName]           = useState('')
 
   const addStateMutation = useMutation({
@@ -758,9 +760,7 @@ export function PTAXManagement() {
                     title="Delete slab"
                     disabled={deleteSlabMutation.isPending}
                     onClick={() => {
-                      if (window.confirm(`Delete slab ${i + 1} for ${selectedStateCode}? This cannot be undone.`)) {
-                        deleteSlabMutation.mutate(slab.id)
-                      }
+                      setCdlg({ msg: `Delete slab ${i + 1} for ${selectedStateCode}? This cannot be undone.`, act: () => deleteSlabMutation.mutate(slab.id) })
                     }}
                   >
                     <Trash2 className="h-3.5 w-3.5" />
@@ -912,6 +912,7 @@ export function PTAXManagement() {
           </div>
         )}
       </SectionCard>
+      <ConfirmDialog open={!!cdlg} message={cdlg?.msg ?? ''} title="Confirm" confirmLabel="Delete" destructive onConfirm={() => { cdlg?.act(); setCdlg(null) }} onCancel={() => setCdlg(null)} />
     </PageContainer>
   )
 }
