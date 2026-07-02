@@ -25,6 +25,9 @@ import { registerPollScheduler }         from './lib/poll-scheduler.js'
 import { scan as runSlaScan }            from './lib/sla-scanner.js'
 import { runAllScans as runIntelligenceScan } from './lib/intelligence-scanner.js'
 import { runDueSources as runAttendanceSources } from './lib/attendance-api-scheduler.js'
+import { tick as runDigestTick }         from './lib/digest-scheduler.js'
+import { tick as runWoCreditTick }       from './lib/wo-credit-reconciler.js'
+import { runPollTick }                   from './lib/poll-scheduler.js'
 import { monthlyAccrualJob }             from './lib/leave-jobs.js'
 import { jobQueue }                      from './lib/job-queue.js'
 import { eventBus }                      from './lib/event-bus.js'
@@ -526,6 +529,15 @@ async function start() {
   })
   durableQueue.register('intelligence-scan', async (_payload, _job) => {
     await runIntelligenceScan(fastify.supabase)
+  })
+  durableQueue.register('send-digest', async (_payload, _job) => {
+    await runDigestTick(fastify.supabase)
+  })
+  durableQueue.register('reconcile-wo-credits', async (_payload, _job) => {
+    await runWoCreditTick(fastify.supabase)
+  })
+  durableQueue.register('send-pulse-poll', async (_payload, _job) => {
+    await runPollTick(fastify.supabase)
   })
   // event-automation is reactive (registerEventBusAutomation wires bus listeners);
   // no standalone scan function exists — complete without action on manual trigger.

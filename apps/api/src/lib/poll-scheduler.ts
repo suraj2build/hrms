@@ -11,32 +11,41 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { WhatsAppProvider }    from './whatsapp-provider.js'
+import { durableQueue }        from './durable-queue.js'
 
 const POLL_INTERVAL_MS = 60 * 60 * 1_000  // 1 hour
 
-export function registerPollScheduler(supabase: SupabaseClient): void {
-  const run = async () => {
-    const now = new Date()
-    // Monday = 1 (getDay()), 09:00–09:59
-    if (now.getDay() !== 1 || now.getHours() !== 9) return
+/** Run the Monday 09:00 poll tick — no-op outside that window. */
+export async function runPollTick(supabase: SupabaseClient): Promise<void> {
+  const now = new Date()
+  // Monday = 1 (getDay()), 09:00–09:59
+  if (now.getDay() !== 1 || now.getHours() !== 9) return
 
-    try {
-      const { data: tenants } = await supabase
-        .from('tenants')
-        .select('id')
-        .in('status', ['active', 'trial'])
+  try {
+    const { data: tenants } = await supabase
+      .from('tenants')
+      .select('id')
+      .in('status', ['active', 'trial'])
 
-      for (const tenant of (tenants ?? []) as { id: string }[]) {
-        await dispatchWeeklyPoll(supabase, tenant.id)
-      }
-    } catch (err) {
-      console.error('[poll-scheduler] error:', err)
+    for (const tenant of (tenants ?? []) as { id: string }[]) {
+      await dispatchWeeklyPoll(supabase, tenant.id)
     }
+  } catch (err) {
+    console.error('[poll-scheduler] error:', err)
+  }
+}
+
+export function registerPollScheduler(supabase: SupabaseClient): void {
+  const enqueue = () => {
+    const key = `send-pulse-poll:${new Date().toISOString().slice(0, 13)}`
+    durableQueue.enqueue('send-pulse-poll', {}, { idempotencyKey: key }).catch(
+      e => console.error('[poll-scheduler] enqueue error:', (e as Error).message),
+    )
   }
 
-  setInterval(run, POLL_INTERVAL_MS)
-  // also run once shortly after startup in case server started during the window
-  setTimeout(run, 5_000)
+  setInterval(enqueue, POLL_INTERVAL_MS)
+  // also enqueue once shortly after startup in case server started during the window
+  setTimeout(enqueue, 5_000)
 }
 
 async function dispatchWeeklyPoll(supabase: SupabaseClient, tenantId: string): Promise<void> {
