@@ -16,16 +16,20 @@ declare module 'fastify' {
 }
 
 interface ProfileCacheEntry {
-  tenantId:   string
-  role:       string
-  employeeId: string | null
-  isActive:   boolean
-  expiresAt:  number
+  tenantId:          string
+  role:              string
+  employeeId:        string | null
+  isActive:          boolean
+  isActiveCheckedAt: number  // timestamp of last DB-fresh is_active check (ISSUE-023)
+  expiresAt:         number
 }
 
 // Per-user profile cache (5-min TTL) — avoids DB hit on every request
-const profileCache = new Map<string, ProfileCacheEntry>()
-const CACHE_TTL    = 5 * 60 * 1000
+const profileCache    = new Map<string, ProfileCacheEntry>()
+const CACHE_TTL       = 5 * 60 * 1000
+// Re-verify is_active from DB this often even on cache hits — bounds the window
+// during which a deactivated account can still make authenticated requests.
+const IS_ACTIVE_TTL   = 60 * 1000
 
 function verifySupabaseJwt(token: string, secret: string): { sub: string } | null {
   try {
@@ -81,7 +85,20 @@ const authPlugin: FastifyPluginAsync = async (fastify) => {
       // Check cache first
       const cached = profileCache.get(userId)
       if (cached && cached.expiresAt > Date.now()) {
-        if (!cached.isActive) {
+        // Role/tenantId are stable for the full CACHE_TTL, but is_active can change
+        // at any moment (admin deactivates account). Re-check it from DB every
+        // IS_ACTIVE_TTL (60 s) so the deactivation → block window stays tight. (ISSUE-023)
+        let isActive = cached.isActive
+        if (cached.isActiveCheckedAt + IS_ACTIVE_TTL < Date.now()) {
+          const { data: freshProfile } = await fastify.supabase
+            .from('profiles')
+            .select('is_active')
+            .eq('id', userId)
+            .single()
+          isActive = (freshProfile as any)?.is_active ?? false
+          profileCache.set(userId, { ...cached, isActive, isActiveCheckedAt: Date.now() })
+        }
+        if (!isActive) {
           return reply.code(401).send({ error: 'Unauthorized', message: 'Account is deactivated' })
         }
         request.tenantId   = cached.tenantId
@@ -116,11 +133,12 @@ const authPlugin: FastifyPluginAsync = async (fastify) => {
       }
 
       profileCache.set(userId, {
-        tenantId:   profile.tenant_id,
-        role:       profile.role,
-        employeeId: (profile as any).employee_id ?? null,
-        isActive:   (profile as any).is_active ?? true,
-        expiresAt:  Date.now() + CACHE_TTL,
+        tenantId:          profile.tenant_id,
+        role:              profile.role,
+        employeeId:        (profile as any).employee_id ?? null,
+        isActive:          (profile as any).is_active ?? true,
+        isActiveCheckedAt: Date.now(),
+        expiresAt:         Date.now() + CACHE_TTL,
       })
 
       request.tenantId = profile.tenant_id
