@@ -106,6 +106,7 @@ export default async function employeeRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', request.tenantId)
       .neq('status', 'separated')
       .order('first_name', { ascending: true })
+      .limit(1000)
 
     if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
 
@@ -186,7 +187,9 @@ export default async function employeeRoutes(fastify: FastifyInstance) {
   fastify.get('/employees', hrAdminAuth, async (request, reply) => {
     const { status, page = '1', limit = '100', department_id, location_id, grade_id, designation_id } =
       request.query as Record<string, string>
-    const offset = (parseInt(page) - 1) * parseInt(limit)
+    const parsedLimit = Math.min(500, Math.max(1, parseInt(limit) || 100))
+    const parsedPage  = Math.max(1, parseInt(page) || 1)
+    const offset      = (parsedPage - 1) * parsedLimit
 
     // ── Dimension filters (used by Data Explorer drill-to-employee-list) ──────
     // department / location / designation / grade all live on job_history
@@ -216,7 +219,7 @@ export default async function employeeRoutes(fastify: FastifyInstance) {
       )
       .eq('tenant_id', request.tenantId)
       .order('first_name', { ascending: true })
-      .range(offset, offset + parseInt(limit) - 1)
+      .range(offset, offset + parsedLimit - 1)
 
     if (status && status !== 'all') {
       query = query.eq('status', status)
