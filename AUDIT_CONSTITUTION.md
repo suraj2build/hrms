@@ -310,7 +310,7 @@ unless a specific issue requires re-reading the file.
 | Job queue duality | `job-queue.ts` (in-memory, unreliable) + `durable-queue.ts` (Supabase-backed) both in use |
 | Migration count | 347 as of 2026-06-30; next available number is 348 |
 | `org_id` tables | 17 tables use `org_id` instead of `tenant_id` (ISSUE-065, open) |
-| Partition expiry | `attendance_daily` partitions only through July 2026 (ISSUE-079 — DATA LOSS RISK) |
+| Partition expiry | `security_events` + `trace_spans` extended through Dec 2027 via migration 348 (ISSUE-079 — CLOSED) |
 | Razorpay billing | Webhook in `routes/billing/index.ts`; `tenants.status` is the authoritative field |
 | WhatsApp HMAC | Fixed in ISSUE-006; uses `X-Hub-Signature-256`, format `sha256=<hex>` |
 | `emvora-*` keys | localStorage keys intentionally NOT renamed (CLAUDE.md); do not touch |
@@ -336,6 +336,11 @@ Update this table after each issue is committed and pushed.
 | ISSUE-019 | security_alerts / verification_records no tenant scope | migration 346 | 2026-06-30 |
 | ISSUE-020 | 59 write policies missing tenant_id | migration 347 | 2026-06-30 |
 | ISSUE-021 | req.employeeId null on cache hits | ProfileCacheEntry + employeeId field | 2026-07-01 |
+| ISSUE-022 | JWT aud claim skipped when absent | unconditional aud !== 'authenticated' in auth.ts | 2026-07-02 |
+| ISSUE-079 | Partition ranges expire Jul 2026 | migration 348 — monthly partitions through Dec 2027 | 2026-07-02 |
+| ISSUE-011 | Durable queue jobs dead-letter | register 6 handlers before durableQueue.start() in index.ts | 2026-07-02 |
+| ISSUE-013 | Unbounded queries (OOM risk) | .limit() on payroll export, variance, muster, anomaly queries | 2026-07-02 |
+| ISSUE-010 | N+1 queries in attendance/leave | batch org ctx in recomputeRange; runConcurrent bulk-assign; freeze-guard .in() | 2026-07-02 |
 
 ---
 
@@ -353,5 +358,5 @@ Update this table after each issue is committed and pushed.
 
 ---
 
-*Last updated: 2026-07-01 after ISSUE-022 closure and AF-001 filing.*
+*Last updated: 2026-07-02 after ISSUE-022, ISSUE-079, ISSUE-011, ISSUE-013, ISSUE-010 closures.*
 *Next open issue: ISSUE-023 (deactivated accounts valid until JWT expiry — scoped to auth plugin is_active check only; see AF-001 for lifecycle sync gap).*
