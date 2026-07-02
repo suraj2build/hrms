@@ -18,6 +18,7 @@
 
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
+import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 
 // ── Query / body schemas ──────────────────────────────────────────────────────
 
@@ -60,7 +61,7 @@ export default async function eventGovernanceRoutes(fastify: FastifyInstance) {
   // Paginated, filterable view of the event_log table with actor names resolved
   // from the profiles table.
   fastify.get('/system/event-governance/log', auth, async (req: any, reply) => {
-    if (!['super_admin', 'hr_admin'].includes(req.userRole)) {
+    if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
       return reply.code(403).send({ error: 'FORBIDDEN', message: 'Admin access required' })
     }
 
@@ -141,7 +142,7 @@ export default async function eventGovernanceRoutes(fastify: FastifyInstance) {
   // ── GET /system/event-governance/log/:eventId ──────────────────────────────
   // Fetch the full detail of a single event_log row.
   fastify.get('/system/event-governance/log/:eventId', auth, async (req: any, reply) => {
-    if (!['super_admin', 'hr_admin'].includes(req.userRole)) {
+    if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
       return reply.code(403).send({ error: 'FORBIDDEN', message: 'Admin access required' })
     }
 
@@ -196,7 +197,7 @@ export default async function eventGovernanceRoutes(fastify: FastifyInstance) {
   // Fetch the full ordered chain of events sharing a correlation_id. Useful for
   // tracing distributed workflows end-to-end.
   fastify.get('/system/event-governance/timeline', auth, async (req: any, reply) => {
-    if (!['super_admin', 'hr_admin'].includes(req.userRole)) {
+    if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
       return reply.code(403).send({ error: 'FORBIDDEN', message: 'Admin access required' })
     }
 
@@ -313,7 +314,7 @@ export default async function eventGovernanceRoutes(fastify: FastifyInstance) {
   // View the current state of the event replay queue. Joins to event_log for
   // event context and profiles for the requesting actor's name.
   fastify.get('/system/event-governance/replay-queue', auth, async (req: any, reply) => {
-    if (!['super_admin', 'hr_admin'].includes(req.userRole)) {
+    if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
       return reply.code(403).send({ error: 'FORBIDDEN', message: 'Admin access required' })
     }
 
@@ -382,7 +383,7 @@ export default async function eventGovernanceRoutes(fastify: FastifyInstance) {
   // Cancel a pending replay request. Only pending replays may be cancelled;
   // replays already in-flight or completed are rejected.
   fastify.put('/system/event-governance/replay-queue/:id/cancel', auth, async (req: any, reply) => {
-    if (!['super_admin', 'hr_admin'].includes(req.userRole)) {
+    if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
       return reply.code(403).send({ error: 'FORBIDDEN', message: 'Admin access required' })
     }
 
@@ -433,7 +434,7 @@ export default async function eventGovernanceRoutes(fastify: FastifyInstance) {
   // ── GET /system/event-governance/retention-rules ──────────────────────────
   // List all active event retention rules. Available to all authenticated admins.
   fastify.get('/system/event-governance/retention-rules', auth, async (req: any, reply) => {
-    if (!['super_admin', 'hr_admin'].includes(req.userRole)) {
+    if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
       return reply.code(403).send({ error: 'FORBIDDEN', message: 'Admin access required' })
     }
 
@@ -550,7 +551,7 @@ export default async function eventGovernanceRoutes(fastify: FastifyInstance) {
   // All aggregations are tenant-scoped. Relies on Supabase RPC or falling back
   // to in-process aggregation when raw SQL RPCs are unavailable.
   fastify.get('/system/event-governance/stats', auth, async (req: any, reply) => {
-    if (!['super_admin', 'hr_admin'].includes(req.userRole)) {
+    if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
       return reply.code(403).send({ error: 'FORBIDDEN', message: 'Admin access required' })
     }
 

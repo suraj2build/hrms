@@ -25,6 +25,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z }                    from 'zod'
 import { runAttendanceReconciliation } from '../../lib/attendance-reconciliation.js'
+import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 
 const dateRe = /^\d{4}-\d{2}-\d{2}$/
 
@@ -33,7 +34,7 @@ export default async function attendanceReconciliationRoutes(fastify: FastifyIns
 
   // Only hr_admin / super_admin can trigger or view reconciliation
   function assertAdmin(req: any, reply: any): boolean {
-    if (!['super_admin', 'hr_admin'].includes(req.userRole)) {
+    if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
       reply.code(403).send({ error: 'FORBIDDEN', message: 'hr_admin or super_admin required' })
       return false
     }

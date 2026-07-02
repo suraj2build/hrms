@@ -16,6 +16,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z }                    from 'zod'
 import { ssrfCheck }            from '../../lib/ssrf-guard.js'
+import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 
 // ── Validation schemas ────────────────────────────────────────────────────────
 
@@ -43,7 +44,7 @@ const auditQuerySchema = z.object({
 // ── Helper ────────────────────────────────────────────────────────────────────
 
 function isAdmin(role: string): boolean {
-  return ['super_admin', 'hr_admin'].includes(role)
+  return (HR_ADMIN_ROLES as readonly string[]).includes(role)
 }
 
 // ── Plugin ────────────────────────────────────────────────────────────────────

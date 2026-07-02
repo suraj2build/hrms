@@ -17,6 +17,7 @@ import {
   type CompensationPolicy,
   type ComponentInput,
 } from '../../lib/compensation-engine.js'
+import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 
 // ── Zod schemas ───────────────────────────────────────────────────────────────
 
@@ -65,7 +66,7 @@ async function assertCompensationAccess(
   req:        any,
   employeeId: string,
 ): Promise<{ code: number; body: object } | null> {
-  if (['super_admin', 'hr_admin'].includes(req.userRole)) return null
+  if ((HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) return null
 
   const { data: profile } = await fastify.supabase
     .from('profiles')
@@ -272,7 +273,7 @@ export default async function compensationRoutes(fastify: FastifyInstance) {
   })
 
   fastify.put('/compensation-policy', auth, async (req: any, reply) => {
-    if (!['super_admin', 'hr_admin'].includes(req.userRole))
+    if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole))
       return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
 
     const parsed = policySchema.safeParse(req.body)
@@ -408,7 +409,7 @@ export default async function compensationRoutes(fastify: FastifyInstance) {
 
   // ── POST /employees/:id/compensation → new revision ──────────────────────────
   fastify.post('/employees/:id/compensation', auth, async (req: any, reply) => {
-    if (!['super_admin', 'hr_admin'].includes(req.userRole))
+    if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole))
       return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
 
     if (!await verifyEmployee(fastify, req.params.id, req.tenantId))
@@ -607,7 +608,7 @@ export default async function compensationRoutes(fastify: FastifyInstance) {
   // employee is never left without active compensation (which would cause phantom
   // LOP on the next payroll run).
   fastify.delete('/employees/:id/compensation/:compId', auth, async (req: any, reply) => {
-    if (!['super_admin', 'hr_admin'].includes(req.userRole)) {
+    if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
       return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
     }
     const { id, compId } = req.params as { id: string; compId: string }

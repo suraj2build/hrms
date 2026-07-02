@@ -14,6 +14,7 @@
  */
 
 import type { FastifyInstance } from 'fastify'
+import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 
 function r2(n: number): number { return Math.round(n * 100) / 100 }
 function r1(n: number): number { return Math.round(n * 10) / 10 }
@@ -30,7 +31,7 @@ export default async function attendanceDataset(fastify: FastifyInstance) {
     preHandler: [
       fastify.authenticate,
       (req: any, reply: any, done: () => void) => {
-        if (!['super_admin', 'hr_admin'].includes(req.userRole)) {
+        if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
           reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
           return
         }

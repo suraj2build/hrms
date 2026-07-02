@@ -26,12 +26,13 @@ import { z }                    from 'zod'
 import { scanAttendanceFreshness, getFreshnessHistory } from '../../lib/attendance-freshness.js'
 import { durableQueue }         from '../../lib/durable-queue.js'
 import { platformHealth }       from '../../lib/startup-health.js'
+import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 
 export default async function operationalHealthRoutes(fastify: FastifyInstance) {
   const auth = { preHandler: [fastify.authenticate] }
 
   function assertAdmin(req: any, reply: any): boolean {
-    if (!['super_admin', 'hr_admin'].includes(req.userRole)) {
+    if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
       reply.code(403).send({ error: 'FORBIDDEN', message: 'hr_admin or super_admin required' })
       return false
     }

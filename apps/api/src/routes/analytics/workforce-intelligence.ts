@@ -15,7 +15,6 @@
 import type { FastifyInstance } from 'fastify'
 import { z }                   from 'zod'
 import { HR_ADMIN_ROLES }      from '../../lib/rbac.js'
-
 // ── Date helpers ──────────────────────────────────────────────────────────────
 
 const dateRe = /^\d{4}-\d{2}-\d{2}$/

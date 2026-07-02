@@ -28,8 +28,6 @@
 import type { FastifyInstance } from 'fastify'
 import { z }                    from 'zod'
 import { HR_ADMIN_ROLES }       from '../../lib/rbac.js'
-
-
 const SUPER_ADMIN = ['super_admin']             as const
 
 export default async function governanceEvolutionRoutes(fastify: FastifyInstance) {

@@ -20,8 +20,9 @@
 
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
+import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 
-const ADMIN_ROLES = ['super_admin', 'hr_admin']
+
 
 const createAccountSchema = z.object({
   email:              z.string().email(),
@@ -43,7 +44,7 @@ export default async function userAccountRoutes(fastify: FastifyInstance) {
     const { id }       = req.params as { id: string }
     const userRole     = (req as any).userRole as string
 
-    if (!ADMIN_ROLES.includes(userRole)) {
+    if (!(HR_ADMIN_ROLES as readonly string[]).includes(userRole)) {
       return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR Admin access required' })
     }
 
@@ -121,7 +122,7 @@ export default async function userAccountRoutes(fastify: FastifyInstance) {
     const userRole = (req as any).userRole as string
     const tenantId = (req as any).tenantId as string
 
-    if (!ADMIN_ROLES.includes(userRole)) {
+    if (!(HR_ADMIN_ROLES as readonly string[]).includes(userRole)) {
       return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR Admin access required' })
     }
 
@@ -299,7 +300,7 @@ export default async function userAccountRoutes(fastify: FastifyInstance) {
     const userRole = (req as any).userRole as string
     const tenantId = (req as any).tenantId as string
 
-    if (!ADMIN_ROLES.includes(userRole)) {
+    if (!(HR_ADMIN_ROLES as readonly string[]).includes(userRole)) {
       return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR Admin access required' })
     }
 
@@ -365,7 +366,7 @@ export default async function userAccountRoutes(fastify: FastifyInstance) {
     const userRole = (req as any).userRole as string
     const tenantId = (req as any).tenantId as string
 
-    if (!ADMIN_ROLES.includes(userRole)) {
+    if (!(HR_ADMIN_ROLES as readonly string[]).includes(userRole)) {
       return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR Admin access required' })
     }
 

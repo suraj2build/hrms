@@ -35,13 +35,14 @@ import {
   validateRosterCalendar,
   generateTestDataset,
 } from '../../lib/roster-calendar-engine.js'
+import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 
 // ── Auth helper ───────────────────────────────────────────────────────────────
 
 function hrAdminAuth(req: any, reply: any, done: () => void) {
   if (!req.userId) return reply.code(401).send({ error: 'Unauthorized' })
   const role = req.userRole ?? ''
-  if (!['super_admin', 'hr_admin'].includes(role)) {
+  if (!(HR_ADMIN_ROLES as readonly string[]).includes(role)) {
     return reply.code(403).send({ error: 'HR admin access required' })
   }
   done()

@@ -15,6 +15,7 @@ import { z } from 'zod'
 import { computeLWF, parseDeductionMonths } from '../../../lib/statutory/lwf-engine.js'
 import type { LWFConfig } from '../../../lib/statutory/lwf-engine.js'
 import { logAction } from '../../../lib/audit-service.js'
+import { HR_ADMIN_ROLES } from '../../../lib/rbac.js'
 
 // States that levy LWF in India
 const LWF_STATES: Record<string, string> = {
@@ -38,7 +39,7 @@ export default async function lwfRoutes(fastify: FastifyInstance) {
   const auth = { preHandler: [fastify.authenticate] }
 
   function requireHrAdmin(req: any, reply: any, done: () => void) {
-    if (!['super_admin', 'hr_admin'].includes(req.userRole)) {
+    if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
       reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
       return
     }

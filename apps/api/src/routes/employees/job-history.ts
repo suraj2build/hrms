@@ -55,7 +55,7 @@ export default async function jobHistoryRoutes(fastify: FastifyInstance) {
     if (!await verifyEmployee(fastify, req.params.id, req.tenantId))
       return reply.code(404).send({ error: 'NOT_FOUND', message: 'Employee not found' })
 
-    const isHrAdmin = ['super_admin', 'hr_admin'].includes(req.userRole)
+    const isHrAdmin = (HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)
     if (!isHrAdmin) {
       const callerEmpId = await resolveCallerEmployeeId(fastify, req.userId, req.tenantId)
       if (!callerEmpId || callerEmpId !== req.params.id) {
@@ -90,7 +90,7 @@ export default async function jobHistoryRoutes(fastify: FastifyInstance) {
     if (!await verifyEmployee(fastify, req.params.id, req.tenantId))
       return reply.code(404).send({ error: 'NOT_FOUND', message: 'Employee not found' })
 
-    const isHrAdmin = ['super_admin', 'hr_admin'].includes(req.userRole)
+    const isHrAdmin = (HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)
     if (!isHrAdmin) {
       const callerEmpId = await resolveCallerEmployeeId(fastify, req.userId, req.tenantId)
       if (!callerEmpId || callerEmpId !== req.params.id) {

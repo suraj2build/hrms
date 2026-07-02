@@ -19,10 +19,11 @@
 import type { FastifyInstance } from 'fastify'
 import { z }                    from 'zod'
 import { computeLifecycleRisks, summariseLifecycle } from '../../lib/lifecycle-expiry.js'
+import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-const EXEC_ROLES = ['super_admin', 'hr_admin'] as const
+
 const monthRe    = /^\d{4}-\d{2}$/
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -138,7 +139,7 @@ export default async function executiveRoutes(fastify: FastifyInstance) {
   const auth = { preHandler: [fastify.authenticate] }
 
   function requireExec(req: any, reply: any): boolean {
-    if (!EXEC_ROLES.includes(req.userRole)) {
+    if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
       reply.code(403).send({ error: 'FORBIDDEN', message: 'Executive access required' })
       return false
     }

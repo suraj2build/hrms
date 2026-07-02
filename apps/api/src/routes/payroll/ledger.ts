@@ -10,6 +10,7 @@
 
 import type { FastifyInstance } from 'fastify'
 import { z }                    from 'zod'
+import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 
 const monthRe = /^\d{4}-\d{2}$/
 
@@ -36,7 +37,7 @@ const createEntrySchema = z.object({
 export default async function payrollLedgerRoute(fastify: FastifyInstance) {
   const auth = { preHandler: [fastify.authenticate] }
 
-  const isHr = (req: any) => ['super_admin', 'hr_admin'].includes(req.userRole)
+  const isHr = (req: any) => (HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)
   const num  = (v: any) => { const n = Number(v); return Number.isFinite(n) ? n : null }
 
   // ── GET /payroll/ledger — cross-employee list (HR admin), optional filters ──
@@ -106,7 +107,7 @@ export default async function payrollLedgerRoute(fastify: FastifyInstance) {
   //    Employees (ESS): only their own entries
   fastify.get('/payroll/ledger/:employeeId', auth, async (req: any, reply) => {
     const { employeeId } = req.params as { employeeId: string }
-    const isAdmin = ['super_admin', 'hr_admin'].includes(req.userRole)
+    const isAdmin = (HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)
 
     // Non-admins can only view their own ledger
     if (!isAdmin) {
@@ -169,7 +170,7 @@ export default async function payrollLedgerRoute(fastify: FastifyInstance) {
 
   // ── POST /payroll/ledger — manual ledger entry (HR admin only) ────────────
   fastify.post('/payroll/ledger', auth, async (req: any, reply) => {
-    if (!['super_admin', 'hr_admin'].includes(req.userRole)) {
+    if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
       return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
     }
 

@@ -35,7 +35,6 @@ import { durableQueue }         from '../../lib/durable-queue.js'
 import { eventBus }             from '../../lib/event-bus.js'
 import { platformHealth }       from '../../lib/startup-health.js'
 import { HR_ADMIN_ROLES }       from '../../lib/rbac.js'
-
 // ── Automation Job Registry ──────────────────────────────────────────────────
 
 interface AutomationJob {

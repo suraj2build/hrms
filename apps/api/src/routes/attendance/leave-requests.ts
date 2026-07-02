@@ -29,6 +29,7 @@ import {
   getPendingApprovalsForManager,
 }                               from '../../lib/approval-service.js'
 import { getDirectReportIds }   from '../../lib/manager-scope.js'
+import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 
 const dateRe = /^\d{4}-\d{2}-\d{2}$/
 
@@ -172,7 +173,7 @@ export default async function leaveRequestsRoutes(fastify: FastifyInstance) {
     //   super_admin / hr_admin  → may filter by any employee_id (or see all)
     //   manager                 → may filter by own direct-report employee_ids only
     //   employee                → always scoped to own employee_id, param ignored
-    const isHrAdmin = ['super_admin', 'hr_admin'].includes(req.userRole)
+    const isHrAdmin = (HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)
     const isManager = req.userRole === 'manager'
     let employeeId  = parsed.data.employee_id
 
@@ -457,7 +458,7 @@ export default async function leaveRequestsRoutes(fastify: FastifyInstance) {
     const { page, limit } = parsedPagination.data
     const offset = (page - 1) * limit
 
-    const isHrAdmin = ['super_admin', 'hr_admin'].includes(req.userRole)
+    const isHrAdmin = (HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)
 
     // Resolve caller's employee_id (needed for manager path + profile lookup)
     const { data: profile } = await fastify.supabase
@@ -545,7 +546,7 @@ export default async function leaveRequestsRoutes(fastify: FastifyInstance) {
   // degrades to 0 on error so the badge never 500s.
   fastify.get('/approvals/pending-count', auth, async (req: any, reply) => {
     const tenantId: string = req.tenantId
-    const isHrAdmin = ['super_admin', 'hr_admin'].includes(req.userRole)
+    const isHrAdmin = (HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)
 
     // Manager scope: resolve direct-report employee ids (empty => count nothing).
     let reportIds: string[] | null = null

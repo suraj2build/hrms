@@ -44,7 +44,7 @@ export default async function personalInfoRoutes(fastify: FastifyInstance) {
     if (!await verifyEmployee(fastify, req.params.id, req.tenantId))
       return reply.code(404).send({ error: 'NOT_FOUND', message: 'Employee not found' })
 
-    const isHrAdmin = ['super_admin', 'hr_admin'].includes(req.userRole)
+    const isHrAdmin = (HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)
     if (!isHrAdmin) {
       const { data: callerProfile } = await fastify.supabase
         .from('profiles')

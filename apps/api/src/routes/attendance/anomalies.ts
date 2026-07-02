@@ -14,6 +14,7 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { eventBus } from '../../lib/event-bus.js'
 import { recomputeRange } from '../../lib/attendance-engine.js'
+import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 
 const dateRe = /^\d{4}-\d{2}-\d{2}$/
 
@@ -99,7 +100,7 @@ export default async function attendanceAnomaliesRoute(fastify: FastifyInstance)
   //    Query param: month=YYYY-MM (defaults to current month)
   //    Also returns 3-month trend and org-wide totals.
   fastify.get('/attendance/anomalies/summary', auth, async (req: any, reply) => {
-    if (!['super_admin', 'hr_admin'].includes(req.userRole)) {
+    if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
       return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
     }
 
@@ -275,7 +276,7 @@ export default async function attendanceAnomaliesRoute(fastify: FastifyInstance)
   // ── GET /attendance/anomalies ──────────────────────────────────────────────────
   //    HR view — all anomalies for the tenant with rich filtering.
   fastify.get('/attendance/anomalies', auth, async (req: any, reply) => {
-    if (!['super_admin', 'hr_admin'].includes(req.userRole)) {
+    if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
       return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
     }
 
@@ -354,7 +355,7 @@ export default async function attendanceAnomaliesRoute(fastify: FastifyInstance)
   // ── POST /attendance/anomalies/:id/resolve ─────────────────────────────────────
   //    HR admin marks one anomaly as resolved.
   fastify.post('/attendance/anomalies/:id/resolve', auth, async (req: any, reply) => {
-    if (!['super_admin', 'hr_admin'].includes(req.userRole)) {
+    if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
       return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
     }
 
@@ -462,7 +463,7 @@ export default async function attendanceAnomaliesRoute(fastify: FastifyInstance)
   //    HR admin resolves multiple anomalies in one call.
   //    Body: { ids: string[] }
   fastify.post('/attendance/anomalies/bulk-resolve', auth, async (req: any, reply) => {
-    if (!['super_admin', 'hr_admin'].includes(req.userRole)) {
+    if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
       return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
     }
 

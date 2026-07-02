@@ -17,6 +17,7 @@
 
 import type { FastifyInstance } from 'fastify'
 import { z }                    from 'zod'
+import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 
 const OUT_OF_OFFICE_STATUSES = new Set(['leave', 'holiday', 'weekly_off', 'comp_off', 'rest_day', 'off'])
 
@@ -49,7 +50,7 @@ export default async function whoIsInRoute(fastify: FastifyInstance) {
     // ── 1. Resolve employee scope ─────────────────────────────────────────────
     // Admin → all active employees in tenant
     // Manager → direct reports only (employees.manager_id = caller's employee_id)
-    const isAdmin = ['super_admin', 'hr_admin'].includes(req.userRole)
+    const isAdmin = (HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)
 
     let empQuery = fastify.supabase
       .from('employees')

@@ -25,7 +25,6 @@
 import type { FastifyInstance } from 'fastify'
 import { z }                   from 'zod'
 import { HR_ADMIN_ROLES }      from '../../lib/rbac.js'
-
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 type MetricType = 'absent' | 'late' | 'ot' | 'pressure' | 'reliability' | 'leave'

@@ -11,6 +11,7 @@
  */
 
 import type { FastifyInstance } from 'fastify'
+import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 
 type GroupBy = 'exit_type' | 'department' | 'location'
 const VALID_GROUP_BY = new Set<string>(['exit_type', 'department', 'location'])
@@ -31,7 +32,7 @@ export default async function separationDataset(fastify: FastifyInstance) {
     preHandler: [
       fastify.authenticate,
       (req: any, reply: any, done: () => void) => {
-        if (!['super_admin', 'hr_admin'].includes(req.userRole)) {
+        if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
           reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
           return
         }

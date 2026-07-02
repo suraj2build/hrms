@@ -15,6 +15,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { generateUniqueCode } from '../../lib/generate-code.js'
+import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 
 const schema = z.object({
   name:      z.string().min(1, 'Name is required'),
@@ -34,7 +35,7 @@ export default async function workLocationsRoutes(fastify: FastifyInstance) {
     preHandler: [
       fastify.authenticate,
       async (req: any, reply: any) => {
-        if (!['super_admin', 'hr_admin'].includes(req.userRole)) {
+        if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
           return reply.code(403).send({
             error:   'FORBIDDEN',
             message: 'HR admin access required',

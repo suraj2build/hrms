@@ -12,6 +12,7 @@
  */
 
 import type { FastifyInstance } from 'fastify'
+import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 
 type GroupBy = 'status' | 'category'
 const VALID_GROUP_BY = new Set<string>(['status', 'category'])
@@ -27,7 +28,7 @@ export default async function assetsDataset(fastify: FastifyInstance) {
     preHandler: [
       fastify.authenticate,
       (req: any, reply: any, done: () => void) => {
-        if (!['super_admin', 'hr_admin'].includes(req.userRole)) {
+        if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
           reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
           return
         }

@@ -7,13 +7,14 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { logAction } from '../../lib/audit-service.js'
 import { gateApprove, gateReject } from '../../lib/approval-orchestrator.js'
+import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 
 const CATEGORY_TYPES = ['medical', 'travel', 'food', 'telephone', 'internet', 'books', 'uniform', 'other'] as const
 
 export default async function reimbursementsRoutes(fastify: FastifyInstance) {
   const auth = { preHandler: [fastify.authenticate] }
 
-  const isHr = (role: string) => ['super_admin', 'hr_admin'].includes(role)
+  const isHr = (role: string) => (HR_ADMIN_ROLES as readonly string[]).includes(role)
 
   function requireHrAdmin(req: any, reply: any, done: () => void) {
     if (!isHr(req.userRole)) {
@@ -397,7 +398,7 @@ export default async function reimbursementsRoutes(fastify: FastifyInstance) {
       return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
     }
 
-    const isHrAdmin = ['super_admin', 'hr_admin'].includes(req.userRole)
+    const isHrAdmin = (HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)
 
     // Employees have no business calling the admin claims list
     if (!isHrAdmin && req.userRole !== 'manager') {
@@ -775,7 +776,7 @@ export default async function reimbursementsRoutes(fastify: FastifyInstance) {
       .maybeSingle()
     if (!claim) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Claim not found' })
 
-    if (!['super_admin', 'hr_admin'].includes(req.userRole)) {
+    if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
       const { data: profile } = await fastify.supabase
         .from('profiles')
         .select('employee_id')

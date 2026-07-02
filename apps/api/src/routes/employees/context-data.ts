@@ -15,7 +15,6 @@
 import type { FastifyInstance } from 'fastify'
 import { z }                    from 'zod'
 import { HR_ADMIN_ROLES }       from '../../lib/rbac.js'
-
 const ALLOWED_ROLES = [...HR_ADMIN_ROLES, 'manager']
 
 export default async function employeeContextDataRoutes(fastify: FastifyInstance) {

@@ -24,11 +24,12 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { notifyHrAdmins } from '../../lib/notify.js'
 import { logAction } from '../../lib/audit-service.js'
+import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 
 export default async function payrollAdjustmentsRoutes(fastify: FastifyInstance) {
   const auth      = { preHandler: [fastify.authenticate] }
   const adminAuth = { preHandler: [fastify.authenticate, (req: any, reply: any, done: () => void) => {
-    if (!['super_admin', 'hr_admin'].includes(req.userRole)) {
+    if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
       reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
       return
     }

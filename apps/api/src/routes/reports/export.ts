@@ -25,7 +25,6 @@ import type { FastifyInstance } from 'fastify'
 import { z }                    from 'zod'
 import * as XLSX                from 'xlsx'
 import { HR_ADMIN_ROLES }       from '../../lib/rbac.js'
-
 const monthRe = /^\d{4}-\d{2}$/
 const dateRe  = /^\d{4}-\d{2}-\d{2}$/
 

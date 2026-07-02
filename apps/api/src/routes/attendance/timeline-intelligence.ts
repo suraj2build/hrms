@@ -16,6 +16,7 @@
 
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
+import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -99,7 +100,7 @@ export default async function timelineIntelligenceRoute(fastify: FastifyInstance
       }
 
       const { employeeId, date } = paramsParsed.data
-      const isAdmin = ['super_admin', 'hr_admin'].includes(req.userRole)
+      const isAdmin = (HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)
 
       // Non-admins may only view their own intelligence data
       if (!isAdmin) {

@@ -5,6 +5,7 @@
 
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
+import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 
 const EVENT_TYPES = [
   'component_change',
@@ -41,7 +42,7 @@ export default async function payrollLedgerRoutes(fastify: FastifyInstance) {
   const auth = { preHandler: [fastify.authenticate] }
 
   function requireHrAdmin(req: any, reply: any, done: () => void) {
-    if (!['super_admin', 'hr_admin'].includes(req.userRole)) {
+    if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
       reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
       return
     }
@@ -50,7 +51,7 @@ export default async function payrollLedgerRoutes(fastify: FastifyInstance) {
 
   /** Admins may view any employee; everyone else only their own records. */
   async function canViewEmployee(req: any, employeeId: string): Promise<boolean> {
-    if (['super_admin', 'hr_admin'].includes(req.userRole)) return true
+    if ((HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) return true
     const { data: profile } = await fastify.supabase
       .from('profiles')
       .select('employee_id')

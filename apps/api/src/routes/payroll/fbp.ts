@@ -12,6 +12,7 @@ import { logAction } from '../../lib/audit-service.js'
 import {
   computeQuarterReconciliation, lockQuarterReconciliation,
 } from '../../lib/fbp-service.js'
+import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 
 const FY_RE = /^\d{4}-\d{2}$/   // e.g. 2026-27
 
@@ -19,7 +20,7 @@ export default async function fbpRoutes(fastify: FastifyInstance) {
   const auth = { preHandler: [fastify.authenticate] }
 
   function requireHrAdmin(req: any, reply: any, done: () => void) {
-    if (!['super_admin', 'hr_admin'].includes(req.userRole)) {
+    if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
       reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
       return
     }

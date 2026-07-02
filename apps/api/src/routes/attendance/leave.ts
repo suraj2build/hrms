@@ -706,7 +706,7 @@ export default async function leaveRoute(fastify: FastifyInstance) {
   // A cancelled leave is permanent — it cannot be re-approved.
   fastify.post('/attendance/leave/:id/cancel', auth, async (req: any, reply) => {
     const { id } = req.params as { id: string }
-    const isHrAdmin = ['super_admin', 'hr_admin'].includes(req.userRole)
+    const isHrAdmin = (HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)
 
     const { data: app, error: fetchError } = await fastify.supabase
       .from('leave_applications')
@@ -853,7 +853,7 @@ export default async function leaveRoute(fastify: FastifyInstance) {
   fastify.get('/attendance/leave/balance/:employeeId', auth, async (req: any, reply) => {
     const { employeeId } = req.params as { employeeId: string }
     const year = new Date().getFullYear()
-    const isHrAdmin = ['super_admin', 'hr_admin'].includes(req.userRole)
+    const isHrAdmin = (HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)
 
     // Non-admin callers may only view their own leave balance.
     // Resolve the caller's employee_id and enforce ownership before touching DB.
@@ -979,7 +979,7 @@ export default async function leaveRoute(fastify: FastifyInstance) {
   fastify.get('/attendance/leave/team-balances', auth, async (req: any, reply) => {
     const year             = new Date().getFullYear()
     const tenantId         = req.tenantId as string
-    const isHrAdmin        = ['super_admin', 'hr_admin'].includes(req.userRole)
+    const isHrAdmin        = (HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)
     const includeLiability = (req.query as any).include_liability === 'true'
 
     let teamEmployeeIds: string[] = []
@@ -1522,7 +1522,7 @@ export default async function leaveRoute(fastify: FastifyInstance) {
       offset?:        string
     }
 
-    const isAdmin  = ['super_admin', 'hr_admin'].includes(req.userRole)
+    const isAdmin  = (HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)
     const limit    = Math.min(parseInt(q.limit  ?? '50', 10), 200)
     const offset   = Math.max(parseInt(q.offset ?? '0',  10), 0)
 

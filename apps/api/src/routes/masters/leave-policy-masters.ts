@@ -27,7 +27,6 @@ import {
 } from '../../lib/policy-governance.js'
 import { resolveEffectivePolicyForEmployee } from '../../lib/leave-policy-service.js'
 import { HR_ADMIN_ROLES }                    from '../../lib/rbac.js'
-
 const masterSchema = z.object({
   name:        z.string().min(1).max(100),
   description: z.string().max(500).optional(),

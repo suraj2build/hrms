@@ -20,6 +20,7 @@
 
 import type { FastifyInstance } from 'fastify'
 import { z }                    from 'zod'
+import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 
 const monthRe = /^\d{4}-\d{2}$/
 
@@ -40,7 +41,7 @@ export default async function payrollInvestigateRoute(fastify: FastifyInstance) 
   const auth = { preHandler: [fastify.authenticate] }
 
   fastify.get('/payroll/investigate/:employeeId', auth, async (req: any, reply) => {
-    if (!['super_admin', 'hr_admin'].includes(req.userRole)) {
+    if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
       return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
     }
 

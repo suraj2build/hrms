@@ -12,6 +12,7 @@ import { z } from 'zod'
 import { computeTDS } from '../../../lib/statutory/tds-engine.js'
 import { fetchFbpTaxableForEmployee } from '../../../lib/fbp-service.js'
 import { logAction } from '../../../lib/audit-service.js'
+import { HR_ADMIN_ROLES } from '../../../lib/rbac.js'
 
 // DB enum values — must match migration 098_tds_foundation.sql CHECK constraint
 const DECLARATION_CATEGORIES = [
@@ -127,7 +128,7 @@ export default async function tdsRoutes(fastify: FastifyInstance) {
   const auth = { preHandler: [fastify.authenticate] }
 
   function requireHrAdmin(req: any, reply: any, done: () => void) {
-    if (!['super_admin', 'hr_admin'].includes(req.userRole)) {
+    if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
       reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
       return
     }
@@ -633,7 +634,7 @@ ${section('Part D — Loss from House Property (Home Loan Interest)', hlDecls,
   // GET /payroll/statutory/tds/declarations/:employeeId — by specific employee
   fastify.get('/declarations/:employeeId', auth, async (req: any, reply) => {
     const { employeeId } = req.params as { employeeId: string }
-    const isHrAdmin = ['super_admin', 'hr_admin'].includes(req.userRole)
+    const isHrAdmin = (HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)
 
     // Non-admin: verify they're requesting their own data
     if (!isHrAdmin) {
@@ -931,7 +932,7 @@ ${section('Part D — Loss from House Property (Home Loan Interest)', hlDecls,
 
     if (!decl) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Declaration not found' })
 
-    const isHrAdmin = ['super_admin', 'hr_admin'].includes(req.userRole)
+    const isHrAdmin = (HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)
     if (!isHrAdmin) {
       const callerEmpId = await resolveCallerEmployeeId(fastify, req)
       if (callerEmpId !== (decl as any).employee_id) return reply.code(403).send({ error: 'FORBIDDEN', message: 'You can only view proofs for your own declarations' })
@@ -962,7 +963,7 @@ ${section('Part D — Loss from House Property (Home Loan Interest)', hlDecls,
     const parsed = schema.safeParse(req.body)
     if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
 
-    const isHrAdmin = ['super_admin', 'hr_admin'].includes(req.userRole)
+    const isHrAdmin = (HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)
 
     const { data: decl } = await fastify.supabase
       .from('tax_declarations')
@@ -1187,7 +1188,7 @@ ${section('Part D — Loss from House Property (Home Loan Interest)', hlDecls,
   fastify.get('/projections/:employeeId', auth, async (req: any, reply) => {
     const { employeeId } = req.params as { employeeId: string }
 
-    const isHrAdmin = ['super_admin', 'hr_admin'].includes(req.userRole)
+    const isHrAdmin = (HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)
     if (!isHrAdmin) {
       const callerEmpId = await resolveCallerEmployeeId(fastify, req)
       if (callerEmpId !== employeeId) return reply.code(403).send({ error: 'FORBIDDEN', message: 'Access denied' })

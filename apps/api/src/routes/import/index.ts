@@ -6,6 +6,7 @@ import { z }                    from 'zod'
 import { generateCSV, MASTER_TEMPLATES } from '../../lib/import-engine/templates.js'
 import { validateImportRows }            from '../../lib/import-engine/validator.js'
 import { runImport }                     from '../../lib/import-engine/importer.js'
+import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 
 // ── Shared constants ──────────────────────────────────────────────────────────
 
@@ -47,7 +48,7 @@ export default async function importRoutes(fastify: FastifyInstance) {
 
   // ── Helper: HR admin gate ─────────────────────────────────────────────────
   function requireHrAdmin(req: any, reply: any): boolean {
-    if (!['super_admin', 'hr_admin'].includes(req.userRole)) {
+    if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
       reply.code(403).send({
         error:   'FORBIDDEN',
         message: 'Only hr_admin or super_admin can access import endpoints',

@@ -21,6 +21,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { CENTRAL_HOLIDAYS_BY_YEAR, SUPPORTED_HOLIDAY_YEARS } from '../../lib/standard-holidays.js'
+import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 
 const createSchema = z.object({
   date:        z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'date must be YYYY-MM-DD'),
@@ -72,7 +73,7 @@ export default async function holidaysRoutes(fastify: FastifyInstance) {
 
   // ── POST /masters/holidays ────────────────────────────────────────────────
   fastify.post('/', auth, async (req: any, reply) => {
-    if (!['super_admin', 'hr_admin'].includes(req.userRole)) {
+    if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
       return reply.code(403).send({ error: 'FORBIDDEN', message: 'hr_admin or super_admin required' })
     }
 
@@ -96,7 +97,7 @@ export default async function holidaysRoutes(fastify: FastifyInstance) {
   // (default 2026 & 2027). Idempotent — existing dates (UNIQUE tenant_id,date)
   // are preserved. Seeded as global (holiday_group_id NULL → applies to all).
   fastify.post('/seed-standard', auth, async (req: any, reply) => {
-    if (!['super_admin', 'hr_admin'].includes(req.userRole)) {
+    if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
       return reply.code(403).send({ error: 'FORBIDDEN', message: 'hr_admin or super_admin required' })
     }
 
@@ -137,7 +138,7 @@ export default async function holidaysRoutes(fastify: FastifyInstance) {
   // ── PATCH /masters/holidays/:id ───────────────────────────────────────────
   // Edit an existing holiday (date / name / optional flag / group / site).
   fastify.patch('/:id', auth, async (req: any, reply) => {
-    if (!['super_admin', 'hr_admin'].includes(req.userRole)) {
+    if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
       return reply.code(403).send({ error: 'FORBIDDEN', message: 'hr_admin or super_admin required' })
     }
 
@@ -203,7 +204,7 @@ export default async function holidaysRoutes(fastify: FastifyInstance) {
   // Body: { holiday_id: string, group_ids: string[] }
   // Also syncs holiday_calendar.holiday_group_id to group_ids[0] for backward compat.
   fastify.post('/group-assignments', auth, async (req: any, reply) => {
-    if (!['super_admin', 'hr_admin'].includes(req.userRole)) {
+    if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
       return reply.code(403).send({ error: 'FORBIDDEN', message: 'hr_admin or super_admin required' })
     }
     const schema = z.object({
@@ -242,7 +243,7 @@ export default async function holidaysRoutes(fastify: FastifyInstance) {
 
   // ── DELETE /masters/holidays/:id ──────────────────────────────────────────
   fastify.delete('/:id', auth, async (req: any, reply) => {
-    if (!['super_admin', 'hr_admin'].includes(req.userRole)) {
+    if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
       return reply.code(403).send({ error: 'FORBIDDEN', message: 'hr_admin or super_admin required' })
     }
 

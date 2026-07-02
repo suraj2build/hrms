@@ -13,6 +13,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { STANDARD_LEAVE_TYPES } from '../../lib/standard-leave-types.js'
+import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 
 const schema = z.object({
   name:              z.string().min(1, 'Name is required').max(50, 'Name must be 50 characters or less'),
@@ -31,7 +32,7 @@ export default async function leaveTypesRoutes(fastify: FastifyInstance) {
     req: { userRole: string },
     reply: { code: (n: number) => { send: (b: unknown) => unknown } },
   ): boolean {
-    if (!['super_admin', 'hr_admin'].includes(req.userRole)) {
+    if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
       reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
       return false
     }
