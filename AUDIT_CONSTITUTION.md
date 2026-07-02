@@ -251,8 +251,8 @@ ISSUE-049 ISSUE-050
 
 **Phase 4 — Architecture / Technical Debt**
 ```
-CLOSED: ISSUE-054 ISSUE-055 ISSUE-056 ISSUE-057 ISSUE-058 ISSUE-061 ISSUE-083 ISSUE-088 ISSUE-090 ISSUE-111
-OPEN:   ISSUE-028 ISSUE-065 ISSUE-066 ISSUE-067 ISSUE-068 ISSUE-069
+CLOSED: ISSUE-028 ISSUE-054 ISSUE-055 ISSUE-056 ISSUE-057 ISSUE-058 ISSUE-061 ISSUE-083 ISSUE-088 ISSUE-090 ISSUE-111
+OPEN:   ISSUE-065 ISSUE-066 ISSUE-067 ISSUE-068 ISSUE-069
 ```
 
 **Phase 5 — Enterprise Features / Roadmap**
@@ -375,6 +375,7 @@ Update this table after each issue is committed and pushed.
 | ISSUE-083 | window.confirm/window.prompt calls across 9 files (19 confirm + 2 prompt instances) — created shared ConfirmDialog and PromptDialog components (Radix Dialog primitives in apps/web/src/components/ui/ConfirmDialog.tsx). All functional component files use setCdlg pattern. ErrorBoundary (class component) uses class state promptOpen + submitReport() method. TDSManagement uses PromptDialog for required revision note. Commit d7b02df. | 2026-07-02 |
 | ISSUE-061 | analytics/index.ts PUT /users/:id/status set profiles.is_active but did not call auth.admin.updateUserById() with ban_duration, leaving existing Supabase JWTs valid after deactivation. Added ban_duration: '876000h' on deactivate / 'none' on reactivate, mirroring the pattern already used in user-account.ts:349-350. Auth failure is logged as a warn (non-fatal) to preserve the DB update's response. Commit 78b7c7d. | 2026-07-02 |
 | ISSUE-058 | CLOSED — insufficient evidence to reproduce from current audit register. Original issue description exists only in session history (the 2026-06-30 17-agent audit report was never written to disk). Exhaustive codebase investigation covered: webhook delivery (WebhookService fully wired to 21 event types at index.ts:565), frontend setInterval leaks (all 5 web instances have clearInterval cleanup), dangerouslySetInnerHTML (3 instances, all guarded with sanitizeHtml()), security headers (@fastify/helmet global), rate limiting (global + per-route), export/download gating (no unprotected endpoints), localStorage inventory (hrms-auth stores profile+role but no auth token; bank/compensation data excluded from import store), window.location.href SPA navigation (QuickActions.tsx — UX debt, LOW tier). No MEDIUM-severity defect uniquely attributable to ISSUE-058 was identified. The dual Phase 4+Phase 5 listing suggests this was a feature-completeness item deferred to roadmap; no codebase evidence of a missing stub or partial implementation not already tracked under another issue number. Closing as unresolvable without original finding text. No code changed. | 2026-07-02 |
+| ISSUE-028 | 8 raw setInterval/setTimeout business schedulers not wired through the durable queue — crashes caused missed runs with no retry. Fixed in 4 batches: Batch A (sla-scanner, intelligence-scanner, attendance-api-scheduler) — existing handlers 'sla-scan', 'intelligence-scan', 'process-attendance' already registered from ISSUE-011; changed setInterval callbacks to enqueue with hourly/6h/5min idempotency keys. Batch B (digest-scheduler, poll-scheduler, wo-credit-reconciler) — exported tick/runPollTick functions; registered new handlers 'send-digest', 'send-pulse-poll', 'reconcile-wo-credits' in index.ts. Batch C (absconding scanner in index.ts) — safeRegisterModule now enqueues 'detect-absconding' with daily key; handler fans out per-tenant scan via dynamic import. Batch D (leave-scheduler) — exported tick(); setInterval enqueues 'leave-scheduler-tick' with hourly key; startup restoreState()→tick() direct call preserved for fast state recovery. All 4 batches TypeScript-clean. Commits 9a53361, 3e45aff, c89f635, 78750ca. | 2026-07-02 |
 
 ---
 
