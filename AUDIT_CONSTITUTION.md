@@ -353,6 +353,8 @@ Update this table after each issue is committed and pushed.
 | ISSUE-025 | leave-scheduler startup crash | hoist setInterval before promise chain in leave-scheduler.ts | 2026-07-02 |
 | ISSUE-040 | roster-calendar engine-call handlers no try/catch | 8 engine-calling handlers wrapped; route-specific safe messages; server-side logging; CRUD handlers unchanged | 2026-07-02 |
 | ISSUE-041 | letters mutation routes unvalidated | Zod schemas on template create/update, generate, approve/reject, ESS request, fulfill/reject; approval_chain partial semantics preserved; content sanitisation deferred | 2026-07-02 |
+| ISSUE-044 | throwable engine calls unwrapped in attendance routes | try/catch on createLeaveRequest/cancel/approve/reverse/reject (leave-requests), runMonthlyAccrual/processCarryForward/processEncashment (leave-accrual), resolveWoEmployees/gateApprove/gateReject (comp-off), buildDaySessionReport×2 (work-sessions) | 2026-07-02 |
+| ISSUE-036 | ExceptionGovernance pagination offset hardcoded to 0 | page state + PAGE_SIZE=50 + offset wired into queryKey and URLSearchParams; prev/next controls; reset on filter apply/clear | 2026-07-02 |
 
 ---
 
@@ -370,4 +372,4 @@ Update this table after each issue is committed and pushed.
 
 ---
 
-*Last updated: 2026-07-02. Phase 1 (Critical Security) fully closed. Phase 2 in progress: ISSUE-025, ISSUE-040, ISSUE-041 closed. Next: ISSUE-042 onwards (missing Zod validation on remaining route files, pagination, further try/catch hardening). ISSUE-028 (raw setInterval schedulers) remains open.*
+*Last updated: 2026-07-02. Phase 1 (Critical Security) fully closed. Phase 2 in progress: ISSUE-025, ISSUE-036, ISSUE-040, ISSUE-041, ISSUE-044 closed. Next: ISSUE-042A (HIGH-risk Zod validation subset), then ISSUE-043A (simple-limit pagination). ISSUE-028 (raw setInterval schedulers) remains deferred.*

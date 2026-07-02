@@ -213,7 +213,10 @@ export function ExceptionGovernance() {
 
   const [filters,  setFilters]  = useState<Filters>(INITIAL_FILTERS)
   const [applied,  setApplied]  = useState<Filters>(INITIAL_FILTERS)
+  const [page,     setPage]     = useState(0)
   const [pendingId, setPendingId] = useState<string | null>(null)
+
+  const PAGE_SIZE = 50
 
   // ── Queries ──────────────────────────────────────────────────────────────────
 
@@ -226,9 +229,9 @@ export function ExceptionGovernance() {
 
   const { data: listData, isLoading: listLoading, isError, refetch } =
     useQuery<ExceptionListResponse>({
-      queryKey: ['exception-list', applied],
+      queryKey: ['exception-list', applied, page],
       queryFn:  () => {
-        const params = new URLSearchParams({ limit: '50', offset: '0' })
+        const params = new URLSearchParams({ limit: String(PAGE_SIZE), offset: String(page * PAGE_SIZE) })
         if (applied.category)    params.set('category',    applied.category)
         if (applied.severity)    params.set('severity',    applied.severity)
         if (applied.status)      params.set('status',      applied.status)
@@ -426,7 +429,7 @@ export function ExceptionGovernance() {
             <Button
               size="sm"
               className="h-8 text-xs"
-              onClick={() => setApplied({ ...filters })}
+              onClick={() => { setApplied({ ...filters }); setPage(0) }}
             >
               Apply
             </Button>
@@ -434,7 +437,7 @@ export function ExceptionGovernance() {
               size="sm"
               variant="ghost"
               className="h-8 text-xs"
-              onClick={() => { setFilters(INITIAL_FILTERS); setApplied(INITIAL_FILTERS) }}
+              onClick={() => { setFilters(INITIAL_FILTERS); setApplied(INITIAL_FILTERS); setPage(0) }}
             >
               Clear
             </Button>
@@ -592,6 +595,35 @@ export function ExceptionGovernance() {
             </div>
           )}
         </div>
+
+        {/* Pagination */}
+        {total > PAGE_SIZE && (
+          <div className="flex items-center justify-between px-4 py-3 border-t border-border">
+            <p className="text-xs text-muted-foreground">
+              Showing {page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, total)} of {total}
+            </p>
+            <div className="flex items-center gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 text-xs"
+                disabled={page === 0 || listLoading}
+                onClick={() => setPage(p => p - 1)}
+              >
+                Previous
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 text-xs"
+                disabled={(page + 1) * PAGE_SIZE >= total || listLoading}
+                onClick={() => setPage(p => p + 1)}
+              >
+                Next
+              </Button>
+            </div>
+          </div>
+        )}
       </SectionCard>
 
       {/* Category breakdown */}
