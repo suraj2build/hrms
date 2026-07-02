@@ -275,7 +275,7 @@ export default async function recognitionRoutes(fastify: FastifyInstance) {
       }).then(undefined, () => { /* feed best-effort */ })
     }
 
-    // WhatsApp notification to recipient if they have a phone
+    // WhatsApp notification to recipient if they have a phone (best-effort — never block kudos success)
     if (parsed.data.badge_code) {
       const { data: empRow } = await fastify.supabase
         .from('employees')
@@ -284,12 +284,16 @@ export default async function recognitionRoutes(fastify: FastifyInstance) {
         .eq('tenant_id', req.tenantId)
         .maybeSingle()
       if ((empRow as any)?.phone) {
-        const wa = new WhatsAppProvider(fastify.supabase)
-        await wa.sendTemplate(req.tenantId, (empRow as any).phone, 'peer_badge_received', {
-          name:    (empRow as any).first_name ?? 'Team member',
-          badge:   badgeLabel ?? parsed.data.badge_code,
-          message: parsed.data.message,
-        })
+        try {
+          const wa = new WhatsAppProvider(fastify.supabase)
+          await wa.sendTemplate(req.tenantId, (empRow as any).phone, 'peer_badge_received', {
+            name:    (empRow as any).first_name ?? 'Team member',
+            badge:   badgeLabel ?? parsed.data.badge_code,
+            message: parsed.data.message,
+          })
+        } catch (waErr) {
+          fastify.log.warn({ err: waErr }, 'recognition: WhatsApp badge notification failed — kudos still recorded')
+        }
       }
     }
 
@@ -545,17 +549,21 @@ export default async function recognitionRoutes(fastify: FastifyInstance) {
     await fastify.supabase.from('award_nominations')
       .update({ status: 'not_selected', reviewed_at: new Date().toISOString(), reviewed_by: req.userId })
       .eq('tenant_id', req.tenantId).eq('round_id', roundId).eq('status', 'pending')
-    // WhatsApp to winner
+    // WhatsApp to winner (best-effort — never block winner declaration success)
     const { data: winner } = await fastify.supabase
       .from('employees').select('phone, first_name').eq('id', winner_employee_id).eq('tenant_id', req.tenantId).maybeSingle()
     if ((winner as any)?.phone) {
-      const wa = new WhatsAppProvider(fastify.supabase)
-      const awardName = (round as any)?.formal_awards?.name ?? 'award'
-      await wa.sendTemplate(req.tenantId, (winner as any).phone, 'award_winner', {
-        name:       (winner as any).first_name ?? 'Team member',
-        award_name: awardName,
-        period:     (round as any)?.period_label ?? '',
-      })
+      try {
+        const wa = new WhatsAppProvider(fastify.supabase)
+        const awardName = (round as any)?.formal_awards?.name ?? 'award'
+        await wa.sendTemplate(req.tenantId, (winner as any).phone, 'award_winner', {
+          name:       (winner as any).first_name ?? 'Team member',
+          award_name: awardName,
+          period:     (round as any)?.period_label ?? '',
+        })
+      } catch (waErr) {
+        fastify.log.warn({ err: waErr }, 'recognition: WhatsApp winner notification failed — winner still declared')
+      }
     }
     return reply.send({ data: { winner_declared: true } })
   })

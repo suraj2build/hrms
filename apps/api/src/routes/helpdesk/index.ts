@@ -228,15 +228,19 @@ export default async function helpdeskRoutes(fastify: FastifyInstance) {
       is_internal: false,
     })
 
-    // WhatsApp auto-acknowledgement
+    // WhatsApp auto-acknowledgement (best-effort — never block ticket creation success)
     const { data: empWithPhone } = await fastify.supabase
       .from('employees').select('phone').eq('id', employeeId).eq('tenant_id', req.tenantId).maybeSingle()
     if ((empWithPhone as any)?.phone) {
-      const wa = new WhatsAppProvider(fastify.supabase)
-      await wa.sendTemplate(req.tenantId, (empWithPhone as any).phone, 'ticket_acknowledgement', {
-        ticket_number: ticketNumber,
-        sla_hours:     String(sla.response_hours),
-      })
+      try {
+        const wa = new WhatsAppProvider(fastify.supabase)
+        await wa.sendTemplate(req.tenantId, (empWithPhone as any).phone, 'ticket_acknowledgement', {
+          ticket_number: ticketNumber,
+          sla_hours:     String(sla.response_hours),
+        })
+      } catch (waErr) {
+        fastify.log.warn({ err: waErr }, 'helpdesk: WhatsApp acknowledgement failed — ticket still created')
+      }
     }
 
     await logAction(fastify.supabase, {

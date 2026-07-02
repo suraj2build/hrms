@@ -187,19 +187,25 @@ export default async function trustIntelligenceRoutes(fastify: FastifyInstance) 
   fastify.post('/trust/regulatory/revisions', { preHandler: [fastify.authenticate] }, async (req, reply) => {
     const body = req.body as any
     const tenantId = (req as any).tenantId
-    const id = await regulatoryIngestionService.ingest(fastify.supabase, {
-      org_id:           tenantId,
-      revision_type:    body.revision_type,
-      jurisdiction:     body.jurisdiction,
-      title:            body.title,
-      description:      body.description,
-      old_value:        body.old_value,
-      new_value:        body.new_value,
-      unit:             body.unit,
-      effective_from:   body.effective_from,
-      source_reference: body.source_reference,
-    })
-    if (!id) return reply.status(500).send({ error: 'Failed to ingest revision' })
+    let id: string | null | undefined
+    try {
+      id = await regulatoryIngestionService.ingest(fastify.supabase, {
+        org_id:           tenantId,
+        revision_type:    body.revision_type,
+        jurisdiction:     body.jurisdiction,
+        title:            body.title,
+        description:      body.description,
+        old_value:        body.old_value,
+        new_value:        body.new_value,
+        unit:             body.unit,
+        effective_from:   body.effective_from,
+        source_reference: body.source_reference,
+      })
+    } catch (err) {
+      fastify.log.error({ err }, 'trust: regulatoryIngestionService.ingest threw')
+      return reply.status(500).send({ error: 'INGEST_FAILED', message: 'Failed to ingest revision' })
+    }
+    if (!id) return reply.status(500).send({ error: 'INGEST_FAILED', message: 'Failed to ingest revision' })
     return reply.status(201).send({ id })
   })
 
@@ -308,13 +314,18 @@ export default async function trustIntelligenceRoutes(fastify: FastifyInstance) 
       }
 
       // Awaited so the verification_records row is persisted before we respond.
-      await verificationOrchestrator.verify({
-        supabase:        fastify.supabase,
-        employee_id:     employeeId,
-        tenant_id:       tenantId,
-        aadhaar,
-        aadhaar_consent: true,
-      })
+      try {
+        await verificationOrchestrator.verify({
+          supabase:        fastify.supabase,
+          employee_id:     employeeId,
+          tenant_id:       tenantId,
+          aadhaar,
+          aadhaar_consent: true,
+        })
+      } catch (err) {
+        fastify.log.error({ err, employeeId }, 'trust: verificationOrchestrator.verify threw (HR aadhaar)')
+        return reply.status(500).send({ error: 'VERIFICATION_FAILED', message: 'Aadhaar verification engine error' })
+      }
 
       // PII-safe echo of the outcome (mask only).
       const v = aadhaarVerificationService.validateStructure(aadhaar)
@@ -356,13 +367,18 @@ export default async function trustIntelligenceRoutes(fastify: FastifyInstance) 
         return reply.status(403).send({ error: 'PROFILE_NOT_LINKED', message: 'Your profile is not linked to an employee record.' })
       }
 
-      await verificationOrchestrator.verify({
-        supabase:        fastify.supabase,
-        employee_id:     employeeId,
-        tenant_id:       tenantId,
-        aadhaar,
-        aadhaar_consent: true,
-      })
+      try {
+        await verificationOrchestrator.verify({
+          supabase:        fastify.supabase,
+          employee_id:     employeeId,
+          tenant_id:       tenantId,
+          aadhaar,
+          aadhaar_consent: true,
+        })
+      } catch (err) {
+        fastify.log.error({ err, employeeId }, 'trust: verificationOrchestrator.verify threw (ESS aadhaar)')
+        return reply.status(500).send({ error: 'VERIFICATION_FAILED', message: 'Aadhaar verification engine error' })
+      }
 
       const v = aadhaarVerificationService.validateStructure(aadhaar)
       return { status: v.isValid ? 'verified' : 'failed', masked: v.masked }

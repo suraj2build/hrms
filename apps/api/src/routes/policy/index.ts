@@ -521,10 +521,15 @@ export default async function policyRoutes(fastify: FastifyInstance) {
       const wa = new WhatsAppProvider(supabase)
       for (const emp of empPhones ?? []) {
         if (emp.phone) {
-          await wa.sendTemplate(tenantId, emp.phone, 'policy_published', {
-            name:  emp.first_name ?? 'Team',
-            title: policy.title,
-          })
+          try {
+            await wa.sendTemplate(tenantId, emp.phone, 'policy_published', {
+              name:  emp.first_name ?? 'Team',
+              title: policy.title,
+            })
+          } catch (waErr) {
+            // best-effort — a single employee's notification failure must not abort the loop
+            fastify.log.warn({ err: waErr, employeeId: emp.id }, 'policy: WhatsApp notification failed — continuing broadcast')
+          }
         }
       }
     }

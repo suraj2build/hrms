@@ -360,14 +360,20 @@ export default async function leaveRoute(fastify: FastifyInstance) {
     // weekly-off day (which would wrongly turn a paid rest day into LOP).
     const leaveSession = (app.session as LeaveSession | null) ?? 'full_day'
     const isHalfDay    = leaveSession !== 'full_day'
-    const workingDays = await computeWorkingLeaveDays(
-      fastify.supabase,
-      app.tenant_id   as string,
-      app.employee_id as string,
-      app.from_date   as string,
-      app.to_date     as string,
-      { halfDay: isHalfDay },
-    )
+    let workingDays: Awaited<ReturnType<typeof computeWorkingLeaveDays>>
+    try {
+      workingDays = await computeWorkingLeaveDays(
+        fastify.supabase,
+        app.tenant_id   as string,
+        app.employee_id as string,
+        app.from_date   as string,
+        app.to_date     as string,
+        { halfDay: isHalfDay },
+      )
+    } catch (err) {
+      fastify.log.error({ err, leaveId: id }, 'leave approve: computeWorkingLeaveDays threw')
+      return reply.code(500).send({ error: 'COMPUTE_FAILED', message: 'Failed to compute working leave days' })
+    }
 
     // Pre-approve balance check + atomic deduction (paid leave only).
     // C6-P1: Use checked_deduct_leave_balance instead of deduct_leave_balance.
