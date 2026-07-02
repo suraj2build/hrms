@@ -16,9 +16,10 @@
 
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
+import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 
 function requireAdmin(req: any, reply: any, done: () => void) {
-  if (!['super_admin', 'hr_admin'].includes(req.userRole)) {
+  if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
     reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
     return
   }

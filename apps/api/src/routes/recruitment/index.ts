@@ -14,6 +14,7 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { randomUUID } from 'crypto'
 import { logAction }    from '../../lib/audit-service.js'
+import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { notifyHrAdmins } from '../../lib/notify.js'
 import { isOfferSignoffEnabled } from '../../lib/payroll-flags.js'
 import {
@@ -132,8 +133,6 @@ async function createPreJoineeFromApp(
 
   return { ok: true, invitation_id: invitation.id }
 }
-
-const HR_ADMIN_ROLES = ['super_admin', 'hr_admin'] as const
 
 export default async function recruitmentRoutes(fastify: FastifyInstance) {
   const auth        = { preHandler: [fastify.authenticate] }

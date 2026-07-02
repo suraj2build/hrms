@@ -15,6 +15,7 @@
  */
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
+import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 
 // ── Schemas ───────────────────────────────────────────────────────────────────
 
@@ -71,10 +72,8 @@ const commentBodySchema = z.object({
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-const ADMIN_ROLES = ['super_admin', 'hr_admin'] as const
-
 function isAdmin(role: string): boolean {
-  return (ADMIN_ROLES as readonly string[]).includes(role)
+  return (HR_ADMIN_ROLES as readonly string[]).includes(role)
 }
 
 async function addTimelineEvent(

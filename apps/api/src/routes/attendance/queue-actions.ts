@@ -18,15 +18,14 @@
 
 import type { FastifyInstance } from 'fastify'
 import { z }                    from 'zod'
-
-const HR_ROLES = ['super_admin', 'hr_admin']
+import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 
 export default async function attendanceQueueActionsRoute(fastify: FastifyInstance) {
   const auth = { preHandler: [fastify.authenticate] }
 
   // ── POST /attendance/queue/:id/resolve ─────────────────────────────────────
   fastify.post('/attendance/queue/:id/resolve', auth, async (req: any, reply) => {
-    if (!HR_ROLES.includes(req.userRole)) {
+    if (!HR_ADMIN_ROLES.includes(req.userRole)) {
       return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
     }
 
@@ -61,7 +60,7 @@ export default async function attendanceQueueActionsRoute(fastify: FastifyInstan
 
   // ── POST /attendance/queue/:id/escalate ────────────────────────────────────
   fastify.post('/attendance/queue/:id/escalate', auth, async (req: any, reply) => {
-    if (!HR_ROLES.includes(req.userRole)) {
+    if (!HR_ADMIN_ROLES.includes(req.userRole)) {
       return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
     }
 
@@ -96,7 +95,7 @@ export default async function attendanceQueueActionsRoute(fastify: FastifyInstan
 
   // ── POST /attendance/queue/:id/snooze ──────────────────────────────────────
   fastify.post('/attendance/queue/:id/snooze', auth, async (req: any, reply) => {
-    if (!HR_ROLES.includes(req.userRole)) {
+    if (!HR_ADMIN_ROLES.includes(req.userRole)) {
       return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
     }
 

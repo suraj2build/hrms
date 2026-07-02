@@ -9,6 +9,7 @@
 
 import { z } from 'zod'
 import type { FastifyInstance } from 'fastify'
+import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import {
   buildDaySessionReport,
   buildMonthSessionBatch,
@@ -30,7 +31,6 @@ const LockSessionBodySchema = z.object({
 
 // ── Auth helpers ──────────────────────────────────────────────────────────────
 
-const HR_ROLES = ['super_admin', 'hr_admin'] as const
 
 // ── Month range helper ────────────────────────────────────────────────────────
 
@@ -81,7 +81,7 @@ export default async function workSessionRoutes(fastify: FastifyInstance) {
   const auth     = { preHandler: [fastify.authenticate] }
 
   function requireHrAdmin(req: any, reply: any): boolean {
-    if (!HR_ROLES.includes(req.userRole ?? '')) {
+    if (!HR_ADMIN_ROLES.includes(req.userRole ?? '')) {
       reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
       return false
     }

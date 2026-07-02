@@ -24,6 +24,7 @@
 
 import type { FastifyInstance } from 'fastify'
 import { z }                   from 'zod'
+import { HR_ADMIN_ROLES }      from '../../lib/rbac.js'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -99,7 +100,7 @@ export default async function workforceDrillRoutes(fastify: FastifyInstance) {
 
   fastify.get('/analytics/workforce/drill', auth, async (req: any, reply) => {
     // Only admin + manager can drill (managers get team scope applied separately)
-    const isAdmin   = ['super_admin', 'hr_admin'].includes(req.userRole)
+    const isAdmin   = (HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)
     const isManager = req.userRole === 'manager'
     if (!isAdmin && !isManager) {
       return reply.code(403).send({ error: 'FORBIDDEN', message: 'Manager or admin access required' })

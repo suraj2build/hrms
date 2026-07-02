@@ -25,8 +25,7 @@ import {
   orchestrateWorkforceEvent,
   getOrchestrationChain,
 }                                   from '../../lib/workforce-orchestrator.js'
-
-const HR_ROLES    = ['super_admin', 'hr_admin'] as const
+import { HR_ADMIN_ROLES }           from '../../lib/rbac.js'
 const SUPER_ADMIN = ['super_admin']             as const
 
 const dateRe = /^\d{4}-\d{2}-\d{2}$/
@@ -36,7 +35,7 @@ export default async function orchestrationRoutes(fastify: FastifyInstance) {
 
   // ── GET /system/orchestration/workers ─────────────────────────────────────
   fastify.get('/system/orchestration/workers', auth, async (req: any, reply) => {
-    if (!HR_ROLES.includes(req.userRole)) {
+    if (!HR_ADMIN_ROLES.includes(req.userRole)) {
       return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
     }
 
@@ -159,7 +158,7 @@ export default async function orchestrationRoutes(fastify: FastifyInstance) {
 
   // ── GET /system/orchestration/queues ──────────────────────────────────────
   fastify.get('/system/orchestration/queues', auth, async (req: any, reply) => {
-    if (!HR_ROLES.includes(req.userRole)) {
+    if (!HR_ADMIN_ROLES.includes(req.userRole)) {
       return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
     }
 
@@ -250,7 +249,7 @@ export default async function orchestrationRoutes(fastify: FastifyInstance) {
 
   // ── GET /system/orchestration/jobs ────────────────────────────────────────
   fastify.get('/system/orchestration/jobs', auth, async (req: any, reply) => {
-    if (!HR_ROLES.includes(req.userRole)) {
+    if (!HR_ADMIN_ROLES.includes(req.userRole)) {
       return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
     }
 
@@ -289,7 +288,7 @@ export default async function orchestrationRoutes(fastify: FastifyInstance) {
 
   // ── GET /system/orchestration/jobs/:id ────────────────────────────────────
   fastify.get('/system/orchestration/jobs/:id', auth, async (req: any, reply) => {
-    if (!HR_ROLES.includes(req.userRole)) {
+    if (!HR_ADMIN_ROLES.includes(req.userRole)) {
       return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
     }
 
@@ -315,7 +314,7 @@ export default async function orchestrationRoutes(fastify: FastifyInstance) {
 
   // ── POST /system/orchestration/jobs/:id/cancel ────────────────────────────
   fastify.post('/system/orchestration/jobs/:id/cancel', auth, async (req: any, reply) => {
-    if (!HR_ROLES.includes(req.userRole)) {
+    if (!HR_ADMIN_ROLES.includes(req.userRole)) {
       return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
     }
 
@@ -426,7 +425,7 @@ export default async function orchestrationRoutes(fastify: FastifyInstance) {
   // Returns the full audit trail for a rebuild chain — rebuild event, enqueued stages,
   // completion status, initiator, reason, impacted periods.
   fastify.get('/system/orchestration/rebuild/:lineageId', auth, async (req: any, reply) => {
-    if (!HR_ROLES.includes(req.userRole)) {
+    if (!HR_ADMIN_ROLES.includes(req.userRole)) {
       return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
     }
 
@@ -452,7 +451,7 @@ export default async function orchestrationRoutes(fastify: FastifyInstance) {
 
   // ── GET /system/orchestration/health ──────────────────────────────────────
   fastify.get('/system/orchestration/health', auth, async (req: any, reply) => {
-    if (!HR_ROLES.includes(req.userRole)) {
+    if (!HR_ADMIN_ROLES.includes(req.userRole)) {
       return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
     }
 

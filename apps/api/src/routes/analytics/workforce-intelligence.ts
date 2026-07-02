@@ -14,6 +14,7 @@
 
 import type { FastifyInstance } from 'fastify'
 import { z }                   from 'zod'
+import { HR_ADMIN_ROLES }      from '../../lib/rbac.js'
 
 // ── Date helpers ──────────────────────────────────────────────────────────────
 
@@ -39,7 +40,7 @@ export default async function workforceIntelligenceRoutes(fastify: FastifyInstan
   const auth = { preHandler: [fastify.authenticate] }
 
   function requireAdmin(req: any, reply: any): boolean {
-    if (!['super_admin', 'hr_admin'].includes(req.userRole)) {
+    if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
       reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
       return false
     }
@@ -302,7 +303,7 @@ export default async function workforceIntelligenceRoutes(fastify: FastifyInstan
   // late rate, and incomplete sessions over the given period.
   // Admin can request team-wide; manager gets their team only.
   fastify.get('/analytics/workforce/reliability', auth, async (req: any, reply) => {
-    const isAdminRole = ['super_admin', 'hr_admin'].includes(req.userRole)
+    const isAdminRole = (HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)
     const isManager   = req.userRole === 'manager'
     if (!isAdminRole && !isManager) {
       return reply.code(403).send({ error: 'FORBIDDEN', message: 'Manager or admin access required' })

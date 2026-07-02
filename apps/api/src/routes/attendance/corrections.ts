@@ -35,9 +35,9 @@ import { eventBus }                     from '../../lib/event-bus.js'
 import { orchestrateWorkforceEvent }    from '../../lib/workforce-orchestrator.js'
 import { isMonthLocked, monthOf }       from '../../lib/period-lock.js'
 
+import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 const dateRe      = /^\d{4}-\d{2}-\d{2}$/
-const HR_ROLES    = ['super_admin', 'hr_admin']
-const ALLOW_ROLES = [...HR_ROLES, 'manager']
+const ALLOW_ROLES = [...HR_ADMIN_ROLES, 'manager']
 
 // All valid statuses — kept in one place so Zod enums stay in sync
 type CorrectionStatus = 'pending' | 'processing' | 'applied' | 'failed' | 'rejected'
@@ -66,7 +66,7 @@ export default async function attendanceCorrectionsRoute(fastify: FastifyInstanc
     tenantId:     string,
     employeeId:   string,
   ): Promise<{ ok: true } | { ok: false; code: number; error: string; message: string }> {
-    if (HR_ROLES.includes(approverRole)) return { ok: true }
+    if ((HR_ADMIN_ROLES as readonly string[]).includes(approverRole)) return { ok: true }
 
     const approverEmpId = await resolveEmployeeId(approverId, tenantId)
     if (!approverEmpId) {
@@ -212,7 +212,7 @@ export default async function attendanceCorrectionsRoute(fastify: FastifyInstanc
     // All other roles use their own linked employee_id.
     let employeeId: string
 
-    if (HR_ROLES.includes(req.userRole) && parsed.data.employee_id) {
+    if (HR_ADMIN_ROLES.includes(req.userRole) && parsed.data.employee_id) {
       const { data: empRow } = await fastify.supabase
         .from('employees')
         .select('id')
@@ -277,7 +277,7 @@ export default async function attendanceCorrectionsRoute(fastify: FastifyInstanc
       employee_id:       employeeId,
       date:              parsed.data.date,
       submitted_by_role: req.userRole,
-      on_behalf: HR_ROLES.includes(req.userRole) && parsed.data.employee_id
+      on_behalf: HR_ADMIN_ROLES.includes(req.userRole) && parsed.data.employee_id
         ? parsed.data.employee_id
         : null,
     })
@@ -332,7 +332,7 @@ export default async function attendanceCorrectionsRoute(fastify: FastifyInstanc
   // is self-healing: call it to both observe and recover stale rows.
   // ──────────────────────────────────────────────────────────────────────────
   fastify.get('/attendance/corrections/operations/stale', auth, async (req: any, reply) => {
-    if (!HR_ROLES.includes(req.userRole)) {
+    if (!HR_ADMIN_ROLES.includes(req.userRole)) {
       return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
     }
 
@@ -423,7 +423,7 @@ export default async function attendanceCorrectionsRoute(fastify: FastifyInstanc
 
     // Manager scope: only direct reports
     let employeeFilter: string[] | null = null
-    if (!HR_ROLES.includes(req.userRole)) {
+    if (!HR_ADMIN_ROLES.includes(req.userRole)) {
       const myEmpId = await resolveEmployeeId(req.userId, req.tenantId)
       if (!myEmpId) return reply.send({ data: [], total: 0 })
 
@@ -624,7 +624,7 @@ export default async function attendanceCorrectionsRoute(fastify: FastifyInstanc
   // approved_by / approved_at remain immutable throughout all retry cycles.
   // ──────────────────────────────────────────────────────────────────────────
   fastify.post('/attendance/corrections/:id/retry', auth, async (req: any, reply) => {
-    if (!HR_ROLES.includes(req.userRole)) {
+    if (!HR_ADMIN_ROLES.includes(req.userRole)) {
       return reply.code(403).send({
         error:   'FORBIDDEN',
         message: 'Only HR admins and super admins can retry failed corrections',

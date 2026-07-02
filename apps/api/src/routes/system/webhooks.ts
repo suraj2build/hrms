@@ -45,8 +45,10 @@ const deliveriesQuerySchema = z.object({
 
 // ── Helper ────────────────────────────────────────────────────────────────────
 
+import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+
 function isAdmin(role: string): boolean {
-  return ['super_admin', 'hr_admin'].includes(role)
+  return (HR_ADMIN_ROLES as readonly string[]).includes(role)
 }
 
 // ── Plugin ────────────────────────────────────────────────────────────────────

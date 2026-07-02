@@ -15,8 +15,7 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { ensureTodaysCelebrations } from '../../lib/community-celebrations.js'
 import { containsProfanity } from '../../lib/profanity.js'
-
-const HR_ROLES = ['super_admin', 'hr_admin']
+import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 const PROFANITY_MSG = 'Your message looks like it contains inappropriate language. Please rephrase.'
 const REACTIONS = ['like', 'celebrate', 'appreciate', 'support'] as const
 
@@ -148,7 +147,7 @@ export default async function communityRoutes(fastify: FastifyInstance) {
       return reply.code(400).send({ error: 'PROFANITY_BLOCKED', message: PROFANITY_MSG })
     }
 
-    const isHr = HR_ROLES.includes(req.userRole)
+    const isHr = HR_ADMIN_ROLES.includes(req.userRole)
     // Announcements + pinning are HR-only; everyone else posts plain updates.
     if ((parsed.data.type === 'announcement' || parsed.data.pinned) && !isHr) {
       return reply.code(403).send({ error: 'FORBIDDEN', message: 'Only HR can post announcements or pin posts' })
@@ -174,7 +173,7 @@ export default async function communityRoutes(fastify: FastifyInstance) {
 
   // ── PATCH /community/posts/:id (moderation — HR only) ────────────────────────
   fastify.patch('/community/posts/:id', auth, async (req: any, reply) => {
-    if (!HR_ROLES.includes(req.userRole)) {
+    if (!HR_ADMIN_ROLES.includes(req.userRole)) {
       return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR access required' })
     }
     const { id } = req.params as { id: string }
@@ -300,7 +299,7 @@ export default async function communityRoutes(fastify: FastifyInstance) {
   // Open reports grouped by post, with reporter count + the post body, so HR can
   // decide whether to hide/remove via PATCH /community/posts/:id.
   fastify.get('/community/reports', auth, async (req: any, reply) => {
-    if (!HR_ROLES.includes(req.userRole)) {
+    if (!HR_ADMIN_ROLES.includes(req.userRole)) {
       return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR access required' })
     }
     const { data: reports, error } = await fastify.supabase

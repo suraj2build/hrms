@@ -27,8 +27,7 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { recomputeRange, utcToLocalDate } from '../../lib/attendance-engine.js'
 import { isMonthLocked, monthOf } from '../../lib/period-lock.js'
-
-const HR_ADMIN_ROLES = ['super_admin', 'hr_admin']
+import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 
 const bodySchema = z.object({
   employee_id: z.string().uuid().optional(),
