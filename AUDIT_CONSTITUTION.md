@@ -349,6 +349,8 @@ Update this table after each issue is committed and pushed.
 | ISSUE-009 | Notification dispatch stub | registerNotificationHandlers() + inbox_items writes | 2026-07-01 |
 | ISSUE-012 | Unhandled rejections in schedulers | .catch() on all async timer callbacks | 2026-07-01 |
 | ISSUE-026 | event-bus-automation error boundaries | VERIFIED CLEAN — no code changes needed | 2026-07-01 |
+| ISSUE-035 | Absconding scanner missing .catch() | COVERED BY ISSUE-012 — timers already wrapped in index.ts | 2026-07-02 |
+| ISSUE-025 | leave-scheduler startup crash | hoist setInterval before promise chain in leave-scheduler.ts | 2026-07-02 |
 
 ---
 
