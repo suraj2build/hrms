@@ -97,6 +97,7 @@ export default async function musterRoute(fastify: FastifyInstance) {
         .eq('tenant_id', req.tenantId)
         .gte('date', fromDate)
         .lte('date', toDate)
+        .limit(50_000)
 
       if (dailyError) {
         req.log.error({ err: dailyError }, 'muster daily query failed')

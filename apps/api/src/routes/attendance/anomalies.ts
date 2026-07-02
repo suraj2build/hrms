@@ -121,6 +121,7 @@ export default async function attendanceAnomaliesRoute(fastify: FastifyInstance)
       .eq('tenant_id', req.tenantId)
       .gte('date', periodStart)
       .lt('date', periodEnd)
+      .limit(10_000)
 
     if (error) {
       req.log.error({ err: error }, 'anomaly summary query failed')

@@ -2252,6 +2252,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       `)
       .eq('run_id', id)
       .eq('tenant_id', req.tenantId)
+      .limit(10_000)
 
     const header = [
       'Employee Code', 'Employee Name', 'Month',
@@ -2319,7 +2320,8 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
           employees(first_name, last_name, employee_code)
         `)
         .eq('run_id', id)
-        .eq('tenant_id', tenantId),
+        .eq('tenant_id', tenantId)
+        .limit(10_000),
       fastify.supabase
         .from('payroll_runs')
         .select('id, month')
@@ -2361,6 +2363,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       .select('employee_id, gross_pay, net_pay, lop_days, lop_amount, payable_days, total_deductions')
       .eq('run_id', prevRun.id)
       .eq('tenant_id', tenantId)
+      .limit(10_000)
 
     const prevMap = new Map<string, any>((prevSlips ?? []).map((s: any) => [s.employee_id, s]))
 
