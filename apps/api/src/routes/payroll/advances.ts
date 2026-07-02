@@ -57,7 +57,7 @@ export default async function advancesRoutes(fastify: FastifyInstance) {
       .from('advance_salary_requests')
       .select('*, employees(id, first_name, last_name, employee_code)')
       .eq('tenant_id', req.tenantId)
-      .order('created_at', { ascending: false })
+      .order('created_at', { ascending: false }).limit(500)
 
     if (parsed.data.employee_id) q = q.eq('employee_id', parsed.data.employee_id)
     if (parsed.data.status) q = q.eq('status', parsed.data.status)
@@ -349,7 +349,7 @@ export default async function advancesRoutes(fastify: FastifyInstance) {
       .select('*')
       .eq('advance_id', id)
       .eq('tenant_id', req.tenantId)
-      .order('recovery_month', { ascending: true })
+      .order('recovery_month', { ascending: true }).limit(100)
 
     if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
     return reply.send({ data: data ?? [] })

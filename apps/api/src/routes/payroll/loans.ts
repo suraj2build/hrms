@@ -44,7 +44,7 @@ export default async function loansRoutes(fastify: FastifyInstance) {
       .from('employee_loans')
       .select('*, employees(id, first_name, last_name, employee_code)')
       .eq('tenant_id', req.tenantId)
-      .order('created_at', { ascending: false })
+      .order('created_at', { ascending: false }).limit(500)
 
     if (parsed.data.employee_id) q = q.eq('employee_id', parsed.data.employee_id)
     if (parsed.data.status) q = q.eq('status', parsed.data.status)
@@ -320,7 +320,7 @@ export default async function loansRoutes(fastify: FastifyInstance) {
       .select('*')
       .eq('loan_id', id)
       .eq('tenant_id', req.tenantId)
-      .order('installment_number', { ascending: true })
+      .order('installment_number', { ascending: true }).limit(200)
 
     if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
     return reply.send({ data: data ?? [] })
