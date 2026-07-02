@@ -114,8 +114,13 @@ export default async function workSessionRoutes(fastify: FastifyInstance) {
     if (!employeeId) return reply.code(400).send({ error: 'employeeId is required' })
     if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return reply.code(400).send({ error: 'date (YYYY-MM-DD) is required' })
 
-    const report = await buildDaySessionReport(supabase, tenantId, employeeId, date)
-    return reply.send({ data: report })
+    try {
+      const report = await buildDaySessionReport(supabase, tenantId, employeeId, date)
+      return reply.send({ data: report })
+    } catch (err: unknown) {
+      req.log.error({ err, tenantId, employeeId, date }, '[work-sessions] failed to build day session report')
+      return reply.code(500).send({ error: 'SESSION_REPORT_ERROR', message: 'Failed to build day session report' })
+    }
   })
 
   // ── GET /attendance/sessions/missing-punches ──────────────────────────────
@@ -342,7 +347,13 @@ export default async function workSessionRoutes(fastify: FastifyInstance) {
     if (!employee_id) return reply.code(400).send({ error: 'employee_id is required' })
     if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return reply.code(400).send({ error: 'date (YYYY-MM-DD) is required' })
 
-    const report = await buildDaySessionReport(supabase, tenantId, employee_id, date)
+    let report: Awaited<ReturnType<typeof buildDaySessionReport>>
+    try {
+      report = await buildDaySessionReport(supabase, tenantId, employee_id, date)
+    } catch (err: unknown) {
+      req.log.error({ err, tenantId, employee_id, date }, '[work-sessions] failed to build day session report for pairing')
+      return reply.code(500).send({ error: 'SESSION_REPORT_ERROR', message: 'Failed to build day session report' })
+    }
 
     // Build upsert payload from the day report's sessions
     const sessionRows = report.sessions.map((s: any) => ({

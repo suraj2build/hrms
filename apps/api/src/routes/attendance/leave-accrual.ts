@@ -119,8 +119,13 @@ export default async function leaveAccrualRoutes(fastify: FastifyInstance) {
     if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
 
     const [year, month] = parsed.data.period.split('-').map(Number)
-    const result = await runMonthlyAccrual(fastify.supabase, req.tenantId, year, month)
-    return reply.send({ data: result, period: parsed.data.period })
+    try {
+      const result = await runMonthlyAccrual(fastify.supabase, req.tenantId, year, month)
+      return reply.send({ data: result, period: parsed.data.period })
+    } catch (err: unknown) {
+      req.log.error({ err, tenantId: req.tenantId, period: parsed.data.period }, '[leave-accrual] unexpected error running monthly accrual')
+      return reply.code(500).send({ error: 'ACCRUAL_ERROR', message: 'Failed to run monthly accrual' })
+    }
   })
 
   // ── POST /leave/accrual/carry-forward ─────────────────────────────────────
@@ -129,8 +134,13 @@ export default async function leaveAccrualRoutes(fastify: FastifyInstance) {
     const parsed = schema.safeParse(req.body)
     if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
 
-    const result = await processCarryForward(fastify.supabase, req.tenantId, parsed.data.from_year)
-    return reply.send({ data: result })
+    try {
+      const result = await processCarryForward(fastify.supabase, req.tenantId, parsed.data.from_year)
+      return reply.send({ data: result })
+    } catch (err: unknown) {
+      req.log.error({ err, tenantId: req.tenantId, from_year: parsed.data.from_year }, '[leave-accrual] unexpected error processing carry-forward')
+      return reply.code(500).send({ error: 'CARRY_FORWARD_ERROR', message: 'Failed to process carry-forward' })
+    }
   })
 
   // ── GET /leave/accrual/runs ───────────────────────────────────────────────
@@ -303,9 +313,14 @@ export default async function leaveAccrualRoutes(fastify: FastifyInstance) {
 
   // ── POST /leave/encashment/:id/approve ────────────────────────────────────
   fastify.post('/leave/encashment/:id/approve', hrAdminAuth, async (req: any, reply) => {
-    const result = await processEncashment(fastify.supabase, req.tenantId, req.params.id, req.userId)
-    if (!result.ok) return reply.code(422).send({ error: 'ENCASHMENT_FAILED', message: result.message })
-    return reply.send({ message: result.message })
+    try {
+      const result = await processEncashment(fastify.supabase, req.tenantId, req.params.id, req.userId)
+      if (!result.ok) return reply.code(422).send({ error: 'ENCASHMENT_FAILED', message: result.message })
+      return reply.send({ message: result.message })
+    } catch (err: unknown) {
+      req.log.error({ err, tenantId: req.tenantId, encashmentId: req.params.id }, '[leave-accrual] unexpected error processing encashment')
+      return reply.code(500).send({ error: 'ENCASHMENT_ERROR', message: 'Failed to process encashment' })
+    }
   })
 
   // ── POST /leave/encashment/:id/reject ─────────────────────────────────────
