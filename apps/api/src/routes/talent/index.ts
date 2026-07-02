@@ -78,6 +78,7 @@ export default async function talentRoutes(fastify: FastifyInstance) {
       .select('id, title, department, location, description, skills_required, experience_min, is_open, posted_at, closes_at, created_at')
       .eq('tenant_id', req.tenantId)
       .order('posted_at', { ascending: false })
+      .limit(500)
 
     if (is_open !== undefined) q = q.eq('is_open', is_open === 'true')
 
@@ -162,6 +163,7 @@ export default async function talentRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', req.tenantId)
       .eq('role_id', id)
       .order('created_at', { ascending: false })
+      .limit(500)
 
     if (error) return reply.code(500).send({ error: error.message })
     return reply.send({ data: data ?? [] })
@@ -192,6 +194,7 @@ export default async function talentRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', req.tenantId)
       .eq('is_open', true)
       .order('posted_at', { ascending: false })
+      .limit(500)
 
     if (error) return reply.code(500).send({ error: error.message })
 
@@ -266,6 +269,7 @@ export default async function talentRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', req.tenantId)
       .eq('employee_id', employeeId)
       .order('created_at', { ascending: false })
+      .limit(200)
 
     if (error) return reply.code(500).send({ error: error.message })
     return reply.send({ data: data ?? [] })

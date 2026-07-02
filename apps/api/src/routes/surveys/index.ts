@@ -548,7 +548,7 @@ export default async function surveyRoutes(fastify: FastifyInstance) {
   // ── Admin: list survey templates ───────────────────────────────────────────────
 
   fastify.get('/admin/templates', hrAuth, async (_req, reply) => {
-    const { data } = await supabase.from('survey_templates').select('*').order('survey_type')
+    const { data } = await supabase.from('survey_templates').select('*').order('survey_type').limit(200)
     return reply.send({ data: data ?? [] })
   })
 

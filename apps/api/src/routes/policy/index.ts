@@ -174,6 +174,7 @@ export default async function policyRoutes(fastify: FastifyInstance) {
       .eq('status', 'published')
       .order('category')
       .order('title')
+      .limit(500)
 
     if (category) q = q.eq('category', category)
 
@@ -213,6 +214,7 @@ export default async function policyRoutes(fastify: FastifyInstance) {
       .select('id, title, category, description, status, requires_acknowledgement, effective_from, published_at, version, created_at, is_mandatory')
       .eq('tenant_id', tenantId)
       .order('created_at', { ascending: false })
+      .limit(500)
 
     if (status) q = q.eq('status', status)
 

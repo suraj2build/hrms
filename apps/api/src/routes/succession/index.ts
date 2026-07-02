@@ -203,6 +203,7 @@ export default async function successionRoutes(fastify: FastifyInstance) {
       .eq('status', status)
       .order('risk_level', { ascending: false })
       .order('position_title')
+      .limit(500)
 
     if (error) return reply.status(500).send({ error: error.message })
 
@@ -243,7 +244,8 @@ export default async function successionRoutes(fastify: FastifyInstance) {
         .eq('tenant_id', tenantId)
         .eq('plan_id', id)
         .order('readiness_level')
-        .order('readiness_score', { ascending: false }),
+        .order('readiness_score', { ascending: false })
+        .limit(200),
     ])
 
     if (planResult.error || !planResult.data) return reply.status(404).send({ error: 'Plan not found' })
@@ -454,6 +456,7 @@ export default async function successionRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', tenantId)
       .eq('candidate_id', cid)
       .order('created_at')
+      .limit(100)
 
     if (error) return reply.status(500).send({ error: error.message })
     return reply.send({ data: data ?? [] })
@@ -640,6 +643,7 @@ export default async function successionRoutes(fastify: FastifyInstance) {
       .select('id, title, status, created_at, created_by, closed_at')
       .eq('tenant_id', tenantId)
       .order('created_at', { ascending: false })
+      .limit(200)
     if (error) return reply.status(500).send({ error: error.message })
     return reply.send({ data: data ?? [] })
   })
@@ -678,7 +682,8 @@ export default async function successionRoutes(fastify: FastifyInstance) {
         .select(`id, field_changed, old_value, new_value, notes, created_at,
           employees!calibration_changes_candidate_id_fkey(first_name, last_name, employee_code)`)
         .eq('session_id', sessionId).eq('tenant_id', tenantId)
-        .order('created_at', { ascending: false }),
+        .order('created_at', { ascending: false })
+        .limit(500),
     ])
 
     if (sessionResult.error || !sessionResult.data) return reply.status(404).send({ error: 'Session not found' })

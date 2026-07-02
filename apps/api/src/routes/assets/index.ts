@@ -64,6 +64,7 @@ export default async function assetsRoutes(fastify: FastifyInstance) {
       `)
       .eq('tenant_id', req.tenantId)
       .order('created_at', { ascending: false })
+      .limit(500)
 
     if (status)      q = q.eq('status', status)
     if (category_id) q = q.eq('category_id', category_id)
@@ -308,6 +309,7 @@ export default async function assetsRoutes(fastify: FastifyInstance) {
       .eq('assigned_to', id)
       .eq('status', 'assigned')
       .order('asset_code')
+      .limit(200)
     if (aErr) req.log.warn({ err: aErr, employeeId: id }, 'assets list query failed — returning empty')
 
     const { data: history, error: hErr } = await fastify.supabase
@@ -316,6 +318,7 @@ export default async function assetsRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', req.tenantId)
       .eq('employee_id', id)
       .order('created_at', { ascending: false })
+      .limit(500)
     if (hErr) req.log.warn({ err: hErr, employeeId: id }, 'asset ledger query failed — returning empty')
 
     return reply.send({
@@ -379,6 +382,7 @@ export default async function assetsRoutes(fastify: FastifyInstance) {
       .select('*, asset_categories(name)')
       .eq('tenant_id', req.tenantId).eq('employee_id', empId)
       .order('requested_at', { ascending: false })
+      .limit(200)
     if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
     return reply.send({ data: (data ?? []).map((r: any) => ({ ...r, category_name: r.asset_categories?.name ?? null, asset_categories: undefined })) })
   })
@@ -389,7 +393,7 @@ export default async function assetsRoutes(fastify: FastifyInstance) {
     let q = fastify.supabase
       .from('asset_requests')
       .select('*, asset_categories(name), employees(first_name, last_name, employee_code)')
-      .eq('tenant_id', req.tenantId).order('requested_at', { ascending: false })
+      .eq('tenant_id', req.tenantId).order('requested_at', { ascending: false }).limit(500)
     if (status && status !== 'all') q = q.eq('status', status)
     const { data, error } = await q
     if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
