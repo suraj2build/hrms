@@ -357,6 +357,8 @@ Update this table after each issue is committed and pushed.
 | ISSUE-036 | ExceptionGovernance pagination offset hardcoded to 0 | page state + PAGE_SIZE=50 + offset wired into queryKey and URLSearchParams; prev/next controls; reset on filter apply/clear | 2026-07-02 |
 | ISSUE-042A | HIGH-risk mutation routes unvalidated | Zod safeParse on 25 handlers across work-sessions (pair+lock), upload (csv), surveys (9 handlers), succession (9 handlers), talent (4 handlers), policy (3 handlers); UUID fields validated; closed enums: talent interest status (4), calibration field_changed (9); tenant-extensible fields use z.string() | 2026-07-02 |
 | ISSUE-043A | Unbounded list queries (simple subset) | .limit() defaults on 22 queries across 7 files: assets (5 handlers), documents (1), recognition (6), talent (4), surveys templates (1), succession (5), policy (2); limits 100–500 based on expected cardinality; complex aggregation handlers (leaderboard, rnr-summary, analytics) excluded | 2026-07-02 |
+| ISSUE-045 | Residue assessment of 040–045 cluster | Assessed and redistributed: 042B (validation gaps — employees PUT + recognition + trust/fabric/mood/workspace/payroll/recruitment), 043B (real pagination — leave/regularisation/helpdesk/fbp/mood), 043C (simple-limit payroll endpoints), 046 (WhatsApp + engine try/catch). No standalone work remains under 045. | 2026-07-02 |
+| ISSUE-046 | WhatsApp and engine-call failures convert successes into 500s | Fire-and-forget try/catch on 4 WhatsApp sendTemplate calls (recognition kudos, declare-winner, helpdesk ticket, policy publish loop); controlled try/catch on 3 primary engine calls (computeWorkingLeaveDays leave-approve, verificationOrchestrator HR+ESS Aadhaar, regulatoryIngestionService.ingest) | 2026-07-02 |
 
 ---
 
@@ -374,4 +376,4 @@ Update this table after each issue is committed and pushed.
 
 ---
 
-*Last updated: 2026-07-02. Phase 1 (Critical Security) fully closed. Phase 2 in progress: ISSUE-025, ISSUE-036, ISSUE-040, ISSUE-041, ISSUE-042A, ISSUE-043A, ISSUE-044 closed. ISSUE-043A closed. Next: ISSUE-045 (residue assessment). ISSUE-028 (raw setInterval schedulers) remains deferred.*
+*Last updated: 2026-07-02. Phase 1 (Critical Security) fully closed. Phase 2 in progress: ISSUE-025, ISSUE-036, ISSUE-040, ISSUE-041, ISSUE-042A, ISSUE-043A, ISSUE-044, ISSUE-045 (redistributed), ISSUE-046 closed. Next: ISSUE-042B (medium-risk validation — employees PUT, recognition, trust/fabric/mood/workspace/payroll/recruitment), then ISSUE-043C (simple-limit payroll endpoints), then ISSUE-043B (real pagination). ISSUE-028 (raw setInterval schedulers) remains deferred.*
