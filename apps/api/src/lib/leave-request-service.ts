@@ -540,6 +540,15 @@ export async function createLeaveRequest(
     .single()
 
   if (error) {
+    // 23505: unique violation — two concurrent submissions raced through the
+    // overlap check and both attempted to insert. Surface as CONFLICT so the
+    // route handler maps it to 409, same as the application-layer overlap guard.
+    if (error.code === '23505') {
+      return {
+        ok:    false,
+        error: { type: 'CONFLICT', message: 'You already have a leave request that overlaps with this date range' },
+      }
+    }
     return { ok: false, error: { type: 'DB_ERROR', message: error.message ?? 'Failed to create leave request' } }
   }
 
