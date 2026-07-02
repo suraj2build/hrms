@@ -21,7 +21,7 @@
 
 -- ── Data field classification registry ───────────────────────────────────────
 
-CREATE TABLE data_field_classifications (
+CREATE TABLE IF NOT EXISTS data_field_classifications (
   table_name       text        NOT NULL,
   column_name      text        NOT NULL,
   sensitivity      text        NOT NULL
@@ -47,9 +47,9 @@ CREATE TABLE data_field_classifications (
   PRIMARY KEY (table_name, column_name)
 );
 
-CREATE INDEX idx_dfc_sensitivity ON data_field_classifications (sensitivity)
+CREATE INDEX IF NOT EXISTS idx_dfc_sensitivity ON data_field_classifications (sensitivity)
   WHERE sensitivity IN ('restricted', 'special_category');
-CREATE INDEX idx_dfc_encrypt     ON data_field_classifications (encrypt_at_rest)
+CREATE INDEX IF NOT EXISTS idx_dfc_encrypt     ON data_field_classifications (encrypt_at_rest)
   WHERE encrypt_at_rest = true;
 
 CREATE OR REPLACE FUNCTION fn_touch_data_field_classifications()
@@ -102,7 +102,7 @@ VALUES
 
 -- ── PII access justification log ─────────────────────────────────────────────
 
-CREATE TABLE pii_access_log (
+CREATE TABLE IF NOT EXISTS pii_access_log (
   id              bigint      GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   tenant_id       uuid        NOT NULL,
   accessor_id     uuid        NOT NULL,           -- auth.users(id) of the accessor
@@ -126,13 +126,13 @@ CREATE TABLE pii_access_log (
   flag_reason     text
 );
 
-CREATE INDEX idx_pii_access_tenant_time   ON pii_access_log (tenant_id, accessed_at DESC);
-CREATE INDEX idx_pii_access_accessor      ON pii_access_log (accessor_id, accessed_at DESC);
-CREATE INDEX idx_pii_access_purpose       ON pii_access_log (access_purpose, accessed_at DESC)
+CREATE INDEX IF NOT EXISTS idx_pii_access_tenant_time   ON pii_access_log (tenant_id, accessed_at DESC);
+CREATE INDEX IF NOT EXISTS idx_pii_access_accessor      ON pii_access_log (accessor_id, accessed_at DESC);
+CREATE INDEX IF NOT EXISTS idx_pii_access_purpose       ON pii_access_log (access_purpose, accessed_at DESC)
   WHERE access_purpose IN ('bulk_export', 'support');
-CREATE INDEX idx_pii_access_flagged       ON pii_access_log (flagged, accessed_at DESC)
+CREATE INDEX IF NOT EXISTS idx_pii_access_flagged       ON pii_access_log (flagged, accessed_at DESC)
   WHERE flagged = true;
-CREATE INDEX idx_pii_access_correlation   ON pii_access_log (correlation_id)
+CREATE INDEX IF NOT EXISTS idx_pii_access_correlation   ON pii_access_log (correlation_id)
   WHERE correlation_id IS NOT NULL;
 
 COMMENT ON TABLE pii_access_log IS
@@ -141,7 +141,7 @@ COMMENT ON TABLE pii_access_log IS
 
 -- ── Right-to-erasure requests ─────────────────────────────────────────────────
 
-CREATE TABLE erasure_requests (
+CREATE TABLE IF NOT EXISTS erasure_requests (
   id               uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id        uuid        NOT NULL,
 
@@ -187,10 +187,10 @@ CREATE TABLE erasure_requests (
   updated_at       timestamptz NOT NULL DEFAULT now()
 );
 
-CREATE INDEX idx_erasure_tenant_status  ON erasure_requests (tenant_id, status);
-CREATE INDEX idx_erasure_pending_sla    ON erasure_requests (sla_deadline ASC)
+CREATE INDEX IF NOT EXISTS idx_erasure_tenant_status  ON erasure_requests (tenant_id, status);
+CREATE INDEX IF NOT EXISTS idx_erasure_pending_sla    ON erasure_requests (sla_deadline ASC)
   WHERE status IN ('pending', 'in_progress', 'on_hold');
-CREATE INDEX idx_erasure_employee       ON erasure_requests (employee_id)
+CREATE INDEX IF NOT EXISTS idx_erasure_employee       ON erasure_requests (employee_id)
   WHERE employee_id IS NOT NULL;
 
 -- Compute sla_deadline on INSERT (requested_at + 30 days).
@@ -224,7 +224,7 @@ COMMENT ON TABLE erasure_requests IS
 
 -- ── Retention enforcement runs ────────────────────────────────────────────────
 
-CREATE TABLE retention_enforcement_runs (
+CREATE TABLE IF NOT EXISTS retention_enforcement_runs (
   id                 uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id          uuid        NOT NULL,
   run_at             timestamptz NOT NULL DEFAULT now(),
@@ -239,8 +239,8 @@ CREATE TABLE retention_enforcement_runs (
                                  CHECK (triggered_by IN ('scheduler','manual','test'))
 );
 
-CREATE INDEX idx_retention_runs_tenant ON retention_enforcement_runs (tenant_id, run_at DESC);
-CREATE INDEX idx_retention_runs_errors ON retention_enforcement_runs (run_at DESC)
+CREATE INDEX IF NOT EXISTS idx_retention_runs_tenant ON retention_enforcement_runs (tenant_id, run_at DESC);
+CREATE INDEX IF NOT EXISTS idx_retention_runs_errors ON retention_enforcement_runs (run_at DESC)
   WHERE jsonb_array_length(errors) > 0;
 
 COMMENT ON TABLE retention_enforcement_runs IS

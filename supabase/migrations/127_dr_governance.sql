@@ -26,7 +26,7 @@
 
 -- ── Backup checkpoints ────────────────────────────────────────────────────────
 
-CREATE TABLE backup_checkpoints (
+CREATE TABLE IF NOT EXISTS backup_checkpoints (
   id                   uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
   checkpoint_type      text        NOT NULL
                                    CHECK (checkpoint_type IN (
@@ -65,12 +65,12 @@ CREATE TABLE backup_checkpoints (
   created_at           timestamptz NOT NULL DEFAULT now()
 );
 
-CREATE INDEX idx_backup_checkpoints_verified   ON backup_checkpoints (verification_status, backup_completed_at DESC)
+CREATE INDEX IF NOT EXISTS idx_backup_checkpoints_verified   ON backup_checkpoints (verification_status, backup_completed_at DESC)
   WHERE verification_status = 'verified';
-CREATE INDEX idx_backup_checkpoints_type       ON backup_checkpoints (checkpoint_type, backup_completed_at DESC);
-CREATE INDEX idx_backup_checkpoints_tenant     ON backup_checkpoints (tenant_id, backup_completed_at DESC)
+CREATE INDEX IF NOT EXISTS idx_backup_checkpoints_type       ON backup_checkpoints (checkpoint_type, backup_completed_at DESC);
+CREATE INDEX IF NOT EXISTS idx_backup_checkpoints_tenant     ON backup_checkpoints (tenant_id, backup_completed_at DESC)
   WHERE tenant_id IS NOT NULL;
-CREATE INDEX idx_backup_checkpoints_unverified ON backup_checkpoints (created_at DESC)
+CREATE INDEX IF NOT EXISTS idx_backup_checkpoints_unverified ON backup_checkpoints (created_at DESC)
   WHERE verification_status = 'unverified';
 
 COMMENT ON TABLE backup_checkpoints IS
@@ -80,7 +80,7 @@ COMMENT ON TABLE backup_checkpoints IS
 
 -- ── Restore drills ────────────────────────────────────────────────────────────
 
-CREATE TABLE restore_drills (
+CREATE TABLE IF NOT EXISTS restore_drills (
   id                   uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
   scenario_code        text        NOT NULL,            -- 'A', 'B', 'C', 'D' — matches dr_scenarios
   drill_type           text        NOT NULL
@@ -134,9 +134,9 @@ CREATE TABLE restore_drills (
   next_drill_due       date
 );
 
-CREATE INDEX idx_restore_drills_passed      ON restore_drills (passed, completed_at DESC);
-CREATE INDEX idx_restore_drills_scenario    ON restore_drills (scenario_code, completed_at DESC);
-CREATE INDEX idx_restore_drills_due         ON restore_drills (next_drill_due ASC)
+CREATE INDEX IF NOT EXISTS idx_restore_drills_passed      ON restore_drills (passed, completed_at DESC);
+CREATE INDEX IF NOT EXISTS idx_restore_drills_scenario    ON restore_drills (scenario_code, completed_at DESC);
+CREATE INDEX IF NOT EXISTS idx_restore_drills_due         ON restore_drills (next_drill_due ASC)
   WHERE next_drill_due IS NOT NULL AND passed = true;
 
 -- fn_touch_restore_drills also computes next_drill_due (completed_at + 90 days).
@@ -166,7 +166,7 @@ COMMENT ON TABLE restore_drills IS
 
 -- ── DR scenario reference table ───────────────────────────────────────────────
 
-CREATE TABLE dr_scenarios (
+CREATE TABLE IF NOT EXISTS dr_scenarios (
   code             text        PRIMARY KEY,   -- 'A', 'B', 'C', 'D'
   name             text        NOT NULL,
   description      text        NOT NULL,
