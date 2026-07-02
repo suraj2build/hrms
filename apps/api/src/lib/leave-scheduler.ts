@@ -356,17 +356,24 @@ async function restoreState(supabase: SupabaseClient): Promise<void> {
  * Call once after the Supabase plugin is registered in Fastify startup.
  */
 export function registerLeaveScheduler(supabase: SupabaseClient): void {
-  // Restore state from DB before first tick (handles process restarts)
-  restoreState(supabase)
-    .then(() => tick(supabase))        // initial tick
-    .then(() => {
-      setInterval(() => {
-        tick(supabase).catch((err: Error) => {
-          console.error('[leave-scheduler] tick error:', err.message)
-          writeHeartbeat(supabase, 'error', { tick: tickCount }, err.message).catch(() => undefined)
-        })
-      }, TICK_MS)
-      console.log(`📅 Leave scheduler active — ticking every ${TICK_MS / 60_000} min`)
+  // Register the interval unconditionally BEFORE the startup promise chain so
+  // the scheduler survives a startup failure (DB unavailable, restoreState()
+  // throws, initial tick() throws). Previously the interval was inside the
+  // .then() and would never be registered if startup failed. (ISSUE-025)
+  setInterval(() => {
+    tick(supabase).catch((err: Error) => {
+      console.error('[leave-scheduler] tick error:', err.message)
+      writeHeartbeat(supabase, 'error', { tick: tickCount }, err.message).catch(() => undefined)
     })
-    .catch(console.error)
+  }, TICK_MS)
+
+  // Restore state and run the first tick. Errors here no longer abort the
+  // interval; we still log them and write a heartbeat for observability.
+  restoreState(supabase)
+    .then(() => tick(supabase))
+    .then(() => console.log(`📅 Leave scheduler active — ticking every ${TICK_MS / 60_000} min`))
+    .catch((err: Error) => {
+      console.error('[leave-scheduler] startup error (interval still active):', err.message)
+      writeHeartbeat(supabase, 'error', { tick: tickCount }, err.message).catch(() => undefined)
+    })
 }

@@ -341,6 +341,14 @@ Update this table after each issue is committed and pushed.
 | ISSUE-011 | Durable queue jobs dead-letter | register 6 handlers before durableQueue.start() in index.ts | 2026-07-02 |
 | ISSUE-013 | Unbounded queries (OOM risk) | .limit() on payroll export, variance, muster, anomaly queries | 2026-07-02 |
 | ISSUE-010 | N+1 queries in attendance/leave | batch org ctx in recomputeRange; runConcurrent bulk-assign; freeze-guard .in() | 2026-07-02 |
+| ISSUE-023 | Deactivated-account window 5 min | IS_ACTIVE_TTL (60 s) re-check on cache hit in auth.ts | 2026-07-02 |
+| ISSUE-024 | Raw DB error messages leaked to clients | onSend hook + error-sanitizer.ts | 2026-07-01 |
+| ISSUE-047 | /owner/tenants missing Zod validation | Zod schemas on owner/tenants mutations | 2026-07-01 |
+| ISSUE-048 | WhatsApp webhook no rate limiting | per-route rateLimit config | 2026-07-01 |
+| ISSUE-018 | ESS home approval count tenant-wide | scope to direct reports in ess/home.ts | 2026-07-01 |
+| ISSUE-009 | Notification dispatch stub | registerNotificationHandlers() + inbox_items writes | 2026-07-01 |
+| ISSUE-012 | Unhandled rejections in schedulers | .catch() on all async timer callbacks | 2026-07-01 |
+| ISSUE-026 | event-bus-automation error boundaries | VERIFIED CLEAN — no code changes needed | 2026-07-01 |
 
 ---
 
@@ -358,5 +366,4 @@ Update this table after each issue is committed and pushed.
 
 ---
 
-*Last updated: 2026-07-02 after ISSUE-022, ISSUE-079, ISSUE-011, ISSUE-013, ISSUE-010 closures.*
-*Next open issue: ISSUE-023 (deactivated accounts valid until JWT expiry — scoped to auth plugin is_active check only; see AF-001 for lifecycle sync gap).*
+*Last updated: 2026-07-02. Phase 1 (Critical Security) fully closed. Phase 2 next: ISSUE-025.*
