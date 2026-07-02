@@ -2242,7 +2242,8 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       .single()
     if (!run) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Run not found' })
 
-    const { data: slips } = await fastify.supabase
+    const EXPORT_LIMIT = 10_000
+    const { data: slips, error: slipsError } = await fastify.supabase
       .from('payroll_slips')
       .select(`
         employee_id, month,
@@ -2252,7 +2253,12 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       `)
       .eq('run_id', id)
       .eq('tenant_id', req.tenantId)
-      .limit(10_000)
+      .limit(EXPORT_LIMIT)
+
+    if (slipsError) return reply.code(500).send({ error: 'DB_ERROR', message: slipsError.message })
+    if ((slips?.length ?? 0) >= EXPORT_LIMIT) {
+      return reply.code(422).send({ error: 'EXPORT_TOO_LARGE', message: 'This payroll run exceeds the online export limit of 10,000 rows. Please contact support for a bulk export.' })
+    }
 
     const header = [
       'Employee Code', 'Employee Name', 'Month',
@@ -2308,8 +2314,9 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
     const prevMonth = `${pd.getFullYear()}-${String(pd.getMonth() + 1).padStart(2, '0')}`
 
     // Fetch current slips + previous run in parallel
+    const VARIANCE_LIMIT = 10_000
     const [
-      { data: currentSlips },
+      { data: currentSlips, error: currSlipsError },
       { data: prevRun },
     ] = await Promise.all([
       fastify.supabase
@@ -2321,7 +2328,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
         `)
         .eq('run_id', id)
         .eq('tenant_id', tenantId)
-        .limit(10_000),
+        .limit(VARIANCE_LIMIT),
       fastify.supabase
         .from('payroll_runs')
         .select('id, month')
@@ -2331,6 +2338,11 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
         .limit(1)
         .maybeSingle(),
     ])
+
+    if (currSlipsError) return reply.code(500).send({ error: 'DB_ERROR', message: currSlipsError.message })
+    if ((currentSlips?.length ?? 0) >= VARIANCE_LIMIT) {
+      return reply.code(422).send({ error: 'EXPORT_TOO_LARGE', message: 'This payroll run exceeds the variance report limit of 10,000 rows. Please contact support for a bulk export.' })
+    }
 
     const totalCurrGross = r2((currentSlips ?? []).reduce((s: number, r: any) => s + r.gross_pay, 0))
     const totalCurrNet   = r2((currentSlips ?? []).reduce((s: number, r: any) => s + r.net_pay,   0))
@@ -2358,12 +2370,17 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
     }
 
     // Fetch previous run slips
-    const { data: prevSlips } = await fastify.supabase
+    const { data: prevSlips, error: prevSlipsError } = await fastify.supabase
       .from('payroll_slips')
       .select('employee_id, gross_pay, net_pay, lop_days, lop_amount, payable_days, total_deductions')
       .eq('run_id', prevRun.id)
       .eq('tenant_id', tenantId)
-      .limit(10_000)
+      .limit(VARIANCE_LIMIT)
+
+    if (prevSlipsError) return reply.code(500).send({ error: 'DB_ERROR', message: prevSlipsError.message })
+    if ((prevSlips?.length ?? 0) >= VARIANCE_LIMIT) {
+      return reply.code(422).send({ error: 'EXPORT_TOO_LARGE', message: 'The previous payroll run exceeds the variance report limit of 10,000 rows. Please contact support for a bulk export.' })
+    }
 
     const prevMap = new Map<string, any>((prevSlips ?? []).map((s: any) => [s.employee_id, s]))
 
