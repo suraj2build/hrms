@@ -578,9 +578,9 @@ export function LeaveApply({ mode = 'page', onSuccess, onClose }: LeaveApplyProp
   // ── Queries ──────────────────────────────────────────────────────────────────
 
   const { data: ltData, isLoading: ltLoading } = useQuery<{ data: LeaveType[] }>({
-    queryKey: ['leave-types-active'],
+    queryKey: ['leave-types'],
     queryFn:  () => api.get('/masters/leave-types'),
-    staleTime: 120_000,
+    staleTime: 60_000,
   })
   const leaveTypes = (ltData?.data ?? []).filter(lt => lt.is_active)
 
