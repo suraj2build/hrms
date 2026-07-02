@@ -13,7 +13,7 @@
  * Design: design-system tokens only. Major UI/UX redesign with interactive calendar.
  */
 
-import { useState, useMemo }                             from 'react'
+import { useState, useMemo, useRef }                     from 'react'
 import { useNavigate, Link }                             from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient }         from '@tanstack/react-query'
 import {
@@ -560,6 +560,10 @@ export function LeaveApply({ mode = 'page', onSuccess, onClose }: LeaveApplyProp
   const { profile } = useAuthStore()
   const employeeId  = profile?.employee_id ?? null
 
+  // Stable per-form-mount UUID sent as Idempotency-Key to prevent duplicate
+  // submissions on network retry. Rotated after each successful submission.
+  const idempotencyKey = useRef(crypto.randomUUID())
+
   // ── Form state ───────────────────────────────────────────────────────────────
   const [leaveTypeId,     setLeaveTypeId]     = useState('')
   const [fromDate,        setFromDate]        = useState('')
@@ -925,8 +929,9 @@ export function LeaveApply({ mode = 'page', onSuccess, onClose }: LeaveApplyProp
         session:         startSession, // backward compat
         hours_requested: startSession === 'hourly' ? hoursRequested : undefined,
         reason:          reason.trim(),
-      }),
+      }, { headers: { 'Idempotency-Key': idempotencyKey.current } }),
     onSuccess: (_res) => {
+      idempotencyKey.current = crypto.randomUUID()
       const sessionLabel: Record<LeaveSession, string> = {
         full_day:    'full day',
         first_half:  'first half (AM)',

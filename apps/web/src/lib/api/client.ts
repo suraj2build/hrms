@@ -252,8 +252,8 @@ export const api = {
   getWithMeta: <T>(url: string) => requestWithMeta<T>(url),
   /** GET that returns the raw Response (for file/blob downloads). */
   getRaw: (url: string) => requestRaw(url),
-  post: <T>(url: string, body?: unknown) =>
-    request<T>(url, { method: 'POST', body: body !== undefined ? JSON.stringify(body) : undefined }),
+  post: <T>(url: string, body?: unknown, opts?: { headers?: HeadersInit }) =>
+    request<T>(url, { method: 'POST', body: body !== undefined ? JSON.stringify(body) : undefined, headers: opts?.headers }),
   put: <T>(url: string, body: unknown) =>
     request<T>(url, { method: 'PUT', body: JSON.stringify(body) }),
   patch: <T>(url: string, body: unknown) =>

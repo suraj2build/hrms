@@ -22,6 +22,7 @@ import {
   getLeaveRequest,
   cancelLeaveRequest,
 }                               from '../../lib/leave-request-service.js'
+import { checkIdempotency, storeIdempotency } from '../../lib/idempotency.js'
 import {
   approveLeaveRequest,
   rejectLeaveRequest,
@@ -95,6 +96,16 @@ export default async function leaveRequestsRoutes(fastify: FastifyInstance) {
       })
     }
 
+    // Idempotency: optional header lets callers replay on network retry
+    const iKey = (req.headers['idempotency-key'] as string | undefined)?.trim()
+    if (iKey) {
+      const cached = await checkIdempotency(fastify.supabase, req.tenantId, iKey, 'leave-request')
+      if (cached) {
+        reply.header('Idempotency-Replayed', 'true')
+        return reply.code(cached.status_code).send(cached.response)
+      }
+    }
+
     try {
       const result = await createLeaveRequest(fastify.supabase, {
         tenantId:       req.tenantId,
@@ -130,7 +141,11 @@ export default async function leaveRequestsRoutes(fastify: FastifyInstance) {
         payload:     { from_date: parsed.data.from_date, to_date: parsed.data.to_date, leave_type_id: parsed.data.leave_type_id },
         correlation_id: req.correlationId ?? undefined,
       })
-      return reply.code(201).send({ data: result.value })
+      const responseBody = { data: result.value }
+      if (iKey) {
+        await storeIdempotency(fastify.supabase, req.tenantId, iKey, 'leave-request', 201, responseBody)
+      }
+      return reply.code(201).send(responseBody)
     } catch (err: unknown) {
       req.log.error({ err, tenantId: req.tenantId }, '[leave-requests] unexpected error creating leave request')
       return reply.code(500).send({ error: 'LEAVE_SERVICE_ERROR', message: 'Failed to create leave request' })
