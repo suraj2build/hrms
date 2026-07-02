@@ -1867,11 +1867,18 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
   // Send the generated offer letter HTML to the candidate via email
   fastify.post('/offers/:appId/send', hrAdminAuth, async (req: any, reply) => {
     const { appId } = req.params as { appId: string }
-    const { letter_html, recipient_email, job_title, company_name, offered_amount, joining_date, valid_until } = req.body as any
-
-    if (!recipient_email || !letter_html) {
-      return reply.code(400).send({ error: 'VALIDATION', message: 'recipient_email and letter_html are required' })
-    }
+    const offerSendSchema = z.object({
+      letter_html:     z.string().min(1),
+      recipient_email: z.string().email(),
+      job_title:       z.string().optional().nullable(),
+      company_name:    z.string().optional().nullable(),
+      offered_amount:  z.unknown().optional().nullable(),
+      joining_date:    z.string().optional().nullable(),
+      valid_until:     z.string().optional().nullable(),
+    })
+    const offerSendParsed = offerSendSchema.safeParse(req.body)
+    if (!offerSendParsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: offerSendParsed.error.issues[0]?.message ?? 'Invalid request body' })
+    const { letter_html, recipient_email, job_title, company_name, offered_amount, joining_date, valid_until } = offerSendParsed.data
 
     // Verify app belongs to tenant (need candidate/requisition ids to persist the offer)
     const { data: app } = await fastify.supabase

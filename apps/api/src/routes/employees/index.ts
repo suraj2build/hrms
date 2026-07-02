@@ -401,8 +401,25 @@ export default async function employeeRoutes(fastify: FastifyInstance) {
   })
 
   // PUT /employees/:id — HR admin / super_admin only
+  const PutEmployeeSchema = z.object({
+    first_name:           z.string().min(1).optional(),
+    last_name:            z.string().min(1).optional(),
+    email:                z.string().email().optional().nullable(),
+    phone:                z.string().optional().nullable(),
+    status:               z.string().optional(),
+    date_of_joining:      z.string().optional().nullable(),
+    joining_date:         z.string().optional().nullable(),
+    work_location_id:     z.string().uuid().optional().nullable(),
+    manager_id:           z.string().uuid().optional().nullable(),
+    reporting_manager_id: z.string().uuid().optional().nullable(),
+    employment_type:      z.string().optional().nullable(),
+  }).passthrough()
+
   fastify.put('/employees/:id', hrAdminAuth, async (request, reply) => {
     const { id } = request.params as { id: string }
+
+    const parsed = PutEmployeeSchema.safeParse(request.body)
+    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message ?? 'Invalid request body' })
 
     // Validate: employee exists and belongs to this tenant before touching it
     const { data: existing, error: findError } = await fastify.supabase
@@ -424,7 +441,7 @@ export default async function employeeRoutes(fastify: FastifyInstance) {
       created_at: _created,
       created_by: _createdBy,
       ...safeUpdates
-    } = request.body as Record<string, unknown>
+    } = parsed.data as Record<string, unknown>
 
     const { data, error } = await fastify.supabase
       .from('employees')

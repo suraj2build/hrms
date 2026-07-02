@@ -4,6 +4,7 @@
  * All routes are passive and read-oriented. POST /evaluate is on-demand only.
  */
 import type { FastifyInstance } from 'fastify'
+import { z } from 'zod'
 import { trustIntelligenceService }    from '../../platform/trust/intelligence/trust-intelligence.service.js'
 import { workforceGraphService }       from '../../platform/trust/graph/workforce-graph.service.js'
 import { regulatoryIngestionService }  from '../../platform/regulatory/ingestion/regulatory-ingestion.service.js'
@@ -18,18 +19,27 @@ export default async function trustIntelligenceRoutes(fastify: FastifyInstance) 
    * Run trust evaluation for an employee (on-demand).
    * Body: { employee_id, pan?, account_number?, ifsc_code?, phone? }
    */
+  const EvaluateSchema = z.object({
+    employee_id:    z.string().uuid('employee_id must be a valid UUID'),
+    pan:            z.string().optional().nullable(),
+    account_number: z.string().optional().nullable(),
+    ifsc_code:      z.string().optional().nullable(),
+    phone:          z.string().optional().nullable(),
+  })
+
   fastify.post('/trust/evaluate', { preHandler: [fastify.authenticate] }, async (req, reply) => {
-    const body = req.body as any
+    const parsed = EvaluateSchema.safeParse(req.body)
+    if (!parsed.success) return reply.status(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message ?? 'Invalid request body' })
     const tenantId = (req as any).tenantId
     try {
       const result = await trustIntelligenceService.evaluateEmployee(fastify.supabase, {
-        employee_id:    body.employee_id,
+        employee_id:    parsed.data.employee_id,
         tenant_id:      tenantId,
         org_id:         tenantId,
-        pan:            body.pan,
-        account_number: body.account_number,
-        ifsc_code:      body.ifsc_code,
-        phone:          body.phone,
+        pan:            parsed.data.pan ?? undefined,
+        account_number: parsed.data.account_number ?? undefined,
+        ifsc_code:      parsed.data.ifsc_code ?? undefined,
+        phone:          parsed.data.phone ?? undefined,
       })
       return result
     } catch (err: any) {
@@ -184,22 +194,35 @@ export default async function trustIntelligenceRoutes(fastify: FastifyInstance) 
    * POST /trust/regulatory/revisions
    * Ingest a new compliance revision (HR admin only).
    */
+  const CreateRevisionSchema = z.object({
+    revision_type:    z.enum(['pf', 'esi', 'minimum_wage', 'overtime', 'jurisdiction_specific']),
+    jurisdiction:     z.string(),
+    title:            z.string().min(1),
+    description:      z.string(),
+    old_value:        z.number().optional(),
+    new_value:        z.number().optional(),
+    unit:             z.string().optional(),
+    effective_from:   z.string(),
+    source_reference: z.string().optional(),
+  })
+
   fastify.post('/trust/regulatory/revisions', { preHandler: [fastify.authenticate] }, async (req, reply) => {
-    const body = req.body as any
+    const parsed = CreateRevisionSchema.safeParse(req.body)
+    if (!parsed.success) return reply.status(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message ?? 'Invalid request body' })
     const tenantId = (req as any).tenantId
     let id: string | null | undefined
     try {
       id = await regulatoryIngestionService.ingest(fastify.supabase, {
         org_id:           tenantId,
-        revision_type:    body.revision_type,
-        jurisdiction:     body.jurisdiction,
-        title:            body.title,
-        description:      body.description,
-        old_value:        body.old_value,
-        new_value:        body.new_value,
-        unit:             body.unit,
-        effective_from:   body.effective_from,
-        source_reference: body.source_reference,
+        revision_type:    parsed.data.revision_type,
+        jurisdiction:     parsed.data.jurisdiction,
+        title:            parsed.data.title,
+        description:      parsed.data.description,
+        old_value:        parsed.data.old_value,
+        new_value:        parsed.data.new_value,
+        unit:             parsed.data.unit,
+        effective_from:   parsed.data.effective_from,
+        source_reference: parsed.data.source_reference,
       })
     } catch (err) {
       fastify.log.error({ err }, 'trust: regulatoryIngestionService.ingest threw')

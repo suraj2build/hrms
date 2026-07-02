@@ -884,6 +884,9 @@ export default async function reimbursementsRoutes(fastify: FastifyInstance) {
    */
   fastify.post('/:id/approve', { preHandler: [fastify.authenticate, requireHrAdmin] }, async (req: any, reply) => {
     const { id } = req.params as { id: string }
+    const approveBodySchema = z.object({ approved_amount: z.number().optional().nullable() }).passthrough()
+    const approveBodyParsed = approveBodySchema.safeParse(req.body)
+    if (!approveBodyParsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: approveBodyParsed.error.issues[0]?.message ?? 'Invalid request body' })
     const { data: existing } = await fastify.supabase
       .from('reimbursement_claims')
       .select('id, status, employee_id, claimed_amount')
@@ -913,7 +916,7 @@ export default async function reimbursementsRoutes(fastify: FastifyInstance) {
     }
 
     const now = new Date().toISOString()
-    const approvedAmt = (req.body as any)?.approved_amount ?? (existing as any).claimed_amount
+    const approvedAmt = approveBodyParsed.data.approved_amount ?? (existing as any).claimed_amount
     const { data, error } = await fastify.supabase
       .from('reimbursement_claims')
       .update({ status: 'approved', approved_amount: approvedAmt, reviewed_by: req.userId, reviewed_at: now, updated_at: now })

@@ -8,6 +8,7 @@
  */
 
 import type { FastifyInstance } from 'fastify'
+import { z } from 'zod'
 
 const ALLOWED_SIZES   = ['1-10','11-50','51-200','201-500','501-2000','2001-5000','5001+']
 const ALLOWED_INDUSTRIES = [
@@ -63,11 +64,24 @@ export default async function companySettingsRoutes(fastify: FastifyInstance) {
 
   // ── PATCH /workspace/company ──────────────────────────────────────────────────
 
+  const PatchCompanySchema = z.object({
+    name:       z.string().min(1).max(200).optional(),
+    industry:   z.string().optional(),
+    size_range: z.string().optional(),
+    country:    z.string().optional(),
+    timezone:   z.string().optional(),
+    logo_url:   z.string().optional().nullable(),
+    settings:   z.record(z.unknown()).optional(),
+  }).passthrough()
+
   fastify.patch('/workspace/company', auth, async (req: any, reply) => {
     if (!requireAdmin(req, reply)) return
 
+    const bodyParsed = PatchCompanySchema.safeParse(req.body)
+    if (!bodyParsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: bodyParsed.error.issues[0]?.message ?? 'Invalid request body' })
+
     const tenantId = req.tenantId
-    const body     = req.body as any
+    const body     = bodyParsed.data
 
     // Only allow safe fields to be updated
     const allowed: Record<string, unknown> = {}

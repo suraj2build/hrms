@@ -14,6 +14,59 @@ import { z } from 'zod'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { WhatsAppProvider } from '../../lib/whatsapp-provider.js'
 
+const CreateAwardSchema = z.object({
+  name:                 z.string().min(1),
+  description:          z.string().optional().nullable(),
+  frequency:            z.string().optional(),
+  award_type:           z.string().optional(),
+  monetary_value:       z.number().optional().nullable(),
+  monetary_description: z.string().optional().nullable(),
+  eligible_group:       z.unknown().optional(),
+  requires_nomination:  z.boolean().optional(),
+})
+
+const UpdateAwardSchema = z.object({
+  name:                 z.string().min(1).optional(),
+  description:          z.string().optional().nullable(),
+  frequency:            z.string().optional(),
+  award_type:           z.string().optional(),
+  monetary_value:       z.number().optional().nullable(),
+  monetary_description: z.string().optional().nullable(),
+  eligible_group:       z.unknown().optional(),
+  requires_nomination:  z.boolean().optional(),
+  is_active:            z.boolean().optional(),
+})
+
+const CreateRoundSchema = z.object({
+  period_label: z.string().min(1),
+  period_start: z.string().optional().nullable(),
+  period_end:   z.string().optional().nullable(),
+})
+
+const UpdateRoundSchema = z.object({
+  status:       z.string().optional(),
+  period_label: z.string().optional(),
+  period_start: z.string().optional().nullable(),
+  period_end:   z.string().optional().nullable(),
+})
+
+const DeclareWinnerSchema = z.object({
+  winner_employee_id: z.string().uuid('winner_employee_id must be a valid UUID'),
+  winner_notes:       z.string().optional().nullable(),
+})
+
+const NominateSchema = z.object({
+  nominee_id:    z.string().uuid('nominee_id must be a valid UUID'),
+  justification: z.string().optional().nullable(),
+})
+
+const SpotAwardSchema = z.object({
+  to_employee_id: z.string().uuid('to_employee_id must be a valid UUID'),
+  award_name:     z.string().min(1),
+  message:        z.string().optional().nullable(),
+  monetary_value: z.number().optional().nullable(),
+})
+
 const DEFAULT_BADGES = [
   { code: 'ownership_champion', label: 'Ownership Champion', icon: 'Award',     description: 'Takes end-to-end ownership',          points: 15 },
   { code: 'customer_hero',      label: 'Customer Hero',      icon: 'Heart',     description: 'Goes above and beyond for customers', points: 15 },
@@ -469,9 +522,9 @@ export default async function recognitionRoutes(fastify: FastifyInstance) {
   })
 
   fastify.post('/recognition/admin/awards', hrAuth, async (req: any, reply) => {
-    const body = req.body as any
-    const { name, description, frequency, award_type, monetary_value, monetary_description, eligible_group, requires_nomination } = body
-    if (!name?.trim()) return reply.code(400).send({ error: 'name is required' })
+    const parsed = CreateAwardSchema.safeParse(req.body)
+    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message ?? 'Invalid request body' })
+    const { name, description, frequency, award_type, monetary_value, monetary_description, eligible_group, requires_nomination } = parsed.data
     const { data, error } = await fastify.supabase.from('formal_awards')
       .insert({ tenant_id: req.tenantId, name: name.trim(), description, frequency: frequency || 'monthly', award_type: award_type || 'custom', monetary_value: monetary_value || null, monetary_description, eligible_group, requires_nomination: requires_nomination !== false, created_by: req.userId })
       .select('id').single()
@@ -481,9 +534,11 @@ export default async function recognitionRoutes(fastify: FastifyInstance) {
 
   fastify.patch('/recognition/admin/awards/:id', hrAuth, async (req: any, reply) => {
     const { id } = req.params as { id: string }
+    const parsed = UpdateAwardSchema.safeParse(req.body)
+    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message ?? 'Invalid request body' })
     const allowed = ['name','description','frequency','award_type','monetary_value','monetary_description','eligible_group','requires_nomination','is_active']
     const update: Record<string, unknown> = {}
-    for (const k of allowed) { if ((req.body as any)[k] !== undefined) update[k] = (req.body as any)[k] }
+    for (const k of allowed) { if ((parsed.data as any)[k] !== undefined) update[k] = (parsed.data as any)[k] }
     const { error } = await fastify.supabase.from('formal_awards').update(update).eq('tenant_id', req.tenantId).eq('id', id)
     if (error) return reply.code(500).send({ error: error.message })
     return reply.send({ data: { updated: true } })
@@ -511,8 +566,9 @@ export default async function recognitionRoutes(fastify: FastifyInstance) {
 
   fastify.post('/recognition/admin/awards/:awardId/rounds', hrAuth, async (req: any, reply) => {
     const { awardId } = req.params as { awardId: string }
-    const { period_label, period_start, period_end } = req.body as any
-    if (!period_label?.trim()) return reply.code(400).send({ error: 'period_label is required' })
+    const parsed = CreateRoundSchema.safeParse(req.body)
+    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message ?? 'Invalid request body' })
+    const { period_label, period_start, period_end } = parsed.data
     const { data, error } = await fastify.supabase.from('award_rounds')
       .insert({ tenant_id: req.tenantId, award_id: awardId, period_label: period_label.trim(), period_start: period_start || null, period_end: period_end || null, status: 'open', created_by: req.userId })
       .select('id').single()
@@ -522,9 +578,11 @@ export default async function recognitionRoutes(fastify: FastifyInstance) {
 
   fastify.patch('/recognition/admin/awards/:awardId/rounds/:roundId', hrAuth, async (req: any, reply) => {
     const { roundId } = req.params as { awardId: string; roundId: string }
+    const parsed = UpdateRoundSchema.safeParse(req.body)
+    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message ?? 'Invalid request body' })
     const allowed = ['status','period_label','period_start','period_end']
     const update: Record<string, unknown> = {}
-    for (const k of allowed) { if ((req.body as any)[k] !== undefined) update[k] = (req.body as any)[k] }
+    for (const k of allowed) { if ((parsed.data as any)[k] !== undefined) update[k] = (parsed.data as any)[k] }
     const { error } = await fastify.supabase.from('award_rounds').update(update).eq('tenant_id', req.tenantId).eq('id', roundId)
     if (error) return reply.code(500).send({ error: error.message })
     return reply.send({ data: { updated: true } })
@@ -532,8 +590,9 @@ export default async function recognitionRoutes(fastify: FastifyInstance) {
 
   fastify.post('/recognition/admin/awards/:awardId/rounds/:roundId/declare-winner', hrAuth, async (req: any, reply) => {
     const { awardId, roundId } = req.params as { awardId: string; roundId: string }
-    const { winner_employee_id, winner_notes } = req.body as any
-    if (!winner_employee_id) return reply.code(400).send({ error: 'winner_employee_id is required' })
+    const parsed = DeclareWinnerSchema.safeParse(req.body)
+    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message ?? 'Invalid request body' })
+    const { winner_employee_id, winner_notes } = parsed.data
     // Update the round
     const { data: round, error: re } = await fastify.supabase.from('award_rounds')
       .update({ status: 'closed', winner_employee_id, winner_notes: winner_notes || null, declared_at: new Date().toISOString(), declared_by: req.userId })
@@ -585,8 +644,9 @@ export default async function recognitionRoutes(fastify: FastifyInstance) {
 
   fastify.post('/recognition/admin/awards/:awardId/rounds/:roundId/nominations', { preHandler: fastify.authenticate }, async (req: any, reply) => {
     const { roundId } = req.params as { awardId: string; roundId: string }
-    const { nominee_id, justification } = req.body as any
-    if (!nominee_id) return reply.code(400).send({ error: 'nominee_id is required' })
+    const parsed = NominateSchema.safeParse(req.body)
+    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message ?? 'Invalid request body' })
+    const { nominee_id, justification } = parsed.data
     const { data, error } = await fastify.supabase.from('award_nominations')
       .insert({ tenant_id: req.tenantId, round_id: roundId, nominee_id, nominated_by: req.userId, justification: justification || null })
       .select('id').single()
@@ -730,8 +790,9 @@ export default async function recognitionRoutes(fastify: FastifyInstance) {
   })
 
   fastify.post('/recognition/spot-award', { preHandler: fastify.authenticate }, async (req: any, reply) => {
-    const { to_employee_id, award_name, message, monetary_value } = req.body as any
-    if (!to_employee_id || !award_name?.trim()) return reply.code(400).send({ error: 'to_employee_id and award_name are required' })
+    const parsed = SpotAwardSchema.safeParse(req.body)
+    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message ?? 'Invalid request body' })
+    const { to_employee_id, award_name, message, monetary_value } = parsed.data
     const empId = await resolveEmployeeId(fastify, req.userId, req.tenantId)
     if (!empId) return reply.code(403).send({ error: 'Employee profile not found' })
     const { data, error } = await fastify.supabase.from('spot_awards')
