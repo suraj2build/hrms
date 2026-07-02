@@ -352,6 +352,7 @@ Update this table after each issue is committed and pushed.
 | ISSUE-035 | Absconding scanner missing .catch() | COVERED BY ISSUE-012 — timers already wrapped in index.ts | 2026-07-02 |
 | ISSUE-025 | leave-scheduler startup crash | hoist setInterval before promise chain in leave-scheduler.ts | 2026-07-02 |
 | ISSUE-040 | roster-calendar engine-call handlers no try/catch | 8 engine-calling handlers wrapped; route-specific safe messages; server-side logging; CRUD handlers unchanged | 2026-07-02 |
+| ISSUE-041 | letters mutation routes unvalidated | Zod schemas on template create/update, generate, approve/reject, ESS request, fulfill/reject; approval_chain partial semantics preserved; content sanitisation deferred | 2026-07-02 |
 
 ---
 
@@ -369,4 +370,4 @@ Update this table after each issue is committed and pushed.
 
 ---
 
-*Last updated: 2026-07-02. Phase 1 (Critical Security) fully closed. ISSUE-025 and ISSUE-040 closed. Phase 2 next: ISSUE-041 (letters/index.ts mutation validation). ISSUE-028 (raw setInterval schedulers) remains open.*
+*Last updated: 2026-07-02. Phase 1 (Critical Security) fully closed. Phase 2 in progress: ISSUE-025, ISSUE-040, ISSUE-041 closed. Next: ISSUE-042 onwards (missing Zod validation on remaining route files, pagination, further try/catch hardening). ISSUE-028 (raw setInterval schedulers) remains open.*
