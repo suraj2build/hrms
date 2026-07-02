@@ -251,13 +251,13 @@ ISSUE-049 ISSUE-050
 
 **Phase 4 — Architecture / Technical Debt**
 ```
-CLOSED: ISSUE-028 ISSUE-054 ISSUE-055 ISSUE-056 ISSUE-057 ISSUE-058 ISSUE-061 ISSUE-083 ISSUE-088 ISSUE-090 ISSUE-111
-OPEN:   ISSUE-065 ISSUE-066 ISSUE-067 ISSUE-068 ISSUE-069
+CLOSED: ISSUE-028 ISSUE-054 ISSUE-055 ISSUE-056 ISSUE-057 ISSUE-058 ISSUE-061 ISSUE-066 ISSUE-067 ISSUE-068 ISSUE-069 ISSUE-083 ISSUE-088 ISSUE-090 ISSUE-111
+OPEN:   ISSUE-065
 ```
 
 **Phase 5 — Enterprise Features / Roadmap**
 ```
-ISSUE-058 ISSUE-059 ISSUE-068 ISSUE-069 ISSUE-070 ISSUE-082 ISSUE-104 ISSUE-116 ISSUE-117
+ISSUE-059 ISSUE-070 ISSUE-082 ISSUE-104 ISSUE-116 ISSUE-117
 ```
 
 ---
@@ -308,7 +308,7 @@ unless a specific issue requires re-reading the file.
 | RLS bypass | Service-role key used by all Fastify routes — RLS not the primary isolation mechanism |
 | Notification service | `dispatch()` in `lib/notification-service.ts` is a `console.log` stub (ISSUE-009, open) |
 | Job queue duality | `job-queue.ts` (in-memory, unreliable) + `durable-queue.ts` (Supabase-backed) both in use |
-| Migration count | 347 as of 2026-06-30; next available number is 348 |
+| Migration count | 349 as of 2026-07-02; next available number is 350 |
 | `org_id` tables | 17 tables use `org_id` instead of `tenant_id` (ISSUE-065, open) |
 | Partition expiry | `security_events` + `trace_spans` extended through Dec 2027 via migration 348 (ISSUE-079 — CLOSED) |
 | Razorpay billing | Webhook in `routes/billing/index.ts`; `tenants.status` is the authoritative field |
@@ -376,6 +376,10 @@ Update this table after each issue is committed and pushed.
 | ISSUE-061 | analytics/index.ts PUT /users/:id/status set profiles.is_active but did not call auth.admin.updateUserById() with ban_duration, leaving existing Supabase JWTs valid after deactivation. Added ban_duration: '876000h' on deactivate / 'none' on reactivate, mirroring the pattern already used in user-account.ts:349-350. Auth failure is logged as a warn (non-fatal) to preserve the DB update's response. Commit 78b7c7d. | 2026-07-02 |
 | ISSUE-058 | CLOSED — insufficient evidence to reproduce from current audit register. Original issue description exists only in session history (the 2026-06-30 17-agent audit report was never written to disk). Exhaustive codebase investigation covered: webhook delivery (WebhookService fully wired to 21 event types at index.ts:565), frontend setInterval leaks (all 5 web instances have clearInterval cleanup), dangerouslySetInnerHTML (3 instances, all guarded with sanitizeHtml()), security headers (@fastify/helmet global), rate limiting (global + per-route), export/download gating (no unprotected endpoints), localStorage inventory (hrms-auth stores profile+role but no auth token; bank/compensation data excluded from import store), window.location.href SPA navigation (QuickActions.tsx — UX debt, LOW tier). No MEDIUM-severity defect uniquely attributable to ISSUE-058 was identified. The dual Phase 4+Phase 5 listing suggests this was a feature-completeness item deferred to roadmap; no codebase evidence of a missing stub or partial implementation not already tracked under another issue number. Closing as unresolvable without original finding text. No code changed. | 2026-07-02 |
 | ISSUE-028 | 8 raw setInterval/setTimeout business schedulers not wired through the durable queue — crashes caused missed runs with no retry. Fixed in 4 batches: Batch A (sla-scanner, intelligence-scanner, attendance-api-scheduler) — existing handlers 'sla-scan', 'intelligence-scan', 'process-attendance' already registered from ISSUE-011; changed setInterval callbacks to enqueue with hourly/6h/5min idempotency keys. Batch B (digest-scheduler, poll-scheduler, wo-credit-reconciler) — exported tick/runPollTick functions; registered new handlers 'send-digest', 'send-pulse-poll', 'reconcile-wo-credits' in index.ts. Batch C (absconding scanner in index.ts) — safeRegisterModule now enqueues 'detect-absconding' with daily key; handler fans out per-tenant scan via dynamic import. Batch D (leave-scheduler) — exported tick(); setInterval enqueues 'leave-scheduler-tick' with hourly key; startup restoreState()→tick() direct call preserved for fast state recovery. All 4 batches TypeScript-clean. Commits 9a53361, 3e45aff, c89f635, 78750ca. | 2026-07-02 |
+| ISSUE-069 | PayrollControlCenter.tsx POST /payroll/runs caller sent `{ trigger: 'manual' }` — missing the required `month` field — causing 400 VALIDATION_ERROR on every invocation from that component. Changed to `{ month: payrollMonth }` using the existing component state variable, matching the payload shape of the two working callers (PayrollRuns.tsx, PayrollValidation.tsx). Commit 8094197. | 2026-07-02 |
+| ISSUE-068 | Two simultaneous POST /payroll/runs requests for the same month both bypassed the finalized-status guard, upserted to the same runId, deleted all payroll_slips, and raced to recompute — the second request failed with UNIQUE (run_id, employee_id) violations for every employee, marking the run partial_failed. Added `status === 'processing'` guard immediately after the existing `status === 'finalized'` check; returns 409 RUN_IN_PROGRESS. Uses the same existingRun row already fetched, zero schema changes. Commit ec0e872. | 2026-07-02 |
+| ISSUE-066 | POST /leave-requests had no network-retry protection — a request that timed out client-side but succeeded server-side would create a duplicate PENDING row on retry. Wired existing checkIdempotency/storeIdempotency helpers (idempotency_keys table, migration 018) into the route handler: optional Idempotency-Key header checked before createLeaveRequest(), response stored only on successful 201 (not on validation/business failures). LeaveApply.tsx generates a stable UUID per form mount via useRef, sends it as Idempotency-Key header, rotates on success. api.post() extended to accept optional { headers } third arg (backward-compatible). Commit f18dd31. | 2026-07-02 |
+| ISSUE-067 | POST /leave-requests overlap check was a non-atomic read-then-insert — two concurrent identical submissions could both pass the check before either committed, producing two PENDING rows. Added migration 349 creating a partial unique index on (tenant_id, employee_id, from_date, to_date) WHERE status IN ('PENDING', 'APPROVED'). Key excludes session/leave_type_id: the overlap check already blocks same-date requests for any session or type combination, so the DB index enforces the same invariant without a narrower scope. 23505 unique violations caught in createLeaveRequest() insert path and mapped to CONFLICT (→ 409), same as the application-layer overlap guard. Commits 7b39255 (migration + service). | 2026-07-02 |
 
 ---
 
