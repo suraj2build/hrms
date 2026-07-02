@@ -336,12 +336,12 @@ Update this table after each issue is committed and pushed.
 | ISSUE-019 | security_alerts / verification_records no tenant scope | migration 346 | 2026-06-30 |
 | ISSUE-020 | 59 write policies missing tenant_id | migration 347 | 2026-06-30 |
 | ISSUE-021 | req.employeeId null on cache hits | ProfileCacheEntry + employeeId field | 2026-07-01 |
-| ISSUE-022 | JWT aud claim skipped when absent | unconditional aud !== 'authenticated' in auth.ts | 2026-07-02 |
-| ISSUE-079 | Partition ranges expire Jul 2026 | migration 348 — monthly partitions through Dec 2027 | 2026-07-02 |
+| ISSUE-022 | JWT aud claim — unconditional enforcement | unconditional aud !== 'authenticated' in auth.ts | 2026-07-02 |
+| ISSUE-079 | security_events/trace_spans partition gap — not attendance_daily | migration 348 — monthly partitions through Dec 2027 | 2026-07-02 |
 | ISSUE-011 | Durable queue jobs dead-letter | register 6 handlers before durableQueue.start() in index.ts | 2026-07-02 |
 | ISSUE-013 | Unbounded queries (OOM risk) | .limit() on payroll export, variance, muster, anomaly queries | 2026-07-02 |
 | ISSUE-010 | N+1 queries in attendance/leave | batch org ctx in recomputeRange; runConcurrent bulk-assign; freeze-guard .in() | 2026-07-02 |
-| ISSUE-023 | Deactivated-account window 5 min | IS_ACTIVE_TTL (60 s) re-check on cache hit in auth.ts | 2026-07-02 |
+| ISSUE-023 | Deactivated-account window ≤60 s (IS_ACTIVE_TTL) | IS_ACTIVE_TTL (60 s) re-check on cache hit in auth.ts | 2026-07-02 |
 | ISSUE-024 | Raw DB error messages leaked to clients | onSend hook + error-sanitizer.ts | 2026-07-01 |
 | ISSUE-047 | /owner/tenants missing Zod validation | Zod schemas on owner/tenants mutations | 2026-07-01 |
 | ISSUE-048 | WhatsApp webhook no rate limiting | per-route rateLimit config | 2026-07-01 |
@@ -368,4 +368,4 @@ Update this table after each issue is committed and pushed.
 
 ---
 
-*Last updated: 2026-07-02. Phase 1 (Critical Security) fully closed. Phase 2 next: ISSUE-025.*
+*Last updated: 2026-07-02. Phase 1 (Critical Security) fully closed. ISSUE-025 closed. Phase 2 next: ISSUE-040 (roster-calendar.ts + letters/index.ts). ISSUE-028 (raw setInterval schedulers) remains open.*
