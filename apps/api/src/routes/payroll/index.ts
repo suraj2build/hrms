@@ -633,6 +633,12 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
           message: `Payroll for ${month} is finalized and cannot be re-run. Roll it back (super_admin) before reprocessing.`,
         })
       }
+      if ((existingRun as any)?.status === 'processing') {
+        return reply.code(409).send({
+          error:   'RUN_IN_PROGRESS',
+          message: `Payroll for ${month} is already processing. Wait for it to complete before re-triggering.`,
+        })
+      }
     }
 
     // Fetch all active employees
