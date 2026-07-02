@@ -21,6 +21,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { eventBus }           from './event-bus.js'
 import { ENTITY_WORKFLOW_MAP, type EntityType } from './workflow-service.js'
+import { durableQueue }       from './durable-queue.js'
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -379,11 +380,14 @@ export async function scan(supabase: SupabaseClient): Promise<void> {
 export function registerSlaScanner(supabase: SupabaseClient): void {
   // Warm-up delay — first scan fires after startup completes
   setTimeout(() => {
-    scan(supabase).catch(e => console.error('[sla-scanner] initial scan error:', (e as Error).message))
-    setInterval(
-      () => scan(supabase).catch(e => console.error('[sla-scanner] scan error:', (e as Error).message)),
-      SCAN_INTERVAL_MS,
-    )
+    const enqueue = () => {
+      const key = `sla-scan:${new Date().toISOString().slice(0, 13)}`
+      durableQueue.enqueue('sla-scan', {}, { idempotencyKey: key }).catch(
+        e => console.error('[sla-scanner] enqueue error:', (e as Error).message),
+      )
+    }
+    enqueue()
+    setInterval(enqueue, SCAN_INTERVAL_MS)
     console.log(`🔍 SLA scanner active — scanning every ${SCAN_INTERVAL_MS / 3_600_000}h`)
   }, WARMUP_MS)
 }

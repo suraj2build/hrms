@@ -43,6 +43,7 @@ import { eventBus }           from './event-bus.js'
 import { computeUpcoming }    from './compliance-calendar.js'
 import { computeLifecycleActionable, categoryLabel } from './lifecycle-expiry.js'
 import { notifyHrAdmins }     from './notify.js'
+import { durableQueue }       from './durable-queue.js'
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -1174,15 +1175,16 @@ export async function runAllScans(supabase: SupabaseClient): Promise<void> {
  */
 export function registerIntelligenceScanner(supabase: SupabaseClient): void {
   setTimeout(() => {
-    runAllScans(supabase).catch(e =>
-      console.error('[intelligence-scanner] initial scan error:', (e as Error).message),
-    )
-    setInterval(
-      () => runAllScans(supabase).catch(e =>
-        console.error('[intelligence-scanner] scan error:', (e as Error).message),
-      ),
-      SCAN_INTERVAL_MS,
-    )
+    const enqueue = () => {
+      // 6-hour bucket: slice to 'YYYY-MM-DDTHH' then round to nearest 6h
+      const now = new Date()
+      const bucket = `${now.toISOString().slice(0, 10)}-${Math.floor(now.getUTCHours() / 6) * 6}`
+      durableQueue.enqueue('intelligence-scan', {}, { idempotencyKey: `intelligence-scan:${bucket}` }).catch(
+        e => console.error('[intelligence-scanner] enqueue error:', (e as Error).message),
+      )
+    }
+    enqueue()
+    setInterval(enqueue, SCAN_INTERVAL_MS)
     console.log(
       `🧠 Intelligence scanner active — scanning every ${SCAN_INTERVAL_MS / 3_600_000}h`,
     )

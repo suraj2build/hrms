@@ -13,6 +13,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { fetchSourceData }     from '../routes/attendance/api-sources.js'
+import { durableQueue }        from './durable-queue.js'
 
 // How often the scheduler wakes up and checks for due sources (5 minutes)
 const TICK_MS = 5 * 60 * 1_000
@@ -156,18 +157,19 @@ async function processSingleSource(supabase: SupabaseClient, source: any): Promi
 // ── Public API ─────────────────────────────────────────────────────────────────
 
 export function registerAttendanceApiScheduler(supabase: SupabaseClient): void {
-  // Initial tick after 30 s to let the process warm up first
-  setTimeout(() => {
-    runDueSources(supabase).catch((err: Error) =>
-      console.error('[att-api-scheduler] initial tick error:', err.message),
+  const enqueue = () => {
+    // 5-minute bucket idempotency key prevents duplicate runs on concurrent ticks
+    const now = new Date()
+    const min5 = Math.floor(now.getUTCMinutes() / 5) * 5
+    const key = `process-attendance:${now.toISOString().slice(0, 15)}${String(min5).padStart(2, '0')}`
+    durableQueue.enqueue('process-attendance', {}, { idempotencyKey: key }).catch((err: Error) =>
+      console.error('[att-api-scheduler] enqueue error:', err.message),
     )
-  }, 30_000)
+  }
 
-  setInterval(() => {
-    runDueSources(supabase).catch((err: Error) =>
-      console.error('[att-api-scheduler] tick error:', err.message),
-    )
-  }, TICK_MS)
+  // Initial tick after 30 s to let the process warm up first
+  setTimeout(enqueue, 30_000)
+  setInterval(enqueue, TICK_MS)
 
   console.log(`🔌 Attendance API scheduler active — ticking every ${TICK_MS / 60_000} min`)
 }
