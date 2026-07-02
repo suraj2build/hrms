@@ -15,7 +15,7 @@
  */
 
 import { useState, useMemo, useRef } from 'react'
-import { useQuery }                  from '@tanstack/react-query'
+import { useQuery, keepPreviousData }                  from '@tanstack/react-query'
 import {
   FileSearch, ShieldAlert, RefreshCw,
   LayoutList, GitCommitVertical, Download,
@@ -333,6 +333,7 @@ export function AttendanceAudit() {
     },
     enabled:   isAdmin,
     staleTime: 30_000,
+    placeholderData: keepPreviousData,
   })
 
   const rows  = data?.data  ?? []

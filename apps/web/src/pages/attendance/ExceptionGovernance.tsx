@@ -9,7 +9,7 @@
  */
 
 import { useState }                          from 'react'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import {
   ShieldAlert, AlertTriangle, CheckCircle2, Clock,
@@ -240,6 +240,7 @@ export function ExceptionGovernance() {
       },
       staleTime: 30_000,
       enabled: isAdmin,
+      placeholderData: keepPreviousData,
     })
 
   // ── Mutation ─────────────────────────────────────────────────────────────────

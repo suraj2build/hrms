@@ -9,7 +9,7 @@
  */
 
 import { Fragment, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, keepPreviousData } from '@tanstack/react-query'
 import {
   FileSearch, RefreshCw, Download, ChevronDown, ChevronRight, ShieldCheck,
 } from 'lucide-react'
@@ -94,6 +94,7 @@ export function AuditTrail() {
       return api.get(`/enterprise/audit/logs?${p.toString()}`)
     },
     enabled: isAdmin,
+    placeholderData: keepPreviousData,
   })
 
   const rows  = data?.data ?? []

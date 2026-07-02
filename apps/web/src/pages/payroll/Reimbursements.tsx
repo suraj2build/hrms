@@ -6,7 +6,7 @@
  */
 
 import { useState }                                from 'react'
-import { useQuery, useMutation, useQueryClient }   from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient, keepPreviousData }   from '@tanstack/react-query'
 import {
   Loader2, RefreshCw, Plus, CheckCircle2,
   XCircle, FileText,
@@ -297,6 +297,7 @@ export function Reimbursements() {
       if (statusFilter !== 'All') params.set('status', statusFilter)
       return api.get<{ data: ReimbClaim[]; total: number }>(`/payroll/reimbursements?${params}`)
     },
+    placeholderData: keepPreviousData,
   })
   const claims = claimsResp?.data ?? []
   const total  = claimsResp?.total ?? 0

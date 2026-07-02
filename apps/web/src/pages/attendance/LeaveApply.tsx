@@ -938,7 +938,7 @@ export function LeaveApply({ mode = 'page', onSuccess, onClose }: LeaveApplyProp
       })
       qc.invalidateQueries({ queryKey: ['my-leave-requests'] })
       qc.invalidateQueries({ queryKey: ['ess-leave-history'] })
-      qc.invalidateQueries({ queryKey: ['ess-leave-balance'] })
+      qc.invalidateQueries({ queryKey: ['my-leave-balance', employeeId] })
       if (onSuccess) { onSuccess() } else { navigate('/ess/leave') }
     },
     onError: (err) => {
