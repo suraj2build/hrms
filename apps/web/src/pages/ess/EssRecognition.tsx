@@ -490,8 +490,8 @@ export function EssRecognition() {
                       <p className="mt-1 text-sm font-bold text-foreground">
                         {emp ? `${emp.first_name} ${emp.last_name}` : 'Winner'}
                       </p>
-                      {emp?.designation && (
-                        <p className="text-[11px] text-muted-foreground">{emp.designation}</p>
+                      {emp?.designation?.name && (
+                        <p className="text-[11px] text-muted-foreground">{emp.designation.name}</p>
                       )}
                       <p className="mt-1 text-[11px] text-muted-foreground">
                         {w.period_label}

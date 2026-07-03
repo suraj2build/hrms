@@ -189,8 +189,8 @@ function NominationsDialog({ open, onClose, awardId, round }: {
                         {n.status.replace('_', ' ')}
                       </span>
                     </div>
-                    {emp?.designation && (
-                      <p className="text-[11px] text-muted-foreground mt-0.5">{emp.designation} · {emp.department}</p>
+                    {(emp?.designation?.name || emp?.department?.name) && (
+                      <p className="text-[11px] text-muted-foreground mt-0.5">{emp.designation?.name}{emp.designation?.name && emp.department?.name ? ' · ' : ''}{emp.department?.name}</p>
                     )}
                     {n.justification && (
                       <p className="mt-1 text-xs text-muted-foreground italic">"{n.justification}"</p>
@@ -994,7 +994,7 @@ export function AdminRecognition() {
                       <span className="text-sm font-medium text-foreground">{a.first_name} {a.last_name}</span>
                       <span className="ml-1.5 text-[11px] text-muted-foreground font-mono">{a.employee_code}</span>
                       <p className="text-[11px] text-muted-foreground mt-0.5">
-                        {a.designation ?? 'Employee'} · {a.department ?? '—'} · completing <span className="font-semibold text-amber-600">{a.milestone_years} year{a.milestone_years > 1 ? 's' : ''}</span> on {fmtDate(a.date_of_joining.replace(/(\d{4})-(\d{2})-(\d{2})/, `${new Date().getFullYear()}-$2-$3`))}
+                        {a.designation?.name ?? 'Employee'} · {a.department?.name ?? '—'} · completing <span className="font-semibold text-amber-600">{a.milestone_years} year{a.milestone_years > 1 ? 's' : ''}</span> on {fmtDate(a.date_of_joining.replace(/(\d{4})-(\d{2})-(\d{2})/, `${new Date().getFullYear()}-$2-$3`))}
                       </p>
                     </div>
                     <Button size="sm" variant="outline" className="h-7 text-xs shrink-0">
@@ -1127,7 +1127,7 @@ export function AdminRecognition() {
                         <span className="font-semibold">{to ? `${to.first_name} ${to.last_name}` : 'Unknown'}</span>
                         {to?.employee_code && <span className="ml-1 text-[11px] text-muted-foreground font-mono">{to.employee_code}</span>}
                       </p>
-                      {to?.designation && <p className="text-[11px] text-muted-foreground">{to.designation}</p>}
+                      {to?.designation?.name && <p className="text-[11px] text-muted-foreground">{to.designation.name}</p>}
                       {s.message && <p className="mt-0.5 text-xs text-muted-foreground italic">"{s.message}"</p>}
                     </div>
                     <div className="shrink-0 text-right">
