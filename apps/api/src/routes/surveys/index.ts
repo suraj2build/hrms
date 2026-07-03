@@ -730,7 +730,7 @@ export default async function surveyRoutes(fastify: FastifyInstance) {
       peers_required: Number(peer_count),
       status:         'open',
     }
-    if (deadline_at !== null)         insertRow.deadline_at     = deadline_at
+    if (deadline_at    !== null)      insertRow.deadline_at     = deadline_at
     if (self_review    !== undefined) insertRow.self_review     = Boolean(self_review)
     if (manager_review !== undefined) insertRow.manager_review  = Boolean(manager_review)
 

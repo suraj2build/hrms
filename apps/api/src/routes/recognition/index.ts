@@ -781,8 +781,8 @@ export default async function recognitionRoutes(fastify: FastifyInstance) {
     const { data, error } = await fastify.supabase
       .from('spot_awards')
       .select(`id, award_name, message, monetary_value, created_at,
-        employees!spot_awards_from_employee_id_fkey(id, first_name, last_name),
-        employees!spot_awards_to_employee_id_fkey(id, first_name, last_name, employee_code, designation:designations(name))`)
+        employees!from_employee_id(id, first_name, last_name),
+        employees!to_employee_id(id, first_name, last_name, employee_code, designation:designations(name))`)
       .eq('tenant_id', req.tenantId)
       .order('created_at', { ascending: false }).limit(50)
     if (error) return reply.code(500).send({ error: error.message })
