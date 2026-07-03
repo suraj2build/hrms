@@ -139,8 +139,8 @@ VALUES
 
 ('CC6.3',  'SOC2', 'access_control',
  'Access is removed when no longer required',
- 'PARTIAL — is_active deactivation revokes auth tokens (ISSUE-061, implemented). Employee lifecycle separation (employees.status=separated) does NOT automatically revoke Supabase Auth tokens; the two state machines are unsynchronised (AF-001, open). Full implementation pending product decision on revocation timing.',
- 'employees', 'in_progress', 'Platform Team', CURRENT_DATE),
+ 'IMPLEMENTED — Employee separation workflow revokes application access by setting profiles.is_active = false and applying Supabase Auth ban_duration (876000h) at the terminal employees.status = separated transition in separation-workflow.ts (AF-001, closed). Manual admin deactivation also revokes tokens immediately (ISSUE-061, implemented). Gate DEF-1 (offer-letter sanitization) remains a separate pre-launch security gate under a different control domain (content injection / XSS) and does not affect CC6.3 status.',
+ 'employees', 'implemented', 'Platform Team', CURRENT_DATE),
 
 ('CC7.1',  'SOC2', 'monitoring',
  'System performance and capacity are monitored and evaluated',
