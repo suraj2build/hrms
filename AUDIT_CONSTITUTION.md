@@ -251,8 +251,7 @@ ISSUE-049 ISSUE-050
 
 **Phase 4 — Architecture / Technical Debt**
 ```
-CLOSED: ISSUE-028 ISSUE-054 ISSUE-055 ISSUE-056 ISSUE-057 ISSUE-058 ISSUE-061 ISSUE-066 ISSUE-067 ISSUE-068 ISSUE-069 ISSUE-083 ISSUE-088 ISSUE-090 ISSUE-111
-OPEN:   ISSUE-065
+CLOSED: ISSUE-028 ISSUE-054 ISSUE-055 ISSUE-056 ISSUE-057 ISSUE-058 ISSUE-061 ISSUE-065 ISSUE-066 ISSUE-067 ISSUE-068 ISSUE-069 ISSUE-083 ISSUE-088 ISSUE-090 ISSUE-111
 ```
 
 **Phase 5 — Enterprise Features / Roadmap**
@@ -308,8 +307,8 @@ unless a specific issue requires re-reading the file.
 | RLS bypass | Service-role key used by all Fastify routes — RLS not the primary isolation mechanism |
 | Notification service | `dispatch()` in `lib/notification-service.ts` is a `console.log` stub (ISSUE-009, open) |
 | Job queue duality | `job-queue.ts` (in-memory, unreliable) + `durable-queue.ts` (Supabase-backed) both in use |
-| Migration count | 349 as of 2026-07-02; next available number is 350 |
-| `org_id` tables | 17 tables use `org_id` instead of `tenant_id` (ISSUE-065, open) |
+| Migration count | 350 as of 2026-07-03; next available number is 351 |
+| `org_id` tables | All 18 tables renamed to `tenant_id` via migration 350 (ISSUE-065, CLOSED). Historical `automation_activity_logs.metadata.org_id` JSONB keys are preserved as-is — no read-side code queries this key. |
 | Partition expiry | `security_events` + `trace_spans` extended through Dec 2027 via migration 348 (ISSUE-079 — CLOSED) |
 | Razorpay billing | Webhook in `routes/billing/index.ts`; `tenants.status` is the authoritative field |
 | WhatsApp HMAC | Fixed in ISSUE-006; uses `X-Hub-Signature-256`, format `sha256=<hex>` |
@@ -380,6 +379,7 @@ Update this table after each issue is committed and pushed.
 | ISSUE-068 | Two simultaneous POST /payroll/runs requests for the same month both bypassed the finalized-status guard, upserted to the same runId, deleted all payroll_slips, and raced to recompute — the second request failed with UNIQUE (run_id, employee_id) violations for every employee, marking the run partial_failed. Added `status === 'processing'` guard immediately after the existing `status === 'finalized'` check; returns 409 RUN_IN_PROGRESS. Uses the same existingRun row already fetched, zero schema changes. Commit ec0e872. | 2026-07-02 |
 | ISSUE-066 | POST /leave-requests had no network-retry protection — a request that timed out client-side but succeeded server-side would create a duplicate PENDING row on retry. Wired existing checkIdempotency/storeIdempotency helpers (idempotency_keys table, migration 018) into the route handler: optional Idempotency-Key header checked before createLeaveRequest(), response stored only on successful 201 (not on validation/business failures). LeaveApply.tsx generates a stable UUID per form mount via useRef, sends it as Idempotency-Key header, rotates on success. api.post() extended to accept optional { headers } third arg (backward-compatible). Commit f18dd31. | 2026-07-02 |
 | ISSUE-067 | POST /leave-requests overlap check was a non-atomic read-then-insert — two concurrent identical submissions could both pass the check before either committed, producing two PENDING rows. Added migration 349 creating a partial unique index on (tenant_id, employee_id, from_date, to_date) WHERE status IN ('PENDING', 'APPROVED'). Key excludes session/leave_type_id: the overlap check already blocks same-date requests for any session or type combination, so the DB index enforces the same invariant without a narrower scope. 23505 unique violations caught in createLeaveRequest() insert path and mapped to CONFLICT (→ 409), same as the application-layer overlap guard. Commits 7b39255 (migration + service). | 2026-07-02 |
+| ISSUE-065 | 18 platform tables (migrations 185/187/188/189) used `org_id` as an alias for the tenant FK instead of the project-standard `tenant_id`. Migration 350: renames `org_id → tenant_id` on all 18 tables via `ALTER TABLE … RENAME COLUMN` (indexes and inline FK constraints auto-update in PostgreSQL); renames the named FK `platform_events_org_fk → platform_events_tenant_fk`; drops and recreates all RLS policies with corrected `tenant_id = get_user_tenant_id()` expressions (compliance_revision_events preserves the `OR tenant_id IS NULL` nullable semantic). `apply_missing_migrations.sql` migration-188 section updated (column DDL, index expressions, RLS policies). App code: 208 `org_id` references renamed to `tenant_id` across 57 TS/TSX files; pre-existing duplicate `tenant_id`/`org_id` fields in duplicate-detector.service.ts and trust-intelligence.service.ts collapsed to single `tenant_id` fields. TypeScript compiles cleanly. Commits 5844881 (DB), 9e9188d (app code). | 2026-07-03 |
 
 ---
 
@@ -397,4 +397,4 @@ Update this table after each issue is committed and pushed.
 
 ---
 
-*Last updated: 2026-07-02. Phase 1 (Critical Security) fully closed. Phase 2 fully closed (ISSUE-028 deferred). Phase 3 fully closed: ISSUE-005, ISSUE-010, ISSUE-013, ISSUE-030–033, ISSUE-046, ISSUE-049, ISSUE-050. Phase 4 (Architecture / Technical Debt) in progress: ISSUE-054, ISSUE-055, ISSUE-056, ISSUE-057 closed. Remaining deferred: reimbursements/my, helpdesk/tickets admin (pagination — product decisions pending), ISSUE-028 (raw setInterval schedulers).*
+*Last updated: 2026-07-03. Phase 1 (Critical Security) fully closed. Phase 2 fully closed (ISSUE-028 deferred then closed). Phase 3 fully closed: ISSUE-005, ISSUE-010, ISSUE-013, ISSUE-030–033, ISSUE-046, ISSUE-049, ISSUE-050. Phase 4 (Architecture / Technical Debt) fully closed: ISSUE-054–058, ISSUE-061, ISSUE-065–069, ISSUE-083, ISSUE-088, ISSUE-090, ISSUE-111. Remaining deferred (product decisions): reimbursements/my pagination, helpdesk/tickets admin pagination.*
