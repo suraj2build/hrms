@@ -114,8 +114,8 @@ export default async function attendanceIntelligenceRoute(fastify: FastifyInstan
       .select(`
         id, flag_type, risk_score, details, first_flagged, last_updated,
         dismissed, dismissed_at, dismiss_note,
-        employees!inner(id, first_name, last_name, employee_code),
-        profiles(id, full_name)
+        employees!employee_id!inner(id, first_name, last_name, employee_code),
+        profiles!dismissed_by(id, full_name)
       `, { count: 'exact' })
       .eq('tenant_id', req.tenantId)
       .eq('dismissed', dismissed === 'true')

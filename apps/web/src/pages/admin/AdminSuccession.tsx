@@ -387,8 +387,8 @@ function AIRecommendationsPanel({ data }: { data: AIRecommendationsData[] }) {
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-1">
                       <span className="text-xs font-medium truncate">{fmtName(rec.employee)}</span>
-                      {rec.employee?.designation && (
-                        <span className="text-[10px] text-muted-foreground shrink-0 truncate max-w-[120px]">{rec.employee.designation}</span>
+                      {rec.employee?.designation?.name && (
+                        <span className="text-[10px] text-muted-foreground shrink-0 truncate max-w-[120px]">{rec.employee.designation.name}</span>
                       )}
                       {rec.candidate.attrition_risk_flag && (
                         <span className="inline-flex items-center gap-0.5 rounded-full bg-destructive/10 text-destructive border border-destructive/30 px-1.5 py-0.5 text-[9px] font-medium shrink-0">
@@ -1516,8 +1516,8 @@ export function AdminSuccession() {
                               <div className="min-w-0">
                                 <div className="flex items-center gap-1.5">
                                   <span className="text-xs font-medium">{fmtName(c.employees)}</span>
-                                  {c.employees?.designation && (
-                                    <span className="text-[10px] text-muted-foreground truncate">{c.employees.designation}</span>
+                                  {c.employees?.designation?.name && (
+                                    <span className="text-[10px] text-muted-foreground truncate">{c.employees.designation.name}</span>
                                   )}
                                 </div>
                                 <div className="flex items-center gap-2 mt-0.5">

@@ -253,7 +253,7 @@ export default async function policyRoutes(fastify: FastifyInstance) {
       .from('policy_qa_logs')
       .select(`
         id, question, answer, cited_policy_ids, model_used, created_at,
-        employees!policy_qa_logs_employee_id_fkey(first_name, last_name, employee_code)
+        employees!employee_id(first_name, last_name, employee_code)
       `)
       .eq('tenant_id', tenantId)
       .order('created_at', { ascending: false })
