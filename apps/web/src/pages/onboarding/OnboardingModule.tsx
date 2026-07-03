@@ -750,7 +750,7 @@ function EmployeeOnboardingTab() {
     queryKey: ['employees-basic'],
     queryFn: () => api.get('/employees'),
   })
-  const employees = employeesResp?.data ?? []
+  const _employees = employeesResp?.data ?? []
 
   const { data: templatesResp2 } = useQuery<{ data: ChecklistTemplate[] }>({
     queryKey: ['onboarding-templates'],

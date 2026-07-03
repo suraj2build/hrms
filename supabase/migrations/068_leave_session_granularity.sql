@@ -83,9 +83,18 @@ UPDATE leave_requests
   SET session = 'first_half'
   WHERE half_day = true AND session = 'full_day';
 
-UPDATE leave_applications
-  SET session = 'first_half'
-  WHERE half_day = true AND session = 'full_day';
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'leave_applications' AND column_name = 'half_day'
+  ) THEN
+    UPDATE leave_applications
+      SET session = 'first_half'
+      WHERE half_day = true AND session = 'full_day';
+  END IF;
+END;
+$$;
 
 -- ── 5. Comments ──────────────────────────────────────────────────────────────
 

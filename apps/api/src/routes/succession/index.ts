@@ -680,7 +680,7 @@ export default async function successionRoutes(fastify: FastifyInstance) {
         .eq('id', sessionId).eq('tenant_id', tenantId).single(),
       supabase.from('calibration_changes')
         .select(`id, field_changed, old_value, new_value, notes, created_at,
-          employees!calibration_changes_candidate_id_fkey(first_name, last_name, employee_code)`)
+          employee:employees!employee_id(first_name, last_name, employee_code)`)
         .eq('session_id', sessionId).eq('tenant_id', tenantId)
         .order('created_at', { ascending: false })
         .limit(500),
@@ -715,6 +715,7 @@ export default async function successionRoutes(fastify: FastifyInstance) {
         tenant_id:     tenantId,
         changed_by:    req.user.id,
         candidate_id,
+        employee_id,
         field_changed,
         old_value:     old_value ?? null,
         new_value:     new_value ?? null,

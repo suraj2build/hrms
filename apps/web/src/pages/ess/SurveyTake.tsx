@@ -182,7 +182,7 @@ export function SurveyTake() {
   if (submitted || survey.completed) {
     return (
       <div className="flex flex-col items-center justify-center py-20 text-center p-6">
-        <CheckCircle2 className="h-12 w-12 text-green-500 mb-4" />
+        <CheckCircle2 className="h-12 w-12 text-success mb-4" />
         <h2 className="text-xl font-semibold text-foreground">Response Submitted!</h2>
         <p className="mt-2 text-sm text-muted-foreground">Thank you for completing the survey.</p>
         <Button className="mt-6" onClick={() => navigate('/ess/surveys')}>

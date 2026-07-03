@@ -731,7 +731,7 @@ export function AdminHelpdesk() {
                         <div className="flex items-center gap-1">
                           <span className="capitalize">{t.category.replace(/_/g, ' ')}</span>
                           {t.ai_suggested_category && t.ai_routing_confidence != null && t.ai_routing_confidence >= 70 && (
-                            <span className="inline-flex items-center gap-0.5 rounded-full bg-teal-50 border border-teal-200 text-teal-700 text-[9px] px-1.5 py-0.5 font-medium">
+                            <span className="inline-flex items-center gap-0.5 rounded-full bg-accent-teal/20 border border-accent-teal/30 text-accent-teal text-[9px] px-1.5 py-0.5 font-medium">
                               AI {t.ai_routing_confidence}%
                             </span>
                           )}
@@ -775,7 +775,7 @@ export function AdminHelpdesk() {
                 <Badge variant={statusBadge(detail.status).variant} className="text-[10px]">{statusBadge(detail.status).label}</Badge>
                 <span className="text-[10px] text-muted-foreground capitalize">{detail.category.replace(/_/g, ' ')}</span>
                 {detail.ai_suggested_category && detail.ai_routing_confidence != null && detail.ai_routing_confidence >= 70 && (
-                  <span className="inline-flex items-center gap-0.5 rounded-full bg-teal-50 border border-teal-200 text-teal-700 text-[9px] px-1.5 py-0.5 font-medium">
+                  <span className="inline-flex items-center gap-0.5 rounded-full bg-accent-teal/20 border border-accent-teal/30 text-accent-teal text-[9px] px-1.5 py-0.5 font-medium">
                     AI: {categoryLabel(detail.ai_suggested_category)} {detail.ai_routing_confidence}%
                   </span>
                 )}

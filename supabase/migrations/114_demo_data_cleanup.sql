@@ -237,7 +237,17 @@ DELETE FROM employees;
 -- Sequence infrastructure (table + function) is preserved;
 -- only the counter rows are removed so SK0001 is issued next.
 
-DELETE FROM employee_code_sequences;
+-- Table created in migration 115; guard against fresh-install ordering
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.tables
+    WHERE table_schema = 'public' AND table_name = 'employee_code_sequences'
+  ) THEN
+    DELETE FROM employee_code_sequences;
+  END IF;
+END;
+$$;
 
 -- ── 23. Org & site masters ────────────────────────────────────────────────────
 
