@@ -139,8 +139,8 @@ VALUES
 
 ('CC6.3',  'SOC2', 'access_control',
  'Access is removed when no longer required',
- 'Employee status=terminated triggers session revocation job. Auth.users disabled on offboarding.',
- 'employees', 'implemented', 'Platform Team', CURRENT_DATE),
+ 'PARTIAL — is_active deactivation revokes auth tokens (ISSUE-061, implemented). Employee lifecycle separation (employees.status=separated) does NOT automatically revoke Supabase Auth tokens; the two state machines are unsynchronised (AF-001, open). Full implementation pending product decision on revocation timing.',
+ 'employees', 'in_progress', 'Platform Team', CURRENT_DATE),
 
 ('CC7.1',  'SOC2', 'monitoring',
  'System performance and capacity are monitored and evaluated',
