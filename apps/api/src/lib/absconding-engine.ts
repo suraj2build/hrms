@@ -117,7 +117,7 @@ async function getLetterMergeFields(
     .select(`
       first_name, last_name, employee_code, designation:designations(name),
       work_locations(name),
-      manager:employees!employees_reporting_manager_id_fkey(first_name, last_name)
+      manager:employees!manager_id(first_name, last_name)
     `)
     .eq('id', employeeId)
     .eq('tenant_id', tenantId)
