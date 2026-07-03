@@ -9,7 +9,7 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
-  Plus, Loader2, FileText, CheckCircle2, Clock, AlertTriangle,
+  Plus, Loader2, FileText, CheckCircle2, Clock,
   BookOpen, BarChart3, Users, Archive, Send, Edit3, Bot, MessageSquare,
 } from 'lucide-react'
 import { toast } from 'sonner'
@@ -23,7 +23,6 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Input }         from '@/components/ui/input'
 import { api }           from '@/lib/api/client'
 import { useAuthStore }  from '@/stores/authStore'
-import { cn }            from '@/lib/utils'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -326,7 +325,7 @@ export function AdminPolicyLibrary() {
                       <td className="py-2 px-3 text-xs text-muted-foreground">{categoryLabel(p.category)}</td>
                       <td className="py-2 px-3">
                         <Badge variant={sb.variant} className="text-[10px]">{sb.label}</Badge>
-                        {p.is_mandatory && <Badge variant="outline" className="ml-1 text-[10px] bg-orange-50 text-orange-700 border-orange-200">Mandatory</Badge>}
+                        {p.is_mandatory && <Badge variant="outline" className="ml-1 text-[10px] bg-warning/10 text-warning border-warning/40">Mandatory</Badge>}
                       </td>
                       <td className="py-2 px-3">
                         {p.requires_acknowledgement && p.status === 'published' ? (

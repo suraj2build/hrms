@@ -148,8 +148,8 @@ export function AiAssistantSettings() {
       </div>
 
       {cfg?.active && (
-        <div className="flex items-start gap-2.5 rounded-lg border border-emerald-500/30 bg-emerald-500/5 px-3.5 py-2.5 text-xs text-foreground">
-          <Plug className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-emerald-500" />
+        <div className="flex items-start gap-2.5 rounded-lg border border-success/30 bg-success/5 px-3.5 py-2.5 text-xs text-foreground">
+          <Plug className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-success" />
           <p>
             Currently answering with <span className="font-semibold">{cfg.active.provider}</span>{' '}
             <span className="text-muted-foreground">({cfg.active.model}, {cfg.active.source} key)</span>
@@ -187,7 +187,7 @@ export function AiAssistantSettings() {
                       <div className="flex items-center gap-2">
                         <span className="flex h-5 w-5 items-center justify-center rounded-full bg-muted text-[10px] font-semibold text-muted-foreground">{i + 1}</span>
                         <span className="text-sm font-medium">{m?.label ?? r.provider}</span>
-                        {i === 0 && <span className="rounded bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-medium text-emerald-600">Primary</span>}
+                        {i === 0 && <span className="rounded bg-success/10 px-1.5 py-0.5 text-[10px] font-medium text-success">Primary</span>}
                       </div>
                       <div className="flex items-center gap-1">
                         <button type="button" title="Move up" disabled={i === 0} onClick={() => move(i, -1)}

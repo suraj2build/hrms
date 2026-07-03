@@ -12,7 +12,7 @@
 
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { useNavigate, useSearchParams, Link } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import {
   Building2, Upload, CheckCircle2, Circle,
   Hash, RefreshCw, AlertCircle, Globe,
@@ -641,7 +641,7 @@ function SystemTab() {
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export function Settings() {
-  const { tenant }  = useAuthStore()
+  const { tenant: _tenant }  = useAuthStore()
   const qc          = useQueryClient()
   const [searchParams, setSearchParams] = useSearchParams()
   const [ticks, setTicks] = useState<Record<string, number>>({ company: 0, logo: 0, empcode: 0 })

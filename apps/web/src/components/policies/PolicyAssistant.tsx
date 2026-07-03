@@ -63,7 +63,7 @@ export function PolicyAssistant({ onOpenPolicy }: { onOpenPolicy: (id: string) =
     ask.mutate(q)
   }
 
-  const usePrompt = (p: string) => {
+  const applyPrompt = (p: string) => {
     setInput(p)
     ask.mutate(p)
   }
@@ -159,7 +159,7 @@ export function PolicyAssistant({ onOpenPolicy }: { onOpenPolicy: (id: string) =
                     {EXAMPLE_PROMPTS.map(p => (
                       <button
                         key={p}
-                        onClick={() => usePrompt(p)}
+                        onClick={() => applyPrompt(p)}
                         className="text-[11px] px-2.5 py-1 rounded-full border border-border text-muted-foreground hover:bg-muted/50 hover:text-foreground transition-colors"
                       >
                         {p}

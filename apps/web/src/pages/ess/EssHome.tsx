@@ -14,14 +14,13 @@ import { useQuery }     from '@tanstack/react-query'
 import { useNavigate, useLocation } from 'react-router-dom'
 import {
   Clock, CheckCircle2, CalendarCheck, ClipboardEdit, Receipt, CreditCard,
-  LifeBuoy, Award, Inbox, CalendarDays, Sparkles,
+  LifeBuoy, Inbox, CalendarDays, Sparkles,
 } from 'lucide-react'
 import { api }          from '@/lib/api/client'
 import { useAuthStore } from '@/stores/authStore'
 import { SignalCard, type Signal } from '@/components/experience/SignalCard'
 import { ActivityItem, type ActivityEvent } from '@/components/experience/ActivityItem'
 import { QuickActions, type Capability } from '@/components/experience/QuickActions'
-import { CelebrationCard } from '@/components/experience/CelebrationCard'
 import { PersonAvatar } from '@/components/experience/PersonAvatar'
 import { AmbientLine } from '@/components/experience/AmbientLine'
 import { ReflectionCard } from '@/components/experience/ReflectionCard'
@@ -75,7 +74,7 @@ function fmtDate(iso: string) {
   const d = new Date(iso + 'T12:00:00Z')
   return isNaN(d.getTime()) ? iso : `${d.getUTCDate()} ${M[d.getUTCMonth()]}`
 }
-function timeAgo(iso: string) {
+function _timeAgo(iso: string) {
   const diff = Date.now() - new Date(iso).getTime()
   const h = Math.floor(diff / 3600000), d = Math.floor(diff / 86400000)
   if (h < 1) return 'just now'
@@ -206,7 +205,7 @@ export function EssHome() {
         <div className="absolute right-6 top-6">
           {today?.check_in ? (
             <span className="flex items-center gap-1.5 rounded-full bg-black/30 px-3 py-1.5 text-xs font-medium text-white/90 backdrop-blur-sm">
-              <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />
+              <CheckCircle2 className="h-3.5 w-3.5 text-success" />
               In since {fmtTime(today.check_in)}
             </span>
           ) : !isWeekend && !isLoading ? (
@@ -233,7 +232,7 @@ export function EssHome() {
         {/* Focus nudge */}
         {signals.length > 0 && (
           <p className="mt-4 flex items-center gap-2 text-sm text-white/80">
-            <span className="h-2 w-2 rounded-full bg-amber-400 shadow-[0_0_6px_rgba(251,191,36,0.7)]" />
+            <span className="h-2 w-2 rounded-full bg-warning shadow-[0_0_6px_rgba(251,191,36,0.7)]" />
             Your focus today: {signals.length} item{signals.length > 1 ? 's' : ''} need{signals.length === 1 ? 's' : ''} your attention.
           </p>
         )}
@@ -341,7 +340,7 @@ export function EssHome() {
 
           {/* Featured celebration — vivid coral→pink gradient, white text */}
           {celebrations.length > 0 ? (
-            <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-orange-500 via-rose-500 to-pink-600 p-7 shadow-lg">
+            <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-warning via-destructive to-destructive/80 p-7 shadow-lg">
               <div aria-hidden className="pointer-events-none absolute -right-8 -top-8 h-40 w-40 rounded-full bg-white/10 blur-2xl" />
               <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-white/70">Today at CognixHR</p>
               <h3 className="serif-hero mt-3 text-[2rem] leading-tight text-white">
