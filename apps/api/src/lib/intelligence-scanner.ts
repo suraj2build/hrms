@@ -1102,9 +1102,9 @@ async function scanSuccessionAttritionRisk(supabase: SupabaseClient, tenantId: s
   const month = currentMonth()
 
   const { data: candidates } = await supabase.from('succession_candidates')
-    .select('id, employee_id, succession_plan_id')
+    .select('id, employee_id, plan_id')
     .eq('tenant_id', tenantId)
-    .in('readiness_status', ['ready_now', 'ready_12m'])
+    .in('readiness_level', ['ready_now', 'ready_12m'])
   if (!candidates?.length) return
 
   const threeMonthsAgo = new Date()

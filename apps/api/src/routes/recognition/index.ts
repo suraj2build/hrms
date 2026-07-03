@@ -765,10 +765,10 @@ export default async function recognitionRoutes(fastify: FastifyInstance) {
       const to   = `${targetYear}-${monthStr}-${String(lastDay).padStart(2, '0')}`
       const { data } = await fastify.supabase
         .from('employees')
-        .select('id, first_name, last_name, employee_code, designation:designations(name), department:departments!department_id(name), date_of_joining')
+        .select('id, first_name, last_name, employee_code, designation:designations(name), department:departments!department_id(name), joining_date')
         .eq('tenant_id', req.tenantId)
-        .gte('date_of_joining', from)
-        .lte('date_of_joining', to)
+        .gte('joining_date', from)
+        .lte('joining_date', to)
         .not('status', 'eq', 'terminated')
       ;(data ?? []).forEach((e: any) => alerts.push({ ...e, milestone_years: years }))
     }

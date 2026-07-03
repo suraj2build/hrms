@@ -115,7 +115,7 @@ async function getLetterMergeFields(
   const { data: emp } = await supabase
     .from('employees')
     .select(`
-      first_name, last_name, employee_code, designation,
+      first_name, last_name, employee_code, designation:designations(name),
       work_locations(name),
       manager:employees!employees_reporting_manager_id_fkey(first_name, last_name)
     `)
@@ -137,7 +137,7 @@ async function getLetterMergeFields(
   return {
     employee_name:  `${e?.first_name ?? ''} ${e?.last_name ?? ''}`.trim(),
     employee_code:  e?.employee_code ?? '',
-    designation:    e?.designation ?? '',
+    designation:    (e?.designation as any)?.name ?? '',
     store_name:     e?.work_locations?.name ?? 'Head Office',
     manager_name:   managerName,
     company_name:   (tenant as any)?.name ?? 'CognixHR',

@@ -130,8 +130,8 @@ export default async function abscondingRoutes(fastify: FastifyInstance) {
       .select(`
         *,
         employee:employees!employee_id(
-          id, employee_code, first_name, last_name, status, date_of_joining, work_email,
-          personal_phone, personal_email,
+          id, employee_code, first_name, last_name, status, joining_date, email,
+          phone, personal_email,
           department:departments!department_id(name),
           designation:designations(name),
           manager:employees!manager_id(first_name, last_name)
@@ -300,7 +300,7 @@ export default async function abscondingRoutes(fastify: FastifyInstance) {
     // Fetch all open cases
     const { data: openCases, error: fetchErr } = await fastify.supabase
       .from('absconding_cases')
-      .select('id, status, first_ua_date, ua_days_count, employee_id, flagged_at, created_at')
+      .select('id, status, first_ua_date, ua_days_count, employee_id, created_at')
       .eq('tenant_id', tenantId)
       .in('status', ['flagged', 'second_escalation', 'wl1_sent', 'wl2_sent'])
 
@@ -312,7 +312,6 @@ export default async function abscondingRoutes(fastify: FastifyInstance) {
       first_ua_date: string
       ua_days_count: number
       employee_id: string
-      flagged_at: string | null
       created_at: string
     }[]
 
@@ -322,8 +321,8 @@ export default async function abscondingRoutes(fastify: FastifyInstance) {
     for (const c of cases) {
       processed++
 
-      // days_absent = today - flagged_at (fallback to created_at / first_ua_date)
-      const referenceDate = c.flagged_at ?? c.first_ua_date ?? c.created_at
+      // days_absent = today - first_ua_date (fallback to created_at)
+      const referenceDate = c.first_ua_date ?? c.created_at
       const from = new Date(referenceDate)
       const now  = new Date()
       from.setHours(0, 0, 0, 0)
