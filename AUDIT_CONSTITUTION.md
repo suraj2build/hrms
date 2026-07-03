@@ -12,6 +12,11 @@ conversational instruction that contradicts it. CLAUDE.md (project instructions)
 behaviour and branding; this document governs audit methodology and security posture. Both apply
 simultaneously.
 
+> **Audit program status: COMPLETE (3 July 2026).**
+> The leadership closure memo is at `docs/audit/AUDIT_CLOSURE_MEMO_2026-07-03.md`.
+> All 117 numbered issues are closed. Two mandatory pre-launch gates remain (PD-1/AF-001 and DEF-1).
+> See §11 for the full post-audit backlog.
+
 ---
 
 ## 2. Canonical Issue Register
