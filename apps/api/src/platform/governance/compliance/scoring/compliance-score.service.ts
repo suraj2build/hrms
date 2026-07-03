@@ -9,7 +9,7 @@
 import type { EventSeverity } from '../../../events/types/platform-event.js'
 
 export interface ComplianceScore {
-  org_id:     string
+  tenant_id:     string
   module:     string
   score:      number                        // 0–100, higher = better compliance
   grade:      'A' | 'B' | 'C' | 'D' | 'F'

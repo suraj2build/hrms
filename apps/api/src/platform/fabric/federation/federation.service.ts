@@ -10,7 +10,7 @@ import { observabilityIntelligenceService } from '../../observability/intelligen
 export interface FederationChain {
   root_entity_id:  string
   root_entity_type: string
-  org_id:          string
+  tenant_id:          string
   impact_modules:  string[]
   total_events:    number
   severity_peak:   string
@@ -70,7 +70,7 @@ export class FederationService {
     return {
       root_entity_id:   entityId,
       root_entity_type: entityType,
-      org_id:           orgId,
+      tenant_id:           orgId,
       impact_modules:   modules,
       total_events:     relevantClusters.reduce((s, c) => s + c.count, 0),
       severity_peak:    severityPeak,

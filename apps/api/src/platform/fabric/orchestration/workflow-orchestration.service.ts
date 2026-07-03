@@ -15,7 +15,7 @@ export class WorkflowOrchestrationService {
    * Persists to orchestration_activity_logs table.
    */
   async startOrchestration(supabase: SupabaseClient, params: {
-    org_id:         string
+    tenant_id:         string
     workflow_type:  OrchestrationWorkflowType
     entity_id:      string
     entity_type:    string
@@ -27,7 +27,7 @@ export class WorkflowOrchestrationService {
 
     const activity: OrchestrationActivity = {
       activity_id:   activityId,
-      org_id:        params.org_id,
+      tenant_id:        params.tenant_id,
       workflow_type: params.workflow_type,
       entity_id:     params.entity_id,
       entity_type:   params.entity_type,
@@ -48,7 +48,7 @@ export class WorkflowOrchestrationService {
       .from('orchestration_activity_logs')
       .insert({
         activity_id:   activity.activity_id,
-        org_id:        activity.org_id,
+        tenant_id:        activity.tenant_id,
         workflow_type: activity.workflow_type,
         entity_id:     activity.entity_id,
         entity_type:   activity.entity_type,
@@ -68,7 +68,7 @@ export class WorkflowOrchestrationService {
       .from('orchestration_activity_logs')
       .update({ status: 'completed', completed_at: new Date().toISOString() })
       .eq('activity_id', activityId)
-      .eq('org_id', orgId)
+      .eq('tenant_id', orgId)
   }
 
   /** Get recent orchestration activities for an org. */
@@ -76,7 +76,7 @@ export class WorkflowOrchestrationService {
     const { data } = await supabase
       .from('orchestration_activity_logs')
       .select('*')
-      .eq('org_id', orgId)
+      .eq('tenant_id', orgId)
       .order('started_at', { ascending: false })
       .limit(limit)
     return (data ?? []) as OrchestrationActivity[]
@@ -88,17 +88,17 @@ export class WorkflowOrchestrationService {
    * Does NOT alter the approval itself.
    */
   async coordinateEscalation(supabase: SupabaseClient, params: {
-    org_id:       string
+    tenant_id:       string
     entity_id:    string
     entity_type:  string
     reason:       string
     escalate_to?: string    // optional actor target description
   }): Promise<string> {
     // Start SLA tracking for the escalation
-    slaService.track('approval-pending', params.entity_id, params.entity_type, params.org_id)
+    slaService.track('approval-pending', params.entity_id, params.entity_type, params.tenant_id)
 
     return this.startOrchestration(supabase, {
-      org_id:        params.org_id,
+      tenant_id:        params.tenant_id,
       workflow_type: 'escalation_chain',
       entity_id:     params.entity_id,
       entity_type:   params.entity_type,

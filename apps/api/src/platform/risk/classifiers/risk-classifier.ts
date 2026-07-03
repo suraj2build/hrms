@@ -31,7 +31,7 @@ export interface RiskClassification {
   factors:           string[]
   entity_id:         string
   entity_type:       string
-  org_id:            string
+  tenant_id:            string
   classified_at:     string
   signal_confidence: number          // 0.0–1.0: 1.0 = fully deterministic, 0.5 = inferred
   explainability?:   ExplainabilityResult
@@ -94,7 +94,7 @@ export class RiskClassifier {
       factors,
       entity_id:         event.entity_id,
       entity_type:       event.entity_type,
-      org_id:            event.org_id,
+      tenant_id:            event.tenant_id,
       classified_at:     new Date().toISOString(),
       signal_confidence: 1.0,
       explainability: explainabilityService.explain({

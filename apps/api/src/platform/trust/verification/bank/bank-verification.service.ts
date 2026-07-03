@@ -26,7 +26,7 @@ export class BankVerificationService {
     ifsc_code:      string
     bank_name?:     string
     employee_id:    string
-    org_id:         string
+    tenant_id:         string
   }): VerificationResult {
     const flags: string[] = []
 
@@ -43,7 +43,7 @@ export class BankVerificationService {
       status:            flags.length === 0 ? 'verified' : 'failed',
       entity_id:         params.employee_id,
       entity_type:       'employee',
-      org_id:            params.org_id,
+      tenant_id:            params.tenant_id,
       verified_at:       new Date().toISOString(),
       score,
       flags,

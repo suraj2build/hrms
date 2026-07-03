@@ -10,7 +10,7 @@ export default async function observabilityRoutes(fastify: FastifyInstance) {
    * Fetch and build a structured event trace for a correlation chain.
    */
   fastify.get('/observability/trace/:correlationId', { preHandler: [fastify.authenticate] }, async (req, reply) => {
-    // Always scope to the authenticated tenant — never trust a client-supplied org_id.
+    // Always scope to the authenticated tenant — never trust a client-supplied tenant_id.
     const orgId: string = (req as any).tenantId
     const { correlationId } = req.params as { correlationId: string }
 
@@ -24,10 +24,10 @@ export default async function observabilityRoutes(fastify: FastifyInstance) {
   /**
    * POST /observability/summary
    * Aggregate events into an operational summary.
-   * Accepts body.events directly OR fetches via org_id + from + to query params.
+   * Accepts body.events directly OR fetches via tenant_id + from + to query params.
    */
   fastify.post('/observability/summary', { preHandler: [fastify.authenticate] }, async (req, reply) => {
-    // Always scope to the authenticated tenant — never trust a client-supplied org_id.
+    // Always scope to the authenticated tenant — never trust a client-supplied tenant_id.
     const orgId: string = (req as any).tenantId
     const body          = req.body as {
       events?: ResolvedPlatformEvent[]
@@ -44,7 +44,7 @@ export default async function observabilityRoutes(fastify: FastifyInstance) {
       const to   = (req.query as any).to   as string | undefined
 
       const svc  = new EventStreamService((fastify as any).supabase)
-      const page = await svc.query({ org_id: orgId, from, to, limit: 200 })
+      const page = await svc.query({ tenant_id: orgId, from, to, limit: 200 })
       events     = page.events
     }
 
@@ -58,7 +58,7 @@ export default async function observabilityRoutes(fastify: FastifyInstance) {
    * Accepts body.events directly OR auto-fetches last 24h.
    */
   fastify.post('/observability/heatmap', { preHandler: [fastify.authenticate] }, async (req, reply) => {
-    // Always scope to the authenticated tenant — never trust a client-supplied org_id.
+    // Always scope to the authenticated tenant — never trust a client-supplied tenant_id.
     const orgId: string = (req as any).tenantId
     const body          = req.body as { events?: ResolvedPlatformEvent[] } | undefined
 
@@ -69,7 +69,7 @@ export default async function observabilityRoutes(fastify: FastifyInstance) {
     } else {
       const from = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
       const svc  = new EventStreamService((fastify as any).supabase)
-      const page = await svc.query({ org_id: orgId, from, limit: 500 })
+      const page = await svc.query({ tenant_id: orgId, from, limit: 500 })
       events     = page.events
     }
 
@@ -82,7 +82,7 @@ export default async function observabilityRoutes(fastify: FastifyInstance) {
    * Returns event clusters from the observability intelligence service.
    */
   fastify.get('/observability/clusters', { preHandler: [fastify.authenticate] }, async (req, reply) => {
-    // Always scope to the authenticated tenant — never trust a client-supplied org_id.
+    // Always scope to the authenticated tenant — never trust a client-supplied tenant_id.
     const orgId: string = (req as any).tenantId
 
     const clusters = observabilityIntelligenceService.getClusters(orgId)

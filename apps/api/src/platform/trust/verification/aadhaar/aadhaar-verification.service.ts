@@ -101,7 +101,7 @@ export class AadhaarVerificationService {
   verify(params: {
     aadhaar:      string
     employee_id:  string
-    org_id:       string
+    tenant_id:       string
     consent:      boolean
   }): VerificationResult {
     const flags: string[] = []
@@ -122,7 +122,7 @@ export class AadhaarVerificationService {
       status,
       entity_id:         params.employee_id,
       entity_type:       'employee',
-      org_id:            params.org_id,
+      tenant_id:            params.tenant_id,
       verified_at:       new Date().toISOString(),
       score,
       flags,

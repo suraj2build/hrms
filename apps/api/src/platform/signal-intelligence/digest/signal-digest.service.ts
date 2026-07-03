@@ -2,7 +2,7 @@ import type { PlatformSignal, SignalDigest } from '../types/signal-types.js'
 
 export class SignalDigestService {
   compute(orgId: string, signals: PlatformSignal[], period = 'last_1h'): SignalDigest {
-    const orgSignals = signals.filter(s => s.org_id === orgId)
+    const orgSignals = signals.filter(s => s.tenant_id === orgId)
 
     const by_severity: Record<string, number> = {}
     const by_source:   Record<string, number> = {}
@@ -37,7 +37,7 @@ export class SignalDigestService {
       .map(([entity_id, { entity_type, count }]) => ({ entity_id, entity_type, signal_count: count }))
 
     return {
-      org_id:        orgId,
+      tenant_id:        orgId,
       period,
       total_signals: orgSignals.length,
       by_severity,

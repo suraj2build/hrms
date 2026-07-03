@@ -10,7 +10,7 @@ import type { EventSeverity }        from '../../events/types/platform-event.js'
 export interface IntelligenceComposition {
   entity_id:           string
   entity_type:         string
-  org_id:              string
+  tenant_id:              string
   governance_score:    number    // 0–100, higher = better compliance
   trust_score:         number    // 0–100, higher = more trusted
   operational_health:  number    // 0–100, higher = healthier
@@ -33,7 +33,7 @@ export interface DecisionGraphNode {
   node_type:    DecisionNodeType
   entity_id:    string
   entity_type:  string
-  org_id:       string
+  tenant_id:       string
   description:  string
   timestamp:    string
   actor_id?:    string
@@ -47,7 +47,7 @@ export interface DecisionGraphEdge {
   from_node_id: string
   to_node_id:   string
   edge_type:    DecisionEdgeType
-  org_id:       string
+  tenant_id:       string
   weight:       number        // 0.0–1.0
   created_at?:  string
 }
@@ -69,7 +69,7 @@ export interface OrchestrationStep {
 
 export interface OrchestrationActivity {
   activity_id:    string
-  org_id:         string
+  tenant_id:         string
   workflow_type:  OrchestrationWorkflowType
   entity_id:      string
   entity_type:    string
@@ -85,7 +85,7 @@ export interface OrchestrationActivity {
 
 export interface ReplaySession {
   id?:               string
-  org_id:            string
+  tenant_id:            string
   entity_id:         string
   entity_type:       string
   replay_from:       string     // ISO timestamp
@@ -115,7 +115,7 @@ export interface KnowledgeEntry {
 // ── Control Plane ────────────────────────────────────────────────────────────
 
 export interface FabricHealthSnapshot {
-  org_id:               string
+  tenant_id:               string
   overall_score:        number        // 0–100
   governance_health:    number
   trust_health:         number

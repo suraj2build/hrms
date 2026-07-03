@@ -17,13 +17,13 @@ export class IntelligenceCompositionService {
   compose(params: {
     entity_id:         string
     entity_type:       string
-    org_id:            string
+    tenant_id:            string
     governance_score?: number   // 0–100 (pass 100 if no violations)
     trust_score?:      number   // 0–100 from TrustScoreService
     // operational health derived from HealthSignalService
     // security risk derived from RiskScoreService + SecurityIntelligenceService
   }): IntelligenceComposition {
-    const { entity_id, entity_type, org_id } = params
+    const { entity_id, entity_type, tenant_id } = params
 
     // Governance score (passed in or default 80 = no violations observed)
     const govScore   = params.governance_score ?? 80
@@ -32,7 +32,7 @@ export class IntelligenceCompositionService {
     const trustScore = params.trust_score ?? 100
 
     // Operational health — average across domains for this org
-    const healthSignals = healthSignalService.getAllDomainHealth(org_id)
+    const healthSignals = healthSignalService.getAllDomainHealth(tenant_id)
     const opHealth = healthSignals.length > 0
       ? healthSignals.reduce((s, h) => s + h.score, 0) / healthSignals.length
       : 80
@@ -64,7 +64,7 @@ export class IntelligenceCompositionService {
     return {
       entity_id,
       entity_type,
-      org_id,
+      tenant_id,
       governance_score:   govScore,
       trust_score:        trustScore,
       operational_health: opHealth,
@@ -85,7 +85,7 @@ export class IntelligenceCompositionService {
 
   /** Compose summaries for a batch of entity IDs. */
   composeBatch(orgId: string, entities: Array<{ entity_id: string; entity_type: string; governance_score?: number; trust_score?: number }>): IntelligenceComposition[] {
-    return entities.map(e => this.compose({ ...e, org_id: orgId }))
+    return entities.map(e => this.compose({ ...e, tenant_id: orgId }))
   }
 }
 

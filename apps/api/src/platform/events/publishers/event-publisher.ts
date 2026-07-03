@@ -38,7 +38,7 @@ export class EventPublisher {
       module:             event.module,
       entity_type:        event.entity_type,
       entity_id:          event.entity_id,
-      org_id:             event.org_id,
+      tenant_id:             event.tenant_id,
       branch_id:          event.branch_id          ?? null,
       actor_id:           event.actor_id           ?? null,
       actor_type:         event.actor_type         ?? 'user',

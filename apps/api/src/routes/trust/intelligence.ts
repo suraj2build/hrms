@@ -35,7 +35,6 @@ export default async function trustIntelligenceRoutes(fastify: FastifyInstance) 
       const result = await trustIntelligenceService.evaluateEmployee(fastify.supabase, {
         employee_id:    parsed.data.employee_id,
         tenant_id:      tenantId,
-        org_id:         tenantId,
         pan:            parsed.data.pan ?? undefined,
         account_number: parsed.data.account_number ?? undefined,
         ifsc_code:      parsed.data.ifsc_code ?? undefined,
@@ -68,7 +67,7 @@ export default async function trustIntelligenceRoutes(fastify: FastifyInstance) 
     const { data, error } = await fastify.supabase
       .from('duplicate_detection_events')
       .select('*')
-      .eq('org_id', tenantId)
+      .eq('tenant_id', tenantId)
       .order('detected_at', { ascending: false })
       .limit(Number(limit))
     if (error) return reply.status(500).send({ error: error.message })
@@ -85,7 +84,7 @@ export default async function trustIntelligenceRoutes(fastify: FastifyInstance) 
     let q = fastify.supabase
       .from('verification_events')
       .select('*')
-      .eq('org_id', tenantId)
+      .eq('tenant_id', tenantId)
       .order('verified_at', { ascending: false })
       .limit(Number(limit))
     if (employee_id) q = q.eq('entity_id', employee_id)
@@ -106,7 +105,7 @@ export default async function trustIntelligenceRoutes(fastify: FastifyInstance) 
     let q = fastify.supabase
       .from('workforce_trust_scores')
       .select('id, entity_id, score_type, score, severity, factors, computed_at')
-      .eq('org_id', tenantId)
+      .eq('tenant_id', tenantId)
       .order('score', { ascending: true })  // lowest trust first
       .limit(Number(limit))
 
@@ -158,7 +157,7 @@ export default async function trustIntelligenceRoutes(fastify: FastifyInstance) 
     const { data, error } = await fastify.supabase
       .from('workforce_trust_scores')
       .select('id, score, severity, factors, explainability, computed_at')
-      .eq('org_id', tenantId)
+      .eq('tenant_id', tenantId)
       .eq('entity_id', employeeId)
       .eq('score_type', 'employee')
       .maybeSingle()
@@ -184,7 +183,7 @@ export default async function trustIntelligenceRoutes(fastify: FastifyInstance) 
       .order('ingested_at', { ascending: false })
       .limit(100)
     if (status) q = q.eq('status', status)
-    // Include platform-wide (org_id IS NULL) and tenant-specific
+    // Include platform-wide (tenant_id IS NULL) and tenant-specific
     const { data, error } = await q
     if (error) return reply.status(500).send({ error: error.message })
     return { revisions: data ?? [], total: (data ?? []).length }
@@ -213,7 +212,7 @@ export default async function trustIntelligenceRoutes(fastify: FastifyInstance) 
     let id: string | null | undefined
     try {
       id = await regulatoryIngestionService.ingest(fastify.supabase, {
-        org_id:           tenantId,
+        tenant_id:           tenantId,
         revision_type:    parsed.data.revision_type,
         jurisdiction:     parsed.data.jurisdiction,
         title:            parsed.data.title,

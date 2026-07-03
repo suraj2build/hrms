@@ -107,7 +107,7 @@ export default async function signalIntelligenceRoutes(fastify: FastifyInstance)
 
     const dummySignal: PlatformSignal = {
       signal_id:   'explain-dummy',
-      org_id:      'explain',
+      tenant_id:      'explain',
       source:      'governance',
       entity_id:   'entity',
       entity_type: 'system',

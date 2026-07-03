@@ -353,7 +353,7 @@ export default async function employeeRoutes(fastify: FastifyInstance) {
       module:      MODULE.EMPLOYEE,
       entity_type: 'employee',
       entity_id:   (data as any).id,
-      org_id:      request.tenantId,
+      tenant_id:      request.tenantId,
       actor_id:    (request as any).userId,
       actor_type:  'user',
       payload:     { employee_code: (data as any).employee_code, employment_type: (parsed.data as any).employment_type ?? null },

@@ -13,7 +13,7 @@ export class SimulationService {
    * ANALYTICAL ONLY — does not touch payroll_runs or compensation tables.
    */
   simulatePayrollImpact(params: {
-    org_id:             string
+    tenant_id:             string
     affected_count:     number
     avg_ctc_increase:   number    // INR per employee per month
     months_in_period:   number
@@ -38,14 +38,14 @@ export class SimulationService {
       explainability: explainabilityService.explain({
         event_type:  'simulation.payroll_impact',
         entity_type: 'org',
-        entity_id:   params.org_id,
+        entity_id:   params.tenant_id,
         payload:     { total_impact: totalImpact, affected_count: params.affected_count },
         severity:    riskLevel,
       }),
     }
 
     return {
-      org_id:           params.org_id,
+      tenant_id:           params.tenant_id,
       simulation_type:  'payroll_impact',
       label:            `Payroll impact: ${params.affected_count} employees, ₹${params.avg_ctc_increase}/month avg`,
       input_params:     params as unknown as Record<string, unknown>,
@@ -59,7 +59,7 @@ export class SimulationService {
    * Simulate compliance threshold change impact.
    */
   simulateComplianceThreshold(params: {
-    org_id:           string
+    tenant_id:           string
     threshold_type:   string    // 'pf_ceiling' | 'esi_ceiling' | etc.
     old_threshold:    number
     new_threshold:    number
@@ -82,14 +82,14 @@ export class SimulationService {
       explainability: explainabilityService.explain({
         event_type:  'simulation.compliance_threshold',
         entity_type: 'org',
-        entity_id:   params.org_id,
+        entity_id:   params.tenant_id,
         payload:     { change_pct: changePct, affected_count: params.affected_count },
         severity:    riskLevel,
       }),
     }
 
     return {
-      org_id:          params.org_id,
+      tenant_id:          params.tenant_id,
       simulation_type: 'compliance_threshold',
       label:           `${params.threshold_type} threshold change: ${params.old_threshold} → ${params.new_threshold}`,
       input_params:    params as unknown as Record<string, unknown>,
@@ -103,7 +103,7 @@ export class SimulationService {
    * Simulate workforce overtime growth impact.
    */
   simulateOvertimeGrowth(params: {
-    org_id:               string
+    tenant_id:               string
     affected_count:       number
     avg_ot_hours_per_week: number
     ot_rate_per_hour:     number
@@ -128,14 +128,14 @@ export class SimulationService {
       explainability: explainabilityService.explain({
         event_type:  'simulation.workforce_overtime',
         entity_type: 'org',
-        entity_id:   params.org_id,
+        entity_id:   params.tenant_id,
         payload:     { avg_ot_hours: params.avg_ot_hours_per_week, total_cost: totalCost },
         severity:    riskLevel,
       }),
     }
 
     return {
-      org_id:          params.org_id,
+      tenant_id:          params.tenant_id,
       simulation_type: 'workforce_overtime',
       label:           `Overtime simulation: ${params.affected_count} employees, ${params.avg_ot_hours_per_week}h/week`,
       input_params:    params as unknown as Record<string, unknown>,

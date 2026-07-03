@@ -2,7 +2,7 @@ export type SignalSource = 'governance' | 'trust' | 'operations' | 'security' | 
 
 export interface PlatformSignal {
   signal_id:   string
-  org_id:      string
+  tenant_id:      string
   source:      SignalSource
   entity_id:   string
   entity_type: string
@@ -21,7 +21,7 @@ export interface PlatformSignal {
 
 export interface SignalCluster {
   cluster_id:   string
-  org_id:       string
+  tenant_id:       string
   label:        string
   signals:      PlatformSignal[]
   severity:     'info' | 'warning' | 'high' | 'critical'
@@ -31,7 +31,7 @@ export interface SignalCluster {
 }
 
 export interface SignalDigest {
-  org_id:        string
+  tenant_id:        string
   period:        string   // e.g. "last_1h", "last_24h"
   total_signals: number
   by_severity:   Record<string, number>

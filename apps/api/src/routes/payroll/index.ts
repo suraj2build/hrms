@@ -2098,7 +2098,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       module:      MODULE.PAYROLL,
       entity_type: 'payroll_run',
       entity_id:   id,
-      org_id:      req.tenantId,
+      tenant_id:      req.tenantId,
       actor_id:    req.userId,
       actor_type:  'user',
       payload:     { month: run.month, total_employees: (run as any).total_employees ?? 0 },

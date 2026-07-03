@@ -21,7 +21,6 @@ export class DuplicateDetectorService {
     pan:         string
     employee_id: string
     tenant_id:   string
-    org_id:      string
   }): Promise<DuplicateDetectionResult | null> {
     const { data, error } = await supabase
       .from('employee_bank_statutory')
@@ -32,7 +31,7 @@ export class DuplicateDetectorService {
 
     if (error || !data || data.length === 0) return null
 
-    return this.buildResult('pan', params.employee_id, 'employee', params.org_id,
+    return this.buildResult('pan', params.employee_id, 'employee', params.tenant_id,
       (data as any[]).map((r: any) => r.employee_id as string),
       hash(params.pan), 'high')
   }
@@ -44,7 +43,6 @@ export class DuplicateDetectorService {
     account_number: string
     employee_id:    string
     tenant_id:      string
-    org_id:         string
   }): Promise<DuplicateDetectionResult | null> {
     // Match on normalized account number (remove spaces/dashes)
     const normalized = params.account_number.replace(/[\s\-]/g, '')
@@ -65,7 +63,7 @@ export class DuplicateDetectorService {
 
     if (matches.length === 0) return null
 
-    return this.buildResult('bank_account', params.employee_id, 'employee', params.org_id,
+    return this.buildResult('bank_account', params.employee_id, 'employee', params.tenant_id,
       matches.map(r => r.employee_id as string),
       hash(normalized), 'high')
   }
@@ -77,7 +75,6 @@ export class DuplicateDetectorService {
     phone:       string
     employee_id: string
     tenant_id:   string
-    org_id:      string
   }): Promise<DuplicateDetectionResult | null> {
     const normalized = params.phone.replace(/[\s\-\+]/g, '')
     const { data, error } = await supabase
@@ -89,7 +86,7 @@ export class DuplicateDetectorService {
 
     if (error || !data || data.length === 0) return null
 
-    return this.buildResult('phone', params.employee_id, 'employee', params.org_id,
+    return this.buildResult('phone', params.employee_id, 'employee', params.tenant_id,
       (data as any[]).map(r => r.id as string),
       hash(normalized), 'warning')
   }
@@ -107,7 +104,7 @@ export class DuplicateDetectorService {
       duplicate_type:      type,
       entity_id:           entityId,
       entity_type:         entityType,
-      org_id:              orgId,
+      tenant_id:              orgId,
       matching_entity_ids: matchingIds,
       value_hash:          valueHash,
       severity,

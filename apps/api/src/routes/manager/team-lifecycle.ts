@@ -90,7 +90,7 @@ export default async function managerTeamLifecycleRoute(fastify: FastifyInstance
       fastify.supabase
         .from('workforce_trust_scores')
         .select('entity_id, score, severity, factors, computed_at')
-        .eq('org_id', req.tenantId).eq('score_type', 'employee')
+        .eq('tenant_id', req.tenantId).eq('score_type', 'employee')
         .in('entity_id', teamIds)
         .then(r => r.data ?? []),
     ])

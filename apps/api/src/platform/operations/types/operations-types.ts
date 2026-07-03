@@ -50,7 +50,7 @@ export interface AutomationActivityRecord {
   action_type:   AutomationActionType
   entity_id:     string
   entity_type:   string
-  org_id:        string
+  tenant_id:        string
   message:       string
   severity:      EventSeverity
   fired_at:      string
@@ -69,7 +69,7 @@ export interface SlaStatus {
   sla_id:        string
   entity_id:     string
   entity_type:   string
-  org_id:        string
+  tenant_id:        string
   started_at:    string
   due_at:        string
   breached:      boolean
@@ -81,7 +81,7 @@ export interface SlaBreachEvent {
   sla_id:          string
   entity_id:       string
   entity_type:     string
-  org_id:          string
+  tenant_id:          string
   breach_severity: EventSeverity
   description:     string
   breached_at:     string
@@ -92,7 +92,7 @@ export type SimulationType = 'payroll_impact' | 'compliance_threshold' | 'workfo
 
 export interface SimulationRun {
   id?:              string
-  org_id:           string
+  tenant_id:           string
   simulation_type:  SimulationType
   label:            string
   input_params:     Record<string, unknown>
@@ -121,7 +121,7 @@ export interface SecurityIntelligenceEvent {
   signal_type:   SecuritySignalType
   entity_id:     string
   entity_type:   string
-  org_id:        string
+  tenant_id:        string
   severity:      EventSeverity
   description:   string
   detected_at:   string

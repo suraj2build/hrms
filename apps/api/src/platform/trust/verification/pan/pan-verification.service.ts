@@ -31,7 +31,7 @@ export class PanVerificationService {
   verify(params: {
     pan:          string
     employee_id:  string
-    org_id:       string
+    tenant_id:       string
     name_from_db?: string   // for future name-match check
   }): VerificationResult {
     const flags: string[] = []
@@ -49,7 +49,7 @@ export class PanVerificationService {
       status:            isValid ? 'verified' : 'failed',
       entity_id:         params.employee_id,
       entity_type:       'employee',
-      org_id:            params.org_id,
+      tenant_id:            params.tenant_id,
       verified_at:       new Date().toISOString(),
       score,
       flags,

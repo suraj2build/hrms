@@ -26,7 +26,7 @@ export class RegulatoryIngestionService {
     const { data, error } = await supabase
       .from('compliance_revision_events')
       .insert({
-        org_id:            input.org_id ?? null,
+        tenant_id:            input.tenant_id ?? null,
         revision_type:     input.revision_type,
         jurisdiction:      input.jurisdiction,
         title:             input.title,
@@ -90,7 +90,7 @@ export class RegulatoryIngestionService {
       .order('ingested_at', { ascending: false })
 
     if (tenantId) {
-      q = q.or(`org_id.eq.${tenantId},org_id.is.null`)
+      q = q.or(`tenant_id.eq.${tenantId},tenant_id.is.null`)
     }
 
     const { data } = await q

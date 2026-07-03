@@ -27,13 +27,13 @@ export interface OperationalHealthSignal {
 }
 
 export class ObservabilityIntelligenceService {
-  /** Event clusters keyed by `org_id:event_type`. */
+  /** Event clusters keyed by `tenant_id:event_type`. */
   private clusters: Map<string, GovernanceEventCluster> = new Map()
   private healthSignals: Map<string, OperationalHealthSignal> = new Map()
 
   /** Record an incoming platform event into the cluster index. */
   recordEvent(event: ResolvedPlatformEvent): void {
-    const key      = `${event.org_id}:${event.event_type}`
+    const key      = `${event.tenant_id}:${event.event_type}`
     const existing = this.clusters.get(key)
     if (existing) {
       existing.count++
