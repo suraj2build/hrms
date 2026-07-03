@@ -34,7 +34,7 @@ export default async function moodRoutes(fastify: FastifyInstance) {
       .from('profiles')
       .select('employee_id')
       .eq('id', profileId)
-      .single()
+      .maybeSingle()
     return data?.employee_id ?? null
   }
 
@@ -58,7 +58,7 @@ export default async function moodRoutes(fastify: FastifyInstance) {
 
   fastify.get('/today', { preHandler: fastify.authenticate }, async (req: any, reply) => {
     const tenantId    = req.tenantId
-    const employeeId  = await getEmployeeId(req.user.id)
+    const employeeId  = await getEmployeeId(req.userId)
     const today       = todayDate()
 
     let checkin: Record<string, unknown> | null = null
@@ -113,7 +113,7 @@ export default async function moodRoutes(fastify: FastifyInstance) {
       return reply.status(400).send({ error: 'mood must be an integer between 1 and 5' })
     }
 
-    const employeeId = await getEmployeeId(req.user.id)
+    const employeeId = await getEmployeeId(req.userId)
     if (!employeeId) {
       return reply.status(400).send({ error: 'No employee profile linked to your account' })
     }
@@ -168,7 +168,7 @@ export default async function moodRoutes(fastify: FastifyInstance) {
       return reply.status(400).send({ error: 'response is required' })
     }
 
-    const employeeId = await getEmployeeId(req.user.id)
+    const employeeId = await getEmployeeId(req.userId)
     if (!employeeId) {
       return reply.status(400).send({ error: 'No employee profile linked to your account' })
     }
@@ -464,7 +464,7 @@ export default async function moodRoutes(fastify: FastifyInstance) {
         ends_at:       ends_at ?? null,
         poll_category: poll_category ?? 'weekly_pulse',
         status:        'draft',
-        created_by:    req.user.id,
+        created_by:    req.userId,
       })
       .select('id')
       .single()
@@ -476,7 +476,7 @@ export default async function moodRoutes(fastify: FastifyInstance) {
       tableName:   'pulse_questions',
       recordId:    data.id,
       action:      'INSERT',
-      performedBy: req.user.id,
+      performedBy: req.userId,
       newData:     { question, poll_category: poll_category ?? 'weekly_pulse' },
     })
 
@@ -516,7 +516,7 @@ export default async function moodRoutes(fastify: FastifyInstance) {
       tableName:   'pulse_questions',
       recordId:    id,
       action:      'UPDATE',
-      performedBy: req.user.id,
+      performedBy: req.userId,
       newData:     update,
     })
 
