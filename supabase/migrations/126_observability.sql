@@ -64,10 +64,10 @@ CREATE TABLE IF NOT EXISTS trace_spans_2026_07 PARTITION OF trace_spans
 CREATE TABLE IF NOT EXISTS trace_spans_default PARTITION OF trace_spans DEFAULT;
 
 -- Indexes on each partition (inherited automatically for child tables in PG15+)
-CREATE INDEX IF NOT EXISTS ON trace_spans (trace_id, started_at);
-CREATE INDEX IF NOT EXISTS ON trace_spans (tenant_id, operation, started_at DESC);
-CREATE INDEX IF NOT EXISTS ON trace_spans (status, started_at DESC) WHERE status IN ('error', 'timeout');
-CREATE INDEX IF NOT EXISTS ON trace_spans (service, operation, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_trace_spans_trace_id   ON trace_spans (trace_id, started_at);
+CREATE INDEX IF NOT EXISTS idx_trace_spans_tenant_op  ON trace_spans (tenant_id, operation, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_trace_spans_status     ON trace_spans (status, started_at DESC) WHERE status IN ('error', 'timeout');
+CREATE INDEX IF NOT EXISTS idx_trace_spans_service_op ON trace_spans (service, operation, started_at DESC);
 
 COMMENT ON TABLE trace_spans IS
   'Distributed trace spans for cross-process request tracing. Partitioned monthly. '
@@ -112,9 +112,9 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_bem_unique_tenant
   ON business_event_metrics (tenant_id, event_category, event_type, metric_date, metric_hour)
   WHERE tenant_id IS NOT NULL;
 
-CREATE INDEX IF NOT EXISTS ON business_event_metrics (tenant_id, event_category, metric_date DESC);
-CREATE INDEX IF NOT EXISTS ON business_event_metrics (event_type, metric_date DESC);
-CREATE INDEX IF NOT EXISTS ON business_event_metrics (metric_date DESC, error_count DESC)
+CREATE INDEX IF NOT EXISTS idx_biz_metrics_tenant_cat ON business_event_metrics (tenant_id, event_category, metric_date DESC);
+CREATE INDEX IF NOT EXISTS idx_biz_metrics_event_type ON business_event_metrics (event_type, metric_date DESC);
+CREATE INDEX IF NOT EXISTS idx_biz_metrics_errors     ON business_event_metrics (metric_date DESC, error_count DESC)
   WHERE error_count > 0;
 
 COMMENT ON TABLE business_event_metrics IS

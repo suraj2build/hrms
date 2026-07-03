@@ -52,11 +52,11 @@ CREATE TABLE IF NOT EXISTS security_events_2026_07 PARTITION OF security_events
 -- Default partition catches any out-of-range inserts (prevents INSERT failures)
 CREATE TABLE IF NOT EXISTS security_events_default PARTITION OF security_events DEFAULT;
 
-CREATE INDEX IF NOT EXISTS ON security_events (tenant_id, event_type, occurred_at DESC);
-CREATE INDEX IF NOT EXISTS ON security_events (actor_id, occurred_at DESC);
-CREATE INDEX IF NOT EXISTS ON security_events (severity, occurred_at DESC)
+CREATE INDEX IF NOT EXISTS idx_sec_events_tenant_type  ON security_events (tenant_id, event_type, occurred_at DESC);
+CREATE INDEX IF NOT EXISTS idx_sec_events_actor        ON security_events (actor_id, occurred_at DESC);
+CREATE INDEX IF NOT EXISTS idx_sec_events_severity     ON security_events (severity, occurred_at DESC)
   WHERE severity IN ('high', 'critical');
-CREATE INDEX IF NOT EXISTS ON security_events (correlation_id)
+CREATE INDEX IF NOT EXISTS idx_sec_events_correlation  ON security_events (correlation_id)
   WHERE correlation_id IS NOT NULL;
 
 COMMENT ON TABLE security_events IS
