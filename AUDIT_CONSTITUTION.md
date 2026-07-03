@@ -315,7 +315,7 @@ unless a specific issue requires re-reading the file.
 | Payroll route size | 4,608 lines — do not read the whole file; target specific functions |
 | RLS bypass | Service-role key used by all Fastify routes — RLS not the primary isolation mechanism |
 | Notification service | `registerNotificationHandlers()` wired in `index.ts`; `inbox_items` writes implemented (ISSUE-009, CLOSED 2026-07-01) |
-| AF-001 (lifecycle sync gap) | `employees.status = 'separated'` does NOT revoke Supabase Auth tokens — the HR lifecycle and auth state machines are unsynchronised. Product decision on revocation timing is pending (PD-1). `122_compliance_controls.sql` CC6.3 set to `in_progress` until AF-001 is resolved. Do not represent this control as implemented in any audit response. |
+| AF-001 (lifecycle sync gap) | **CLOSED (2026-07-03).** `PATCH /employees/:id/separation/relieve` now sets `profiles.is_active = false` and calls `auth.admin.updateUserById(..., { ban_duration: '876000h' })` at the terminal `employees.status = 'separated'` transition (`separation-workflow.ts`). SOC2 CC6.3 updated to `implemented` in `122_compliance_controls.sql`. |
 | Job queue duality | `job-queue.ts` (in-memory, unreliable) + `durable-queue.ts` (Supabase-backed) both in use |
 | Migration count | 350 as of 2026-07-03; next available number is 351 |
 | `org_id` tables | All 18 tables renamed to `tenant_id` via migration 350 (ISSUE-065, CLOSED). Historical `automation_activity_logs.metadata.org_id` JSONB keys are preserved as-is — no read-side code queries this key. |
@@ -433,7 +433,7 @@ Code cannot be written until the product team makes a decision on the open quest
 
 | ID | Title | Blocked on |
 |----|-------|-----------|
-| PD-1 / AF-001 | Employee lifecycle ↔ auth revocation sync — `employees.status = 'separated'` does not revoke Supabase JWTs; fixing this requires a product decision on revocation timing and UX. See §6.6. | Product decision on revocation stage |
+| ~~PD-1 / AF-001~~ | ~~Employee lifecycle ↔ auth revocation sync~~ | **CLOSED 2026-07-03** — implemented in `separation-workflow.ts`; CC6.3 now `implemented`. |
 | PD-2 | Helpdesk admin ticket list — `GET /helpdesk/tickets` bulk "Select All" semantics unknown; scope of safe pagination depends on whether Select All is page-scoped or match-all. | Product decision on Select All behaviour |
 
 ---
