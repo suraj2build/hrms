@@ -8,6 +8,7 @@ import { LogoMark, Wordmark } from '@/components/brand/Logo'
 import { toast } from 'sonner'
 import { supabase } from '@/lib/supabase/client'
 import { useAuthStore } from '@/stores/authStore'
+import { DEMO_MODE } from '@/lib/demo'
 import { AuthShowcase, FloatKeyframes } from './AuthShowcase'
 import type { UserRole } from '@/types'
 
@@ -59,11 +60,20 @@ export function Login() {
       password: values.password,
     })
     if (error) { toast.error(error.message); return }
+    // Clear demo mode so real tenant data loads after a real login
+    try { sessionStorage.removeItem('cognix-demo') } catch { /* noop */ }
+    if (DEMO_MODE) {
+      // Module was already loaded in demo mode — reload so it re-initializes cleanly
+      window.location.reload()
+      return
+    }
     setAwaitingProfile(true)
   }
 
   async function signInWithGoogle() {
     setGoogleLoading(true)
+    // Clear demo mode before OAuth redirect — the callback page will load without it
+    try { sessionStorage.removeItem('cognix-demo') } catch { /* noop */ }
     const { error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
       options: { redirectTo: `${window.location.origin}/auth/callback` },
