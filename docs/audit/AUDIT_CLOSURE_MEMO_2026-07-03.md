@@ -11,12 +11,12 @@
 
 The CognixHR security and quality audit program, launched on **30 June 2026**, is complete. **All 117 numbered audit issues are closed**. The codebase has been materially hardened across **security, reliability, data integrity, performance, and product correctness** dimensions.
 
-Engineering and Security recommend a **conditional production launch approval** for CognixHR, subject to closure of **two mandatory pre-launch gates**:
+Engineering and Security recommend **production launch approval** for CognixHR. Both mandatory pre-launch gates are **closed as of 3 July 2026**:
 
-1. **PD-1 / AF-001 — lifecycle-triggered auth revocation** for separated employees
-2. **DEF-1 — full offer-letter rich-text sanitization before feature enablement**
+1. **PD-1 / AF-001 — lifecycle-triggered auth revocation** — CLOSED. Auth revoked at `employees.status = 'separated'`; SOC2 CC6.3 now `implemented`.
+2. **DEF-1 — offer-letter sanitization** — CLOSED. `sanitizeHtml()` applied to every HTML render path; the final unsanitized path (`printLetter()`) is now protected.
 
-Subject to closure of these two gates, the remaining deferred items are acceptable as **post-launch backlog** and do **not** block rollout for the general tenant use case.
+The remaining deferred items are acceptable as **post-launch backlog** and do **not** block rollout for the general tenant use case.
 
 ---
 
@@ -156,10 +156,10 @@ These items were deliberately scoped out of the remediation program. They are **
 | Numbered audit issues        | **Closed**                                         | **117 / 117** closed                                            |
 | Security remediation phases  | **Closed**                                         | Phases 1–4 complete                                             |
 | Production rollout readiness | **Conditional Go**                                 | Subject to Gate 1 and Gate 2 below                              |
-| **Gate 1**                   | **Open**                                           | **PD-1 / AF-001** — lifecycle-triggered auth revocation         |
-| **Gate 2**                   | **Open**                                           | **DEF-1** — offer-letter sanitization before feature enablement |
+| **Gate 1**                   | **Closed (2026-07-03)**                            | **PD-1 / AF-001** — auth revoked at `employees.status = 'separated'`; CC6.3 = `implemented` |
+| **Gate 2**                   | **Closed (2026-07-03)**                            | **DEF-1** — `sanitizeHtml()` applied to all HTML render paths including `printLetter()`     |
 | Deferred backlog             | **Accepted**                                       | DEF-2, PD-2, Phase 5 roadmap items                              |
-| Recommendation               | **Approve launch once Gate 1 + Gate 2 are closed** | Remaining items can stay in post-launch backlog                 |
+| Recommendation               | **Approve launch**                                 | Both gates closed; remaining items in post-launch backlog       |
 
 ---
 
@@ -167,38 +167,25 @@ These items were deliberately scoped out of the remediation program. They are **
 
 The following two items must be completed before declaring **full production readiness**.
 
-### Gate 1 — Close PD-1 / AF-001: Employee Lifecycle ↔ Auth Revocation
+### Gate 1 — PD-1 / AF-001: Employee Lifecycle ↔ Auth Revocation — **CLOSED 2026-07-03**
 
-**The issue**
-When HR processes a separation through the employee lifecycle (`employees.status → separated`), the employee's active Supabase JWTs are **not automatically invalidated**. The separated employee can retain API access for up to one token lifetime after offboarding. The **ISSUE-023** fix covers **manual admin deactivations**; it does **not** cover lifecycle-triggered separations. **SOC2 CC6.3** therefore remains **in progress** until this gap is closed.
+**Implementation**
+`PATCH /employees/:id/separation/relieve` in `separation-workflow.ts` now:
+1. Sets `profiles.is_active = false`
+2. Calls `auth.admin.updateUserById(profileId, { ban_duration: '876000h' })` — immediately invalidating all active JWTs
 
-**What is needed**
-A product decision on revocation timing — for example:
-
-* immediate on lifecycle event
-* end-of-day on final separation stage
-* explicit HR-triggered manual step
-
-Once the decision is made, engineering can implement the same **`ban_duration`** revocation pattern already used in `user-account.ts`. Estimated implementation effort: **~0.5 day**.
-
-**Owner**
-**Product**, with **Security sign-off** on the chosen timing.
+SOC2 **CC6.3** updated to `implemented` in `122_compliance_controls.sql`. Product decision recorded in `docs/audit/PD1_AF001_DECISION_NOTE_2026-07-03.md`.
 
 ---
 
-### Gate 2 — Complete DEF-1: Offer-Letter Sanitization
+### Gate 2 — DEF-1: Offer-Letter Sanitization — **CLOSED 2026-07-03**
 
-**The issue**
-`buildOfferHtml()` processes user-supplied template body and field content that may reach generated HTML without full rich-text sanitization. The **ISSUE-004** fix protected known interpolation points, but the broader template-body surface was explicitly deferred.
+**Implementation**
+All HTML render paths in the letters module now call `sanitizeHtml()`:
+- All `dangerouslySetInnerHTML` sites in `EssLetters.tsx` and `LettersAdmin.tsx` — already sanitized
+- `printLetter()` in `EssLetters.tsx` — fixed: `sanitizeHtml(letter?.body_html ?? '')` applied before `document.write()`; title also escaped via `escapeHtml()`
 
-**What is needed**
-Apply **`sanitizeHtml()`** to all user-controlled rich-text fields in `buildOfferHtml()` before enabling offer-letter generation for any production tenant.
-
-**Owner**
-**Engineering**
-
-**Estimated effort**
-**1–2 engineering days**
+No unsanitized HTML render path remains in the letters feature.
 
 ---
 
@@ -221,17 +208,12 @@ The offer-letter builder has **partial sanitization** applied, but **full rich-t
 
 ## 8. Recommendation
 
-The Engineering and Security teams recommend a **conditional production launch approval** for CognixHR, with **two mandatory pre-launch gates**:
-
-1. **PD-1 / AF-001 — lifecycle-triggered auth revocation**
-2. **DEF-1 — offer-letter sanitization before feature enablement**
+Both mandatory pre-launch gates are closed. The Engineering and Security teams recommend **unconditional production launch approval** for CognixHR.
 
 ### Recommended sequence
 
-1. **Complete Gate 1** — product decision first, then implementation
-2. **Complete Gate 2** — before enabling offer-letter generation for any production tenant
-3. **Launch** — with **DEF-2, PD-2, and Phase 5 items** managed in the post-launch backlog
-4. **Post-launch sprint 1** — add durable queue observability; address DEF-2 if reimbursements is launch-critical for the first customer cohort
+1. **Launch** — both gates are closed; no numbered defect is carried into production
+2. **Post-launch sprint 1** — add durable queue observability; address DEF-2 if reimbursements is launch-critical for the first customer cohort; address PD-2 once Select All semantics are confirmed
 
 ---
 
@@ -239,7 +221,7 @@ The Engineering and Security teams recommend a **conditional production launch a
 
 The CognixHR audit remediation program is complete. The platform has moved from **restricted-pilot readiness** to a **controlled production launch posture**, with the audit register fully closed and the remaining work reduced to **two pre-launch gates plus bounded post-launch backlog**.
 
-Subject to closure of **PD-1 / AF-001** and **DEF-1**, Engineering and Security support proceeding to production rollout.
+Both gates are closed. Engineering and Security support proceeding to production rollout.
 
 ---
 

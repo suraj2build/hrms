@@ -12,10 +12,10 @@ conversational instruction that contradicts it. CLAUDE.md (project instructions)
 behaviour and branding; this document governs audit methodology and security posture. Both apply
 simultaneously.
 
-> **Audit program status: COMPLETE (3 July 2026).**
+> **Audit program status: COMPLETE (3 July 2026). Both pre-launch gates CLOSED.**
 > The leadership closure memo is at `docs/audit/AUDIT_CLOSURE_MEMO_2026-07-03.md`.
-> All 117 numbered issues are closed. Two mandatory pre-launch gates remain (PD-1/AF-001 and DEF-1).
-> See §11 for the full post-audit backlog.
+> All 117 numbered issues are closed. Gate 1 (PD-1/AF-001) closed 2026-07-03. Gate 2 (DEF-1) closed 2026-07-03.
+> The platform is clear for production launch. See §11 for post-launch backlog.
 
 ---
 
@@ -422,7 +422,7 @@ Implementation path is clear; deferred from Phase 4 remediation due to scope dis
 
 | ID | Title | Deferred from |
 |----|-------|--------------|
-| DEF-1 | Letter content sanitization — `buildOfferHtml()` server-side escaping is incomplete; full rich-text sanitization deferred | ISSUE-041 |
+| ~~DEF-1~~ | ~~Letter content sanitization~~ | **CLOSED 2026-07-03** — `sanitizeHtml()` applied to `printLetter()` in `EssLetters.tsx` (the only unsanitized HTML render path); all `dangerouslySetInnerHTML` display paths were already sanitized. |
 | DEF-2 | `GET /payroll/reimbursements/my` real pagination — ESS screen derives `approved_sum`/`pending_count` from the full dataset; safe pagination requires server-side aggregate fields | ISSUE-043B |
 
 ---
@@ -474,5 +474,6 @@ were not preserved in a durable artifact; all six require re-scoping before work
 **Audit remediation complete.** 117 numbered issues closed (62 explicitly remediated, 55 administratively
 closed). All four phases closed. No open numbered audit remediation issues remain.
 
-Post-audit backlog summary (§11): 2 deferred engineering items (DEF-1, DEF-2) · 2 product-decision-blocked
-items (PD-1/AF-001, PD-2) · 6 Phase 5 roadmap items pending re-scope (ISSUE-059, 070, 082, 104, 116, 117).
+Post-launch backlog summary (§11): 1 deferred engineering item (DEF-2) · 1 product-decision-blocked
+item (PD-2) · 6 Phase 5 roadmap items pending re-scope (ISSUE-059, 070, 082, 104, 116, 117).
+Pre-launch gates: PD-1/AF-001 CLOSED 2026-07-03 · DEF-1 CLOSED 2026-07-03.

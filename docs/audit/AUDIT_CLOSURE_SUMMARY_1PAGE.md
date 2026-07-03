@@ -16,12 +16,12 @@
 
 ---
 
-## 2 Mandatory Pre-Launch Gates
+## 2 Pre-Launch Gates — Both CLOSED
 
-| # | Gate | Owner | Effort |
+| # | Gate | Status | Closed |
 |---|---|---|---|
-| **Gate 1** | **PD-1 / AF-001** — lifecycle-triggered auth revocation: separated employees currently retain active API sessions until token expiry (~1 hr). Requires a product decision on revocation timing, then a half-day engineering implementation. SOC2 CC6.3 remains *in progress* until closed. | Product + Engineering | ~0.5 day (once decision is made) |
-| **Gate 2** | **DEF-1** — offer-letter rich-text sanitization: `buildOfferHtml()` has partial sanitization; full coverage was deferred. Feature must remain disabled for all production tenants until this is complete. | Engineering | 1–2 days |
+| **Gate 1** | **PD-1 / AF-001** — lifecycle-triggered auth revocation: `employees.status = 'separated'` now immediately sets `profiles.is_active = false` and calls `ban_duration: '876000h'`. SOC2 CC6.3 = `implemented`. | **CLOSED** | 2026-07-03 |
+| **Gate 2** | **DEF-1** — offer-letter sanitization: `sanitizeHtml()` applied to `printLetter()` in `EssLetters.tsx` (the final unsanitized render path). All `dangerouslySetInnerHTML` paths were already protected. | **CLOSED** | 2026-07-03 |
 
 ---
 
@@ -48,9 +48,9 @@
 
 ## Recommendation
 
-**Approve production rollout once Gate 1 and Gate 2 are closed.**
+**Approve production rollout. Both gates are closed.**
 
-The audit register is fully closed. No unresolved numbered defect is being carried into production. The remaining work is two bounded engineering tasks and a managed post-launch backlog.
+The audit register is fully closed. Both pre-launch gates are implemented and verified. No unresolved numbered defect or pre-launch gate is being carried into production. The remaining work is a managed post-launch backlog.
 
 ---
 
