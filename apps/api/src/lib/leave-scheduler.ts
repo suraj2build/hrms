@@ -10,8 +10,8 @@
  *   yearly_accrual   — Jan 1  (calendar) or Apr 1 (financial year start)
  *   monthly_accrual  — 1st–3rd of each month (safe window)
  *   carry_forward    — Dec 31 (calendar year-end) or Mar 31 (FY year-end)
- *                      Runs BEFORE co_expiry so balances reflect the
- *                      carry-forward before any expiry deductions.
+ *                      Enqueued BEFORE co_expiry so the queue worker picks
+ *                      up carry-forward first on year-end days.
  *   co_expiry        — every day (after carry_forward on year-end days)
  *
  * State is held in memory for speed; if the process restarts mid-month,
@@ -20,6 +20,10 @@
  *
  * All jobs run for every active tenant. Errors are caught per-tenant so
  * one bad tenant cannot block others.
+ *
+ * C4 change: tick() now enqueues 6 independent durable sub-jobs instead
+ * of running them synchronously. Each sub-job has its own timeout, so a
+ * slow tenant cannot push the whole tick over the 120s durable-job limit.
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
@@ -33,6 +37,10 @@ import { runMonthlyAccrual, processCarryForward } from './accrual-engine.js'
 import { runEventGrantsForTenant }                from './leave-event-engine.js'
 import { runLeaveReconciliation }                  from './leave-reconciliation.js'
 import { durableQueue }                            from './durable-queue.js'
+
+// Suppress unused-import warning — processCarryForward is re-exported for
+// callers that need it directly (e.g. admin one-shot endpoints).
+void processCarryForward
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -174,7 +182,109 @@ async function expireStaleUploadSessions(supabase: SupabaseClient): Promise<void
   }
 }
 
+// ── Sub-job handlers (called by durable queue workers) ─────────────────────────
+// Each function fetches tenants fresh and iterates, so a crash in one does not
+// affect the other sub-jobs (which run as independent durable jobs).
+
+export async function execLeaveYearlyAccrual(
+  supabase: SupabaseClient,
+  payload:  { isCalYearStart: boolean; year: number; leaveYear: number; dayKey: string },
+): Promise<void> {
+  const { leaveYear, dayKey } = payload
+  console.log(`[leave-scheduler] job:yearly-accrual year=${leaveYear}`)
+  for (const tenantId of await fetchAllTenantIds(supabase)) {
+    await yearlyAccrualJob(supabase, tenantId, leaveYear, null, dayKey)
+      .then(r => console.log(`[leave-scheduler] yearly_accrual tenant=${tenantId} credited=${r.total_days_credited} emp=${r.employees_processed}`))
+      .catch((e: Error) => console.error(`[leave-scheduler] yearly_accrual error tenant=${tenantId}`, e.message))
+  }
+}
+
+export async function execLeaveMonthlyAccrual(
+  supabase: SupabaseClient,
+  payload:  { year: number; monthNum: number },
+): Promise<void> {
+  const { year, monthNum } = payload
+  const monthKey = `${year}-${String(monthNum).padStart(2, '0')}`
+  console.log(`[leave-scheduler] job:monthly-accrual month=${monthKey}`)
+  for (const tenantId of await fetchAllTenantIds(supabase)) {
+    await monthlyAccrualJob(supabase, tenantId, year, monthNum)
+      .then(r => console.log(`[leave-scheduler] monthly_accrual tenant=${tenantId} credited=${r.total_days_credited} emp=${r.employees_processed}`))
+      .catch((e: Error) => console.error(`[leave-scheduler] monthly_accrual error tenant=${tenantId}`, e.message))
+    await runMonthlyAccrual(supabase, tenantId, year, monthNum)
+      .then(r => console.log(`[leave-scheduler] rule_accrual tenant=${tenantId} credited=${r.total_days_credited} emp=${r.employees_credited} errors=${r.errors.length}`))
+      .catch((e: Error) => console.error(`[leave-scheduler] rule_accrual error tenant=${tenantId}`, e.message))
+  }
+}
+
+export async function execLeaveCarryForward(
+  supabase: SupabaseClient,
+  payload:  { fromYear: number; toYear: number },
+): Promise<void> {
+  const { fromYear, toYear } = payload
+  console.log(`[leave-scheduler] job:carry-forward ${fromYear}→${toYear}`)
+  for (const tenantId of await fetchAllTenantIds(supabase)) {
+    await carryForwardJob(supabase, tenantId, fromYear, toYear)
+      .then(r => console.log(`[leave-scheduler] carry_forward tenant=${tenantId} credited=${r.total_days_credited} emp=${r.employees_processed}`))
+      .catch((e: Error) => console.error(`[leave-scheduler] carry_forward error tenant=${tenantId}`, e.message))
+  }
+}
+
+export async function execLeaveCoExpiry(
+  supabase: SupabaseClient,
+  payload:  { dayKey: string },
+): Promise<void> {
+  // Reconstruct a deterministic date from dayKey so idempotency holds even if
+  // the job runs slightly after midnight (the queued dayKey stays the same).
+  const asOf = new Date(`${payload.dayKey}T12:00:00.000Z`)
+  for (const tenantId of await fetchAllTenantIds(supabase)) {
+    await coExpiryJob(supabase, tenantId, asOf)
+      .then(r => {
+        if (r.employees_processed > 0) {
+          console.log(`[leave-scheduler] co_expiry tenant=${tenantId} expired=${-r.total_days_credited} emp=${r.employees_processed}`)
+        }
+      })
+      .catch((e: Error) => console.error(`[leave-scheduler] co_expiry error tenant=${tenantId}`, e.message))
+  }
+}
+
+export async function execLeaveEventGrants(
+  supabase: SupabaseClient,
+  payload:  { dayKey: string },
+): Promise<void> {
+  const asOf = new Date(`${payload.dayKey}T12:00:00.000Z`)
+  for (const tenantId of await fetchAllTenantIds(supabase)) {
+    await runEventGrantsForTenant(supabase, tenantId, asOf)
+      .then(r => {
+        if (r.granted > 0 || r.expired > 0) {
+          console.log(`[leave-scheduler] event_grants tenant=${tenantId} granted=${r.granted} skipped=${r.skipped} expired=${r.expired} errors=${r.errors}`)
+        }
+      })
+      .catch((e: Error) => console.error(`[leave-scheduler] event_grants error tenant=${tenantId}`, e.message))
+  }
+}
+
+export async function execLeaveReconciliationJob(
+  supabase: SupabaseClient,
+  payload:  { dayKey: string; reconcYear: number },
+): Promise<void> {
+  const { reconcYear } = payload
+  for (const tenantId of await fetchAllTenantIds(supabase)) {
+    await runLeaveReconciliation(supabase, tenantId, reconcYear, null, 'scheduler')
+      .then(r => {
+        if (r.issues_found > 0) {
+          console.warn(`[leave-scheduler] reconciliation tenant=${tenantId} issues=${r.issues_found} severity=${r.severity}`)
+        } else {
+          console.log(`[leave-scheduler] reconciliation tenant=${tenantId} clean`)
+        }
+      })
+      .catch((e: Error) => console.error(`[leave-scheduler] reconciliation error tenant=${tenantId}`, e.message))
+  }
+}
+
 // ── Main tick ──────────────────────────────────────────────────────────────────
+// tick() is now a lightweight dispatcher: it checks timing gates and enqueues
+// independent durable sub-jobs rather than running the work synchronously.
+// Each sub-job has its own timeout and does not block the others.
 
 export async function tick(supabase: SupabaseClient): Promise<void> {
   tickCount++
@@ -192,129 +302,83 @@ export async function tick(supabase: SupabaseClient): Promise<void> {
   await writeHeartbeat(supabase, 'ok', { tick: tickCount, day: dayKey })
 
   // ── 0. Upload session orphan sweep ──────────────────────────────────────────
-  // Runs every tick (hourly). Marks sessions stuck in non-terminal states for
-  // >30 minutes as orphaned. Non-destructive — storage files are not deleted.
+  // Stays in-process: it's fast, cross-tenant, and needs no per-tenant loop.
   await expireStaleUploadSessions(supabase).catch(
     (e: Error) => console.warn('[leave-scheduler] upload orphan sweep error:', e.message),
   )
 
-  let tenants: string[] | null = null
-  const getTenants = async () => {
-    if (!tenants) tenants = await fetchAllTenantIds(supabase)
-    return tenants
-  }
-
   // ── Year-boundary flags ──────────────────────────────────────────────────────
-  // Calendar year-end:  Dec 31  →  carry-forward fromYear=year, toYear=year+1
-  // Financial year-end: Mar 31  →  carry-forward fromYear=year-1, toYear=year
-  // Calendar year-start:  Jan 1 (monthNum=1, dom=1)
-  // Financial year-start: Apr 1 (monthNum=4, dom=1)
-  const isDecYearEnd  = (monthIdx === 11 && dom === 31)
-  const isMarYearEnd  = (monthIdx === 2  && dom === 31)
+  const isDecYearEnd   = (monthIdx === 11 && dom === 31)
+  const isMarYearEnd   = (monthIdx === 2  && dom === 31)
   const isCalYearStart = (monthNum === 1  && dom === 1)
   const isFYStart      = (monthNum === 4  && dom === 1)
 
   // ── 1. Yearly accrual ────────────────────────────────────────────────────────
-  // Runs on Jan 1 (calendar year start) or Apr 1 (financial year start).
-  // Only runs once per year — use yearKey to gate.
   if ((isCalYearStart || isFYStart) && ran.yearlyAccrual !== yearKey) {
-    // Cal year-start Jan 1 YYYY → credit year = YYYY
-    // FY-start Apr 1 YYYY → FY started Apr 2024 means FY 2024; credit year = YYYY - 1
     const leaveYear = isCalYearStart ? year : year - 1
-    console.log(`[leave-scheduler] Yearly accrual due for year ${leaveYear}`)
-    for (const tenantId of await getTenants()) {
-      await yearlyAccrualJob(supabase, tenantId, leaveYear, null, dayKey)
-        .then(r => console.log(`[leave-scheduler] yearly_accrual tenant=${tenantId} credited=${r.total_days_credited} emp=${r.employees_processed}`))
-        .catch((e: Error) => console.error(`[leave-scheduler] yearly_accrual error tenant=${tenantId}`, e.message))
-    }
+    console.log(`[leave-scheduler] Yearly accrual due for year ${leaveYear} — enqueuing sub-job`)
+    await durableQueue.enqueue(
+      'leave-yearly-accrual',
+      { isCalYearStart, year, leaveYear, dayKey },
+      { idempotencyKey: `leave-yearly-accrual:${yearKey}`, timeoutMs: 5 * 60 * 1_000 },
+    ).catch((e: Error) => console.error('[leave-scheduler] enqueue leave-yearly-accrual failed:', e.message))
     ran.yearlyAccrual = yearKey
   }
 
   // ── 2. Monthly accrual ───────────────────────────────────────────────────────
-  // Run within the first MONTHLY_SAFE_DAYS days of the month.
   if (dom <= MONTHLY_SAFE_DAYS && ran.monthlyAccrual !== monthKey) {
-    console.log(`[leave-scheduler] Monthly accrual due for ${monthKey}`)
-    for (const tenantId of await getTenants()) {
-      // Legacy entitlement-based accrual
-      await monthlyAccrualJob(supabase, tenantId, year, monthNum)
-        .then(r => console.log(`[leave-scheduler] monthly_accrual tenant=${tenantId} credited=${r.total_days_credited} emp=${r.employees_processed}`))
-        .catch((e: Error) => console.error(`[leave-scheduler] monthly_accrual error tenant=${tenantId}`, e.message))
-
-      // New rule-based accrual engine (leave_accrual_rules)
-      await runMonthlyAccrual(supabase, tenantId, year, monthNum)
-        .then(r => console.log(`[leave-scheduler] rule_accrual tenant=${tenantId} credited=${r.total_days_credited} emp=${r.employees_credited} errors=${r.errors.length}`))
-        .catch((e: Error) => console.error(`[leave-scheduler] rule_accrual error tenant=${tenantId}`, e.message))
-    }
+    console.log(`[leave-scheduler] Monthly accrual due for ${monthKey} — enqueuing sub-job`)
+    await durableQueue.enqueue(
+      'leave-monthly-accrual',
+      { year, monthNum },
+      { idempotencyKey: `leave-monthly-accrual:${monthKey}`, timeoutMs: 5 * 60 * 1_000 },
+    ).catch((e: Error) => console.error('[leave-scheduler] enqueue leave-monthly-accrual failed:', e.message))
     ran.monthlyAccrual = monthKey
   }
 
   // ── 3. Carry forward ────────────────────────────────────────────────────────
-  // MUST run before co_expiry on year-end days so the newly carried balance
-  // is present when expiry deductions are calculated.
-  //
-  // Dec 31 → calendar year-end  (fromYear = current year,     toYear = year+1)
-  // Mar 31 → financial year-end (fromYear = previous year,    toYear = current year)
+  // Enqueued BEFORE co-expiry. The durable queue is FIFO for a single worker,
+  // so carry-forward completes first on year-end days before CO expiry runs.
   if ((isDecYearEnd || isMarYearEnd) && ran.carryForward !== yearKey) {
     const fromYear = isDecYearEnd ? year     : year - 1
     const toYear   = isDecYearEnd ? year + 1 : year
-    console.log(`[leave-scheduler] Carry-forward due: ${fromYear} → ${toYear}`)
-    for (const tenantId of await getTenants()) {
-      await carryForwardJob(supabase, tenantId, fromYear, toYear)
-        .then(r => console.log(`[leave-scheduler] carry_forward tenant=${tenantId} credited=${r.total_days_credited} emp=${r.employees_processed}`))
-        .catch((e: Error) => console.error(`[leave-scheduler] carry_forward error tenant=${tenantId}`, e.message))
-    }
+    console.log(`[leave-scheduler] Carry-forward due: ${fromYear}→${toYear} — enqueuing sub-job`)
+    await durableQueue.enqueue(
+      'leave-carry-forward',
+      { fromYear, toYear },
+      { idempotencyKey: `leave-carry-forward:${yearKey}`, timeoutMs: 5 * 60 * 1_000 },
+    ).catch((e: Error) => console.error('[leave-scheduler] enqueue leave-carry-forward failed:', e.message))
     ran.carryForward = yearKey
   }
 
   // ── 4. CO expiry ────────────────────────────────────────────────────────────
-  // Runs once per day — AFTER carry_forward so year-end carry is applied first.
   if (ran.coExpiry !== dayKey) {
-    for (const tenantId of await getTenants()) {
-      await coExpiryJob(supabase, tenantId, now)
-        .then(r => {
-          if (r.employees_processed > 0) {
-            console.log(`[leave-scheduler] co_expiry tenant=${tenantId} expired=${-r.total_days_credited} emp=${r.employees_processed}`)
-          }
-        })
-        .catch((e: Error) => console.error(`[leave-scheduler] co_expiry error tenant=${tenantId}`, e.message))
-    }
+    await durableQueue.enqueue(
+      'leave-co-expiry',
+      { dayKey },
+      { idempotencyKey: `leave-co-expiry:${dayKey}`, timeoutMs: 2 * 60 * 1_000 },
+    ).catch((e: Error) => console.error('[leave-scheduler] enqueue leave-co-expiry failed:', e.message))
     ran.coExpiry = dayKey
   }
 
   // ── 5. Event-triggered leave grants ─────────────────────────────────────────
-  // Runs once per day. Detects employees with a birthday/anniversary today and
-  // credits event-grant days per their effective leave policy.
-  // Idempotency is guaranteed by the unique constraint in leave_event_grants.
   if (ran.eventGrants !== dayKey) {
-    for (const tenantId of await getTenants()) {
-      await runEventGrantsForTenant(supabase, tenantId, now)
-        .then(r => {
-          if (r.granted > 0 || r.expired > 0) {
-            console.log(`[leave-scheduler] event_grants tenant=${tenantId} granted=${r.granted} skipped=${r.skipped} expired=${r.expired} errors=${r.errors}`)
-          }
-        })
-        .catch((e: Error) => console.error(`[leave-scheduler] event_grants error tenant=${tenantId}`, e.message))
-    }
+    await durableQueue.enqueue(
+      'leave-event-grants',
+      { dayKey },
+      { idempotencyKey: `leave-event-grants:${dayKey}`, timeoutMs: 2 * 60 * 1_000 },
+    ).catch((e: Error) => console.error('[leave-scheduler] enqueue leave-event-grants failed:', e.message))
     ran.eventGrants = dayKey
   }
 
   // ── 6. Nightly reconciliation ────────────────────────────────────────────────
-  // Runs once per day. Validates ledger integrity: balance drift, missing accruals,
-  // duplicate grants, orphan entries. Writes a leave_reconciliation_reports row.
-  // Non-blocking — reconciliation errors never prevent other jobs from running.
   if (ran.reconciliation !== dayKey) {
-    const reconcYear = now.getUTCMonth() >= 3 ? now.getUTCFullYear() : now.getUTCFullYear() - 1
-    for (const tenantId of await getTenants()) {
-      await runLeaveReconciliation(supabase, tenantId, reconcYear, null, 'scheduler')
-        .then(r => {
-          if (r.issues_found > 0) {
-            console.warn(`[leave-scheduler] reconciliation tenant=${tenantId} issues=${r.issues_found} severity=${r.severity}`)
-          } else {
-            console.log(`[leave-scheduler] reconciliation tenant=${tenantId} clean`)
-          }
-        })
-        .catch((e: Error) => console.error(`[leave-scheduler] reconciliation error tenant=${tenantId}`, e.message))
-    }
+    const reconcYear = now.getUTCMonth() >= 3 ? year : year - 1
+    await durableQueue.enqueue(
+      'leave-reconciliation',
+      { dayKey, reconcYear },
+      { idempotencyKey: `leave-reconciliation:${dayKey}`, timeoutMs: 3 * 60 * 1_000 },
+    ).catch((e: Error) => console.error('[leave-scheduler] enqueue leave-reconciliation failed:', e.message))
     ran.reconciliation = dayKey
   }
 }
