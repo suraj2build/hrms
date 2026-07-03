@@ -22,14 +22,22 @@ import { registerIntelligenceScanner }   from './lib/intelligence-scanner.js'
 import { registerDigestScheduler }       from './lib/digest-scheduler.js'
 import { registerWoCreditScheduler }     from './lib/wo-credit-reconciler.js'
 import { registerPollScheduler }         from './lib/poll-scheduler.js'
+import { scan as runSlaScan }            from './lib/sla-scanner.js'
+import { runAllScans as runIntelligenceScan } from './lib/intelligence-scanner.js'
+import { runDueSources as runAttendanceSources } from './lib/attendance-api-scheduler.js'
+import { tick as runDigestTick }         from './lib/digest-scheduler.js'
+import { tick as runWoCreditTick }       from './lib/wo-credit-reconciler.js'
+import { runPollTick }                   from './lib/poll-scheduler.js'
+import { tick as runLeaveSchedulerTick } from './lib/leave-scheduler.js'
+import { monthlyAccrualJob }             from './lib/leave-jobs.js'
 import { jobQueue }                      from './lib/job-queue.js'
 import { eventBus }                      from './lib/event-bus.js'
 import type { HrmsEventType }            from './lib/event-bus.js'
 import { durableQueue }                  from './lib/durable-queue.js'
 import { WebhookService }                from './lib/webhook-service.js'
-registerNotificationHandlers()
-// Note: registerAnomalyHandlers(supabase) is called below inside start(), AFTER
-// the supabase plugin is registered, because it needs the Supabase client.
+// Note: registerNotificationHandlers(supabase) and registerAnomalyHandlers(supabase)
+// are called below inside start(), AFTER the supabase plugin is registered,
+// because they need the Supabase client.
 
 // Routes — Sprint 1
 import employeeOptionsRoute from './routes/employees/options.js'
@@ -413,6 +421,9 @@ async function start() {
     })
   })
 
+  // ── Global error sanitizer — strips raw DB messages from 5xx responses ──────
+  await fastify.register(import('./plugins/error-sanitizer.js'))
+
   // ── Wire loggers into in-process infrastructure ──────────────────────────────
   jobQueue.setLogger(fastify.log as any)
   eventBus.setLogger(fastify.log as any)
@@ -421,6 +432,11 @@ async function start() {
   // Required checks (env-vars, database, auth) will process.exit(1) if they fail.
   // Optional module checks degrade gracefully and disable the module.
   await startupHealthChecks(fastify.supabase, fastify.log)
+
+  // Notification handlers — approval decisions → employee inbox (must follow supabase plugin)
+  await safeRegisterModule('notification-handlers', async () => {
+    registerNotificationHandlers(fastify.supabase)
+  }, fastify.log)
 
   // Onboarding orchestrator — wires onboarding → events, trust, notifications, checklist
   await safeRegisterModule('onboarding', async () => {
@@ -473,22 +489,72 @@ async function start() {
     registerPollScheduler(fastify.supabase)
   }, fastify.log)
 
-  // Absconding case scanner — daily scan for UA employees, auto-escalates state machine
+  // Absconding case scanner — daily scan for UA employees, auto-escalates state machine.
+  // Scheduling only: sets up enqueue timers. Handler registered below with other durable handlers.
   await safeRegisterModule('absconding-scanner', async () => {
-    const { scanAndEscalate } = await import('./lib/absconding-engine.js')
     const TWENTY_FOUR_HOURS = 24 * 60 * 60 * 1_000
-    const runScan = async () => {
-      const { data: tenants } = await fastify.supabase
-        .from('tenants').select('id').in('status', ['active', 'trial'])
-      for (const t of (tenants ?? []) as { id: string }[]) {
-        try { await scanAndEscalate(fastify.supabase, t.id) }
-        catch (e) { fastify.log.error({ tenant: t.id, err: e }, 'absconding scan failed') }
-      }
+    const enqueue = () => {
+      const key = `detect-absconding:${new Date().toISOString().slice(0, 10)}`
+      durableQueue.enqueue('detect-absconding', {}, { idempotencyKey: key }).catch(
+        e => fastify.log.error({ err: e }, '[absconding] enqueue error'),
+      )
     }
-    // Run once at startup (with small delay), then every 24 hours
-    setTimeout(runScan, 60_000)
-    setInterval(runScan, TWENTY_FOUR_HOURS)
+    // Enqueue once at startup (with small delay), then every 24 hours
+    setTimeout(enqueue, 60_000)
+    setInterval(enqueue, TWENTY_FOUR_HOURS)
   }, fastify.log)
+
+  // Register durable queue handlers before start() — without these, every enqueued
+  // job dead-letters immediately (ISSUE-011). Handlers close over fastify.supabase
+  // which is available here because supabasePlugin was registered above.
+  durableQueue.register('process-attendance', async (_payload, _job) => {
+    await runAttendanceSources(fastify.supabase)
+  })
+  durableQueue.register('leave-accrual', async (_payload, job) => {
+    const tenantId = job.tenant_id
+    if (!tenantId) { fastify.log.warn('[durable-queue] leave-accrual: missing tenant_id — skipping'); return }
+    const now   = new Date()
+    const year  = typeof _payload.year  === 'number' ? _payload.year  : now.getUTCFullYear()
+    const month = typeof _payload.month === 'number' ? _payload.month : now.getUTCMonth() + 1
+    await monthlyAccrualJob(fastify.supabase, tenantId, year, month, typeof _payload.triggered_by === 'string' ? _payload.triggered_by : null)
+  })
+  durableQueue.register('sla-scan', async (_payload, _job) => {
+    await runSlaScan(fastify.supabase)
+  })
+  // detect-anomalies is event-driven (registerAnomalyHandlers wires bus listeners);
+  // no standalone scan function exists — complete without action on manual trigger.
+  durableQueue.register('detect-anomalies', async (_payload, _job) => {
+    fastify.log.info('[durable-queue] detect-anomalies: event-driven handler — no standalone scan to run')
+  })
+  durableQueue.register('intelligence-scan', async (_payload, _job) => {
+    await runIntelligenceScan(fastify.supabase)
+  })
+  durableQueue.register('send-digest', async (_payload, _job) => {
+    await runDigestTick(fastify.supabase)
+  })
+  durableQueue.register('reconcile-wo-credits', async (_payload, _job) => {
+    await runWoCreditTick(fastify.supabase)
+  })
+  durableQueue.register('send-pulse-poll', async (_payload, _job) => {
+    await runPollTick(fastify.supabase)
+  })
+  durableQueue.register('leave-scheduler-tick', async (_payload, _job) => {
+    await runLeaveSchedulerTick(fastify.supabase)
+  })
+  durableQueue.register('detect-absconding', async (_payload, _job) => {
+    const { scanAndEscalate } = await import('./lib/absconding-engine.js')
+    const { data: tenants } = await fastify.supabase
+      .from('tenants').select('id').in('status', ['active', 'trial'])
+    for (const t of (tenants ?? []) as { id: string }[]) {
+      try { await scanAndEscalate(fastify.supabase, t.id) }
+      catch (e) { fastify.log.error({ tenant: t.id, err: e }, 'absconding scan failed') }
+    }
+  })
+  // event-automation is reactive (registerEventBusAutomation wires bus listeners);
+  // no standalone scan function exists — complete without action on manual trigger.
+  durableQueue.register('event-automation', async (_payload, _job) => {
+    fastify.log.info('[durable-queue] event-automation: event-driven handler — no standalone scan to run')
+  })
 
   // Durable job queue — Postgres-backed, crash-safe, multi-instance ready.
   // Must start AFTER supabase plugin is registered (needs the client).

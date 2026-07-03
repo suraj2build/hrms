@@ -16,6 +16,7 @@
  *   DELETE /talent/interest/:iid    — withdraw interest
  */
 
+import { z } from 'zod'
 import type { FastifyInstance } from 'fastify'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 
@@ -28,6 +29,41 @@ async function resolveCallerEmployeeId(fastify: any, userId: string, tenantId: s
     .maybeSingle()
   return (data as any)?.employee_id ?? null
 }
+
+// ── Body schemas ─────────────────────────────────────────────────────────────
+
+const CreateRoleSchema = z.object({
+  title: z.string().min(1, 'title is required'),
+  department: z.string().optional().nullable(),
+  location: z.string().optional().nullable(),
+  description: z.string().optional().nullable(),
+  skills_required: z.array(z.string()).optional(),
+  experience_min: z.number().min(0).optional().nullable(),
+  closes_at: z.string().optional().nullable(),
+})
+
+const UpdateRoleSchema = z.object({
+  title: z.string().optional(),
+  department: z.string().optional().nullable(),
+  location: z.string().optional().nullable(),
+  description: z.string().optional().nullable(),
+  skills_required: z.array(z.string()).optional(),
+  experience_min: z.number().min(0).optional().nullable(),
+  is_open: z.boolean().optional(),
+  closes_at: z.string().optional().nullable(),
+})
+
+const UpdateInterestSchema = z.object({
+  status: z.enum(['interested', 'shortlisted', 'selected', 'not_selected']),
+  reviewer_notes: z.string().optional().nullable(),
+})
+
+const RegisterInterestSchema = z.object({
+  role_id: z.string().uuid('role_id must be a valid UUID'),
+  cover_note: z.string().optional().nullable(),
+  skills: z.array(z.string()).optional(),
+  availability: z.string().optional(),
+})
 
 export default async function talentRoutes(fastify: FastifyInstance) {
   const { supabase } = fastify
@@ -42,6 +78,7 @@ export default async function talentRoutes(fastify: FastifyInstance) {
       .select('id, title, department, location, description, skills_required, experience_min, is_open, posted_at, closes_at, created_at')
       .eq('tenant_id', req.tenantId)
       .order('posted_at', { ascending: false })
+      .limit(500)
 
     if (is_open !== undefined) q = q.eq('is_open', is_open === 'true')
 
@@ -66,8 +103,9 @@ export default async function talentRoutes(fastify: FastifyInstance) {
 
   // ── HR: post a role ─────────────────────────────────────────────────────────
   fastify.post('/roles', hrAuth, async (req: any, reply) => {
-    const b = req.body as any
-    if (!b?.title?.trim()) return reply.code(400).send({ error: 'title is required' })
+    const parsed = CreateRoleSchema.safeParse(req.body)
+    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message ?? 'Invalid request body' })
+    const b = parsed.data
 
     const { data, error } = await supabase
       .from('talent_roles')
@@ -92,7 +130,9 @@ export default async function talentRoutes(fastify: FastifyInstance) {
   // ── HR: update a role ───────────────────────────────────────────────────────
   fastify.put('/roles/:id', hrAuth, async (req: any, reply) => {
     const { id } = req.params as { id: string }
-    const b = req.body as any
+    const parsed = UpdateRoleSchema.safeParse(req.body)
+    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message ?? 'Invalid request body' })
+    const b = parsed.data as Record<string, unknown>
     const allowed = ['title', 'department', 'location', 'description', 'skills_required', 'experience_min', 'is_open', 'closes_at']
     const update: Record<string, unknown> = {}
     for (const k of allowed) { if (b[k] !== undefined) update[k] = b[k] }
@@ -123,6 +163,7 @@ export default async function talentRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', req.tenantId)
       .eq('role_id', id)
       .order('created_at', { ascending: false })
+      .limit(500)
 
     if (error) return reply.code(500).send({ error: error.message })
     return reply.send({ data: data ?? [] })
@@ -131,9 +172,9 @@ export default async function talentRoutes(fastify: FastifyInstance) {
   // ── HR: update interest status ───────────────────────────────────────────────
   fastify.put('/interests/:iid', hrAuth, async (req: any, reply) => {
     const { iid } = req.params as { iid: string }
-    const VALID_STATUSES = ['interested', 'shortlisted', 'selected', 'not_selected']
-    const { status, reviewer_notes } = req.body as any
-    if (!VALID_STATUSES.includes(status)) return reply.code(400).send({ error: `status must be one of: ${VALID_STATUSES.join(', ')}` })
+    const parsed = UpdateInterestSchema.safeParse(req.body)
+    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message ?? 'Invalid request body' })
+    const { status, reviewer_notes } = parsed.data
 
     const { error } = await supabase
       .from('talent_interests')
@@ -153,6 +194,7 @@ export default async function talentRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', req.tenantId)
       .eq('is_open', true)
       .order('posted_at', { ascending: false })
+      .limit(500)
 
     if (error) return reply.code(500).send({ error: error.message })
 
@@ -183,8 +225,9 @@ export default async function talentRoutes(fastify: FastifyInstance) {
     const employeeId = await resolveCallerEmployeeId(fastify, req.userId, req.tenantId)
     if (!employeeId) return reply.code(403).send({ error: 'PROFILE_NOT_LINKED', message: 'Your profile is not linked to an employee record' })
 
-    const { role_id, cover_note, skills, availability } = req.body as any
-    if (!role_id) return reply.code(400).send({ error: 'role_id is required' })
+    const parsed = RegisterInterestSchema.safeParse(req.body)
+    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message ?? 'Invalid request body' })
+    const { role_id, cover_note, skills, availability } = parsed.data
 
     // Verify role is open
     const { data: role } = await supabase
@@ -205,7 +248,7 @@ export default async function talentRoutes(fastify: FastifyInstance) {
         employee_id: employeeId,
         cover_note:  cover_note   ?? null,
         skills:      skills        ?? [],
-        availability: VALID_AVAIL.includes(availability) ? availability : 'open',
+        availability: availability != null && VALID_AVAIL.includes(availability) ? availability : 'open',
         status:      'interested',
       }, { onConflict: 'role_id,employee_id' })
       .select('id')
@@ -226,6 +269,7 @@ export default async function talentRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', req.tenantId)
       .eq('employee_id', employeeId)
       .order('created_at', { ascending: false })
+      .limit(200)
 
     if (error) return reply.code(500).send({ error: error.message })
     return reply.send({ data: data ?? [] })

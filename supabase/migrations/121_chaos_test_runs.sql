@@ -12,7 +12,7 @@
 
 -- ── Chaos test run log ────────────────────────────────────────────────────────
 
-CREATE TABLE chaos_test_runs (
+CREATE TABLE IF NOT EXISTS chaos_test_runs (
   id              uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
 
   -- Scenario identification
@@ -62,10 +62,10 @@ CREATE TABLE chaos_test_runs (
   created_at      timestamptz NOT NULL DEFAULT now()
 );
 
-CREATE INDEX idx_chaos_runs_suite       ON chaos_test_runs (suite_run_id) WHERE suite_run_id IS NOT NULL;
-CREATE INDEX idx_chaos_runs_scenario    ON chaos_test_runs (scenario_code, started_at DESC);
-CREATE INDEX idx_chaos_runs_passed      ON chaos_test_runs (passed, started_at DESC);
-CREATE INDEX idx_chaos_runs_category    ON chaos_test_runs (category, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_chaos_runs_suite       ON chaos_test_runs (suite_run_id) WHERE suite_run_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_chaos_runs_scenario    ON chaos_test_runs (scenario_code, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_chaos_runs_passed      ON chaos_test_runs (passed, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_chaos_runs_category    ON chaos_test_runs (category, started_at DESC);
 
 COMMENT ON TABLE chaos_test_runs IS
   'Audit trail for chaos/resilience test scenarios. One row per scenario execution. '
@@ -100,7 +100,7 @@ COMMENT ON VIEW chaos_suite_summary IS
 -- ── Seed: known scenario definitions ─────────────────────────────────────────
 -- Reference table so the runner can look up human-readable metadata.
 
-CREATE TABLE chaos_scenarios (
+CREATE TABLE IF NOT EXISTS chaos_scenarios (
   code            text        PRIMARY KEY,   -- 'C1' .. 'C12'
   name            text        NOT NULL,
   category        text        NOT NULL CHECK (category IN ('infrastructure','application','data_integrity','security')),

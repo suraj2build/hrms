@@ -27,15 +27,14 @@
  */
 import type { FastifyInstance } from 'fastify'
 import { z }                    from 'zod'
-
-const HR_ROLES    = ['super_admin', 'hr_admin'] as const
+import { HR_ADMIN_ROLES }       from '../../lib/rbac.js'
 const SUPER_ADMIN = ['super_admin']             as const
 
 export default async function governanceEvolutionRoutes(fastify: FastifyInstance) {
   const auth = { preHandler: [fastify.authenticate] }
 
   function requireAdmin(req: any, reply: any): boolean {
-    if (!HR_ROLES.includes(req.userRole)) {
+    if (!HR_ADMIN_ROLES.includes(req.userRole)) {
       reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
       return false
     }
@@ -328,7 +327,7 @@ export default async function governanceEvolutionRoutes(fastify: FastifyInstance
 
     // Only the delegator or an admin can revoke
     const isOwner = existing.delegator_id === req.userId
-    const isAdmin = HR_ROLES.includes(req.userRole)
+    const isAdmin = HR_ADMIN_ROLES.includes(req.userRole)
     if (!isOwner && !isAdmin) {
       return reply.code(403).send({ error: 'FORBIDDEN', message: 'Only the delegator or an admin can revoke this delegation' })
     }

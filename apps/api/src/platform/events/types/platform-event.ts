@@ -36,7 +36,7 @@ export interface PlatformEvent {
   entity_id: string
 
   /** Tenant / organisation UUID */
-  org_id: string
+  tenant_id: string
   /** Optional site/branch UUID */
   branch_id?: string
 

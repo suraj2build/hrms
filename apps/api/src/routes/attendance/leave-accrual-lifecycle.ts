@@ -29,11 +29,12 @@ import {
   type AccrualTierRow,
   type ActiveFreeze,
 } from '../../lib/leave-accrual-lifecycle-engine.js'
+import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 
 const dateRe = /^\d{4}-\d{2}-\d{2}$/
 
 function isAdmin(role: string): boolean {
-  return ['super_admin', 'hr_admin'].includes(role)
+  return (HR_ADMIN_ROLES as readonly string[]).includes(role)
 }
 
 export default async function leaveAccrualLifecycleRoutes(fastify: FastifyInstance) {

@@ -11,6 +11,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { normalizeAttendanceStatus } from '../../lib/attendance-utils.js'
+import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 
 const querySchema = z.object({
   month: z.string().regex(/^\d{4}-\d{2}$/, 'month must be YYYY-MM'),
@@ -21,7 +22,7 @@ export default async function musterRoute(fastify: FastifyInstance) {
     '/attendance/muster',
     { preHandler: [fastify.authenticate] },
     async (req, reply) => {
-      const isAdmin = ['super_admin', 'hr_admin'].includes(req.userRole)
+      const isAdmin = (HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)
       const isMgr   = req.userRole === 'manager'
       if (!isAdmin && !isMgr) {
         return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin or manager access required' })
@@ -97,6 +98,7 @@ export default async function musterRoute(fastify: FastifyInstance) {
         .eq('tenant_id', req.tenantId)
         .gte('date', fromDate)
         .lte('date', toDate)
+        .limit(50_000)
 
       if (dailyError) {
         req.log.error({ err: dailyError }, 'muster daily query failed')

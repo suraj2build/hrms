@@ -19,6 +19,7 @@
 
 import type { FastifyInstance } from 'fastify'
 import { eventBus }            from '../../lib/event-bus.js'
+import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 
 const monthRe = /^\d{4}-\d{2}$/
 
@@ -198,7 +199,7 @@ export default async function payrollForecastRoute(fastify: FastifyInstance) {
   const auth = { preHandler: [fastify.authenticate] }
 
   function requireAdmin(req: any, reply: any): boolean {
-    if (!['super_admin', 'hr_admin'].includes(req.userRole)) {
+    if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
       reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
       return false
     }

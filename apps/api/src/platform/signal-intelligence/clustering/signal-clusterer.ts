@@ -20,14 +20,14 @@ export class SignalClusterer {
     for (const signal of signals) {
       // Primary key: same org + entity + source
       const primaryId = createHash('sha256')
-        .update(`${signal.org_id}:${signal.entity_id}:${signal.source}`)
+        .update(`${signal.tenant_id}:${signal.entity_id}:${signal.source}`)
         .digest('hex')
         .slice(0, 16)
 
       // Secondary key: same org + event_type + time window bucket (5-min)
       const windowBucket = Math.floor(new Date(signal.timestamp).getTime() / WINDOW_MS)
       const secondaryId  = createHash('sha256')
-        .update(`${signal.org_id}:${signal.event_type}:${windowBucket}`)
+        .update(`${signal.tenant_id}:${signal.event_type}:${windowBucket}`)
         .digest('hex')
         .slice(0, 16)
 
@@ -53,7 +53,7 @@ export class SignalClusterer {
       const first = clusterSignals[0]
       result.push({
         cluster_id,
-        org_id:      first.org_id,
+        tenant_id:      first.tenant_id,
         label:       `${first.source}/${first.entity_type} cluster`,
         signals:     clusterSignals,
         severity:    maxSeverity(clusterSignals.map(s => s.severity)),

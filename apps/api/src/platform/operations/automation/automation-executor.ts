@@ -32,7 +32,7 @@ export class AutomationExecutor {
       action_type:   action.type,
       entity_id:     action.target_entity_id,
       entity_type:   action.target_type,
-      org_id:        event.org_id,
+      tenant_id:        event.tenant_id,
       message:       action.message,
       severity:      action.severity,
       fired_at:      new Date().toISOString(),
@@ -49,7 +49,7 @@ export class AutomationExecutor {
     const insertResult = supabase
       .from('automation_activity_logs')
       .insert({
-        org_id:        record.org_id,
+        tenant_id:        record.tenant_id,
         action_type:   record.action_type,
         entity_id:     record.entity_id,
         entity_type:   record.entity_type,

@@ -114,9 +114,9 @@ export function CompOff() {
   const requests = data?.data ?? []
 
   const { data: leaveTypesData } = useQuery<{ data: Array<{ id: string; name: string; is_active?: boolean }> }>({
-    queryKey: ['leave-types-active'],
+    queryKey: ['leave-types'],
     queryFn:  () => api.get('/masters/leave-types'),
-    staleTime: 120_000,
+    staleTime: 60_000,
   })
   const leaveTypes = (leaveTypesData?.data ?? []).filter((lt) => lt.is_active)
 

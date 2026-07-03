@@ -20,8 +20,8 @@ import {
   getChainForEntity,
 }                               from '../../lib/workflow-service.js'
 
-const HR_ROLES    = ['super_admin', 'hr_admin']
-const ALLOW_ROLES = [...HR_ROLES, 'manager']
+import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+const ALLOW_ROLES = [...HR_ADMIN_ROLES, 'manager']
 
 // Workflow types the engine drives (must match the 053 enum + migrations 313/314).
 const WORKFLOW_TYPES = ['leave', 'correction', 'regularisation', 'overtime', 'comp_off', 'reimbursement', 'loan', 'advance'] as const
@@ -32,7 +32,7 @@ export default async function workflowsRoute(fastify: FastifyInstance) {
 
   // ── GET /approvals/workflows/config ─────────────────────────────────────────
   fastify.get('/approvals/workflows/config', auth, async (req: any, reply) => {
-    if (!HR_ROLES.includes(req.userRole)) {
+    if (!HR_ADMIN_ROLES.includes(req.userRole)) {
       return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
     }
 
@@ -58,7 +58,7 @@ export default async function workflowsRoute(fastify: FastifyInstance) {
 
   // ── POST /approvals/workflows/config ─────────────────────────────────────────
   fastify.post('/approvals/workflows/config', auth, async (req: any, reply) => {
-    if (!HR_ROLES.includes(req.userRole)) {
+    if (!HR_ADMIN_ROLES.includes(req.userRole)) {
       return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
     }
 
@@ -91,7 +91,7 @@ export default async function workflowsRoute(fastify: FastifyInstance) {
 
   // ── DELETE /approvals/workflows/config/:id ───────────────────────────────────
   fastify.delete('/approvals/workflows/config/:id', auth, async (req: any, reply) => {
-    if (!HR_ROLES.includes(req.userRole)) {
+    if (!HR_ADMIN_ROLES.includes(req.userRole)) {
       return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
     }
 

@@ -69,10 +69,10 @@ export default async function auditRoutes(fastify: FastifyInstance) {
   })
 
   // GET /enterprise/audit/export
-  fastify.get('/audit/export', { preHandler: [fastify.authenticate] }, async (req, reply) => {
+  fastify.get('/audit/export', hrAdminAuth, async (req, reply) => {
     try {
       const query = req.query as Record<string, string | undefined>
-      const org_id = (req as any).tenantId as string | undefined
+      const tenant_id = (req as any).tenantId as string | undefined
 
       const limit   = Math.min(Number(query.limit ?? 200), 1000)
       const format  = query.format === 'csv' ? 'csv' : 'json'
@@ -90,7 +90,7 @@ export default async function auditRoutes(fastify: FastifyInstance) {
         .limit(limit)
 
       // Tenant isolation is mandatory — never export another tenant's events.
-      qb = qb.eq('org_id', org_id)
+      qb = qb.eq('tenant_id', tenant_id)
       if (from)        qb = qb.gte('timestamp', from)
       if (to)          qb = qb.lte('timestamp', to)
       if (module_)     qb = qb.eq('module', module_)
@@ -106,7 +106,7 @@ export default async function auditRoutes(fastify: FastifyInstance) {
           reply.header('Content-Disposition', 'attachment; filename="audit-export.csv"')
           return reply.send('event_id,event_type,module,entity_type,entity_id,actor_id,severity,timestamp,correlation_id\n')
         }
-        return reply.send({ events: [], total: 0, error: error.message })
+        return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
       }
 
       const events = data ?? []
@@ -135,15 +135,15 @@ export default async function auditRoutes(fastify: FastifyInstance) {
       return reply.send({ events, total: events.length, exported_at: new Date().toISOString() })
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err)
-      return reply.send({ events: [], total: 0, error: message })
+      return reply.code(500).send({ error: 'INTERNAL_ERROR', message })
     }
   })
 
   // GET /enterprise/audit/stats
-  fastify.get('/audit/stats', { preHandler: [fastify.authenticate] }, async (req, reply) => {
+  fastify.get('/audit/stats', hrAdminAuth, async (req, reply) => {
     try {
       const query  = req.query as Record<string, string | undefined>
-      const org_id = (req as any).tenantId as string | undefined
+      const tenant_id = (req as any).tenantId as string | undefined
 
       const to   = query.to   ?? new Date().toISOString()
       const from = query.from ?? new Date(Date.now() - 30 * 24 * 3_600_000).toISOString()
@@ -156,7 +156,7 @@ export default async function auditRoutes(fastify: FastifyInstance) {
         .limit(2000)
 
       // Tenant isolation is mandatory.
-      qb = qb.eq('org_id', org_id)
+      qb = qb.eq('tenant_id', tenant_id)
 
       const { data, error } = await qb
 

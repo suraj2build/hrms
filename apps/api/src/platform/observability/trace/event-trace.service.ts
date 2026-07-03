@@ -29,7 +29,7 @@ export interface EventTrace {
 }
 
 export interface EventSummary {
-  org_id:               string
+  tenant_id:               string
   period:               string
   total:                number
   by_module:            Record<string, number>
@@ -201,7 +201,7 @@ class EventTraceService {
       .slice(0, 5)
 
     return {
-      org_id:               orgId,
+      tenant_id:               orgId,
       period,
       total:                events.length,
       by_module,

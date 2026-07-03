@@ -11,6 +11,7 @@
  */
 
 import type { FastifyInstance } from 'fastify'
+import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 
 // Slips advance finalized → processed → paid; all count as final for reporting.
 const FINAL_SLIP_STATUSES = ['finalized', 'processed', 'paid', 'completed']
@@ -22,7 +23,7 @@ export default async function statutoryDataset(fastify: FastifyInstance) {
     preHandler: [
       fastify.authenticate,
       (req: any, reply: any, done: () => void) => {
-        if (!['super_admin', 'hr_admin'].includes(req.userRole)) {
+        if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
           reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
           return
         }

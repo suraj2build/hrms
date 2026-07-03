@@ -8,7 +8,7 @@
  */
 
 import { useState } from 'react'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query'
 import {
   Users2, Plus, RefreshCw, Search, Star,
   Mail, Phone, Building2, Briefcase, ChevronRight,
@@ -156,6 +156,7 @@ export function AdminCandidates() {
     queryKey: ['recruitment', 'candidates', search, sourceFilter, page],
     queryFn:  () => api.get(`/recruitment/candidates?${params}`),
     enabled:  isAdmin,
+    placeholderData: keepPreviousData,
   })
   const rows  = data?.data ?? []
   const total = data?.total ?? 0

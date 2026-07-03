@@ -16,6 +16,7 @@ import {
   resolveCollisionPolicy,
 } from '../../lib/collision-engine.js'
 import { resolveEmployeeOrgContext } from '../../lib/org-context.js'
+import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 
 const dateRe = /^\d{4}-\d{2}-\d{2}$/
 
@@ -61,7 +62,7 @@ export default async function leaveCollisionRoutes(fastify: FastifyInstance) {
 
   // ── GET /leave/collision/log ────────────────────────────────────────────
   fastify.get('/leave/collision/log', auth, async (req: any, reply) => {
-    if (!['super_admin', 'hr_admin'].includes(req.userRole)) {
+    if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
       return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
     }
 
@@ -131,7 +132,7 @@ export default async function leaveCollisionRoutes(fastify: FastifyInstance) {
   // The record is retained for audit; acknowledged_at is set so it no longer
   // appears in the default (unfiltered) log view.
   fastify.post('/leave/collision/log/:id/resolve', auth, async (req: any, reply) => {
-    if (!['super_admin', 'hr_admin'].includes(req.userRole)) {
+    if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
       return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
     }
 
@@ -341,7 +342,7 @@ export default async function leaveCollisionRoutes(fastify: FastifyInstance) {
   // ── HR: GET /leave/optional-holidays/pool ─────────────────────────────────
   // List the pool for a given year (defaults to current year), with selection counts.
   fastify.get('/leave/optional-holidays/pool', auth, async (req: any, reply) => {
-    if (!['super_admin', 'hr_admin'].includes(req.userRole)) {
+    if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
       return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
     }
     const year = Number((req.query as Record<string, string>).year ?? new Date().getFullYear())
@@ -385,7 +386,7 @@ export default async function leaveCollisionRoutes(fastify: FastifyInstance) {
   // ── HR: POST /leave/optional-holidays/pool ───────────────────────────────
   // Add a holiday to the optional pool.
   fastify.post('/leave/optional-holidays/pool', auth, async (req: any, reply) => {
-    if (!['super_admin', 'hr_admin'].includes(req.userRole)) {
+    if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
       return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
     }
     const schema = z.object({
@@ -414,7 +415,7 @@ export default async function leaveCollisionRoutes(fastify: FastifyInstance) {
   // ── HR: DELETE /leave/optional-holidays/pool/:poolId ─────────────────────
   // Remove a holiday from the pool (also removes all employee selections for it).
   fastify.delete('/leave/optional-holidays/pool/:poolId', auth, async (req: any, reply) => {
-    if (!['super_admin', 'hr_admin'].includes(req.userRole)) {
+    if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
       return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
     }
     const { poolId } = req.params as { poolId: string }

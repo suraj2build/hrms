@@ -106,6 +106,7 @@ export default async function employeeRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', request.tenantId)
       .neq('status', 'separated')
       .order('first_name', { ascending: true })
+      .limit(1000)
 
     if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
 
@@ -186,7 +187,9 @@ export default async function employeeRoutes(fastify: FastifyInstance) {
   fastify.get('/employees', hrAdminAuth, async (request, reply) => {
     const { status, page = '1', limit = '100', department_id, location_id, grade_id, designation_id } =
       request.query as Record<string, string>
-    const offset = (parseInt(page) - 1) * parseInt(limit)
+    const parsedLimit = Math.min(500, Math.max(1, parseInt(limit) || 100))
+    const parsedPage  = Math.max(1, parseInt(page) || 1)
+    const offset      = (parsedPage - 1) * parsedLimit
 
     // ── Dimension filters (used by Data Explorer drill-to-employee-list) ──────
     // department / location / designation / grade all live on job_history
@@ -216,7 +219,7 @@ export default async function employeeRoutes(fastify: FastifyInstance) {
       )
       .eq('tenant_id', request.tenantId)
       .order('first_name', { ascending: true })
-      .range(offset, offset + parseInt(limit) - 1)
+      .range(offset, offset + parsedLimit - 1)
 
     if (status && status !== 'all') {
       query = query.eq('status', status)
@@ -350,7 +353,7 @@ export default async function employeeRoutes(fastify: FastifyInstance) {
       module:      MODULE.EMPLOYEE,
       entity_type: 'employee',
       entity_id:   (data as any).id,
-      org_id:      request.tenantId,
+      tenant_id:      request.tenantId,
       actor_id:    (request as any).userId,
       actor_type:  'user',
       payload:     { employee_code: (data as any).employee_code, employment_type: (parsed.data as any).employment_type ?? null },
@@ -401,8 +404,25 @@ export default async function employeeRoutes(fastify: FastifyInstance) {
   })
 
   // PUT /employees/:id — HR admin / super_admin only
+  const PutEmployeeSchema = z.object({
+    first_name:           z.string().min(1).optional(),
+    last_name:            z.string().min(1).optional(),
+    email:                z.string().email().optional().nullable(),
+    phone:                z.string().optional().nullable(),
+    status:               z.string().optional(),
+    date_of_joining:      z.string().optional().nullable(),
+    joining_date:         z.string().optional().nullable(),
+    work_location_id:     z.string().uuid().optional().nullable(),
+    manager_id:           z.string().uuid().optional().nullable(),
+    reporting_manager_id: z.string().uuid().optional().nullable(),
+    employment_type:      z.string().optional().nullable(),
+  }).passthrough()
+
   fastify.put('/employees/:id', hrAdminAuth, async (request, reply) => {
     const { id } = request.params as { id: string }
+
+    const parsed = PutEmployeeSchema.safeParse(request.body)
+    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message ?? 'Invalid request body' })
 
     // Validate: employee exists and belongs to this tenant before touching it
     const { data: existing, error: findError } = await fastify.supabase
@@ -424,7 +444,7 @@ export default async function employeeRoutes(fastify: FastifyInstance) {
       created_at: _created,
       created_by: _createdBy,
       ...safeUpdates
-    } = request.body as Record<string, unknown>
+    } = parsed.data as Record<string, unknown>
 
     const { data, error } = await fastify.supabase
       .from('employees')

@@ -138,7 +138,13 @@ export default async function compOffRoute(fastify: FastifyInstance) {
 
     // Mutual exclusivity: employees on a WO-credit roster do NOT earn comp-off —
     // their off accounting is owned entirely by the WO-credit reconciler.
-    const woEmpIds = new Set((await resolveWoEmployees(fastify.supabase, req.tenantId)).map(e => e.employeeId))
+    let woEmpIds: Set<string>
+    try {
+      woEmpIds = new Set((await resolveWoEmployees(fastify.supabase, req.tenantId)).map(e => e.employeeId))
+    } catch (err: unknown) {
+      req.log.error({ err, tenantId: req.tenantId }, '[comp-off] failed to resolve WO employees')
+      return reply.code(500).send({ error: 'WO_RESOLVE_ERROR', message: 'Failed to resolve weekly-off employees' })
+    }
     const qualifying = (qualifyingRaw ?? []).filter((r: any) => !woEmpIds.has(r.employee_id))
 
     if (!qualifying.length) {
@@ -263,7 +269,7 @@ export default async function compOffRoute(fastify: FastifyInstance) {
 
     // Multi-level gate (engages only when a comp-off chain is configured). An
     // intermediate approval advances a level and returns without crediting balance.
-    {
+    try {
       const gate = await gateApprove(fastify.supabase, {
         tenantId: req.tenantId, entityType: 'comp_off_request', entityId: id,
         actorId: req.userId, actorRole: req.userRole, targetEmployeeId: (co as any).employee_id,
@@ -281,6 +287,9 @@ export default async function compOffRoute(fastify: FastifyInstance) {
         return reply.send({ data: { id, status: 'pending', advanced_to_level: gate.nextLevel, total_levels: gate.totalLevels } })
       }
       // gate.kind === 'finalize' → fall through to the credit logic below.
+    } catch (err: unknown) {
+      req.log.error({ err, tenantId: req.tenantId, id }, '[comp-off] unexpected error in approval gate')
+      return reply.code(500).send({ error: 'APPROVE_GATE_ERROR', message: 'Failed to process comp-off approval' })
     }
 
     // Segregation of duties — a user may not approve their own comp-off (F3).
@@ -452,7 +461,7 @@ export default async function compOffRoute(fastify: FastifyInstance) {
 
     // Multi-level gate — reject always finalizes but records + closes the instance
     // when a comp-off chain exists.
-    {
+    try {
       const gate = await gateReject(fastify.supabase, {
         tenantId: req.tenantId, entityType: 'comp_off_request', entityId: id,
         actorId: req.userId, actorRole: req.userRole, targetEmployeeId: (co as any).employee_id,
@@ -462,6 +471,9 @@ export default async function compOffRoute(fastify: FastifyInstance) {
         const code = gate.error.type === 'FORBIDDEN' ? 403 : gate.error.type === 'CONFLICT' ? 409 : 400
         return reply.code(code).send({ error: gate.error.type, message: gate.error.message })
       }
+    } catch (err: unknown) {
+      req.log.error({ err, tenantId: req.tenantId, id }, '[comp-off] unexpected error in rejection gate')
+      return reply.code(500).send({ error: 'REJECT_GATE_ERROR', message: 'Failed to process comp-off rejection' })
     }
 
     const now = new Date().toISOString()

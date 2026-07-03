@@ -17,6 +17,7 @@
 
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
+import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 
 const upsertSchema = z.object({
   date_type_id: z.string().uuid('date_type_id must be a UUID'),
@@ -32,7 +33,7 @@ export default async function employeeImportantDatesRoutes(fastify: FastifyInsta
     req:   { userRole: string },
     reply: { code: (n: number) => { send: (b: unknown) => unknown } },
   ): boolean {
-    if (!['super_admin', 'hr_admin'].includes(req.userRole)) {
+    if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
       reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
       return false
     }

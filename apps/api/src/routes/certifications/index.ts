@@ -15,8 +15,7 @@
 
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
-
-const HR_ROLES = ['super_admin', 'hr_admin'] as const
+import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 
 export default async function certificationRoutes(fastify: FastifyInstance) {
   const auth = { preHandler: [fastify.authenticate] }
@@ -24,7 +23,7 @@ export default async function certificationRoutes(fastify: FastifyInstance) {
     preHandler: [
       fastify.authenticate,
       async (req: any, reply: any) => {
-        if (!HR_ROLES.includes(req.userRole)) {
+        if (!HR_ADMIN_ROLES.includes(req.userRole)) {
           return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
         }
       },
@@ -47,7 +46,7 @@ export default async function certificationRoutes(fastify: FastifyInstance) {
     if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
     const { employee_id, cert_type, status, expiring_in, search, limit, offset } = parsed.data
 
-    const isHr = HR_ROLES.includes(req.userRole)
+    const isHr = HR_ADMIN_ROLES.includes(req.userRole)
 
     let query = fastify.supabase
       .from('employee_certifications')

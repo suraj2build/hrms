@@ -4,6 +4,7 @@
  * orchestration, replay, and knowledge layer endpoints.
  */
 import type { FastifyInstance }            from 'fastify'
+import { z }                               from 'zod'
 import { intelligenceCompositionService }  from '../../platform/fabric/composition/intelligence-composition.service.js'
 import { federationService }               from '../../platform/fabric/federation/federation.service.js'
 import { unifiedSimulationService }        from '../../platform/fabric/simulation-engine/unified-simulation.service.js'
@@ -33,7 +34,7 @@ export default async function fabricRoutes(fastify: FastifyInstance) {
     const composition = intelligenceCompositionService.compose({
       entity_id:        body.entity_id,
       entity_type:      body.entity_type ?? 'employee',
-      org_id:           orgId,
+      tenant_id:           orgId,
       governance_score: body.governance_score,
       trust_score:      body.trust_score,
     })
@@ -67,7 +68,7 @@ export default async function fabricRoutes(fastify: FastifyInstance) {
     const body = req.body as any
     const orgId = (req as any).tenantId
     const run = unifiedSimulationService.simulatePolicyChange({
-      org_id:           orgId,
+      tenant_id:           orgId,
       policy_name:      body.policy_name ?? 'unnamed',
       change_type:      body.change_type ?? 'new',
       affected_modules: body.affected_modules ?? [],
@@ -75,11 +76,11 @@ export default async function fabricRoutes(fastify: FastifyInstance) {
       estimated_admin_hours: Number(body.estimated_admin_hours) || 0,
       created_by:       (req as any).userId,
     })
-    void fastify.supabase.from('simulation_runs').insert({
-      org_id: run.org_id, simulation_type: run.simulation_type, label: run.label,
+    fastify.supabase.from('simulation_runs').insert({
+      tenant_id: run.tenant_id, simulation_type: run.simulation_type, label: run.label,
       input_params: run.input_params, result_summary: run.result_summary,
       created_at: run.created_at, created_by: run.created_by ?? null,
-    })
+    }).then(undefined, () => {})
     return run
   })
 
@@ -88,17 +89,17 @@ export default async function fabricRoutes(fastify: FastifyInstance) {
     const body = req.body as any
     const orgId = (req as any).tenantId
     const run = unifiedSimulationService.simulateGovernanceDrift({
-      org_id:             orgId,
+      tenant_id:             orgId,
       current_drift_rate: Number(body.current_drift_rate) || 20,
       trend_direction:    body.trend_direction ?? 'stable',
       weeks_ahead:        Number(body.weeks_ahead) || 12,
       created_by:         (req as any).userId,
     })
-    void fastify.supabase.from('simulation_runs').insert({
-      org_id: run.org_id, simulation_type: run.simulation_type, label: run.label,
+    fastify.supabase.from('simulation_runs').insert({
+      tenant_id: run.tenant_id, simulation_type: run.simulation_type, label: run.label,
       input_params: run.input_params, result_summary: run.result_summary,
       created_at: run.created_at, created_by: run.created_by ?? null,
-    })
+    }).then(undefined, () => {})
     return run
   })
 
@@ -126,30 +127,46 @@ export default async function fabricRoutes(fastify: FastifyInstance) {
     return { activities, total: activities.length }
   })
 
+  const EscalateSchema = z.object({
+    entity_id:   z.string().uuid(),
+    entity_type: z.string().optional(),
+    reason:      z.string().optional(),
+    escalate_to: z.string().uuid().optional(),
+  })
+
+  const ReplaySchema = z.object({
+    entity_id:   z.string().uuid(),
+    entity_type: z.string().optional(),
+    from:        z.string(),
+    to:          z.string(),
+  })
+
   // POST /fabric/orchestration/escalate — coordinate an escalation (advisory)
   fastify.post('/fabric/orchestration/escalate', { preHandler: [fastify.authenticate] }, async (req, reply) => {
-    const body = req.body as any
+    const parsed = EscalateSchema.safeParse(req.body)
+    if (!parsed.success) return reply.status(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message ?? 'Invalid request body' })
     const orgId = (req as any).tenantId
     const activityId = await workflowOrchestrationService.coordinateEscalation(fastify.supabase, {
-      org_id:      orgId,
-      entity_id:   body.entity_id,
-      entity_type: body.entity_type ?? 'employee',
-      reason:      body.reason ?? '',
-      escalate_to: body.escalate_to,
+      tenant_id:      orgId,
+      entity_id:   parsed.data.entity_id,
+      entity_type: parsed.data.entity_type ?? 'employee',
+      reason:      parsed.data.reason ?? '',
+      escalate_to: parsed.data.escalate_to,
     })
     return reply.status(201).send({ activity_id: activityId })
   })
 
   // POST /fabric/replay — start a replay session
-  fastify.post('/fabric/replay', { preHandler: [fastify.authenticate] }, async (req, _reply) => {
-    const body = req.body as any
+  fastify.post('/fabric/replay', { preHandler: [fastify.authenticate] }, async (req, reply) => {
+    const parsed = ReplaySchema.safeParse(req.body)
+    if (!parsed.success) return reply.status(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message ?? 'Invalid request body' })
     const orgId = (req as any).tenantId
     const session = await replayIntelligenceService.replay(fastify.supabase, {
-      org_id:      orgId,
-      entity_id:   body.entity_id,
-      entity_type: body.entity_type ?? 'employee',
-      from:        body.from,
-      to:          body.to,
+      tenant_id:      orgId,
+      entity_id:   parsed.data.entity_id,
+      entity_type: parsed.data.entity_type ?? 'employee',
+      from:        parsed.data.from,
+      to:          parsed.data.to,
       created_by:  (req as any).userId,
     })
     return session

@@ -1045,15 +1045,16 @@ async function searchPolicy(ctx: ToolCtx, args: { query?: string }): Promise<str
 async function getPayBreakdown(ctx: ToolCtx): Promise<string> {
   if (!ctx.employeeId) return 'No employee profile linked to your account.'
 
-  const { data } = await ctx.supabase
-    .from('employee_compensation_components')
-    .select('component_name, amount, component_type')
+  const { data: comp } = await ctx.supabase
+    .from('employee_compensations')
+    .select('employee_compensation_components(value, calculation_type, salary_components!salary_component_id(name))')
     .eq('employee_id', ctx.employeeId)
     .eq('tenant_id', ctx.caller.tenantId)
-    .order('component_type')
+    .maybeSingle()
 
-  if (!data?.length) return 'Salary structure not found. Contact HR for your compensation details.'
-  const lines = (data as any[]).map(c => `${c.component_name}: ${fmtINR(Number(c.amount ?? 0))}`)
+  const components = (comp as any)?.employee_compensation_components ?? []
+  if (!components.length) return 'Salary structure not found. Contact HR for your compensation details.'
+  const lines = (components as any[]).map((c: any) => `${c.salary_components?.name ?? 'Component'}: ${fmtINR(Number(c.value ?? 0))}`)
   return `**Your Salary Structure**\n\n${lines.join('\n')}`
 }
 
@@ -1071,7 +1072,7 @@ async function getAttendanceCalendar(ctx: ToolCtx, args: { month?: string }): Pr
 
   const { data } = await ctx.supabase
     .from('attendance_daily')
-    .select('date, status, in_time, out_time')
+    .select('date, status, work_hours')
     .eq('tenant_id', ctx.caller.tenantId)
     .eq('employee_id', ctx.employeeId)
     .gte('date', from)
@@ -1086,7 +1087,7 @@ async function getAttendanceCalendar(ctx: ToolCtx, args: { month?: string }): Pr
       week_off: 'Week Off', half_day: 'Half Day',
     }
     const s = statusLabel[r.status] ?? r.status
-    const hours = r.in_time && r.out_time ? ` (${r.in_time}–${r.out_time})` : ''
+    const hours = r.work_hours ? ` (${Number(r.work_hours).toFixed(1)}h)` : ''
     return `${r.date}: ${s}${hours}`
   })
 

@@ -12,6 +12,7 @@
  */
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
+import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 
 const schema = z.object({
   name:        z.string().min(1, 'Name is required').max(120),
@@ -23,7 +24,7 @@ const schema = z.object({
 
 export default async function holidayGroupsRoutes(fastify: FastifyInstance) {
   const auth = { preHandler: [fastify.authenticate] }
-  const isAdmin = (req: any) => ['super_admin', 'hr_admin'].includes(req.userRole)
+  const isAdmin = (req: any) => (HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)
 
   fastify.get('/', auth, async (req: any, reply) => {
     const { data, error } = await fastify.supabase

@@ -166,10 +166,10 @@ export function LeaveAccrualAdmin() {
 
   // ── Queries ────────────────────────────────────────────────────────────────
   const { data: leaveTypesResp } = useQuery<{ data: LeaveType[] }>({
-    queryKey: ['leave-types-all'],
+    queryKey: ['leave-types'],
     queryFn:  () => api.get('/masters/leave-types'),
     enabled:  isAdmin,
-    staleTime: 300_000,
+    staleTime: 60_000,
   })
   const leaveTypes = (leaveTypesResp?.data ?? []).filter(lt => lt.is_active)
 

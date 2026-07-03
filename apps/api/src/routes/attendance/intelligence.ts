@@ -12,8 +12,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { computeIntelligence } from '../../lib/intelligence-engine.js'
-
-const HR_ADMIN_ROLES = ['super_admin', 'hr_admin'] as const
+import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 
 export default async function attendanceIntelligenceRoute(fastify: FastifyInstance) {
   const auth = { preHandler: [fastify.authenticate] }

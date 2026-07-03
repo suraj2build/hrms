@@ -7,12 +7,13 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { logAction } from '../../lib/audit-service.js'
 import { gateApprove, gateReject } from '../../lib/approval-orchestrator.js'
+import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 
 const RECOVERY_TYPES = ['payroll_deduction', 'manual_payment', 'adjustment'] as const
 
 export default async function advancesRoutes(fastify: FastifyInstance) {
   const auth = { preHandler: [fastify.authenticate] }
-  const isHr = (role: string) => ['super_admin', 'hr_admin'].includes(role)
+  const isHr = (role: string) => (HR_ADMIN_ROLES as readonly string[]).includes(role)
 
   function requireHrAdmin(req: any, reply: any, done: () => void) {
     if (!isHr(req.userRole)) {
@@ -34,7 +35,7 @@ export default async function advancesRoutes(fastify: FastifyInstance) {
       return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
     }
 
-    const isHrAdmin = ['super_admin', 'hr_admin'].includes(req.userRole)
+    const isHrAdmin = (HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)
 
     // Non-admins (employees, managers) may only see their own advances.
     // Any supplied employee_id is ignored and replaced with the caller's own.
@@ -57,7 +58,7 @@ export default async function advancesRoutes(fastify: FastifyInstance) {
       .from('advance_salary_requests')
       .select('*, employees(id, first_name, last_name, employee_code)')
       .eq('tenant_id', req.tenantId)
-      .order('created_at', { ascending: false })
+      .order('created_at', { ascending: false }).limit(500)
 
     if (parsed.data.employee_id) q = q.eq('employee_id', parsed.data.employee_id)
     if (parsed.data.status) q = q.eq('status', parsed.data.status)
@@ -82,7 +83,7 @@ export default async function advancesRoutes(fastify: FastifyInstance) {
     }
 
     // Self-scoping: non-admins may only raise an advance for themselves.
-    if (!['super_admin', 'hr_admin'].includes(req.userRole)) {
+    if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
       const { data: profile } = await fastify.supabase
         .from('profiles')
         .select('employee_id')
@@ -349,7 +350,7 @@ export default async function advancesRoutes(fastify: FastifyInstance) {
       .select('*')
       .eq('advance_id', id)
       .eq('tenant_id', req.tenantId)
-      .order('recovery_month', { ascending: true })
+      .order('recovery_month', { ascending: true }).limit(100)
 
     if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
     return reply.send({ data: data ?? [] })

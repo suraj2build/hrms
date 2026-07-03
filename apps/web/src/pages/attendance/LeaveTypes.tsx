@@ -26,6 +26,7 @@ import { Button }        from '@/components/ui/button'
 import { Input }         from '@/components/ui/input'
 import { EmployeeSelector } from '@/components/filters/EmployeeSelector'
 import { Badge }         from '@/components/ui/badge'
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { toast }         from 'sonner'
 import { api }           from '@/lib/api/client'
 import { useAuthStore }  from '@/stores/authStore'
@@ -124,6 +125,7 @@ export function LeaveTypes() {
   const [balanceEmpId,  setBalanceEmpId]  = useState('')
   const [appliedEmpId,  setAppliedEmpId]  = useState('')
   const [balanceEdits,  setBalanceEdits]  = useState<Record<string, string>>({})
+  const [cdlg, setCdlg] = useState<{ msg: string; act: () => void } | null>(null)
 
   // ── Query ──────────────────────────────────────────────────────────────────
   const { data, isLoading, isError, refetch } = useQuery<{ data: LeaveType[] }>({
@@ -241,8 +243,7 @@ export function LeaveTypes() {
     const msg = lt.is_active
       ? `Delete "${lt.name}"? If it has existing applications it will be deactivated instead.`
       : `Permanently delete the inactive type "${lt.name}"?`
-    if (!window.confirm(msg)) return
-    deleteMutation.mutate(lt.id)
+    setCdlg({ msg, act: () => deleteMutation.mutate(lt.id) })
   }
 
   // ── Render ────────────────────────────────────────────────────────────────
@@ -620,6 +621,7 @@ export function LeaveTypes() {
           )}
         </SectionCard>
       )}
+      <ConfirmDialog open={!!cdlg} message={cdlg?.msg ?? ''} title="Confirm" confirmLabel="Delete" destructive onConfirm={() => { cdlg?.act(); setCdlg(null) }} onCancel={() => setCdlg(null)} />
     </PageContainer>
   )
 }

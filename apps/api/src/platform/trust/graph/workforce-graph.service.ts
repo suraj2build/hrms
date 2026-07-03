@@ -21,7 +21,7 @@ export class WorkforceGraphService {
       await supabase
         .from('workforce_graph_edges')
         .upsert({
-          org_id:      edge.org_id,
+          tenant_id:      edge.tenant_id,
           from_entity: edge.from_entity,
           from_type:   edge.from_type,
           to_entity:   edge.to_entity,
@@ -30,7 +30,7 @@ export class WorkforceGraphService {
           weight:      edge.weight,
           metadata:    edge.metadata ?? null,
           created_at:  new Date().toISOString(),
-        }, { onConflict: 'org_id,from_entity,to_entity,edge_type' })
+        }, { onConflict: 'tenant_id,from_entity,to_entity,edge_type' })
     } catch {
       // Non-fatal — graph edge upsert errors are swallowed
     }
@@ -41,7 +41,7 @@ export class WorkforceGraphService {
    */
   async addPanEdge(supabase: SupabaseClient, employeeId: string, pan: string, orgId: string): Promise<void> {
     await this.upsertEdge(supabase, {
-      org_id:      orgId,
+      tenant_id:      orgId,
       from_entity: employeeId,
       from_type:   'employee',
       to_entity:   hashValue(pan),
@@ -56,7 +56,7 @@ export class WorkforceGraphService {
    */
   async addBankEdge(supabase: SupabaseClient, employeeId: string, accountNumber: string, orgId: string): Promise<void> {
     await this.upsertEdge(supabase, {
-      org_id:      orgId,
+      tenant_id:      orgId,
       from_entity: employeeId,
       from_type:   'employee',
       to_entity:   hashValue(accountNumber.replace(/[\s\-]/g, '')),
@@ -71,7 +71,7 @@ export class WorkforceGraphService {
    */
   async addPhoneEdge(supabase: SupabaseClient, employeeId: string, phone: string, orgId: string): Promise<void> {
     await this.upsertEdge(supabase, {
-      org_id:      orgId,
+      tenant_id:      orgId,
       from_entity: employeeId,
       from_type:   'employee',
       to_entity:   hashValue(phone.replace(/[\s\-\+]/g, '')),
@@ -88,7 +88,7 @@ export class WorkforceGraphService {
     const { data } = await supabase
       .from('workforce_graph_edges')
       .select('*')
-      .eq('org_id', orgId)
+      .eq('tenant_id', orgId)
       .eq('from_entity', employeeId)
     return (data ?? []) as WorkforceGraphEdge[]
   }
@@ -100,7 +100,7 @@ export class WorkforceGraphService {
     const { data } = await supabase
       .from('workforce_graph_edges')
       .select('from_entity')
-      .eq('org_id', orgId)
+      .eq('tenant_id', orgId)
       .eq('to_entity', toEntity)
       .eq('edge_type', edgeType)
     return (data ?? []).map((r: any) => r.from_entity as string)

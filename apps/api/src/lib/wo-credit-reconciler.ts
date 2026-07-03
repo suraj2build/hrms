@@ -19,6 +19,7 @@
  */
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { isMonthLocked } from './period-lock.js'
+import { durableQueue }  from './durable-queue.js'
 
 const RECON_INTERVAL_MS = 6 * 60 * 60 * 1_000   // every 6h (daily-grain; cheap + idempotent)
 const WARMUP_MS         = 7 * 60 * 1_000
@@ -444,7 +445,7 @@ export async function finalizeTenantMonth(
 }
 
 // ── Scheduler ───────────────────────────────────────────────────────────────
-async function tick(supabase: SupabaseClient): Promise<void> {
+export async function tick(supabase: SupabaseClient): Promise<void> {
   const now = new Date()
   const year = now.getUTCFullYear()
   const month = now.getUTCMonth() + 1
@@ -474,12 +475,15 @@ async function tick(supabase: SupabaseClient): Promise<void> {
 }
 
 export function registerWoCreditScheduler(supabase: SupabaseClient): void {
-  setTimeout(() => {
-    tick(supabase).catch(e => console.error('[wo-credit] initial tick error:', (e as Error).message))
-    setInterval(
-      () => tick(supabase).catch(e => console.error('[wo-credit] tick error:', (e as Error).message)),
-      RECON_INTERVAL_MS,
+  const enqueue = () => {
+    const key = `reconcile-wo-credits:${new Date().toISOString().slice(0, 10)}`
+    durableQueue.enqueue('reconcile-wo-credits', {}, { idempotencyKey: key }).catch(
+      e => console.error('[wo-credit] enqueue error:', (e as Error).message),
     )
+  }
+  setTimeout(() => {
+    enqueue()
+    setInterval(enqueue, RECON_INTERVAL_MS)
     console.log('🗓️  WO-credit reconciler active — daily floating weekly-off accounting')
   }, WARMUP_MS)
 }

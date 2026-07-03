@@ -43,6 +43,7 @@ import { eventBus }           from './event-bus.js'
 import { computeUpcoming }    from './compliance-calendar.js'
 import { computeLifecycleActionable, categoryLabel } from './lifecycle-expiry.js'
 import { notifyHrAdmins }     from './notify.js'
+import { durableQueue }       from './durable-queue.js'
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -1101,9 +1102,9 @@ async function scanSuccessionAttritionRisk(supabase: SupabaseClient, tenantId: s
   const month = currentMonth()
 
   const { data: candidates } = await supabase.from('succession_candidates')
-    .select('id, employee_id, succession_plan_id')
+    .select('id, employee_id, plan_id')
     .eq('tenant_id', tenantId)
-    .in('readiness_status', ['ready_now', 'ready_12m'])
+    .in('readiness_level', ['ready_now', 'ready_12m'])
   if (!candidates?.length) return
 
   const threeMonthsAgo = new Date()
@@ -1138,7 +1139,7 @@ async function scanSuccessionAttritionRisk(supabase: SupabaseClient, tenantId: s
 
 // ── Main scan orchestrator ─────────────────────────────────────────────────────
 
-async function runAllScans(supabase: SupabaseClient): Promise<void> {
+export async function runAllScans(supabase: SupabaseClient): Promise<void> {
   const tenantIds = await fetchTenantIds(supabase).catch(() => [] as string[])
   if (!tenantIds.length) return
 
@@ -1174,15 +1175,16 @@ async function runAllScans(supabase: SupabaseClient): Promise<void> {
  */
 export function registerIntelligenceScanner(supabase: SupabaseClient): void {
   setTimeout(() => {
-    runAllScans(supabase).catch(e =>
-      console.error('[intelligence-scanner] initial scan error:', (e as Error).message),
-    )
-    setInterval(
-      () => runAllScans(supabase).catch(e =>
-        console.error('[intelligence-scanner] scan error:', (e as Error).message),
-      ),
-      SCAN_INTERVAL_MS,
-    )
+    const enqueue = () => {
+      // 6-hour bucket: slice to 'YYYY-MM-DDTHH' then round to nearest 6h
+      const now = new Date()
+      const bucket = `${now.toISOString().slice(0, 10)}-${Math.floor(now.getUTCHours() / 6) * 6}`
+      durableQueue.enqueue('intelligence-scan', {}, { idempotencyKey: `intelligence-scan:${bucket}` }).catch(
+        e => console.error('[intelligence-scanner] enqueue error:', (e as Error).message),
+      )
+    }
+    enqueue()
+    setInterval(enqueue, SCAN_INTERVAL_MS)
     console.log(
       `🧠 Intelligence scanner active — scanning every ${SCAN_INTERVAL_MS / 3_600_000}h`,
     )

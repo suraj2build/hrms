@@ -118,6 +118,7 @@ export default async function billingRoutes(fastify: FastifyInstance) {
           break
         case 'subscription.cancelled':
           updates.subscription_status = 'cancelled'
+          updates.status = 'cancelled'
           break
       }
       if (Object.keys(updates).length) {

@@ -129,7 +129,7 @@ export async function computeReadiness(
     sessionId
       ? supabase.from('workforce_trust_scores')
           .select('score, severity')
-          .eq('org_id', tenantId)
+          .eq('tenant_id', tenantId)
           .eq('entity_id', sessionId)
           .eq('score_type', 'onboarding')
           .maybeSingle()

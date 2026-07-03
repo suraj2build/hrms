@@ -41,7 +41,7 @@ triggerRegistry.register({
     target_type:      'payroll_run',
     message:          `Payroll run finalized — governance review window open`,
     severity:         'info',
-    metadata:         { org_id: event.org_id },
+    metadata:         { tenant_id: event.tenant_id },
   }),
 })
 

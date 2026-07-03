@@ -11,6 +11,7 @@
 
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
+import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
 
@@ -41,7 +42,7 @@ export default async function attendanceRiskRoute(fastify: FastifyInstance) {
   const auth = { preHandler: [fastify.authenticate] }
 
   function requireAdmin(req: any, reply: any): boolean {
-    if (!['super_admin', 'hr_admin'].includes(req.userRole)) {
+    if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
       reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
       return false
     }
@@ -202,7 +203,7 @@ export default async function attendanceRiskRoute(fastify: FastifyInstance) {
       const { employeeId } = req.params
 
       // Employees can view their own; admins can view anyone.
-      const isAdmin = ['super_admin', 'hr_admin'].includes(req.userRole)
+      const isAdmin = (HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)
       if (!isAdmin) {
         // Verify the caller is the employee being queried
         const { data: profile } = await fastify.supabase

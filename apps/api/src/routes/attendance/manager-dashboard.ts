@@ -18,6 +18,7 @@ import type { FastifyInstance } from 'fastify'
 import { z }                    from 'zod'
 import { normalizeAttendanceStatus } from '../../lib/attendance-utils.js'
 import { PRESENT_STATUSES }          from '../../lib/attendance-read-model.js'
+import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 
 const querySchema = z.object({
   /** Override — HR admin can inspect another manager's dashboard */
@@ -43,7 +44,7 @@ export default async function managerDashboardRoute(fastify: FastifyInstance) {
 
     if (
       parsed.data.manager_employee_id &&
-      ['super_admin', 'hr_admin'].includes(userRole)
+      (HR_ADMIN_ROLES as readonly string[]).includes(userRole)
     ) {
       // Admin override: use the supplied ID directly (still scoped to tenant)
       const { data: empRow } = await fastify.supabase

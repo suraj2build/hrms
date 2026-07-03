@@ -33,6 +33,7 @@ import { api }           from '@/lib/api/client'
 import { useAuthStore }  from '@/stores/authStore'
 import { cn }            from '@/lib/utils'
 import { useStatutoryMonth } from '@/components/compliance/StatutoryMonthPicker'
+import { PromptDialog }  from '@/components/ui/ConfirmDialog'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -293,6 +294,7 @@ function DeclarationsTab({ financialYear }: { financialYear: string }) {
   const [approveTarget, setApproveTarget] = useState<TaxDeclarationItem | null>(null)
   const [rejectTarget,  setRejectTarget]  = useState<TaxDeclarationItem | null>(null)
   const [statusFilter,  setStatusFilter]  = useState('')
+  const [revisionTargetId, setRevisionTargetId] = useState<string | null>(null)
 
   const { data: declarations, isLoading, isError } = useQuery<TaxDeclarationItem[]>({
     queryKey:  ['tds-declarations', financialYear, statusFilter],
@@ -448,10 +450,7 @@ function DeclarationsTab({ financialYear }: { financialYear: string }) {
                           variant="outline"
                           className="h-6 text-[10px] gap-1 text-warning border-warning/30 hover:bg-warning/10"
                           disabled={revisionMutation.isPending}
-                          onClick={() => {
-                            const notes = window.prompt('Reason for revision request (required):')
-                            if (notes?.trim()) revisionMutation.mutate({ id: d.id, notes: notes.trim() })
-                          }}
+                          onClick={() => setRevisionTargetId(d.id)}
                         >
                           Revise
                         </Button>
@@ -483,6 +482,14 @@ function DeclarationsTab({ financialYear }: { financialYear: string }) {
           onClose={() => setRejectTarget(null)}
         />
       )}
+      <PromptDialog
+        open={!!revisionTargetId}
+        title="Request revision"
+        placeholder="Reason for revision request (required):"
+        required
+        onConfirm={(notes) => { if (revisionTargetId) revisionMutation.mutate({ id: revisionTargetId, notes: notes.trim() }); setRevisionTargetId(null) }}
+        onCancel={() => setRevisionTargetId(null)}
+      />
     </>
   )
 }

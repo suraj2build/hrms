@@ -9,7 +9,7 @@
  */
 
 import { useState }      from 'react'
-import { useQuery }      from '@tanstack/react-query'
+import { useQuery, keepPreviousData }      from '@tanstack/react-query'
 import { EmployeeLabel } from '@/components/employee/EmployeeLabel'
 import { EmployeeSelector } from '@/components/filters/EmployeeSelector'
 import {
@@ -142,6 +142,7 @@ export function PolicyConflicts() {
     },
     enabled:   isAdmin,
     staleTime: 60_000,
+    placeholderData: keepPreviousData,
   })
 
   // The summary API is month-scoped — derive the month from the range end.

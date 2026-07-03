@@ -30,7 +30,7 @@ export interface DriftDetectionResult {
 }
 
 export class DriftDetectionService {
-  /** In-memory counters keyed by `org_id:event_type`. */
+  /** In-memory counters keyed by `tenant_id:event_type`. */
   private counters: Map<string, number> = new Map()
 
   private bump(key: string): number {
@@ -44,7 +44,7 @@ export class DriftDetectionService {
    * Returns a result if drift is detected, null otherwise.
    */
   analyse(event: ResolvedPlatformEvent): DriftDetectionResult | null {
-    const orgKey = `${event.org_id}:${event.event_type}`
+    const orgKey = `${event.tenant_id}:${event.event_type}`
     const count = this.bump(orgKey)
 
     // Override growth: many payroll runs in short window

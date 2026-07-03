@@ -119,7 +119,7 @@ export function EssShell() {
   const atThreshold = useArrivalStore((s) => s.atThreshold)
   // Home gets the full-width experience — the context panel is replaced by the
   // inline right column (celebration card, also today, etc).
-  const isHomePage = pathname === '/ess/home' || pathname === '/ess/dashboard' || pathname === '/ess'
+  const _isHomePage = pathname === '/ess/home' || pathname === '/ess/dashboard' || pathname === '/ess'
 
   // Context Rail is only shown on Pillar pages (overview/experience pages).
   // Service section pages (Leave, Attendance, Pay, Documents, etc.) are task-oriented

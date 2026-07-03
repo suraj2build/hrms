@@ -76,7 +76,7 @@ async function computeEmployeeTrustBreakdown(
     supabase
       .from('workforce_trust_scores')
       .select('id, score, severity, factors, explainability, computed_at')
-      .eq('org_id', tenantId)
+      .eq('tenant_id', tenantId)
       .eq('entity_id', employeeId)
       .eq('score_type', 'employee')
       .order('computed_at', { ascending: false })
@@ -86,14 +86,14 @@ async function computeEmployeeTrustBreakdown(
     supabase
       .from('verification_events')
       .select('verification_type, status, flags, score, verified_at')
-      .eq('org_id', tenantId)
+      .eq('tenant_id', tenantId)
       .eq('entity_id', employeeId)
       .order('verified_at', { ascending: false }),
 
     supabase
       .from('duplicate_detection_events')
       .select('duplicate_type, matching_entity_ids, severity, value_hash, detected_at')
-      .eq('org_id', tenantId)
+      .eq('tenant_id', tenantId)
       .eq('entity_id', employeeId)
       .order('detected_at', { ascending: false }),
   ])
@@ -108,7 +108,7 @@ async function computeEmployeeTrustBreakdown(
   // Build explainability fields from the live event data
   const partial = trustScoreService.computeEmployeeTrustScore({
     employee_id:   employeeId,
-    org_id:        tenantId,
+    tenant_id:        tenantId,
     verifications: verifs,
     duplicates:    dups,
   })
@@ -116,7 +116,7 @@ async function computeEmployeeTrustBreakdown(
   return {
     score_type:      'employee' as const,
     entity_id:       employeeId,
-    org_id:          tenantId,
+    tenant_id:          tenantId,
     // Use persisted score as authoritative; fall back to recomputed if absent
     score:           score         ?? partial.score,
     severity:        severity      ?? partial.severity,
@@ -164,7 +164,7 @@ async function computeSessionTrustBreakdown(
 
   return trustScoreService.computeOnboardingTrustScore({
     employee_id:   sessionId,
-    org_id:        tenantId,
+    tenant_id:        tenantId,
     has_pan:       hasPan,
     has_bank:      hasBank,
     has_identity:  hasIdentity,

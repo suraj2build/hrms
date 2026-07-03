@@ -7,12 +7,13 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { logAction } from '../../lib/audit-service.js'
 import { EventType, MODULE } from '../../platform/events/index.js'
+import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 
 export default async function compensationRevisionsRoutes(fastify: FastifyInstance) {
   const auth = { preHandler: [fastify.authenticate] }
 
   function requireHrAdmin(req: any, reply: any, done: () => void) {
-    if (!['super_admin', 'hr_admin'].includes(req.userRole)) {
+    if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
       reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
       return
     }
@@ -104,7 +105,7 @@ export default async function compensationRevisionsRoutes(fastify: FastifyInstan
       module:      MODULE.COMPENSATION,
       entity_type: 'compensation_revision',
       entity_id:   (data as any).id,
-      org_id:      req.tenantId,
+      tenant_id:      req.tenantId,
       actor_id:    req.userId,
       actor_type:  'user',
       payload:     { employee_id: parsed.data.employee_id, new_ctc_annual: parsed.data.new_ctc_annual, revision_type: parsed.data.revision_type },
@@ -318,7 +319,7 @@ export default async function compensationRevisionsRoutes(fastify: FastifyInstan
       module:      MODULE.COMPENSATION,
       entity_type: 'compensation_revision',
       entity_id:   id,
-      org_id:      req.tenantId,
+      tenant_id:      req.tenantId,
       actor_id:    req.userId,
       actor_type:  'user',
       payload:     { employee_id: rev.employee_id, new_ctc_annual: rev.new_ctc_annual, effective_date: rev.effective_date },
@@ -386,7 +387,7 @@ export default async function compensationRevisionsRoutes(fastify: FastifyInstan
       module:      MODULE.COMPENSATION,
       entity_type: 'compensation_revision',
       entity_id:   id,
-      org_id:      req.tenantId,
+      tenant_id:      req.tenantId,
       actor_id:    req.userId,
       actor_type:  'user',
       payload:     { employee_id: (revision as any).employee_id, rejection_reason: parsed.data.rejection_reason },
@@ -400,7 +401,7 @@ export default async function compensationRevisionsRoutes(fastify: FastifyInstan
   // Employees (and managers) can only view their own revision history.
   fastify.get('/employee/:employeeId', auth, async (req: any, reply) => {
     const { employeeId } = req.params as { employeeId: string }
-    const isHrAdmin = ['super_admin', 'hr_admin'].includes(req.userRole)
+    const isHrAdmin = (HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)
 
     if (!isHrAdmin) {
       // Resolve the caller's employee_id and verify ownership

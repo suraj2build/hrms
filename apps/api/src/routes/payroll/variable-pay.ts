@@ -5,6 +5,7 @@
 
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
+import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 
 const TEMPLATE_TYPES = [
   'performance_bonus',
@@ -20,7 +21,7 @@ export default async function variablePayRoutes(fastify: FastifyInstance) {
   const auth = { preHandler: [fastify.authenticate] }
 
   function requireHrAdmin(req: any, reply: any, done: () => void) {
-    if (!['super_admin', 'hr_admin'].includes(req.userRole)) {
+    if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
       reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
       return
     }
@@ -41,7 +42,7 @@ export default async function variablePayRoutes(fastify: FastifyInstance) {
     let q = fastify.supabase
       .from('incentive_templates')
       .select('*')
-      .eq('tenant_id', req.tenantId)
+      .eq('tenant_id', req.tenantId).limit(200)
 
     if (parsed.data.is_active !== undefined) {
       q = q.eq('is_active', parsed.data.is_active === 'true')
@@ -132,7 +133,7 @@ export default async function variablePayRoutes(fastify: FastifyInstance) {
     let q = fastify.supabase
       .from('variable_payout_batches')
       .select('*, incentive_templates(id, name, code, template_type)')
-      .eq('tenant_id', req.tenantId)
+      .eq('tenant_id', req.tenantId).limit(200)
 
     if (parsed.data.payout_month) q = q.eq('payout_month', parsed.data.payout_month)
     if (parsed.data.status) q = q.eq('status', parsed.data.status)
@@ -245,7 +246,7 @@ export default async function variablePayRoutes(fastify: FastifyInstance) {
       .from('variable_payouts')
       .select('*, employees(id, first_name, last_name, employee_code)')
       .eq('batch_id', id)
-      .eq('tenant_id', req.tenantId)
+      .eq('tenant_id', req.tenantId).limit(1000)
 
     if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
     return reply.send({ data: data ?? [] })
@@ -346,7 +347,7 @@ export default async function variablePayRoutes(fastify: FastifyInstance) {
       `)
       .eq('employee_id', employeeId)
       .eq('tenant_id', req.tenantId)
-      .eq('variable_payout_batches.status', 'approved')
+      .eq('variable_payout_batches.status', 'approved').limit(100)
 
     if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
 
@@ -385,7 +386,7 @@ export default async function variablePayRoutes(fastify: FastifyInstance) {
         variable_payout_batches(id, batch_name, payout_month, status, incentive_templates(id, name, code, template_type))
       `)
       .eq('employee_id', employeeId)
-      .eq('tenant_id', req.tenantId)
+      .eq('tenant_id', req.tenantId).limit(200)
 
     if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
     return reply.send({ data: data ?? [] })

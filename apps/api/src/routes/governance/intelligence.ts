@@ -17,7 +17,7 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
     const { data, error, count } = await fastify.supabase
       .from('platform_events')
       .select('*', { count: 'exact' })
-      .eq('org_id', tenantId)
+      .eq('tenant_id', tenantId)
       .order('timestamp', { ascending: false })
       .range(Number(offset), Number(offset) + Number(limit) - 1)
     if (error) return reply.status(500).send({ error: error.message })
@@ -30,7 +30,7 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
     const { data, error } = await fastify.supabase
       .from('platform_events')
       .select('*')
-      .eq('org_id', tenantId)
+      .eq('tenant_id', tenantId)
       .in('severity', ['high', 'critical'])
       .order('timestamp', { ascending: false })
       .limit(50)
@@ -44,7 +44,7 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
     const { data, error } = await fastify.supabase
       .from('platform_events')
       .select('entity_type, entity_id, severity, event_type, timestamp')
-      .eq('org_id', tenantId)
+      .eq('tenant_id', tenantId)
       .in('severity', ['high', 'critical'])
       .order('timestamp', { ascending: false })
       .limit(100)

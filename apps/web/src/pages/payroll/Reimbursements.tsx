@@ -6,7 +6,7 @@
  */
 
 import { useState }                                from 'react'
-import { useQuery, useMutation, useQueryClient }   from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient, keepPreviousData }   from '@tanstack/react-query'
 import {
   Loader2, RefreshCw, Plus, CheckCircle2,
   XCircle, FileText,
@@ -282,18 +282,25 @@ export function Reimbursements() {
   const isAdmin     = ['super_admin', 'hr_admin'].includes(profile?.role ?? '')
   const qc          = useQueryClient()
 
+  const PAGE_SIZE = 50
+
   const [statusFilter, setStatusFilter]   = useState('All')
   const [reviewTarget, setReviewTarget]   = useState<ReimbClaim | null>(null)
   const [rejectTarget, setRejectTarget]   = useState<ReimbClaim | null>(null)
   const [showAddCat, setShowAddCat]       = useState(false)
+  const [page, setPage]                   = useState(0)
 
-  const { data: claims = [], isLoading: claimsLoading, refetch } = useQuery<ReimbClaim[]>({
-    queryKey: ['reimbursements', statusFilter],
+  const { data: claimsResp, isLoading: claimsLoading, refetch } = useQuery<{ data: ReimbClaim[]; total: number }>({
+    queryKey: ['reimbursements', statusFilter, page],
     queryFn:  () => {
-      const qs = statusFilter !== 'All' ? `?status=${statusFilter}` : ''
-      return api.get<{ data: ReimbClaim[] }>(`/payroll/reimbursements${qs}`).then((r) => r.data)
+      const params = new URLSearchParams({ limit: String(PAGE_SIZE), offset: String(page * PAGE_SIZE) })
+      if (statusFilter !== 'All') params.set('status', statusFilter)
+      return api.get<{ data: ReimbClaim[]; total: number }>(`/payroll/reimbursements?${params}`)
     },
+    placeholderData: keepPreviousData,
   })
+  const claims = claimsResp?.data ?? []
+  const total  = claimsResp?.total ?? 0
 
   const { data: categories = [], isLoading: catsLoading } = useQuery<ReimbCategory[]>({
     queryKey: ['reimb-categories'],
@@ -351,7 +358,7 @@ export function Reimbursements() {
             <div className="mb-4">
               <select
                 value={statusFilter}
-                onChange={e => setStatusFilter(e.target.value)}
+                onChange={e => { setStatusFilter(e.target.value); setPage(0) }}
                 className="h-8 rounded-md border border-border bg-background px-3 text-xs text-foreground outline-none focus:ring-1 focus:ring-ring"
               >
                 {STATUS_OPTS.map(s => (
@@ -373,6 +380,7 @@ export function Reimbursements() {
                 <p className="text-sm text-muted-foreground">No claims found.</p>
               </div>
             ) : (
+              <div>
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
@@ -435,6 +443,18 @@ export function Reimbursements() {
                     ))}
                   </tbody>
                 </table>
+              </div>
+              {total > PAGE_SIZE && (
+                <div className="flex items-center justify-between border-t border-border px-4 py-3">
+                  <span className="text-xs text-muted-foreground">
+                    Showing {page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, total)} of {total}
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <Button size="sm" variant="outline" className="h-7 text-xs" disabled={page === 0} onClick={() => setPage(p => p - 1)}>Prev</Button>
+                    <Button size="sm" variant="outline" className="h-7 text-xs" disabled={(page + 1) * PAGE_SIZE >= total} onClick={() => setPage(p => p + 1)}>Next</Button>
+                  </div>
+                </div>
+              )}
               </div>
             )}
           </SectionCard>

@@ -23,7 +23,7 @@
 
 -- ── Distributed trace spans (partitioned) ────────────────────────────────────
 
-CREATE TABLE trace_spans (
+CREATE TABLE IF NOT EXISTS trace_spans (
   id              uuid        NOT NULL DEFAULT gen_random_uuid(),
   trace_id        uuid        NOT NULL,   -- W3C traceparent trace-id component
   span_id         uuid        NOT NULL DEFAULT gen_random_uuid(),
@@ -54,20 +54,20 @@ CREATE TABLE trace_spans (
 ) PARTITION BY RANGE (started_at);
 
 -- Create initial partitions
-CREATE TABLE trace_spans_2026_05 PARTITION OF trace_spans
+CREATE TABLE IF NOT EXISTS trace_spans_2026_05 PARTITION OF trace_spans
   FOR VALUES FROM ('2026-05-01') TO ('2026-06-01');
-CREATE TABLE trace_spans_2026_06 PARTITION OF trace_spans
+CREATE TABLE IF NOT EXISTS trace_spans_2026_06 PARTITION OF trace_spans
   FOR VALUES FROM ('2026-06-01') TO ('2026-07-01');
-CREATE TABLE trace_spans_2026_07 PARTITION OF trace_spans
+CREATE TABLE IF NOT EXISTS trace_spans_2026_07 PARTITION OF trace_spans
   FOR VALUES FROM ('2026-07-01') TO ('2026-08-01');
 -- Default partition for out-of-range inserts (prevents failures during month rollover)
-CREATE TABLE trace_spans_default PARTITION OF trace_spans DEFAULT;
+CREATE TABLE IF NOT EXISTS trace_spans_default PARTITION OF trace_spans DEFAULT;
 
 -- Indexes on each partition (inherited automatically for child tables in PG15+)
-CREATE INDEX ON trace_spans (trace_id, started_at);
-CREATE INDEX ON trace_spans (tenant_id, operation, started_at DESC);
-CREATE INDEX ON trace_spans (status, started_at DESC) WHERE status IN ('error', 'timeout');
-CREATE INDEX ON trace_spans (service, operation, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_trace_spans_trace_id   ON trace_spans (trace_id, started_at);
+CREATE INDEX IF NOT EXISTS idx_trace_spans_tenant_op  ON trace_spans (tenant_id, operation, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_trace_spans_status     ON trace_spans (status, started_at DESC) WHERE status IN ('error', 'timeout');
+CREATE INDEX IF NOT EXISTS idx_trace_spans_service_op ON trace_spans (service, operation, started_at DESC);
 
 COMMENT ON TABLE trace_spans IS
   'Distributed trace spans for cross-process request tracing. Partitioned monthly. '
@@ -78,7 +78,7 @@ COMMENT ON TABLE trace_spans IS
 -- Pre-aggregated so dashboards do not scan raw trace_spans.
 -- Written by the 'metrics_aggregation' scheduler job every hour.
 
-CREATE TABLE business_event_metrics (
+CREATE TABLE IF NOT EXISTS business_event_metrics (
   -- Surrogate PK — expressions are not permitted in PRIMARY KEY constraints.
   -- Logical uniqueness enforced by two partial unique indexes below.
   id              uuid        NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
@@ -105,16 +105,16 @@ CREATE TABLE business_event_metrics (
 -- Logical uniqueness: one row per (category, type, date, hour) per tenant.
 -- Split into two partial indexes because PRIMARY KEY cannot contain expressions
 -- and COALESCE in a unique constraint is not permitted in PostgreSQL.
-CREATE UNIQUE INDEX idx_bem_unique_platform
+CREATE UNIQUE INDEX IF NOT EXISTS idx_bem_unique_platform
   ON business_event_metrics (event_category, event_type, metric_date, metric_hour)
   WHERE tenant_id IS NULL;
-CREATE UNIQUE INDEX idx_bem_unique_tenant
+CREATE UNIQUE INDEX IF NOT EXISTS idx_bem_unique_tenant
   ON business_event_metrics (tenant_id, event_category, event_type, metric_date, metric_hour)
   WHERE tenant_id IS NOT NULL;
 
-CREATE INDEX ON business_event_metrics (tenant_id, event_category, metric_date DESC);
-CREATE INDEX ON business_event_metrics (event_type, metric_date DESC);
-CREATE INDEX ON business_event_metrics (metric_date DESC, error_count DESC)
+CREATE INDEX IF NOT EXISTS idx_biz_metrics_tenant_cat ON business_event_metrics (tenant_id, event_category, metric_date DESC);
+CREATE INDEX IF NOT EXISTS idx_biz_metrics_event_type ON business_event_metrics (event_type, metric_date DESC);
+CREATE INDEX IF NOT EXISTS idx_biz_metrics_errors     ON business_event_metrics (metric_date DESC, error_count DESC)
   WHERE error_count > 0;
 
 COMMENT ON TABLE business_event_metrics IS
@@ -154,7 +154,7 @@ COMMENT ON VIEW observability_health IS
 -- ── Seed: known business event types ─────────────────────────────────────────
 -- Reference table so the aggregation job knows which event types to aggregate.
 
-CREATE TABLE business_event_types (
+CREATE TABLE IF NOT EXISTS business_event_types (
   event_category  text        NOT NULL,
   event_type      text        NOT NULL,
   description     text        NOT NULL,

@@ -87,6 +87,7 @@ export default async function documentRoutes(fastify: FastifyInstance) {
       .select('id, name, doc_type, storage_path, file_size, mime_type, expires_at, created_at, employee_id')
       .eq('tenant_id', req.tenantId)
       .order('created_at', { ascending: false })
+      .limit(500)
 
     if (doc_type) query = query.eq('doc_type', doc_type)
 

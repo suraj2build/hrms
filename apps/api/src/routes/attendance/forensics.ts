@@ -27,6 +27,7 @@
 import type { FastifyInstance } from 'fastify'
 import { resolveEmployeeOrgContext, getWeeklyOffDays } from '../../lib/org-context.js'
 import { normalizeAttendanceStatus } from '../../lib/attendance-utils.js'
+import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
 
@@ -44,7 +45,7 @@ export default async function attendanceForensicsRoute(fastify: FastifyInstance)
     '/attendance/forensics/:employeeId/:date',
     auth,
     async (req: any, reply) => {
-      if (!['super_admin', 'hr_admin'].includes(req.userRole)) {
+      if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
         return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
       }
 

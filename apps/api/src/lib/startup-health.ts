@@ -40,6 +40,7 @@ export interface PlatformHealth {
 const OPTIONAL_MODULES = [
   'letters',
   'notifications',
+  'notification-handlers',
   'leave-scheduler',
   'attendance-api-scheduler',
   'anomaly-handler',

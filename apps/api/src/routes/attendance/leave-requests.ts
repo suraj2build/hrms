@@ -22,6 +22,7 @@ import {
   getLeaveRequest,
   cancelLeaveRequest,
 }                               from '../../lib/leave-request-service.js'
+import { checkIdempotency, storeIdempotency } from '../../lib/idempotency.js'
 import {
   approveLeaveRequest,
   rejectLeaveRequest,
@@ -29,6 +30,7 @@ import {
   getPendingApprovalsForManager,
 }                               from '../../lib/approval-service.js'
 import { getDirectReportIds }   from '../../lib/manager-scope.js'
+import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 
 const dateRe = /^\d{4}-\d{2}-\d{2}$/
 
@@ -94,41 +96,60 @@ export default async function leaveRequestsRoutes(fastify: FastifyInstance) {
       })
     }
 
-    const result = await createLeaveRequest(fastify.supabase, {
-      tenantId:       req.tenantId,
-      employeeId,
-      leaveTypeId:    parsed.data.leave_type_id,
-      fromDate:       parsed.data.from_date,
-      toDate:         parsed.data.to_date,
-      reason:         parsed.data.reason,
-      halfDay:        parsed.data.half_day,
-      session:        parsed.data.session,
-      hoursRequested: parsed.data.hours_requested,
-      requestedBy:    req.userId,
-      startSession:   parsed.data.start_session,
-      endSession:     parsed.data.end_session,
-    })
-
-    if (!result.ok) {
-      return reply.code(errorToHttp(result.error.type)).send({
-        error:   result.error.type,
-        message: result.error.message,
-      })
+    // Idempotency: optional header lets callers replay on network retry
+    const iKey = (req.headers['idempotency-key'] as string | undefined)?.trim()
+    if (iKey) {
+      const cached = await checkIdempotency(fastify.supabase, req.tenantId, iKey, 'leave-request')
+      if (cached) {
+        reply.header('Idempotency-Replayed', 'true')
+        return reply.code(cached.status_code).send(cached.response)
+      }
     }
 
-    // Fire-and-forget — never await, never blocks
-    fastify.eventPublisher.publish({
-      event_type:  EventType.LEAVE_REQUESTED,
-      module:      MODULE.LEAVE,
-      entity_type: 'leave_request',
-      entity_id:   (result.value as any).id,
-      org_id:      req.tenantId,
-      actor_id:    req.userId,
-      actor_type:  'user',
-      payload:     { from_date: parsed.data.from_date, to_date: parsed.data.to_date, leave_type_id: parsed.data.leave_type_id },
-      correlation_id: req.correlationId ?? undefined,
-    })
-    return reply.code(201).send({ data: result.value })
+    try {
+      const result = await createLeaveRequest(fastify.supabase, {
+        tenantId:       req.tenantId,
+        employeeId,
+        leaveTypeId:    parsed.data.leave_type_id,
+        fromDate:       parsed.data.from_date,
+        toDate:         parsed.data.to_date,
+        reason:         parsed.data.reason,
+        halfDay:        parsed.data.half_day,
+        session:        parsed.data.session,
+        hoursRequested: parsed.data.hours_requested,
+        requestedBy:    req.userId,
+        startSession:   parsed.data.start_session,
+        endSession:     parsed.data.end_session,
+      })
+
+      if (!result.ok) {
+        return reply.code(errorToHttp(result.error.type)).send({
+          error:   result.error.type,
+          message: result.error.message,
+        })
+      }
+
+      // Fire-and-forget — never await, never blocks
+      fastify.eventPublisher.publish({
+        event_type:  EventType.LEAVE_REQUESTED,
+        module:      MODULE.LEAVE,
+        entity_type: 'leave_request',
+        entity_id:   (result.value as any).id,
+        tenant_id:      req.tenantId,
+        actor_id:    req.userId,
+        actor_type:  'user',
+        payload:     { from_date: parsed.data.from_date, to_date: parsed.data.to_date, leave_type_id: parsed.data.leave_type_id },
+        correlation_id: req.correlationId ?? undefined,
+      })
+      const responseBody = { data: result.value }
+      if (iKey) {
+        await storeIdempotency(fastify.supabase, req.tenantId, iKey, 'leave-request', 201, responseBody)
+      }
+      return reply.code(201).send(responseBody)
+    } catch (err: unknown) {
+      req.log.error({ err, tenantId: req.tenantId }, '[leave-requests] unexpected error creating leave request')
+      return reply.code(500).send({ error: 'LEAVE_SERVICE_ERROR', message: 'Failed to create leave request' })
+    }
   })
 
   // ── GET /leave-requests ─────────────────────────────────────────────────────
@@ -167,7 +188,7 @@ export default async function leaveRequestsRoutes(fastify: FastifyInstance) {
     //   super_admin / hr_admin  → may filter by any employee_id (or see all)
     //   manager                 → may filter by own direct-report employee_ids only
     //   employee                → always scoped to own employee_id, param ignored
-    const isHrAdmin = ['super_admin', 'hr_admin'].includes(req.userRole)
+    const isHrAdmin = (HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)
     const isManager = req.userRole === 'manager'
     let employeeId  = parsed.data.employee_id
 
@@ -223,20 +244,32 @@ export default async function leaveRequestsRoutes(fastify: FastifyInstance) {
       return reply.send({ total: count ?? 0 })
     }
 
-    const result = await listLeaveRequests(fastify.supabase, req.tenantId, {
-      employeeId,
-      status:    parsed.data.status,
-      fromDate:  (parsed.data as any).from_date,
-      toDate:    (parsed.data as any).to_date,
-      limit:     parsed.data.limit,
-      offset:    parsed.data.offset,
-    })
+    let countQ = fastify.supabase
+      .from('leave_requests')
+      .select('id', { count: 'exact', head: true })
+      .eq('tenant_id', req.tenantId)
+    if (employeeId)                        countQ = countQ.eq('employee_id', employeeId) as any
+    if (parsed.data.status)                countQ = countQ.eq('status', parsed.data.status) as any
+    if ((parsed.data as any).from_date)    countQ = countQ.gte('from_date', (parsed.data as any).from_date) as any
+    if ((parsed.data as any).to_date)      countQ = countQ.lte('to_date', (parsed.data as any).to_date) as any
+
+    const [result, { count }] = await Promise.all([
+      listLeaveRequests(fastify.supabase, req.tenantId, {
+        employeeId,
+        status:    parsed.data.status,
+        fromDate:  (parsed.data as any).from_date,
+        toDate:    (parsed.data as any).to_date,
+        limit:     parsed.data.limit,
+        offset:    parsed.data.offset,
+      }),
+      countQ,
+    ])
 
     if (!result.ok) {
       return reply.code(500).send({ error: result.error.type, message: result.error.message })
     }
 
-    return reply.send({ data: result.value })
+    return reply.send({ data: result.value, total: count ?? 0, limit: parsed.data.limit, offset: parsed.data.offset })
   })
 
   // ── GET /leave-requests/:id ─────────────────────────────────────────────────
@@ -259,65 +292,75 @@ export default async function leaveRequestsRoutes(fastify: FastifyInstance) {
   fastify.delete('/leave-requests/:id', auth, async (req: any, reply) => {
     const { id } = req.params as { id: string }
 
-    const result = await cancelLeaveRequest(
-      fastify.supabase,
-      req.tenantId,
-      id,
-      req.userId,
-    )
+    try {
+      const result = await cancelLeaveRequest(
+        fastify.supabase,
+        req.tenantId,
+        id,
+        req.userId,
+      )
 
-    if (!result.ok) {
-      return reply.code(errorToHttp(result.error.type)).send({
-        error:   result.error.type,
-        message: result.error.message,
-      })
+      if (!result.ok) {
+        return reply.code(errorToHttp(result.error.type)).send({
+          error:   result.error.type,
+          message: result.error.message,
+        })
+      }
+
+      return reply.send({ data: result.value })
+    } catch (err: unknown) {
+      req.log.error({ err, tenantId: req.tenantId, id }, '[leave-requests] unexpected error cancelling leave request')
+      return reply.code(500).send({ error: 'LEAVE_SERVICE_ERROR', message: 'Failed to cancel leave request' })
     }
-
-    return reply.send({ data: result.value })
   })
 
   // ── POST /leave-requests/:id/approve ───────────────────────────────────────
   fastify.post('/leave-requests/:id/approve', auth, async (req: any, reply) => {
     const { id } = req.params as { id: string }
 
-    const result = await approveLeaveRequest(fastify.supabase, {
-      tenantId:  req.tenantId,
-      requestId: id,
-      ctx: {
-        approverId:   req.userId,
-        approverRole: req.userRole,
-        tenantId:     req.tenantId,
-      },
-    })
-
-    if (!result.ok) {
-      const extra = result.error.type === 'INSUFFICIENT_BALANCE'
-        ? { current_balance: (result.error as { type: string; message: string; currentBalance: number }).currentBalance }
-        : {}
-      return reply.code(errorToHttp(result.error.type)).send({
-        error:   result.error.type,
-        message: result.error.message,
-        ...extra,
+    try {
+      const result = await approveLeaveRequest(fastify.supabase, {
+        tenantId:  req.tenantId,
+        requestId: id,
+        ctx: {
+          approverId:   req.userId,
+          approverRole: req.userRole,
+          tenantId:     req.tenantId,
+        },
       })
-    }
 
-    // Only publish the "approved" event on a true finalization. With a multi-level
-    // chain an intermediate approval leaves the request PENDING (advanced a level).
-    if (result.value.status === 'APPROVED') {
-      // Fire-and-forget — never await, never blocks
-      fastify.eventPublisher.publish({
-        event_type:  EventType.LEAVE_APPROVED,
-        module:      MODULE.LEAVE,
-        entity_type: 'leave_request',
-        entity_id:   id,
-        org_id:      req.tenantId,
-        actor_id:    req.userId,
-        actor_type:  'user',
-        payload:     { approved_by: req.userId },
-        correlation_id: req.correlationId ?? undefined,
-      })
+      if (!result.ok) {
+        const extra = result.error.type === 'INSUFFICIENT_BALANCE'
+          ? { current_balance: (result.error as { type: string; message: string; currentBalance: number }).currentBalance }
+          : {}
+        return reply.code(errorToHttp(result.error.type)).send({
+          error:   result.error.type,
+          message: result.error.message,
+          ...extra,
+        })
+      }
+
+      // Only publish the "approved" event on a true finalization. With a multi-level
+      // chain an intermediate approval leaves the request PENDING (advanced a level).
+      if (result.value.status === 'APPROVED') {
+        // Fire-and-forget — never await, never blocks
+        fastify.eventPublisher.publish({
+          event_type:  EventType.LEAVE_APPROVED,
+          module:      MODULE.LEAVE,
+          entity_type: 'leave_request',
+          entity_id:   id,
+          tenant_id:      req.tenantId,
+          actor_id:    req.userId,
+          actor_type:  'user',
+          payload:     { approved_by: req.userId },
+          correlation_id: req.correlationId ?? undefined,
+        })
+      }
+      return reply.send({ data: result.value })
+    } catch (err: unknown) {
+      req.log.error({ err, tenantId: req.tenantId, id }, '[leave-requests] unexpected error approving leave request')
+      return reply.code(500).send({ error: 'LEAVE_SERVICE_ERROR', message: 'Failed to approve leave request' })
     }
-    return reply.send({ data: result.value })
   })
 
   // ── POST /leave-requests/:id/cancel-approved ───────────────────────────────
@@ -327,35 +370,40 @@ export default async function leaveRequestsRoutes(fastify: FastifyInstance) {
   fastify.post('/leave-requests/:id/cancel-approved', auth, async (req: any, reply) => {
     const { id } = req.params as { id: string }
 
-    const result = await reverseApprovedLeaveRequest(fastify.supabase, {
-      tenantId:  req.tenantId,
-      requestId: id,
-      ctx: {
-        approverId:   req.userId,
-        approverRole: req.userRole,
-        tenantId:     req.tenantId,
-      },
-    })
-
-    if (!result.ok) {
-      return reply.code(errorToHttp(result.error.type)).send({
-        error:   result.error.type,
-        message: result.error.message,
+    try {
+      const result = await reverseApprovedLeaveRequest(fastify.supabase, {
+        tenantId:  req.tenantId,
+        requestId: id,
+        ctx: {
+          approverId:   req.userId,
+          approverRole: req.userRole,
+          tenantId:     req.tenantId,
+        },
       })
-    }
 
-    fastify.eventPublisher.publish({
-      event_type:  EventType.LEAVE_CANCELLED,
-      module:      MODULE.LEAVE,
-      entity_type: 'leave_request',
-      entity_id:   id,
-      org_id:      req.tenantId,
-      actor_id:    req.userId,
-      actor_type:  'user',
-      payload:     { reversed_by: req.userId },
-      correlation_id: req.correlationId ?? undefined,
-    })
-    return reply.send({ data: result.value })
+      if (!result.ok) {
+        return reply.code(errorToHttp(result.error.type)).send({
+          error:   result.error.type,
+          message: result.error.message,
+        })
+      }
+
+      fastify.eventPublisher.publish({
+        event_type:  EventType.LEAVE_CANCELLED,
+        module:      MODULE.LEAVE,
+        entity_type: 'leave_request',
+        entity_id:   id,
+        tenant_id:      req.tenantId,
+        actor_id:    req.userId,
+        actor_type:  'user',
+        payload:     { reversed_by: req.userId },
+        correlation_id: req.correlationId ?? undefined,
+      })
+      return reply.send({ data: result.value })
+    } catch (err: unknown) {
+      req.log.error({ err, tenantId: req.tenantId, id }, '[leave-requests] unexpected error reversing leave approval')
+      return reply.code(500).send({ error: 'LEAVE_SERVICE_ERROR', message: 'Failed to reverse leave approval' })
+    }
   })
 
   // ── POST /leave-requests/:id/reject ────────────────────────────────────────
@@ -373,25 +421,30 @@ export default async function leaveRequestsRoutes(fastify: FastifyInstance) {
       })
     }
 
-    const result = await rejectLeaveRequest(fastify.supabase, {
-      tenantId:        req.tenantId,
-      requestId:       id,
-      ctx: {
-        approverId:   req.userId,
-        approverRole: req.userRole,
-        tenantId:     req.tenantId,
-      },
-      rejectionReason: parsed.data.rejection_reason,
-    })
-
-    if (!result.ok) {
-      return reply.code(errorToHttp(result.error.type)).send({
-        error:   result.error.type,
-        message: result.error.message,
+    try {
+      const result = await rejectLeaveRequest(fastify.supabase, {
+        tenantId:        req.tenantId,
+        requestId:       id,
+        ctx: {
+          approverId:   req.userId,
+          approverRole: req.userRole,
+          tenantId:     req.tenantId,
+        },
+        rejectionReason: parsed.data.rejection_reason,
       })
-    }
 
-    return reply.send({ data: result.value })
+      if (!result.ok) {
+        return reply.code(errorToHttp(result.error.type)).send({
+          error:   result.error.type,
+          message: result.error.message,
+        })
+      }
+
+      return reply.send({ data: result.value })
+    } catch (err: unknown) {
+      req.log.error({ err, tenantId: req.tenantId, id }, '[leave-requests] unexpected error rejecting leave request')
+      return reply.code(500).send({ error: 'LEAVE_SERVICE_ERROR', message: 'Failed to reject leave request' })
+    }
   })
 
   // ── GET /approvals/pending?page=1&limit=20 ─────────────────────────────────
@@ -420,7 +473,7 @@ export default async function leaveRequestsRoutes(fastify: FastifyInstance) {
     const { page, limit } = parsedPagination.data
     const offset = (page - 1) * limit
 
-    const isHrAdmin = ['super_admin', 'hr_admin'].includes(req.userRole)
+    const isHrAdmin = (HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)
 
     // Resolve caller's employee_id (needed for manager path + profile lookup)
     const { data: profile } = await fastify.supabase
@@ -508,7 +561,7 @@ export default async function leaveRequestsRoutes(fastify: FastifyInstance) {
   // degrades to 0 on error so the badge never 500s.
   fastify.get('/approvals/pending-count', auth, async (req: any, reply) => {
     const tenantId: string = req.tenantId
-    const isHrAdmin = ['super_admin', 'hr_admin'].includes(req.userRole)
+    const isHrAdmin = (HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)
 
     // Manager scope: resolve direct-report employee ids (empty => count nothing).
     let reportIds: string[] | null = null

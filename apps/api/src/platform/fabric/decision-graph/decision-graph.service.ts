@@ -31,7 +31,7 @@ export class DecisionGraphService {
         node_type:    fullNode.node_type,
         entity_id:    fullNode.entity_id,
         entity_type:  fullNode.entity_type,
-        org_id:       fullNode.org_id,
+        tenant_id:       fullNode.tenant_id,
         description:  fullNode.description,
         timestamp:    fullNode.timestamp,
         actor_id:     fullNode.actor_id ?? null,
@@ -51,7 +51,7 @@ export class DecisionGraphService {
         from_node_id: edge.from_node_id,
         to_node_id:   edge.to_node_id,
         edge_type:    edge.edge_type,
-        org_id:       edge.org_id,
+        tenant_id:       edge.tenant_id,
         weight:       edge.weight,
         created_at:   edge.created_at ?? new Date().toISOString(),
       })
@@ -62,7 +62,7 @@ export class DecisionGraphService {
     const { data } = await supabase
       .from('decision_graph_nodes')
       .select('*')
-      .eq('org_id', orgId)
+      .eq('tenant_id', orgId)
       .eq('entity_id', entityId)
       .order('timestamp', { ascending: false })
       .limit(limit)
@@ -74,7 +74,7 @@ export class DecisionGraphService {
     const { data } = await supabase
       .from('decision_graph_nodes')
       .select('*')
-      .eq('org_id', orgId)
+      .eq('tenant_id', orgId)
       .order('timestamp', { ascending: false })
       .limit(limit)
     return (data ?? []) as DecisionGraphNode[]
@@ -82,7 +82,7 @@ export class DecisionGraphService {
 
   /** Quick helper to record an event-driven decision node from a platform event. */
   async recordFromEvent(supabase: SupabaseClient, params: {
-    org_id:      string
+    tenant_id:      string
     entity_id:   string
     entity_type: string
     node_type:   DecisionNodeType
@@ -94,7 +94,7 @@ export class DecisionGraphService {
       node_type:    params.node_type,
       entity_id:    params.entity_id,
       entity_type:  params.entity_type,
-      org_id:       params.org_id,
+      tenant_id:       params.tenant_id,
       description:  params.description,
       timestamp:    new Date().toISOString(),
       actor_id:     params.actor_id,

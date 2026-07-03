@@ -150,6 +150,16 @@ export default async function analyticsRoutes(fastify: FastifyInstance) {
       .single()
 
     if (error || !data) return reply.code(500).send({ error: 'UPDATE_FAILED', message: 'Failed to update status.' })
+
+    // Mirror the ban/unban behaviour from user-account.ts — set Supabase Auth
+    // ban_duration so existing JWTs are rejected immediately, not just at TTL.
+    const { error: authErr } = await fastify.supabase.auth.admin.updateUserById(id, {
+      ban_duration: parsed.data.is_active ? 'none' : '876000h',
+    })
+    if (authErr) {
+      fastify.log.warn({ err: authErr, userId: id }, 'analytics: auth ban/unban failed — profile updated but auth not synced')
+    }
+
     return reply.send({ data })
   })
 }

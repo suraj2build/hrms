@@ -17,6 +17,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z }                    from 'zod'
 import { ssrfCheck }            from '../../lib/ssrf-guard.js'
+import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 
 // ── Shared schemas ────────────────────────────────────────────────────────────
 
@@ -268,7 +269,7 @@ export default async function attendanceApiSourcesRoutes(fastify: FastifyInstanc
   const auth = { preHandler: [fastify.authenticate] }
 
   function isAdmin(role: string) {
-    return ['super_admin', 'hr_admin'].includes(role)
+    return (HR_ADMIN_ROLES as readonly string[]).includes(role)
   }
 
   // ── GET /attendance/api-sources ───────────────────────────────────────────

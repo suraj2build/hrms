@@ -10,6 +10,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { checkDeclarationWindow } from './tds.js'
+import { HR_ADMIN_ROLES } from '../../../lib/rbac.js'
 
 // ── Zod schemas ───────────────────────────────────────────────────────────────
 
@@ -48,7 +49,7 @@ export default async function previousEmploymentTdsRoutes(fastify: FastifyInstan
   const auth = { preHandler: [fastify.authenticate] }
 
   function requireHrAdmin(req: any, reply: any, done: () => void) {
-    if (!['super_admin', 'hr_admin'].includes(req.userRole)) {
+    if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
       reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
       return
     }
@@ -174,7 +175,7 @@ export default async function previousEmploymentTdsRoutes(fastify: FastifyInstan
   fastify.delete('/previous-employment/my/:id', auth, async (req: any, reply) => {
     const { id } = req.params as { id: string }
 
-    const isAdmin = ['super_admin', 'hr_admin'].includes(req.userRole)
+    const isAdmin = (HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)
 
     // Fetch record
     const { data: existing, error: fetchErr } = await fastify.supabase

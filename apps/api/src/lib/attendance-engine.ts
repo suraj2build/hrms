@@ -51,7 +51,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { writeAuditLogs, writeComputeLogs }  from './attendance-processor.js'
 import { eventService }                      from './event-service.js'
 import { policyService, type AttendancePolicy, DEFAULT_POLICY } from './policy-service.js'
-import { resolveEmployeeOrgContext, getWeeklyOffDays } from './org-context.js'
+import { resolveEmployeeOrgContext, getWeeklyOffDays, EmployeeOrgContext } from './org-context.js'
 import { resolveIsWeeklyOff }                          from './roster-calendar-engine.js'
 import { resolveViaRotationPolicy }                    from './rotation-engine.js'
 import { resolveShiftWithAttribution, toShiftMeta, type ResolvedShift } from './shift-resolution-engine.js'
@@ -175,6 +175,12 @@ export interface ComputeDayOpts {
    * this to avoid N extra round-trips (one pre-fetch per employee per range).
    */
   policy?:     AttendancePolicy
+  /**
+   * Pre-fetched org context (site, roster, holiday group) for this employee.
+   * When provided, computeDay skips the org-context DB queries.
+   * recomputeRange always supplies this to avoid N extra round-trips.
+   */
+  orgCtx?:     EmployeeOrgContext
 }
 
 export interface RecomputeRangeOpts {
@@ -775,7 +781,7 @@ export async function computeDay(
     resolveShiftWithAttribution(supabase, tenant_id, employee_id, date),
     opts.tenantTz ? Promise.resolve(opts.tenantTz) : fetchTenantTz(supabase, tenant_id),
     opts.policy   ? Promise.resolve(opts.policy)   : policyService.getPolicy(supabase, tenant_id, employee_id),
-    resolveEmployeeOrgContext(supabase, tenant_id, employee_id, date),
+    opts.orgCtx ? Promise.resolve(opts.orgCtx) : resolveEmployeeOrgContext(supabase, tenant_id, employee_id, date),
   ])
   const shift = resolvedShiftAttr ? toShiftMeta(resolvedShiftAttr) : null
 
@@ -1172,16 +1178,21 @@ export async function recomputeRange(
     return { rows_computed: 0, rows_upserted: 0, rows_protected: 0, dates: [] }
   }
 
-  // Pre-fetch shared values — timezone + policy — once per recomputeRange call.
-  // Both are the same for all dates in the range (same employee, same tenant).
-  const [tenantTz, policy] = await Promise.all([
+  // Pre-fetch shared values — timezone, policy, org context — once per
+  // recomputeRange call. All three are the same for all dates in the range
+  // (same employee, same tenant). Without pre-fetching, computeDay fires a
+  // resolveEmployeeOrgContext DB round-trip per date — 120-150 queries for a
+  // 30-day range. org context uses the range start date; mid-range site changes
+  // (rare) are accepted as a minor inaccuracy vs. the N+1 cost.
+  const [tenantTz, policy, orgCtx] = await Promise.all([
     fetchTenantTz(supabase, tenant_id),
     policyService.getPolicy(supabase, tenant_id, employee_id),
+    resolveEmployeeOrgContext(supabase, tenant_id, employee_id, dates[0]!),
   ])
 
   // Compute all dates in parallel, passing pre-fetched values to skip DB queries
   const computed = await Promise.all(
-    dates.map((date) => computeDay(supabase, { tenant_id, employee_id, date, tenantTz, policy })),
+    dates.map((date) => computeDay(supabase, { tenant_id, employee_id, date, tenantTz, policy, orgCtx })),
   )
 
   // Batch-fetch existing {status, day_fraction, computed_source} for delta detection

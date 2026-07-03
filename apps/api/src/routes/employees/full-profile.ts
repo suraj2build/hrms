@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import { fetchFullProfile } from '../../lib/employee-profile.js'
 import { SLOW_THRESHOLD_MS } from '../../lib/constants.js'
+import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 
 // ── Light-mode rate limiter ────────────────────────────────────────────────────
 // Prevents clients from polling ?light=true in a tight loop without ever
@@ -118,6 +119,20 @@ export default async function fullProfileRoute(fastify: FastifyInstance) {
   const auth = { preHandler: [fastify.authenticate] }
 
   fastify.get('/employees/:id/full-profile', auth, async (req: any, reply) => {
+    // HR admins may read any employee's profile; others may only read their own.
+    const isHr = HR_ADMIN_ROLES.includes(req.userRole)
+    if (!isHr) {
+      const { data: callerProfile } = await fastify.supabase
+        .from('profiles')
+        .select('employee_id')
+        .eq('id', req.userId)
+        .eq('tenant_id', req.tenantId)
+        .maybeSingle()
+      if (!callerProfile || (callerProfile as any).employee_id !== req.params.id) {
+        return reply.code(403).send({ error: 'FORBIDDEN', message: 'Access denied' })
+      }
+    }
+
     const startMs = Date.now()
     let light     = (req.query as Record<string, string>).light === 'true'
 

@@ -24,6 +24,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { buildDigest, periodKey, type DigestFrequency } from './digest-builder.js'
 import { sendEmail, digestEmail, APP_PUBLIC_URL } from './email-service.js'
+import { durableQueue }       from './durable-queue.js'
 
 const TICK_MS    = 60 * 60 * 1_000   // hourly
 const WARMUP_MS  = 5 * 60 * 1_000    // 5-minute startup delay
@@ -196,7 +197,7 @@ function isDue(frequency: DigestFrequency, now: Date): boolean {
   return now.getUTCDate() === 1                                // 1st of month
 }
 
-async function tick(supabase: SupabaseClient): Promise<void> {
+export async function tick(supabase: SupabaseClient): Promise<void> {
   const now = new Date()
   const due = ALL_FREQ.filter(f => isDue(f, now))
   if (!due.length) return
@@ -221,12 +222,15 @@ async function tick(supabase: SupabaseClient): Promise<void> {
  * Call once at startup after the Supabase plugin is registered.
  */
 export function registerDigestScheduler(supabase: SupabaseClient): void {
-  setTimeout(() => {
-    tick(supabase).catch(e => console.error('[digest] initial tick error:', (e as Error).message))
-    setInterval(
-      () => tick(supabase).catch(e => console.error('[digest] tick error:', (e as Error).message)),
-      TICK_MS,
+  const enqueue = () => {
+    const key = `send-digest:${new Date().toISOString().slice(0, 13)}`
+    durableQueue.enqueue('send-digest', {}, { idempotencyKey: key }).catch(
+      e => console.error('[digest] enqueue error:', (e as Error).message),
     )
+  }
+  setTimeout(() => {
+    enqueue()
+    setInterval(enqueue, TICK_MS)
     console.log('📬 Digest scheduler active (R9-minimal) — daily/weekly/monthly to all HR admins')
   }, WARMUP_MS)
 }

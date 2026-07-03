@@ -58,7 +58,7 @@ export default async function operationsRoutes(fastify: FastifyInstance) {
     const { data, error } = await fastify.supabase
       .from('automation_activity_logs')
       .select('*')
-      .eq('org_id', tenantId)
+      .eq('tenant_id', tenantId)
       .order('fired_at', { ascending: false })
       .limit(Number(limit))
     if (error) return reply.status(500).send({ error: error.message })
@@ -83,22 +83,22 @@ export default async function operationsRoutes(fastify: FastifyInstance) {
     const body = req.body as any
     const tenantId = (req as any).tenantId
     const run = simulationService.simulatePayrollImpact({
-      org_id:            tenantId,
+      tenant_id:            tenantId,
       affected_count:    Number(body.affected_count) || 0,
       avg_ctc_increase:  Number(body.avg_ctc_increase) || 0,
       months_in_period:  Number(body.months_in_period) || 1,
       created_by:        (req as any).userId,
     })
     // Persist simulation run (fire-and-forget)
-    void fastify.supabase.from('simulation_runs').insert({
-      org_id:           run.org_id,
+    fastify.supabase.from('simulation_runs').insert({
+      tenant_id:           run.tenant_id,
       simulation_type:  run.simulation_type,
       label:            run.label,
       input_params:     run.input_params,
       result_summary:   run.result_summary,
       created_at:       run.created_at,
       created_by:       run.created_by ?? null,
-    })
+    }).then(undefined, () => {})
     return run
   })
 
@@ -107,18 +107,18 @@ export default async function operationsRoutes(fastify: FastifyInstance) {
     const body = req.body as any
     const tenantId = (req as any).tenantId
     const run = simulationService.simulateComplianceThreshold({
-      org_id:          tenantId,
+      tenant_id:          tenantId,
       threshold_type:  body.threshold_type ?? 'threshold',
       old_threshold:   Number(body.old_threshold) || 0,
       new_threshold:   Number(body.new_threshold) || 0,
       affected_count:  Number(body.affected_count) || 0,
       created_by:      (req as any).userId,
     })
-    void fastify.supabase.from('simulation_runs').insert({
-      org_id: run.org_id, simulation_type: run.simulation_type, label: run.label,
+    fastify.supabase.from('simulation_runs').insert({
+      tenant_id: run.tenant_id, simulation_type: run.simulation_type, label: run.label,
       input_params: run.input_params, result_summary: run.result_summary,
       created_at: run.created_at, created_by: run.created_by ?? null,
-    })
+    }).then(undefined, () => {})
     return run
   })
 
@@ -127,18 +127,18 @@ export default async function operationsRoutes(fastify: FastifyInstance) {
     const body = req.body as any
     const tenantId = (req as any).tenantId
     const run = simulationService.simulateOvertimeGrowth({
-      org_id:                tenantId,
+      tenant_id:                tenantId,
       affected_count:        Number(body.affected_count) || 0,
       avg_ot_hours_per_week: Number(body.avg_ot_hours_per_week) || 0,
       ot_rate_per_hour:      Number(body.ot_rate_per_hour) || 0,
       weeks:                 Number(body.weeks) || 4,
       created_by:            (req as any).userId,
     })
-    void fastify.supabase.from('simulation_runs').insert({
-      org_id: run.org_id, simulation_type: run.simulation_type, label: run.label,
+    fastify.supabase.from('simulation_runs').insert({
+      tenant_id: run.tenant_id, simulation_type: run.simulation_type, label: run.label,
       input_params: run.input_params, result_summary: run.result_summary,
       created_at: run.created_at, created_by: run.created_by ?? null,
-    })
+    }).then(undefined, () => {})
     return run
   })
 
@@ -149,7 +149,7 @@ export default async function operationsRoutes(fastify: FastifyInstance) {
     const { data, error } = await fastify.supabase
       .from('simulation_runs')
       .select('*')
-      .eq('org_id', tenantId)
+      .eq('tenant_id', tenantId)
       .order('created_at', { ascending: false })
       .limit(Number(limit))
     if (error) return reply.status(500).send({ error: error.message })
@@ -171,7 +171,7 @@ export default async function operationsRoutes(fastify: FastifyInstance) {
     const { data, error } = await fastify.supabase
       .from('sla_breach_events')
       .select('*')
-      .eq('org_id', tenantId)
+      .eq('tenant_id', tenantId)
       .order('breached_at', { ascending: false })
       .limit(Number(limit))
     if (error) return reply.status(500).send({ error: error.message })

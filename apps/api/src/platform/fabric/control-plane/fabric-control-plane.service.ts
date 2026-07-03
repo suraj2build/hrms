@@ -38,11 +38,11 @@ export class FabricControlPlaneService {
     const { count: activeOrchestrations } = await supabase
       .from('orchestration_activity_logs')
       .select('activity_id', { count: 'exact', head: true })
-      .eq('org_id', orgId)
+      .eq('tenant_id', orgId)
       .eq('status', 'active')
 
     return {
-      org_id:                orgId,
+      tenant_id:                orgId,
       overall_score:         overall,
       governance_health:     govHealth,
       trust_health:          trustHealth,

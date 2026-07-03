@@ -15,7 +15,6 @@ import { useNavigate, useLocation } from 'react-router-dom'
 import { Cake, PartyPopper, Plane } from 'lucide-react'
 import { api } from '@/lib/api/client'
 import { PersonAvatar } from '@/components/experience/PersonAvatar'
-import { AmbientLine } from '@/components/experience/AmbientLine'
 import { PillarHero } from '@/components/experience/PillarHero'
 import { LoadingState } from '@/components/layout/LoadingState'
 import { ErrorState } from '@/components/layout/ErrorState'
@@ -50,9 +49,9 @@ function FaceRow({ people }: { people: Party[] }) {
 }
 
 export function MyTeam() {
-  const navigate = useNavigate()
+  const _navigate = useNavigate()
   const { pathname } = useLocation()
-  const base = pathname.startsWith('/manager') ? (pathname.startsWith('/manager/self') ? '/manager/self' : '/manager/self') : '/ess'
+  const _base = pathname.startsWith('/manager') ? (pathname.startsWith('/manager/self') ? '/manager/self' : '/manager/self') : '/ess'
 
   const { data, isLoading, isError, refetch } = useQuery<TeamPayload>({
     queryKey: ['ess-team'], queryFn: () => api.get('/ess/team'), staleTime: 2 * 60_000,

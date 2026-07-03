@@ -34,7 +34,7 @@ import { jobQueue }             from '../../lib/job-queue.js'
 import { durableQueue }         from '../../lib/durable-queue.js'
 import { eventBus }             from '../../lib/event-bus.js'
 import { platformHealth }       from '../../lib/startup-health.js'
-
+import { HR_ADMIN_ROLES }       from '../../lib/rbac.js'
 // ── Automation Job Registry ──────────────────────────────────────────────────
 
 interface AutomationJob {
@@ -137,7 +137,7 @@ export default async function jobQueueRoutes(fastify: FastifyInstance) {
   // ── GET /system/jobs/dead ────────────────────────────────────────────────────
   // Returns all dead-letter jobs for inspection.
   fastify.get('/system/jobs/dead', auth, async (req: any, reply) => {
-    if (!['super_admin', 'hr_admin'].includes(req.userRole)) {
+    if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
       return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
     }
 
@@ -180,7 +180,7 @@ export default async function jobQueueRoutes(fastify: FastifyInstance) {
   // ── POST /system/jobs/:jobId/trigger ────────────────────────────────────────
   // Manually trigger a registered automation job via the durable queue.
   fastify.post('/system/jobs/:jobId/trigger', auth, async (req: any, reply) => {
-    if (!['super_admin', 'hr_admin'].includes(req.userRole)) {
+    if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
       return reply.code(403).send({ error: 'FORBIDDEN', message: 'Admin access required' })
     }
 
@@ -222,7 +222,7 @@ export default async function jobQueueRoutes(fastify: FastifyInstance) {
   // the job's `type` field — only works for jobs whose handlers are registered in
   // the handler registry below. Novel one-off jobs cannot be retried this way.
   fastify.post('/system/jobs/dead/:id/retry', auth, async (req: any, reply) => {
-    if (!['super_admin', 'hr_admin'].includes(req.userRole)) {
+    if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
       return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
     }
 
@@ -260,7 +260,7 @@ export default async function jobQueueRoutes(fastify: FastifyInstance) {
   // Combined observability dashboard — event bus + job queue + platform health.
   // For hr_admin / super_admin only.
   fastify.get('/system/observability', auth, async (req: any, reply) => {
-    if (!['super_admin', 'hr_admin'].includes(req.userRole)) {
+    if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
       return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
     }
 
@@ -326,7 +326,7 @@ export default async function jobQueueRoutes(fastify: FastifyInstance) {
   // Compact operational health snapshot — event bus, durable queue, webhooks,
   // scheduler heartbeats. For monitoring systems, dashboards, and health cards.
   fastify.get('/metrics', auth, async (req: any, reply) => {
-    if (!['super_admin', 'hr_admin'].includes(req.userRole)) {
+    if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
       return reply.code(403).send({ error: 'FORBIDDEN', message: 'Admin access required' })
     }
 
@@ -420,7 +420,7 @@ export default async function jobQueueRoutes(fastify: FastifyInstance) {
   // ── DELETE /system/jobs/dead ─────────────────────────────────────────────────
   // Purges the entire dead-letter queue. Irreversible — use with care.
   fastify.delete('/system/jobs/dead', auth, async (req: any, reply) => {
-    if (!['super_admin', 'hr_admin'].includes(req.userRole)) {
+    if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
       return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
     }
 
@@ -493,7 +493,7 @@ export default async function jobQueueRoutes(fastify: FastifyInstance) {
   // ── GET /system/jobs/durable/dead ────────────────────────────────────────────
   // Recent dead jobs from background_job_results (last 100).
   fastify.get('/system/jobs/durable/dead', auth, async (req: any, reply) => {
-    if (!['super_admin', 'hr_admin'].includes(req.userRole)) {
+    if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
       return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
     }
 
@@ -504,7 +504,7 @@ export default async function jobQueueRoutes(fastify: FastifyInstance) {
   // ── POST /system/jobs/durable/dead/:id/requeue ───────────────────────────────
   // Move a specific dead background_job_results row back into background_jobs.
   fastify.post('/system/jobs/durable/dead/:id/requeue', auth, async (req: any, reply) => {
-    if (!['super_admin', 'hr_admin'].includes(req.userRole)) {
+    if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
       return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
     }
 
@@ -530,7 +530,7 @@ export default async function jobQueueRoutes(fastify: FastifyInstance) {
   // ── DELETE /system/jobs/durable/dead ─────────────────────────────────────────
   // Purge background_job_results older than ?days (default 90).
   fastify.delete('/system/jobs/durable/dead', auth, async (req: any, reply) => {
-    if (!['super_admin', 'hr_admin'].includes(req.userRole)) {
+    if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
       return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
     }
 
@@ -543,7 +543,7 @@ export default async function jobQueueRoutes(fastify: FastifyInstance) {
   // ── GET /system/jobs/durable/retry-storm ─────────────────────────────────────
   // Detect retry storms: job types with > 10 dead results in the last 10 minutes.
   fastify.get('/system/jobs/durable/retry-storm', auth, async (req: any, reply) => {
-    if (!['super_admin', 'hr_admin'].includes(req.userRole)) {
+    if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
       return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
     }
 
@@ -559,7 +559,7 @@ export default async function jobQueueRoutes(fastify: FastifyInstance) {
   // ── DELETE /system/jobs/durable/quarantine/:id ────────────────────────────────
   // Clear quarantine for a specific poison job after the operator has fixed the handler.
   fastify.delete('/system/jobs/durable/quarantine/:id', auth, async (req: any, reply) => {
-    if (!['super_admin', 'hr_admin'].includes(req.userRole)) {
+    if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
       return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
     }
 
@@ -584,7 +584,7 @@ export default async function jobQueueRoutes(fastify: FastifyInstance) {
   // ── GET /system/jobs/durable/retry-storm/open ────────────────────────────────
   // Returns open retry storm incidents from DB (durable across restarts).
   fastify.get('/system/jobs/durable/retry-storm/open', auth, async (req: any, reply) => {
-    if (!['super_admin', 'hr_admin'].includes(req.userRole)) {
+    if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
       return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
     }
     const incidents = await durableQueue.getOpenStormIncidents(fastify.supabase)
@@ -594,7 +594,7 @@ export default async function jobQueueRoutes(fastify: FastifyInstance) {
   // ── POST /system/jobs/durable/retry-storm/:id/acknowledge ────────────────────
   // Mark a storm incident as acknowledged — operator confirms they are investigating.
   fastify.post('/system/jobs/durable/retry-storm/:id/acknowledge', auth, async (req: any, reply) => {
-    if (!['super_admin', 'hr_admin'].includes(req.userRole)) {
+    if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
       return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
     }
     const { id } = req.params as { id: string }
@@ -609,7 +609,7 @@ export default async function jobQueueRoutes(fastify: FastifyInstance) {
   // ── GET /system/jobs/durable/quarantine ──────────────────────────────────────
   // Returns all currently quarantined job records from DB.
   fastify.get('/system/jobs/durable/quarantine', auth, async (req: any, reply) => {
-    if (!['super_admin', 'hr_admin'].includes(req.userRole)) {
+    if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
       return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
     }
     const jobs = await durableQueue.getQuarantinedJobs(fastify.supabase)
@@ -619,7 +619,7 @@ export default async function jobQueueRoutes(fastify: FastifyInstance) {
   // ── GET /system/module-health ─────────────────────────────────────────────────
   // Returns durable module health state from DB (replaces in-memory platformHealth.modules).
   fastify.get('/system/module-health', auth, async (req: any, reply) => {
-    if (!['super_admin', 'hr_admin'].includes(req.userRole)) {
+    if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
       return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
     }
 
@@ -653,7 +653,7 @@ export default async function jobQueueRoutes(fastify: FastifyInstance) {
   // Returns all scheduler_heartbeats rows so operators can verify liveness.
   // A heartbeat older than 2× the scheduler's tick interval is stale/crashed.
   fastify.get('/system/scheduler-health', auth, async (req: any, reply) => {
-    if (!['super_admin', 'hr_admin'].includes(req.userRole)) {
+    if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
       return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
     }
 

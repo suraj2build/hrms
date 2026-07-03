@@ -280,10 +280,10 @@ export function RegularisationApproval() {
 
   // ── Queries ────────────────────────────────────────────────────────────────
   const { data: leaveTypesData } = useQuery<{ data: Array<{ id: string; name: string; is_active: boolean }> }>({
-    queryKey: ['leave-types-bulk'],
+    queryKey: ['leave-types'],
     queryFn:  () => api.get('/masters/leave-types'),
     enabled:  isAdmin,
-    staleTime: 120_000,
+    staleTime: 60_000,
   })
   const activeLeaveTypes = (leaveTypesData?.data ?? []).filter(lt => lt.is_active)
 

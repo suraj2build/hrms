@@ -16,9 +16,10 @@
 
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
+import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 
 function requireAdmin(req: any, reply: any, done: () => void) {
-  if (!['super_admin', 'hr_admin'].includes(req.userRole)) {
+  if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
     reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
     return
   }
@@ -209,7 +210,7 @@ export default async function securityRoutes(fastify: FastifyInstance) {
   })
 
   // ── GET /security/intelligence ────────────────────────────────────────────
-  // Threat intelligence signal stream (security_intelligence_events uses org_id)
+  // Threat intelligence signal stream (security_intelligence_events uses tenant_id)
 
   fastify.get('/intelligence', auth, async (req: any, reply) => {
     const q = z.object({
@@ -226,7 +227,7 @@ export default async function securityRoutes(fastify: FastifyInstance) {
     let query = fastify.supabase
       .from('security_intelligence_events')
       .select('id, signal_type, entity_id, entity_type, severity, description, metadata, detected_at', { count: 'exact' })
-      .eq('org_id', req.tenantId)
+      .eq('tenant_id', req.tenantId)
       .order('detected_at', { ascending: false })
 
     if (signal_type) query = query.eq('signal_type', signal_type)
@@ -246,7 +247,7 @@ export default async function securityRoutes(fastify: FastifyInstance) {
   })
 
   // ── GET /security/verification ────────────────────────────────────────────
-  // Identity verification event log (verification_events uses org_id)
+  // Identity verification event log (verification_events uses tenant_id)
 
   fastify.get('/verification', auth, async (req: any, reply) => {
     const q = z.object({
@@ -263,7 +264,7 @@ export default async function securityRoutes(fastify: FastifyInstance) {
     let query = fastify.supabase
       .from('verification_events')
       .select('id, entity_id, entity_type, verification_type, status, score, flags, verified_at', { count: 'exact' })
-      .eq('org_id', req.tenantId)
+      .eq('tenant_id', req.tenantId)
       .order('verified_at', { ascending: false })
 
     if (verification_type) query = query.eq('verification_type', verification_type)

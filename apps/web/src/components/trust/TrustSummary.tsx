@@ -29,7 +29,7 @@ interface TrustAuditSignal {
 interface TrustBreakdown {
   score_type:      string
   entity_id:       string
-  org_id:          string
+  tenant_id:          string
   score:           number | null
   severity:        'low' | 'medium' | 'high' | 'critical' | null
   factors:         string[]

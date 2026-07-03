@@ -24,6 +24,7 @@ import type { SupabaseClient }  from '@supabase/supabase-js'
 import { z } from 'zod'
 import { processAttendanceForDate, writeFailedAuditRun } from '../../lib/attendance-processor.js'
 import { isMonthLocked, monthOf } from '../../lib/period-lock.js'
+import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 
 const bodySchema = z.object({
   date:  z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'date must be YYYY-MM-DD').optional(),
@@ -154,7 +155,7 @@ export default async function processRoute(fastify: FastifyInstance) {
     '/attendance/process',
     { preHandler: [fastify.authenticate] },
     async (req, reply) => {
-      if (!['super_admin', 'hr_admin'].includes(req.userRole)) {
+      if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
         return reply.code(403).send({ error: 'FORBIDDEN', message: 'hr_admin or super_admin required' })
       }
 

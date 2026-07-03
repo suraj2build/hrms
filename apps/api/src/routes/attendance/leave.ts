@@ -30,6 +30,17 @@ import { isLeaveLedgerShadowEnabled, recordShadowDrift } from '../../lib/leave-l
 
 const dateRe = /^\d{4}-\d{2}-\d{2}$/
 
+async function runConcurrent<T>(items: T[], fn: (item: T) => Promise<void>, concurrency = 10): Promise<void> {
+  const queue = [...items]
+  const workers = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
+    while (queue.length > 0) {
+      const item = queue.shift()!
+      await fn(item)
+    }
+  })
+  await Promise.all(workers)
+}
+
 const applySchema = z.object({
   leave_type_id: z.string().uuid('leave_type_id must be a UUID'),
   from_date:     z.string().regex(dateRe, 'from_date must be YYYY-MM-DD'),
@@ -349,14 +360,20 @@ export default async function leaveRoute(fastify: FastifyInstance) {
     // weekly-off day (which would wrongly turn a paid rest day into LOP).
     const leaveSession = (app.session as LeaveSession | null) ?? 'full_day'
     const isHalfDay    = leaveSession !== 'full_day'
-    const workingDays = await computeWorkingLeaveDays(
-      fastify.supabase,
-      app.tenant_id   as string,
-      app.employee_id as string,
-      app.from_date   as string,
-      app.to_date     as string,
-      { halfDay: isHalfDay },
-    )
+    let workingDays: Awaited<ReturnType<typeof computeWorkingLeaveDays>>
+    try {
+      workingDays = await computeWorkingLeaveDays(
+        fastify.supabase,
+        app.tenant_id   as string,
+        app.employee_id as string,
+        app.from_date   as string,
+        app.to_date     as string,
+        { halfDay: isHalfDay },
+      )
+    } catch (err) {
+      fastify.log.error({ err, leaveId: id }, 'leave approve: computeWorkingLeaveDays threw')
+      return reply.code(500).send({ error: 'COMPUTE_FAILED', message: 'Failed to compute working leave days' })
+    }
 
     // Pre-approve balance check + atomic deduction (paid leave only).
     // C6-P1: Use checked_deduct_leave_balance instead of deduct_leave_balance.
@@ -546,19 +563,18 @@ export default async function leaveRoute(fastify: FastifyInstance) {
     // Non-blocking: approval is already committed above; this is a best-effort queue entry.
     try {
       const affectedMonths = [...new Set(leaveDates.map((d: string) => d.slice(0, 7)))]
-      for (const month of affectedMonths) {
-        const { data: freeze } = await fastify.supabase
-          .from('payroll_freeze_log')
-          .select('id')
-          .eq('tenant_id', req.tenantId)
-          .eq('freeze_month', month)
-          .eq('action', 'freeze')
-          .is('unfrozen_at', null)
-          .limit(1)
-          .maybeSingle()
-
-        if (freeze) {
-          await fastify.supabase.from('payroll_adjustments').insert({
+      // Batch-check all affected months in one query instead of N per-month queries
+      const { data: frozenRows } = await fastify.supabase
+        .from('payroll_freeze_log')
+        .select('freeze_month')
+        .eq('tenant_id', req.tenantId)
+        .in('freeze_month', affectedMonths)
+        .eq('action', 'freeze')
+        .is('unfrozen_at', null)
+      const frozenSet = new Set((frozenRows ?? []).map((r: { freeze_month: string }) => r.freeze_month))
+      if (frozenSet.size > 0) {
+        await fastify.supabase.from('payroll_adjustments').insert(
+          [...frozenSet].map(month => ({
             tenant_id:       req.tenantId,
             employee_id:     app.employee_id,
             locked_month:    month,
@@ -568,8 +584,8 @@ export default async function leaveRoute(fastify: FastifyInstance) {
             source_id:       app.id,
             status:          'pending',
             created_by:      req.userId,
-          })
-        }
+          }))
+        )
       }
     } catch (err) {
       req.log.warn({ err }, 'payroll freeze guard check failed — approval committed')
@@ -690,7 +706,7 @@ export default async function leaveRoute(fastify: FastifyInstance) {
   // A cancelled leave is permanent — it cannot be re-approved.
   fastify.post('/attendance/leave/:id/cancel', auth, async (req: any, reply) => {
     const { id } = req.params as { id: string }
-    const isHrAdmin = ['super_admin', 'hr_admin'].includes(req.userRole)
+    const isHrAdmin = (HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)
 
     const { data: app, error: fetchError } = await fastify.supabase
       .from('leave_applications')
@@ -837,7 +853,7 @@ export default async function leaveRoute(fastify: FastifyInstance) {
   fastify.get('/attendance/leave/balance/:employeeId', auth, async (req: any, reply) => {
     const { employeeId } = req.params as { employeeId: string }
     const year = new Date().getFullYear()
-    const isHrAdmin = ['super_admin', 'hr_admin'].includes(req.userRole)
+    const isHrAdmin = (HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)
 
     // Non-admin callers may only view their own leave balance.
     // Resolve the caller's employee_id and enforce ownership before touching DB.
@@ -963,7 +979,7 @@ export default async function leaveRoute(fastify: FastifyInstance) {
   fastify.get('/attendance/leave/team-balances', auth, async (req: any, reply) => {
     const year             = new Date().getFullYear()
     const tenantId         = req.tenantId as string
-    const isHrAdmin        = ['super_admin', 'hr_admin'].includes(req.userRole)
+    const isHrAdmin        = (HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)
     const includeLiability = (req.query as any).include_liability === 'true'
 
     let teamEmployeeIds: string[] = []
@@ -1403,7 +1419,7 @@ export default async function leaveRoute(fastify: FastifyInstance) {
     // and deduct leave balance for paid leave. (Was: raw calendar expansion, no balance,
     // no source flag — turned rest days into LOP and skipped balance.)
     const dailyRows: Array<Record<string, unknown>> = []
-    for (const emp_id of employee_ids) {
+    await runConcurrent(employee_ids, async (emp_id) => {
       let workingDates: string[] = dates
       try {
         const wd = await computeWorkingLeaveDays(fastify.supabase, req.tenantId, emp_id, from_date, to_date)
@@ -1451,7 +1467,7 @@ export default async function leaveRoute(fastify: FastifyInstance) {
           computed_source: 'leave_approval',
         })
       }
-    }
+    })
     const { error: dailyErr } = await fastify.supabase
       .from('attendance_daily')
       .upsert(dailyRows, { onConflict: 'tenant_id,employee_id,date' })
@@ -1506,7 +1522,7 @@ export default async function leaveRoute(fastify: FastifyInstance) {
       offset?:        string
     }
 
-    const isAdmin  = ['super_admin', 'hr_admin'].includes(req.userRole)
+    const isAdmin  = (HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)
     const limit    = Math.min(parseInt(q.limit  ?? '50', 10), 200)
     const offset   = Math.max(parseInt(q.offset ?? '0',  10), 0)
 

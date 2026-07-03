@@ -23,8 +23,7 @@ import {
 import { resolveAssistantConfig, resolveAssistantChain, resolveAiMode, maskKey } from '../../lib/ai/config.js'
 import { buildAssistantContext } from '../../lib/ai/assistant-context.js'
 import { ASSISTANT_TOOLS, executeTool } from '../../lib/ai/assistant-tools.js'
-
-const HR_ROLES = ['super_admin', 'hr_admin']
+import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 
 const SYSTEM_BASE =
   'You are the CognixHR Assistant, a helpful in-app assistant for an HR/payroll system. ' +
@@ -40,7 +39,7 @@ export default async function assistantRoutes(fastify: FastifyInstance) {
   const auth = { preHandler: [fastify.authenticate] }
   const hrAuth = {
     preHandler: [fastify.authenticate, async (req: any, reply: any) => {
-      if (!HR_ROLES.includes(req.userRole)) {
+      if (!HR_ADMIN_ROLES.includes(req.userRole)) {
         return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
       }
     }],
@@ -99,7 +98,7 @@ export default async function assistantRoutes(fastify: FastifyInstance) {
     }
     const meter = (cfg: AssistantConfig) => {
       if (usageTotals.total === 0) return
-      void fastify.supabase.from('ai_usage_log').insert({
+      fastify.supabase.from('ai_usage_log').insert({
         tenant_id:         req.tenantId,
         provider:          cfg.provider,
         model:             effectiveModel(cfg),
@@ -110,7 +109,7 @@ export default async function assistantRoutes(fastify: FastifyInstance) {
         user_id:           req.userId,
       }).then(({ error }: any) => {
         if (error) req.log.warn({ err: error.message }, 'ai usage metering insert failed')
-      })
+      }, () => {})
     }
 
     try {

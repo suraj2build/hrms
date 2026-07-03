@@ -608,7 +608,7 @@ export function registerOnboardingHandlers(supabase: SupabaseClient): void {
 
       const result = trustScoreService.computeOnboardingTrustScore({
         employee_id:  employeeId,
-        org_id:       tenantId,
+        tenant_id:       tenantId,
         has_pan:      hasPan,
         has_bank:     hasBank,
         has_identity: hasIdentity,
@@ -620,14 +620,14 @@ export function registerOnboardingHandlers(supabase: SupabaseClient): void {
       await supabase
         .from('workforce_trust_scores')
         .upsert({
-          org_id:      tenantId,
+          tenant_id:      tenantId,
           entity_id:   sessionId,
           score_type:  'onboarding',
           score:       result.score,
           severity:    result.severity,
           factors:     result.factors,
           computed_at: result.computed_at,
-        }, { onConflict: 'org_id,entity_id,score_type' })
+        }, { onConflict: 'tenant_id,entity_id,score_type' })
     } catch (err) {
       logWarn('trust_score_failed', sessionId, err)
     }

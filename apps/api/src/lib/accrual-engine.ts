@@ -106,6 +106,10 @@ export async function runMonthlyAccrual(
 
   const alreadyRunTypes = new Set((existingRuns ?? []).map((r: { leave_type_id: string }) => r.leave_type_id))
 
+  // Computed once — same for every employee in this accrual run
+  const periodLastDay = new Date(Date.UTC(periodYear, periodMonth, 0)).toISOString().slice(0, 10)
+  const nowIso = new Date().toISOString()
+
   // ── Process each rule ──────────────────────────────────────────────────────
   for (const rule of monthlyRules as AccrualRule[]) {
     if (alreadyRunTypes.has(rule.leave_type_id)) {
@@ -117,72 +121,90 @@ export async function runMonthlyAccrual(
     let totalDays = 0
     const runErrors: string[] = []
 
+    // Batch-fetch existing balances so we can compute new balances in memory
+    // without a per-employee SELECT (eliminates ISSUE-030).
+    const { data: existingBalances, error: balFetchErr } = await supabase
+      .from('employee_leave_balance')
+      .select('employee_id, balance')
+      .eq('tenant_id', tenantId)
+      .eq('leave_type_id', rule.leave_type_id)
+      .eq('year', periodYear)
+
+    if (balFetchErr) {
+      runErrors.push(`Balance pre-fetch failed: ${balFetchErr.message}`)
+    }
+
+    const balanceMap = new Map<string, number>(
+      (existingBalances ?? []).map((b: { employee_id: string; balance: number }) => [b.employee_id, Number(b.balance)])
+    )
+
+    const balUpserts: Record<string, unknown>[] = []
+    const ledInserts: Record<string, unknown>[] = []
+    const alUpserts:  Record<string, unknown>[] = []
+
     for (const emp of employees as Array<{ id: string; joining_date: string }>) {
-      try {
-        const days = rule.prorate_on_joining
-          ? proratedDays(rule.days_per_period, emp.joining_date, periodYear, periodMonth)
-          : rule.days_per_period
+      const days = rule.prorate_on_joining
+        ? proratedDays(rule.days_per_period, emp.joining_date, periodYear, periodMonth)
+        : rule.days_per_period
 
-        if (days <= 0) continue
+      if (days <= 0) continue
 
-        // Fetch current balance (upsert if absent)
-        const { data: balRow } = await supabase
-          .from('employee_leave_balance')
-          .select('balance')
-          .eq('tenant_id', tenantId)
-          .eq('employee_id', emp.id)
-          .eq('leave_type_id', rule.leave_type_id)
-          .eq('year', periodYear)
-          .maybeSingle()
+      const currentBalance = balanceMap.get(emp.id) ?? 0
+      const newBalance = parseFloat((currentBalance + days).toFixed(2))
 
-        const currentBalance = Number(balRow?.balance ?? 0)
-        const newBalance = parseFloat((currentBalance + days).toFixed(2))
+      balUpserts.push({
+        tenant_id:     tenantId,
+        employee_id:   emp.id,
+        leave_type_id: rule.leave_type_id,
+        year:          periodYear,
+        balance:       newBalance,
+        updated_at:    nowIso,
+      })
 
-        // Upsert balance
-        await supabase
-          .from('employee_leave_balance')
-          .upsert(
-            { tenant_id: tenantId, employee_id: emp.id, leave_type_id: rule.leave_type_id, year: periodYear, balance: newBalance, updated_at: new Date().toISOString() },
-            { onConflict: 'tenant_id,employee_id,leave_type_id,year' },
-          )
+      ledInserts.push({
+        tenant_id:     tenantId,
+        employee_id:   emp.id,
+        leave_type_id: rule.leave_type_id,
+        year:          periodYear,
+        txn_type:      'accrual',
+        delta:         days,
+        balance_after: newBalance,
+        notes:         `Monthly accrual — ${runPeriod}`,
+      })
 
-        // Write explainability ledger entry (leave_balance_ledger — audit trail with
-        // running balance snapshots).
-        await supabase.from('leave_balance_ledger').insert({
-          tenant_id:     tenantId,
-          employee_id:   emp.id,
-          leave_type_id: rule.leave_type_id,
-          year:          periodYear,
-          txn_type:      'accrual',
-          delta:         days,
-          balance_after: newBalance,
-          notes:         `Monthly accrual — ${runPeriod}`,
-        })
+      alUpserts.push({
+        tenant_id:     tenantId,
+        employee_id:   emp.id,
+        leave_type_id: rule.leave_type_id,
+        year:          periodYear,
+        accrual_type:  'monthly',
+        days,
+        accrued_on:    periodLastDay,
+        is_expired:    false,
+        notes:         `Monthly accrual — ${runPeriod}`,
+      })
 
-        // C6 dual-write: also record the credit in leave_accrual_ledger (the
-        // authoritative balance ledger). accrued_on = last day of the period so
-        // the existing (tenant,employee,leave_type,year,accrual_type,accrued_on)
-        // unique index treats each month as a distinct row.
-        const periodLastDay = new Date(Date.UTC(periodYear, periodMonth, 0)).toISOString().slice(0, 10)
-        await supabase
-          .from('leave_accrual_ledger')
-          .upsert({
-            tenant_id:     tenantId,
-            employee_id:   emp.id,
-            leave_type_id: rule.leave_type_id,
-            year:          periodYear,
-            accrual_type:  'monthly',
-            days,
-            accrued_on:    periodLastDay,
-            is_expired:    false,
-            notes:         `Monthly accrual — ${runPeriod}`,
-          }, { onConflict: 'tenant_id,employee_id,leave_type_id,year,accrual_type,accrued_on', ignoreDuplicates: true })
+      employeesCredited++
+      totalDays = parseFloat((totalDays + days).toFixed(2))
+    }
 
-        employeesCredited++
-        totalDays = parseFloat((totalDays + days).toFixed(2))
-      } catch (empErr: unknown) {
-        runErrors.push(`Employee ${emp.id}: ${(empErr as Error).message}`)
-      }
+    // Batch write: 3 calls per rule regardless of employee count
+    // (was 4 × N_employees sequential calls — ISSUE-030 through ISSUE-033).
+    if (balUpserts.length) {
+      const { error: balErr } = await supabase
+        .from('employee_leave_balance')
+        .upsert(balUpserts, { onConflict: 'tenant_id,employee_id,leave_type_id,year' })
+      if (balErr) runErrors.push(`Balance batch failed: ${balErr.message}`)
+
+      const { error: ledErr } = await supabase
+        .from('leave_balance_ledger')
+        .insert(ledInserts)
+      if (ledErr) runErrors.push(`Ledger batch failed: ${ledErr.message}`)
+
+      const { error: alErr } = await supabase
+        .from('leave_accrual_ledger')
+        .upsert(alUpserts, { onConflict: 'tenant_id,employee_id,leave_type_id,year,accrual_type,accrued_on', ignoreDuplicates: true })
+      if (alErr) runErrors.push(`Accrual ledger batch failed: ${alErr.message}`)
     }
 
     // Record the run
@@ -195,7 +217,7 @@ export async function runMonthlyAccrual(
         total_days_credited: totalDays,
         status:              runErrors.length ? 'partial' : 'success',
         error_message:       runErrors.length ? runErrors.join('; ') : null,
-        ran_at:              new Date().toISOString(),
+        ran_at:              nowIso,
       },
       { onConflict: 'tenant_id,run_period,leave_type_id' },
     )
@@ -229,8 +251,11 @@ export async function processCarryForward(
 
   if (!rules?.length) return { employees_processed: 0, total_days_carried: 0 }
 
+  const nowIso = new Date().toISOString()
+  const carryAccruedOn = `${toYear}-01-01`
+
   for (const rule of rules as Array<{ leave_type_id: string; carry_forward_max: number; carry_forward_expiry_months: number }>) {
-    // Fetch all employees with a balance in fromYear
+    // Fetch all employees with a fromYear balance for this rule
     const { data: balances } = await supabase
       .from('employee_leave_balance')
       .select('employee_id, balance')
@@ -239,36 +264,49 @@ export async function processCarryForward(
       .eq('year', fromYear)
       .gt('balance', 0)
 
-    for (const bal of (balances ?? []) as Array<{ employee_id: string; balance: number }>) {
+    if (!balances?.length) continue
+
+    // Expiry date is the same for every employee within a rule
+    let expiryDate: string | null = null
+    if (rule.carry_forward_expiry_months > 0) {
+      const expiry = new Date(Date.UTC(toYear, rule.carry_forward_expiry_months - 1, 28))
+      expiryDate = expiry.toISOString().slice(0, 10)
+    }
+    const notesSuffix = expiryDate ? ` · expires ${expiryDate}` : ''
+
+    // Batch-fetch existing toYear balances to avoid a per-employee SELECT
+    const { data: toYearBals } = await supabase
+      .from('employee_leave_balance')
+      .select('employee_id, balance')
+      .eq('tenant_id', tenantId)
+      .eq('leave_type_id', rule.leave_type_id)
+      .eq('year', toYear)
+
+    const toYearMap = new Map<string, number>(
+      (toYearBals ?? []).map((b: { employee_id: string; balance: number }) => [b.employee_id, Number(b.balance)])
+    )
+
+    const cfBalUpserts: Record<string, unknown>[] = []
+    const cfLedInserts: Record<string, unknown>[] = []
+    const cfAlUpserts:  Record<string, unknown>[] = []
+
+    for (const bal of balances as Array<{ employee_id: string; balance: number }>) {
       const carryDays = Math.min(Number(bal.balance), rule.carry_forward_max)
       if (carryDays <= 0) continue
 
-      // Compute expiry date if applicable
-      let expiryDate: string | null = null
-      if (rule.carry_forward_expiry_months > 0) {
-        const expiry = new Date(Date.UTC(toYear, rule.carry_forward_expiry_months - 1, 28))
-        expiryDate = expiry.toISOString().slice(0, 10)
-      }
-
-      // Get existing toYear balance
-      const { data: existBal } = await supabase
-        .from('employee_leave_balance')
-        .select('balance')
-        .eq('tenant_id', tenantId)
-        .eq('employee_id', bal.employee_id)
-        .eq('leave_type_id', rule.leave_type_id)
-        .eq('year', toYear)
-        .maybeSingle()
-
-      const existingBalance = Number(existBal?.balance ?? 0)
+      const existingBalance = toYearMap.get(bal.employee_id) ?? 0
       const newBalance = parseFloat((existingBalance + carryDays).toFixed(2))
 
-      await supabase.from('employee_leave_balance').upsert(
-        { tenant_id: tenantId, employee_id: bal.employee_id, leave_type_id: rule.leave_type_id, year: toYear, balance: newBalance, updated_at: new Date().toISOString() },
-        { onConflict: 'tenant_id,employee_id,leave_type_id,year' },
-      )
+      cfBalUpserts.push({
+        tenant_id:     tenantId,
+        employee_id:   bal.employee_id,
+        leave_type_id: rule.leave_type_id,
+        year:          toYear,
+        balance:       newBalance,
+        updated_at:    nowIso,
+      })
 
-      await supabase.from('leave_balance_ledger').insert({
+      cfLedInserts.push({
         tenant_id:     tenantId,
         employee_id:   bal.employee_id,
         leave_type_id: rule.leave_type_id,
@@ -276,28 +314,37 @@ export async function processCarryForward(
         txn_type:      'carry_forward',
         delta:         carryDays,
         balance_after: newBalance,
-        notes:         `Carry-forward from ${fromYear}${expiryDate ? ` · expires ${expiryDate}` : ''}`,
+        notes:         `Carry-forward from ${fromYear}${notesSuffix}`,
       })
 
-      // C6 dual-write: credit in leave_accrual_ledger (authoritative balance ledger).
-      // accrued_on = Jan 1 of toYear; idempotent via the annual-types unique index.
-      const carryAcruedOn = `${toYear}-01-01`
-      await supabase
-        .from('leave_accrual_ledger')
-        .upsert({
-          tenant_id:     tenantId,
-          employee_id:   bal.employee_id,
-          leave_type_id: rule.leave_type_id,
-          year:          toYear,
-          accrual_type:  'carry_forward',
-          days:          carryDays,
-          accrued_on:    carryAcruedOn,
-          is_expired:    false,
-          notes:         `Carry-forward from ${fromYear}${expiryDate ? ` · expires ${expiryDate}` : ''}`,
-        }, { onConflict: 'tenant_id,employee_id,leave_type_id,year,accrual_type,accrued_on', ignoreDuplicates: true })
+      cfAlUpserts.push({
+        tenant_id:     tenantId,
+        employee_id:   bal.employee_id,
+        leave_type_id: rule.leave_type_id,
+        year:          toYear,
+        accrual_type:  'carry_forward',
+        days:          carryDays,
+        accrued_on:    carryAccruedOn,
+        is_expired:    false,
+        notes:         `Carry-forward from ${fromYear}${notesSuffix}`,
+      })
 
       employeesProcessed++
       totalCarried = parseFloat((totalCarried + carryDays).toFixed(2))
+    }
+
+    // Batch write: 3 calls per rule regardless of employee count
+    // (was 3 × N_employees sequential calls)
+    if (cfBalUpserts.length) {
+      await supabase
+        .from('employee_leave_balance')
+        .upsert(cfBalUpserts, { onConflict: 'tenant_id,employee_id,leave_type_id,year' })
+
+      await supabase.from('leave_balance_ledger').insert(cfLedInserts)
+
+      await supabase
+        .from('leave_accrual_ledger')
+        .upsert(cfAlUpserts, { onConflict: 'tenant_id,employee_id,leave_type_id,year,accrual_type,accrued_on', ignoreDuplicates: true })
     }
   }
 

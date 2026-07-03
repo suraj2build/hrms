@@ -43,7 +43,7 @@ interface Explainability {
 }
 
 interface FabricHealthSnapshot {
-  org_id:                string
+  tenant_id:                string
   overall_score:         number
   governance_health:     number
   trust_health:          number
@@ -59,7 +59,7 @@ interface FabricHealthSnapshot {
 interface IntelligenceComposition {
   entity_id:          string
   entity_type:        string
-  org_id:             string
+  tenant_id:             string
   governance_score:   number
   trust_score:        number
   operational_health: number
@@ -76,7 +76,7 @@ interface DecisionGraphNode {
   node_type:   string
   entity_id:   string
   entity_type: string
-  org_id:      string
+  tenant_id:      string
   description: string
   timestamp:   string
   actor_id?:   string
@@ -94,7 +94,7 @@ interface OrchestrationStep {
 
 interface OrchestrationActivity {
   activity_id:   string
-  org_id:        string
+  tenant_id:        string
   workflow_type: string
   entity_id:     string
   entity_type:   string
@@ -108,7 +108,7 @@ interface OrchestrationActivity {
 
 interface ReplaySession {
   id?:             string
-  org_id:          string
+  tenant_id:          string
   entity_id:       string
   entity_type:     string
   replay_from:     string

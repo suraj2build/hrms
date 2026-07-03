@@ -7,13 +7,14 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { logAction } from '../../lib/audit-service.js'
 import { gateApprove, gateReject } from '../../lib/approval-orchestrator.js'
+import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 
 const CATEGORY_TYPES = ['medical', 'travel', 'food', 'telephone', 'internet', 'books', 'uniform', 'other'] as const
 
 export default async function reimbursementsRoutes(fastify: FastifyInstance) {
   const auth = { preHandler: [fastify.authenticate] }
 
-  const isHr = (role: string) => ['super_admin', 'hr_admin'].includes(role)
+  const isHr = (role: string) => (HR_ADMIN_ROLES as readonly string[]).includes(role)
 
   function requireHrAdmin(req: any, reply: any, done: () => void) {
     if (!isHr(req.userRole)) {
@@ -388,6 +389,8 @@ export default async function reimbursementsRoutes(fastify: FastifyInstance) {
       employee_id: z.string().uuid().optional(),
       status: z.string().optional(),
       month: z.string().optional(),
+      limit:  z.coerce.number().int().min(1).max(500).default(50),
+      offset: z.coerce.number().int().min(0).default(0),
     })
 
     const parsed = querySchema.safeParse(req.query)
@@ -395,7 +398,7 @@ export default async function reimbursementsRoutes(fastify: FastifyInstance) {
       return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
     }
 
-    const isHrAdmin = ['super_admin', 'hr_admin'].includes(req.userRole)
+    const isHrAdmin = (HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)
 
     // Employees have no business calling the admin claims list
     if (!isHrAdmin && req.userRole !== 'manager') {
@@ -417,10 +420,14 @@ export default async function reimbursementsRoutes(fastify: FastifyInstance) {
       }
     }
 
+    const limit  = parsed.data.limit
+    const offset = parsed.data.offset
+
     let q = fastify.supabase
       .from('reimbursement_claims')
-      .select('*, employees(id, first_name, last_name, employee_code), reimbursement_categories(id, name, code, category_type)')
+      .select('*, employees(id, first_name, last_name, employee_code), reimbursement_categories(id, name, code, category_type)', { count: 'exact' })
       .eq('tenant_id', req.tenantId)
+      .order('created_at', { ascending: false })
 
     if (isHrAdmin) {
       // HR admin can filter by any supplied employee_id
@@ -460,10 +467,11 @@ export default async function reimbursementsRoutes(fastify: FastifyInstance) {
       const lastDay = new Date(year, mon, 0).toISOString().slice(0, 10)
       q = q.gte('expense_date', firstDay).lte('expense_date', lastDay)
     }
+    q = q.range(offset, offset + limit - 1)
 
-    const { data, error } = await q
+    const { data, count, error } = await q
     if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
-    return reply.send({ data: data ?? [] })
+    return reply.send({ data: data ?? [], total: count ?? 0, limit, offset })
   })
 
   // ── POST /payroll/reimbursements/claims ───────────────────────────────────────
@@ -768,7 +776,7 @@ export default async function reimbursementsRoutes(fastify: FastifyInstance) {
       .maybeSingle()
     if (!claim) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Claim not found' })
 
-    if (!['super_admin', 'hr_admin'].includes(req.userRole)) {
+    if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
       const { data: profile } = await fastify.supabase
         .from('profiles')
         .select('employee_id')
@@ -808,9 +816,14 @@ export default async function reimbursementsRoutes(fastify: FastifyInstance) {
       employee_id: z.string().uuid().optional(),
       status: z.string().optional(),
       month:  z.string().optional(),
+      limit:  z.coerce.number().int().min(1).max(500).default(50),
+      offset: z.coerce.number().int().min(0).default(0),
     })
     const parsed = querySchema.safeParse(req.query)
     if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+
+    const limit  = parsed.data.limit
+    const offset = parsed.data.offset
 
     let q = fastify.supabase
       .from('reimbursement_claims')
@@ -824,6 +837,7 @@ export default async function reimbursementsRoutes(fastify: FastifyInstance) {
       const [year, mon] = parsed.data.month.split('-').map(Number)
       q = q.gte('expense_date', `${parsed.data.month}-01`).lte('expense_date', new Date(year, mon, 0).toISOString().slice(0, 10))
     }
+    q = q.range(offset, offset + limit - 1)
 
     const { data, count, error } = await q
     if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
@@ -841,7 +855,7 @@ export default async function reimbursementsRoutes(fastify: FastifyInstance) {
         claim_month:   (c.expense_date ?? c.claim_date ?? c.created_at ?? '').slice(0, 7) || null,
       }
     })
-    return reply.send({ data: rows, total: count ?? 0 })
+    return reply.send({ data: rows, total: count ?? 0, limit, offset })
   })
 
   /**
@@ -884,6 +898,9 @@ export default async function reimbursementsRoutes(fastify: FastifyInstance) {
    */
   fastify.post('/:id/approve', { preHandler: [fastify.authenticate, requireHrAdmin] }, async (req: any, reply) => {
     const { id } = req.params as { id: string }
+    const approveBodySchema = z.object({ approved_amount: z.number().optional().nullable() }).passthrough()
+    const approveBodyParsed = approveBodySchema.safeParse(req.body)
+    if (!approveBodyParsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: approveBodyParsed.error.issues[0]?.message ?? 'Invalid request body' })
     const { data: existing } = await fastify.supabase
       .from('reimbursement_claims')
       .select('id, status, employee_id, claimed_amount')
@@ -913,7 +930,7 @@ export default async function reimbursementsRoutes(fastify: FastifyInstance) {
     }
 
     const now = new Date().toISOString()
-    const approvedAmt = (req.body as any)?.approved_amount ?? (existing as any).claimed_amount
+    const approvedAmt = approveBodyParsed.data.approved_amount ?? (existing as any).claimed_amount
     const { data, error } = await fastify.supabase
       .from('reimbursement_claims')
       .update({ status: 'approved', approved_amount: approvedAmt, reviewed_by: req.userId, reviewed_at: now, updated_at: now })

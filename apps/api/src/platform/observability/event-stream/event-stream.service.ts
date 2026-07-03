@@ -9,7 +9,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import type { ResolvedPlatformEvent } from '../../events/types/platform-event.js'
 
 export interface EventStreamQuery {
-  org_id:         string
+  tenant_id:         string
   event_type?:    string
   module?:        string
   entity_type?:   string
@@ -49,7 +49,7 @@ export class EventStreamService {
     let query = this.supabase
       .from('platform_events')
       .select('*', { count: 'exact' })
-      .eq('org_id', q.org_id)
+      .eq('tenant_id', q.tenant_id)
       .order('timestamp', { ascending: false })
       .range(offset, offset + limit - 1)
 
@@ -82,7 +82,7 @@ export class EventStreamService {
     const { data, error } = await this.supabase
       .from('platform_events')
       .select('*')
-      .eq('org_id', orgId)
+      .eq('tenant_id', orgId)
       .eq('correlation_id', correlationId)
       .order('timestamp', { ascending: true })
 
@@ -101,7 +101,7 @@ export class EventStreamService {
     const { data, error } = await this.supabase
       .from('platform_events')
       .select('*')
-      .eq('org_id', orgId)
+      .eq('tenant_id', orgId)
       .eq('entity_type', entityType)
       .eq('entity_id', entityId)
       .order('timestamp', { ascending: false })

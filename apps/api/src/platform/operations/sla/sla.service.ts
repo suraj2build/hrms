@@ -31,7 +31,7 @@ export class SlaService {
       sla_id:          slaId,
       entity_id:       entityId,
       entity_type:     entityType,
-      org_id:          orgId,
+      tenant_id:          orgId,
       started_at:      start.toISOString(),
       due_at:          due.toISOString(),
       breached:        false,
@@ -65,7 +65,7 @@ export class SlaService {
           sla_id:          status.sla_id,
           entity_id:       status.entity_id,
           entity_type:     status.entity_type,
-          org_id:          status.org_id,
+          tenant_id:          status.tenant_id,
           breach_severity: sla?.severity_on_breach ?? 'warning',
           description:     `${sla?.name ?? status.sla_id} SLA breached — ${elapsed.toFixed(1)}h elapsed (threshold: ${sla?.threshold_hours}h)`,
           breached_at:     new Date().toISOString(),
@@ -86,11 +86,11 @@ export class SlaService {
 
   getTracked(orgId?: string): SlaStatus[] {
     const all = [...this.tracked.values()]
-    return orgId ? all.filter(s => s.org_id === orgId) : all
+    return orgId ? all.filter(s => s.tenant_id === orgId) : all
   }
 
   getBreaches(orgId?: string): SlaBreachEvent[] {
-    return orgId ? this.breaches.filter(b => b.org_id === orgId) : [...this.breaches]
+    return orgId ? this.breaches.filter(b => b.tenant_id === orgId) : [...this.breaches]
   }
 
   getDefinitions(): SlaDefinition[] { return [...this.definitions] }

@@ -14,6 +14,7 @@ import { Input }  from '@/components/ui/input'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@/components/ui/dialog'
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 
 interface TenantDetail {
   id: string; name: string; slug: string; plan: string; status: string
@@ -71,6 +72,7 @@ export function OwnerTenantDetail() {
   const [resetAdminId, setResetAdminId]   = useState<string | null>(null)
   const [resetPwd, setResetPwd]           = useState('')
   const [showResetPwd, setShowResetPwd]   = useState(false)
+  const [cdlg, setCdlg] = useState<{ msg: string; act: () => void; destructive?: boolean } | null>(null)
   const [copiedPwd, setCopiedPwd]         = useState(false)
 
   const { data, isLoading, isError, refetch } = useQuery<{ data: TenantDetail }>({
@@ -153,13 +155,21 @@ export function OwnerTenantDetail() {
     onError: (e: unknown) => toast.error(e instanceof Error ? e.message : String(e)),
   })
 
-  function statusAction(action: 'activate' | 'suspend' | 'cancel') {
-    const name = t?.name ?? 'this tenant'
-    if (action === 'suspend' && !window.confirm(`Suspend "${name}"? Their users will be blocked from making changes until reactivated.`)) return
-    if (action === 'cancel'  && !window.confirm(`Cancel "${name}"'s subscription? They will lose write access.`)) return
+  function doStatusAction(action: 'activate' | 'suspend' | 'cancel') {
     ownerApi.post(`/owner/tenants/${id}/${action}`)
       .then(() => { toast.success(`Tenant ${action}d`); qc.invalidateQueries({ queryKey: ['owner-tenant', id] }) })
       .catch((e: unknown) => toast.error(e instanceof Error ? e.message : String(e)))
+  }
+
+  function statusAction(action: 'activate' | 'suspend' | 'cancel') {
+    const name = t?.name ?? 'this tenant'
+    if (action === 'suspend') {
+      setCdlg({ msg: `Suspend "${name}"? Their users will be blocked from making changes until reactivated.`, act: () => doStatusAction('suspend') })
+    } else if (action === 'cancel') {
+      setCdlg({ msg: `Cancel "${name}"'s subscription? They will lose write access.`, act: () => doStatusAction('cancel') })
+    } else {
+      doStatusAction(action)
+    }
   }
 
   function issueLicense() {
@@ -170,14 +180,13 @@ export function OwnerTenantDetail() {
 
   function deleteTenant() {
     const name = t?.name ?? 'this tenant'
-    if (!window.confirm(`Permanently DELETE "${name}" and ALL its data (employees, payroll, attendance, logins)?\n\nThis cannot be undone.`)) return
-    ownerApi.delete<{ message?: string }>(`/owner/tenants/${id}`)
-      .then((res) => {
-        toast.success(res?.message ?? 'Tenant deleted')
-        qc.invalidateQueries({ queryKey: ['owner-tenants'] })
-        navigate('/owner/tenants')
-      })
-      .catch((e: unknown) => toast.error(e instanceof Error ? e.message : String(e)))
+    setCdlg({
+      msg: `Permanently DELETE "${name}" and ALL its data (employees, payroll, attendance, logins)?\n\nThis cannot be undone.`,
+      destructive: true,
+      act: () => ownerApi.delete<{ message?: string }>(`/owner/tenants/${id}`)
+        .then((res) => { toast.success(res?.message ?? 'Tenant deleted'); qc.invalidateQueries({ queryKey: ['owner-tenants'] }); navigate('/owner/tenants') })
+        .catch((e: unknown) => toast.error(e instanceof Error ? e.message : String(e))),
+    })
   }
 
   if (isLoading) return (
@@ -710,7 +719,7 @@ export function OwnerTenantDetail() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
+      <ConfirmDialog open={!!cdlg} message={cdlg?.msg ?? ''} title="Confirm" confirmLabel="Confirm" destructive={cdlg?.destructive} onConfirm={() => { cdlg?.act(); setCdlg(null) }} onCancel={() => setCdlg(null)} />
     </div>
   )
 }

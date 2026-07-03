@@ -25,7 +25,7 @@ EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 -- ── Security events (partitioned by month) ────────────────────────────────────
 
-CREATE TABLE security_events (
+CREATE TABLE IF NOT EXISTS security_events (
   id              bigint      GENERATED ALWAYS AS IDENTITY,
   event_type      text        NOT NULL,   -- 'failed_auth', 'bulk_export', 'role_change', …
   severity        security_severity NOT NULL DEFAULT 'info',
@@ -43,20 +43,20 @@ CREATE TABLE security_events (
 ) PARTITION BY RANGE (occurred_at);
 
 -- Create initial partitions (3 months: May, Jun, Jul 2026)
-CREATE TABLE security_events_2026_05 PARTITION OF security_events
+CREATE TABLE IF NOT EXISTS security_events_2026_05 PARTITION OF security_events
   FOR VALUES FROM ('2026-05-01') TO ('2026-06-01');
-CREATE TABLE security_events_2026_06 PARTITION OF security_events
+CREATE TABLE IF NOT EXISTS security_events_2026_06 PARTITION OF security_events
   FOR VALUES FROM ('2026-06-01') TO ('2026-07-01');
-CREATE TABLE security_events_2026_07 PARTITION OF security_events
+CREATE TABLE IF NOT EXISTS security_events_2026_07 PARTITION OF security_events
   FOR VALUES FROM ('2026-07-01') TO ('2026-08-01');
 -- Default partition catches any out-of-range inserts (prevents INSERT failures)
-CREATE TABLE security_events_default PARTITION OF security_events DEFAULT;
+CREATE TABLE IF NOT EXISTS security_events_default PARTITION OF security_events DEFAULT;
 
-CREATE INDEX ON security_events (tenant_id, event_type, occurred_at DESC);
-CREATE INDEX ON security_events (actor_id, occurred_at DESC);
-CREATE INDEX ON security_events (severity, occurred_at DESC)
+CREATE INDEX IF NOT EXISTS idx_sec_events_tenant_type  ON security_events (tenant_id, event_type, occurred_at DESC);
+CREATE INDEX IF NOT EXISTS idx_sec_events_actor        ON security_events (actor_id, occurred_at DESC);
+CREATE INDEX IF NOT EXISTS idx_sec_events_severity     ON security_events (severity, occurred_at DESC)
   WHERE severity IN ('high', 'critical');
-CREATE INDEX ON security_events (correlation_id)
+CREATE INDEX IF NOT EXISTS idx_sec_events_correlation  ON security_events (correlation_id)
   WHERE correlation_id IS NOT NULL;
 
 COMMENT ON TABLE security_events IS
@@ -65,7 +65,7 @@ COMMENT ON TABLE security_events IS
 
 -- ── Security detection rules ──────────────────────────────────────────────────
 
-CREATE TABLE security_detection_rules (
+CREATE TABLE IF NOT EXISTS security_detection_rules (
   id               uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
   rule_name        text        NOT NULL UNIQUE,
   description      text        NOT NULL,
@@ -167,7 +167,7 @@ VALUES
 
 -- ── Security alerts ───────────────────────────────────────────────────────────
 
-CREATE TABLE security_alerts (
+CREATE TABLE IF NOT EXISTS security_alerts (
   id               uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
   rule_name        text        NOT NULL REFERENCES security_detection_rules(rule_name) ON UPDATE CASCADE,
   severity         security_severity NOT NULL,
@@ -211,13 +211,13 @@ CREATE TABLE security_alerts (
   created_at       timestamptz NOT NULL DEFAULT now()
 );
 
-CREATE INDEX idx_security_alerts_open      ON security_alerts (status, triggered_at DESC)
+CREATE INDEX IF NOT EXISTS idx_security_alerts_open      ON security_alerts (status, triggered_at DESC)
   WHERE status = 'open';
-CREATE INDEX idx_security_alerts_critical  ON security_alerts (severity, triggered_at DESC)
+CREATE INDEX IF NOT EXISTS idx_security_alerts_critical  ON security_alerts (severity, triggered_at DESC)
   WHERE severity = 'critical';
-CREATE INDEX idx_security_alerts_tenant    ON security_alerts (tenant_id, triggered_at DESC);
-CREATE INDEX idx_security_alerts_rule      ON security_alerts (rule_name, triggered_at DESC);
-CREATE INDEX idx_security_alerts_actor     ON security_alerts (actor_id, triggered_at DESC);
+CREATE INDEX IF NOT EXISTS idx_security_alerts_tenant    ON security_alerts (tenant_id, triggered_at DESC);
+CREATE INDEX IF NOT EXISTS idx_security_alerts_rule      ON security_alerts (rule_name, triggered_at DESC);
+CREATE INDEX IF NOT EXISTS idx_security_alerts_actor     ON security_alerts (actor_id, triggered_at DESC);
 
 COMMENT ON TABLE security_alerts IS
   'Security alerts raised by the detection engine. '

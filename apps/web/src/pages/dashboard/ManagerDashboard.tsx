@@ -1012,7 +1012,7 @@ function PageHero({ firstName, todaySummary }: { firstName: string; todaySummary
     : 'Loading team attendance...'
 
   return (
-    <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-sky-900 via-blue-900 to-slate-900 px-8 py-10 mb-8 sky-grain">
+    <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-info via-primary to-muted px-8 py-10 mb-8 sky-grain">
       <div
         aria-hidden
         className="pointer-events-none absolute -right-16 -top-16 h-[320px] w-[320px] rounded-full bg-white/8 blur-3xl drift-slow"

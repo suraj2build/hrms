@@ -18,7 +18,7 @@
 
 -- ── Credential rotation log (immutable) ──────────────────────────────────────
 
-CREATE TABLE credential_rotation_log (
+CREATE TABLE IF NOT EXISTS credential_rotation_log (
   id                      uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
 
   -- What was rotated
@@ -56,10 +56,10 @@ CREATE TABLE credential_rotation_log (
   created_at              timestamptz NOT NULL DEFAULT now()
 );
 
-CREATE INDEX idx_credential_rotation_name   ON credential_rotation_log (credential_name, rotated_at DESC);
-CREATE INDEX idx_credential_rotation_type   ON credential_rotation_log (rotation_type, rotated_at DESC)
+CREATE INDEX IF NOT EXISTS idx_credential_rotation_name   ON credential_rotation_log (credential_name, rotated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_credential_rotation_type   ON credential_rotation_log (rotation_type, rotated_at DESC)
   WHERE rotation_type IN ('emergency', 'suspected_breach', 'post_incident');
-CREATE INDEX idx_credential_rotation_unverified ON credential_rotation_log (verification_status)
+CREATE INDEX IF NOT EXISTS idx_credential_rotation_unverified ON credential_rotation_log (verification_status)
   WHERE verification_status = 'pending';
 
 -- Immutable — credential rotation records must never be modified or deleted
@@ -84,7 +84,7 @@ COMMENT ON TABLE credential_rotation_log IS
 -- Lightweight log of secret access by service components.
 -- Written by the application when it retrieves a credential for use.
 
-CREATE TABLE secret_access_audit (
+CREATE TABLE IF NOT EXISTS secret_access_audit (
   id              bigint      GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   secret_name     text        NOT NULL,
   accessor_type   text        NOT NULL CHECK (accessor_type IN ('service','user','pipeline','scheduler')),
@@ -102,11 +102,11 @@ CREATE TABLE secret_access_audit (
   flag_reason     text
 );
 
-CREATE INDEX idx_secret_access_name_time   ON secret_access_audit (secret_name, accessed_at DESC);
-CREATE INDEX idx_secret_access_accessor    ON secret_access_audit (accessor_id, accessed_at DESC);
-CREATE INDEX idx_secret_access_flagged     ON secret_access_audit (flagged, accessed_at DESC)
+CREATE INDEX IF NOT EXISTS idx_secret_access_name_time   ON secret_access_audit (secret_name, accessed_at DESC);
+CREATE INDEX IF NOT EXISTS idx_secret_access_accessor    ON secret_access_audit (accessor_id, accessed_at DESC);
+CREATE INDEX IF NOT EXISTS idx_secret_access_flagged     ON secret_access_audit (flagged, accessed_at DESC)
   WHERE flagged = true;
-CREATE INDEX idx_secret_access_correlation ON secret_access_audit (correlation_id)
+CREATE INDEX IF NOT EXISTS idx_secret_access_correlation ON secret_access_audit (correlation_id)
   WHERE correlation_id IS NOT NULL;
 
 COMMENT ON TABLE secret_access_audit IS

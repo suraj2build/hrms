@@ -35,13 +35,14 @@ import {
   validateRosterCalendar,
   generateTestDataset,
 } from '../../lib/roster-calendar-engine.js'
+import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 
 // ── Auth helper ───────────────────────────────────────────────────────────────
 
 function hrAdminAuth(req: any, reply: any, done: () => void) {
   if (!req.userId) return reply.code(401).send({ error: 'Unauthorized' })
   const role = req.userRole ?? ''
-  if (!['super_admin', 'hr_admin'].includes(role)) {
+  if (!(HR_ADMIN_ROLES as readonly string[]).includes(role)) {
     return reply.code(403).send({ error: 'HR admin access required' })
   }
   done()
@@ -63,23 +64,28 @@ export default async function rosterCalendarRoutes(fastify: FastifyInstance) {
       return reply.code(400).send({ error: 'month query param required (YYYY-MM)' })
     }
 
-    const calendar = await buildEmployeeRosterCalendar(supabase, tenantId, employeeId, month)
+    try {
+      const calendar = await buildEmployeeRosterCalendar(supabase, tenantId, employeeId, month)
 
-    // Summary stats
-    const workingDays  = calendar.filter(d => d.is_working_day).length
-    const weeklyOffs   = calendar.filter(d => d.is_weekly_off).length
-    const holidays     = calendar.filter(d => d.is_holiday).length
-    const altSatOffs   = calendar.filter(d => d.is_alternate_saturday_off).length
-    const fatigueRisks = calendar.filter(d => d.fatigue_risk).length
+      // Summary stats
+      const workingDays  = calendar.filter(d => d.is_working_day).length
+      const weeklyOffs   = calendar.filter(d => d.is_weekly_off).length
+      const holidays     = calendar.filter(d => d.is_holiday).length
+      const altSatOffs   = calendar.filter(d => d.is_alternate_saturday_off).length
+      const fatigueRisks = calendar.filter(d => d.fatigue_risk).length
 
-    return reply.send({
-      data: {
-        employee_id: employeeId,
-        month,
-        summary: { working_days: workingDays, weekly_offs: weeklyOffs, holidays, alt_sat_offs: altSatOffs, fatigue_risks: fatigueRisks },
-        days: detail === 'false' ? undefined : calendar,
-      },
-    })
+      return reply.send({
+        data: {
+          employee_id: employeeId,
+          month,
+          summary: { working_days: workingDays, weekly_offs: weeklyOffs, holidays, alt_sat_offs: altSatOffs, fatigue_risks: fatigueRisks },
+          days: detail === 'false' ? undefined : calendar,
+        },
+      })
+    } catch (err: unknown) {
+      req.log.error({ err, employeeId, month }, '[roster-calendar] engine error')
+      return reply.code(500).send({ error: 'ROSTER_CALENDAR_ERROR', message: 'Failed to build roster calendar' })
+    }
   })
 
   // ── Roster Calendar — bulk (multiple employees) ───────────────────────────
@@ -98,22 +104,27 @@ export default async function rosterCalendarRoutes(fastify: FastifyInstance) {
       return reply.code(400).send({ error: 'Maximum 50 employees per bulk request' })
     }
 
-    const results = await Promise.all(
-      employee_ids.map(async id => {
-        const calendar = await buildEmployeeRosterCalendar(supabase, tenantId, id, month)
-        return {
-          employee_id:  id,
-          working_days: calendar.filter(d => d.is_working_day).length,
-          weekly_offs:  calendar.filter(d => d.is_weekly_off).length,
-          holidays:     calendar.filter(d => d.is_holiday).length,
-          alt_sat_offs: calendar.filter(d => d.is_alternate_saturday_off).length,
-          fatigue_days: calendar.filter(d => d.fatigue_risk).length,
-          days:         calendar,
-        }
-      })
-    )
+    try {
+      const results = await Promise.all(
+        employee_ids.map(async id => {
+          const calendar = await buildEmployeeRosterCalendar(supabase, tenantId, id, month)
+          return {
+            employee_id:  id,
+            working_days: calendar.filter(d => d.is_working_day).length,
+            weekly_offs:  calendar.filter(d => d.is_weekly_off).length,
+            holidays:     calendar.filter(d => d.is_holiday).length,
+            alt_sat_offs: calendar.filter(d => d.is_alternate_saturday_off).length,
+            fatigue_days: calendar.filter(d => d.fatigue_risk).length,
+            days:         calendar,
+          }
+        })
+      )
 
-    return reply.send({ data: results, month })
+      return reply.send({ data: results, month })
+    } catch (err: unknown) {
+      req.log.error({ err, month, count: employee_ids.length }, '[roster-calendar] bulk engine error')
+      return reply.code(500).send({ error: 'ROSTER_CALENDAR_ERROR', message: 'Failed to build roster calendar' })
+    }
   })
 
   // ── Single-day resolution ─────────────────────────────────────────────────
@@ -126,13 +137,18 @@ export default async function rosterCalendarRoutes(fastify: FastifyInstance) {
       return reply.code(400).send({ error: 'date must be YYYY-MM-DD' })
     }
 
-    const [day, expectation, fatigue] = await Promise.all([
-      resolveRosterDay(supabase, tenantId, employeeId, date),
-      resolveShiftExpectation(supabase, tenantId, employeeId, date),
-      checkFatigueRisk(supabase, tenantId, employeeId, date, null),
-    ])
+    try {
+      const [day, expectation, fatigue] = await Promise.all([
+        resolveRosterDay(supabase, tenantId, employeeId, date),
+        resolveShiftExpectation(supabase, tenantId, employeeId, date),
+        checkFatigueRisk(supabase, tenantId, employeeId, date, null),
+      ])
 
-    return reply.send({ data: { ...day, shift_expectation: expectation, fatigue_detail: fatigue } })
+      return reply.send({ data: { ...day, shift_expectation: expectation, fatigue_detail: fatigue } })
+    } catch (err: unknown) {
+      req.log.error({ err, employeeId, date }, '[roster-calendar] engine error')
+      return reply.code(500).send({ error: 'ROSTER_CALENDAR_ERROR', message: 'Failed to resolve roster day' })
+    }
   })
 
   // ── Working-day count (payroll) ───────────────────────────────────────────
@@ -143,8 +159,13 @@ export default async function rosterCalendarRoutes(fastify: FastifyInstance) {
     const tenantId       = req.tenantId as string
 
     if (!month) return reply.code(400).send({ error: 'month required' })
-    const count = await countRosterWorkingDays(supabase, tenantId, employeeId, month)
-    return reply.send({ data: { employee_id: employeeId, month, working_days: count } })
+    try {
+      const count = await countRosterWorkingDays(supabase, tenantId, employeeId, month)
+      return reply.send({ data: { employee_id: employeeId, month, working_days: count } })
+    } catch (err: unknown) {
+      req.log.error({ err, employeeId, month }, '[roster-calendar] engine error')
+      return reply.code(500).send({ error: 'ROSTER_CALENDAR_ERROR', message: 'Failed to count working days' })
+    }
   })
 
   // ── Weekly-Off Rules CRUD ─────────────────────────────────────────────────
@@ -421,8 +442,13 @@ export default async function rosterCalendarRoutes(fastify: FastifyInstance) {
       return reply.code(400).send({ error: 'date query param required (YYYY-MM-DD)' })
     }
 
-    const explanation = await explainRosterDay(supabase, tenantId, employeeId, date)
-    return reply.send({ data: explanation })
+    try {
+      const explanation = await explainRosterDay(supabase, tenantId, employeeId, date)
+      return reply.send({ data: explanation })
+    } catch (err: unknown) {
+      req.log.error({ err, employeeId, date }, '[roster-calendar] engine error')
+      return reply.code(500).send({ error: 'ROSTER_CALENDAR_ERROR', message: 'Failed to explain roster simulation' })
+    }
   })
 
   // ── Validate — check a month calendar for logical issues ─────────────────
@@ -436,27 +462,37 @@ export default async function rosterCalendarRoutes(fastify: FastifyInstance) {
       return reply.code(400).send({ error: 'month query param required (YYYY-MM)' })
     }
 
-    const calendar = await buildEmployeeRosterCalendar(supabase, tenantId, employeeId, month)
-    const issues   = validateRosterCalendar(calendar)
+    try {
+      const calendar = await buildEmployeeRosterCalendar(supabase, tenantId, employeeId, month)
+      const issues   = validateRosterCalendar(calendar)
 
-    return reply.send({
-      data: {
-        employee_id:   employeeId,
-        month,
-        total_days:    calendar.length,
-        issue_count:   issues.length,
-        errors:        issues.filter(i => i.severity === 'error').length,
-        warnings:      issues.filter(i => i.severity === 'warning').length,
-        issues,
-        is_valid:      issues.filter(i => i.severity === 'error').length === 0,
-      },
-    })
+      return reply.send({
+        data: {
+          employee_id:   employeeId,
+          month,
+          total_days:    calendar.length,
+          issue_count:   issues.length,
+          errors:        issues.filter(i => i.severity === 'error').length,
+          warnings:      issues.filter(i => i.severity === 'warning').length,
+          issues,
+          is_valid:      issues.filter(i => i.severity === 'error').length === 0,
+        },
+      })
+    } catch (err: unknown) {
+      req.log.error({ err, employeeId, month }, '[roster-calendar] engine error')
+      return reply.code(500).send({ error: 'ROSTER_CALENDAR_ERROR', message: 'Failed to validate roster simulation' })
+    }
   })
 
   // ── Test Dataset — return 8 edge-case scenarios for QA seeding ───────────
 
-  fastify.get('/roster-simulation/test-dataset', { preHandler: hrAdminAuth }, async (_req, reply) => {
-    return reply.send({ data: generateTestDataset() })
+  fastify.get('/roster-simulation/test-dataset', { preHandler: hrAdminAuth }, async (req: any, reply) => {
+    try {
+      return reply.send({ data: generateTestDataset() })
+    } catch (err: unknown) {
+      req.log.error({ err }, '[roster-calendar] engine error')
+      return reply.code(500).send({ error: 'ROSTER_CALENDAR_ERROR', message: 'Failed to generate roster test dataset' })
+    }
   })
 
   // ── Coverage Analytics ────────────────────────────────────────────────────
@@ -485,21 +521,26 @@ export default async function rosterCalendarRoutes(fastify: FastifyInstance) {
     const BATCH = 10
     const allCalendars: Array<{ employee_id: string; working_days: number; weekly_offs: number; alt_sat_offs: number; fatigue_days: number }> = []
 
-    for (let i = 0; i < (employees ?? []).length; i += BATCH) {
-      const batch = (employees ?? []).slice(i, i + BATCH)
-      const results = await Promise.all(
-        batch.map(async (emp: Record<string, string>) => {
-          const cal = await buildEmployeeRosterCalendar(supabase, tenantId, emp.id, month)
-          return {
-            employee_id:  emp.id,
-            working_days: cal.filter(d => d.is_working_day).length,
-            weekly_offs:  cal.filter(d => d.is_weekly_off).length,
-            alt_sat_offs: cal.filter(d => d.is_alternate_saturday_off).length,
-            fatigue_days: cal.filter(d => d.fatigue_risk).length,
-          }
-        })
-      )
-      allCalendars.push(...results)
+    try {
+      for (let i = 0; i < (employees ?? []).length; i += BATCH) {
+        const batch = (employees ?? []).slice(i, i + BATCH)
+        const results = await Promise.all(
+          batch.map(async (emp: Record<string, string>) => {
+            const cal = await buildEmployeeRosterCalendar(supabase, tenantId, emp.id, month)
+            return {
+              employee_id:  emp.id,
+              working_days: cal.filter(d => d.is_working_day).length,
+              weekly_offs:  cal.filter(d => d.is_weekly_off).length,
+              alt_sat_offs: cal.filter(d => d.is_alternate_saturday_off).length,
+              fatigue_days: cal.filter(d => d.fatigue_risk).length,
+            }
+          })
+        )
+        allCalendars.push(...results)
+      }
+    } catch (err: unknown) {
+      req.log.error({ err, month }, '[roster-calendar] coverage engine error')
+      return reply.code(500).send({ error: 'ROSTER_CALENDAR_ERROR', message: 'Failed to calculate roster coverage' })
     }
 
     const totalWorking = allCalendars.reduce((s, c) => s + c.working_days, 0)

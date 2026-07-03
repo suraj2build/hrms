@@ -18,8 +18,7 @@
  */
 import type { FastifyInstance } from 'fastify'
 import { z }                    from 'zod'
-
-const HR_ROLES = ['super_admin', 'hr_admin'] as const
+import { HR_ADMIN_ROLES }       from '../../lib/rbac.js'
 const dateRe   = /^\d{4}-\d{2}-\d{2}$/
 const monthRe  = /^\d{4}-\d{2}$/
 
@@ -48,7 +47,7 @@ export default async function executiveIntelligenceRoutes(fastify: FastifyInstan
   const auth = { preHandler: [fastify.authenticate] }
 
   function requireAdmin(req: any, reply: any): boolean {
-    if (!HR_ROLES.includes(req.userRole)) {
+    if (!HR_ADMIN_ROLES.includes(req.userRole)) {
       reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
       return false
     }

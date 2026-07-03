@@ -26,7 +26,7 @@
 -- When requeue_count >= threshold, is_quarantined is set to true.
 -- Operators clear quarantine via clearQuarantine() which sets cleared_at.
 
-CREATE TABLE poison_job_quarantine (
+CREATE TABLE IF NOT EXISTS poison_job_quarantine (
   job_id              uuid        PRIMARY KEY,
   job_type            text        NOT NULL,
   tenant_id           uuid        REFERENCES tenants(id) ON DELETE SET NULL,
@@ -44,10 +44,10 @@ CREATE TABLE poison_job_quarantine (
   updated_at          timestamptz NOT NULL DEFAULT now()
 );
 
-CREATE INDEX idx_poison_job_quarantine_tenant    ON poison_job_quarantine (tenant_id);
-CREATE INDEX idx_poison_job_quarantine_active    ON poison_job_quarantine (is_quarantined)
+CREATE INDEX IF NOT EXISTS idx_poison_job_quarantine_tenant    ON poison_job_quarantine (tenant_id);
+CREATE INDEX IF NOT EXISTS idx_poison_job_quarantine_active    ON poison_job_quarantine (is_quarantined)
   WHERE is_quarantined = true AND cleared_at IS NULL;
-CREATE INDEX idx_poison_job_quarantine_updated   ON poison_job_quarantine (updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_poison_job_quarantine_updated   ON poison_job_quarantine (updated_at DESC);
 
 -- Auto-update updated_at
 CREATE OR REPLACE FUNCTION fn_touch_poison_job_quarantine()
@@ -72,7 +72,7 @@ COMMENT ON TABLE poison_job_quarantine IS
 -- rows for the same job type within the same day.
 -- Operators acknowledge/resolve via API; status drives dashboard alerting.
 
-CREATE TABLE retry_storm_incidents (
+CREATE TABLE IF NOT EXISTS retry_storm_incidents (
   id              uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
   job_type        text        NOT NULL,
   tenant_id       uuid        REFERENCES tenants(id) ON DELETE SET NULL,
@@ -97,14 +97,14 @@ CREATE TABLE retry_storm_incidents (
   created_at      timestamptz NOT NULL DEFAULT now()
 );
 
-CREATE INDEX idx_retry_storm_open         ON retry_storm_incidents (status, detected_at DESC)
+CREATE INDEX IF NOT EXISTS idx_retry_storm_open         ON retry_storm_incidents (status, detected_at DESC)
   WHERE status = 'open';
-CREATE INDEX idx_retry_storm_job_type     ON retry_storm_incidents (job_type, detected_at DESC);
-CREATE INDEX idx_retry_storm_tenant       ON retry_storm_incidents (tenant_id, detected_at DESC);
+CREATE INDEX IF NOT EXISTS idx_retry_storm_job_type     ON retry_storm_incidents (job_type, detected_at DESC);
+CREATE INDEX IF NOT EXISTS idx_retry_storm_tenant       ON retry_storm_incidents (tenant_id, detected_at DESC);
 
 -- Dedup: one open storm per job_type per UTC-hour bucket.
 -- Uses the plain-text storm_bucket column (set by trigger) — no expression in index.
-CREATE UNIQUE INDEX idx_retry_storm_dedup
+CREATE UNIQUE INDEX IF NOT EXISTS idx_retry_storm_dedup
   ON retry_storm_incidents (job_type, storm_bucket)
   WHERE status = 'open';
 
@@ -132,7 +132,7 @@ COMMENT ON TABLE retry_storm_incidents IS
 -- Upserted on every startup and status change.
 -- Replaces the in-memory platformHealth.modules object which is cleared on restart.
 
-CREATE TABLE module_health (
+CREATE TABLE IF NOT EXISTS module_health (
   module_name     text        PRIMARY KEY,
   status          text        NOT NULL DEFAULT 'starting'
                               CHECK (status IN ('starting', 'healthy', 'degraded', 'failed', 'stopped')),
@@ -145,9 +145,9 @@ CREATE TABLE module_health (
   metadata        jsonb       NOT NULL DEFAULT '{}'
 );
 
-CREATE INDEX idx_module_health_status ON module_health (status)
+CREATE INDEX IF NOT EXISTS idx_module_health_status ON module_health (status)
   WHERE status IN ('failed', 'degraded');
-CREATE INDEX idx_module_health_updated ON module_health (last_updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_module_health_updated ON module_health (last_updated_at DESC);
 
 COMMENT ON TABLE module_health IS
   'Durable module startup/health state. Replaces in-memory platformHealth.modules in startup-health.ts.';

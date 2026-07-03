@@ -24,7 +24,7 @@ export interface VerificationResult {
   status:                  VerificationStatus
   entity_id:               string
   entity_type:             string
-  org_id:                  string
+  tenant_id:                  string
   verified_at:             string
   score:                   number       // 0–100
   flags:                   string[]     // e.g. ['name_mismatch', 'duplicate_pan']
@@ -45,7 +45,7 @@ export interface DuplicateDetectionResult {
   duplicate_type:       DuplicateType
   entity_id:            string         // the employee being checked
   entity_type:          string
-  org_id:               string
+  tenant_id:               string
   matching_entity_ids:  string[]       // other employees sharing the same value
   value_hash:           string         // SHA-256 of the duplicated value (no PII)
   severity:             EventSeverity
@@ -68,7 +68,7 @@ export interface TrustAuditSignal {
 export interface TrustScoreResult {
   score_type:      TrustScoreType
   entity_id:       string
-  org_id:          string
+  tenant_id:          string
   score:           number          // 0–100, higher = more trustworthy
   severity:        'low' | 'medium' | 'high' | 'critical'
   factors:         string[]        // legacy negative deductions — kept for backward compat
@@ -86,7 +86,7 @@ export type GraphEdgeType =
 
 export interface WorkforceGraphEdge {
   id?:           string
-  org_id:        string
+  tenant_id:        string
   from_entity:   string      // employee UUID
   from_type:     'employee'
   to_entity:     string      // bank account hash / phone hash / etc.
@@ -101,7 +101,7 @@ export type ComplianceRevisionType = 'pf' | 'esi' | 'minimum_wage' | 'overtime' 
 
 export interface ComplianceRevisionEvent {
   id?:               string
-  org_id?:           string    // NULL = platform-wide
+  tenant_id?:           string    // NULL = platform-wide
   revision_type:     ComplianceRevisionType
   jurisdiction:      string    // 'IN', 'IN-MH', etc.
   title:             string

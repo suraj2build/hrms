@@ -19,10 +19,11 @@
 import type { FastifyInstance } from 'fastify'
 import { z }                    from 'zod'
 import { computeLifecycleRisks, summariseLifecycle } from '../../lib/lifecycle-expiry.js'
+import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-const EXEC_ROLES = ['super_admin', 'hr_admin'] as const
+
 const monthRe    = /^\d{4}-\d{2}$/
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -138,7 +139,7 @@ export default async function executiveRoutes(fastify: FastifyInstance) {
   const auth = { preHandler: [fastify.authenticate] }
 
   function requireExec(req: any, reply: any): boolean {
-    if (!EXEC_ROLES.includes(req.userRole)) {
+    if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
       reply.code(403).send({ error: 'FORBIDDEN', message: 'Executive access required' })
       return false
     }
@@ -336,7 +337,7 @@ export default async function executiveRoutes(fastify: FastifyInstance) {
       fastify.supabase
         .from('workforce_trust_scores')
         .select('id', { count: 'exact', head: true })
-        .eq('org_id', req.tenantId)
+        .eq('tenant_id', req.tenantId)
         .eq('severity', 'high'),
 
       // Trust verified employees
@@ -1033,7 +1034,7 @@ export default async function executiveRoutes(fastify: FastifyInstance) {
       fastify.supabase
         .from('workforce_trust_scores')
         .select('id', { count: 'exact', head: true })
-        .eq('org_id', req.tenantId)
+        .eq('tenant_id', req.tenantId)
         .eq('severity', 'high'),
 
       // Medium-risk trust profiles
@@ -1060,7 +1061,7 @@ export default async function executiveRoutes(fastify: FastifyInstance) {
       fastify.supabase
         .from('duplicate_detection_events')
         .select('id', { count: 'exact', head: true })
-        .eq('org_id', req.tenantId),
+        .eq('tenant_id', req.tenantId),
 
       // Governance events 30d
       fastify.supabase
@@ -1074,7 +1075,7 @@ export default async function executiveRoutes(fastify: FastifyInstance) {
       fastify.supabase
         .from('workforce_trust_scores')
         .select('score, severity, computed_at')
-        .eq('org_id', req.tenantId)
+        .eq('tenant_id', req.tenantId)
         .eq('score_type', 'employee')
         .order('computed_at', { ascending: false })
         .limit(500),

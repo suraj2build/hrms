@@ -142,13 +142,11 @@ class EventService {
    * @param payload    Strongly-typed payload (enforced by EventMap)
    */
   emit<K extends EventName>(eventName: K, payload: EventMap[K]): void {
-    // Structured log — useful for debugging without a real event broker
     console.log(JSON.stringify({
       level:   'info',
       service: 'event',
       action:  'emit',
       event:   eventName,
-      payload,
     }))
 
     const list = this.handlers.get(eventName) ?? []

@@ -17,7 +17,7 @@ export type UnifiedSimulationType =
   | 'trust_degradation_projection'
 
 export interface PolicyChangeSimulationParams {
-  org_id:           string
+  tenant_id:           string
   policy_name:      string
   change_type:      'stricter' | 'relaxed' | 'new'
   affected_modules: string[]
@@ -27,7 +27,7 @@ export interface PolicyChangeSimulationParams {
 }
 
 export interface GovernanceDriftProjectionParams {
-  org_id:             string
+  tenant_id:             string
   current_drift_rate: number    // 0–100 current drift score
   trend_direction:    'improving' | 'stable' | 'deteriorating'
   weeks_ahead:        number
@@ -46,7 +46,7 @@ export class UnifiedSimulationService {
     const risk = adminImpact > 1000 ? 'high' as const : adminImpact > 200 ? 'warning' as const : 'info' as const
 
     return {
-      org_id:          params.org_id,
+      tenant_id:          params.tenant_id,
       simulation_type: 'policy_change',
       label:           `Policy change: ${params.policy_name} (${params.change_type})`,
       input_params:    params as unknown as Record<string, unknown>,
@@ -64,7 +64,7 @@ export class UnifiedSimulationService {
         explainability: explainabilityService.explain({
           event_type:  'simulation.policy_change',
           entity_type: 'org',
-          entity_id:   params.org_id,
+          entity_id:   params.tenant_id,
           payload:     { policy: params.policy_name, change_type: params.change_type },
           severity:    risk,
         }),
@@ -81,7 +81,7 @@ export class UnifiedSimulationService {
     const risk = projectedDrift > 70 ? 'critical' as const : projectedDrift > 50 ? 'high' as const : projectedDrift > 30 ? 'warning' as const : 'info' as const
 
     return {
-      org_id:          params.org_id,
+      tenant_id:          params.tenant_id,
       simulation_type: 'policy_change',
       label:           `Governance drift projection: ${params.weeks_ahead} weeks (${params.trend_direction})`,
       input_params:    params as unknown as Record<string, unknown>,
@@ -99,7 +99,7 @@ export class UnifiedSimulationService {
         explainability: explainabilityService.explain({
           event_type:  'simulation.governance_drift',
           entity_type: 'org',
-          entity_id:   params.org_id,
+          entity_id:   params.tenant_id,
           payload:     { current: params.current_drift_rate, projected: projectedDrift, weeks: params.weeks_ahead },
           severity:    risk,
         }),

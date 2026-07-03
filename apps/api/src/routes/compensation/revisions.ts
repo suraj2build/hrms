@@ -17,6 +17,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z }                    from 'zod'
 import { eventBus }             from '../../lib/event-bus.js'
+import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 
 const dateRe = /^\d{4}-\d{2}-\d{2}$/
 
@@ -44,7 +45,7 @@ export default async function compensationRevisionsRoute(fastify: FastifyInstanc
   const auth = { preHandler: [fastify.authenticate] }
 
   function isAdmin(role: string) {
-    return ['super_admin', 'hr_admin'].includes(role)
+    return (HR_ADMIN_ROLES as readonly string[]).includes(role)
   }
 
   /** Resolve the caller's own employee_id from their profile (server-side, never trusted). */

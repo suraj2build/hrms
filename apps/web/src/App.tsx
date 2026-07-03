@@ -18,8 +18,9 @@ const EssShell = lazy(() => import('@/components/layout/EssShell').then(m => ({ 
 import { ManagerShell }  from '@/components/layout/ManagerShell'  // /manager/* — manager console
 
 // ── Auth pages (always needed, keep eager) ────────────────────────────────────
-import { Login }        from '@/pages/auth/Login'
-import { Signup }       from '@/pages/auth/Signup'
+import { Login }          from '@/pages/auth/Login'
+import { Signup }         from '@/pages/auth/Signup'
+import { ForgotPassword } from '@/pages/auth/ForgotPassword'
 import { MobilePreview } from '@/pages/MobilePreview'
 import { AuthCallback } from '@/pages/auth/AuthCallback'
 
@@ -665,7 +666,8 @@ export default function App() {
               {/* ── Public ─────────────────────────────────────────────────── */}
               {/* Demo entry — activates demo mode (see lib/demo) then lands in the app. */}
               <Route path="/demo"          element={<Navigate to="/admin/control-center" replace />} />
-              <Route path="/login"         element={<Login />} />
+              <Route path="/login"            element={<Login />} />
+              <Route path="/forgot-password"  element={<ForgotPassword />} />
               <Route path="/mobile-preview" element={<MobilePreview />} />
               <Route path="/signup"        element={<Signup />} />
               <Route path="/terms"         element={<TermsPage />} />

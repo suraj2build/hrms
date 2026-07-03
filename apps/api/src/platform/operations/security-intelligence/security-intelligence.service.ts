@@ -18,7 +18,7 @@ export class SecurityIntelligenceService {
 
     const windowMs = 5 * 60 * 1000  // 5-minute window
     const now = Date.now()
-    const key = `${event.org_id}:${event.actor_id}:${event.event_type}`
+    const key = `${event.tenant_id}:${event.actor_id}:${event.event_type}`
     const existing = this.actorCounts.get(key)
 
     if (existing && (now - existing.window_start) < windowMs) {
@@ -55,7 +55,7 @@ export class SecurityIntelligenceService {
       signal_type:  type,
       entity_id:    event.actor_id!,
       entity_type:  'user',
-      org_id:       event.org_id,
+      tenant_id:       event.tenant_id,
       severity,
       description,
       detected_at:  new Date().toISOString(),
@@ -73,7 +73,7 @@ export class SecurityIntelligenceService {
   }
 
   getEvents(orgId?: string, limit = 50): SecurityIntelligenceEvent[] {
-    const all = orgId ? this.events.filter(e => e.org_id === orgId) : this.events
+    const all = orgId ? this.events.filter(e => e.tenant_id === orgId) : this.events
     return all.slice(-limit)
   }
 

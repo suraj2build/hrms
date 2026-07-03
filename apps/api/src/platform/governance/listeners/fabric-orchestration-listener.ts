@@ -37,7 +37,7 @@ export class FabricOrchestrationListener extends GovernanceListener {
       if (!nodeType) return
 
       await decisionGraphService.recordFromEvent(this.supabase, {
-        org_id:      event.org_id,
+        tenant_id:      event.tenant_id,
         entity_id:   event.entity_id,
         entity_type: event.entity_type,
         node_type:   nodeType,

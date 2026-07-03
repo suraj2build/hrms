@@ -17,12 +17,13 @@
 
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
+import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 
 export default async function managerCompensationRoute(fastify: FastifyInstance) {
   const auth = { preHandler: [fastify.authenticate] }
 
   function isAdmin(role: string) {
-    return ['super_admin', 'hr_admin'].includes(role)
+    return (HR_ADMIN_ROLES as readonly string[]).includes(role)
   }
 
   /** Resolve the manager employee_id for this request (self, or admin override). */

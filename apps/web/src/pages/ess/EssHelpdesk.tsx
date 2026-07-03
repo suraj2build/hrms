@@ -117,11 +117,12 @@ export function EssHelpdesk() {
   const [csatRating, setCsatRating] = useState(0)
   const [csatComment, setCsatComment] = useState('')
 
-  const { data: tickets = [], isLoading } = useQuery<Ticket[]>({
+  const { data: ticketsResp, isLoading } = useQuery<{ data?: Ticket[]; open_count?: number }>({
     queryKey: ['helpdesk', 'my', statusFilter],
     queryFn:  () =>
-      api.get<{ data?: Ticket[] }>(`/helpdesk/tickets/my${statusFilter !== 'all' ? `?status=${statusFilter}` : ''}`).then(r => r.data ?? []),
+      api.get<{ data?: Ticket[]; open_count?: number }>(`/helpdesk/tickets/my${statusFilter !== 'all' ? `?status=${statusFilter}` : ''}`),
   })
+  const tickets = ticketsResp?.data ?? []
 
   const { data: detail } = useQuery<Ticket | null>({
     queryKey: ['helpdesk', 'detail', openTicketId],
@@ -173,7 +174,7 @@ export function EssHelpdesk() {
     createTicket.mutate(form)
   }
 
-  const openCount = tickets.filter(t => !['resolved', 'closed'].includes(t.status)).length
+  const openCount = ticketsResp?.open_count ?? tickets.filter(t => !['resolved', 'closed'].includes(t.status)).length
 
   return (
     <PageContainer>

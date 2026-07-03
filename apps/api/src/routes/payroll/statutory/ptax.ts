@@ -8,12 +8,13 @@ import { z } from 'zod'
 import { computePTax } from '../../../lib/statutory/ptax-engine.js'
 import type { PTaxSlab } from '../../../lib/statutory/ptax-engine.js'
 import { logAction } from '../../../lib/audit-service.js'
+import { HR_ADMIN_ROLES } from '../../../lib/rbac.js'
 
 export default async function ptaxRoutes(fastify: FastifyInstance) {
   const auth = { preHandler: [fastify.authenticate] }
 
   function requireHrAdmin(req: any, reply: any, done: () => void) {
-    if (!['super_admin', 'hr_admin'].includes(req.userRole)) {
+    if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
       reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
       return
     }

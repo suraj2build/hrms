@@ -37,7 +37,7 @@ export class OperationalIntelligenceListener extends GovernanceListener {
     // 2. SLA tracking for leave/approval events
     try {
       if (event.event_type === 'leave.requested') {
-        slaService.track('approval-pending', event.entity_id, 'leave_request', event.org_id, event.timestamp)
+        slaService.track('approval-pending', event.entity_id, 'leave_request', event.tenant_id, event.timestamp)
       }
       if (event.event_type === 'leave.approved' || event.event_type === 'leave.rejected' || event.event_type === 'leave.cancelled') {
         slaService.resolve('approval-pending', event.entity_id)

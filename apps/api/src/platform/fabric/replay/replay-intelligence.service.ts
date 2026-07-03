@@ -15,7 +15,7 @@ export class ReplayIntelligenceService {
    * NEVER writes to operational tables.
    */
   async replay(supabase: SupabaseClient, params: {
-    org_id:      string
+    tenant_id:      string
     entity_id:   string
     entity_type: string
     from:        string    // ISO timestamp
@@ -24,7 +24,7 @@ export class ReplayIntelligenceService {
   }): Promise<ReplaySession> {
     const session: ReplaySession = {
       id:           randomUUID(),
-      org_id:       params.org_id,
+      tenant_id:       params.tenant_id,
       entity_id:    params.entity_id,
       entity_type:  params.entity_type,
       replay_from:  params.from,
@@ -40,7 +40,7 @@ export class ReplayIntelligenceService {
       const { data, error } = await supabase
         .from('platform_events')
         .select('*')
-        .eq('org_id', params.org_id)
+        .eq('tenant_id', params.tenant_id)
         .eq('entity_id', params.entity_id)
         .gte('timestamp', params.from)
         .lte('timestamp', params.to)
@@ -71,7 +71,7 @@ export class ReplayIntelligenceService {
       .from('replay_sessions')
       .insert({
         id:              session.id,
-        org_id:          session.org_id,
+        tenant_id:          session.tenant_id,
         entity_id:       session.entity_id,
         entity_type:     session.entity_type,
         replay_from:     session.replay_from,
@@ -91,7 +91,7 @@ export class ReplayIntelligenceService {
     const { data } = await supabase
       .from('replay_sessions')
       .select('*')
-      .eq('org_id', orgId)
+      .eq('tenant_id', orgId)
       .order('created_at', { ascending: false })
       .limit(limit)
     return (data ?? []) as ReplaySession[]

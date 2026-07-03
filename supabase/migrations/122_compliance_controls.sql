@@ -15,7 +15,7 @@
 
 -- ── Compliance control registry ───────────────────────────────────────────────
 
-CREATE TABLE compliance_controls (
+CREATE TABLE IF NOT EXISTS compliance_controls (
   control_id       text        PRIMARY KEY,   -- 'CC6.1', 'DPDPA-8', 'ISO-A9.4' etc.
   framework        text        NOT NULL
                                CHECK (framework IN ('SOC2', 'DPDPA2023', 'ISO27001', 'Internal')),
@@ -35,8 +35,8 @@ CREATE TABLE compliance_controls (
   updated_at       timestamptz NOT NULL DEFAULT now()
 );
 
-CREATE INDEX idx_compliance_controls_framework ON compliance_controls (framework);
-CREATE INDEX idx_compliance_controls_status    ON compliance_controls (status)
+CREATE INDEX IF NOT EXISTS idx_compliance_controls_framework ON compliance_controls (framework);
+CREATE INDEX IF NOT EXISTS idx_compliance_controls_status    ON compliance_controls (status)
   WHERE status NOT IN ('implemented', 'verified');
 
 -- Auto-update updated_at
@@ -58,7 +58,7 @@ COMMENT ON TABLE compliance_controls IS
 
 -- ── Evidence snapshots ────────────────────────────────────────────────────────
 
-CREATE TABLE compliance_evidence_snapshots (
+CREATE TABLE IF NOT EXISTS compliance_evidence_snapshots (
   id               uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
   control_id       text        NOT NULL REFERENCES compliance_controls(control_id) ON DELETE CASCADE,
   snapshot_date    date        NOT NULL DEFAULT CURRENT_DATE,
@@ -73,8 +73,8 @@ CREATE TABLE compliance_evidence_snapshots (
   UNIQUE (control_id, snapshot_date)
 );
 
-CREATE INDEX idx_compliance_evidence_control  ON compliance_evidence_snapshots (control_id, snapshot_date DESC);
-CREATE INDEX idx_compliance_evidence_failing  ON compliance_evidence_snapshots (snapshot_date DESC)
+CREATE INDEX IF NOT EXISTS idx_compliance_evidence_control  ON compliance_evidence_snapshots (control_id, snapshot_date DESC);
+CREATE INDEX IF NOT EXISTS idx_compliance_evidence_failing  ON compliance_evidence_snapshots (snapshot_date DESC)
   WHERE pass = false;
 
 COMMENT ON TABLE compliance_evidence_snapshots IS
@@ -139,8 +139,8 @@ VALUES
 
 ('CC6.3',  'SOC2', 'access_control',
  'Access is removed when no longer required',
- 'Employee status=terminated triggers session revocation job. Auth.users disabled on offboarding.',
- 'employees', 'implemented', 'Platform Team', CURRENT_DATE),
+ 'PARTIAL — is_active deactivation revokes auth tokens (ISSUE-061, implemented). Employee lifecycle separation (employees.status=separated) does NOT automatically revoke Supabase Auth tokens; the two state machines are unsynchronised (AF-001, open). Full implementation pending product decision on revocation timing.',
+ 'employees', 'in_progress', 'Platform Team', CURRENT_DATE),
 
 ('CC7.1',  'SOC2', 'monitoring',
  'System performance and capacity are monitored and evaluated',

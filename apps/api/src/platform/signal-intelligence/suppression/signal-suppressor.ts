@@ -11,7 +11,7 @@ export class SignalSuppressor {
   private seen: Map<string, number> = new Map()
 
   private key(signal: PlatformSignal): string {
-    return `${signal.org_id}:${signal.source}:${signal.entity_id}:${signal.event_type}:${signal.severity}`
+    return `${signal.tenant_id}:${signal.source}:${signal.entity_id}:${signal.event_type}:${signal.severity}`
   }
 
   shouldSuppress(signal: PlatformSignal): { suppress: boolean; reason?: string } {

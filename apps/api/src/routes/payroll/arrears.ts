@@ -5,6 +5,7 @@
 
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
+import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 
 const ARREAR_TYPES = ['salary_revision', 'bonus_revision', 'component_change', 'correction', 'other'] as const
 
@@ -12,7 +13,7 @@ export default async function arrearsRoutes(fastify: FastifyInstance) {
   const auth = { preHandler: [fastify.authenticate] }
 
   function requireHrAdmin(req: any, reply: any, done: () => void) {
-    if (!['super_admin', 'hr_admin'].includes(req.userRole)) {
+    if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
       reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
       return
     }
@@ -35,7 +36,7 @@ export default async function arrearsRoutes(fastify: FastifyInstance) {
       .from('arrear_batches')
       .select('*')
       .eq('tenant_id', req.tenantId)
-      .order('created_at', { ascending: false })
+      .order('created_at', { ascending: false }).limit(200)
 
     if (parsed.data.status) q = q.eq('status', parsed.data.status)
     if (parsed.data.from_period) q = q.gte('from_period', parsed.data.from_period)
@@ -164,7 +165,7 @@ export default async function arrearsRoutes(fastify: FastifyInstance) {
       .select('*')
       .eq('tenant_id', req.tenantId)
       .eq('batch_id', id)
-      .order('period_month', { ascending: true })
+      .order('period_month', { ascending: true }).limit(1000)
     if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
 
     const empIds = [...new Set((records ?? []).map((r: any) => r.employee_id))]
@@ -300,7 +301,7 @@ export default async function arrearsRoutes(fastify: FastifyInstance) {
       .select('*, arrear_batches(id, batch_name, arrear_type, status, from_period, to_period, payout_month)')
       .eq('employee_id', employeeId)
       .eq('tenant_id', req.tenantId)
-      .order('period_month', { ascending: false })
+      .order('period_month', { ascending: false }).limit(200)
 
     if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
     return reply.send({ data: data ?? [] })

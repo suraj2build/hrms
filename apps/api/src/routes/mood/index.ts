@@ -17,6 +17,7 @@
  */
 
 import type { FastifyInstance } from 'fastify'
+import { z } from 'zod'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { logAction }                   from '../../lib/audit-service.js'
 import { resolveAssistantChain }       from '../../lib/ai/config.js'
@@ -430,11 +431,28 @@ export default async function moodRoutes(fastify: FastifyInstance) {
 
   // ── POST /mood/admin/pulse ───────────────────────────────────────────────────
 
+  const CreatePulseSchema = z.object({
+    question:      z.string().min(1),
+    options:       z.array(z.unknown()).optional().nullable(),
+    starts_at:     z.string().optional().nullable(),
+    ends_at:       z.string().optional().nullable(),
+    poll_category: z.string().optional(),
+  })
+
+  const UpdatePulseSchema = z.object({
+    question:      z.string().min(1).optional(),
+    options:       z.array(z.unknown()).optional().nullable(),
+    status:        z.string().optional(),
+    starts_at:     z.string().optional().nullable(),
+    ends_at:       z.string().optional().nullable(),
+    poll_category: z.string().optional(),
+  })
+
   fastify.post('/admin/pulse', hrAuth, async (req: any, reply) => {
     const tenantId = req.tenantId
-    const { question, options, starts_at, ends_at, poll_category } = req.body as any
-
-    if (!question?.trim()) return reply.status(400).send({ error: 'question is required' })
+    const parsed = CreatePulseSchema.safeParse(req.body)
+    if (!parsed.success) return reply.status(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message ?? 'Invalid request body' })
+    const { question, options, starts_at, ends_at, poll_category } = parsed.data
 
     const { data, error } = await supabase
       .from('pulse_questions')
@@ -470,12 +488,13 @@ export default async function moodRoutes(fastify: FastifyInstance) {
   fastify.patch('/admin/pulse/:id', hrAuth, async (req: any, reply) => {
     const tenantId = req.tenantId
     const { id }   = req.params as { id: string }
-    const body     = req.body as Record<string, unknown>
+    const parsed   = UpdatePulseSchema.safeParse(req.body)
+    if (!parsed.success) return reply.status(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message ?? 'Invalid request body' })
 
     const allowed = ['question', 'options', 'status', 'starts_at', 'ends_at', 'poll_category']
     const update: Record<string, unknown> = {}
     for (const k of allowed) {
-      if (body[k] !== undefined) update[k] = body[k]
+      if ((parsed.data as any)[k] !== undefined) update[k] = (parsed.data as any)[k]
     }
 
     if (Object.keys(update).length === 0) {
@@ -510,15 +529,24 @@ export default async function moodRoutes(fastify: FastifyInstance) {
     const tenantId = req.tenantId
     const { id }   = req.params as { id: string }
 
-    const { data, error } = await supabase
+    const qs = z.object({
+      limit:  z.coerce.number().int().min(1).max(500).default(50),
+      offset: z.coerce.number().int().min(0).default(0),
+    }).safeParse(req.query)
+
+    const limit  = qs.success ? qs.data.limit  : 50
+    const offset = qs.success ? qs.data.offset : 0
+
+    const { data, count, error } = await supabase
       .from('pulse_responses')
-      .select('id, response, created_at, employee_id')
+      .select('id, response, created_at, employee_id', { count: 'exact' })
       .eq('tenant_id', tenantId)
       .eq('question_id', id)
       .order('created_at', { ascending: false })
+      .range(offset, offset + limit - 1)
 
     if (error) return reply.status(500).send({ error: error.message })
-    return reply.send({ data: data ?? [] })
+    return reply.send({ data: data ?? [], total: count ?? 0, limit, offset })
   })
 
   // ── GET /mood/admin/cluster-breakdown ────────────────────────────────────────

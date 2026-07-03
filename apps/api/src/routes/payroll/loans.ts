@@ -6,6 +6,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { gateApprove, gateReject } from '../../lib/approval-orchestrator.js'
+import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 
 const LOAN_TYPES = ['personal', 'housing', 'vehicle', 'education', 'emergency', 'other'] as const
 const PAYMENT_TYPES = ['emi', 'prepayment', 'foreclosure', 'adjustment'] as const
@@ -18,7 +19,7 @@ function computeEMI(principal: number, annualRatePct: number, tenureMonths: numb
 
 export default async function loansRoutes(fastify: FastifyInstance) {
   const auth = { preHandler: [fastify.authenticate] }
-  const isHr = (role: string) => ['super_admin', 'hr_admin'].includes(role)
+  const isHr = (role: string) => (HR_ADMIN_ROLES as readonly string[]).includes(role)
 
   function requireHrAdmin(req: any, reply: any, done: () => void) {
     if (!isHr(req.userRole)) {
@@ -44,7 +45,7 @@ export default async function loansRoutes(fastify: FastifyInstance) {
       .from('employee_loans')
       .select('*, employees(id, first_name, last_name, employee_code)')
       .eq('tenant_id', req.tenantId)
-      .order('created_at', { ascending: false })
+      .order('created_at', { ascending: false }).limit(500)
 
     if (parsed.data.employee_id) q = q.eq('employee_id', parsed.data.employee_id)
     if (parsed.data.status) q = q.eq('status', parsed.data.status)
@@ -71,7 +72,7 @@ export default async function loansRoutes(fastify: FastifyInstance) {
     }
 
     // Self-scoping: non-admins may only raise a loan request for themselves.
-    if (!['super_admin', 'hr_admin'].includes(req.userRole)) {
+    if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
       const { data: profile } = await fastify.supabase
         .from('profiles')
         .select('employee_id')
@@ -320,7 +321,7 @@ export default async function loansRoutes(fastify: FastifyInstance) {
       .select('*')
       .eq('loan_id', id)
       .eq('tenant_id', req.tenantId)
-      .order('installment_number', { ascending: true })
+      .order('installment_number', { ascending: true }).limit(200)
 
     if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
     return reply.send({ data: data ?? [] })

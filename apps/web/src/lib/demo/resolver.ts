@@ -71,6 +71,7 @@ function ok(data: Json, message = 'Saved (demo)') {
  * People screens. (On a live deployment a real LLM answers from real HR data.)
  */
 function demoAssistantReply(body: unknown): string {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const msg = String((body as any)?.message ?? '').toLowerCase()
   const has = (...ws: string[]) => ws.some(w => msg.includes(w))
   const inr = (n: number) => '₹' + Math.round(n).toLocaleString('en-IN')
@@ -80,12 +81,14 @@ function demoAssistantReply(body: unknown): string {
     return `Your current leave balances are — ${parts}. Apply or view details from Me → Leave.`
   }
   if (has('payslip', 'salary', 'net pay', 'last pay', 'paid')) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const latest: any = fx.demoMyPayslips()[0]
     return latest
       ? `Your latest payslip (${latest.month}) shows a net pay of ${inr(Number(latest.net_pay))} on a gross of ${inr(Number(latest.gross_pay))}. Download it from Pay → Payslips.`
       : 'You have no payslips yet.'
   }
   if (has('pending', 'approval', 'approve', 'waiting')) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const mine = fx.demoMyLeaveRequests().filter((r: any) => r.status === 'pending')
     return `You have ${mine.length} pending leave request(s)${mine[0] ? ` — e.g. ${mine[0].computed_days} day(s) from ${mine[0].from_date} (“${mine[0].reason}”)` : ''}. Track them in My Approvals.`
   }
@@ -98,8 +101,10 @@ function demoAssistantReply(body: unknown): string {
   if (has('holiday', 'next holiday')) {
     const now = new Date()
     const today = now.toISOString().slice(0, 10)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const next = fx.demoHolidays(now.getFullYear()).filter((h: any) => h.date >= today).slice(0, 2)
     return next.length
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ? `Upcoming holidays — ${next.map((h: any) => `${h.name} (${h.date})`).join(', ')}.`
       : 'No more holidays this year in the demo calendar.'
   }

@@ -549,7 +549,7 @@ export function PayrollControlCenter(): JSX.Element {
   })
 
   const runPayrollMutation = useMutation({
-    mutationFn: () => api.post<{ run_id: string }>('/payroll/runs', { trigger: 'manual' }),
+    mutationFn: () => api.post<{ run_id: string }>('/payroll/runs', { month: payrollMonth }),
     onSuccess: (data) => {
       setIsRunning(false)
       setLastRunId(data?.run_id ?? null)

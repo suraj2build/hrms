@@ -24,6 +24,7 @@
 
 import type { FastifyInstance } from 'fastify'
 import type { SupabaseClient }  from '@supabase/supabase-js'
+import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 
 async function resetTableLock(supabase: SupabaseClient, tenantId: string): Promise<boolean> {
   const { data, error } = await supabase
@@ -50,7 +51,7 @@ export default async function forceUnlockRoute(fastify: FastifyInstance) {
     '/attendance/process/force-unlock',
     { preHandler: [fastify.authenticate] },
     async (req, reply) => {
-      if (!['super_admin', 'hr_admin'].includes(req.userRole)) {
+      if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
         return reply.code(403).send({ error: 'FORBIDDEN', message: 'hr_admin or super_admin required' })
       }
 

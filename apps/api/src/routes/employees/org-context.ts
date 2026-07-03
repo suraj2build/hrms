@@ -18,6 +18,7 @@ import {
   getHolidayDates,
   type HolidayRowWithDate,
 } from '../../lib/org-context.js'
+import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 
 export default async function employeeOrgContextRoutes(fastify: FastifyInstance) {
   const auth = { preHandler: [fastify.authenticate] }
@@ -142,7 +143,7 @@ export default async function employeeOrgContextRoutes(fastify: FastifyInstance)
 
   // ── POST /employees/employees/:id/org-context ───────────────────────────────────────
   fastify.post('/employees/:id/org-context', auth, async (req: any, reply) => {
-    if (!['super_admin', 'hr_admin'].includes(req.userRole)) {
+    if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
       return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
     }
 

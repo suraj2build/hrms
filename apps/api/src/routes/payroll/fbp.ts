@@ -12,6 +12,7 @@ import { logAction } from '../../lib/audit-service.js'
 import {
   computeQuarterReconciliation, lockQuarterReconciliation,
 } from '../../lib/fbp-service.js'
+import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 
 const FY_RE = /^\d{4}-\d{2}$/   // e.g. 2026-27
 
@@ -19,7 +20,7 @@ export default async function fbpRoutes(fastify: FastifyInstance) {
   const auth = { preHandler: [fastify.authenticate] }
 
   function requireHrAdmin(req: any, reply: any, done: () => void) {
-    if (!['super_admin', 'hr_admin'].includes(req.userRole)) {
+    if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
       reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
       return
     }
@@ -45,7 +46,7 @@ export default async function fbpRoutes(fastify: FastifyInstance) {
       .select('*, salary_components(id, name, code)')
       .eq('tenant_id', req.tenantId)
       .eq('employee_id', empId)
-      .order('created_at', { ascending: false })
+      .order('created_at', { ascending: false }).limit(100)
     if (qs.success && qs.data.financial_year) q = q.eq('financial_year', qs.data.financial_year)
     if (qs.success && qs.data.quarter) q = q.eq('quarter', qs.data.quarter)
 
@@ -68,7 +69,7 @@ export default async function fbpRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', req.tenantId)
       .eq('employee_id', empId)
       .order('financial_year', { ascending: false })
-      .order('quarter', { ascending: false })
+      .order('quarter', { ascending: false }).limit(100)
     if (qs.success && qs.data.financial_year) q = q.eq('financial_year', qs.data.financial_year)
     if (qs.success && qs.data.quarter) q = q.eq('quarter', qs.data.quarter)
 
@@ -197,7 +198,7 @@ export default async function fbpRoutes(fastify: FastifyInstance) {
       .select('id, file_name, storage_path, mime_type, file_size_bytes, uploaded_at')
       .eq('tenant_id', req.tenantId)
       .eq('submission_id', id)
-      .order('uploaded_at', { ascending: false })
+      .order('uploaded_at', { ascending: false }).limit(50)
     if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
     return reply.send({ data: data ?? [] })
   })
@@ -208,20 +209,26 @@ export default async function fbpRoutes(fastify: FastifyInstance) {
       status:         z.string().optional(),
       financial_year: z.string().optional(),
       quarter:        z.coerce.number().optional(),
+      limit:          z.coerce.number().int().min(1).max(500).default(200),
+      offset:         z.coerce.number().int().min(0).default(0),
     }).safeParse(req.query)
+
+    const limit  = qs.success ? qs.data.limit  : 200
+    const offset = qs.success ? qs.data.offset : 0
 
     let q = fastify.supabase
       .from('fbp_bill_submissions')
-      .select('*, salary_components(id, name, code), employees!inner(id, first_name, last_name, employee_code)')
+      .select('*, salary_components(id, name, code), employees!inner(id, first_name, last_name, employee_code)', { count: 'exact' })
       .eq('tenant_id', req.tenantId)
       .order('created_at', { ascending: false })
     if (qs.success && qs.data.status)         q = q.eq('status', qs.data.status)
     if (qs.success && qs.data.financial_year) q = q.eq('financial_year', qs.data.financial_year)
     if (qs.success && qs.data.quarter)        q = q.eq('quarter', qs.data.quarter)
+    q = q.range(offset, offset + limit - 1)
 
-    const { data, error } = await q
+    const { data, count, error } = await q
     if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
-    return reply.send({ data: data ?? [] })
+    return reply.send({ data: data ?? [], total: count ?? 0, limit, offset })
   })
 
   // ── HR: approve submission (approved_amount may differ from claimed) ──────────

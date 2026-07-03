@@ -6,6 +6,7 @@
  * HR Admin only.
  */
 import type { FastifyInstance } from 'fastify'
+import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 
 const DEFAULT_TEMPLATES = [
   {
@@ -73,7 +74,7 @@ export default async function seedOnboardingTemplatesRoutes(fastify: FastifyInst
   const auth = { preHandler: [fastify.authenticate] }
 
   fastify.post('/onboarding/seed-default-templates', auth, async (req: any, reply) => {
-    if (!['super_admin', 'hr_admin'].includes(req.userRole)) {
+    if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
       return reply.code(403).send({ error: 'FORBIDDEN' })
     }
 

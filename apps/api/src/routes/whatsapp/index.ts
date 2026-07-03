@@ -11,6 +11,7 @@
  */
 
 import type { FastifyPluginAsync } from 'fastify'
+import crypto                     from 'node:crypto'
 import { createClient }           from '@supabase/supabase-js'
 import { WhatsAppProvider }       from '../../lib/whatsapp-provider.js'
 
@@ -33,7 +34,22 @@ const whatsappRoutes: FastifyPluginAsync = async (fastify) => {
   })
 
   // ── POST /whatsapp/webhook — inbound messages ─────────────────────────────────
-  fastify.post('/whatsapp/webhook', async (req, reply) => {
+  fastify.post('/whatsapp/webhook', { config: { rawBody: true, rateLimit: { max: Number(process.env.WHATSAPP_WEBHOOK_RATE_LIMIT ?? 300), timeWindow: '1 minute' } } }, async (req, reply) => {
+    // Verify Meta HMAC-SHA256 signature before processing the payload.
+    // Header: X-Hub-Signature-256: sha256=<hex digest of HMAC-SHA256(appSecret, rawBody)>
+    const appSecret = process.env.WHATSAPP_APP_SECRET
+    if (!appSecret) {
+      req.log.error('[whatsapp] WHATSAPP_APP_SECRET is not configured — rejecting inbound webhook')
+      return reply.code(503).send({ error: 'SERVICE_UNAVAILABLE' })
+    }
+    const sig = (req.headers['x-hub-signature-256'] as string | undefined) ?? ''
+    const raw = (req as any).rawBody as string | Buffer | undefined
+    if (!sig || !raw) return reply.code(403).send({ error: 'MISSING_SIGNATURE' })
+    const expected = 'sha256=' + crypto.createHmac('sha256', appSecret).update(raw).digest('hex')
+    const ok = expected.length === sig.length &&
+      crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(sig))
+    if (!ok) return reply.code(403).send({ error: 'INVALID_SIGNATURE' })
+
     const body = req.body as Record<string, unknown>
 
     try {

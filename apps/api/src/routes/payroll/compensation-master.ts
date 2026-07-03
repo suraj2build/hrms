@@ -17,13 +17,14 @@ import {
   listStructureComponents, addStructureComponent, removeStructureComponent,
   cloneStructure, seedStandardComponents,
 } from '../../lib/salary-config-store.js'
+import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 
 export default async function compensationMasterRoutes(fastify: FastifyInstance) {
   const auth        = { preHandler: [fastify.authenticate] }
   const hrAdminAuth = { preHandler: [fastify.authenticate, requireHrAdmin] }
 
   function requireHrAdmin(req: any, reply: any, done: () => void) {
-    if (!['super_admin', 'hr_admin'].includes(req.userRole)) {
+    if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
       reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
       return
     }
@@ -211,7 +212,7 @@ export default async function compensationMasterRoutes(fastify: FastifyInstance)
   fastify.get('/employee/:employeeId', auth, async (req: any, reply) => {
     const { employeeId } = req.params as { employeeId: string }
 
-    const isHrAdmin = ['super_admin', 'hr_admin'].includes(req.userRole)
+    const isHrAdmin = (HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)
     if (!isHrAdmin) {
       const { data: callerProfile } = await fastify.supabase
         .from('profiles')

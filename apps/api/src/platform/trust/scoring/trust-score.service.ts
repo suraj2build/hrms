@@ -107,7 +107,7 @@ export class TrustScoreService {
 
   computeEmployeeTrustScore(params: {
     employee_id:  string
-    org_id:       string
+    tenant_id:       string
     verifications: VerificationResult[]
     duplicates:    DuplicateDetectionResult[]
     risk_flags?:   string[]
@@ -146,7 +146,7 @@ export class TrustScoreService {
     return {
       score_type:      'employee',
       entity_id:       params.employee_id,
-      org_id:          params.org_id,
+      tenant_id:          params.tenant_id,
       score,
       severity,
       factors,
@@ -167,7 +167,7 @@ export class TrustScoreService {
 
   computeOnboardingTrustScore(params: {
     employee_id:  string
-    org_id:       string
+    tenant_id:       string
     has_pan:      boolean
     has_bank:     boolean
     has_identity: boolean
@@ -184,7 +184,7 @@ export class TrustScoreService {
     } else if (params.pan_valid === false) {
       score -= 15; factors.push('PAN validation failed')
     } else {
-      mockVerifications.push({ verification_type: 'pan', status: 'verified', entity_id: params.employee_id, entity_type: 'employee', org_id: params.org_id, verified_at: new Date().toISOString(), score: 90, flags: [] })
+      mockVerifications.push({ verification_type: 'pan', status: 'verified', entity_id: params.employee_id, entity_type: 'employee', tenant_id: params.tenant_id, verified_at: new Date().toISOString(), score: 90, flags: [] })
     }
 
     if (!params.has_bank) {
@@ -192,13 +192,13 @@ export class TrustScoreService {
     } else if (params.bank_valid === false) {
       score -= 15; factors.push('Bank validation failed')
     } else {
-      mockVerifications.push({ verification_type: 'bank_account', status: 'verified', entity_id: params.employee_id, entity_type: 'employee', org_id: params.org_id, verified_at: new Date().toISOString(), score: 90, flags: [] })
+      mockVerifications.push({ verification_type: 'bank_account', status: 'verified', entity_id: params.employee_id, entity_type: 'employee', tenant_id: params.tenant_id, verified_at: new Date().toISOString(), score: 90, flags: [] })
     }
 
     if (!params.has_identity) {
       score -= 10; factors.push('Identity documents not uploaded')
     } else {
-      mockVerifications.push({ verification_type: 'document', status: 'verified', entity_id: params.employee_id, entity_type: 'employee', org_id: params.org_id, verified_at: new Date().toISOString(), score: 85, flags: [] })
+      mockVerifications.push({ verification_type: 'document', status: 'verified', entity_id: params.employee_id, entity_type: 'employee', tenant_id: params.tenant_id, verified_at: new Date().toISOString(), score: 85, flags: [] })
     }
 
     for (const d of params.duplicates) {
@@ -213,7 +213,7 @@ export class TrustScoreService {
     return {
       score_type:      'onboarding',
       entity_id:       params.employee_id,
-      org_id:          params.org_id,
+      tenant_id:          params.tenant_id,
       score,
       severity,
       factors,

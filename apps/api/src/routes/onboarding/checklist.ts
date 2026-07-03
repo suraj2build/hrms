@@ -23,8 +23,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { emitOnboardingChecklistCompleted } from '../../lib/onboarding-orchestrator.js'
-
-const HR_ROLES = ['super_admin', 'hr_admin']
+import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 
 /**
  * Self-or-HR access check. An employee may access their own checklist/tasks.
@@ -33,7 +32,7 @@ const HR_ROLES = ['super_admin', 'hr_admin']
  * `req.employeeId` (with `req.userId` kept as a fallback for legacy linkage).
  */
 function canAccessEmployee(req: any, employeeId: string): boolean {
-  return HR_ROLES.includes(req.userRole)
+  return HR_ADMIN_ROLES.includes(req.userRole)
     || req.employeeId === employeeId
     || req.userId === employeeId
 }
@@ -115,7 +114,7 @@ export default async function onboardingChecklistRoutes(fastify: FastifyInstance
 
   // ── POST /templates ─────────────────────────────────────────────────────────
   fastify.post('/templates', auth, async (req: any, reply) => {
-    if (!HR_ROLES.includes(req.userRole)) {
+    if (!HR_ADMIN_ROLES.includes(req.userRole)) {
       return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
     }
 
@@ -164,7 +163,7 @@ export default async function onboardingChecklistRoutes(fastify: FastifyInstance
   })
 
   fastify.post('/templates/:id/items', auth, async (req: any, reply) => {
-    if (!HR_ROLES.includes(req.userRole)) {
+    if (!HR_ADMIN_ROLES.includes(req.userRole)) {
       return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
     }
 
@@ -216,7 +215,7 @@ export default async function onboardingChecklistRoutes(fastify: FastifyInstance
 
   // ── DELETE /templates/:id/items/:itemId ─────────────────────────────────────
   fastify.delete('/templates/:id/items/:itemId', auth, async (req: any, reply) => {
-    if (!HR_ROLES.includes(req.userRole)) {
+    if (!HR_ADMIN_ROLES.includes(req.userRole)) {
       return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
     }
 
@@ -300,7 +299,7 @@ export default async function onboardingChecklistRoutes(fastify: FastifyInstance
 
   // ── POST /employees/:employeeId/checklist ───────────────────────────────────
   fastify.post('/employees/:employeeId/checklist', auth, async (req: any, reply) => {
-    if (!HR_ROLES.includes(req.userRole)) {
+    if (!HR_ADMIN_ROLES.includes(req.userRole)) {
       return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
     }
 
@@ -534,7 +533,7 @@ export default async function onboardingChecklistRoutes(fastify: FastifyInstance
 
   // ── GET /checklists ─── list all employee checklists for tenant (with counts) ─
   fastify.get('/checklists', auth, async (req: any, reply) => {
-    if (!HR_ROLES.includes(req.userRole)) {
+    if (!HR_ADMIN_ROLES.includes(req.userRole)) {
       return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
     }
 
@@ -755,7 +754,7 @@ export default async function onboardingChecklistRoutes(fastify: FastifyInstance
 
   // ── DELETE /template-items/:itemId ─── delete item by id (tenant-scoped) ──────
   fastify.delete('/template-items/:itemId', auth, async (req: any, reply) => {
-    if (!HR_ROLES.includes(req.userRole)) {
+    if (!HR_ADMIN_ROLES.includes(req.userRole)) {
       return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
     }
 
@@ -778,7 +777,7 @@ export default async function onboardingChecklistRoutes(fastify: FastifyInstance
 
   // ── POST /checklists ─── assign checklist (body {employee_id, template_id}) ───
   fastify.post('/checklists', auth, async (req: any, reply) => {
-    if (!HR_ROLES.includes(req.userRole)) {
+    if (!HR_ADMIN_ROLES.includes(req.userRole)) {
       return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
     }
 

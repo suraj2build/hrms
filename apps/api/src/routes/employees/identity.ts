@@ -23,6 +23,20 @@ export default async function identityRoutes(fastify: FastifyInstance) {
   const hrAdminAuth = { preHandler: [fastify.authenticate, requireRole(...HR_ADMIN_ROLES)] }
 
   fastify.get('/employees/:id/identity', auth, async (req: any, reply) => {
+    // Government-ID PII: HR admins may read any employee; employees may only read their own.
+    const isHr = HR_ADMIN_ROLES.includes(req.userRole)
+    if (!isHr) {
+      const { data: profile } = await fastify.supabase
+        .from('profiles')
+        .select('employee_id')
+        .eq('id', req.userId)
+        .eq('tenant_id', req.tenantId)
+        .maybeSingle()
+      if (!profile || (profile as any).employee_id !== req.params.id) {
+        return reply.code(403).send({ error: 'FORBIDDEN', message: 'Access denied' })
+      }
+    }
+
     if (!await verifyEmployee(fastify, req.params.id, req.tenantId))
       return reply.code(404).send({ error: 'NOT_FOUND', message: 'Employee not found' })
     const { data, error } = await fastify.supabase

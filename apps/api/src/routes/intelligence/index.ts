@@ -346,6 +346,9 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
 
   // ── GET /intelligence/manager-summary ────────────────────────────────────────
   fastify.get('/manager-summary', { preHandler: [fastify.authenticate] }, async (req: any, reply) => {
+    if (req.userRole !== 'hr_admin' && req.userRole !== 'super_admin' && req.userRole !== 'manager') {
+      return reply.code(403).send({ error: 'FORBIDDEN' })
+    }
     const tenantId: string = req.tenantId
     const now = new Date()
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10)
@@ -1066,6 +1069,9 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
 
   // ── POST /intelligence/search ───────────────────────────────────────────────
   fastify.post('/search', { preHandler: [fastify.authenticate] }, async (req: any, reply) => {
+    if (req.userRole !== 'hr_admin' && req.userRole !== 'super_admin') {
+      return reply.code(403).send({ error: 'FORBIDDEN' })
+    }
     const tenantId: string = req.tenantId
     const { query } = req.body as { query?: string }
     if (!query || typeof query !== 'string' || !query.trim()) {

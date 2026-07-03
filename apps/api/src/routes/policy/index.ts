@@ -20,12 +20,42 @@
  *   POST /:id/archive      — archive a published/draft policy
  */
 
+import { z } from 'zod'
 import Anthropic          from '@anthropic-ai/sdk'
 import type { FastifyInstance } from 'fastify'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { logAction }                   from '../../lib/audit-service.js'
 import { notify }                      from '../../lib/notify.js'
 import { WhatsAppProvider }            from '../../lib/whatsapp-provider.js'
+
+// ── Body schemas ─────────────────────────────────────────────────────────────
+
+const AskPolicySchema = z.object({
+  question: z.string().min(1, 'question is required'),
+  language: z.string().optional(),
+})
+
+const CreatePolicySchema = z.object({
+  title: z.string().min(1, 'title is required'),
+  category: z.string().optional(),
+  description: z.string().optional().nullable(),
+  content: z.string().optional().nullable(),
+  file_url: z.string().optional().nullable(),
+  requires_acknowledgement: z.boolean().optional(),
+  effective_from: z.string().optional().nullable(),
+  is_mandatory: z.boolean().optional(),
+})
+
+const UpdatePolicySchema = z.object({
+  title: z.string().optional(),
+  category: z.string().optional(),
+  description: z.string().optional().nullable(),
+  content: z.string().optional().nullable(),
+  file_url: z.string().optional().nullable(),
+  requires_acknowledgement: z.boolean().optional(),
+  effective_from: z.string().optional().nullable(),
+  is_mandatory: z.boolean().optional(),
+})
 
 export default async function policyRoutes(fastify: FastifyInstance) {
   const { supabase } = fastify
@@ -68,8 +98,9 @@ export default async function policyRoutes(fastify: FastifyInstance) {
 
   fastify.post('/ask', { preHandler: fastify.authenticate }, async (req: any, reply) => {
     const tenantId = req.tenantId
-    const { question, language } = req.body as { question?: string; language?: string }
-    if (!question?.trim()) return reply.status(400).send({ error: 'question is required' })
+    const parsed = AskPolicySchema.safeParse(req.body)
+    if (!parsed.success) return reply.status(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message ?? 'Invalid request body' })
+    const { question, language } = parsed.data
 
     const employeeId = await getEmployeeId(req.user.id)
 
@@ -143,6 +174,7 @@ export default async function policyRoutes(fastify: FastifyInstance) {
       .eq('status', 'published')
       .order('category')
       .order('title')
+      .limit(500)
 
     if (category) q = q.eq('category', category)
 
@@ -182,6 +214,7 @@ export default async function policyRoutes(fastify: FastifyInstance) {
       .select('id, title, category, description, status, requires_acknowledgement, effective_from, published_at, version, created_at, is_mandatory')
       .eq('tenant_id', tenantId)
       .order('created_at', { ascending: false })
+      .limit(500)
 
     if (status) q = q.eq('status', status)
 
@@ -342,6 +375,8 @@ export default async function policyRoutes(fastify: FastifyInstance) {
 
   fastify.post('/', hrAuth, async (req: any, reply) => {
     const tenantId = req.tenantId
+    const parsed = CreatePolicySchema.safeParse(req.body)
+    if (!parsed.success) return reply.status(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message ?? 'Invalid request body' })
     const {
       title,
       category = 'other',
@@ -351,9 +386,7 @@ export default async function policyRoutes(fastify: FastifyInstance) {
       requires_acknowledgement = false,
       effective_from,
       is_mandatory = false,
-    } = req.body as any
-
-    if (!title?.trim()) return reply.status(400).send({ error: 'title is required' })
+    } = parsed.data
 
     const { data, error } = await supabase
       .from('hr_policies')
@@ -392,7 +425,9 @@ export default async function policyRoutes(fastify: FastifyInstance) {
   fastify.put('/:id', hrAuth, async (req: any, reply) => {
     const tenantId = req.tenantId
     const { id }   = req.params as { id: string }
-    const body     = req.body as Record<string, unknown>
+    const parsedBody = UpdatePolicySchema.safeParse(req.body)
+    if (!parsedBody.success) return reply.status(400).send({ error: 'VALIDATION_ERROR', message: parsedBody.error.issues[0]?.message ?? 'Invalid request body' })
+    const body = parsedBody.data as Record<string, unknown>
 
     const allowed = [
       'title','category','description','content',
@@ -486,10 +521,15 @@ export default async function policyRoutes(fastify: FastifyInstance) {
       const wa = new WhatsAppProvider(supabase)
       for (const emp of empPhones ?? []) {
         if (emp.phone) {
-          await wa.sendTemplate(tenantId, emp.phone, 'policy_published', {
-            name:  emp.first_name ?? 'Team',
-            title: policy.title,
-          })
+          try {
+            await wa.sendTemplate(tenantId, emp.phone, 'policy_published', {
+              name:  emp.first_name ?? 'Team',
+              title: policy.title,
+            })
+          } catch (waErr) {
+            // best-effort — a single employee's notification failure must not abort the loop
+            fastify.log.warn({ err: waErr, employeeId: emp.id }, 'policy: WhatsApp notification failed — continuing broadcast')
+          }
         }
       }
     }

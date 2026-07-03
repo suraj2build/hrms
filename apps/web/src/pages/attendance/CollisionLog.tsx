@@ -11,7 +11,7 @@
  */
 
 import { useState }           from 'react'
-import { useQuery }           from '@tanstack/react-query'
+import { useQuery, keepPreviousData }           from '@tanstack/react-query'
 import {
   GitMerge, ShieldAlert, Search, ChevronLeft, ChevronRight,
 } from 'lucide-react'
@@ -132,6 +132,7 @@ export function CollisionLog() {
     },
     enabled: isAdmin,
     staleTime: 60_000,
+    placeholderData: keepPreviousData,
   })
 
   function applyFilters() {
