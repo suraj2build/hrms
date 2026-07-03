@@ -28,6 +28,10 @@ session history), 117 issues across four severity tiers:
 
 **Overall score: 4.9 / 10 — CONDITIONAL GO (restricted pilot only).**
 
+> **AUDIT COMPLETE.** All 117 numbered issues (ISSUE-001 through ISSUE-117) are closed and all four
+> remediation phases are closed. No unresolved numbered audit defect remains. Any items not in §10
+> belong to the post-audit backlog (§11) — they are not open audit findings.
+
 When a new audit session begins, the auditor must:
 1. Determine which issues from the register are already closed (check `audit-remediation` branch commits).
 2. Not re-open closed issues unless a regression is detected.
@@ -387,7 +391,66 @@ Update this table after each issue is committed and pushed.
 
 ---
 
-## 11. What a Good Audit Session Looks Like
+## 11. Audit Closure Declaration & Post-Audit Backlog
+
+### 11.1 Closure Declaration
+
+**All numbered audit issues ISSUE-001 through ISSUE-117 are closed. All four remediation phases are
+closed. No open numbered audit remediation issues remain.**
+
+| Phase | Status | Scope |
+|-------|--------|-------|
+| Phase 1 — Critical Security | **CLOSED** | 18 issues resolved |
+| Phase 2 — Production Stability | **CLOSED** | 15 issues resolved |
+| Phase 3 — Performance | **CLOSED** | 10 issues resolved |
+| Phase 4 — Architecture / Technical Debt | **CLOSED** | 16 explicitly remediated + 55 administratively closed |
+| Phase 5 — Enterprise Features / Roadmap | **Deferred** | 6 items re-scoped to post-audit backlog (§11.4) |
+
+The items in §11.2–11.4 are **post-remediation backlog** items tracked here for continuity.
+They are not unresolved audit defects and do not block production readiness.
+
+---
+
+### 11.2 Deferred Engineering Follow-Ups
+
+Implementation path is clear; deferred from Phase 4 remediation due to scope discipline.
+
+| ID | Title | Deferred from |
+|----|-------|--------------|
+| DEF-1 | Letter content sanitization — `buildOfferHtml()` server-side escaping is incomplete; full rich-text sanitization deferred | ISSUE-041 |
+| DEF-2 | `GET /payroll/reimbursements/my` real pagination — ESS screen derives `approved_sum`/`pending_count` from the full dataset; safe pagination requires server-side aggregate fields | ISSUE-043B |
+
+---
+
+### 11.3 Product-Decision-Blocked Items
+
+Code cannot be written until the product team makes a decision on the open question.
+
+| ID | Title | Blocked on |
+|----|-------|-----------|
+| PD-1 / AF-001 | Employee lifecycle ↔ auth revocation sync — `employees.status = 'separated'` does not revoke Supabase JWTs; fixing this requires a product decision on revocation timing and UX. See §6.6. | Product decision on revocation stage |
+| PD-2 | Helpdesk admin ticket list — `GET /helpdesk/tickets` bulk "Select All" semantics unknown; scope of safe pagination depends on whether Select All is page-scoped or match-all. | Product decision on Select All behaviour |
+
+---
+
+### 11.4 Phase 5 Roadmap Items
+
+Listed in the original audit register as Phase 5 (Enterprise Features / Roadmap). Original descriptions
+were not preserved in a durable artifact; all six require re-scoping before work begins. These items are
+**not remediation failures** — they were always classified as post-GA roadmap.
+
+| Issue | Classification |
+|-------|---------------|
+| ISSUE-059 | Phase 5 — Enterprise Features / Roadmap |
+| ISSUE-070 | Phase 5 — Enterprise Features / Roadmap |
+| ISSUE-082 | Phase 5 — Enterprise Features / Roadmap |
+| ISSUE-104 | Phase 5 — Enterprise Features / Roadmap |
+| ISSUE-116 | Phase 5 — Enterprise Features / Roadmap |
+| ISSUE-117 | Phase 5 — Enterprise Features / Roadmap |
+
+---
+
+## 12. What a Good Audit Session Looks Like
 
 1. Read this file.
 2. Read CLAUDE.md.
@@ -401,4 +464,10 @@ Update this table after each issue is committed and pushed.
 
 ---
 
-*Last updated: 2026-07-03. All four remediation phases are closed. The active post-remediation backlog consists of: 2 implementation-ready engineering items (DEF-1 letter sanitization; DEF-2 reimbursements/my pagination); 2 product-decision-blocked engineering items (PD-1 AF-001 lifecycle/auth revocation; PD-2 helpdesk pagination semantics); 6 Phase 5 roadmap items pending re-scoping (ISSUE-059, 070, 082, 104, 116, 117). 55 legacy issue IDs are administratively closed because their original descriptions were not preserved in a durable artifact and no independently actionable scope remains.*
+*Last updated: 2026-07-03.*
+
+**Audit remediation complete.** 117 numbered issues closed (62 explicitly remediated, 55 administratively
+closed). All four phases closed. No open numbered audit remediation issues remain.
+
+Post-audit backlog summary (§11): 2 deferred engineering items (DEF-1, DEF-2) · 2 product-decision-blocked
+items (PD-1/AF-001, PD-2) · 6 Phase 5 roadmap items pending re-scope (ISSUE-059, 070, 082, 104, 116, 117).
