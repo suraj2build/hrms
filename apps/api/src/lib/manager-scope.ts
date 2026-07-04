@@ -62,19 +62,26 @@ export async function resolveManagerEmployeeId(
   return resolveCallerEmployeeId(supabase, req.userId, req.tenantId)
 }
 
-/** All active direct-report employee ids for a manager. */
+/**
+ * All active subordinate employee ids for a manager, at any depth up to
+ * maxDepth levels (default 10). Uses the get_all_subordinates() Postgres
+ * recursive CTE (migration 357) so the full org subtree is returned, not
+ * just immediate direct reports.
+ */
 export async function getDirectReportIds(
-  supabase:  SupabaseClient,
-  tenantId:  string,
+  supabase:          SupabaseClient,
+  tenantId:          string,
   managerEmployeeId: string,
+  maxDepth:          number = 10,
 ): Promise<string[]> {
-  const { data } = await supabase
-    .from('employees')
-    .select('id')
-    .eq('tenant_id', tenantId)
-    .eq('manager_id', managerEmployeeId)
-    .eq('status', 'active')
-  return (data ?? []).map((e: any) => e.id as string)
+  const { data, error } = await supabase
+    .rpc('get_all_subordinates', {
+      p_manager_id: managerEmployeeId,
+      p_tenant_id:  tenantId,
+      p_max_depth:  maxDepth,
+    })
+  if (error) throw error
+  return (data ?? []).map((e: { id: string }) => e.id)
 }
 
 /**

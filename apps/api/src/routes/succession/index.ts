@@ -86,9 +86,11 @@ const UpdatePlanSchema = z.object({
   notes: z.string().optional().nullable(),
 })
 
+const READINESS_LEVELS = ['ready_now', 'ready_1_2_years', 'ready_3_5_years'] as const
+
 const AddCandidateSchema = z.object({
   employee_id: z.string().uuid('employee_id must be a valid UUID'),
-  readiness_level: z.string().optional(),
+  readiness_level: z.enum(READINESS_LEVELS).optional(),
   readiness_score: z.number().min(0).max(100).optional().nullable(),
   strengths: z.string().optional().nullable(),
   gaps: z.string().optional().nullable(),
@@ -97,7 +99,7 @@ const AddCandidateSchema = z.object({
 })
 
 const UpdateCandidateSchema = z.object({
-  readiness_level: z.string().optional(),
+  readiness_level: z.enum(READINESS_LEVELS).optional(),
   readiness_score: z.number().optional().nullable(),
   strengths: z.string().optional().nullable(),
   gaps: z.string().optional().nullable(),
@@ -318,7 +320,11 @@ export default async function successionRoutes(fastify: FastifyInstance) {
       .select('id')
       .single()
 
-    if (error) return reply.status(500).send({ error: error.message })
+    if (error) {
+      if (error.code === '23505') return reply.status(409).send({ error: 'CONFLICT', message: 'This employee is already a candidate for this plan' })
+      if (error.code === '23514') return reply.status(400).send({ error: 'VALIDATION_ERROR', message: error.message })
+      return reply.status(500).send({ error: error.message })
+    }
     await logAction(supabase, { tenantId, tableName: 'succession_candidates', recordId: data.id, action: 'INSERT', performedBy: req.user.id, newData: { plan_id, employee_id, readiness_level } })
     return reply.status(201).send({ data })
   })
@@ -544,19 +550,25 @@ export default async function successionRoutes(fastify: FastifyInstance) {
     if (!candidate) return reply.status(404).send({ error: 'Candidate not found' })
     const c = candidate as any
 
-    const msg = await ai.messages.create({
-      model:      'claude-haiku-4-5-20251001',
-      max_tokens: 800,
-      system: 'You are an HR succession planning expert. Generate practical IDP actions. Return ONLY a JSON array of objects with keys: action_type (course|stretch|mentoring|project|certification), description (concise action, max 120 chars), target_months (number).',
-      messages: [{
-        role:    'user',
-        content: `Generate 5 IDP actions for:\nName: ${c.employees?.first_name} ${c.employees?.last_name}\nRole: ${c.employees?.designation} (${c.employees?.department})\nReadiness: ${c.readiness_level}\nStrengths: ${c.strengths || 'N/A'}\nGaps: ${c.gaps || 'N/A'}\nCurrent plan: ${c.development_plan || 'None'}`,
-      }],
-    })
+    if (!process.env.ANTHROPIC_API_KEY) return reply.status(503).send({ error: 'AI_NOT_CONFIGURED', message: 'AI generation is not available in this environment' })
 
-    const raw = msg.content[0]?.type === 'text' ? msg.content[0].text.trim() : '[]'
     let actions: any[] = []
-    try { actions = JSON.parse(raw.replace(/```json|```/g, '').trim()) } catch (_) {}
+    try {
+      const msg = await ai.messages.create({
+        model:      'claude-haiku-4-5-20251001',
+        max_tokens: 800,
+        system: 'You are an HR succession planning expert. Generate practical IDP actions. Return ONLY a JSON array of objects with keys: action_type (course|stretch|mentoring|project|certification), description (concise action, max 120 chars), target_months (number).',
+        messages: [{
+          role:    'user',
+          content: `Generate 5 IDP actions for:\nName: ${c.employees?.first_name} ${c.employees?.last_name}\nRole: ${c.employees?.designation} (${c.employees?.department})\nReadiness: ${c.readiness_level}\nStrengths: ${c.strengths || 'N/A'}\nGaps: ${c.gaps || 'N/A'}\nCurrent plan: ${c.development_plan || 'None'}`,
+        }],
+      })
+      const raw = msg.content[0]?.type === 'text' ? msg.content[0].text.trim() : '[]'
+      try { actions = JSON.parse(raw.replace(/```json|```/g, '').trim()) } catch (_) {}
+    } catch (err: any) {
+      fastify.log.error({ err, cid }, 'succession/idp/ai-generate: AI call failed')
+      return reply.status(502).send({ error: 'AI_ERROR', message: 'AI generation failed — try again or add actions manually' })
+    }
 
     return reply.send({ data: actions })
   })

@@ -28,6 +28,8 @@ import { HR_ADMIN_ROLES }       from '../../lib/rbac.js'
 const monthRe = /^\d{4}-\d{2}$/
 const dateRe  = /^\d{4}-\d{2}-\d{2}$/
 
+const MUSTER_EXPORT_LIMIT = 200_000
+
 // ── Shared helpers ─────────────────────────────────────────────────────────────
 
 function r2(n: number): number {
@@ -579,10 +581,18 @@ export default async function reportExportRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', tenantId)
       .gte('date', fromDate)
       .lte('date', toDate)
+      .limit(MUSTER_EXPORT_LIMIT + 1)
 
     if (attErr) {
       req.log.error({ err: attErr }, 'muster-roll export: attendance query failed')
       return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch attendance records' })
+    }
+
+    if ((daily?.length ?? 0) > MUSTER_EXPORT_LIMIT) {
+      return reply.code(422).send({
+        error:   'EXPORT_TOO_LARGE',
+        message: `Export exceeds ${MUSTER_EXPORT_LIMIT.toLocaleString()} attendance rows. Narrow the filter (e.g. by department) and re-export.`,
+      })
     }
 
     // attendance map: employeeId → date → record

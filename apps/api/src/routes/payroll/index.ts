@@ -226,6 +226,7 @@ import {
   generateAccrualEntries,
   generateAccountingIntegrityHash,
 } from '../../lib/payroll-accounting-engine.js'
+import { durableQueue } from '../../lib/durable-queue.js'
 
 const monthRe = /^\d{4}-\d{2}$/
 
@@ -506,9 +507,232 @@ async function runConcurrent<T>(items: T[], fn: (item: T) => Promise<void>): Pro
   }
 }
 
+/**
+ * executePayrollRun — runs the per-employee payroll processing for a live run.
+ *
+ * Called by the 'payroll-run' durable job handler. Transitions the run row
+ * from 'queued' → 'processing' → 'draft'|'failed'|'partial_failed'.
+ * Never throws — all errors are caught and reflected in the run's status.
+ */
+async function executePayrollRun(
+  supabase:  any,
+  log:       any,
+  opts:      { tenantId: string; runId: string; month: string; initiatedBy?: string },
+): Promise<void> {
+  const { tenantId, runId, month, initiatedBy } = opts
+
+  const [runYear, runMon] = month.split('-').map(Number)
+  const runPeriodEnd      = new Date(runYear, runMon, 0).toISOString().slice(0, 10)
+
+  // Mark run as processing
+  await supabase.from('payroll_runs').update({ status: 'processing' }).eq('id', runId)
+
+  // Fetch all active employees
+  const { data: employees, error: empErr } = await supabase
+    .from('employees')
+    .select('id, first_name, last_name, employee_code')
+    .eq('tenant_id', tenantId)
+    .eq('status', 'active')
+    .order('employee_code')
+
+  if (empErr) {
+    log.error({ err: empErr, run_id: runId, month, tenant_id: tenantId }, 'payroll run job: failed to fetch employees')
+    await supabase.from('payroll_runs')
+      .update({ status: 'failed', error_message: `Employee fetch failed: ${empErr.message}` })
+      .eq('id', runId)
+    return
+  }
+
+  const empList = (employees ?? []) as Array<{ id: string; first_name: string; last_name: string; employee_code: string }>
+
+  // Update employee_count now that we know it
+  await supabase.from('payroll_runs').update({ employee_count: empList.length }).eq('id', runId)
+
+  // Count working days — abort the run if this fails (LOP would be corrupted)
+  let total_working_days: number
+  try {
+    total_working_days = await countWorkingDaysInMonth(supabase, tenantId, month)
+  } catch (wdErr: any) {
+    log.error({ err: wdErr, run_id: runId, month, tenant_id: tenantId }, 'payroll run job: holiday calendar query failed — run aborted')
+    await supabase.from('payroll_runs')
+      .update({ status: 'failed', error_message: `Working-day count failed: ${wdErr?.message}` })
+      .eq('id', runId)
+    return
+  }
+
+  log.info({ event: 'payroll_run_start', run_id: runId, month, employee_count: empList.length }, 'payroll run started')
+
+  await logRunEvent(supabase, log, {
+    tenant_id:  tenantId,
+    run_id:     runId,
+    event_type: 'run_started',
+    month,
+    payload:    { employee_count: empList.length, initiated_by: initiatedBy ?? 'system' },
+  })
+
+  // Delete existing slips (idempotent re-trigger)
+  await supabase.from('payroll_slips').delete().eq('run_id', runId)
+
+  // ── Per-employee processing loop ──────────────────────────────────────────
+  const succeededSlips: PayrollSlipResult[] = []
+  const failedEmployees: FailedEmployee[]   = []
+
+  await runConcurrent(empList, async (emp) => {
+    const empCtx = { employee_id: emp.id, employee_code: emp.employee_code, month, run_id: runId }
+
+    try {
+      let compensation: Awaited<ReturnType<typeof fetchActiveCompensation>>
+      let attendance:   Awaited<ReturnType<typeof fetchAttendanceSummary>>
+      try {
+        ;[compensation, attendance] = await Promise.all([
+          fetchActiveCompensation(supabase, tenantId, emp.id, runPeriodEnd),
+          fetchAttendanceSummary(supabase, tenantId, emp.id, month),
+        ])
+      } catch (fetchErr: any) {
+        const reason = fetchErr?.message ?? 'Unknown data fetch error'
+        log.error({ ...empCtx, err: fetchErr, stage: 'data_fetch' }, 'payroll: data fetch failed — skipping employee')
+        await logRunEvent(supabase, log, {
+          tenant_id: tenantId, run_id: runId, event_type: 'data_fetch_failed',
+          employee_id: emp.id, month, error_details: { message: reason, stack: fetchErr?.stack },
+        })
+        failedEmployees.push({ employee_id: emp.id, employee_code: emp.employee_code, failure_stage: 'data_fetch', reason })
+        return
+      }
+
+      const advLoanDeductions = await fetchAdvanceLoanDeductions(supabase, tenantId, emp.id, month)
+      const compValidation    = validateCompensation(compensation, { employeeId: emp.id, month }, runPeriodEnd)
+
+      if (compValidation.blocking_errors.length > 0) {
+        const reason = compValidation.blocking_errors[0]
+        log.error({ ...empCtx, errors: compValidation.blocking_errors, stage: 'compensation_validation' }, 'payroll: compensation validation blocking error')
+        await logRunEvent(supabase, log, {
+          tenant_id: tenantId, run_id: runId,
+          event_type: compensation ? 'compensation_invalid' : 'compensation_missing',
+          employee_id: emp.id, month,
+          payload: { errors: compValidation.blocking_errors }, error_details: { message: reason },
+        })
+        failedEmployees.push({ employee_id: emp.id, employee_code: emp.employee_code, failure_stage: 'compensation_validation', reason, details: { errors: compValidation.blocking_errors } })
+        return
+      }
+
+      if (compValidation.warnings.length > 0) {
+        log.warn({ ...empCtx, warnings: compValidation.warnings }, 'payroll: compensation warnings (non-blocking)')
+      }
+
+      const result   = await computeSlipWithStatutory(supabase, tenantId, { tenantId, employeeId: emp.id, month, compensation, attendance, total_working_days, advance_loan_deductions: advLoanDeductions }, month)
+      const slipRow  = buildSlipRow(tenantId, runId, result, month)
+      const slipValid = validatePayrollSlipPayload(slipRow, { employeeId: emp.id, month })
+
+      if (!slipValid.valid) {
+        log.error({ ...empCtx, validation_errors: slipValid.errors, stage: 'slip_validation' }, 'payroll: slip payload validation failed')
+        await logRunEvent(supabase, log, {
+          tenant_id: tenantId, run_id: runId, event_type: 'validation_failed',
+          employee_id: emp.id, month, payload: slipRow, error_details: { validation_errors: slipValid.errors },
+        })
+        failedEmployees.push({ employee_id: emp.id, employee_code: emp.employee_code, failure_stage: 'slip_validation', reason: `Slip payload validation failed: ${slipValid.errors[0]}`, details: { validation_errors: slipValid.errors } })
+        return
+      }
+
+      const { error: insertErr } = await supabase.from('payroll_slips').insert(slipRow)
+      if (insertErr) {
+        log.error({ ...empCtx, err: insertErr, stage: 'db_insert' }, 'payroll: DB insert failed for employee slip')
+        await logRunEvent(supabase, log, {
+          tenant_id: tenantId, run_id: runId, event_type: 'slip_insert_failed',
+          employee_id: emp.id, month, payload: slipRow,
+          error_details: { message: insertErr.message, code: insertErr.code, details: insertErr.details, hint: insertErr.hint },
+        })
+        failedEmployees.push({ employee_id: emp.id, employee_code: emp.employee_code, failure_stage: 'db_insert', reason: insertErr.message, details: { code: insertErr.code, details: insertErr.details, hint: insertErr.hint } })
+        return
+      }
+
+      await logRunEvent(supabase, log, {
+        tenant_id: tenantId, run_id: runId, event_type: 'slip_computed', employee_id: emp.id, month,
+        payload: { gross_pay: result.gross_pay, net_pay: result.net_pay, lop_days: result.lop_days, payable_days: result.payable_days, total_deductions: result.total_deductions, has_warning: !!result.warning },
+      })
+      succeededSlips.push(result)
+
+    } catch (unexpectedErr: any) {
+      const reason = unexpectedErr?.message ?? 'Unexpected error during payroll computation'
+      log.error({ ...empCtx, err: unexpectedErr, stage: 'unexpected' }, 'payroll: unexpected per-employee error')
+      failedEmployees.push({ employee_id: emp.id, employee_code: emp.employee_code, failure_stage: 'unexpected', reason, details: { stack: unexpectedErr?.stack } })
+    }
+  })
+
+  // ── Aggregate + finalise run row ──────────────────────────────────────────
+  const totalGross      = round2(succeededSlips.reduce((s, r) => s + r.gross_pay,        0))
+  const totalDeductions = round2(succeededSlips.reduce((s, r) => s + r.total_deductions, 0))
+  const totalNet        = round2(succeededSlips.reduce((s, r) => s + r.net_pay,          0))
+  const totalLop        = round2(succeededSlips.reduce((s, r) => s + r.lop_amount,       0))
+
+  const runStatus: 'draft' | 'partial_failed' | 'failed' =
+    succeededSlips.length === 0 && empList.length > 0
+      ? 'failed'
+      : failedEmployees.length > 0
+        ? 'partial_failed'
+        : 'draft'
+
+  const failureSummary = buildFailureSummary(failedEmployees, empList.length)
+
+  const runUpdatePayload: Record<string, unknown> = {
+    status:           runStatus,
+    employee_count:   succeededSlips.length,
+    total_gross:      totalGross,
+    total_deductions: totalDeductions,
+    total_net:        totalNet,
+    total_lop_amount: totalLop,
+    failure_summary:  failureSummary,
+  }
+
+  if (runStatus === 'failed') {
+    const dominantLabel = failureSummary ? `${failureSummary.dominant_stage}: ${failureSummary.dominant_reason}` : 'unknown error'
+    runUpdatePayload.error_message = `All ${empList.length} employee(s) failed. Dominant cause — ${dominantLabel}`
+  } else if (failedEmployees.length > 0) {
+    const dominantLabel = failureSummary ? `${failureSummary.dominant_stage}: ${failureSummary.dominant_reason}` : 'unknown error'
+    runUpdatePayload.error_message = `${failedEmployees.length} of ${empList.length} employee(s) failed. Dominant cause — ${dominantLabel}`
+  }
+
+  const { error: runUpdateErr } = await supabase.from('payroll_runs').update(runUpdatePayload).eq('id', runId)
+  if (runUpdateErr) {
+    log.error({ err: runUpdateErr, run_id: runId, attempted_status: runStatus }, 'payroll: failed to update run totals after slip insertion')
+  }
+
+  await logRunEvent(supabase, log, {
+    tenant_id: tenantId, run_id: runId, event_type: 'run_completed', month,
+    payload: { succeeded: succeededSlips.length, failed: failedEmployees.length, total: empList.length, total_gross: totalGross, total_net: totalNet, run_status: runStatus },
+  })
+
+  if (failedEmployees.length > 0) {
+    try {
+      const { data: dbRules } = await supabase
+        .from('payroll_validation_rules')
+        .select('code, name, description, severity, blocking, enabled, stage, remediation_route')
+        .eq('enabled', true)
+      const blockerRows = buildPayrollBlockers({ tenantId, runId, failedEmployees, dbRules: dbRules ?? undefined })
+      if (blockerRows.length > 0) {
+        const { error: blockerErr } = await supabase.from('payroll_run_blockers').insert(blockerRows)
+        if (blockerErr) {
+          log.warn({ err: blockerErr, run_id: runId, blocker_count: blockerRows.length }, 'payroll: blocker insert failed')
+        }
+      }
+    } catch (blockerErr: any) {
+      log.warn({ err: blockerErr, run_id: runId }, 'payroll: blocker build/insert threw — non-fatal')
+    }
+  }
+
+  log.info({ event: 'payroll_run_complete', run_id: runId, month, succeeded: succeededSlips.length, failed: failedEmployees.length, total: empList.length, total_gross: totalGross, total_net: totalNet, run_status: runStatus }, 'payroll run complete')
+}
+
 export default async function payrollRoutes(fastify: FastifyInstance) {
   const auth        = { preHandler: [fastify.authenticate] }
   const hrAdminAuth = { preHandler: [fastify.authenticate, requireRole(...HR_ADMIN_ROLES)] }
+
+  // Register the 'payroll-run' durable job handler (C6: async payroll execution).
+  // Registered here so it closes over fastify.supabase and fastify.log, matching
+  // the pattern of all other durable job handlers in apps/api/src/index.ts.
+  durableQueue.register('payroll-run', async (payload, _job) => {
+    const { tenantId, runId, month, initiatedBy } = payload as { tenantId: string; runId: string; month: string; initiatedBy?: string }
+    await executePayrollRun(fastify.supabase, fastify.log, { tenantId, runId, month, initiatedBy })
+  })
 
   // ── POST /payroll/runs ───────────────────────────────────────────────────────
   //
@@ -633,56 +857,38 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
           message: `Payroll for ${month} is finalized and cannot be re-run. Roll it back (super_admin) before reprocessing.`,
         })
       }
-      if ((existingRun as any)?.status === 'processing') {
+      if ((existingRun as any)?.status === 'queued' || (existingRun as any)?.status === 'processing') {
         return reply.code(409).send({
           error:   'RUN_IN_PROGRESS',
-          message: `Payroll for ${month} is already processing. Wait for it to complete before re-triggering.`,
+          message: `Payroll for ${month} is already queued or processing. Wait for it to complete before re-triggering.`,
         })
       }
     }
 
-    // Fetch all active employees
-    const { data: employees, error: empErr } = await fastify.supabase
-      .from('employees')
-      .select('id, first_name, last_name, employee_code')
-      .eq('tenant_id', tenantId)
-      .eq('status', 'active')
-      .order('employee_code')
-
-    if (empErr) {
-      req.log.error({ err: empErr, month, tenant_id: tenantId }, 'payroll run: failed to fetch employees')
-      return reply.code(500).send({
-        error:   'QUERY_FAILED',
-        message: 'Failed to fetch employees',
-        details: empErr.message,
-        code:    empErr.code,
-      })
-    }
-
-    const empList = (employees ?? []) as Array<{
-      id: string; first_name: string; last_name: string; employee_code: string
-    }>
-
-    // Shared context for the processing loop
-    const [runYear, runMon] = month.split('-').map(Number)
-    const runPeriodEnd      = new Date(runYear, runMon, 0).toISOString().slice(0, 10)
-
-    // countWorkingDaysInMonth now throws on DB error (holiday calendar query failure would
-    // corrupt every employee's LOP calculation — fail the entire run immediately).
-    let total_working_days: number
-    try {
-      total_working_days = await countWorkingDaysInMonth(fastify.supabase, tenantId, month)
-    } catch (wdErr: any) {
-      req.log.error({ err: wdErr, month, tenant_id: tenantId }, 'payroll: holiday calendar query failed — run aborted')
-      return reply.code(500).send({
-        error:   'WORKING_DAYS_FETCH_FAILED',
-        message: wdErr?.message ?? 'Failed to count working days for the payroll period',
-        details: 'Payroll run aborted — LOP calculations require an accurate working-day count.',
-      })
-    }
-
     // ── DRY RUN: compute + validate without any DB writes ───────────────────
     if (dry_run) {
+      // Fetch employees + working days synchronously (dry runs are fast)
+      const { data: dryEmployees, error: dryEmpErr } = await fastify.supabase
+        .from('employees')
+        .select('id, first_name, last_name, employee_code')
+        .eq('tenant_id', tenantId)
+        .eq('status', 'active')
+        .order('employee_code')
+      if (dryEmpErr) {
+        req.log.error({ err: dryEmpErr, month, tenant_id: tenantId }, 'payroll dry run: failed to fetch employees')
+        return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch employees', details: dryEmpErr.message })
+      }
+      const empList = (dryEmployees ?? []) as Array<{ id: string; first_name: string; last_name: string; employee_code: string }>
+      const [runYear, runMon] = month.split('-').map(Number)
+      const runPeriodEnd      = new Date(runYear, runMon, 0).toISOString().slice(0, 10)
+      let total_working_days: number
+      try {
+        total_working_days = await countWorkingDaysInMonth(fastify.supabase, tenantId, month)
+      } catch (wdErr: any) {
+        req.log.error({ err: wdErr, month, tenant_id: tenantId }, 'payroll dry run: holiday calendar query failed')
+        return reply.code(500).send({ error: 'WORKING_DAYS_FETCH_FAILED', message: wdErr?.message ?? 'Failed to count working days' })
+      }
+
       req.log.info(
         { event: 'payroll_dry_run_start', month, employee_count: empList.length, tenant_id: tenantId },
         'payroll dry run started',
@@ -775,27 +981,30 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       })
     }
 
-    // ── LIVE RUN ─────────────────────────────────────────────────────────────
-
-    // Upsert the run row (processing)
+    // ── LIVE RUN (async) — accepted, returns 202 immediately ────────────────
+    // All validation guards above have passed.  Upsert the run row as 'queued'
+    // and hand off to the durable queue worker which transitions it through:
+    //   queued → processing → draft | partial_failed | failed
+    //
+    // Frontend: poll GET /payroll/runs/:run_id for status. The run_id is known
+    // immediately from the 202 body. Existing callers that read `data.run_id`
+    // continue to work; callers that also expected synchronous totals (e.g.
+    // PayrollControlCenter) will see the run in 'queued' state until the worker
+    // completes and updates the row.
     const { data: run, error: runErr } = await fastify.supabase
       .from('payroll_runs')
       .upsert({
-        tenant_id:      tenantId,
+        tenant_id:  tenantId,
         month,
-        status:         'processing',
-        notes:          notes ?? null,
-        created_by:     req.userId,
-        employee_count: empList.length,
+        status:     'queued',
+        notes:      notes ?? null,
+        created_by: req.userId,
       }, { onConflict: 'tenant_id,month' })
       .select('id')
       .single()
 
     if (runErr || !run) {
-      req.log.error(
-        { err: runErr, month, tenant_id: tenantId },
-        'payroll run: failed to upsert run row',
-      )
+      req.log.error({ err: runErr, month, tenant_id: tenantId }, 'payroll run: failed to upsert run row')
       return reply.code(500).send({
         error:   'INSERT_FAILED',
         message: 'Failed to create payroll run',
@@ -804,405 +1013,38 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       })
     }
 
-    const runId = run.id as string
+    const runId = (run as { id: string }).id
 
-    req.log.info(
-      { event: 'payroll_run_start', run_id: runId, month, employee_count: empList.length },
-      'payroll run started',
-    )
-
-    // Forensic: run_started
-    await logRunEvent(fastify.supabase, req.log, {
-      tenant_id:  tenantId,
-      run_id:     runId,
-      event_type: 'run_started',
-      month,
-      payload:    { employee_count: empList.length, initiated_by: req.userId },
-    })
-
-    // Delete existing slips for this run (idempotent re-trigger)
-    await fastify.supabase
-      .from('payroll_slips')
-      .delete()
-      .eq('run_id', runId)
-
-    // ── Per-employee processing loop ─────────────────────────────────────────
-    //
-    // Each employee is fully isolated.  A failure at any stage (data fetch,
-    // compensation validation, payload validation, DB insert) is caught, logged
-    // with full structured context, appended to failedEmployees[], and the loop
-    // continues with the next employee.
-
-    const succeededSlips: PayrollSlipResult[] = []
-    const failedEmployees: FailedEmployee[]   = []
-
-    await runConcurrent(empList, async (emp) => {
-      const empCtx = { employee_id: emp.id, employee_code: emp.employee_code, month, run_id: runId }
-
-      try {
-        // ── Stage 1: Fetch compensation + attendance ───────────────────────
-        let compensation: Awaited<ReturnType<typeof fetchActiveCompensation>>
-        let attendance:   Awaited<ReturnType<typeof fetchAttendanceSummary>>
-
-        try {
-          ;[compensation, attendance] = await Promise.all([
-            fetchActiveCompensation(fastify.supabase, tenantId, emp.id, runPeriodEnd),
-            fetchAttendanceSummary(fastify.supabase, tenantId, emp.id, month),
-          ])
-        } catch (fetchErr: any) {
-          const reason = fetchErr?.message ?? 'Unknown data fetch error'
-          req.log.error(
-            { ...empCtx, err: fetchErr, stage: 'data_fetch' },
-            'payroll: data fetch failed — skipping employee',
-          )
-          await logRunEvent(fastify.supabase, req.log, {
-            tenant_id:    tenantId, run_id: runId,
-            event_type:   'data_fetch_failed',
-            employee_id:  emp.id, month,
-            error_details: { message: reason, stack: fetchErr?.stack },
-          })
-          failedEmployees.push({
-            employee_id:   emp.id,
-            employee_code: emp.employee_code,
-            failure_stage: 'data_fetch',
-            reason,
-          })
-          return
-        }
-
-        // ── Stage 1.5: Fetch advance / loan deductions for this employee ─────
-        const advLoanDeductions = await fetchAdvanceLoanDeductions(
-          fastify.supabase, tenantId, emp.id, month,
-        )
-
-        // ── Stage 2: Validate compensation ────────────────────────────────
-        const compValidation = validateCompensation(
-          compensation, { employeeId: emp.id, month }, runPeriodEnd,
-        )
-
-        if (compValidation.blocking_errors.length > 0) {
-          const reason = compValidation.blocking_errors[0]
-          req.log.error(
-            { ...empCtx, errors: compValidation.blocking_errors, stage: 'compensation_validation' },
-            'payroll: compensation validation blocking error — skipping employee',
-          )
-          await logRunEvent(fastify.supabase, req.log, {
-            tenant_id:    tenantId, run_id: runId,
-            event_type:   compensation ? 'compensation_invalid' : 'compensation_missing',
-            employee_id:  emp.id, month,
-            payload:      { errors: compValidation.blocking_errors },
-            error_details: { message: reason },
-          })
-          failedEmployees.push({
-            employee_id:   emp.id,
-            employee_code: emp.employee_code,
-            failure_stage: 'compensation_validation',
-            reason,
-            details:       { errors: compValidation.blocking_errors },
-          })
-          return
-        }
-
-        // Non-blocking compensation warnings — surfaced in logs, do not skip employee
-        if (compValidation.warnings.length > 0) {
-          req.log.warn(
-            { ...empCtx, warnings: compValidation.warnings },
-            'payroll: compensation warnings (non-blocking)',
-          )
-        }
-
-        // ── Stage 3: Compute slip (+ config-driven statutory PF/ESI/PT) ────
-        const result = await computeSlipWithStatutory(fastify.supabase, tenantId, {
+    let jobId: string
+    try {
+      jobId = await durableQueue.enqueue(
+        'payroll-run',
+        { tenantId, runId, month, initiatedBy: req.userId },
+        {
           tenantId,
-          employeeId: emp.id,
-          month,
-          compensation,
-          attendance,
-          total_working_days,
-          advance_loan_deductions: advLoanDeductions,
-        }, month)
-
-        // ── Stage 4: Validate slip payload before insert ──────────────────
-        const slipRow  = buildSlipRow(tenantId, runId, result, month)
-        const slipValid = validatePayrollSlipPayload(slipRow, { employeeId: emp.id, month })
-
-        if (!slipValid.valid) {
-          req.log.error(
-            {
-              ...empCtx,
-              validation_errors: slipValid.errors,
-              slip_payload:      slipRow,
-              stage:             'slip_validation',
-            },
-            'payroll: slip payload validation failed — refusing DB insert',
-          )
-          await logRunEvent(fastify.supabase, req.log, {
-            tenant_id:    tenantId, run_id: runId,
-            event_type:   'validation_failed',
-            employee_id:  emp.id, month,
-            payload:      slipRow,
-            error_details: { validation_errors: slipValid.errors },
-          })
-          failedEmployees.push({
-            employee_id:   emp.id,
-            employee_code: emp.employee_code,
-            failure_stage: 'slip_validation',
-            reason:        `Slip payload validation failed: ${slipValid.errors[0]}`,
-            details:       { validation_errors: slipValid.errors },
-          })
-          return
-        }
-
-        // ── Stage 5: DB insert ────────────────────────────────────────────
-        const { error: insertErr } = await fastify.supabase
-          .from('payroll_slips')
-          .insert(slipRow)
-
-        if (insertErr) {
-          req.log.error(
-            {
-              ...empCtx,
-              err:              insertErr,
-              supabase_code:    insertErr.code,
-              supabase_details: insertErr.details,
-              supabase_hint:    insertErr.hint,
-              slip_payload:     slipRow,
-              stage:            'db_insert',
-            },
-            'payroll: DB insert failed for employee slip',
-          )
-          await logRunEvent(fastify.supabase, req.log, {
-            tenant_id:    tenantId, run_id: runId,
-            event_type:   'slip_insert_failed',
-            employee_id:  emp.id, month,
-            payload:      slipRow,
-            error_details: {
-              message: insertErr.message,
-              code:    insertErr.code,
-              details: insertErr.details,
-              hint:    insertErr.hint,
-            },
-          })
-          failedEmployees.push({
-            employee_id:   emp.id,
-            employee_code: emp.employee_code,
-            failure_stage: 'db_insert',
-            reason:        insertErr.message,
-            details: {
-              code:    insertErr.code,
-              details: insertErr.details,
-              hint:    insertErr.hint,
-            },
-          })
-          return
-        }
-
-        // ── Stage 6: Slip inserted — log success forensics ────────────────
-        await logRunEvent(fastify.supabase, req.log, {
-          tenant_id:  tenantId, run_id: runId,
-          event_type: 'slip_computed',
-          employee_id: emp.id, month,
-          payload: {
-            gross_pay:        result.gross_pay,
-            net_pay:          result.net_pay,
-            lop_days:         result.lop_days,
-            payable_days:     result.payable_days,
-            total_deductions: result.total_deductions,
-            has_warning:      !!result.warning,
-          },
-        })
-
-        succeededSlips.push(result)
-
-      } catch (unexpectedErr: any) {
-        // Should not reach here — all stages have their own try/catch above.
-        // Belt-and-suspenders catch to ensure one employee never crashes the loop.
-        const reason = unexpectedErr?.message ?? 'Unexpected error during payroll computation'
-        req.log.error(
-          { ...empCtx, err: unexpectedErr, stack: unexpectedErr?.stack, stage: 'unexpected' },
-          'payroll: unexpected per-employee error (all stages should be caught above)',
-        )
-        failedEmployees.push({
-          employee_id:   emp.id,
-          employee_code: emp.employee_code,
-          failure_stage: 'unexpected',
-          reason,
-          details:       { stack: unexpectedErr?.stack },
-        })
-      }
-    })
-
-    // ── Aggregate totals from succeeded slips only ───────────────────────────
-    const totalGross      = round2(succeededSlips.reduce((s, r) => s + r.gross_pay,        0))
-    const totalDeductions = round2(succeededSlips.reduce((s, r) => s + r.total_deductions, 0))
-    const totalNet        = round2(succeededSlips.reduce((s, r) => s + r.net_pay,          0))
-    const totalLop        = round2(succeededSlips.reduce((s, r) => s + r.lop_amount,       0))
-
-    // Mark run as failed if every single employee failed.
-    // Mark as partial_failed if some (but not all) employees failed.
-    // Mark as draft only when all employees succeeded.
-    const runStatus: 'draft' | 'partial_failed' | 'failed' =
-      succeededSlips.length === 0 && empList.length > 0
-        ? 'failed'
-        : failedEmployees.length > 0
-          ? 'partial_failed'
-          : 'draft'
-
-    // Build structured failure summary — stored in DB so the admin UI can display
-    // the dominant failure reason without a separate payroll_run_events query.
-    const failureSummary = buildFailureSummary(failedEmployees, empList.length)
-
-    const runUpdatePayload: Record<string, unknown> = {
-      status:           runStatus,
-      employee_count:   succeededSlips.length,
-      total_gross:      totalGross,
-      total_deductions: totalDeductions,
-      total_net:        totalNet,
-      total_lop_amount: totalLop,
-      failure_summary:  failureSummary,
-    }
-
-    if (runStatus === 'failed') {
-      // Use dominant reason in error_message so it surfaces in list view without
-      // needing to join payroll_run_events.
-      const dominantLabel = failureSummary
-        ? `${failureSummary.dominant_stage}: ${failureSummary.dominant_reason}`
-        : 'unknown error'
-      runUpdatePayload.error_message =
-        `All ${empList.length} employee(s) failed. Dominant cause — ${dominantLabel}`
-    } else if (failedEmployees.length > 0) {
-      const dominantLabel = failureSummary
-        ? `${failureSummary.dominant_stage}: ${failureSummary.dominant_reason}`
-        : 'unknown error'
-      runUpdatePayload.error_message =
-        `${failedEmployees.length} of ${empList.length} employee(s) failed. ` +
-        `Dominant cause — ${dominantLabel}`
-    }
-
-    const { error: runUpdateErr } = await fastify.supabase
-      .from('payroll_runs')
-      .update(runUpdatePayload)
-      .eq('id', runId)
-
-    if (runUpdateErr) {
-      // Non-fatal: slips are already inserted.  Log the error so it's not invisible,
-      // but don't block the response — the caller already knows the slip count.
-      req.log.error(
-        { err: runUpdateErr, run_id: runId, attempted_status: runStatus },
-        'payroll: failed to update run totals after slip insertion',
+          createdBy:      req.userId,
+          maxRetries:     0,
+          timeoutMs:      10 * 60 * 1000,
+          idempotencyKey: `payroll-run-${tenantId}-${month}`,
+        },
       )
+    } catch (enqErr: any) {
+      await fastify.supabase
+        .from('payroll_runs')
+        .update({ status: 'failed', error_message: `Failed to enqueue job: ${enqErr.message}` })
+        .eq('id', runId)
+      req.log.error({ err: enqErr, run_id: runId, month }, 'payroll: failed to enqueue durable job')
+      return reply.code(500).send({ error: 'ENQUEUE_FAILED', message: 'Failed to queue payroll run — please retry' })
     }
 
-    // ── Forensic: run_completed ──────────────────────────────────────────────
-    await logRunEvent(fastify.supabase, req.log, {
-      tenant_id:  tenantId, run_id: runId,
-      event_type: 'run_completed',
-      month,
-      payload: {
-        succeeded:    succeededSlips.length,
-        failed:       failedEmployees.length,
-        total:        empList.length,
-        total_gross:  totalGross,
-        total_net:    totalNet,
-        run_status:   runStatus,
-      },
+    req.log.info({ event: 'payroll_run_queued', run_id: runId, job_id: jobId, month }, 'payroll run queued')
+
+    return reply.code(202).send({
+      run_id:  runId,
+      job_id:  jobId,
+      status:  'queued',
+      message: `Payroll run for ${month} queued. Poll GET /payroll/runs/${runId} for status.`,
     })
-
-    // ── Persist payroll blockers ──────────────────────────────────────────────
-    // Non-fatal: blocker write failure must never block the run response.
-    // The blockers populate the Resolution Center UI for HR admins.
-    if (failedEmployees.length > 0) {
-      try {
-        // Fetch enabled validation rules so DB overrides apply to severity/blocking
-        const { data: dbRules } = await fastify.supabase
-          .from('payroll_validation_rules')
-          .select('code, name, description, severity, blocking, enabled, stage, remediation_route')
-          .eq('enabled', true)
-
-        const blockerRows = buildPayrollBlockers({
-          tenantId,
-          runId,
-          failedEmployees,
-          dbRules: dbRules ?? undefined,
-        })
-
-        if (blockerRows.length > 0) {
-          const { error: blockerErr } = await fastify.supabase
-            .from('payroll_run_blockers')
-            .insert(blockerRows)
-
-          if (blockerErr) {
-            req.log.warn(
-              { err: blockerErr, run_id: runId, blocker_count: blockerRows.length },
-              'payroll: blocker insert failed — Resolution Center will be empty for this run',
-            )
-          } else {
-            req.log.info(
-              { run_id: runId, blocker_count: blockerRows.length },
-              'payroll: blockers inserted into payroll_run_blockers',
-            )
-          }
-        }
-      } catch (blockerErr: any) {
-        req.log.warn(
-          { err: blockerErr, run_id: runId },
-          'payroll: blocker build/insert threw unexpectedly — non-fatal, run response continues',
-        )
-      }
-    }
-
-    req.log.info(
-      {
-        event:       'payroll_run_complete',
-        run_id:      runId,
-        month,
-        succeeded:   succeededSlips.length,
-        failed:      failedEmployees.length,
-        total:       empList.length,
-        total_gross: totalGross,
-        total_net:   totalNet,
-        run_status:  runStatus,
-      },
-      'payroll run complete',
-    )
-
-    // Employees with no attendance data (full pay assumed — operator must verify)
-    const noAttendanceSlips = succeededSlips.filter(r => r.warning)
-
-    const responseBody: Record<string, unknown> = {
-      run_id:            runId,
-      month,
-      employee_count:    succeededSlips.length,
-      total_working_days,
-      total_gross:       totalGross,
-      total_net:         totalNet,
-      run_status:        runStatus,
-      ...(failedEmployees.length > 0 && {
-        failed_count:     failedEmployees.length,
-        failed_employees: failedEmployees,
-        failure_summary:  failureSummary,
-      }),
-      ...(noAttendanceSlips.length > 0 && {
-        no_attendance_count:     noAttendanceSlips.length,
-        no_attendance_employees: noAttendanceSlips.map(r => r.employeeId),
-        warnings: [
-          `${noAttendanceSlips.length} employee(s) have no attendance data and will receive full pay — ` +
-          'verify punch records before finalizing.',
-        ],
-      }),
-    }
-
-    // If every employee failed, return 500 with full failure detail
-    if (runStatus === 'failed') {
-      return reply.code(500).send({
-        error:   'PAYROLL_RUN_FAILED',
-        message: `Payroll run created (run_id=${runId}) but all ${empList.length} employees failed. ` +
-                 'See failed_employees for per-employee machine-readable failure reasons.',
-        ...responseBody,
-      })
-    }
-
-    return reply.code(201).send(responseBody)
   })
 
   // ── GET /payroll/runs ────────────────────────────────────────────────────────

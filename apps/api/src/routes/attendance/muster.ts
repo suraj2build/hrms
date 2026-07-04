@@ -13,6 +13,8 @@ import { z } from 'zod'
 import { normalizeAttendanceStatus } from '../../lib/attendance-utils.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 
+const MUSTER_ROW_LIMIT = 200_000
+
 const querySchema = z.object({
   month: z.string().regex(/^\d{4}-\d{2}$/, 'month must be YYYY-MM'),
 })
@@ -98,11 +100,15 @@ export default async function musterRoute(fastify: FastifyInstance) {
         .eq('tenant_id', req.tenantId)
         .gte('date', fromDate)
         .lte('date', toDate)
-        .limit(50_000)
+        .limit(MUSTER_ROW_LIMIT)
 
       if (dailyError) {
         req.log.error({ err: dailyError }, 'muster daily query failed')
         return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch attendance records' })
+      }
+
+      if ((daily?.length ?? 0) >= MUSTER_ROW_LIMIT) {
+        reply.header('X-Truncated', 'true')
       }
 
       // Build a lookup: employeeId → date → daily row

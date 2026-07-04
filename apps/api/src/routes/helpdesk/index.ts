@@ -422,7 +422,7 @@ export default async function helpdeskRoutes(fastify: FastifyInstance) {
   // HR ADMIN
   // ═══════════════════════════════════════════════════════════════════════════
 
-  // GET /helpdesk/tickets?status=&priority=&assigned_to=&mine=&sort=sla_urgency
+  // GET /helpdesk/tickets?status=&priority=&assigned_to=&mine=&sort=sla_urgency&page=1&limit=50
   fastify.get('/tickets', hrAdminAuth, async (req: any, reply) => {
     const qs = z.object({
       status:      z.string().optional(),
@@ -431,16 +431,27 @@ export default async function helpdeskRoutes(fastify: FastifyInstance) {
       assigned_to: z.string().optional(),
       mine:        z.string().optional(),
       sort:        z.string().optional(),
+      page:        z.coerce.number().int().min(1).default(1),
+      limit:       z.coerce.number().int().min(1).max(100).default(50),
     }).safeParse(req.query)
 
-    const f = qs.data ?? {}
+    if (!qs.success) {
+      return reply.code(400).send({ error: 'VALIDATION_ERROR', message: qs.error.issues[0]?.message })
+    }
+
+    const { page, limit, ...f } = qs.data
     const sortBySla = f.sort === 'sla_urgency'
+    const offset    = (page - 1) * limit
 
     let q = fastify.supabase
       .from('helpdesk_tickets')
-      .select('*, employees(first_name, last_name, employee_code)')
+      .select(
+        'id, ticket_number, subject, category, priority, status, employee_id, created_by, assigned_to, sla_hours, sla_due_at, sla_breached_at, resolution_due_at, resolution_breached_at, first_response_at, resolved_at, closed_at, created_at, updated_at, employees(first_name, last_name, employee_code)',
+        { count: 'exact' },
+      )
       .eq('tenant_id', req.tenantId)
       .order(sortBySla ? 'sla_due_at' : 'created_at', { ascending: sortBySla })
+      .range(offset, offset + limit - 1)
 
     if (f.status && f.status !== 'all')     q = q.eq('status', f.status)
     if (f.priority && f.priority !== 'all') q = q.eq('priority', f.priority)
@@ -448,29 +459,45 @@ export default async function helpdeskRoutes(fastify: FastifyInstance) {
     if (f.mine === 'true')                  q = q.eq('assigned_to', req.userId)
     else if (f.assigned_to)                 q = q.eq('assigned_to', f.assigned_to)
 
-    const { data, error } = await q
+    const { data, count, error } = await q
     if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
-    return reply.send({ data: data ?? [] })
+    return reply.send({ data: data ?? [], total: count ?? 0, page, limit, pages: Math.ceil((count ?? 0) / limit) })
   })
 
   // GET /helpdesk/stats — queue counts for the admin badge/header
   fastify.get('/stats', hrAdminAuth, async (req: any, reply) => {
-    const { data, error } = await fastify.supabase
-      .from('helpdesk_tickets')
-      .select('status, sla_breached_at, resolution_breached_at')
-      .eq('tenant_id', req.tenantId)
+    const liveStatuses = ['open', 'in_progress', 'awaiting_employee']
+    const countBase = () =>
+      fastify.supabase
+        .from('helpdesk_tickets')
+        .select('*', { count: 'exact', head: true })
+        .eq('tenant_id', req.tenantId)
 
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    const [totalRes, openRes, breachedRes, resBreachedRes, statusRes] = await Promise.all([
+      countBase(),
+      countBase().in('status', liveStatuses),
+      countBase().in('status', liveStatuses).not('sla_breached_at', 'is', null),
+      countBase().in('status', liveStatuses).not('resolution_breached_at', 'is', null),
+      fastify.supabase.from('helpdesk_tickets').select('status').eq('tenant_id', req.tenantId),
+    ])
 
-    const rows = (data ?? []) as any[]
-    const isLive = (r: any) => !['resolved', 'closed'].includes(r.status)
-    const open = rows.filter(isLive).length
-    const breached = rows.filter(r => r.sla_breached_at && isLive(r)).length
-    const resolutionBreached = rows.filter(r => r.resolution_breached_at && isLive(r)).length
+    const fetchErr = totalRes.error ?? openRes.error ?? breachedRes.error ?? resBreachedRes.error ?? statusRes.error
+    if (fetchErr) return reply.code(500).send({ error: 'DB_ERROR', message: fetchErr.message })
+
     const byStatus: Record<string, number> = {}
-    for (const r of rows) byStatus[r.status] = (byStatus[r.status] ?? 0) + 1
+    for (const r of (statusRes.data ?? []) as { status: string }[]) {
+      byStatus[r.status] = (byStatus[r.status] ?? 0) + 1
+    }
 
-    return reply.send({ data: { total: rows.length, open, breached, resolution_breached: resolutionBreached, by_status: byStatus } })
+    return reply.send({
+      data: {
+        total:               totalRes.count    ?? 0,
+        open:                openRes.count     ?? 0,
+        breached:            breachedRes.count ?? 0,
+        resolution_breached: resBreachedRes.count ?? 0,
+        by_status:           byStatus,
+      },
+    })
   })
 
   // POST /helpdesk/tickets/:id/assign — assign to an HR agent

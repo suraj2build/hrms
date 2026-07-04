@@ -18,7 +18,7 @@ import { cn } from '@/lib/utils'
 import { SubTabs } from '@/components/ui/SubTabs'
 import { Button } from '@/components/ui/button'
 import { Label }  from '@/components/ui/label'
-import { sanitizeHtml } from '@/lib/sanitize'
+import { sanitizeHtml, escapeHtml } from '@/lib/sanitize'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@/components/ui/dialog'
@@ -105,10 +105,10 @@ function LetterViewDialog({ letterId, onClose }: { letterId: string; onClose: ()
   const letter = data?.data
 
   function printLetter() {
-    const html = letter?.body_html ?? ''
+    const html = sanitizeHtml(letter?.body_html ?? '')
     const win  = window.open('', '_blank')
     if (!win) return
-    win.document.write(`<!DOCTYPE html><html><head><title>${letter?.subject ?? 'Letter'}</title>
+    win.document.write(`<!DOCTYPE html><html><head><title>${escapeHtml(letter?.subject ?? 'Letter')}</title>
     <style>body{font-family:Georgia,serif;max-width:750px;margin:40px auto;font-size:13px;line-height:1.6}</style>
     </head><body>${html}</body></html>`)
     win.document.close()

@@ -452,12 +452,21 @@ function AuthProvider({ children }: { children: React.ReactNode }) {
 
     // ── DEMO MODE — seed a fixture identity and skip all supabase/auth wiring ──
     // The whole app then runs against the demo resolver (see lib/api/client.ts).
+    // Guard: if a real Supabase session exists, the user is a legitimate tenant
+    // who hit /demo while logged in. Clear the demo flag and reload so real data loads.
     if (DEMO_MODE) {
-      setProfile(demoProfile)
-      setTenant(demoTenant)
-      setAccessToken('demo')
-      setLoading(false)
-      setBootstrapping(false)
+      supabase.auth.getSession().then(({ data: { session } }) => {
+        if (session?.user) {
+          try { sessionStorage.removeItem('cognix-demo') } catch { /* noop */ }
+          window.location.reload()
+        } else {
+          setProfile(demoProfile)
+          setTenant(demoTenant)
+          setAccessToken('demo')
+          setLoading(false)
+          setBootstrapping(false)
+        }
+      })
       return
     }
 

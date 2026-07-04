@@ -24,7 +24,7 @@ import { Button }        from '@/components/ui/button'
 import { Input }         from '@/components/ui/input'
 import { Label }         from '@/components/ui/label'
 import {
-  Dialog, DialogContent,
+  Dialog, DialogContent, DialogTitle,
 } from '@/components/ui/dialog'
 import {
   Sheet, SheetContent, SheetHeader, SheetTitle,
@@ -445,6 +445,7 @@ export function AdminCandidates() {
       {/* Create / Edit Dialog */}
       <Dialog open={sheetOpen} onOpenChange={setSheetOpen}>
         <DialogContent className="max-w-xl p-0 gap-0 overflow-hidden [&>button]:text-white [&>button]:opacity-80 [&>button:hover]:opacity-100 [&>button]:top-5 [&>button]:right-5">
+          <DialogTitle className="sr-only">Candidate Details</DialogTitle>
           {/* Header */}
           <div className="bg-gradient-to-br from-[#0d5a4e] to-[#15B8A6] px-6 py-5">
             <div className="flex items-center gap-3">

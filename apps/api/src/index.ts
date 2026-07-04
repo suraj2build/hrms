@@ -28,7 +28,15 @@ import { runDueSources as runAttendanceSources } from './lib/attendance-api-sche
 import { tick as runDigestTick }         from './lib/digest-scheduler.js'
 import { tick as runWoCreditTick }       from './lib/wo-credit-reconciler.js'
 import { runPollTick }                   from './lib/poll-scheduler.js'
-import { tick as runLeaveSchedulerTick } from './lib/leave-scheduler.js'
+import {
+  tick as runLeaveSchedulerTick,
+  execLeaveYearlyAccrual,
+  execLeaveMonthlyAccrual,
+  execLeaveCarryForward,
+  execLeaveCoExpiry,
+  execLeaveEventGrants,
+  execLeaveReconciliationJob,
+} from './lib/leave-scheduler.js'
 import { monthlyAccrualJob }             from './lib/leave-jobs.js'
 import { jobQueue }                      from './lib/job-queue.js'
 import { eventBus }                      from './lib/event-bus.js'
@@ -540,6 +548,24 @@ async function start() {
   })
   durableQueue.register('leave-scheduler-tick', async (_payload, _job) => {
     await runLeaveSchedulerTick(fastify.supabase)
+  })
+  durableQueue.register('leave-yearly-accrual', async (payload, _job) => {
+    await execLeaveYearlyAccrual(fastify.supabase, payload as { isCalYearStart: boolean; year: number; leaveYear: number; dayKey: string })
+  })
+  durableQueue.register('leave-monthly-accrual', async (payload, _job) => {
+    await execLeaveMonthlyAccrual(fastify.supabase, payload as { year: number; monthNum: number })
+  })
+  durableQueue.register('leave-carry-forward', async (payload, _job) => {
+    await execLeaveCarryForward(fastify.supabase, payload as { fromYear: number; toYear: number })
+  })
+  durableQueue.register('leave-co-expiry', async (payload, _job) => {
+    await execLeaveCoExpiry(fastify.supabase, payload as { dayKey: string })
+  })
+  durableQueue.register('leave-event-grants', async (payload, _job) => {
+    await execLeaveEventGrants(fastify.supabase, payload as { dayKey: string })
+  })
+  durableQueue.register('leave-reconciliation', async (payload, _job) => {
+    await execLeaveReconciliationJob(fastify.supabase, payload as { dayKey: string; reconcYear: number })
   })
   durableQueue.register('detect-absconding', async (_payload, _job) => {
     const { scanAndEscalate } = await import('./lib/absconding-engine.js')
