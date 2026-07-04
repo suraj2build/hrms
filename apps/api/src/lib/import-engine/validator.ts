@@ -55,9 +55,16 @@ function parseNumber(val: string): number | null {
 
 // ── Lookup helpers (resolve code → UUID, stored in normalizedData) ────────────
 
+/** Split an array into chunks of at most `size` elements. */
+function chunkArray<T>(arr: T[], size: number): T[][] {
+  const chunks: T[][] = []
+  for (let i = 0; i < arr.length; i += size) chunks.push(arr.slice(i, i + size))
+  return chunks
+}
+
 /**
  * Resolve a set of employee_codes to { code → employee_id } map.
- * Invalid codes are not included — callers emit errors for missing entries.
+ * Chunked into batches of 500 to stay under PostgREST's default max-rows limit.
  */
 async function resolveEmployeeCodes(
   supabase: SupabaseClient,
@@ -65,18 +72,26 @@ async function resolveEmployeeCodes(
   codes: string[],
 ): Promise<Map<string, string>> {
   if (codes.length === 0) return new Map()
-  const { data } = await supabase
-    .from('employees')
-    .select('id, employee_code')
-    .eq('tenant_id', tenantId)
-    .in('employee_code', codes)
-  if (!data) return new Map()
-  return new Map((data as any[]).map((r) => [String(r.employee_code).toUpperCase(), r.id as string]))
+  const result = new Map<string, string>()
+  for (const chunk of chunkArray(codes, 500)) {
+    const { data } = await supabase
+      .from('employees')
+      .select('id, employee_code')
+      .eq('tenant_id', tenantId)
+      .in('employee_code', chunk)
+      .limit(500)
+    if (data) {
+      for (const r of data as any[]) {
+        result.set(String(r.employee_code).toUpperCase(), r.id as string)
+      }
+    }
+  }
+  return result
 }
 
 /**
  * Resolve a set of code values from any tenant-scoped table to { code → id } map.
- * Returns empty map on error — callers decide whether missing codes are errors or warnings.
+ * Chunked into batches of 500 to stay under PostgREST's default max-rows limit.
  */
 async function resolveCodeToId(
   supabase: SupabaseClient,
@@ -86,13 +101,21 @@ async function resolveCodeToId(
   codes: string[],
 ): Promise<Map<string, string>> {
   if (codes.length === 0) return new Map()
-  const { data } = await supabase
-    .from(table)
-    .select(`id, ${codeColumn}`)
-    .eq('tenant_id', tenantId)
-    .in(codeColumn, codes)
-  if (!data) return new Map()
-  return new Map((data as any[]).map((r) => [String(r[codeColumn] ?? '').toUpperCase(), r.id as string]))
+  const result = new Map<string, string>()
+  for (const chunk of chunkArray(codes, 500)) {
+    const { data } = await supabase
+      .from(table)
+      .select(`id, ${codeColumn}`)
+      .eq('tenant_id', tenantId)
+      .in(codeColumn, chunk)
+      .limit(500)
+    if (data) {
+      for (const r of data as any[]) {
+        result.set(String(r[codeColumn] ?? '').toUpperCase(), r.id as string)
+      }
+    }
+  }
+  return result
 }
 
 // ── Per-type normalisers & validators ─────────────────────────────────────────
@@ -717,13 +740,19 @@ async function checkExistingCodes(
   codes: string[],
 ): Promise<Set<string>> {
   if (codes.length === 0) return new Set()
-  const { data } = await supabase
-    .from(table)
-    .select(codeColumn)
-    .eq('tenant_id', tenantId)
-    .in(codeColumn, codes)
-  if (!data) return new Set()
-  return new Set((data as any[]).map((r) => String(r[codeColumn] ?? '').toUpperCase()))
+  const result = new Set<string>()
+  for (const chunk of chunkArray(codes, 500)) {
+    const { data } = await supabase
+      .from(table)
+      .select(codeColumn)
+      .eq('tenant_id', tenantId)
+      .in(codeColumn, chunk)
+      .limit(500)
+    if (data) {
+      for (const r of data as any[]) result.add(String(r[codeColumn] ?? '').toUpperCase())
+    }
+  }
+  return result
 }
 
 // ── Main export ───────────────────────────────────────────────────────────────
