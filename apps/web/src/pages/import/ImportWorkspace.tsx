@@ -1103,6 +1103,16 @@ export function ImportWorkspace() {
     onError: (e: Error) => toast.error('Import failed', { description: e.message }),
   })
 
+  // ── Cancel job (from History) ──────────────────────────────────────────────
+  const cancelJobMutation = useMutation({
+    mutationFn: (jobId: string) => api.delete(`/import/jobs/${jobId}`),
+    onSuccess: () => {
+      toast.success('Job cancelled')
+      queryClient.invalidateQueries({ queryKey: ['import-jobs'] })
+    },
+    onError: (e: Error) => toast.error('Cancel failed', { description: e.message }),
+  })
+
   // ── Mutation Timeout Guards ───────────────────────────────────────────────
   // If a mutation hangs indefinitely the spinner never clears. After the deadline
   // we expose a cancel UI so the user always has an escape hatch.
@@ -2064,8 +2074,10 @@ export function ImportWorkspace() {
                   <SelectItem value="all">All Statuses</SelectItem>
                   <SelectItem value="pending">Pending</SelectItem>
                   <SelectItem value="validating">Validating</SelectItem>
+                  <SelectItem value="importing">Importing</SelectItem>
                   <SelectItem value="completed">Completed</SelectItem>
                   <SelectItem value="failed">Failed</SelectItem>
+                  <SelectItem value="cancelled">Cancelled</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -2107,6 +2119,7 @@ export function ImportWorkspace() {
                         <th className="px-3 py-2.5 text-right text-xs font-semibold text-muted-foreground">Failed</th>
                         <th className="px-3 py-2.5 text-left text-xs font-semibold text-muted-foreground">Status</th>
                         <th className="px-3 py-2.5 text-right text-xs font-semibold text-muted-foreground">Duration</th>
+                        <th className="px-3 py-2.5 text-center text-xs font-semibold text-muted-foreground">Actions</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -2148,12 +2161,25 @@ export function ImportWorkspace() {
                               <td className="px-3 py-2.5 text-right text-muted-foreground text-xs">
                                 {job.durationMs != null ? `${(job.durationMs / 1000).toFixed(1)}s` : '—'}
                               </td>
+                              <td className="px-3 py-2.5 text-center" onClick={e => e.stopPropagation()}>
+                                {['pending', 'validating', 'validated', 'importing'].includes(job.status) && (
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-6 px-2 text-xs text-destructive hover:bg-destructive/10"
+                                    disabled={cancelJobMutation.isPending}
+                                    onClick={() => cancelJobMutation.mutate(job.id)}
+                                  >
+                                    {cancelJobMutation.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Cancel'}
+                                  </Button>
+                                )}
+                              </td>
                             </tr>
 
                             {/* Expanded job detail — Errors / Created / Updated tabs */}
                             {isExpanded && (
                               <tr className="border-b border-border bg-muted/20">
-                                <td colSpan={11} className="px-4 py-3">
+                                <td colSpan={12} className="px-4 py-3">
                                   {/* Tab bar */}
                                   <div className="flex gap-1 mb-3">
                                     {(['errors', 'created', 'updated'] as const).map(tab => (

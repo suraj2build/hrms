@@ -340,10 +340,10 @@ export default async function importRoutes(fastify: FastifyInstance) {
       return reply.code(404).send({ error: 'NOT_FOUND', message: 'Import job not found' })
     }
 
-    if (!['pending', 'validating', 'validated'].includes(job.status as string)) {
+    if (!['pending', 'validating', 'validated', 'importing'].includes(job.status as string)) {
       return reply.code(409).send({
         error:   'CONFLICT',
-        message: `Cannot cancel a job with status "${job.status}". Only pending/validating/validated jobs can be cancelled.`,
+        message: `Cannot cancel a job with status "${job.status}". Only pending/validating/validated/importing jobs can be cancelled.`,
       })
     }
 
