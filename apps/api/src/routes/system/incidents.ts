@@ -125,7 +125,7 @@ export default async function incidentsRoute(fastify: FastifyInstance) {
         employee_id, department_id, assigned_to,
         related_entity_type, related_entity_id,
         employees(id, first_name, last_name, employee_code),
-        profiles!operational_incidents_assigned_to_fkey(id, full_name)
+        profiles!assigned_to(id, full_name)
         `,
         { count: 'exact' },
       )
@@ -267,7 +267,7 @@ export default async function incidentsRoute(fastify: FastifyInstance) {
         related_entity_type, related_entity_id,
         resolved_by, created_by,
         employees(id, first_name, last_name, employee_code),
-        profiles!operational_incidents_assigned_to_fkey(id, full_name)
+        profiles!assigned_to(id, full_name)
         `,
       )
       .eq('id', id)
@@ -302,7 +302,7 @@ export default async function incidentsRoute(fastify: FastifyInstance) {
       .select(
         `
         id, reason:escalation_reason, created_at:escalated_at, escalated_by:escalated_from, escalated_to,
-        profiles!incident_escalations_escalated_to_fkey(id, full_name)
+        profiles!escalated_to(id, full_name)
         `,
       )
       .eq('incident_id', id)
