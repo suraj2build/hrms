@@ -1099,9 +1099,6 @@ export function ImportWorkspace() {
         queryClient.invalidateQueries({ queryKey: [k] })
       }
 
-      toast.success('Import complete', {
-        description: `${data.created} created, ${data.updated} updated, ${data.failed} failed.`,
-      })
     },
     onError: (e: Error) => toast.error('Import failed', { description: e.message }),
   })
@@ -1236,14 +1233,17 @@ export function ImportWorkspace() {
     if (!polledJob?.data) return
     const j = polledJob.data
     if (j.status === 'completed' || j.status === 'failed') {
-      setImportResult(prev => prev ? {
-        ...prev,
-        created: (j.created_rows as number) ?? 0,
-        updated: (j.updated_rows as number) ?? 0,
-        failed:  (j.failed_rows  as number) ?? 0,
-        skipped: (j.skipped_rows as number) ?? 0,
-      } : prev)
+      const created = (j.created_rows as number) ?? 0
+      const updated = (j.updated_rows as number) ?? 0
+      const failed  = (j.failed_rows  as number) ?? 0
+      const skipped = (j.skipped_rows as number) ?? 0
+      setImportResult(prev => prev ? { ...prev, created, updated, failed, skipped } : prev)
       queryClient.invalidateQueries({ queryKey: ['import-jobs'] })
+      if (j.status === 'completed') {
+        toast.success('Import complete', { description: `${created} created, ${updated} updated, ${failed} failed.` })
+      } else {
+        toast.error('Import failed', { description: 'Check Import History for details.' })
+      }
     }
   }, [polledJob])
 
