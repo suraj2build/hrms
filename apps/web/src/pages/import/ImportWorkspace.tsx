@@ -1823,7 +1823,7 @@ export function ImportWorkspace() {
                             This import is taking longer than usual. You can close this screen and track progress from History.
                           </p>
                           <div className="flex gap-2">
-                            <Button variant="outline" size="sm" onClick={() => { importMutation.reset(); setCurrentStep('import'); setActiveTab('history') }}>
+                            <Button variant="outline" size="sm" onClick={() => { importMutation.reset(); setCurrentStep('import'); setActiveTab('history'); queryClient.invalidateQueries({ queryKey: ['import-jobs'] }) }}>
                               Go to History
                             </Button>
                             <Button variant="ghost" size="sm" onClick={() => setImportTimedOut(false)}>
