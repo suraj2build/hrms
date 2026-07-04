@@ -118,6 +118,36 @@ async function resolveCodeToId(
   return result
 }
 
+/**
+ * Resolve a set of emails to { email → { id, code } } for conflict detection.
+ * Chunked into batches of 500 to stay under PostgREST's default max-rows limit.
+ */
+async function resolveEmployeesByEmail(
+  supabase: SupabaseClient,
+  tenantId: string,
+  emails: string[],
+): Promise<Map<string, { id: string; code: string }>> {
+  if (emails.length === 0) return new Map()
+  const result = new Map<string, { id: string; code: string }>()
+  for (const chunk of chunkArray(emails, 500)) {
+    const { data } = await supabase
+      .from('employees')
+      .select('id, email, employee_code')
+      .eq('tenant_id', tenantId)
+      .in('email', chunk)
+      .limit(500)
+    if (data) {
+      for (const r of data as any[]) {
+        result.set(String(r.email ?? '').toLowerCase(), {
+          id:   r.id   as string,
+          code: String(r.employee_code ?? ''),
+        })
+      }
+    }
+  }
+  return result
+}
+
 // ── Per-type normalisers & validators ─────────────────────────────────────────
 
 function validateEmployee(
@@ -819,6 +849,15 @@ export async function validateImportRows(
       ),
     ]
 
+    // Collect emails of valid rows for email-conflict detection
+    const emailsInBatch = [
+      ...new Set(
+        validatedRows
+          .filter((r) => r.isValid && r.normalizedData.email)
+          .map((r) => (r.normalizedData.email as string).toLowerCase()),
+      ),
+    ]
+
     // Resolve all lookups in parallel
     const [
       empCodeMap,
@@ -827,6 +866,7 @@ export async function validateImportRows(
       gradeIdMap,
       locIdMap,
       mgrCodeMap,
+      empEmailMap,
     ] = await Promise.all([
       resolveEmployeeCodes(supabase, tenantId, codesInBatch),
       resolveCodeToId(supabase, tenantId, 'departments',  'code', pick('department_code')),
@@ -834,6 +874,7 @@ export async function validateImportRows(
       resolveCodeToId(supabase, tenantId, 'grades',       'code', pick('grade_code')),
       resolveCodeToId(supabase, tenantId, 'work_locations', 'code', pick('work_location_code')),
       resolveEmployeeCodes(supabase, tenantId, pick('manager_employee_code')),
+      resolveEmployeesByEmail(supabase, tenantId, emailsInBatch),
     ])
 
     for (const vr of validatedRows) {
@@ -846,6 +887,22 @@ export async function validateImportRows(
         if (empId) {
           vr.isDuplicate = true
           vr.normalizedData.employee_id = empId
+        }
+      }
+
+      // Email-based conflict check: if code lookup didn't find a match but this email
+      // already belongs to another employee, surface a clear error instead of letting
+      // the INSERT blow up on the unique constraint at runtime.
+      if (!vr.isDuplicate && vr.normalizedData.email) {
+        const email = (vr.normalizedData.email as string).toLowerCase()
+        const conflict = empEmailMap.get(email)
+        if (conflict) {
+          vr.errors.push({
+            field:    'email',
+            message:  `Email "${email}" already belongs to employee ${conflict.code} in this tenant. Update the employee_code in your CSV to "${conflict.code}" so this row is treated as an update, or remove it if no change is needed.`,
+            severity: 'error',
+          })
+          vr.isValid = false
         }
       }
 
