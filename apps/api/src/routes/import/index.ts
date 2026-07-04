@@ -12,6 +12,11 @@ import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 
 const VALID_MASTER_TYPES = Object.keys(MASTER_TEMPLATES)
 
+// Master types that are pre-seeded per tenant and must not be overwritten via import.
+const SEEDED_MASTER_TYPES: Record<string, string> = {
+  states: 'States are pre-seeded for every tenant (all 36 Indian states/UTs). Edit PT/LWF flags and region labels from Settings → States instead of importing.',
+}
+
 const IMPORT_MODES = ['create_only', 'update_only', 'upsert', 'validate_only'] as const
 
 // ── Zod schemas ───────────────────────────────────────────────────────────────
@@ -95,6 +100,13 @@ export default async function importRoutes(fastify: FastifyInstance) {
 
     const { masterType, rows } = parsed.data
 
+    if (SEEDED_MASTER_TYPES[masterType]) {
+      return reply.code(400).send({
+        error:   'SEEDED_MASTER',
+        message: SEEDED_MASTER_TYPES[masterType],
+      })
+    }
+
     try {
       const result = await validateImportRows(
         fastify.supabase,
@@ -127,6 +139,13 @@ export default async function importRoutes(fastify: FastifyInstance) {
     }
 
     const { masterType, rows, fileName, mode } = parsed.data
+
+    if (SEEDED_MASTER_TYPES[masterType]) {
+      return reply.code(400).send({
+        error:   'SEEDED_MASTER',
+        message: SEEDED_MASTER_TYPES[masterType],
+      })
+    }
 
     try {
       const result = await runImport(
