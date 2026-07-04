@@ -1116,7 +1116,7 @@ export function ImportWorkspace() {
 
   useEffect(() => {
     if (!importMutation.isPending) { setImportTimedOut(false); return }
-    const t = setTimeout(() => setImportTimedOut(true), 120_000)
+    const t = setTimeout(() => setImportTimedOut(true), 45_000)
     return () => clearTimeout(t)
   }, [importMutation.isPending])
 
@@ -1806,12 +1806,19 @@ export function ImportWorkspace() {
                       <Loader2 className="h-8 w-8 animate-spin text-primary" />
                       <p className="text-sm text-muted-foreground">Importing data, please wait…</p>
                       {importTimedOut && (
-                        <div className="flex flex-col items-center gap-2 mt-2">
-                          <p className="text-xs text-warning">This is taking longer than expected.</p>
-                          <p className="text-xs text-muted-foreground">The import may still be running server-side. Check Import History before retrying.</p>
-                          <Button variant="outline" size="sm" onClick={() => { importMutation.reset(); setCurrentStep('import'); setActiveTab('history') }}>
-                            Dismiss and Check History
-                          </Button>
+                        <div className="flex flex-col items-center gap-3 mt-2 text-center">
+                          <p className="text-sm font-medium">Import is still running</p>
+                          <p className="text-xs text-muted-foreground max-w-xs">
+                            This import is taking longer than usual. You can close this screen and track progress from History.
+                          </p>
+                          <div className="flex gap-2">
+                            <Button variant="outline" size="sm" onClick={() => { importMutation.reset(); setCurrentStep('import'); setActiveTab('history') }}>
+                              Go to History
+                            </Button>
+                            <Button variant="ghost" size="sm" onClick={() => setImportTimedOut(false)}>
+                              Keep Waiting
+                            </Button>
+                          </div>
                         </div>
                       )}
                     </div>
