@@ -174,10 +174,10 @@ function flattenValidationRows(backend: BackendValidationResult): ValidationResu
 
 interface ImportResult {
   importJobId: string
-  created: number
-  updated: number
-  failed: number
-  skipped: number
+  created?: number
+  updated?: number
+  failed?: number
+  skipped?: number
 }
 
 interface ImportJob {
@@ -1218,6 +1218,35 @@ export function ImportWorkspace() {
     ...(row.warnings ?? []).map(w => ({ rowNumber: row.row_number, field: w.field, error: w.message, severity: 'warning' as const })),
   ])
 
+  // ── Poll job until complete (async import) ────────────────────────────────
+  // After the API returns 202 the counts are unknown. Poll every 3s until the
+  // job settles (completed/failed), then fill in the result counts.
+  const jobIsSettled = importResult?.created !== undefined
+  const { data: polledJob } = useQuery({
+    queryKey: ['import-job-poll', importResult?.importJobId],
+    queryFn: () =>
+      api.get<{ data: Record<string, unknown> }>(`/import/jobs/${importResult!.importJobId}`),
+    enabled: currentStep === 'complete' && !!importResult?.importJobId && !jobIsSettled,
+    refetchInterval: (query) => {
+      const s = query.state.data?.data?.status as string | undefined
+      return s === 'completed' || s === 'failed' ? false : 3000
+    },
+  })
+  React.useEffect(() => {
+    if (!polledJob?.data) return
+    const j = polledJob.data
+    if (j.status === 'completed' || j.status === 'failed') {
+      setImportResult(prev => prev ? {
+        ...prev,
+        created: (j.created_rows as number) ?? 0,
+        updated: (j.updated_rows as number) ?? 0,
+        failed:  (j.failed_rows  as number) ?? 0,
+        skipped: (j.skipped_rows as number) ?? 0,
+      } : prev)
+      queryClient.invalidateQueries({ queryKey: ['import-jobs'] })
+    }
+  }, [polledJob])
+
   // ── Reset Workflow ─────────────────────────────────────────────────────────
   function resetWorkflow() {
     if (selectedMaster) clearSession(selectedMaster)
@@ -1870,9 +1899,16 @@ export function ImportWorkspace() {
                 </div>
               )}
 
-              {currentStep === 'complete' && importResult && (
+              {currentStep === 'complete' && importResult && !jobIsSettled && (
+                <div className="flex flex-col items-center gap-3 py-10">
+                  <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                  <p className="text-sm text-muted-foreground">Import is running… checking progress</p>
+                </div>
+              )}
+
+              {currentStep === 'complete' && importResult && jobIsSettled && (
                 <div className="space-y-5">
-                  {importResult.failed === 0 ? (
+                  {(importResult.failed ?? 0) === 0 ? (
                     <div className="flex flex-col items-center gap-4 py-4">
                       <div className="rounded-full bg-success/10 p-5">
                         <CheckCircle2 className="h-10 w-10 text-success" />
@@ -1892,10 +1928,10 @@ export function ImportWorkspace() {
                       <div className="text-center">
                         <p className="text-xl font-bold text-foreground">Import Completed with Errors</p>
                         <p className="text-sm text-muted-foreground mt-1">
-                          <span className="font-semibold text-destructive">{importResult.failed} rows failed</span>
-                          {importResult.created > 0 && `, ${importResult.created} created`}
-                          {importResult.updated > 0 && `, ${importResult.updated} updated`}
-                          {importResult.skipped > 0 && `, ${importResult.skipped} skipped`}.
+                          <span className="font-semibold text-destructive">{importResult.failed ?? 0} rows failed</span>
+                          {(importResult.created ?? 0) > 0 && `, ${importResult.created} created`}
+                          {(importResult.updated ?? 0) > 0 && `, ${importResult.updated} updated`}
+                          {(importResult.skipped ?? 0) > 0 && `, ${importResult.skipped} skipped`}.
                         </p>
                       </div>
                     </div>
@@ -1903,20 +1939,20 @@ export function ImportWorkspace() {
 
                   {/* Result cards */}
                   <MetricRow cols={4}>
-                    <MetricCard label="Created" value={importResult.created} variant="success" />
-                    <MetricCard label="Updated" value={importResult.updated} variant="neutral" />
-                    <MetricCard label="Failed" value={importResult.failed} variant="destructive" />
-                    <MetricCard label="Skipped" value={importResult.skipped} variant="warning" />
+                    <MetricCard label="Created" value={importResult.created ?? 0} variant="success" />
+                    <MetricCard label="Updated" value={importResult.updated ?? 0} variant="neutral" />
+                    <MetricCard label="Failed"  value={importResult.failed  ?? 0} variant="destructive" />
+                    <MetricCard label="Skipped" value={importResult.skipped ?? 0} variant="warning" />
                   </MetricRow>
 
                   {/* Failed row loading indicator */}
-                  {importResult.failed > 0 && failedRowsLoading && (
+                  {(importResult.failed ?? 0) > 0 && failedRowsLoading && (
                     <div className="flex items-center gap-2 text-sm text-muted-foreground">
                       <Loader2 className="h-4 w-4 animate-spin" />
                       Loading failure details…
                     </div>
                   )}
-                  {importResult.failed > 0 && failedRowsError && (
+                  {(importResult.failed ?? 0) > 0 && failedRowsError && (
                     <div className="rounded-md border border-destructive/20 bg-destructive/5 p-3 flex items-center gap-2 text-sm text-muted-foreground">
                       <AlertTriangle className="h-4 w-4 text-destructive flex-shrink-0" />
                       Could not load failure details. Check Import History for row-level errors.
@@ -1924,7 +1960,7 @@ export function ImportWorkspace() {
                   )}
 
                   {/* Failed row details */}
-                  {importResult.failed > 0 && failedFlatRows.length > 0 && (
+                  {(importResult.failed ?? 0) > 0 && failedFlatRows.length > 0 && (
                     <div className="space-y-2">
                       <div className="flex items-center justify-between">
                         <p className="text-sm font-medium text-foreground">
