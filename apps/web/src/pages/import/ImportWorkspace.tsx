@@ -1142,7 +1142,25 @@ export function ImportWorkspace() {
   // while a background refresh runs after the stale window elapses.
   const { data: jobsData, isLoading: jobsLoading, isFetching: jobsFetching, isError: jobsError } = useQuery({
     queryKey: ['import-jobs'],
-    queryFn: () => api.get<{ data: ImportJob[] }>('/import/jobs'),
+    queryFn: () =>
+      api.get<{ data: Record<string, unknown>[] }>('/import/jobs').then(res => ({
+        ...res,
+        data: (res.data ?? []).map((j): ImportJob => ({
+          id:         j.id         as string,
+          masterType: j.master_type as MasterType,
+          fileName:   j.file_name   as string,
+          mode:       j.mode        as Mode,
+          totalRows:  j.total_rows  as number,
+          validRows:  j.valid_rows  as number,
+          created:    j.created_rows as number,
+          updated:    j.updated_rows as number,
+          failed:     j.failed_rows  as number,
+          skipped:    j.skipped_rows as number,
+          status:     j.status      as ImportJob['status'],
+          durationMs: j.duration_ms  as number | undefined,
+          createdAt:  j.created_at   as string,
+        })),
+      })),
     enabled: activeTab === 'history',
     staleTime: 60_000,
     placeholderData: keepPreviousData,
