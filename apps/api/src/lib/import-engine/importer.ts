@@ -767,12 +767,11 @@ async function importEmployees(
         const { error: empErr } = await supabase
           .from('employees')
           .update({
-            first_name:       norm.first_name,
-            last_name:        norm.last_name,
-            phone:            (norm.phone as string | undefined) ?? null,
-            joining_date:     norm.joining_date,
-            status:           (norm.status as string | undefined) ?? 'active',
-            work_location_id: (norm.work_location_id as string | undefined) ?? null,
+            first_name:   norm.first_name,
+            last_name:    norm.last_name,
+            phone:        (norm.phone   as string | undefined) ?? null,
+            joining_date: norm.joining_date,
+            status:       (norm.status  as string | undefined) ?? 'active',
           })
           .eq('tenant_id', tenantId)
           .eq('id', employeeId)
