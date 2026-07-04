@@ -1809,7 +1809,7 @@ export function ImportWorkspace() {
                         <div className="flex flex-col items-center gap-2 mt-2">
                           <p className="text-xs text-warning">This is taking longer than expected.</p>
                           <p className="text-xs text-muted-foreground">The import may still be running server-side. Check Import History before retrying.</p>
-                          <Button variant="outline" size="sm" onClick={() => { importMutation.reset(); setCurrentStep('import') }}>
+                          <Button variant="outline" size="sm" onClick={() => { importMutation.reset(); setCurrentStep('import'); setActiveTab('history') }}>
                             Dismiss and Check History
                           </Button>
                         </div>
