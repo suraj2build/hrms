@@ -787,6 +787,7 @@ export function ImportWorkspace() {
   const [historyMasterFilter, setHistoryMasterFilter] = useState<string>('all')
   const [historyStatusFilter, setHistoryStatusFilter] = useState<string>('all')
   const [expandedJobId, setExpandedJobId] = useState<string | null>(null)
+  const [expandedJobTab, setExpandedJobTab] = useState<'errors' | 'created' | 'updated'>('errors')
   const [errorPage, setErrorPage] = useState(1)
 
   // ── File Upload ───────────────────────────────────────────────────────────
@@ -1172,6 +1173,16 @@ export function ImportWorkspace() {
     ...(row.errors ?? []).map(e => ({ rowNumber: row.row_number, field: e.field, error: e.message, severity: e.severity })),
     ...(row.warnings ?? []).map(w => ({ rowNumber: row.row_number, field: w.field, error: w.message, severity: 'warning' as const })),
   ])
+
+  const { data: createdRowsData, isLoading: createdRowsLoading } = useQuery({
+    queryKey: ['import-job-rows-created', expandedJobId, expandedJobTab],
+    queryFn: () =>
+      api.get<{ data: ImportJobRow[] }>(`/import/jobs/${expandedJobId}/rows?status=${expandedJobTab}&limit=200`),
+    enabled: !!expandedJobId && (expandedJobTab === 'created' || expandedJobTab === 'updated'),
+    staleTime: 60_000,
+    retry: 1,
+  })
+  const createdRows = createdRowsData?.data ?? []
 
   // ── Complete Step — Failed Row Details ────────────────────────────────────
   // staleTime: 5 min — failed rows for a finished job are immutable; no need to
@@ -2055,7 +2066,7 @@ export function ImportWorkspace() {
                                 'border-b border-border last:border-0 cursor-pointer transition-colors',
                                 isExpanded ? 'bg-muted/50' : 'hover:bg-muted/30',
                               )}
-                              onClick={() => setExpandedJobId(isExpanded ? null : job.id)}
+                              onClick={() => { setExpandedJobId(isExpanded ? null : job.id); setExpandedJobTab('errors') }}
                             >
                               <td className="px-3 py-2.5 text-muted-foreground text-xs whitespace-nowrap">
                                 {(() => { const _d = new Date(job.createdAt); const _M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; return isNaN(_d.getTime()) ? '—' : `${String(_d.getUTCDate()).padStart(2,'0')}-${_M[_d.getUTCMonth()]}-${_d.getUTCFullYear()}` })()}{' '}
@@ -2085,57 +2096,120 @@ export function ImportWorkspace() {
                               </td>
                             </tr>
 
-                            {/* Expanded row errors */}
+                            {/* Expanded job detail — Errors / Created / Updated tabs */}
                             {isExpanded && (
                               <tr className="border-b border-border bg-muted/20">
                                 <td colSpan={11} className="px-4 py-3">
-                                  {expandedRowsLoading ? (
-                                    <div className="flex items-center gap-2 py-2 text-xs text-muted-foreground">
-                                      <Loader2 className="h-3 w-3 animate-spin" />
-                                      Loading error details…
-                                    </div>
-                                  ) : expandedRowsError ? (
-                                    <div className="flex items-center gap-2 py-2 text-xs text-destructive">
-                                      <XCircle className="h-3 w-3" />
-                                      Could not load row errors.
-                                    </div>
-                                  ) : expandedFlatRows.length === 0 ? (
-                                    <p className="text-xs text-muted-foreground py-2">
-                                      No errors recorded for this import job.
-                                    </p>
-                                  ) : (
-                                    <div className="rounded-md border border-border overflow-hidden">
-                                      <table className="w-full text-xs">
-                                        <thead>
-                                          <tr className="bg-muted/60 border-b border-border">
-                                            <th className="px-3 py-2 text-left text-muted-foreground font-semibold">Row #</th>
-                                            <th className="px-3 py-2 text-left text-muted-foreground font-semibold">Field</th>
-                                            <th className="px-3 py-2 text-left text-muted-foreground font-semibold">Error</th>
-                                            <th className="px-3 py-2 text-left text-muted-foreground font-semibold">Severity</th>
-                                          </tr>
-                                        </thead>
-                                        <tbody>
-                                          {expandedFlatRows.map((row, i) => (
-                                            <tr
-                                              key={`${row.rowNumber}-${row.field}-${i}`}
-                                              className={cn(
-                                                'border-b border-border last:border-0',
-                                                row.severity === 'error' ? 'bg-destructive/5' : 'bg-warning/5',
-                                              )}
-                                            >
-                                              <td className="px-3 py-1.5 font-mono text-muted-foreground">{row.rowNumber}</td>
-                                              <td className="px-3 py-1.5 font-mono text-foreground">{row.field}</td>
-                                              <td className="px-3 py-1.5 text-foreground">{row.error}</td>
-                                              <td className="px-3 py-1.5">
-                                                <Badge variant={row.severity === 'error' ? 'destructive' : 'warning'}>
-                                                  {row.severity}
-                                                </Badge>
-                                              </td>
+                                  {/* Tab bar */}
+                                  <div className="flex gap-1 mb-3">
+                                    {(['errors', 'created', 'updated'] as const).map(tab => (
+                                      <button
+                                        key={tab}
+                                        onClick={() => setExpandedJobTab(tab)}
+                                        className={cn(
+                                          'px-3 py-1 rounded text-xs font-medium transition-colors',
+                                          expandedJobTab === tab
+                                            ? 'bg-primary text-primary-foreground'
+                                            : 'bg-muted text-muted-foreground hover:bg-muted/80',
+                                        )}
+                                      >
+                                        {tab === 'errors' ? 'Errors' : tab === 'created' ? `Created (${job.created})` : `Updated (${job.updated})`}
+                                      </button>
+                                    ))}
+                                  </div>
+
+                                  {/* Errors tab */}
+                                  {expandedJobTab === 'errors' && (
+                                    expandedRowsLoading ? (
+                                      <div className="flex items-center gap-2 py-2 text-xs text-muted-foreground">
+                                        <Loader2 className="h-3 w-3 animate-spin" />
+                                        Loading error details…
+                                      </div>
+                                    ) : expandedRowsError ? (
+                                      <div className="flex items-center gap-2 py-2 text-xs text-destructive">
+                                        <XCircle className="h-3 w-3" />
+                                        Could not load row errors.
+                                      </div>
+                                    ) : expandedFlatRows.length === 0 ? (
+                                      <p className="text-xs text-muted-foreground py-2">No errors recorded for this import.</p>
+                                    ) : (
+                                      <div className="rounded-md border border-border overflow-hidden">
+                                        <table className="w-full text-xs">
+                                          <thead>
+                                            <tr className="bg-muted/60 border-b border-border">
+                                              <th className="px-3 py-2 text-left text-muted-foreground font-semibold">Row #</th>
+                                              <th className="px-3 py-2 text-left text-muted-foreground font-semibold">Field</th>
+                                              <th className="px-3 py-2 text-left text-muted-foreground font-semibold">Error</th>
+                                              <th className="px-3 py-2 text-left text-muted-foreground font-semibold">Severity</th>
                                             </tr>
-                                          ))}
-                                        </tbody>
-                                      </table>
-                                    </div>
+                                          </thead>
+                                          <tbody>
+                                            {expandedFlatRows.map((row, i) => (
+                                              <tr
+                                                key={`${row.rowNumber}-${row.field}-${i}`}
+                                                className={cn(
+                                                  'border-b border-border last:border-0',
+                                                  row.severity === 'error' ? 'bg-destructive/5' : 'bg-warning/5',
+                                                )}
+                                              >
+                                                <td className="px-3 py-1.5 font-mono text-muted-foreground">{row.rowNumber}</td>
+                                                <td className="px-3 py-1.5 font-mono text-foreground">{row.field}</td>
+                                                <td className="px-3 py-1.5 text-foreground">{row.error}</td>
+                                                <td className="px-3 py-1.5">
+                                                  <Badge variant={row.severity === 'error' ? 'destructive' : 'warning'}>
+                                                    {row.severity}
+                                                  </Badge>
+                                                </td>
+                                              </tr>
+                                            ))}
+                                          </tbody>
+                                        </table>
+                                      </div>
+                                    )
+                                  )}
+
+                                  {/* Created / Updated tab */}
+                                  {(expandedJobTab === 'created' || expandedJobTab === 'updated') && (
+                                    createdRowsLoading ? (
+                                      <div className="flex items-center gap-2 py-2 text-xs text-muted-foreground">
+                                        <Loader2 className="h-3 w-3 animate-spin" />
+                                        Loading records…
+                                      </div>
+                                    ) : createdRows.length === 0 ? (
+                                      <p className="text-xs text-muted-foreground py-2">
+                                        No {expandedJobTab} records for this import.
+                                      </p>
+                                    ) : (() => {
+                                      const cols = Object.keys(createdRows[0].row_data ?? {})
+                                      return (
+                                        <div className="rounded-md border border-border overflow-x-auto">
+                                          <table className="w-full text-xs whitespace-nowrap">
+                                            <thead>
+                                              <tr className="bg-muted/60 border-b border-border">
+                                                <th className="px-3 py-2 text-left text-muted-foreground font-semibold">Row #</th>
+                                                {cols.map(c => (
+                                                  <th key={c} className="px-3 py-2 text-left text-muted-foreground font-semibold capitalize">
+                                                    {c.replace(/_/g, ' ')}
+                                                  </th>
+                                                ))}
+                                              </tr>
+                                            </thead>
+                                            <tbody>
+                                              {createdRows.map(row => (
+                                                <tr key={row.id} className="border-b border-border last:border-0 hover:bg-muted/20">
+                                                  <td className="px-3 py-1.5 font-mono text-muted-foreground">{row.row_number}</td>
+                                                  {cols.map(c => (
+                                                    <td key={c} className="px-3 py-1.5 text-foreground max-w-[200px] truncate">
+                                                      {String(row.row_data?.[c] ?? '—')}
+                                                    </td>
+                                                  ))}
+                                                </tr>
+                                              ))}
+                                            </tbody>
+                                          </table>
+                                        </div>
+                                      )
+                                    })()
                                   )}
                                 </td>
                               </tr>
