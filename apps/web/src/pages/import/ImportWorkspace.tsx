@@ -1185,9 +1185,9 @@ export function ImportWorkspace() {
   // staleTime: 60 s — row errors for a completed job never change; caching prevents
   // a re-fetch every time the user collapses and re-expands the same job row.
   const { data: expandedRowsData, isLoading: expandedRowsLoading, isError: expandedRowsError } = useQuery({
-    queryKey: ['import-job-rows', expandedJobId],
+    queryKey: ['import-job-rows', expandedJobId, 'failed'],
     queryFn: () =>
-      api.get<{ data: ImportJobRow[] }>(`/import/jobs/${expandedJobId}/rows?status=invalid`),
+      api.get<{ data: ImportJobRow[] }>(`/import/jobs/${expandedJobId}/rows?status=failed&limit=500`),
     enabled: !!expandedJobId,
     staleTime: 60_000,
     retry: 1,
