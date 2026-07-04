@@ -1190,19 +1190,16 @@ async function writeRowResults(
 
 // ── Main export ───────────────────────────────────────────────────────────────
 
-export async function runImport(
+export async function createImportJob(
   supabase: SupabaseClient,
   tenantId: string,
   createdBy: string,
   masterType: string,
   mode: ImportMode,
-  rows: Record<string, string>[],
   fileName: string,
-): Promise<ImportResult> {
-  const startedAt = Date.now()
-
-  // ── 1. Create the job record ─────────────────────────────────────────────
-  const { data: jobData, error: jobCreateError } = await supabase
+  totalRows: number,
+): Promise<string> {
+  const { data, error } = await supabase
     .from('import_jobs')
     .insert({
       tenant_id:   tenantId,
@@ -1211,16 +1208,34 @@ export async function runImport(
       mode,
       file_name:   fileName,
       status:      'validating',
-      total_rows:  rows.length,
+      total_rows:  totalRows,
     })
     .select('id')
     .single()
 
-  if (jobCreateError || !jobData) {
-    throw new Error(`Failed to create import job: ${jobCreateError?.message ?? 'unknown'}`)
-  }
+  if (error || !data) throw new Error(`Failed to create import job: ${error?.message ?? 'unknown'}`)
+  return data.id as string
+}
 
-  const jobId = jobData.id as string
+export async function runImport(
+  supabase: SupabaseClient,
+  tenantId: string,
+  createdBy: string,
+  masterType: string,
+  mode: ImportMode,
+  rows: Record<string, string>[],
+  fileName: string,
+  existingJobId?: string,
+): Promise<ImportResult> {
+  const startedAt = Date.now()
+
+  // ── 1. Create the job record (or reuse one created by the caller) ────────
+  let jobId: string
+  if (existingJobId) {
+    jobId = existingJobId
+  } else {
+    jobId = await createImportJob(supabase, tenantId, createdBy, masterType, mode, fileName, rows.length)
+  }
 
   try {
     // ── 2. Validate rows ─────────────────────────────────────────────────

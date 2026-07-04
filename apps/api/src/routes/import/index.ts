@@ -5,7 +5,7 @@ import type { FastifyInstance } from 'fastify'
 import { z }                    from 'zod'
 import { generateCSV, MASTER_TEMPLATES } from '../../lib/import-engine/templates.js'
 import { validateImportRows }            from '../../lib/import-engine/validator.js'
-import { runImport }                     from '../../lib/import-engine/importer.js'
+import { runImport, createImportJob }    from '../../lib/import-engine/importer.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 
 // ── Shared constants ──────────────────────────────────────────────────────────
@@ -147,24 +147,42 @@ export default async function importRoutes(fastify: FastifyInstance) {
       })
     }
 
+    // Create the job record synchronously so we can return 202 immediately.
+    // The actual import runs in the background — Railway's HTTP timeout won't
+    // kill large imports because we've already replied.
+    let jobId: string
     try {
-      const result = await runImport(
+      jobId = await createImportJob(
         fastify.supabase,
         req.tenantId,
         req.userId,
         masterType,
         mode,
-        rows,
         fileName,
+        rows.length,
       )
-      return reply.code(202).send({ data: result })
     } catch (err) {
       fastify.log.error(err)
       return reply.code(500).send({
         error:   'IMPORT_ERROR',
-        message: err instanceof Error ? err.message : 'Unexpected error during import',
+        message: err instanceof Error ? err.message : 'Failed to create import job',
       })
     }
+
+    // Return 202 immediately — client can poll Import History for progress.
+    reply.code(202).send({ data: { importJobId: jobId, status: 'processing' } })
+
+    // Process in background (unawaited — response is already sent).
+    runImport(
+      fastify.supabase,
+      req.tenantId,
+      req.userId,
+      masterType,
+      mode,
+      rows,
+      fileName,
+      jobId,
+    ).catch(err => fastify.log.error({ err, jobId }, 'Background import failed'))
   })
 
   // ── GET /import/jobs ──────────────────────────────────────────────────────
