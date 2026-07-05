@@ -32,11 +32,10 @@ import { cn }                    from '@/lib/utils'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
-const REQUIRED_COLUMNS = ['employee_code', 'date', 'in_time', 'out_time'] as const
+const REQUIRED_COLUMNS = ['employee_code', 'datetime'] as const
 const OPTIONAL_COLUMNS = ['source'] as const
 
-const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
-const TIME_RE = /^\d{2}:\d{2}(:\d{2})?$/
+const DATETIME_RE = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2})?$/
 
 interface PreviewRow {
   /** 1-indexed line number in the file (header = 1). */
@@ -86,20 +85,40 @@ function validateRow(fields: Record<string, string>): string[] {
   const warnings: string[] = []
 
   if (!fields.employee_code) warnings.push('employee_code is empty')
-  if (!fields.date)          warnings.push('date is empty')
-  else if (!DATE_RE.test(fields.date)) warnings.push(`date "${fields.date}" is not YYYY-MM-DD`)
 
-  if (!fields.in_time)  warnings.push('in_time is empty')
-  else if (!TIME_RE.test(fields.in_time)) warnings.push(`in_time "${fields.in_time}" is not HH:MM[:SS]`)
-
-  if (!fields.out_time) warnings.push('out_time is empty')
-  else if (!TIME_RE.test(fields.out_time)) warnings.push(`out_time "${fields.out_time}" is not HH:MM[:SS]`)
-
-  // Note: out_time < in_time is valid for night shifts (cross-midnight).
-  // The server detects this and places the OUT punch on the next calendar day.
-  // No client-side error is raised here for that case.
+  if (!fields.datetime) warnings.push('datetime is empty')
+  else if (!DATETIME_RE.test(fields.datetime))
+    warnings.push(`datetime "${fields.datetime}" — expected YYYY-MM-DD HH:MM or YYYY-MM-DD HH:MM:SS`)
 
   return warnings
+}
+
+/**
+ * Compute preview directions: group rows by (employee_code, date), sort by time,
+ * assign IN/OUT alternately — mirrors the server-side logic so the preview
+ * shows the user exactly which punches become IN vs OUT before they submit.
+ */
+function assignPreviewDirections(rows: { employee_code: string; datetime: string }[]): ('IN' | 'OUT' | '')[] {
+  const directions: ('IN' | 'OUT' | '')[] = new Array(rows.length).fill('')
+  const groups = new Map<string, number[]>()
+
+  rows.forEach((row, idx) => {
+    if (!row.employee_code || !DATETIME_RE.test(row.datetime)) return
+    const date = row.datetime.split(/[T ]/)[0]
+    const key  = `${row.employee_code}::${date}`
+    if (!groups.has(key)) groups.set(key, [])
+    groups.get(key)!.push(idx)
+  })
+
+  for (const [, indices] of groups) {
+    const sorted = [...indices].sort((a, b) =>
+      rows[a].datetime.localeCompare(rows[b].datetime)
+    )
+    sorted.forEach((originalIdx, pos) => {
+      directions[originalIdx] = pos % 2 === 0 ? 'IN' : 'OUT'
+    })
+  }
+  return directions
 }
 
 // ── Component ──────────────────────────────────────────────────────────────────
@@ -200,18 +219,22 @@ export function AttendanceUpload() {
       setTotalRows(dataLines.length)
 
       // Preview: first 20 rows
+      const allRowMaps: { employee_code: string; datetime: string }[] = []
       const preview: PreviewRow[] = []
       for (let i = 0; i < Math.min(20, dataLines.length); i++) {
         const fields = parseCsvLine(dataLines[i])
         const rowMap: Record<string, string> = {}
         headerCols.forEach((col, idx) => { rowMap[col] = fields[idx] ?? '' })
-
+        allRowMaps.push({ employee_code: rowMap.employee_code ?? '', datetime: rowMap.datetime ?? '' })
         preview.push({
           line:     i + 2,
           fields:   rowMap,
           warnings: missing.length > 0 ? [] : validateRow(rowMap),
         })
       }
+      // Compute preview directions for the first 20 rows
+      const dirs = assignPreviewDirections(allRowMaps)
+      dirs.forEach((dir, i) => { if (preview[i]) preview[i].fields.__direction = dir })
       setPreviewRows(preview)
 
       // Reset file input so the same file can be re-picked after clearing
@@ -331,15 +354,18 @@ export function AttendanceUpload() {
             </div>
 
             {/* Column format reminder */}
-            <div className="mt-4 p-3 rounded-md bg-muted/50 border border-border text-xs text-muted-foreground space-y-1">
+            <div className="mt-4 p-3 rounded-md bg-muted/50 border border-border text-xs text-muted-foreground space-y-1.5">
               <p className="font-semibold text-foreground">Required columns</p>
               <p className="font-mono">
                 {REQUIRED_COLUMNS.join(', ')}
-                <span className="ml-2 text-muted-foreground">(+ optional: {OPTIONAL_COLUMNS.join(', ')})</span>
+                <span className="ml-2 text-muted-foreground/70">(+ optional: {OPTIONAL_COLUMNS.join(', ')})</span>
               </p>
               <p>
-                <span className="font-medium">date</span> — YYYY-MM-DD &nbsp;|&nbsp;
-                <span className="font-medium">in_time / out_time</span> — HH:MM or HH:MM:SS in <strong>tenant local time</strong> (e.g. IST for India — <em>not</em> UTC)
+                <span className="font-medium">datetime</span> — <span className="font-mono">YYYY-MM-DD HH:MM</span> or <span className="font-mono">YYYY-MM-DD HH:MM:SS</span> in <strong>tenant local time</strong> (e.g. IST — <em>not</em> UTC)
+              </p>
+              <p className="text-muted-foreground/80">
+                One row = one punch event. The system groups punches by employee + date, sorts by time,
+                and automatically assigns direction: <span className="font-medium text-foreground">1st punch = IN, 2nd = OUT, 3rd = IN…</span>
               </p>
             </div>
           </SectionCard>
@@ -408,6 +434,7 @@ export function AttendanceUpload() {
                           )}
                         </th>
                       ))}
+                      <th className="px-3 py-2 text-left text-primary font-semibold">Direction</th>
                       <th className="px-3 py-2 text-left text-muted-foreground font-semibold">Status</th>
                     </tr>
                   </thead>
@@ -440,6 +467,17 @@ export function AttendanceUpload() {
                               )}
                             </td>
                           ))}
+                          <td className="px-3 py-2">
+                            {row.fields.__direction === 'IN' && (
+                              <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-semibold bg-success/15 text-success">IN</span>
+                            )}
+                            {row.fields.__direction === 'OUT' && (
+                              <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-semibold bg-primary/15 text-primary">OUT</span>
+                            )}
+                            {!row.fields.__direction && (
+                              <span className="text-muted-foreground/50 text-[10px]">—</span>
+                            )}
+                          </td>
                           <td className="px-3 py-2">
                             {hasWarning ? (
                               <div className="flex flex-col gap-0.5">

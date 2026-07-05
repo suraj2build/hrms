@@ -1,15 +1,16 @@
 /**
  * GET /attendance/sample-csv
  *
- * Returns a downloadable CSV file with the expected column headers and
- * 3 illustrative sample rows for the attendance bulk-upload feature.
+ * Returns a downloadable CSV with the expected column headers and
+ * sample rows for the attendance bulk-upload feature.
  *
- * Columns:
+ * New format (single-column datetime):
  *   employee_code — must match an active employee in the tenant
- *   date          — YYYY-MM-DD
- *   in_time       — HH:MM or HH:MM:SS  (tenant local time, e.g. 09:00 for 9 AM IST — NOT UTC)
- *   out_time      — HH:MM or HH:MM:SS
+ *   datetime      — YYYY-MM-DD HH:MM or YYYY-MM-DD HH:MM:SS (tenant local time)
  *   source        — optional; defaults to "csv_upload"
+ *
+ * Each row is ONE punch event. The server groups punches by (employee, date),
+ * sorts by time, and assigns direction: 1st=IN, 2nd=OUT, 3rd=IN, 4th=OUT…
  *
  * Auth: any authenticated user (hr_admin / super_admin in practice).
  */
@@ -21,14 +22,21 @@ export default async function attendanceSampleCsvRoute(fastify: FastifyInstance)
   fastify.get('/attendance/sample-csv', auth, async (_req, reply) => {
     const today     = new Date().toISOString().slice(0, 10)
     const yesterday = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10)
-    const twoDays   = new Date(Date.now() - 2 * 86_400_000).toISOString().slice(0, 10)
 
     const lines = [
-      'employee_code,date,in_time,out_time,source',
-      `EMP001,${today},09:00,18:00,csv_upload`,
-      `EMP002,${today},08:45,17:30,csv_upload`,
-      `EMP001,${yesterday},09:15,18:30,csv_upload`,
-      `EMP003,${twoDays},10:00,19:00,csv_upload`,
+      'employee_code,datetime,source',
+      // EMP001 today: IN then OUT
+      `EMP001,${today} 09:00:00,csv_upload`,
+      `EMP001,${today} 18:00:00,csv_upload`,
+      // EMP002 today: IN then OUT
+      `EMP002,${today} 08:45:00,csv_upload`,
+      `EMP002,${today} 17:30:00,csv_upload`,
+      // EMP001 yesterday
+      `EMP001,${yesterday} 09:15:00,csv_upload`,
+      `EMP001,${yesterday} 18:30:00,csv_upload`,
+      // Night-shift example: IN yesterday evening, OUT today morning
+      `EMP003,${yesterday} 22:00:00,csv_upload`,
+      `EMP003,${today} 06:00:00,csv_upload`,
     ]
 
     const csv = lines.join('\r\n') + '\r\n'
