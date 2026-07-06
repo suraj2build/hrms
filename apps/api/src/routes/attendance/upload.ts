@@ -33,10 +33,10 @@ import { recomputeRange, localToUtc }  from '../../lib/attendance-engine.js'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-const REQUIRED_HEADERS = ['employee_code', 'datetime'] as const
-const DATETIME_RE = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2})?$/
-const MAX_ROWS        = 100_000   // ~50 employees × 26 days × 2 punches × 40 months head-room
-const UPSERT_CHUNK    = 1_000     // Supabase/PostgREST row limit per single upsert call
+const REQUIRED_HEADERS  = ['employee_code', 'datetime'] as const
+const DATETIME_RE       = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2})?$/
+const UPSERT_CHUNK      = 1_000   // Supabase/PostgREST row limit per single upsert call
+const UPSERT_CONCURRENCY = 10     // parallel upsert chunks in flight at once
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -125,13 +125,6 @@ export default async function attendanceUploadRoute(fastify: FastifyInstance) {
 
     // ── 3. Parse data rows ──────────────────────────────────────────────────
     const dataLines = allLines.slice(1)
-
-    if (dataLines.length > MAX_ROWS) {
-      return reply.code(400).send({
-        error:   'TOO_MANY_ROWS',
-        message: `CSV must contain at most ${MAX_ROWS} data rows (found ${dataLines.length})`,
-      })
-    }
 
     // ── 3a. Duplicate-upload detection ─────────────────────────────────────
     const contentChecksum = createHash('sha256').update(csvContent as string, 'utf8').digest('hex')
@@ -313,19 +306,26 @@ export default async function attendanceUploadRoute(fastify: FastifyInstance) {
       })
     }
 
-    // ── 7. Bulk upsert punch rows (chunked) ────────────────────────────────
-    // Supabase/PostgREST rejects single upsert calls with >1000 rows, so we
-    // batch them. All chunks must succeed; we abort on the first error.
+    // ── 7. Bulk upsert punch rows (chunked + parallel) ─────────────────────
+    // PostgREST rejects single upserts >1000 rows, so we chunk and run
+    // UPSERT_CONCURRENCY chunks in parallel for speed (260k rows ÷ 1000 ÷ 10
+    // concurrent = ~26 serial rounds ≈ a few seconds).
+    const chunks: typeof punchRows[] = []
     for (let i = 0; i < punchRows.length; i += UPSERT_CHUNK) {
-      const chunk = punchRows.slice(i, i + UPSERT_CHUNK)
-      const { error: upsertErr } = await fastify.supabase
-        .from('attendance_punch_logs')
-        .upsert(chunk, {
-          onConflict:       'tenant_id,employee_id,punched_at,direction',
-          ignoreDuplicates: true,
-        })
-      if (upsertErr) {
-        req.log.error({ err: upsertErr, chunk_start: i, rows: chunk.length }, 'attendance upload: punch upsert failed')
+      chunks.push(punchRows.slice(i, i + UPSERT_CHUNK))
+    }
+    for (let i = 0; i < chunks.length; i += UPSERT_CONCURRENCY) {
+      const batch = chunks.slice(i, i + UPSERT_CONCURRENCY)
+      const results = await Promise.all(
+        batch.map((chunk) =>
+          fastify.supabase
+            .from('attendance_punch_logs')
+            .upsert(chunk, { onConflict: 'tenant_id,employee_id,punched_at,direction', ignoreDuplicates: true })
+        )
+      )
+      const firstErr = results.find((r) => r.error)?.error
+      if (firstErr) {
+        req.log.error({ err: firstErr, chunk_offset: i, chunks: batch.length }, 'attendance upload: punch upsert failed')
         return reply.code(500).send({ error: 'INSERT_FAILED', message: 'Failed to insert punch records' })
       }
     }

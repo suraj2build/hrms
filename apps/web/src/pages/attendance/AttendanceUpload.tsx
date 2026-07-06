@@ -408,7 +408,7 @@ export function AttendanceUpload() {
                   {!hasErrors && !missingCols.length && (
                     <span className="flex items-center gap-1 text-success">
                       <CheckCircle2 className="h-3.5 w-3.5" />
-                      Preview looks valid — up to 100,000 rows supported
+                      Preview looks valid
                     </span>
                   )}
                 </div>
