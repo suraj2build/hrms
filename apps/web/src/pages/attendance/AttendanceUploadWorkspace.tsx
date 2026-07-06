@@ -462,6 +462,19 @@ export function AttendanceUploadWorkspace() {
   })
 
   async function uploadToStorage(csv: string): Promise<string | null> {
+    // Ensure the JWT is fresh before uploading directly to Supabase Storage.
+    // Tabs left open in the background may have a stale access token that
+    // auto-refresh hasn't re-issued yet — this causes "exp claim timestamp
+    // check failed" from the Storage API even though the user is logged in.
+    // getSession() triggers a silent token refresh when the token is expired.
+    const { data: { session }, error: sessionErr } = await supabase.auth.getSession()
+    if (sessionErr || !session) {
+      toast.error('Session expired', {
+        description: 'Your session has expired. Please refresh the page and log in again.',
+      })
+      return null
+    }
+
     const safeFilename = (fileName ?? 'attendance_upload.csv').replace(/[^a-z0-9._\- ]/gi, '_')
     const storagePath  = `${profile!.tenant_id}/${Date.now()}-${safeFilename}`
     const blob = new Blob([csv], { type: 'text/csv' })
@@ -469,7 +482,12 @@ export function AttendanceUploadWorkspace() {
       .from('attendance-uploads')
       .upload(storagePath, blob, { contentType: 'text/csv', upsert: false })
     if (error) {
-      toast.error('File upload failed', { description: error.message })
+      const isJwtError = /exp|jwt|token|expired/i.test(error.message)
+      toast.error(isJwtError ? 'Session expired' : 'File upload failed', {
+        description: isJwtError
+          ? 'Your session expired during upload. Refresh the page and try again.'
+          : error.message,
+      })
       return null
     }
     return storagePath
