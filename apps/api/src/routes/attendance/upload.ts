@@ -186,9 +186,11 @@ export default async function attendanceUploadRoute(fastify: FastifyInstance) {
 
       const employee_code = fields[colIdx.employee_code]?.trim() ?? ''
       const datetime      = fields[colIdx.datetime]?.trim()      ?? ''
-      const source        = colIdx.source >= 0
-        ? (fields[colIdx.source]?.trim() || 'csv_upload')
-        : 'csv_upload'
+      // Normalize source: lowercase and clamp to allowed values so a CSV with
+      // 'CSV_Upload', 'Device', etc. doesn't trigger a check-constraint violation.
+      const ALLOWED_SOURCES = new Set(['device','manual','mobile','web','kiosk','regularisation','csv_upload'])
+      const rawSource = colIdx.source >= 0 ? (fields[colIdx.source]?.trim().toLowerCase() || 'csv_upload') : 'csv_upload'
+      const source    = ALLOWED_SOURCES.has(rawSource) ? rawSource : 'csv_upload'
 
       if (!employee_code) {
         rowErrors.push({ line: lineNumber, row: rawLine, error: 'employee_code is empty' })
@@ -390,8 +392,10 @@ export default async function attendanceUploadRoute(fastify: FastifyInstance) {
       const firstErr = results.find((r) => r.error)?.error
       if (firstErr) {
         req.log.error({ err: firstErr, chunk_offset: i, chunks: batch.length }, 'attendance upload: punch upsert failed')
-        // Period-lock trigger raises check_violation (23514) with message prefix PERIOD_FINALIZED
-        if (firstErr.code === '23514' || (firstErr.message ?? '').includes('PERIOD_FINALIZED')) {
+        // Period-lock trigger raises check_violation (23514) with message prefix PERIOD_FINALIZED.
+        // Only treat it as period-sealed when the message actually contains PERIOD_FINALIZED —
+        // other check violations (e.g. invalid source value) must not be misidentified.
+        if ((firstErr.message ?? '').includes('PERIOD_FINALIZED')) {
           const monthMatch = (firstErr.message ?? '').match(/PERIOD_FINALIZED:\s*attendance for (\S+)/)
           const month = monthMatch?.[1] ?? 'this period'
           return reply.code(409).send({
