@@ -764,15 +764,19 @@ async function importEmployees(
         const employeeId = norm.employee_id as string
 
         // Update lean employee table (identity + status only)
+        const updateFields: Record<string, unknown> = {
+          first_name:   norm.first_name,
+          last_name:    norm.last_name,
+          phone:        (norm.phone   as string | undefined) ?? null,
+          joining_date: norm.joining_date,
+          status:       (norm.status  as string | undefined) ?? 'active',
+        }
+        if (norm.employee_code_changed) {
+          updateFields.employee_code = (norm.employee_code as string).trim().toUpperCase()
+        }
         const { error: empErr } = await supabase
           .from('employees')
-          .update({
-            first_name:   norm.first_name,
-            last_name:    norm.last_name,
-            phone:        (norm.phone   as string | undefined) ?? null,
-            joining_date: norm.joining_date,
-            status:       (norm.status  as string | undefined) ?? 'active',
-          })
+          .update(updateFields)
           .eq('tenant_id', tenantId)
           .eq('id', employeeId)
 

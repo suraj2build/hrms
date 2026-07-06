@@ -890,19 +890,36 @@ export async function validateImportRows(
         }
       }
 
-      // Email-based conflict check: if code lookup didn't find a match but this email
-      // already belongs to another employee, surface a clear error instead of letting
-      // the INSERT blow up on the unique constraint at runtime.
+      // Email-based match: if code lookup didn't find a match but this email already
+      // belongs to an existing employee (e.g. previously imported with an auto-code),
+      // treat it as an update and carry the new code as the desired employee_code.
+      // This supports migration workflows where old-system codes need to replace
+      // auto-generated ones without deleting and re-importing the employee.
       if (!vr.isDuplicate && vr.normalizedData.email) {
         const email = (vr.normalizedData.email as string).toLowerCase()
         const conflict = empEmailMap.get(email)
         if (conflict) {
-          vr.errors.push({
-            field:    'email',
-            message:  `Email "${email}" already belongs to employee ${conflict.code} in this tenant. Update the employee_code in your CSV to "${conflict.code}" so this row is treated as an update, or remove it if no change is needed.`,
-            severity: 'error',
-          })
-          vr.isValid = false
+          const existingCode = conflict.code
+          const providedCode = (vr.normalizedData.employee_code as string | undefined) ?? ''
+          if (existingCode && providedCode && existingCode.toUpperCase() !== providedCode.toUpperCase()) {
+            // Different code — update the employee and rename their code
+            vr.isDuplicate = true
+            vr.normalizedData.employee_id         = conflict.id
+            vr.normalizedData.employee_code_changed = true
+            vr.warnings.push({
+              field:    'employee_code',
+              message:  `Employee code will be updated from "${existingCode}" → "${providedCode}" (matched by email)`,
+              severity: 'warning',
+            })
+          } else {
+            // Same code or no code provided — normal email-conflict error
+            vr.errors.push({
+              field:    'email',
+              message:  `Email "${email}" already belongs to employee ${existingCode} in this tenant. Update the employee_code in your CSV to "${existingCode}" so this row is treated as an update, or remove it if no change is needed.`,
+              severity: 'error',
+            })
+            vr.isValid = false
+          }
         }
       }
 
