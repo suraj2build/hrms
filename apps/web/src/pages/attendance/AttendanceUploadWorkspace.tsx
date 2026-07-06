@@ -171,7 +171,12 @@ function assignPreviewDirections(rows: { employee_code: string; datetime: string
       const normB = rows[b].datetime.replace(/^(\d{2})-(\d{2})-(\d{4})/, '$3-$2-$1')
       return normA.localeCompare(normB)
     })
-    sorted.forEach((origIdx, pos) => { directions[origIdx] = pos % 2 === 0 ? 'IN' : 'OUT' })
+    const n = sorted.length
+    sorted.forEach((origIdx, pos) => {
+      if (pos === 0)       directions[origIdx] = 'IN'
+      else if (pos === n - 1) directions[origIdx] = 'OUT'
+      else                 directions[origIdx] = pos % 2 === 0 ? 'IN' : 'OUT'
+    })
   }
   return directions
 }

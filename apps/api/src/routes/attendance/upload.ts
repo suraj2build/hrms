@@ -233,7 +233,12 @@ export default async function attendanceUploadRoute(fastify: FastifyInstance) {
     }
     for (const [, punches] of dayGroups) {
       punches.sort((a, b) => a.time.localeCompare(b.time))
-      punches.forEach((p, i) => { p.direction = i % 2 === 0 ? 'IN' : 'OUT' })
+      const n = punches.length
+      punches.forEach((p, i) => {
+        if (i === 0)     p.direction = 'IN'
+        else if (i === n - 1) p.direction = 'OUT'
+        else             p.direction = i % 2 === 0 ? 'IN' : 'OUT'
+      })
     }
 
     // ── 5. Batch resolve employee codes → IDs ───────────────────────────────

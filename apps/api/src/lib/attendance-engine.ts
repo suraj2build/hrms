@@ -371,62 +371,62 @@ function computeShiftEndUtc(date: string, shift: ShiftMeta, tz: string): Date {
 // ── Punch pairing ─────────────────────────────────────────────────────────────
 
 /**
- * Pair IN/OUT punches into sessions.
+ * Pair punches into a single session using the gross-minus-breaks model.
  *
- * - Consecutive INs → only the first opens a session; rest are ignored.
- * - Consecutive OUTs → ignored (no open session to close).
- * - Unclosed IN: if `shiftEndFallback` is provided and is strictly after the
- *   IN time, the session is closed at shift-end; otherwise 0 minutes.
+ * Rules (confirmed with product):
+ *   1 punch  → MIS PUNCH: hasUnpunchedOut=true, 0 minutes.
+ *   2+ punches → sort by time; first=IN, last=OUT.
+ *     Middle punches form break pairs: (break-OUT, break-IN), (break-OUT, break-IN)…
+ *     An orphaned odd middle punch is silently ignored (no flag, no deduction).
+ *   worked = (last − first) − sum(complete break pairs)  capped at 1440 min.
  *
- * Returns aggregate stats alongside the sessions array.
+ * shiftEndFallback is retained in the signature for API compatibility but is
+ * unused — the gross-minus-breaks model never needs it.
  */
-function pairPunches(punches: PunchLog[], shiftEndFallback: Date | null = null): PairResult {
-  const sessions: PairedSession[] = []
-  let openIn: Date | null = null
-
-  for (const punch of punches) {
-    if (punch.direction === 'IN') {
-      if (!openIn) openIn = new Date(punch.punched_at)
-      // Duplicate IN → ignore
-    } else {
-      // OUT punch
-      if (openIn) {
-        const checkOut      = new Date(punch.punched_at)
-        const minutesWorked = Math.max(0, (checkOut.getTime() - openIn.getTime()) / 60_000)
-        sessions.push({ checkIn: openIn, checkOut, complete: true, minutesWorked })
-        openIn = null
-      }
-      // OUT without open IN → ignore
-    }
+function pairPunches(punches: PunchLog[], _shiftEndFallback: Date | null = null): PairResult {
+  if (punches.length === 0) {
+    return { sessions: [], workedMinutes: 0, firstInTime: null, lastOutTime: null, hasUnpunchedOut: false }
   }
 
-  // Unclosed IN
-  if (openIn) {
-    if (shiftEndFallback && shiftEndFallback > openIn) {
-      const minutesWorked = Math.max(0, (shiftEndFallback.getTime() - openIn.getTime()) / 60_000)
-      sessions.push({ checkIn: openIn, checkOut: shiftEndFallback, complete: true, minutesWorked })
-    } else {
-      sessions.push({ checkIn: openIn, checkOut: null, complete: false, minutesWorked: 0 })
-    }
-  }
-
-  const workedMinutes = Math.max(
-    0,
-    Math.min(1440, sessions.filter((s) => s.complete).reduce((sum, s) => sum + s.minutesWorked, 0)),
+  const sorted = [...punches].sort(
+    (a, b) => new Date(a.punched_at).getTime() - new Date(b.punched_at).getTime(),
   )
 
-  const firstInTime = sessions.length > 0 ? sessions[0]!.checkIn : null
-  const lastOutTime = (() => {
-    for (let i = sessions.length - 1; i >= 0; i--) {
-      const s = sessions[i]!
-      if (s.complete && s.checkOut) return s.checkOut
+  // 1 punch = MIS PUNCH
+  if (sorted.length === 1) {
+    const checkIn = new Date(sorted[0]!.punched_at)
+    return {
+      sessions:       [{ checkIn, checkOut: null, complete: false, minutesWorked: 0 }],
+      workedMinutes:  0,
+      firstInTime:    checkIn,
+      lastOutTime:    null,
+      hasUnpunchedOut: true,
     }
-    return null
-  })()
+  }
 
-  const hasUnpunchedOut = sessions.some((s) => !s.complete)
+  const firstTime = new Date(sorted[0]!.punched_at)
+  const lastTime  = new Date(sorted[sorted.length - 1]!.punched_at)
+  const grossMinutes = (lastTime.getTime() - firstTime.getTime()) / 60_000
 
-  return { sessions, workedMinutes, firstInTime, lastOutTime, hasUnpunchedOut }
+  // Middle punches: pair as (break-OUT at i=0, break-IN at i=1), …
+  // Odd orphan (unpaired last middle punch) is silently ignored.
+  const middle = sorted.slice(1, sorted.length - 1)
+  let breakMinutes = 0
+  for (let i = 0; i + 1 < middle.length; i += 2) {
+    const breakStart = new Date(middle[i]!.punched_at)
+    const breakEnd   = new Date(middle[i + 1]!.punched_at)
+    breakMinutes += Math.max(0, (breakEnd.getTime() - breakStart.getTime()) / 60_000)
+  }
+
+  const workedMinutes = Math.max(0, Math.min(1440, grossMinutes - breakMinutes))
+
+  return {
+    sessions:        [{ checkIn: firstTime, checkOut: lastTime, complete: true, minutesWorked: workedMinutes }],
+    workedMinutes,
+    firstInTime:     firstTime,
+    lastOutTime:     lastTime,
+    hasUnpunchedOut: false,
+  }
 }
 
 // ── Anomaly detection ──────────────────────────────────────────────────────────
