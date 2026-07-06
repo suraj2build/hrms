@@ -53,9 +53,11 @@ interface FailedRow {
 }
 
 interface UploadResult {
-  total_rows:   number
-  success_rows: number
-  failed_rows:  FailedRow[]
+  total_rows:           number
+  success_rows:         number
+  failed_rows:          FailedRow[]
+  recompute_targets?:   number
+  recompute_background?: boolean
 }
 
 // ── CSV helpers ────────────────────────────────────────────────────────────────
@@ -406,7 +408,7 @@ export function AttendanceUpload() {
                   {!hasErrors && !missingCols.length && (
                     <span className="flex items-center gap-1 text-success">
                       <CheckCircle2 className="h-3.5 w-3.5" />
-                      Preview looks valid
+                      Preview looks valid — up to 100,000 rows supported
                     </span>
                   )}
                 </div>
@@ -524,7 +526,7 @@ export function AttendanceUpload() {
                   <OperationalErrorBanner
                     error={uploadMutation.error?.message ?? 'Upload failed — the server rejected the request.'}
                     severity="high"
-                    remediationText="Check that your CSV is well-formed, all required columns are present, and the file is under 2,000 rows. Then retry."
+                    remediationText="Check that your CSV is well-formed and all required columns (employee_code, datetime) are present. Then retry."
                     onRetry={() => csvText && uploadMutation.mutate(csvText)}
                     retrying={uploadMutation.isPending}
                   />
@@ -579,8 +581,8 @@ export function AttendanceUpload() {
               {result.failed_rows.length === 0 && (
                 <div className="flex items-center gap-2 p-3 rounded-md bg-success/10 border border-success/20 text-sm text-success">
                   <CheckCircle2 className="h-4 w-4 flex-shrink-0" />
-                  All {result.success_rows} row{result.success_rows !== 1 ? 's' : ''} imported
-                  successfully. Attendance has been recomputed.
+                  All {result.success_rows} punch{result.success_rows !== 1 ? 'es' : ''} imported successfully.
+                  {result.recompute_targets ? ` Attendance is being recomputed for ${result.recompute_targets} day(s) in the background — changes will reflect shortly.` : ' Attendance has been recomputed.'}
                 </div>
               )}
 

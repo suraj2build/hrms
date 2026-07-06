@@ -35,7 +35,8 @@ import { recomputeRange, localToUtc }  from '../../lib/attendance-engine.js'
 
 const REQUIRED_HEADERS = ['employee_code', 'datetime'] as const
 const DATETIME_RE = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2})?$/
-const MAX_ROWS = 5_000
+const MAX_ROWS        = 100_000   // ~50 employees × 26 days × 2 punches × 40 months head-room
+const UPSERT_CHUNK    = 1_000     // Supabase/PostgREST row limit per single upsert call
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -312,53 +313,58 @@ export default async function attendanceUploadRoute(fastify: FastifyInstance) {
       })
     }
 
-    // ── 7. Bulk upsert punch rows ───────────────────────────────────────────
-    const { error: upsertErr } = await fastify.supabase
-      .from('attendance_punch_logs')
-      .upsert(punchRows, {
-        onConflict:       'tenant_id,employee_id,punched_at,direction',
-        ignoreDuplicates: true,
-      })
-
-    if (upsertErr) {
-      req.log.error({ err: upsertErr, rows: punchRows.length }, 'attendance upload: punch upsert failed')
-      return reply.code(500).send({ error: 'INSERT_FAILED', message: 'Failed to insert punch records' })
+    // ── 7. Bulk upsert punch rows (chunked) ────────────────────────────────
+    // Supabase/PostgREST rejects single upsert calls with >1000 rows, so we
+    // batch them. All chunks must succeed; we abort on the first error.
+    for (let i = 0; i < punchRows.length; i += UPSERT_CHUNK) {
+      const chunk = punchRows.slice(i, i + UPSERT_CHUNK)
+      const { error: upsertErr } = await fastify.supabase
+        .from('attendance_punch_logs')
+        .upsert(chunk, {
+          onConflict:       'tenant_id,employee_id,punched_at,direction',
+          ignoreDuplicates: true,
+        })
+      if (upsertErr) {
+        req.log.error({ err: upsertErr, chunk_start: i, rows: chunk.length }, 'attendance upload: punch upsert failed')
+        return reply.code(500).send({ error: 'INSERT_FAILED', message: 'Failed to insert punch records' })
+      }
     }
 
     const successRows = punchRows.length
 
     req.log.info(
       { tenant_id: req.tenantId, punch_rows: punchRows.length, recompute_targets: recomputeSet.size },
-      'attendance upload: punches inserted',
+      'attendance upload: punches inserted — recompute running in background',
     )
 
-    // ── 8. Recompute attendance_daily ───────────────────────────────────────
-    const targets = [...recomputeSet.values()]
-    let recomputedDays = 0
-    let recomputeFailed = 0
-    const recomputeErrors: Array<{ employee_id: string; date: string; error: string }> = []
-    const CONCURRENCY = 6
-    for (let i = 0; i < targets.length; i += CONCURRENCY) {
-      const batch = targets.slice(i, i + CONCURRENCY)
-      await Promise.all(batch.map(async ({ employee_id, date }) => {
-        try {
-          await recomputeRange(fastify.supabase, {
-            tenant_id:   req.tenantId,
-            employee_id,
-            from_date:   date,
-            to_date:     date,
-            changed_by:  req.userId,
-          })
-          recomputedDays++
-        } catch (err: any) {
-          recomputeFailed++
-          if (recomputeErrors.length < 20) {
-            recomputeErrors.push({ employee_id, date, error: err?.message ?? 'recompute failed' })
+    // ── 8. Recompute attendance_daily (background — does not block response) ─
+    // For large monthly uploads this can be thousands of (employee, date) pairs.
+    // We fire-and-forget so the HTTP response is immediate; recompute continues
+    // in the background. The UI can refresh attendance after a short delay.
+    const recomputeTargets = [...recomputeSet.values()]
+    setImmediate(async () => {
+      const CONCURRENCY = 8
+      for (let i = 0; i < recomputeTargets.length; i += CONCURRENCY) {
+        const batch = recomputeTargets.slice(i, i + CONCURRENCY)
+        await Promise.all(batch.map(async ({ employee_id, date }) => {
+          try {
+            await recomputeRange(fastify.supabase, {
+              tenant_id:   req.tenantId,
+              employee_id,
+              from_date:   date,
+              to_date:     date,
+              changed_by:  req.userId,
+            })
+          } catch (err: any) {
+            fastify.log.warn({ err, employee_id, date }, 'attendance upload: background recompute failed')
           }
-          fastify.log.warn({ err, employee_id, date }, 'attendance upload: recompute failed')
-        }
-      }))
-    }
+        }))
+      }
+      fastify.log.info(
+        { tenant_id: req.tenantId, targets: recomputeTargets.length },
+        'attendance upload: background recompute complete',
+      )
+    })
 
     // ── 9. Audit upload session (fire-and-forget) ───────────────────────────
     setImmediate(async () => {
@@ -392,13 +398,12 @@ export default async function attendanceUploadRoute(fastify: FastifyInstance) {
 
     // ── 10. Respond ─────────────────────────────────────────────────────────
     return reply.send({
-      total_rows:        dataLines.length,
-      success_rows:      successRows,
-      failed_rows:       allFailedRows,
-      duplicate_warning: duplicateWarning,
-      recomputed_days:   recomputedDays,
-      recompute_failed:  recomputeFailed,
-      recompute_errors:  recomputeErrors,
+      total_rows:           dataLines.length,
+      success_rows:         successRows,
+      failed_rows:          allFailedRows,
+      duplicate_warning:    duplicateWarning,
+      recompute_targets:    recomputeSet.size,
+      recompute_background: true,
     })
   })
 
