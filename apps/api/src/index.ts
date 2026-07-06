@@ -197,6 +197,8 @@ import lettersRoutes                       from './routes/letters/index.js'
 
 // Routes — Universal Master Import Framework
 import importRoutes                        from './routes/import/index.js'
+import importsRoutes                       from './routes/imports/index.js'
+import { createImportJobHandler }          from './lib/import-pipeline/worker.js'
 import onboardingSessionRoutes             from './routes/onboarding/sessions.js'
 import onboardingDraftRoutes               from './routes/onboarding/drafts.js'
 import onboardingDashboardRoute            from './routes/onboarding/dashboard.js'
@@ -582,6 +584,10 @@ async function start() {
     fastify.log.info('[durable-queue] event-automation: event-driven handler — no standalone scan to run')
   })
 
+  // Enterprise import pipeline — dispatches to per-module handlers registered via
+  // registerImportModule(). Pass 1: registry is empty; Pass 2 registers attendance.
+  durableQueue.register('import_job', createImportJobHandler(fastify))
+
   // Durable job queue — Postgres-backed, crash-safe, multi-instance ready.
   // Must start AFTER supabase plugin is registered (needs the client).
   await safeRegisterModule('durable-queue', async () => {
@@ -660,6 +666,9 @@ async function start() {
 
   // ── Universal Master Import Framework ────────────────────────
   await fastify.register(importRoutes, { prefix: '/import' })
+
+  // ── Enterprise Import Pipeline ────────────────────────────────
+  await fastify.register(importsRoutes, { prefix: '/imports' })
 
   // ── AI-Assisted Employee Onboarding ──────────────────────────
   await fastify.register(onboardingSessionRoutes,    { prefix: '/onboarding' })  // sessions + documents + extract

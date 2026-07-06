@@ -98,6 +98,8 @@ const DataExplorer      = lazy(() => import('@/pages/explorer/DataExplorer').the
 
 // Import + Onboarding
 const ImportWorkspace      = lazy(() => import('@/pages/import/ImportWorkspace').then(m => ({ default: m.ImportWorkspace })))
+const ImportHistory        = lazy(() => import('@/pages/imports/ImportHistory'))
+const ImportJobDetail      = lazy(() => import('@/pages/imports/ImportJobDetail'))
 const OnboardingHub        = lazy(() => import('@/pages/onboarding/OnboardingHub').then(m => ({ default: m.OnboardingHub })))
 const HRReviewWorkspace    = lazy(() => import('@/pages/onboarding/HRReviewWorkspace').then(m => ({ default: m.HRReviewWorkspace })))
 const OnboardingModule     = lazy(() => import('@/pages/onboarding/OnboardingModule').then(m => ({ default: m.OnboardingModule })))
@@ -744,6 +746,8 @@ export default function App() {
 
                 {/* Data Onboarding */}
                 <Route path="/admin/import"                       element={<ImportWorkspace />} />
+                <Route path="/admin/imports"                      element={<ImportHistory />} />
+                <Route path="/admin/imports/:jobId"               element={<ImportJobDetail />} />
                 <Route path="/admin/onboarding"                   element={<OnboardingHub />} />
                 {/* Legacy direct links → unified hub tabs */}
                 <Route path="/admin/onboarding/pre-joinee"        element={<Navigate to="/admin/onboarding?tab=invites" replace />} />

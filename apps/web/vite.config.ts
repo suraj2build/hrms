@@ -99,6 +99,7 @@ export default defineConfig(({ mode }) => ({
       '/reports':         apiProxy(),
       '/masters':         apiProxy(),
       '/import':          apiProxy(),
+      '/imports':         apiProxy(),
       '/onboarding':      apiProxy(),
       '/attendance':      apiProxy(),
       '/leave':           apiProxy(),
