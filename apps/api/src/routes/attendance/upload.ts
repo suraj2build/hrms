@@ -242,6 +242,45 @@ export default async function attendanceUploadRoute(fastify: FastifyInstance) {
       })
     }
 
+    // ── 4a. Pre-filter punches in PAYROLL_FINALIZED months ─────────────────
+    // Query the lock state for every month represented in the upload.
+    // Rows whose month is finalized are moved to rowErrors and skipped —
+    // the rest of the upload proceeds normally for open/locked months.
+    try {
+      const uploadMonths = [...new Set(parsedPunches.map((p) => p.date.slice(0, 7)))]
+      const { data: lockedPeriods } = await fastify.supabase
+        .from('attendance_period_locks')
+        .select('period_month, state')
+        .eq('tenant_id', req.tenantId)
+        .in('period_month', uploadMonths)
+
+      const finalizedMonths = new Set(
+        ((lockedPeriods ?? []) as Array<{ period_month: string; state: string }>)
+          .filter((p) => p.state === 'PAYROLL_FINALIZED')
+          .map((p) => p.period_month)
+      )
+
+      if (finalizedMonths.size > 0) {
+        const allowed: ParsedPunch[] = []
+        for (const punch of parsedPunches) {
+          const month = punch.date.slice(0, 7)
+          if (finalizedMonths.has(month)) {
+            rowErrors.push({
+              line:  punch.line,
+              row:   `${punch.employee_code},${punch.datetime}`,
+              error: `Skipped — period ${month} is sealed (payroll finalized). Reverse the finalization in Period Manager to import these punches.`,
+            })
+          } else {
+            allowed.push(punch)
+          }
+        }
+        parsedPunches.length = 0
+        parsedPunches.push(...allowed)
+      }
+    } catch (lockErr) {
+      req.log.warn({ err: lockErr }, 'attendance upload: period-lock pre-check failed — proceeding without filter')
+    }
+
     // ── 5. Batch resolve employee codes → IDs ───────────────────────────────
     const uniqueCodes = [...new Set(parsedPunches.map((r) => r.employee_code))]
 
