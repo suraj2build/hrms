@@ -1,27 +1,23 @@
 /**
  * POST /attendance/upload
  *
- * Bulk-import attendance from a CSV string.  New single-datetime format:
- *   Each row is ONE punch event (employee_code + datetime).
- *   The server groups punches by (employee_id, calendar-date), sorts by time,
- *   and assigns direction automatically: 1st=IN, 2nd=OUT, 3rd=IN, 4th=OUT…
+ * Bulk-import attendance from a CSV string.  Async job model:
+ *   1. Validate CSV header + create a job record → return 202 { job_id }
+ *   2. Background job: parse rows, resolve employees, upsert punches,
+ *      recompute attendance_daily, write upload_sessions audit row.
+ *   3. Callers poll GET /attendance/upload/jobs/:jobId for progress.
  *
- * For each resolved punch the route:
- *   1. Resolves employee_code → employee_id (batched, one query for all codes)
- *   2. Groups punches by (employee_id, date), sorts by time, assigns IN/OUT
- *   3. Upserts punches into attendance_punch_logs (source = "csv_upload")
- *   4. Recomputes attendance_daily for every (employee_id, date) affected
+ * CSV format (one row = one punch event):
+ *   Required columns: employee_code, datetime
+ *   Optional column:  source  (defaults to "csv_upload")
+ *
+ *   datetime: YYYY-MM-DD HH:MM or YYYY-MM-DD HH:MM:SS  (tenant local time)
+ *             Also accepts ISO separator and DD-MM-YYYY (biometric export).
  *
  * Body (JSON):
- *   { csv_content: string }   — full text of the uploaded CSV file
+ *   { csv_content: string, filename?: string }
  *
- * Required CSV columns: employee_code, datetime
- * Optional CSV column:  source  (defaults to "csv_upload")
- *
- * datetime format: YYYY-MM-DD HH:MM or YYYY-MM-DD HH:MM:SS  (tenant local time)
- *                  Also accepts ISO separator: YYYY-MM-DDTHH:MM[:SS]
- *
- * Response 200: { total_rows, success_rows, failed_rows, recomputed_days, … }
+ * Response 202: { job_id, total_rows, filename }
  *
  * Auth: hr_admin / super_admin only.
  */
@@ -33,32 +29,26 @@ import { recomputeRange, localToUtc }  from '../../lib/attendance-engine.js'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-const REQUIRED_HEADERS  = ['employee_code', 'datetime'] as const
-// Accept both YYYY-MM-DD and DD-MM-YYYY (biometric devices often export DD-MM-YYYY)
-const DATETIME_RE       = /^(\d{4}-\d{2}-\d{2}|\d{2}-\d{2}-\d{4})[T ]\d{2}:\d{2}(:\d{2})?$/
-const UPSERT_CHUNK      = 1_000   // Supabase/PostgREST row limit per single upsert call
-const UPSERT_CONCURRENCY = 10     // parallel upsert chunks in flight at once
+const REQUIRED_HEADERS   = ['employee_code', 'datetime'] as const
+const DATETIME_RE        = /^(\d{4}-\d{2}-\d{2}|\d{2}-\d{2}-\d{4})[T ]\d{2}:\d{2}(:\d{2})?$/
+const UPSERT_CHUNK       = 1_000
+const UPSERT_CONCURRENCY = 10
+const ROW_ERRORS_CAP     = 500   // max error entries stored in JSONB
+const ALLOWED_SOURCES    = new Set(['device','manual','mobile','web','kiosk','regularisation','csv_upload'])
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-/** Parse a CSV line respecting simple double-quote escaping. */
 function parseCsvLine(line: string): string[] {
   const fields: string[] = []
   let current = ''
   let inQuotes = false
-
   for (let i = 0; i < line.length; i++) {
     const ch = line[i]
     if (ch === '"') {
-      if (inQuotes && line[i + 1] === '"') {
-        current += '"'
-        i++
-      } else {
-        inQuotes = !inQuotes
-      }
+      if (inQuotes && line[i + 1] === '"') { current += '"'; i++ }
+      else { inQuotes = !inQuotes }
     } else if (ch === ',' && !inQuotes) {
-      fields.push(current.trim())
-      current = ''
+      fields.push(current.trim()); current = ''
     } else {
       current += ch
     }
@@ -67,16 +57,10 @@ function parseCsvLine(line: string): string[] {
   return fields
 }
 
-/**
- * Extract date (YYYY-MM-DD) and normalised time (HH:MM:SS) from a datetime string.
- * Accepts YYYY-MM-DD and DD-MM-YYYY date parts, T or space separator, HH:MM or HH:MM:SS.
- * DD-MM-YYYY is normalised to YYYY-MM-DD so the rest of the pipeline stays consistent.
- */
 function splitDatetime(dt: string): { date: string; time: string } {
   const sep = dt.indexOf('T') !== -1 ? 'T' : ' '
   const [datePart, timePart] = dt.split(sep)
   const time = timePart.length === 5 ? `${timePart}:00` : timePart.slice(0, 8)
-  // Normalise DD-MM-YYYY → YYYY-MM-DD
   const date = /^\d{2}-\d{2}-\d{4}$/.test(datePart)
     ? datePart.split('-').reverse().join('-')
     : datePart
@@ -87,84 +71,41 @@ function splitDatetime(dt: string): { date: string; time: string } {
 
 const UploadBodySchema = z.object({
   csv_content: z.string().min(1, 'csv_content is required and must be a non-empty string'),
+  filename:    z.string().max(255).optional(),
 })
 
-// ── Route ─────────────────────────────────────────────────────────────────────
+// ── Background job processor ─────────────────────────────────────────────────
 
-export default async function attendanceUploadRoute(fastify: FastifyInstance) {
-  const adminAuth = { preHandler: [fastify.authenticate, requireRole(...HR_ADMIN_ROLES)] }
+interface ProcessJobParams {
+  jobId:       string
+  tenantId:    string
+  userId:      string
+  csvContent:  string
+  dataLines:   string[]
+  colIdx:      { employee_code: number; datetime: number; source: number }
+  filename:    string
+  checksum:    string
+}
 
-  fastify.post('/attendance/upload', adminAuth, async (req: any, reply) => {
+async function processUploadJob(fastify: FastifyInstance, params: ProcessJobParams) {
+  const { jobId, tenantId, userId, csvContent, dataLines, colIdx, filename, checksum } = params
+  const log = fastify.log.child({ upload_job_id: jobId, tenant_id: tenantId })
+
+  const updateJob = async (fields: Record<string, unknown>) => {
     try {
-    const parsed = UploadBodySchema.safeParse(req.body)
-    if (!parsed.success) {
-      return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message ?? 'Invalid request body' })
+      await fastify.supabase
+        .from('attendance_upload_jobs')
+        .update({ ...fields, updated_at: new Date().toISOString() })
+        .eq('id', jobId)
+    } catch (err) {
+      log.warn({ err }, 'upload job: failed to update progress — non-critical')
     }
-    const csvContent = parsed.data.csv_content
+  }
 
-    // ── 1. Split into lines ─────────────────────────────────────────────────
-    const allLines = csvContent.split(/\r?\n/).map((l) => l.trim()).filter(Boolean)
+  try {
+    await updateJob({ status: 'processing', started_at: new Date().toISOString() })
 
-    if (allLines.length < 2) {
-      return reply.code(400).send({
-        error:   'EMPTY_CSV',
-        message: 'CSV must contain a header row and at least one data row',
-      })
-    }
-
-    // ── 2. Parse + validate header ──────────────────────────────────────────
-    const headerLine = allLines[0]
-    const headerCols = parseCsvLine(headerLine).map((h) => h.toLowerCase().trim())
-
-    const missingCols = REQUIRED_HEADERS.filter((c) => !headerCols.includes(c))
-    if (missingCols.length > 0) {
-      return reply.code(400).send({
-        error:   'MISSING_COLUMNS',
-        message: `Missing required columns: ${missingCols.join(', ')}. Required: employee_code, datetime`,
-      })
-    }
-
-    const colIdx = {
-      employee_code: headerCols.indexOf('employee_code'),
-      datetime:      headerCols.indexOf('datetime'),
-      source:        headerCols.indexOf('source'),
-    }
-
-    // ── 3. Parse data rows ──────────────────────────────────────────────────
-    const dataLines = allLines.slice(1)
-
-    // ── 3a. Duplicate-upload detection ─────────────────────────────────────
-    const contentChecksum = createHash('sha256').update(csvContent as string, 'utf8').digest('hex')
-    let duplicateWarning: { upload_session_id: string; uploaded_at: string } | null = null
-
-    try {
-      const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
-      const { data: existingUpload } = await fastify.supabase
-        .from('upload_sessions')
-        .select('id, created_at')
-        .eq('tenant_id', req.tenantId)
-        .eq('upload_type', 'attendance_csv')
-        .eq('content_checksum', contentChecksum)
-        .eq('status', 'completed')
-        .gte('created_at', since24h)
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle()
-
-      if (existingUpload) {
-        duplicateWarning = {
-          upload_session_id: (existingUpload as any).id,
-          uploaded_at:       (existingUpload as any).created_at,
-        }
-        req.log.warn(
-          { tenant_id: req.tenantId, checksum: contentChecksum, prior_session: (existingUpload as any).id },
-          'attendance upload: duplicate CSV detected (same checksum within 24h) — proceeding with replay',
-        )
-      }
-    } catch (checksumErr) {
-      req.log.warn({ err: checksumErr }, 'attendance upload: checksum duplicate check failed — skipped')
-    }
-
+    // ── 1. Parse data rows ────────────────────────────────────────────────────
     interface ParsedPunch {
       line:          number
       employee_code: string
@@ -175,9 +116,9 @@ export default async function attendanceUploadRoute(fastify: FastifyInstance) {
       source:        string
     }
 
-    const parsedPunches: ParsedPunch[]                                          = []
-    const rowErrors:     Array<{ line: number; row: string; error: string }>    = []
-    const seen           = new Set<string>()  // dedup by (employee_code, datetime)
+    const parsedPunches: ParsedPunch[]                                       = []
+    const rowErrors: Array<{ line: number; row: string; error: string }>     = []
+    const seen       = new Set<string>()
 
     for (let i = 0; i < dataLines.length; i++) {
       const lineNumber = i + 2
@@ -186,28 +127,29 @@ export default async function attendanceUploadRoute(fastify: FastifyInstance) {
 
       const employee_code = fields[colIdx.employee_code]?.trim() ?? ''
       const datetime      = fields[colIdx.datetime]?.trim()      ?? ''
-      // Normalize source: lowercase and clamp to allowed values so a CSV with
-      // 'CSV_Upload', 'Device', etc. doesn't trigger a check-constraint violation.
-      const ALLOWED_SOURCES = new Set(['device','manual','mobile','web','kiosk','regularisation','csv_upload'])
       const rawSource = colIdx.source >= 0 ? (fields[colIdx.source]?.trim().toLowerCase() || 'csv_upload') : 'csv_upload'
       const source    = ALLOWED_SOURCES.has(rawSource) ? rawSource : 'csv_upload'
 
       if (!employee_code) {
-        rowErrors.push({ line: lineNumber, row: rawLine, error: 'employee_code is empty' })
+        if (rowErrors.length < ROW_ERRORS_CAP)
+          rowErrors.push({ line: lineNumber, row: rawLine, error: 'employee_code is empty' })
         continue
       }
       if (!datetime) {
-        rowErrors.push({ line: lineNumber, row: rawLine, error: 'datetime is empty' })
+        if (rowErrors.length < ROW_ERRORS_CAP)
+          rowErrors.push({ line: lineNumber, row: rawLine, error: 'datetime is empty' })
         continue
       }
       if (!DATETIME_RE.test(datetime)) {
-        rowErrors.push({ line: lineNumber, row: rawLine, error: `Invalid datetime "${datetime}" — expected YYYY-MM-DD HH:MM or YYYY-MM-DD HH:MM:SS in tenant local time` })
+        if (rowErrors.length < ROW_ERRORS_CAP)
+          rowErrors.push({ line: lineNumber, row: rawLine, error: `Invalid datetime "${datetime}" — expected YYYY-MM-DD HH:MM or YYYY-MM-DD HH:MM:SS in tenant local time` })
         continue
       }
 
       const dupKey = `${employee_code}::${datetime}`
       if (seen.has(dupKey)) {
-        rowErrors.push({ line: lineNumber, row: rawLine, error: 'Duplicate row (same employee_code + datetime already appears earlier in the CSV)' })
+        if (rowErrors.length < ROW_ERRORS_CAP)
+          rowErrors.push({ line: lineNumber, row: rawLine, error: 'Duplicate row (same employee_code + datetime already appears earlier in the CSV)' })
         continue
       }
       seen.add(dupKey)
@@ -216,18 +158,7 @@ export default async function attendanceUploadRoute(fastify: FastifyInstance) {
       parsedPunches.push({ line: lineNumber, employee_code, datetime, date, time, source })
     }
 
-    if (parsedPunches.length === 0) {
-      return reply.code(400).send({
-        error:        'NO_VALID_ROWS',
-        message:      'No valid data rows found after validation',
-        total_rows:   dataLines.length,
-        success_rows: 0,
-        failed_rows:  rowErrors,
-      })
-    }
-
-    // ── 4. Assign IN/OUT directions ─────────────────────────────────────────
-    // Group by (employee_code, date), sort by time, assign alternately: 1st=IN, 2nd=OUT…
+    // ── 2. Assign IN/OUT directions ───────────────────────────────────────────
     const dayGroups = new Map<string, ParsedPunch[]>()
     for (const punch of parsedPunches) {
       const key = `${punch.employee_code}::${punch.date}`
@@ -238,148 +169,126 @@ export default async function attendanceUploadRoute(fastify: FastifyInstance) {
       punches.sort((a, b) => a.time.localeCompare(b.time))
       const n = punches.length
       punches.forEach((p, i) => {
-        if (i === 0)     p.direction = 'IN'
+        if (i === 0)          p.direction = 'IN'
         else if (i === n - 1) p.direction = 'OUT'
-        else             p.direction = i % 2 === 0 ? 'IN' : 'OUT'
+        else                  p.direction = i % 2 === 0 ? 'IN' : 'OUT'
       })
     }
 
-    // ── 4a. Pre-filter punches in PAYROLL_FINALIZED months ─────────────────
-    // Fetch all sealed months for this tenant (a small set — typically 0-24 rows).
-    // Rows whose month is finalized are moved to rowErrors and skipped so the
-    // rest of the upload succeeds for open/locked months.
+    // ── 3. Pre-filter punches in PAYROLL_FINALIZED months ────────────────────
     {
       const { data: finalizedPeriods, error: lockQueryErr } = await fastify.supabase
         .from('attendance_period_locks')
         .select('period_month')
-        .eq('tenant_id', req.tenantId)
+        .eq('tenant_id', tenantId)
         .eq('state', 'PAYROLL_FINALIZED')
 
-      if (lockQueryErr) {
-        req.log.warn({ err: lockQueryErr }, 'attendance upload: period-lock query failed — proceeding without filter')
-      } else {
+      if (!lockQueryErr) {
         const finalizedMonths = new Set(
           (finalizedPeriods ?? []).map((p: { period_month: string }) => p.period_month)
         )
-        req.log.info({ finalizedMonths: [...finalizedMonths] }, 'attendance upload: finalized months for tenant')
-
         if (finalizedMonths.size > 0) {
           const allowed: ParsedPunch[] = []
           for (const punch of parsedPunches) {
             const month = punch.date.slice(0, 7)
             if (finalizedMonths.has(month)) {
-              rowErrors.push({
-                line:  punch.line,
-                row:   `${punch.employee_code},${punch.datetime}`,
-                error: `Skipped — period ${month} is sealed (payroll finalized). Use Period Manager → Reverse Finalization to unlock it first.`,
-              })
+              if (rowErrors.length < ROW_ERRORS_CAP)
+                rowErrors.push({
+                  line:  punch.line,
+                  row:   `${punch.employee_code},${punch.datetime}`,
+                  error: `Skipped — period ${month} is sealed (payroll finalized). Use Period Manager → Reverse Finalization to unlock it first.`,
+                })
             } else {
               allowed.push(punch)
             }
           }
           parsedPunches.length = 0
           parsedPunches.push(...allowed)
-          req.log.info(
-            { skipped: rowErrors.length, remaining: parsedPunches.length },
-            'attendance upload: period-lock filter applied',
-          )
         }
       }
     }
 
-    // If all rows were in finalized months, return early (nothing left to insert).
     if (parsedPunches.length === 0) {
-      return reply.send({
-        total_rows:   dataLines.length,
-        success_rows: 0,
-        failed_rows:  rowErrors,
+      await updateJob({
+        status:        'completed',
+        processed_rows: dataLines.length,
+        success_rows:   0,
+        failed_rows:    rowErrors.length,
+        skipped_rows:   0,
+        row_errors:     rowErrors,
+        completed_at:   new Date().toISOString(),
       })
+      return
     }
 
-    // ── 5. Batch resolve employee codes → IDs ───────────────────────────────
+    // ── 4. Batch resolve employee codes → IDs ─────────────────────────────────
     const uniqueCodes = [...new Set(parsedPunches.map((r) => r.employee_code))]
-
     const { data: employees, error: empErr } = await fastify.supabase
       .from('employees')
       .select('id, employee_code')
-      .eq('tenant_id', req.tenantId)
+      .eq('tenant_id', tenantId)
       .in('employee_code', uniqueCodes)
 
     if (empErr) {
-      req.log.error({ err: empErr }, 'attendance upload: employee lookup failed')
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to resolve employee codes' })
+      log.error({ err: empErr }, 'upload job: employee lookup failed')
+      await updateJob({ status: 'failed', error: 'Failed to resolve employee codes', completed_at: new Date().toISOString() })
+      return
     }
 
     const codeToId = new Map<string, string>(
       (employees ?? []).map((e: { id: string; employee_code: string }) => [e.employee_code, e.id])
     )
 
-    // ── 5a. Fetch tenant timezone ───────────────────────────────────────────
+    // ── 5. Fetch tenant timezone ───────────────────────────────────────────────
     const { data: tenantRow } = await fastify.supabase
-      .from('tenants')
-      .select('timezone')
-      .eq('id', req.tenantId)
-      .maybeSingle()
+      .from('tenants').select('timezone').eq('id', tenantId).maybeSingle()
     const tenantTz: string = (tenantRow as { timezone?: string } | null)?.timezone ?? 'UTC'
 
-    // ── 6. Build punch rows ─────────────────────────────────────────────────
-    interface PunchRow {
-      tenant_id:   string
-      employee_id: string
-      punched_at:  string
-      direction:   'IN' | 'OUT'
-      source:      string
-    }
+    // ── 6. Build punch rows ───────────────────────────────────────────────────
+    interface PunchRow { tenant_id: string; employee_id: string; punched_at: string; direction: 'IN' | 'OUT'; source: string }
 
-    const punchRows:    PunchRow[]                                          = []
+    const punchRows:    PunchRow[] = []
     const recomputeSet = new Map<string, { employee_id: string; date: string }>()
-    const insertErrors: Array<{ line: number; row: string; error: string }> = []
 
     for (const punch of parsedPunches) {
       const employee_id = codeToId.get(punch.employee_code)
       if (!employee_id) {
-        insertErrors.push({
-          line:  punch.line,
-          row:   `${punch.employee_code},${punch.datetime}`,
-          error: `Employee code "${punch.employee_code}" not found in this organisation`,
-        })
+        if (rowErrors.length < ROW_ERRORS_CAP)
+          rowErrors.push({
+            line:  punch.line,
+            row:   `${punch.employee_code},${punch.datetime}`,
+            error: `Employee code "${punch.employee_code}" not found in this organisation`,
+          })
         continue
       }
-
       const punched_at = localToUtc(punch.date, punch.time, tenantTz).toISOString()
-
-      punchRows.push({
-        tenant_id:   req.tenantId,
-        employee_id,
-        punched_at,
-        direction:   punch.direction!,
-        source:      punch.source,
-      })
-
+      punchRows.push({ tenant_id: tenantId, employee_id, punched_at, direction: punch.direction!, source: punch.source })
       const rKey = `${employee_id}::${punch.date}`
-      if (!recomputeSet.has(rKey)) {
-        recomputeSet.set(rKey, { employee_id, date: punch.date })
-      }
+      if (!recomputeSet.has(rKey)) recomputeSet.set(rKey, { employee_id, date: punch.date })
     }
-
-    const allFailedRows = [...rowErrors, ...insertErrors]
 
     if (punchRows.length === 0) {
-      return reply.send({
-        total_rows:   dataLines.length,
-        success_rows: 0,
-        failed_rows:  allFailedRows,
+      await updateJob({
+        status:         'completed',
+        processed_rows: dataLines.length,
+        success_rows:   0,
+        failed_rows:    rowErrors.length,
+        skipped_rows:   0,
+        row_errors:     rowErrors,
+        completed_at:   new Date().toISOString(),
       })
+      return
     }
 
-    // ── 7. Bulk upsert punch rows (chunked + parallel) ─────────────────────
-    // PostgREST rejects single upserts >1000 rows, so we chunk and run
-    // UPSERT_CONCURRENCY chunks in parallel for speed (260k rows ÷ 1000 ÷ 10
-    // concurrent = ~26 serial rounds ≈ a few seconds).
+    // ── 7. Bulk upsert punch rows (chunked + parallel) ────────────────────────
     const chunks: typeof punchRows[] = []
-    for (let i = 0; i < punchRows.length; i += UPSERT_CHUNK) {
+    for (let i = 0; i < punchRows.length; i += UPSERT_CHUNK)
       chunks.push(punchRows.slice(i, i + UPSERT_CHUNK))
-    }
+
+    let insertedSoFar  = 0
+    let lastProgressAt = 0
+    const PROGRESS_INTERVAL = 50_000  // update DB every ~50k rows inserted
+
     for (let i = 0; i < chunks.length; i += UPSERT_CONCURRENCY) {
       const batch = chunks.slice(i, i + UPSERT_CONCURRENCY)
       const results = await Promise.all(
@@ -391,104 +300,222 @@ export default async function attendanceUploadRoute(fastify: FastifyInstance) {
       )
       const firstErr = results.find((r) => r.error)?.error
       if (firstErr) {
-        req.log.error({ err: firstErr, chunk_offset: i, chunks: batch.length }, 'attendance upload: punch upsert failed')
-        // Period-lock trigger raises check_violation (23514) with message prefix PERIOD_FINALIZED.
-        // Only treat it as period-sealed when the message actually contains PERIOD_FINALIZED —
-        // other check violations (e.g. invalid source value) must not be misidentified.
+        log.error({ err: firstErr, chunk_offset: i }, 'upload job: punch upsert failed')
         if ((firstErr.message ?? '').includes('PERIOD_FINALIZED')) {
           const monthMatch = (firstErr.message ?? '').match(/PERIOD_FINALIZED:\s*attendance for (\S+)/)
           const month = monthMatch?.[1] ?? 'this period'
-          return reply.code(409).send({
-            error:   'PERIOD_FINALIZED',
-            message: `Attendance for ${month} is sealed — payroll has been finalized. Reverse the payroll finalization before uploading punches for that period.`,
+          await updateJob({
+            status:       'failed',
+            error:        `Attendance for ${month} is sealed — payroll has been finalized. Reverse the payroll finalization before uploading punches for that period.`,
+            completed_at: new Date().toISOString(),
           })
+          return
         }
-        return reply.code(500).send({ error: 'INSERT_FAILED', message: 'Failed to insert punch records' })
+        await updateJob({
+          status:       'failed',
+          error:        `Database error while inserting punch records: ${firstErr.message}`,
+          completed_at: new Date().toISOString(),
+        })
+        return
+      }
+
+      for (const chunk of batch) insertedSoFar += chunk.length
+
+      if (insertedSoFar - lastProgressAt >= PROGRESS_INTERVAL || i + UPSERT_CONCURRENCY >= chunks.length) {
+        lastProgressAt = insertedSoFar
+        await updateJob({ processed_rows: Math.min(insertedSoFar, dataLines.length) })
       }
     }
 
-    const successRows = punchRows.length
+    const successRows  = punchRows.length
+    const failedCount  = rowErrors.length
+    const skippedCount = dataLines.length - successRows - failedCount
 
-    req.log.info(
-      { tenant_id: req.tenantId, punch_rows: punchRows.length, recompute_targets: recomputeSet.size },
-      'attendance upload: punches inserted — recompute running in background',
-    )
+    log.info({ punch_rows: successRows, recompute_targets: recomputeSet.size }, 'upload job: upserts done — recomputing')
 
-    // ── 8. Recompute attendance_daily (background — does not block response) ─
-    // For large monthly uploads this can be thousands of (employee, date) pairs.
-    // We fire-and-forget so the HTTP response is immediate; recompute continues
-    // in the background. The UI can refresh attendance after a short delay.
+    // ── 8. Recompute attendance_daily ─────────────────────────────────────────
     const recomputeTargets = [...recomputeSet.values()]
-    setImmediate(async () => {
-      const CONCURRENCY = 8
-      for (let i = 0; i < recomputeTargets.length; i += CONCURRENCY) {
-        const batch = recomputeTargets.slice(i, i + CONCURRENCY)
-        await Promise.all(batch.map(async ({ employee_id, date }) => {
-          try {
-            await recomputeRange(fastify.supabase, {
-              tenant_id:   req.tenantId,
-              employee_id,
-              from_date:   date,
-              to_date:     date,
-              changed_by:  req.userId,
-            })
-          } catch (err: any) {
-            fastify.log.warn({ err, employee_id, date }, 'attendance upload: background recompute failed')
-          }
-        }))
-      }
-      fastify.log.info(
-        { tenant_id: req.tenantId, targets: recomputeTargets.length },
-        'attendance upload: background recompute complete',
-      )
-    })
-
-    // ── 9. Audit upload session (fire-and-forget) ───────────────────────────
-    setImmediate(async () => {
-      try {
-        await (fastify as any).supabase
-          .from('upload_sessions')
-          .insert({
-            tenant_id:            req.tenantId,
-            upload_type:          'attendance_csv',
-            status:               'completed',
-            file_name:            'attendance_upload.csv',
-            file_size:            Buffer.byteLength(csvContent as string, 'utf8'),
-            mime_type:            'text/csv',
-            bucket:               'employee-files',
-            created_by:           req.userId,
-            content_checksum:     contentChecksum,
-            upload_started_at:    new Date().toISOString(),
-            upload_completed_at:  new Date().toISOString(),
-            processing_ended_at:  new Date().toISOString(),
-            result_summary: {
-              total_rows:   dataLines.length,
-              success_rows: successRows,
-              failed_rows:  allFailedRows.length,
-              is_replay:    duplicateWarning !== null,
-            },
+    const RECOMPUTE_CONCURRENCY = 8
+    for (let i = 0; i < recomputeTargets.length; i += RECOMPUTE_CONCURRENCY) {
+      const batch = recomputeTargets.slice(i, i + RECOMPUTE_CONCURRENCY)
+      await Promise.all(batch.map(async ({ employee_id, date }) => {
+        try {
+          await recomputeRange(fastify.supabase, {
+            tenant_id:   tenantId,
+            employee_id,
+            from_date:   date,
+            to_date:     date,
+            changed_by:  userId,
           })
-      } catch (err) {
-        fastify.log.warn({ err }, 'attendance upload: failed to write upload_sessions audit row — non-critical')
-      }
+        } catch (err: any) {
+          log.warn({ err, employee_id, date }, 'upload job: recompute failed for one target')
+        }
+      }))
+    }
+
+    // ── 9. Write upload_sessions audit row ────────────────────────────────────
+    try {
+      await fastify.supabase.from('upload_sessions').insert({
+        tenant_id:            tenantId,
+        upload_type:          'attendance_csv',
+        status:               'completed',
+        file_name:            filename,
+        file_size:            Buffer.byteLength(csvContent, 'utf8'),
+        mime_type:            'text/csv',
+        bucket:               'employee-files',
+        created_by:           userId,
+        content_checksum:     checksum,
+        upload_started_at:    new Date().toISOString(),
+        upload_completed_at:  new Date().toISOString(),
+        processing_ended_at:  new Date().toISOString(),
+        result_summary: {
+          total_rows:   dataLines.length,
+          success_rows: successRows,
+          failed_rows:  failedCount,
+        },
+      })
+    } catch (err) {
+      log.warn({ err }, 'upload job: failed to write upload_sessions audit row — non-critical')
+    }
+
+    // ── 10. Mark job as completed ─────────────────────────────────────────────
+    await updateJob({
+      status:         'completed',
+      processed_rows: dataLines.length,
+      success_rows:   successRows,
+      failed_rows:    failedCount,
+      skipped_rows:   Math.max(0, skippedCount),
+      row_errors:     rowErrors,
+      completed_at:   new Date().toISOString(),
     })
 
-    // ── 10. Respond ─────────────────────────────────────────────────────────
-    return reply.send({
-      total_rows:           dataLines.length,
-      success_rows:         successRows,
-      failed_rows:          allFailedRows,
-      duplicate_warning:    duplicateWarning,
-      recompute_targets:    recomputeSet.size,
-      recompute_background: true,
-    })
+    log.info({ success_rows: successRows, failed_rows: failedCount, recompute_targets: recomputeTargets.length }, 'upload job: completed')
+  } catch (err: any) {
+    log.error({ err }, 'upload job: unhandled exception')
+    try {
+      await fastify.supabase
+        .from('attendance_upload_jobs')
+        .update({
+          status:       'failed',
+          error:        err?.message ?? 'Unexpected server error',
+          completed_at: new Date().toISOString(),
+          updated_at:   new Date().toISOString(),
+        })
+        .eq('id', jobId)
+    } catch { /* best effort */ }
+  }
+}
+
+// ── Route ─────────────────────────────────────────────────────────────────────
+
+export default async function attendanceUploadRoute(fastify: FastifyInstance) {
+  const adminAuth = { preHandler: [fastify.authenticate, requireRole(...HR_ADMIN_ROLES)] }
+
+  // ── POST /attendance/upload ──────────────────────────────────────────────────
+  fastify.post('/attendance/upload', { ...adminAuth, bodyLimit: 50 * 1024 * 1024 }, async (req: any, reply) => {
+    try {
+      const parsed = UploadBodySchema.safeParse(req.body)
+      if (!parsed.success) {
+        return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message ?? 'Invalid request body' })
+      }
+      const csvContent = parsed.data.csv_content
+      const filename   = parsed.data.filename ?? 'attendance_upload.csv'
+
+      // ── 1. Split lines ───────────────────────────────────────────────────────
+      const allLines = csvContent.split(/\r?\n/).map((l) => l.trim()).filter(Boolean)
+      if (allLines.length < 2) {
+        return reply.code(400).send({
+          error:   'EMPTY_CSV',
+          message: 'CSV must contain a header row and at least one data row',
+        })
+      }
+
+      // ── 2. Validate header ───────────────────────────────────────────────────
+      const headerCols = parseCsvLine(allLines[0]).map((h) => h.toLowerCase().trim())
+      const missingCols = REQUIRED_HEADERS.filter((c) => !headerCols.includes(c))
+      if (missingCols.length > 0) {
+        return reply.code(400).send({
+          error:   'MISSING_COLUMNS',
+          message: `Missing required columns: ${missingCols.join(', ')}. Required: employee_code, datetime`,
+        })
+      }
+
+      const colIdx = {
+        employee_code: headerCols.indexOf('employee_code'),
+        datetime:      headerCols.indexOf('datetime'),
+        source:        headerCols.indexOf('source'),
+      }
+
+      const dataLines  = allLines.slice(1)
+      const totalRows  = dataLines.length
+      const checksum   = createHash('sha256').update(csvContent, 'utf8').digest('hex')
+
+      // ── 3. Create job record ─────────────────────────────────────────────────
+      const { data: jobRow, error: jobErr } = await fastify.supabase
+        .from('attendance_upload_jobs')
+        .insert({
+          tenant_id:  req.tenantId,
+          created_by: req.userId,
+          filename,
+          status:     'queued',
+          total_rows: totalRows,
+        })
+        .select('id')
+        .single()
+
+      if (jobErr || !jobRow) {
+        req.log.error({ err: jobErr }, 'attendance upload: failed to create job record')
+        return reply.code(500).send({ error: 'JOB_CREATE_FAILED', message: 'Failed to create upload job' })
+      }
+
+      const jobId = (jobRow as { id: string }).id
+
+      // ── 4. Reply 202 immediately ─────────────────────────────────────────────
+      reply.code(202).send({ job_id: jobId, total_rows: totalRows, filename })
+
+      // ── 5. Process in background ─────────────────────────────────────────────
+      setImmediate(() => {
+        processUploadJob(fastify, {
+          jobId,
+          tenantId:   req.tenantId,
+          userId:     req.userId,
+          csvContent,
+          dataLines,
+          colIdx,
+          filename,
+          checksum,
+        }).catch((err) => {
+          fastify.log.error({ err, jobId }, 'upload job: processUploadJob threw unexpectedly')
+        })
+      })
     } catch (err: any) {
-      req.log.error({ err }, 'attendance upload: unhandled exception')
+      req.log.error({ err }, 'attendance upload: unhandled exception in handler')
       return reply.code(500).send({ error: 'UPLOAD_ERROR', message: 'Upload failed due to an unexpected error. Please try again.' })
     }
   })
 
-  // ── GET /attendance/upload-sessions ────────────────────────────────────────
+  // ── GET /attendance/upload/jobs/:jobId ───────────────────────────────────────
+  fastify.get('/attendance/upload/jobs/:jobId', adminAuth, async (req: any, reply) => {
+    const { jobId } = req.params as { jobId: string }
+
+    const { data, error } = await fastify.supabase
+      .from('attendance_upload_jobs')
+      .select('id, status, total_rows, processed_rows, success_rows, failed_rows, skipped_rows, row_errors, error, created_at, started_at, completed_at')
+      .eq('id', jobId)
+      .eq('tenant_id', req.tenantId)
+      .maybeSingle()
+
+    if (error) {
+      req.log.error({ err: error }, 'upload job: query failed')
+      return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    }
+    if (!data) {
+      return reply.code(404).send({ error: 'NOT_FOUND', message: 'Upload job not found' })
+    }
+    return reply.send(data)
+  })
+
+  // ── GET /attendance/upload-sessions ─────────────────────────────────────────
   fastify.get('/attendance/upload-sessions', adminAuth, async (req: any, reply) => {
     const rawLimit  = Number((req.query as Record<string, string>)?.limit ?? 30)
     const pageLimit = Math.min(Math.max(1, Number.isFinite(rawLimit) ? rawLimit : 30), 100)
@@ -505,7 +532,6 @@ export default async function attendanceUploadRoute(fastify: FastifyInstance) {
       fastify.log.error({ err: error }, 'attendance upload-sessions: query failed')
       return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
     }
-
     return reply.send({ data: data ?? [] })
   })
 }

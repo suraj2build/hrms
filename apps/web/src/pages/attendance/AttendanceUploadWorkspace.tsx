@@ -13,7 +13,7 @@
  *  7. Operational Timeline    — deep-links into ObservabilityConsole
  */
 
-import { useState, useRef, useCallback, useMemo, Fragment }    from 'react'
+import { useState, useRef, useCallback, useMemo, Fragment, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query'
 import { useNavigate }                             from 'react-router-dom'
 import {
@@ -71,6 +71,27 @@ interface UploadResult {
   duplicate_warning:    DuplicateWarning | null
   recompute_targets?:   number
   recompute_background?: boolean
+}
+
+interface UploadJobRef {
+  job_id:     string
+  total_rows: number
+  filename:   string
+}
+
+interface UploadJob {
+  id:             string
+  status:         'queued' | 'processing' | 'completed' | 'failed'
+  total_rows:     number
+  processed_rows: number
+  success_rows:   number
+  failed_rows:    number
+  skipped_rows:   number
+  row_errors:     FailedRow[]
+  error?:         string | null
+  created_at:     string
+  started_at?:    string | null
+  completed_at?:  string | null
 }
 
 interface UploadedDateRange {
@@ -228,6 +249,7 @@ export function AttendanceUploadWorkspace() {
   const [parseError,        setParseError]        = useState<string | null>(null)
   const [isDragging,        setIsDragging]        = useState(false)
   const [uploadedDateRange, setUploadedDateRange] = useState<UploadedDateRange | null>(null)
+  const [activeJobId,       setActiveJobId]       = useState<string | null>(null)
 
   // ── Replay confirmation state ─────────────────────────────────────────────
   const [pendingReplay,   setPendingReplay]   = useState<string | null>(null)  // csvText to replay
@@ -261,6 +283,44 @@ export function AttendanceUploadWorkspace() {
     placeholderData: keepPreviousData,
     retry:           2,
   })
+
+  // ── Active upload job polling ─────────────────────────────────────────────
+  const { data: jobData } = useQuery<UploadJob>({
+    queryKey:        ['attendance-upload-job', activeJobId],
+    queryFn:         () => api.get<UploadJob>(`/attendance/upload/jobs/${activeJobId}`),
+    enabled:         !!activeJobId,
+    refetchInterval: (query) => {
+      const d = query.state.data
+      if (!d || d.status === 'completed' || d.status === 'failed') return false
+      return 2_000
+    },
+  })
+
+  useEffect(() => {
+    if (!activeJobId || !jobData) return
+    if (jobData.status !== 'completed' && jobData.status !== 'failed') return
+
+    setActiveJobId(null)
+
+    const failedCount = jobData.failed_rows ?? 0
+    setResult({
+      total_rows:           jobData.total_rows,
+      success_rows:         jobData.success_rows,
+      failed_rows:          jobData.row_errors ?? [],
+      duplicate_warning:    null,
+      recompute_background: true,
+    })
+
+    if (jobData.status === 'failed') {
+      toast.error('Upload failed', { description: jobData.error ?? 'Processing error — check the upload history for details.' })
+    } else {
+      toast[failedCount > 0 ? 'warning' : 'success']('Attendance uploaded', {
+        description: `${jobData.success_rows}/${jobData.total_rows} rows imported.${failedCount > 0 ? ` ${failedCount} failed.` : ''}`,
+      })
+    }
+    qc.invalidateQueries({ queryKey: ['attendance-upload-sessions'] })
+    qc.invalidateQueries({ queryKey: ['attendance-upload-health'] })
+  }, [jobData, activeJobId, qc])
 
   // ── Section 3: Recent uploads ─────────────────────────────────────────────
   const {
@@ -385,24 +445,16 @@ export function AttendanceUploadWorkspace() {
     setFileName(null); setCsvText(null); setHeaders([]); setMissingCols([])
     setPreviewRows([]); setTotalRows(0); setResult(null); setParseError(null)
     setPendingReplay(null); setReplayConfirmed(false); setUploadedDateRange(null)
+    setActiveJobId(null)
   }
 
   // ── Upload mutation ───────────────────────────────────────────────────────
-  const uploadMutation = useMutation<UploadResult, Error, string>({
-    mutationFn: (csv: string) => api.post<UploadResult>('/attendance/upload', { csv_content: csv }),
+  const uploadMutation = useMutation<UploadJobRef, Error, { csv: string; filename?: string }>({
+    mutationFn: ({ csv, filename }) =>
+      api.post<UploadJobRef>('/attendance/upload', { csv_content: csv, filename }),
     onSuccess: (data) => {
-      setResult(data)
-      // If duplicate detected and not yet confirmed, show replay warning
-      if (data.duplicate_warning && !replayConfirmed) {
-        setPendingReplay(csvText)
-        return
-      }
-      const partial = data.failed_rows.length > 0
-      toast[partial ? 'warning' : 'success']('Attendance uploaded', {
-        description: `${data.success_rows}/${data.total_rows} rows imported.${partial ? ` ${data.failed_rows.length} failed.` : ''}`,
-      })
-      qc.invalidateQueries({ queryKey: ['attendance-upload-sessions'] })
-      qc.invalidateQueries({ queryKey: ['attendance-upload-health'] })
+      setActiveJobId(data.job_id)
+      toast.info('Upload queued', { description: `${data.total_rows.toLocaleString()} rows are being processed in the background.` })
     },
     onError: e => toast.error('Upload failed', { description: e.message }),
   })
@@ -411,13 +463,14 @@ export function AttendanceUploadWorkspace() {
     const content = csv ?? csvText
     if (!content) return
     setResult(null)
-    uploadMutation.mutate(content)
+    setActiveJobId(null)
+    uploadMutation.mutate({ csv: content, filename: fileName ?? undefined })
   }
 
   function handleReplayConfirm() {
     setReplayConfirmed(true)
     setPendingReplay(null)
-    if (csvText) uploadMutation.mutate(csvText)
+    if (csvText) uploadMutation.mutate({ csv: csvText, filename: fileName ?? undefined })
   }
 
   function handleDownloadSample() {
@@ -432,8 +485,10 @@ export function AttendanceUploadWorkspace() {
   }
 
   // ── Derived ───────────────────────────────────────────────────────────────
-  const hasErrors = previewRows.some(r => r.warnings.length > 0)
-  const canSubmit = !!csvText && missingCols.length === 0 && !parseError && !pendingReplay
+  const hasErrors   = previewRows.some(r => r.warnings.length > 0)
+  const canSubmit   = !!csvText && missingCols.length === 0 && !parseError && !pendingReplay
+  const isJobActive = !!activeJobId && (!jobData || (jobData.status !== 'completed' && jobData.status !== 'failed'))
+  const isProcessing = uploadMutation.isPending || isJobActive
 
   // Section 6: Payroll impact assessment
   const payrollImpact = useMemo(() => {
@@ -566,9 +621,9 @@ export function AttendanceUploadWorkspace() {
                   <Button
                     variant="outline" size="sm" className="h-7 text-xs text-destructive border-destructive/30 hover:bg-destructive/10"
                     onClick={handleReplayConfirm}
-                    disabled={uploadMutation.isPending}
+                    disabled={isProcessing}
                   >
-                    {uploadMutation.isPending
+                    {isProcessing
                       ? <><Loader2 className="h-3 w-3 animate-spin" />Replaying…</>
                       : 'Yes, replay upload anyway'
                     }
@@ -576,7 +631,7 @@ export function AttendanceUploadWorkspace() {
                   <Button
                     variant="outline" size="sm" className="h-7 text-xs"
                     onClick={handleClear}
-                    disabled={uploadMutation.isPending}
+                    disabled={isProcessing}
                   >
                     Cancel — discard this file
                   </Button>
@@ -620,12 +675,12 @@ export function AttendanceUploadWorkspace() {
               accept=".csv,text/csv,.xlsx,.xls"
               className="hidden"
               onChange={handleFileChange}
-              disabled={uploadMutation.isPending}
+              disabled={isProcessing}
             />
 
             {uploadMutation.isPending ? (
               <><Loader2 className="h-8 w-8 text-primary animate-spin" />
-                <p className="text-sm text-muted-foreground">Processing {totalRows} rows…</p></>
+                <p className="text-sm text-muted-foreground">Submitting file…</p></>
             ) : fileName ? (
               <>
                 <FileText className="h-8 w-8 text-primary" />
@@ -689,10 +744,39 @@ export function AttendanceUploadWorkspace() {
             </div>
           )}
 
-          {/* Progress bar while uploading */}
+          {/* Progress bar — initial submit */}
           {uploadMutation.isPending && (
             <div className="mt-3 h-1.5 w-full rounded-full bg-muted overflow-hidden">
               <div className="h-full w-1/3 rounded-full bg-primary animate-pulse" />
+            </div>
+          )}
+
+          {/* Progress bar — background job processing */}
+          {isJobActive && jobData && (
+            <div className="mt-3 space-y-1.5">
+              <div className="flex items-center justify-between text-xs text-muted-foreground">
+                <span className="flex items-center gap-1.5">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  {jobData.status === 'queued' ? 'Queued — processing will start shortly…' : 'Processing in background…'}
+                </span>
+                <span className="tabular-nums font-mono">
+                  {jobData.processed_rows.toLocaleString()} / {jobData.total_rows.toLocaleString()} rows
+                </span>
+              </div>
+              <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
+                <div
+                  className="h-full rounded-full bg-primary transition-all duration-700"
+                  style={{ width: `${jobData.total_rows > 0 ? Math.min(100, (jobData.processed_rows / jobData.total_rows) * 100) : 0}%` }}
+                />
+              </div>
+              <p className="text-[10px] text-muted-foreground">
+                You can navigate away — the import will continue and you can return here to check the result.
+              </p>
+            </div>
+          )}
+          {isJobActive && !jobData && (
+            <div className="mt-3 h-1.5 w-full rounded-full bg-muted overflow-hidden">
+              <div className="h-full w-1/4 rounded-full bg-primary animate-pulse" />
             </div>
           )}
 
@@ -703,7 +787,7 @@ export function AttendanceUploadWorkspace() {
                 error={uploadMutation.error?.message ?? 'Upload failed.'}
                 severity="high"
                 remediationText="Check that your CSV is well-formed and all required columns are present, then retry."
-                onRetry={() => csvText && uploadMutation.mutate(csvText)}
+                onRetry={() => csvText && uploadMutation.mutate({ csv: csvText, filename: fileName ?? undefined })}
                 retrying={uploadMutation.isPending}
               />
             </div>
@@ -732,12 +816,12 @@ export function AttendanceUploadWorkspace() {
                 )}
                 <Button
                   onClick={() => handleSubmit()}
-                  disabled={!canSubmit || uploadMutation.isPending}
+                  disabled={!canSubmit || isProcessing}
                   size="sm"
                   className="gap-1.5 h-7"
                 >
-                  {uploadMutation.isPending
-                    ? <><Loader2 className="h-3 w-3 animate-spin" />Uploading…</>
+                  {isProcessing
+                    ? <><Loader2 className="h-3 w-3 animate-spin" />{isJobActive ? 'Processing…' : 'Uploading…'}</>
                     : <><Upload className="h-3 w-3" />Submit {totalRows} rows</>
                   }
                 </Button>
