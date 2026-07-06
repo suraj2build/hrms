@@ -31,7 +31,7 @@ interface PeriodLock {
 
 interface ActionDialogState {
   open:   boolean
-  action: 'lock' | 'unlock' | 'start-payroll' | 'finalize' | null
+  action: 'lock' | 'unlock' | 'start-payroll' | 'finalize' | 'reverse-finalization' | null
   month:  string
 }
 
@@ -78,10 +78,11 @@ const DIALOG_CONFIG: Record<
   NonNullable<ActionDialogState['action']>,
   { title: string; desc: string; confirmLabel: string; needsReason: boolean }
 > = {
-  lock:            { title: 'Lock Period',    desc: 'Lock this period to prevent further attendance modifications. Provide a reason for the lock.',                       confirmLabel: 'Lock Period',   needsReason: true  },
-  unlock:          { title: 'Unlock Period',  desc: 'Unlock this period to allow attendance corrections. Provide a reason for unlocking.',                               confirmLabel: 'Unlock',        needsReason: true  },
-  'start-payroll': { title: 'Start Payroll',  desc: 'Advance this period to Payroll Processing. No further corrections will be allowed.',                               confirmLabel: 'Start Payroll', needsReason: false },
-  finalize:        { title: 'Finalize Period',desc: 'Permanently close this period. This action marks the payroll as finalized and cannot be reversed.',                 confirmLabel: 'Finalize',      needsReason: false },
+  lock:                   { title: 'Lock Period',           desc: 'Lock this period to prevent further attendance modifications. Provide a reason for the lock.',                                                                        confirmLabel: 'Lock Period',          needsReason: true  },
+  unlock:                 { title: 'Unlock Period',         desc: 'Unlock this period to allow attendance corrections. Provide a reason for unlocking.',                                                                                          confirmLabel: 'Unlock',               needsReason: true  },
+  'start-payroll':        { title: 'Start Payroll',         desc: 'Advance this period to Payroll Processing. No further corrections will be allowed.',                                                                                           confirmLabel: 'Start Payroll',        needsReason: false },
+  finalize:               { title: 'Finalize Period',       desc: 'Permanently close this period. This action marks the payroll as finalized and cannot be reversed.',                                                                            confirmLabel: 'Finalize',             needsReason: false },
+  'reverse-finalization': { title: 'Reverse Finalization',  desc: 'Reopen this period for attendance corrections. Payroll finalization will be reversed and the period will return to Open state. Provide a reason for audit trail purposes.',   confirmLabel: 'Reverse Finalization', needsReason: true  },
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -140,16 +141,20 @@ export function AttendancePeriods() {
   // ── Mutation ───────────────────────────────────────────────────────────────
 
   const actionMutation = useMutation({
-    mutationFn: ({ month, action, reason: r }: { month: string; action: string; reason?: string }) =>
-      api.post(`/attendance/period-locks/${month}/${action}`, r ? { reason: r } : {}),
+    mutationFn: ({ month, action, reason: r }: { month: string; action: string; reason?: string }) => {
+      // reverse-finalization reuses the unlock endpoint
+      const endpoint = action === 'reverse-finalization' ? 'unlock' : action
+      return api.post(`/attendance/period-locks/${month}/${endpoint}`, r ? { reason: r } : {})
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['period-locks'] })
       queryClient.invalidateQueries({ queryKey: ['period-lock', dialog.month] })
       const actionLabel: Record<string, string> = {
-        lock:            'Period locked',
-        unlock:          'Period unlocked',
-        'start-payroll': 'Payroll processing started',
-        finalize:        'Period finalized',
+        lock:                   'Period locked',
+        unlock:                 'Period unlocked',
+        'start-payroll':        'Payroll processing started',
+        finalize:               'Period finalized',
+        'reverse-finalization': 'Finalization reversed — period is now Open',
       }
       toast.success(actionLabel[dialog.action ?? ''] ?? 'Action completed', {
         description: fmtMonth(dialog.month),
@@ -216,6 +221,15 @@ export function AttendancePeriods() {
         variant: 'outline' as const,
         onClick: () => openDialog('finalize', month),
         className: 'border-primary/40 text-primary hover:bg-primary/10',
+      })
+    }
+    if (state === 'PAYROLL_FINALIZED') {
+      actions.push({
+        label: 'Reverse Finalization',
+        icon: Unlock,
+        variant: 'outline' as const,
+        onClick: () => openDialog('reverse-finalization', month),
+        className: 'border-destructive/40 text-destructive hover:bg-destructive/10',
       })
     }
     return actions
