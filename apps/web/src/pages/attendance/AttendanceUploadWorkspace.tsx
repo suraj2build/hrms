@@ -35,6 +35,7 @@ import { AsyncStatusBadge }       from '@/components/async'
 import { OperationalErrorBanner } from '@/components/async'
 import { MetricCard, MetricRow }  from '@/components/dashboard/MetricCard'
 import { api }                    from '@/lib/api/client'
+import { supabase }               from '@/lib/supabase/client'
 import { useAuthStore }           from '@/stores/authStore'
 import { cn }                     from '@/lib/utils'
 
@@ -250,6 +251,7 @@ export function AttendanceUploadWorkspace() {
   const [isDragging,        setIsDragging]        = useState(false)
   const [uploadedDateRange, setUploadedDateRange] = useState<UploadedDateRange | null>(null)
   const [activeJobId,       setActiveJobId]       = useState<string | null>(null)
+  const [storageUploading,  setStorageUploading]  = useState(false)
 
   // ── Replay confirmation state ─────────────────────────────────────────────
   const [pendingReplay,   setPendingReplay]   = useState<string | null>(null)  // csvText to replay
@@ -445,13 +447,13 @@ export function AttendanceUploadWorkspace() {
     setFileName(null); setCsvText(null); setHeaders([]); setMissingCols([])
     setPreviewRows([]); setTotalRows(0); setResult(null); setParseError(null)
     setPendingReplay(null); setReplayConfirmed(false); setUploadedDateRange(null)
-    setActiveJobId(null)
+    setActiveJobId(null); setStorageUploading(false)
   }
 
-  // ── Upload mutation ───────────────────────────────────────────────────────
-  const uploadMutation = useMutation<UploadJobRef, Error, { csv: string; filename?: string }>({
-    mutationFn: ({ csv, filename }) =>
-      api.post<UploadJobRef>('/attendance/upload', { csv_content: csv, filename }),
+  // ── Upload mutation (posts storage path — tiny body, no timeout risk) ────────
+  const uploadMutation = useMutation<UploadJobRef, Error, { storagePath: string; filename: string; totalRows: number }>({
+    mutationFn: ({ storagePath, filename, totalRows }) =>
+      api.post<UploadJobRef>('/attendance/upload', { storage_path: storagePath, filename, total_rows: totalRows }),
     onSuccess: (data) => {
       setActiveJobId(data.job_id)
       toast.info('Upload queued', { description: `${data.total_rows.toLocaleString()} rows are being processed in the background.` })
@@ -459,18 +461,47 @@ export function AttendanceUploadWorkspace() {
     onError: e => toast.error('Upload failed', { description: e.message }),
   })
 
-  function handleSubmit(csv?: string) {
+  async function uploadToStorage(csv: string): Promise<string | null> {
+    const safeFilename = (fileName ?? 'attendance_upload.csv').replace(/[^a-z0-9._\- ]/gi, '_')
+    const storagePath  = `${profile!.tenant_id}/${Date.now()}-${safeFilename}`
+    const blob = new Blob([csv], { type: 'text/csv' })
+    const { error } = await supabase.storage
+      .from('attendance-uploads')
+      .upload(storagePath, blob, { contentType: 'text/csv', upsert: false })
+    if (error) {
+      toast.error('File upload failed', { description: error.message })
+      return null
+    }
+    return storagePath
+  }
+
+  async function handleSubmit(csv?: string) {
     const content = csv ?? csvText
     if (!content) return
     setResult(null)
     setActiveJobId(null)
-    uploadMutation.mutate({ csv: content, filename: fileName ?? undefined })
+    setStorageUploading(true)
+    try {
+      const storagePath = await uploadToStorage(content)
+      if (!storagePath) return
+      uploadMutation.mutate({ storagePath, filename: fileName ?? 'attendance_upload.csv', totalRows })
+    } finally {
+      setStorageUploading(false)
+    }
   }
 
-  function handleReplayConfirm() {
+  async function handleReplayConfirm() {
     setReplayConfirmed(true)
     setPendingReplay(null)
-    if (csvText) uploadMutation.mutate({ csv: csvText, filename: fileName ?? undefined })
+    if (!csvText) return
+    setStorageUploading(true)
+    try {
+      const storagePath = await uploadToStorage(csvText)
+      if (!storagePath) return
+      uploadMutation.mutate({ storagePath, filename: fileName ?? 'attendance_upload.csv', totalRows })
+    } finally {
+      setStorageUploading(false)
+    }
   }
 
   function handleDownloadSample() {
@@ -485,10 +516,10 @@ export function AttendanceUploadWorkspace() {
   }
 
   // ── Derived ───────────────────────────────────────────────────────────────
-  const hasErrors   = previewRows.some(r => r.warnings.length > 0)
-  const canSubmit   = !!csvText && missingCols.length === 0 && !parseError && !pendingReplay
-  const isJobActive = !!activeJobId && (!jobData || (jobData.status !== 'completed' && jobData.status !== 'failed'))
-  const isProcessing = uploadMutation.isPending || isJobActive
+  const hasErrors    = previewRows.some(r => r.warnings.length > 0)
+  const canSubmit    = !!csvText && missingCols.length === 0 && !parseError && !pendingReplay
+  const isJobActive  = !!activeJobId && (!jobData || (jobData.status !== 'completed' && jobData.status !== 'failed'))
+  const isProcessing = storageUploading || uploadMutation.isPending || isJobActive
 
   // Section 6: Payroll impact assessment
   const payrollImpact = useMemo(() => {
@@ -678,9 +709,12 @@ export function AttendanceUploadWorkspace() {
               disabled={isProcessing}
             />
 
-            {uploadMutation.isPending ? (
+            {storageUploading ? (
               <><Loader2 className="h-8 w-8 text-primary animate-spin" />
-                <p className="text-sm text-muted-foreground">Submitting file…</p></>
+                <p className="text-sm text-muted-foreground">Uploading file… (direct to storage, bypasses server)</p></>
+            ) : uploadMutation.isPending ? (
+              <><Loader2 className="h-8 w-8 text-primary animate-spin" />
+                <p className="text-sm text-muted-foreground">Starting import job…</p></>
             ) : fileName ? (
               <>
                 <FileText className="h-8 w-8 text-primary" />
@@ -744,7 +778,16 @@ export function AttendanceUploadWorkspace() {
             </div>
           )}
 
-          {/* Progress bar — initial submit */}
+          {/* Progress bar — storage upload phase */}
+          {storageUploading && (
+            <div className="mt-3 space-y-1">
+              <p className="text-xs text-muted-foreground">Uploading file directly to Supabase Storage…</p>
+              <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
+                <div className="h-full w-2/3 rounded-full bg-primary animate-pulse" />
+              </div>
+            </div>
+          )}
+          {/* Progress bar — job creation phase */}
           {uploadMutation.isPending && (
             <div className="mt-3 h-1.5 w-full rounded-full bg-muted overflow-hidden">
               <div className="h-full w-1/3 rounded-full bg-primary animate-pulse" />
@@ -787,7 +830,7 @@ export function AttendanceUploadWorkspace() {
                 error={uploadMutation.error?.message ?? 'Upload failed.'}
                 severity="high"
                 remediationText="Check that your CSV is well-formed and all required columns are present, then retry."
-                onRetry={() => csvText && uploadMutation.mutate({ csv: csvText, filename: fileName ?? undefined })}
+                onRetry={() => { void handleSubmit() }}
                 retrying={uploadMutation.isPending}
               />
             </div>
