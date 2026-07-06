@@ -28,11 +28,12 @@ interface CostCenter   { id: string; name: string; code: string | null; is_activ
 
 // ── Step schemas ─────────────────────────────────────────────────────────────
 const step1Schema = z.object({
-  first_name:   z.string().min(1, 'Required'),
-  last_name:    z.string().min(1, 'Required'),
-  email:        z.string().email('Enter a valid email'),
-  phone:        z.string().optional(),
-  joining_date: z.string().min(1, 'Required'),
+  first_name:    z.string().min(1, 'Required'),
+  last_name:     z.string().min(1, 'Required'),
+  email:         z.string().email('Enter a valid email'),
+  phone:         z.string().optional(),
+  joining_date:  z.string().min(1, 'Required'),
+  employee_code: z.string().max(50).optional(),
 })
 
 const step2Schema = z.object({
@@ -86,6 +87,7 @@ export function AddEmployee() {
         email:           step1Data.email,
         phone:           step1Data.phone         || undefined,
         joining_date:    step1Data.joining_date,
+        employee_code:   step1Data.employee_code || undefined,
         employment_type: step2Data.employment_type,
         department_id:   step2Data.department_id   || undefined,
         designation_id:  step2Data.designation_id  || undefined,
@@ -227,6 +229,21 @@ export function AddEmployee() {
                     />
                   </FormField>
                 </FormRow>
+
+                <FormField
+                  label="Employee Code"
+                  htmlFor="employee_code"
+                  description="Leave blank to auto-generate. Provide your old system's code when migrating."
+                  error={form1.formState.errors.employee_code?.message}
+                >
+                  <Input
+                    id="employee_code"
+                    placeholder="e.g. EMP001 (auto-generated if blank)"
+                    {...form1.register('employee_code', {
+                      setValueAs: (v: string) => v ? v.trim().toUpperCase() : '',
+                    })}
+                  />
+                </FormField>
               </FormSection>
 
               <Button type="submit" className="w-full">
@@ -384,6 +401,13 @@ export function AddEmployee() {
               <p><span className="text-muted-foreground w-32 inline-block">Email</span>{step1Data.email}</p>
               {step1Data.phone && <p><span className="text-muted-foreground w-32 inline-block">Phone</span>{step1Data.phone}</p>}
               <p><span className="text-muted-foreground w-32 inline-block">Joining Date</span>{fmtDate(step1Data.joining_date)}</p>
+              <p>
+                <span className="text-muted-foreground w-32 inline-block">Employee Code</span>
+                {step1Data.employee_code
+                  ? <span className="font-mono">{step1Data.employee_code}</span>
+                  : <span className="italic text-muted-foreground text-xs">Auto-generated</span>
+                }
+              </p>
 
               {step2Data && (
                 <>

@@ -24,6 +24,9 @@ const fullCreateSchema = z.object({
   manager_id:       z.string().uuid().optional(),
   site_id:          z.string().uuid().optional(),
   roster_id:        z.string().uuid().optional(),
+  // Optional: provide an existing code when migrating from another system.
+  // Leave absent or null to auto-generate (e.g. SK0042).
+  employee_code: z.string().max(50).optional().nullable(),
 })
 
 type FullCreateBody = z.infer<typeof fullCreateSchema>
@@ -208,6 +211,7 @@ export default async function fullCreateRoute(fastify: FastifyInstance) {
         p_manager_id:       b.manager_id       ?? null,
         p_site_id:          b.site_id          ?? null,
         p_roster_id:        b.roster_id        ?? null,
+        p_employee_code:    (b.employee_code && b.employee_code.trim()) ? b.employee_code.trim().toUpperCase() : null,
       })
 
     if (rpcError) {
