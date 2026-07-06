@@ -42,7 +42,8 @@ import { cn }                     from '@/lib/utils'
 
 const REQUIRED_COLUMNS  = ['employee_code', 'datetime'] as const
 const OPTIONAL_COLUMNS  = ['source'] as const
-const DATETIME_RE = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2})?$/
+// Accept both YYYY-MM-DD and DD-MM-YYYY (biometric devices often export DD-MM-YYYY)
+const DATETIME_RE = /^(\d{4}-\d{2}-\d{2}|\d{2}-\d{2}-\d{4})[T ]\d{2}:\d{2}(:\d{2})?$/
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -148,18 +149,28 @@ function validateRow(fields: Record<string, string>): string[] {
   return w
 }
 
+function normaliseDatePart(raw: string): string {
+  // DD-MM-YYYY → YYYY-MM-DD so sort/group keys are consistent
+  return /^\d{2}-\d{2}-\d{4}$/.test(raw) ? raw.split('-').reverse().join('-') : raw
+}
+
 function assignPreviewDirections(rows: { employee_code: string; datetime: string }[]): ('IN' | 'OUT' | '')[] {
   const directions: ('IN' | 'OUT' | '')[] = new Array(rows.length).fill('')
   const groups = new Map<string, number[]>()
   rows.forEach((row, idx) => {
     if (!row.employee_code || !DATETIME_RE.test(row.datetime)) return
-    const date = row.datetime.split(/[T ]/)[0]
+    const date = normaliseDatePart(row.datetime.split(/[T ]/)[0])
     const key  = `${row.employee_code}::${date}`
     if (!groups.has(key)) groups.set(key, [])
     groups.get(key)!.push(idx)
   })
   for (const [, indices] of groups) {
-    const sorted = [...indices].sort((a, b) => rows[a].datetime.localeCompare(rows[b].datetime))
+    // Sort by normalised datetime so DD-MM-YYYY and YYYY-MM-DD both sort correctly
+    const sorted = [...indices].sort((a, b) => {
+      const normA = rows[a].datetime.replace(/^(\d{2})-(\d{2})-(\d{4})/, '$3-$2-$1')
+      const normB = rows[b].datetime.replace(/^(\d{2})-(\d{2})-(\d{4})/, '$3-$2-$1')
+      return normA.localeCompare(normB)
+    })
     sorted.forEach((origIdx, pos) => { directions[origIdx] = pos % 2 === 0 ? 'IN' : 'OUT' })
   }
   return directions
@@ -319,7 +330,7 @@ export function AttendanceUploadWorkspace() {
         const cols = parseCsvLine(line)
         const dt   = cols[dtColIdx]?.trim()
         const emp  = cols[empColIdx]?.trim()
-        if (dt && DATETIME_RE.test(dt)) allDates.push(dt.split(/[T ]/)[0])
+        if (dt && DATETIME_RE.test(dt)) allDates.push(normaliseDatePart(dt.split(/[T ]/)[0]))
         if (emp) allEmployees.add(emp)
       }
       if (allDates.length > 0) {
@@ -647,7 +658,7 @@ export function AttendanceUploadWorkspace() {
               <span className="ml-2 opacity-60">(optional: {OPTIONAL_COLUMNS.join(', ')})</span>
             </p>
             <p>
-              <strong>datetime</strong> — <span className="font-mono">YYYY-MM-DD HH:MM</span> or <span className="font-mono">YYYY-MM-DD HH:MM:SS</span> in <em>tenant local time</em> (not UTC)
+              <strong>datetime</strong> — <span className="font-mono">YYYY-MM-DD HH:MM</span> or <span className="font-mono">DD-MM-YYYY HH:MM</span> (biometric export format also accepted) in <em>tenant local time</em> (not UTC)
             </p>
             <p className="text-muted-foreground/80">
               One row = one punch event. System groups by employee + date, sorts by time, assigns <strong className="text-foreground">1st = IN, 2nd = OUT, 3rd = IN…</strong> automatically.

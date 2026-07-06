@@ -34,7 +34,8 @@ import { recomputeRange, localToUtc }  from '../../lib/attendance-engine.js'
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const REQUIRED_HEADERS  = ['employee_code', 'datetime'] as const
-const DATETIME_RE       = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2})?$/
+// Accept both YYYY-MM-DD and DD-MM-YYYY (biometric devices often export DD-MM-YYYY)
+const DATETIME_RE       = /^(\d{4}-\d{2}-\d{2}|\d{2}-\d{2}-\d{4})[T ]\d{2}:\d{2}(:\d{2})?$/
 const UPSERT_CHUNK      = 1_000   // Supabase/PostgREST row limit per single upsert call
 const UPSERT_CONCURRENCY = 10     // parallel upsert chunks in flight at once
 
@@ -68,13 +69,18 @@ function parseCsvLine(line: string): string[] {
 
 /**
  * Extract date (YYYY-MM-DD) and normalised time (HH:MM:SS) from a datetime string.
- * Accepts: "YYYY-MM-DD HH:MM", "YYYY-MM-DD HH:MM:SS", "YYYY-MM-DDTHH:MM[:SS]"
+ * Accepts YYYY-MM-DD and DD-MM-YYYY date parts, T or space separator, HH:MM or HH:MM:SS.
+ * DD-MM-YYYY is normalised to YYYY-MM-DD so the rest of the pipeline stays consistent.
  */
 function splitDatetime(dt: string): { date: string; time: string } {
   const sep = dt.indexOf('T') !== -1 ? 'T' : ' '
   const [datePart, timePart] = dt.split(sep)
   const time = timePart.length === 5 ? `${timePart}:00` : timePart.slice(0, 8)
-  return { date: datePart, time }
+  // Normalise DD-MM-YYYY → YYYY-MM-DD
+  const date = /^\d{2}-\d{2}-\d{4}$/.test(datePart)
+    ? datePart.split('-').reverse().join('-')
+    : datePart
+  return { date, time }
 }
 
 // ── Body schema ───────────────────────────────────────────────────────────────
