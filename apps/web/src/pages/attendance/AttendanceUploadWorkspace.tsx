@@ -40,10 +40,9 @@ import { cn }                     from '@/lib/utils'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-const REQUIRED_COLUMNS  = ['employee_code', 'date', 'in_time', 'out_time'] as const
+const REQUIRED_COLUMNS  = ['employee_code', 'datetime'] as const
 const OPTIONAL_COLUMNS  = ['source'] as const
-const DATE_RE  = /^\d{4}-\d{2}-\d{2}$/
-const TIME_RE  = /^\d{2}:\d{2}(:\d{2})?$/
+const DATETIME_RE = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2})?$/
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -65,10 +64,12 @@ interface DuplicateWarning {
 }
 
 interface UploadResult {
-  total_rows:        number
-  success_rows:      number
-  failed_rows:       FailedRow[]
-  duplicate_warning: DuplicateWarning | null
+  total_rows:           number
+  success_rows:         number
+  failed_rows:          FailedRow[]
+  duplicate_warning:    DuplicateWarning | null
+  recompute_targets?:   number
+  recompute_background?: boolean
 }
 
 interface UploadedDateRange {
@@ -141,13 +142,27 @@ function parseCsvLine(line: string): string[] {
 function validateRow(fields: Record<string, string>): string[] {
   const w: string[] = []
   if (!fields.employee_code) w.push('employee_code is empty')
-  if (!fields.date)          w.push('date is empty')
-  else if (!DATE_RE.test(fields.date)) w.push(`date "${fields.date}" not YYYY-MM-DD`)
-  if (!fields.in_time)  w.push('in_time is empty')
-  else if (!TIME_RE.test(fields.in_time)) w.push(`in_time "${fields.in_time}" not HH:MM`)
-  if (!fields.out_time) w.push('out_time is empty')
-  else if (!TIME_RE.test(fields.out_time)) w.push(`out_time "${fields.out_time}" not HH:MM`)
+  if (!fields.datetime)      w.push('datetime is empty')
+  else if (!DATETIME_RE.test(fields.datetime))
+    w.push(`datetime "${fields.datetime}" — expected YYYY-MM-DD HH:MM or YYYY-MM-DD HH:MM:SS`)
   return w
+}
+
+function assignPreviewDirections(rows: { employee_code: string; datetime: string }[]): ('IN' | 'OUT' | '')[] {
+  const directions: ('IN' | 'OUT' | '')[] = new Array(rows.length).fill('')
+  const groups = new Map<string, number[]>()
+  rows.forEach((row, idx) => {
+    if (!row.employee_code || !DATETIME_RE.test(row.datetime)) return
+    const date = row.datetime.split(/[T ]/)[0]
+    const key  = `${row.employee_code}::${date}`
+    if (!groups.has(key)) groups.set(key, [])
+    groups.get(key)!.push(idx)
+  })
+  for (const [, indices] of groups) {
+    const sorted = [...indices].sort((a, b) => rows[a].datetime.localeCompare(rows[b].datetime))
+    sorted.forEach((origIdx, pos) => { directions[origIdx] = pos % 2 === 0 ? 'IN' : 'OUT' })
+  }
+  return directions
 }
 
 function fmtDate(iso: string | null | undefined) {
@@ -295,17 +310,17 @@ export function AttendanceUploadWorkspace() {
     setTotalRows(dataLines.length)
 
     // ── Extract uploaded date range + unique employee count ───────────────────
-    const dateColIdx = headerCols.indexOf('date')
-    const empColIdx  = headerCols.indexOf('employee_code')
-    if (dateColIdx >= 0 && missing.length === 0) {
+    const dtColIdx  = headerCols.indexOf('datetime')
+    const empColIdx = headerCols.indexOf('employee_code')
+    if (dtColIdx >= 0 && missing.length === 0) {
       const allDates: string[] = []
       const allEmployees = new Set<string>()
       for (const line of dataLines) {
         const cols = parseCsvLine(line)
-        const d    = cols[dateColIdx]?.trim()
+        const dt   = cols[dtColIdx]?.trim()
         const emp  = cols[empColIdx]?.trim()
-        if (d && DATE_RE.test(d)) allDates.push(d)
-        if (emp)                  allEmployees.add(emp)
+        if (dt && DATETIME_RE.test(dt)) allDates.push(dt.split(/[T ]/)[0])
+        if (emp) allEmployees.add(emp)
       }
       if (allDates.length > 0) {
         allDates.sort()
@@ -321,13 +336,17 @@ export function AttendanceUploadWorkspace() {
       setUploadedDateRange(null)
     }
 
+    const allRowMaps: { employee_code: string; datetime: string }[] = []
     const preview: PreviewRow[] = []
     for (let i = 0; i < Math.min(20, dataLines.length); i++) {
       const fields = parseCsvLine(dataLines[i])
       const rowMap: Record<string, string> = {}
       headerCols.forEach((col, idx) => { rowMap[col] = fields[idx] ?? '' })
+      allRowMaps.push({ employee_code: rowMap.employee_code ?? '', datetime: rowMap.datetime ?? '' })
       preview.push({ line: i + 2, fields: rowMap, warnings: missing.length > 0 ? [] : validateRow(rowMap) })
     }
+    const dirs = assignPreviewDirections(allRowMaps)
+    dirs.forEach((dir, i) => { if (preview[i]) preview[i].fields.__direction = dir })
     setPreviewRows(preview)
   }, [])
 
@@ -614,7 +633,7 @@ export function AttendanceUploadWorkspace() {
                   <p className="text-sm font-medium text-foreground">
                     Drag &amp; drop or click to browse
                   </p>
-                  <p className="text-xs text-muted-foreground mt-0.5">CSV or XLSX · max 2,000 rows</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">CSV or XLSX · one row per punch event</p>
                 </div>
               </>
             )}
@@ -628,8 +647,10 @@ export function AttendanceUploadWorkspace() {
               <span className="ml-2 opacity-60">(optional: {OPTIONAL_COLUMNS.join(', ')})</span>
             </p>
             <p>
-              <strong>date</strong> — YYYY-MM-DD &nbsp;|&nbsp;
-              <strong>in_time / out_time</strong> — HH:MM in <em>tenant local time</em> (not UTC)
+              <strong>datetime</strong> — <span className="font-mono">YYYY-MM-DD HH:MM</span> or <span className="font-mono">YYYY-MM-DD HH:MM:SS</span> in <em>tenant local time</em> (not UTC)
+            </p>
+            <p className="text-muted-foreground/80">
+              One row = one punch event. System groups by employee + date, sorts by time, assigns <strong className="text-foreground">1st = IN, 2nd = OUT, 3rd = IN…</strong> automatically.
             </p>
           </div>
 
@@ -725,6 +746,7 @@ export function AttendanceUploadWorkspace() {
                         )}
                       </th>
                     ))}
+                    <th className="px-3 py-2 text-left text-primary font-semibold">Direction</th>
                     <th className="px-3 py-2 text-left text-muted-foreground font-semibold">Status</th>
                   </tr>
                 </thead>
@@ -747,6 +769,17 @@ export function AttendanceUploadWorkspace() {
                             {row.fields[col] || <span className="text-destructive/60 italic">empty</span>}
                           </td>
                         ))}
+                        <td className="px-3 py-2">
+                          {row.fields.__direction === 'IN' && (
+                            <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-semibold bg-success/15 text-success">IN</span>
+                          )}
+                          {row.fields.__direction === 'OUT' && (
+                            <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-semibold bg-primary/15 text-primary">OUT</span>
+                          )}
+                          {!row.fields.__direction && (
+                            <span className="text-muted-foreground/50 text-[10px]">—</span>
+                          )}
+                        </td>
                         <td className="px-3 py-2">
                           {bad ? (
                             <div className="flex flex-col gap-0.5">
