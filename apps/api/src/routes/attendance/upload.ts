@@ -95,6 +95,7 @@ export default async function attendanceUploadRoute(fastify: FastifyInstance) {
   const adminAuth = { preHandler: [fastify.authenticate, requireRole(...HR_ADMIN_ROLES)] }
 
   fastify.post('/attendance/upload', adminAuth, async (req: any, reply) => {
+    try {
     const parsed = UploadBodySchema.safeParse(req.body)
     if (!parsed.success) {
       return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message ?? 'Invalid request body' })
@@ -337,6 +338,15 @@ export default async function attendanceUploadRoute(fastify: FastifyInstance) {
       const firstErr = results.find((r) => r.error)?.error
       if (firstErr) {
         req.log.error({ err: firstErr, chunk_offset: i, chunks: batch.length }, 'attendance upload: punch upsert failed')
+        // Period-lock trigger raises check_violation (23514) with message prefix PERIOD_FINALIZED
+        if (firstErr.code === '23514' || (firstErr.message ?? '').includes('PERIOD_FINALIZED')) {
+          const monthMatch = (firstErr.message ?? '').match(/PERIOD_FINALIZED:\s*attendance for (\S+)/)
+          const month = monthMatch?.[1] ?? 'this period'
+          return reply.code(409).send({
+            error:   'PERIOD_FINALIZED',
+            message: `Attendance for ${month} is sealed — payroll has been finalized. Reverse the payroll finalization before uploading punches for that period.`,
+          })
+        }
         return reply.code(500).send({ error: 'INSERT_FAILED', message: 'Failed to insert punch records' })
       }
     }
@@ -416,6 +426,10 @@ export default async function attendanceUploadRoute(fastify: FastifyInstance) {
       recompute_targets:    recomputeSet.size,
       recompute_background: true,
     })
+    } catch (err: any) {
+      req.log.error({ err }, 'attendance upload: unhandled exception')
+      return reply.code(500).send({ error: 'UPLOAD_ERROR', message: 'Upload failed due to an unexpected error. Please try again.' })
+    }
   })
 
   // ── GET /attendance/upload-sessions ────────────────────────────────────────
