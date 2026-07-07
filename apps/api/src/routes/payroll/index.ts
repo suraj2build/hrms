@@ -3124,6 +3124,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
   // Composite readiness score (0-100) for the current payroll month.
   // Aggregates: coverage, blockers, validations, attendance, statutory configs.
   fastify.get('/payroll/readiness-score', hrAdminAuth, async (req: any, reply) => {
+    try {
     const tenantId = req.tenantId as string
 
     // Latest run
@@ -3205,6 +3206,10 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
         run: latestRun ? { id: latestRun.id, status: latestRun.status, month: latestRun.month } : null,
       },
     })
+    } catch (err: any) {
+      req.log.error({ err, tenant_id: req.tenantId }, 'payroll readiness-score failed')
+      return reply.code(500).send({ error: 'READINESS_SCORE_FAILED', message: err?.message ?? 'Failed to compute readiness score' })
+    }
   })
 
   // ── GET /payroll/freeze-log ───────────────────────────────────────────────────
