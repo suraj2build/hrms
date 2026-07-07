@@ -106,7 +106,7 @@ export function createImportJobHandler(fastify: FastifyInstance): JobHandlerFn {
     log.info({ jobId, module: moduleName }, '[import-worker] dispatching to module handler')
 
     try {
-      await handler.handle(job, supabase, log)
+      await handler.handle(job, supabase, log as any)
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       log.error({ jobId, module: moduleName, err: msg }, '[import-worker] module handler threw')
