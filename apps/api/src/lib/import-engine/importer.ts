@@ -1196,11 +1196,18 @@ async function writeRowResults(
     row_data:      vr.originalData,
   }))
 
-  // Batch write row results silently (non-critical)
+  // Build batches, then write them in parallel groups of 4
+  const ROW_WRITE_CONCURRENCY = 4
+  const batches: (typeof payload)[] = []
   for (let i = 0; i < payload.length; i += BATCH_SIZE) {
-    await supabase
-      .from('import_job_rows')
-      .insert(payload.slice(i, i + BATCH_SIZE))
+    batches.push(payload.slice(i, i + BATCH_SIZE))
+  }
+  for (let i = 0; i < batches.length; i += ROW_WRITE_CONCURRENCY) {
+    await Promise.all(
+      batches.slice(i, i + ROW_WRITE_CONCURRENCY).map((b) =>
+        supabase.from('import_job_rows').insert(b),
+      ),
+    )
   }
 }
 
