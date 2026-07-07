@@ -246,7 +246,7 @@ export async function resetJobForRetry(
 
     await updateJobProgress(supabase, job.id, {
       status:         'queued',
-      current_stage:  null,
+      current_stage:  undefined,
       parsed_rows:    0,
       validated_rows: 0,
       processed_rows: 0,
@@ -274,7 +274,7 @@ export async function resetJobForRetry(
 
     await updateJobProgress(supabase, job.id, {
       status:        'queued',
-      current_stage: null,
+      current_stage: undefined,
       error_summary: undefined,
     })
   }
