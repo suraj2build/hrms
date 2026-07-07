@@ -313,7 +313,7 @@ async function processUploadJob(fastify: FastifyInstance, params: ProcessJobPara
 
     let insertedSoFar  = 0
     let lastProgressAt = 0
-    const PROGRESS_INTERVAL = 50_000
+    const PROGRESS_INTERVAL = 5_000
 
     for (let i = 0; i < chunks.length; i += UPSERT_CONCURRENCY) {
       const batch = chunks.slice(i, i + UPSERT_CONCURRENCY)
@@ -471,6 +471,23 @@ export default async function attendanceUploadRoute(fastify: FastifyInstance) {
     if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
     if (!data)  return reply.code(404).send({ error: 'NOT_FOUND', message: 'Upload job not found' })
     return reply.send(data)
+  })
+
+  // ── GET /attendance/upload/active-job ───────────────────────────────────────
+  // Returns the most recent non-terminal job for this tenant so the browser
+  // can restore the progress bar after a page navigation.
+  fastify.get('/attendance/upload/active-job', adminAuth, async (req: any, reply) => {
+    const { data, error } = await fastify.supabase
+      .from('attendance_upload_jobs')
+      .select('id, status, total_rows, processed_rows, success_rows, failed_rows, skipped_rows, row_errors, error, created_at, started_at, completed_at, filename')
+      .eq('tenant_id', req.tenantId)
+      .in('status', ['queued', 'processing'])
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+
+    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    return reply.send(data ?? null)
   })
 
   // ── GET /attendance/upload-sessions ─────────────────────────────────────────
