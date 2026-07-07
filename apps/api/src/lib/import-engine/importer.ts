@@ -469,13 +469,18 @@ const TABLE_MAP: Record<string, TableConfig> = {
 
 // ── Custom import handlers (complex multi-table or ordered writes) ────────────
 
+type ProgressCallback = (counts: { created: number; updated: number; failed: number; skipped: number }) => Promise<void>
+
 type CustomImportHandler = (
   supabase: SupabaseClient,
   tenantId: string,
   createdBy: string,
   validRows: ValidatedRow[],
   mode: ImportMode,
+  onProgress?: ProgressCallback,
 ) => Promise<{ created: number; updated: number; failed: number; skipped: number }>
+
+const IMPORT_CONCURRENCY = 8
 
 /**
  * Employee Compensation Import
@@ -748,94 +753,102 @@ async function importEmployees(
   createdBy: string,
   validRows: ValidatedRow[],
   mode: ImportMode,
+  onProgress?: ProgressCallback,
 ): Promise<{ created: number; updated: number; failed: number; skipped: number }> {
   let created = 0
   let updated = 0
   let failed  = 0
   let skipped = 0
 
-  for (const vr of validRows) {
-    const norm = vr.normalizedData
+  for (let i = 0; i < validRows.length; i += IMPORT_CONCURRENCY) {
+    const batch = validRows.slice(i, i + IMPORT_CONCURRENCY)
 
-    try {
-      if (vr.isDuplicate) {
-        if (mode === 'create_only') { skipped++; continue }
+    await Promise.all(batch.map(async (vr) => {
+      const norm = vr.normalizedData
 
-        const employeeId = norm.employee_id as string
+      try {
+        if (vr.isDuplicate) {
+          if (mode === 'create_only') { skipped++; return }
 
-        // Update lean employee table (identity + status only)
-        const updateFields: Record<string, unknown> = {
-          first_name:   norm.first_name,
-          last_name:    norm.last_name,
-          phone:        (norm.phone   as string | undefined) ?? null,
-          joining_date: norm.joining_date,
-          status:       (norm.status  as string | undefined) ?? 'active',
+          const employeeId = norm.employee_id as string
+
+          // Update lean employee table (identity + status only)
+          const updateFields: Record<string, unknown> = {
+            first_name:   norm.first_name,
+            last_name:    norm.last_name,
+            phone:        (norm.phone   as string | undefined) ?? null,
+            joining_date: norm.joining_date,
+            status:       (norm.status  as string | undefined) ?? 'active',
+          }
+          if (norm.employee_code_changed) {
+            updateFields.employee_code = (norm.employee_code as string).trim().toUpperCase()
+          }
+          const { error: empErr } = await supabase
+            .from('employees')
+            .update(updateFields)
+            .eq('tenant_id', tenantId)
+            .eq('id', employeeId)
+
+          if (empErr) throw new Error(empErr.message)
+
+          // Update the current job_history row (employment_type + org refs)
+          const { error: jhErr } = await supabase
+            .from('job_history')
+            .update({
+              employment_type:  (norm.employment_type  as string | undefined) ?? 'permanent',
+              department_id:    (norm.department_id    as string | undefined) ?? null,
+              designation_id:   (norm.designation_id   as string | undefined) ?? null,
+              grade_id:         (norm.grade_id         as string | undefined) ?? null,
+              work_location_id: (norm.work_location_id as string | undefined) ?? null,
+              manager_id:       (norm.manager_id       as string | undefined) ?? null,
+            })
+            .eq('tenant_id', tenantId)
+            .eq('employee_id', employeeId)
+            .eq('is_current', true)
+
+          if (jhErr) throw new Error(jhErr.message)
+          updated++
+          return
         }
-        if (norm.employee_code_changed) {
-          updateFields.employee_code = (norm.employee_code as string).trim().toUpperCase()
-        }
-        const { error: empErr } = await supabase
-          .from('employees')
-          .update(updateFields)
-          .eq('tenant_id', tenantId)
-          .eq('id', employeeId)
 
-        if (empErr) throw new Error(empErr.message)
+        if (mode === 'update_only') { skipped++; return }
 
-        // Update the current job_history row (employment_type + org refs)
-        const { error: jhErr } = await supabase
-          .from('job_history')
-          .update({
-            employment_type:  (norm.employment_type  as string | undefined) ?? 'permanent',
-            department_id:    (norm.department_id    as string | undefined) ?? null,
-            designation_id:   (norm.designation_id   as string | undefined) ?? null,
-            grade_id:         (norm.grade_id         as string | undefined) ?? null,
-            work_location_id: (norm.work_location_id as string | undefined) ?? null,
-            manager_id:       (norm.manager_id       as string | undefined) ?? null,
-          })
-          .eq('tenant_id', tenantId)
-          .eq('employee_id', employeeId)
-          .eq('is_current', true)
+        // New employee — use create_employee_with_job RPC (employees + job_history atomically)
+        const providedCode = (norm.employee_code as string | undefined | null)
+        const employeeCode = (providedCode && providedCode.trim()) ? providedCode.trim() : null
 
-        if (jhErr) throw new Error(jhErr.message)
-        updated++
-        continue
+        const { data, error } = await supabase.rpc('create_employee_with_job', {
+          p_tenant_id:        tenantId,
+          p_created_by:       createdBy,
+          p_first_name:       norm.first_name       as string,
+          p_last_name:        norm.last_name         as string,
+          p_email:            norm.email             as string,
+          p_joining_date:     norm.joining_date      as string,
+          p_employment_type:  (norm.employment_type  as string | undefined) ?? 'permanent',
+          p_phone:            (norm.phone            as string | undefined) ?? null,
+          p_department_id:    (norm.department_id    as string | undefined) ?? null,
+          p_designation_id:   (norm.designation_id   as string | undefined) ?? null,
+          p_grade_id:         (norm.grade_id         as string | undefined) ?? null,
+          p_work_location_id: (norm.work_location_id as string | undefined) ?? null,
+          p_manager_id:       (norm.manager_id       as string | undefined) ?? null,
+          p_employee_code:    employeeCode,
+        })
+
+        if (error || !data) throw new Error(error?.message ?? 'create_employee_with_job failed')
+        created++
+      } catch (err) {
+        vr.errors.push({
+          field: '_db',
+          message: err instanceof Error ? err.message : String(err),
+          severity: 'error',
+        })
+        vr.isValid = false
+        failed++
       }
+    }))
 
-      if (mode === 'update_only') { skipped++; continue }
-
-      // New employee — use create_employee_with_job RPC (employees + job_history atomically)
-      const providedCode = (norm.employee_code as string | undefined | null)
-      const employeeCode = (providedCode && providedCode.trim()) ? providedCode.trim() : null
-
-      const { data, error } = await supabase.rpc('create_employee_with_job', {
-        p_tenant_id:        tenantId,
-        p_created_by:       createdBy,
-        p_first_name:       norm.first_name       as string,
-        p_last_name:        norm.last_name         as string,
-        p_email:            norm.email             as string,
-        p_joining_date:     norm.joining_date      as string,
-        p_employment_type:  (norm.employment_type  as string | undefined) ?? 'permanent',
-        p_phone:            (norm.phone            as string | undefined) ?? null,
-        p_department_id:    (norm.department_id    as string | undefined) ?? null,
-        p_designation_id:   (norm.designation_id   as string | undefined) ?? null,
-        p_grade_id:         (norm.grade_id         as string | undefined) ?? null,
-        p_work_location_id: (norm.work_location_id as string | undefined) ?? null,
-        p_manager_id:       (norm.manager_id       as string | undefined) ?? null,
-        p_employee_code:    employeeCode,
-      })
-
-      if (error || !data) throw new Error(error?.message ?? 'create_employee_with_job failed')
-      created++
-    } catch (err) {
-      vr.errors.push({
-        field: '_db',
-        message: err instanceof Error ? err.message : String(err),
-        severity: 'error',
-      })
-      vr.isValid = false
-      failed++
-    }
+    // Report progress after each concurrent batch (non-blocking)
+    if (onProgress) await onProgress({ created, updated, failed, skipped }).catch(() => {})
   }
 
   return { created, updated, failed, skipped }
@@ -1317,7 +1330,18 @@ export async function runImport(
         }
       }
 
-      const result = await customHandler(supabase, tenantId, createdBy, eligibleRows, mode)
+      const onProgress: ProgressCallback = async (counts) => {
+        await supabase
+          .from('import_jobs')
+          .update({
+            created_rows: counts.created,
+            updated_rows: counts.updated,
+            failed_rows:  counts.failed + validation.invalidRows,
+          })
+          .eq('id', jobId)
+      }
+
+      const result = await customHandler(supabase, tenantId, createdBy, eligibleRows, mode, onProgress)
       totalCreated += result.created
       totalUpdated += result.updated
       totalFailed  += result.failed
