@@ -828,9 +828,19 @@ export function AttendanceUploadWorkspace() {
                   <Loader2 className="h-3.5 w-3.5 animate-spin" />
                   {jobData.status === 'queued' ? 'Queued — processing will start shortly…' : 'Processing in background…'}
                 </span>
-                <span className="tabular-nums font-mono">
-                  {jobData.processed_rows.toLocaleString()} / {jobData.total_rows.toLocaleString()} rows
-                </span>
+                <div className="flex items-center gap-3">
+                  <span className="tabular-nums font-mono">
+                    {jobData.processed_rows.toLocaleString()} / {jobData.total_rows.toLocaleString()} rows
+                  </span>
+                  <button
+                    type="button"
+                    className="text-[10px] underline underline-offset-2 opacity-60 hover:opacity-100"
+                    onClick={() => setActiveJobId(null)}
+                    title="Dismiss this job tracker (upload continues in background)"
+                  >
+                    Dismiss
+                  </button>
+                </div>
               </div>
               <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
                 <div
@@ -844,8 +854,19 @@ export function AttendanceUploadWorkspace() {
             </div>
           )}
           {isJobActive && !jobData && (
-            <div className="mt-3 h-1.5 w-full rounded-full bg-muted overflow-hidden">
-              <div className="h-full w-1/4 rounded-full bg-primary animate-pulse" />
+            <div className="mt-3 space-y-1">
+              <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
+                <div className="h-full w-1/4 rounded-full bg-primary animate-pulse" />
+              </div>
+              <div className="flex justify-end">
+                <button
+                  type="button"
+                  className="text-[10px] underline underline-offset-2 opacity-60 hover:opacity-100"
+                  onClick={() => setActiveJobId(null)}
+                >
+                  Dismiss
+                </button>
+              </div>
             </div>
           )}
 
