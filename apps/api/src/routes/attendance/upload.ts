@@ -476,12 +476,29 @@ export default async function attendanceUploadRoute(fastify: FastifyInstance) {
   // ── GET /attendance/upload/active-job ───────────────────────────────────────
   // Returns the most recent non-terminal job for this tenant so the browser
   // can restore the progress bar after a page navigation.
+  // Only returns jobs created within the last 2 hours — older queued/processing
+  // jobs are orphaned (server restarted mid-job) and must not block new uploads.
+  // As a side-effect, marks any orphaned jobs (> 2 h old, still queued/processing)
+  // as failed so they stop blocking future uploads.
   fastify.get('/attendance/upload/active-job', adminAuth, async (req: any, reply) => {
+    const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString()
+
+    // Clean up orphaned jobs older than 2 hours (fire-and-forget)
+    fastify.supabase
+      .from('attendance_upload_jobs')
+      .update({ status: 'failed', error: 'Server restarted while this job was processing. Please re-upload.', completed_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+      .eq('tenant_id', req.tenantId)
+      .in('status', ['queued', 'processing'])
+      .lt('created_at', twoHoursAgo)
+      .then(() => {})
+      .catch(() => {})
+
     const { data, error } = await fastify.supabase
       .from('attendance_upload_jobs')
       .select('id, status, total_rows, processed_rows, success_rows, failed_rows, skipped_rows, row_errors, error, created_at, started_at, completed_at, filename')
       .eq('tenant_id', req.tenantId)
       .in('status', ['queued', 'processing'])
+      .gte('created_at', twoHoursAgo)
       .order('created_at', { ascending: false })
       .limit(1)
       .maybeSingle()
