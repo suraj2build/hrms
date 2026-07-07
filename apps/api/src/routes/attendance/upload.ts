@@ -347,33 +347,9 @@ async function processUploadJob(fastify: FastifyInstance, params: ProcessJobPara
     const failedCount  = rowErrors.length
     const skippedCount = skippedDupeCount
 
-    log.info({ punch_rows: successRows, recompute_targets: recomputeSet.size }, 'upload job: upserts done — recomputing')
+    log.info({ punch_rows: successRows, recompute_targets: recomputeSet.size }, 'upload job: upserts done')
 
-    // Mark all rows processed so the UI switches to "Recomputing..." phase
-    await updateJob({ processed_rows: totalRows })
-
-    // ── 10. Recompute attendance_daily ─────────────────────────────────────────
-    // Touch updated_at every 50 batches so the stale-job check (5-min window)
-    // does not mistakenly mark this long-running recompute as orphaned.
-    const recomputeTargets = [...recomputeSet.values()]
-    const RECOMPUTE_CONCURRENCY = 8
-    const RECOMPUTE_KEEPALIVE_EVERY = 50
-    for (let i = 0; i < recomputeTargets.length; i += RECOMPUTE_CONCURRENCY) {
-      const batch = recomputeTargets.slice(i, i + RECOMPUTE_CONCURRENCY)
-      await Promise.all(batch.map(async ({ employee_id, date }) => {
-        try {
-          await recomputeRange(fastify.supabase, { tenant_id: tenantId, employee_id, from_date: date, to_date: date, changed_by: userId })
-        } catch (err: any) {
-          log.warn({ err, employee_id, date }, 'upload job: recompute failed for one target')
-        }
-      }))
-      const batchIndex = Math.floor(i / RECOMPUTE_CONCURRENCY)
-      if (batchIndex % RECOMPUTE_KEEPALIVE_EVERY === 0) {
-        await updateJob({})  // keep updated_at fresh
-      }
-    }
-
-    // ── 11. Write upload_sessions audit row ────────────────────────────────────
+    // ── 10. Write upload_sessions audit row ───────────────────────────────────
     try {
       await fastify.supabase.from('upload_sessions').insert({
         tenant_id: tenantId, upload_type: 'attendance_csv', status: 'completed',
@@ -387,13 +363,33 @@ async function processUploadJob(fastify: FastifyInstance, params: ProcessJobPara
       log.warn({ err }, 'upload job: upload_sessions audit failed — non-critical')
     }
 
-    // ── 12. Mark job completed ─────────────────────────────────────────────────
+    // ── 11. Mark job completed — BEFORE recompute so the UI unblocks immediately
     await updateJob({ status: 'completed', processed_rows: totalRows, success_rows: successRows, failed_rows: failedCount, skipped_rows: skippedCount, row_errors: rowErrors, completed_at: new Date().toISOString() })
 
-    log.info({ success_rows: successRows, failed_rows: failedCount, recompute_targets: recomputeTargets.length }, 'upload job: completed')
+    log.info({ success_rows: successRows, failed_rows: failedCount, recompute_targets: recomputeSet.size }, 'upload job: completed — recompute starting in background')
 
-    // ── 13. Delete temp file from storage (fire-and-forget) ───────────────────
+    // ── 12. Delete temp file from storage (fire-and-forget) ──────────────────
     fastify.supabase.storage.from(STORAGE_BUCKET).remove([storagePath]).catch(() => { /* best effort */ })
+
+    // ── 13. Recompute attendance_daily (fully background — does NOT block job completion)
+    // Run in setImmediate so this function returns immediately after marking completed.
+    // For large uploads (500k+ rows) the recompute can take many minutes; blocking
+    // the job on it causes the progress bar to appear frozen indefinitely.
+    const recomputeTargets = [...recomputeSet.values()]
+    setImmediate(async () => {
+      const RECOMPUTE_CONCURRENCY = 16
+      for (let i = 0; i < recomputeTargets.length; i += RECOMPUTE_CONCURRENCY) {
+        const batch = recomputeTargets.slice(i, i + RECOMPUTE_CONCURRENCY)
+        await Promise.all(batch.map(async ({ employee_id, date }) => {
+          try {
+            await recomputeRange(fastify.supabase, { tenant_id: tenantId, employee_id, from_date: date, to_date: date, changed_by: userId })
+          } catch (err: any) {
+            log.warn({ err, employee_id, date }, 'upload job: background recompute failed for one target')
+          }
+        }))
+      }
+      log.info({ recompute_targets: recomputeTargets.length }, 'upload job: background recompute done')
+    })
 
   } catch (err: any) {
     log.error({ err }, 'upload job: unhandled exception')
