@@ -331,13 +331,13 @@ export default async function employeeRoutes(fastify: FastifyInstance) {
       return reply.code(400).send({ error: 'VALIDATION', message: parsed.error.errors[0]?.message })
     }
 
-    // Generate employee code
-    const { count } = await fastify.supabase
-      .from('employees')
-      .select('id', { count: 'exact', head: true })
-      .eq('tenant_id', request.tenantId)
-
-    const code = `EMP-${String((count ?? 0) + 1).padStart(4, '0')}`
+    // Generate employee code via the tenant sequence (idempotent, race-safe)
+    const { data: generatedCode, error: codeErr } = await fastify.supabase
+      .rpc('generate_employee_code', { p_tenant_id: request.tenantId })
+    if (codeErr || !generatedCode) {
+      return reply.code(500).send({ error: 'CODE_GEN_ERROR', message: `Failed to generate employee code: ${codeErr?.message ?? 'unknown'}` })
+    }
+    const code = generatedCode as string
 
     const { data, error } = await fastify.supabase
       .from('employees')

@@ -427,13 +427,13 @@ export default async function draftRoutes(fastify: FastifyInstance) {
       })
     }
 
-    // Generate employee_code
-    const { count: empCount } = await fastify.supabase
-      .from('employees')
-      .select('id', { count: 'exact', head: true })
-      .eq('tenant_id', req.tenantId)
-
-    const employeeCode = `EMP${String((empCount ?? 0) + 1).padStart(4, '0')}`
+    // Generate employee_code via the tenant sequence (idempotent, race-safe)
+    const { data: generatedCode, error: codeErr } = await fastify.supabase
+      .rpc('generate_employee_code', { p_tenant_id: req.tenantId })
+    if (codeErr || !generatedCode) {
+      return reply.code(500).send({ error: 'CODE_GEN_ERROR', message: `Failed to generate employee code: ${codeErr?.message ?? 'unknown'}` })
+    }
+    const employeeCode = generatedCode as string
 
     // Build first_name / last_name from draft
     let firstName = draft.first_name ?? ''
