@@ -136,56 +136,58 @@ export async function buildCompensationCoverageAudit(
     }
   }
 
-  // ── 2. Fetch active compensations for all employees (one query) ───────────
+  // ── 2. Fetch active compensations for all employees (batched to avoid URL limit) ──
   const empIds = empList.map(e => e.id)
+  const CHUNK = 400
 
-  const { data: compensations, error: compErr } = await supabase
-    .from('employee_compensations')
-    .select('id, employee_id, ctc_annual, ctc_monthly, effective_from')
-    .eq('tenant_id', tenantId)
-    .eq('is_active', true)
-    .in('employee_id', empIds)
+  const compList: RawCompensation[] = []
+  for (let i = 0; i < empIds.length; i += CHUNK) {
+    const { data, error: compErr } = await supabase
+      .from('employee_compensations')
+      .select('id, employee_id, ctc_annual, ctc_monthly, effective_from')
+      .eq('tenant_id', tenantId)
+      .eq('is_active', true)
+      .in('employee_id', empIds.slice(i, i + CHUNK))
 
-  if (compErr) {
-    throw new Error(`Coverage audit: failed to fetch compensations — ${compErr.message}`)
+    if (compErr) {
+      throw new Error(`Coverage audit: failed to fetch compensations — ${compErr.message}`)
+    }
+    compList.push(...((data ?? []) as RawCompensation[]))
   }
 
-  const compList   = (compensations ?? []) as RawCompensation[]
-  const compByEmp  = new Map<string, RawCompensation>(compList.map(c => [c.employee_id, c]))
+  const compByEmp = new Map<string, RawCompensation>(compList.map(c => [c.employee_id, c]))
 
-  // ── 3. Fetch component stats for all found compensations ──────────────────
+  // ── 3. Fetch component stats for all found compensations (batched) ────────
   const componentCountByComp = new Map<string, number>()   // compensation_id → # rows
   const earningTotalByComp   = new Map<string, number>()   // compensation_id → sum computed_monthly of earnings
   const hasNaNByComp         = new Set<string>()           // compensation_ids with NaN/Infinity components
 
   if (compList.length > 0) {
     const compIds = compList.map(c => c.id)
-    const { data: components, error: ccErr } = await supabase
-      .from('employee_compensation_components')
-      .select('compensation_id, computed_monthly, salary_components(component_type)')
-      .in('compensation_id', compIds)
+    for (let i = 0; i < compIds.length; i += CHUNK) {
+      const { data: components, error: ccErr } = await supabase
+        .from('employee_compensation_components')
+        .select('compensation_id, computed_monthly, salary_components(component_type)')
+        .in('compensation_id', compIds.slice(i, i + CHUNK))
 
-    if (!ccErr && components) {
+      if (ccErr || !components) continue  // non-fatal — treated as no data
+
       for (const cc of components as any[]) {
         const cid = cc.compensation_id as string
-        // Count
         componentCountByComp.set(cid, (componentCountByComp.get(cid) ?? 0) + 1)
 
         const amt  = Number(cc.computed_monthly)
         const type = cc.salary_components?.component_type ?? ''
 
-        // NaN / Infinity guard
         if (!Number.isFinite(amt) || Number.isNaN(amt)) {
           hasNaNByComp.add(cid)
           continue
         }
-
         if (type === 'earning') {
           earningTotalByComp.set(cid, (earningTotalByComp.get(cid) ?? 0) + amt)
         }
       }
     }
-    // Component query error is non-fatal — we'll treat as "no data" and flag
   }
 
   // ── 4. Analyse each employee ──────────────────────────────────────────────
