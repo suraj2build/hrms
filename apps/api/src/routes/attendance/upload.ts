@@ -158,6 +158,7 @@ async function processUploadJob(fastify: FastifyInstance, params: ProcessJobPara
     const parsedPunches: ParsedPunch[]                                    = []
     const rowErrors: Array<{ line: number; row: string; error: string }>  = []
     const seen = new Set<string>()
+    let skippedDupeCount = 0
 
     for (let i = 0; i < dataLines.length; i++) {
       const lineNumber = i + 2
@@ -184,7 +185,7 @@ async function processUploadJob(fastify: FastifyInstance, params: ProcessJobPara
 
       const dupKey = `${employee_code}::${datetime}`
       if (seen.has(dupKey)) {
-        if (rowErrors.length < ROW_ERRORS_CAP) rowErrors.push({ line: lineNumber, row: rawLine, error: 'Duplicate row (same employee_code + datetime already appears earlier in the CSV)' })
+        skippedDupeCount++
         continue
       }
       seen.add(dupKey)
@@ -287,7 +288,21 @@ async function processUploadJob(fastify: FastifyInstance, params: ProcessJobPara
     }
 
     if (punchRows.length === 0) {
-      await updateJob({ status: 'completed', processed_rows: totalRows, success_rows: 0, failed_rows: rowErrors.length, skipped_rows: 0, row_errors: rowErrors, completed_at: new Date().toISOString() })
+      // If parsedPunches had valid rows but none resolved, the error cap may have been
+      // exhausted by earlier validation errors — force a diagnostic so the root cause is visible.
+      if (parsedPunches.length > 0) {
+        const unmatchedCodes = [...new Set(
+          parsedPunches.filter(p => !codeToId.has(p.employee_code)).map(p => p.employee_code)
+        )].slice(0, 5)
+        if (unmatchedCodes.length > 0) {
+          const diagErr =
+            `All ${parsedPunches.length.toLocaleString()} valid row(s) failed — employee codes not found in this organisation. ` +
+            `First unmatched code(s): ${unmatchedCodes.map(c => `"${c}"`).join(', ')}. ` +
+            `Verify codes match exactly in Settings → Employees.`
+          rowErrors.push({ line: 0, row: '', error: diagErr })
+        }
+      }
+      await updateJob({ status: 'completed', processed_rows: totalRows, success_rows: 0, failed_rows: rowErrors.length, skipped_rows: skippedDupeCount, row_errors: rowErrors, completed_at: new Date().toISOString() })
       return
     }
 
@@ -330,7 +345,7 @@ async function processUploadJob(fastify: FastifyInstance, params: ProcessJobPara
 
     const successRows  = punchRows.length
     const failedCount  = rowErrors.length
-    const skippedCount = Math.max(0, totalRows - successRows - failedCount)
+    const skippedCount = skippedDupeCount
 
     log.info({ punch_rows: successRows, recompute_targets: recomputeSet.size }, 'upload job: upserts done — recomputing')
 
