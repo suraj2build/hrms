@@ -495,14 +495,12 @@ export default async function attendanceUploadRoute(fastify: FastifyInstance) {
     const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString()
 
     // Mark stale jobs as failed (fire-and-forget)
-    fastify.supabase
+    void fastify.supabase
       .from('attendance_upload_jobs')
       .update({ status: 'failed', error: 'Processing stalled (server may have restarted). Please re-upload.', completed_at: new Date().toISOString(), updated_at: new Date().toISOString() })
       .eq('tenant_id', req.tenantId)
       .in('status', ['queued', 'processing'])
       .lt('updated_at', tenMinutesAgo)
-      .then(() => {})
-      .catch(() => {})
 
     // Return the job only if it's still actively updating
     const { data, error } = await fastify.supabase
