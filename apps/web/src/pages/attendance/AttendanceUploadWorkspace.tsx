@@ -826,7 +826,11 @@ export function AttendanceUploadWorkspace() {
               <div className="flex items-center justify-between text-xs text-muted-foreground">
                 <span className="flex items-center gap-1.5">
                   <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  {jobData.status === 'queued' ? 'Queued — processing will start shortly…' : 'Processing in background…'}
+                  {jobData.status === 'queued'
+                    ? 'Queued — processing will start shortly…'
+                    : jobData.processed_rows >= jobData.total_rows && jobData.total_rows > 0
+                      ? 'Recomputing attendance records… this may take a few minutes'
+                      : 'Processing in background…'}
                 </span>
                 <div className="flex items-center gap-3">
                   <span className="tabular-nums font-mono">

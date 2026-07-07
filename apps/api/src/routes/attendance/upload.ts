@@ -349,9 +349,15 @@ async function processUploadJob(fastify: FastifyInstance, params: ProcessJobPara
 
     log.info({ punch_rows: successRows, recompute_targets: recomputeSet.size }, 'upload job: upserts done — recomputing')
 
+    // Mark all rows processed so the UI switches to "Recomputing..." phase
+    await updateJob({ processed_rows: totalRows })
+
     // ── 10. Recompute attendance_daily ─────────────────────────────────────────
+    // Touch updated_at every 50 batches so the stale-job check (5-min window)
+    // does not mistakenly mark this long-running recompute as orphaned.
     const recomputeTargets = [...recomputeSet.values()]
     const RECOMPUTE_CONCURRENCY = 8
+    const RECOMPUTE_KEEPALIVE_EVERY = 50
     for (let i = 0; i < recomputeTargets.length; i += RECOMPUTE_CONCURRENCY) {
       const batch = recomputeTargets.slice(i, i + RECOMPUTE_CONCURRENCY)
       await Promise.all(batch.map(async ({ employee_id, date }) => {
@@ -361,6 +367,10 @@ async function processUploadJob(fastify: FastifyInstance, params: ProcessJobPara
           log.warn({ err, employee_id, date }, 'upload job: recompute failed for one target')
         }
       }))
+      const batchIndex = Math.floor(i / RECOMPUTE_CONCURRENCY)
+      if (batchIndex % RECOMPUTE_KEEPALIVE_EVERY === 0) {
+        await updateJob({})  // keep updated_at fresh
+      }
     }
 
     // ── 11. Write upload_sessions audit row ────────────────────────────────────
@@ -484,7 +494,9 @@ export default async function attendanceUploadRoute(fastify: FastifyInstance) {
   //
   // Orphaned jobs are marked failed so they never block new uploads.
   fastify.get('/attendance/upload/active-job', adminAuth, async (req: any, reply) => {
-    const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString()
+    // 10-min window: active jobs touch updated_at every ~50 recompute batches;
+    // anything silent for 10+ min is truly orphaned (server restart mid-job).
+    const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString()
 
     // Mark stale jobs as failed (fire-and-forget)
     fastify.supabase
@@ -492,17 +504,17 @@ export default async function attendanceUploadRoute(fastify: FastifyInstance) {
       .update({ status: 'failed', error: 'Processing stalled (server may have restarted). Please re-upload.', completed_at: new Date().toISOString(), updated_at: new Date().toISOString() })
       .eq('tenant_id', req.tenantId)
       .in('status', ['queued', 'processing'])
-      .lt('updated_at', fiveMinutesAgo)
+      .lt('updated_at', tenMinutesAgo)
       .then(() => {})
       .catch(() => {})
 
-    // Return the job only if it's still actively updating (updated_at recent)
+    // Return the job only if it's still actively updating
     const { data, error } = await fastify.supabase
       .from('attendance_upload_jobs')
       .select('id, status, total_rows, processed_rows, success_rows, failed_rows, skipped_rows, row_errors, error, created_at, started_at, completed_at, filename')
       .eq('tenant_id', req.tenantId)
       .in('status', ['queued', 'processing'])
-      .gte('updated_at', fiveMinutesAgo)
+      .gte('updated_at', tenMinutesAgo)
       .order('created_at', { ascending: false })
       .limit(1)
       .maybeSingle()
