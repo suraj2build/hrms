@@ -286,6 +286,14 @@ export function AttendanceUploadWorkspace() {
     retry:           2,
   })
 
+  // ── On mount: recover active job from server so the progress bar
+  //    survives page navigation (activeJobId is local state, cleared on nav).
+  useEffect(() => {
+    api.get<UploadJob | null>('/attendance/upload/active-job')
+      .then((job) => { if (job?.id) setActiveJobId(job.id) })
+      .catch(() => {})
+  }, [])
+
   // ── Active upload job polling ─────────────────────────────────────────────
   const { data: jobData } = useQuery<UploadJob>({
     queryKey:        ['attendance-upload-job', activeJobId],
