@@ -1015,10 +1015,18 @@ export function AttendanceUploadWorkspace() {
             )}
 
             {/* Full success */}
-            {result.failed_rows.length === 0 && (
+            {result.failed_rows.length === 0 && result.success_rows > 0 && (
               <div className="flex items-center gap-2 p-3 rounded-md bg-success/10 border border-success/20 text-sm text-success">
                 <CheckCircle2 className="h-4 w-4 flex-shrink-0" />
                 All {result.success_rows} row{result.success_rows !== 1 ? 's' : ''} imported. Attendance recomputed.
+              </div>
+            )}
+
+            {/* Zero imported — no errors either (duplicates or sealed periods) */}
+            {result.failed_rows.length === 0 && result.success_rows === 0 && (
+              <div className="flex items-center gap-2 p-3 rounded-md bg-warning/10 border border-warning/20 text-sm text-warning">
+                <AlertTriangle className="h-4 w-4 flex-shrink-0" />
+                No rows were imported. All records may already exist, or all dates fall in a payroll-sealed period.
               </div>
             )}
 

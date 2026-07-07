@@ -243,18 +243,24 @@ async function processUploadJob(fastify: FastifyInstance, params: ProcessJobPara
     }
 
     // ── 6. Batch resolve employee codes → IDs ──────────────────────────────────
+    // Batch in chunks of 400 to stay well under PostgREST URL length limits.
     const uniqueCodes = [...new Set(parsedPunches.map((r) => r.employee_code))]
-    const { data: employees, error: empErr } = await fastify.supabase
-      .from('employees').select('id, employee_code').eq('tenant_id', tenantId).in('employee_code', uniqueCodes)
+    const CODE_BATCH  = 400
+    const codeToId    = new Map<string, string>()
 
-    if (empErr) {
-      await updateJob({ status: 'failed', error: 'Failed to resolve employee codes', completed_at: new Date().toISOString() })
-      return
+    for (let ci = 0; ci < uniqueCodes.length; ci += CODE_BATCH) {
+      const batch = uniqueCodes.slice(ci, ci + CODE_BATCH)
+      const { data: employees, error: empErr } = await fastify.supabase
+        .from('employees').select('id, employee_code').eq('tenant_id', tenantId).in('employee_code', batch)
+
+      if (empErr) {
+        await updateJob({ status: 'failed', error: `Failed to resolve employee codes: ${empErr.message}`, completed_at: new Date().toISOString() })
+        return
+      }
+      for (const e of (employees ?? []) as { id: string; employee_code: string }[]) {
+        codeToId.set(e.employee_code, e.id)
+      }
     }
-
-    const codeToId = new Map<string, string>(
-      (employees ?? []).map((e: { id: string; employee_code: string }) => [e.employee_code, e.id])
-    )
 
     // ── 7. Fetch tenant timezone ───────────────────────────────────────────────
     const { data: tenantRow } = await fastify.supabase
