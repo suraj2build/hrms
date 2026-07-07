@@ -476,29 +476,33 @@ export default async function attendanceUploadRoute(fastify: FastifyInstance) {
   // ── GET /attendance/upload/active-job ───────────────────────────────────────
   // Returns the most recent non-terminal job for this tenant so the browser
   // can restore the progress bar after a page navigation.
-  // Only returns jobs created within the last 2 hours — older queued/processing
-  // jobs are orphaned (server restarted mid-job) and must not block new uploads.
-  // As a side-effect, marks any orphaned jobs (> 2 h old, still queued/processing)
-  // as failed so they stop blocking future uploads.
+  //
+  // A job is "orphaned" (server restarted mid-job) when:
+  //   • it is still queued/processing AND
+  //   • updated_at has not moved in the last 5 minutes
+  //     (active jobs refresh updated_at every ~5 s via progress updates)
+  //
+  // Orphaned jobs are marked failed so they never block new uploads.
   fastify.get('/attendance/upload/active-job', adminAuth, async (req: any, reply) => {
-    const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString()
+    const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString()
 
-    // Clean up orphaned jobs older than 2 hours (fire-and-forget)
+    // Mark stale jobs as failed (fire-and-forget)
     fastify.supabase
       .from('attendance_upload_jobs')
-      .update({ status: 'failed', error: 'Server restarted while this job was processing. Please re-upload.', completed_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+      .update({ status: 'failed', error: 'Processing stalled (server may have restarted). Please re-upload.', completed_at: new Date().toISOString(), updated_at: new Date().toISOString() })
       .eq('tenant_id', req.tenantId)
       .in('status', ['queued', 'processing'])
-      .lt('created_at', twoHoursAgo)
+      .lt('updated_at', fiveMinutesAgo)
       .then(() => {})
       .catch(() => {})
 
+    // Return the job only if it's still actively updating (updated_at recent)
     const { data, error } = await fastify.supabase
       .from('attendance_upload_jobs')
       .select('id, status, total_rows, processed_rows, success_rows, failed_rows, skipped_rows, row_errors, error, created_at, started_at, completed_at, filename')
       .eq('tenant_id', req.tenantId)
       .in('status', ['queued', 'processing'])
-      .gte('created_at', twoHoursAgo)
+      .gte('updated_at', fiveMinutesAgo)
       .order('created_at', { ascending: false })
       .limit(1)
       .maybeSingle()
