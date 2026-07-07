@@ -120,28 +120,33 @@ export default async function attendanceRecomputeRoute(fastify: FastifyInstance)
       })
     }
 
-    // Run in parallel — each employee is independent
-    const results = await Promise.allSettled(
-      empIds.map((empId) =>
-        recomputeRange(fastify.supabase, {
-          tenant_id:   req.tenantId,
-          employee_id: empId,
-          from_date,
-          to_date,
-          changed_by:  req.userId,
-        }),
-      ),
-    )
-
+    // Run in parallel with capped concurrency — each employee is independent.
+    // Running all employees at once (Promise.allSettled over 3k+ items) would
+    // exhaust the DB connection pool and likely OOM for large tenants.
+    const CONCURRENCY = 16
     let totalUpserted = 0
     let failedCount   = 0
 
-    for (const r of results) {
-      if (r.status === 'fulfilled') {
-        totalUpserted += r.value.rows_upserted
-      } else {
-        failedCount++
-        req.log.warn({ reason: r.reason }, 'recompute failed for one employee')
+    for (let i = 0; i < empIds.length; i += CONCURRENCY) {
+      const batch = empIds.slice(i, i + CONCURRENCY)
+      const results = await Promise.allSettled(
+        batch.map((empId) =>
+          recomputeRange(fastify.supabase, {
+            tenant_id:   req.tenantId,
+            employee_id: empId,
+            from_date,
+            to_date,
+            changed_by:  req.userId,
+          }),
+        ),
+      )
+      for (const r of results) {
+        if (r.status === 'fulfilled') {
+          totalUpserted += r.value.rows_upserted
+        } else {
+          failedCount++
+          req.log.warn({ reason: r.reason }, 'recompute failed for one employee')
+        }
       }
     }
 
