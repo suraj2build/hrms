@@ -11,7 +11,8 @@
 
 import { useState, useCallback, useMemo, useEffect, useRef } from 'react'
 import { Link }          from 'react-router-dom'
-import { useQuery }      from '@tanstack/react-query'
+import { useQuery, useMutation } from '@tanstack/react-query'
+import { toast } from 'sonner'
 import {
   ChevronLeft, ChevronRight, ShieldAlert,
   TableProperties, Search, RefreshCw,
@@ -20,7 +21,7 @@ import {
   AlertTriangle, Activity, FileText,
   ClipboardEdit, ClipboardCheck,
   CheckSquare, Square, CheckCircle2,
-  Calendar, Loader2,
+  Calendar, Loader2, Play,
 } from 'lucide-react'
 
 import { PageContainer }    from '@/components/layout/PageContainer'
@@ -340,6 +341,38 @@ export function MusterRoll() {
     exportMusterCsv(sel, dates, monthLabel)
   }
 
+  // Process attendance — recomputes attendance_daily for all active employees
+  // for the currently displayed month.  Runs synchronously on the server
+  // (concurrency-capped at 16); large tenants may take 1–3 min.
+  const processMonth = useMutation({
+    mutationFn: () => {
+      const lastDay = new Date(year, month + 1, 0).toISOString().slice(0, 10)
+      return api.post('/attendance/recompute', {
+        from_date: `${ms}-01`,
+        to_date:   lastDay,
+      })
+    },
+    onSuccess: () => {
+      toast.success(`Attendance processed for ${monthLabel}`, {
+        description: 'All employee records have been recomputed. Refreshing muster roll…',
+      })
+      refetch()
+    },
+    onError: (err: any) => {
+      const msg = err?.message ?? ''
+      if (msg.includes('PERIOD_LOCKED')) {
+        toast.error('Period is locked', { description: 'Reverse the payroll finalization before reprocessing.' })
+      } else {
+        // Request likely timed out while server was still processing —
+        // the recompute continues in the background.
+        toast.info('Processing continues in background', {
+          description: `Recompute is running for ${monthLabel}. Refresh the muster roll in a few minutes to see results.`,
+          duration: 8000,
+        })
+      }
+    },
+  })
+
   // Phase 5 — Bulk workflow links pass selected employee IDs as context
   const selectedIdsParam = [...selected].join(',')
 
@@ -560,8 +593,21 @@ export function MusterRoll() {
                         onClick={() => { setViewDate(new Date(year, month + 1, 1)); setSelected(new Set()) }}>
                         <ChevronRight className="h-4 w-4" />
                       </Button>
-                      <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => refetch()}>
+                      <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => refetch()}
+                        title="Refresh muster data">
                         <RefreshCw className="h-3.5 w-3.5" />
+                      </Button>
+                      <Button
+                        variant="outline"
+                        className="h-7 px-2 text-xs gap-1"
+                        onClick={() => processMonth.mutate()}
+                        disabled={processMonth.isPending || periodState === 'PAYROLL_FINALIZED'}
+                        title={periodState === 'PAYROLL_FINALIZED' ? 'Period is locked' : `Recompute attendance for ${monthLabel}`}
+                      >
+                        {processMonth.isPending
+                          ? <Loader2 className="h-3 w-3 animate-spin" />
+                          : <Play className="h-3 w-3" />}
+                        {processMonth.isPending ? 'Processing…' : 'Process'}
                       </Button>
                       <Button
                         size="icon" variant="ghost" className="h-7 w-7"
