@@ -96,3 +96,32 @@ export async function assertRangeOpen(
     throw new PeriodLockedError([...locked].sort()[0])
   }
 }
+
+/**
+ * Throw PeriodLockedError only when a month in [fromDate, toDate] is
+ * PAYROLL_FINALIZED — the terminal sealed state.
+ *
+ * Use this for HR-initiated manual recomputes: LOCKED and PAYROLL_PROCESSING
+ * months should still be recomputable by HR admins; the DB trigger (migration
+ * 262) is the hard backstop that prevents writes to PAYROLL_FINALIZED months
+ * regardless of which code path is used.
+ */
+export async function assertRangeNotFinalized(
+  supabase: SupabaseClient,
+  tenantId: string,
+  fromDate: string,
+  toDate: string,
+): Promise<void> {
+  const unique = [...new Set(monthsInRange(fromDate, toDate))]
+  if (!unique.length) return
+  const { data } = await supabase
+    .from('attendance_period_locks')
+    .select('period_month')
+    .eq('tenant_id', tenantId)
+    .in('period_month', unique)
+    .eq('state', 'PAYROLL_FINALIZED')
+  const finalized = ((data ?? []) as Array<{ period_month: string }>)
+    .map((r) => r.period_month)
+    .sort()
+  if (finalized.length) throw new PeriodLockedError(finalized[0])
+}

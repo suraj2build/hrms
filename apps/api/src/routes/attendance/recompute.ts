@@ -16,7 +16,7 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { recomputeRange }              from '../../lib/attendance-engine.js'
-import { assertRangeOpen, PeriodLockedError } from '../../lib/period-lock.js'
+import { assertRangeNotFinalized, PeriodLockedError } from '../../lib/period-lock.js'
 
 const dateRe = /^\d{4}-\d{2}-\d{2}$/
 
@@ -48,9 +48,11 @@ export default async function attendanceRecomputeRoute(fastify: FastifyInstance)
       })
     }
 
-    // Period protection — refuse to recompute any month that is locked for payroll.
+    // Period protection — refuse to recompute only if payroll is fully finalized.
+    // LOCKED / PAYROLL_PROCESSING months are still recomputable by HR admins;
+    // migration 262's DB trigger is the hard backstop for PAYROLL_FINALIZED.
     try {
-      await assertRangeOpen(fastify.supabase, req.tenantId, from_date, to_date)
+      await assertRangeNotFinalized(fastify.supabase, req.tenantId, from_date, to_date)
     } catch (err) {
       if (err instanceof PeriodLockedError) {
         return reply.code(409).send({ error: 'PERIOD_LOCKED', message: err.message })
