@@ -96,7 +96,10 @@ export default async function attendanceRecomputeRoute(fastify: FastifyInstance)
       }
     }
 
-    // ── All active employees ──────────────────────────────────────────────────
+    // ── All active employees — runs in background, returns 202 immediately ───────
+    // For large tenants (1000+ employees × 30 days) the loop takes 5–20 minutes,
+    // far exceeding Railway's HTTP timeout.  We return 202 immediately and let
+    // setImmediate carry the work so the HTTP response is never held.
     const { data: employees, error: empErr } = await fastify.supabase
       .from('employees')
       .select('id')
@@ -111,56 +114,56 @@ export default async function attendanceRecomputeRoute(fastify: FastifyInstance)
     const empIds = ((employees ?? []) as Array<{ id: string }>).map((e) => e.id)
 
     if (empIds.length === 0) {
-      return reply.send({
-        employees_processed: 0,
-        rows_upserted:       0,
+      return reply.code(200).send({
+        status:              'completed',
+        employees_queued:    0,
         from_date,
         to_date,
-        duration_ms: Date.now() - started,
       })
     }
 
-    // Run in parallel with capped concurrency — each employee is independent.
-    // Running all employees at once (Promise.allSettled over 3k+ items) would
-    // exhaust the DB connection pool and likely OOM for large tenants.
-    const CONCURRENCY = 16
-    let totalUpserted = 0
-    let failedCount   = 0
-
-    for (let i = 0; i < empIds.length; i += CONCURRENCY) {
-      const batch = empIds.slice(i, i + CONCURRENCY)
-      const results = await Promise.allSettled(
-        batch.map((empId) =>
-          recomputeRange(fastify.supabase, {
-            tenant_id:   req.tenantId,
-            employee_id: empId,
-            from_date,
-            to_date,
-            changed_by:  req.userId,
-          }),
-        ),
-      )
-      for (const r of results) {
-        if (r.status === 'fulfilled') {
-          totalUpserted += r.value.rows_upserted
-        } else {
-          failedCount++
-          req.log.warn({ reason: r.reason }, 'recompute failed for one employee')
-        }
-      }
-    }
-
-    if (failedCount > 0) {
-      req.log.warn({ failedCount, total: empIds.length, from_date, to_date }, 'bulk recompute partial failure')
-    }
-
-    return reply.send({
-      employees_processed: empIds.length - failedCount,
-      employees_failed:    failedCount,
-      rows_upserted:       totalUpserted,
+    // Return 202 before the loop starts so the HTTP connection is released.
+    reply.code(202).send({
+      status:           'processing',
+      employees_queued: empIds.length,
       from_date,
       to_date,
-      duration_ms: Date.now() - started,
+      message: `Recomputing attendance for ${empIds.length} employees. Refresh the muster roll in a few minutes.`,
+    })
+
+    // Background recompute — runs after the response is flushed.
+    const tenantId  = req.tenantId
+    const userId    = req.userId
+    const log       = req.log
+    setImmediate(async () => {
+      const CONCURRENCY = 16
+      let totalUpserted = 0
+      let failedCount   = 0
+
+      for (let i = 0; i < empIds.length; i += CONCURRENCY) {
+        const batch = empIds.slice(i, i + CONCURRENCY)
+        const results = await Promise.allSettled(
+          batch.map((empId) =>
+            recomputeRange(fastify.supabase, {
+              tenant_id:   tenantId,
+              employee_id: empId,
+              from_date,
+              to_date,
+              changed_by:  userId,
+            }),
+          ),
+        )
+        for (const r of results) {
+          if (r.status === 'fulfilled') {
+            totalUpserted += r.value.rows_upserted
+          } else {
+            failedCount++
+            log.warn({ reason: r.reason }, 'bulk recompute: one employee failed')
+          }
+        }
+      }
+
+      log.info({ employees: empIds.length, failed: failedCount, rows_upserted: totalUpserted, from_date, to_date }, 'bulk recompute: done')
     })
   })
 }
