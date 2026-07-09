@@ -290,14 +290,14 @@ export default async function attendanceAnomaliesRoute(fastify: FastifyInstance)
 
     const { from, to, employee_id, type, severity, resolved, limit, offset } = parsed.data
 
+    // Step 1 — fetch anomaly rows without a PostgREST relationship join.
+    // The employees!inner join was causing 500s when PostgREST's schema cache
+    // didn't reflect the FK (stale cache or missing migration). We now do two
+    // flat queries and join in application code, which is immune to cache issues.
     let q = fastify.supabase
       .from('attendance_anomalies')
       .select(
-        `
-          id, date, type, message, severity, resolved, created_at, updated_at,
-          resolved_at, employee_id,
-          employees!inner(id, first_name, last_name, employee_code)
-        `,
+        'id, date, type, message, severity, resolved, created_at, updated_at, resolved_at, employee_id',
         { count: 'exact' },
       )
       .eq('tenant_id', req.tenantId)
@@ -320,20 +320,25 @@ export default async function attendanceAnomaliesRoute(fastify: FastifyInstance)
       return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch anomalies' })
     }
 
-    const rows = ((data ?? []) as Array<{
-      id:          string
-      date:        string
-      type:        string
-      message:     string
-      severity:    string
-      resolved:    boolean
-      created_at:  string
-      updated_at:  string
-      resolved_at: string | null
-      employee_id: string | null
-      employees:   { id: string; first_name: string; last_name: string; employee_code: string } | Array<{ id: string; first_name: string; last_name: string; employee_code: string }> | null
-    }>).map((r) => {
-      const emp = Array.isArray(r.employees) ? r.employees[0] : r.employees
+    // Step 2 — fetch employee names for the page of results (at most `limit` unique IDs).
+    type AnomalyRow = { id: string; date: string; type: string; message: string; severity: string; resolved: boolean; created_at: string; updated_at: string; resolved_at: string | null; employee_id: string | null }
+    const anomalyRows = (data ?? []) as AnomalyRow[]
+    const empIds = [...new Set(anomalyRows.map(r => r.employee_id).filter(Boolean))] as string[]
+
+    const empMap = new Map<string, { first_name: string; last_name: string; employee_code: string }>()
+    if (empIds.length > 0) {
+      const { data: emps } = await fastify.supabase
+        .from('employees')
+        .select('id, first_name, last_name, employee_code')
+        .eq('tenant_id', req.tenantId)
+        .in('id', empIds)
+      for (const e of (emps ?? []) as Array<{ id: string; first_name: string; last_name: string; employee_code: string }>) {
+        empMap.set(e.id, e)
+      }
+    }
+
+    const rows = anomalyRows.map((r) => {
+      const emp = r.employee_id ? empMap.get(r.employee_id) : undefined
       return {
         id:            r.id,
         date:          r.date,
@@ -343,7 +348,7 @@ export default async function attendanceAnomaliesRoute(fastify: FastifyInstance)
         resolved:      r.resolved,
         created_at:    r.created_at,
         resolved_at:   r.resolved_at,
-        employee_id:   emp?.id           ?? r.employee_id ?? null,
+        employee_id:   r.employee_id ?? null,
         employee_name: emp ? `${emp.first_name} ${emp.last_name}` : null,
         employee_code: emp?.employee_code ?? null,
       }
