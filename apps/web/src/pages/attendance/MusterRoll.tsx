@@ -341,37 +341,61 @@ export function MusterRoll() {
     exportMusterCsv(sel, dates, monthLabel)
   }
 
-  // Process attendance — recomputes attendance_daily for all active employees
-  // for the currently displayed month.  Runs synchronously on the server
-  // (concurrency-capped at 16); large tenants may take 1–3 min.
+  // Processing state — true while background recompute is running on the server.
+  // The API returns 202 immediately; we poll by auto-refreshing every 30s until
+  // the user dismisses or navigates away.
+  const [processingMonth, setProcessingMonth] = useState<string | null>(null)
+  const processingPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  useEffect(() => {
+    if (processingMonth !== ms) {
+      // Month changed — cancel any outstanding poll
+      if (processingPollRef.current) clearInterval(processingPollRef.current)
+      processingPollRef.current = null
+      setProcessingMonth(null)
+    }
+  }, [ms, processingMonth])
+
+  // Clean up interval on unmount
+  useEffect(() => () => { if (processingPollRef.current) clearInterval(processingPollRef.current) }, [])
+
   const processMonth = useMutation({
     mutationFn: () => {
       const lastDay = new Date(year, month + 1, 0).toISOString().slice(0, 10)
-      return api.post('/attendance/recompute', {
+      return api.post<{ status: string; employees_queued?: number }>('/attendance/recompute', {
         from_date: `${ms}-01`,
         to_date:   lastDay,
       })
     },
-    onSuccess: () => {
-      toast.success(`Attendance processed for ${monthLabel}`, {
-        description: 'All employee records have been recomputed. Refreshing muster roll…',
-      })
-      refetch()
+    onSuccess: (data) => {
+      if ((data as any)?.status === 'processing') {
+        // 202 — background job started; poll every 30s and auto-refresh
+        setProcessingMonth(ms)
+        toast.info(`Recompute started for ${monthLabel}`, {
+          description: `Processing ${(data as any)?.employees_queued ?? ''} employees in background. The muster roll will refresh every 30 seconds.`,
+          duration: 10_000,
+        })
+        if (processingPollRef.current) clearInterval(processingPollRef.current)
+        processingPollRef.current = setInterval(() => {
+          refetch()
+        }, 30_000)
+      } else {
+        // Instant completion (0 employees or single-employee path)
+        toast.success(`Attendance processed for ${monthLabel}`)
+        refetch()
+      }
     },
     onError: (err: any) => {
-      const msg = err?.message ?? ''
+      const msg = (err?.message ?? '') as string
       if (msg.includes('PERIOD_LOCKED')) {
         toast.error('Period is locked', { description: 'Reverse the payroll finalization before reprocessing.' })
       } else {
-        // Request likely timed out while server was still processing —
-        // the recompute continues in the background.
-        toast.info('Processing continues in background', {
-          description: `Recompute is running for ${monthLabel}. Refresh the muster roll in a few minutes to see results.`,
-          duration: 8000,
-        })
+        toast.error('Failed to start recompute', { description: msg || 'Unexpected error. Check server logs.' })
       }
     },
   })
+
+  const isProcessing = processingMonth === ms
 
   // Phase 5 — Bulk workflow links pass selected employee IDs as context
   const selectedIdsParam = [...selected].join(',')
@@ -597,18 +621,34 @@ export function MusterRoll() {
                         title="Refresh muster data">
                         <RefreshCw className="h-3.5 w-3.5" />
                       </Button>
-                      <Button
-                        variant="outline"
-                        className="h-7 px-2 text-xs gap-1"
-                        onClick={() => processMonth.mutate()}
-                        disabled={processMonth.isPending || periodState === 'PAYROLL_FINALIZED'}
-                        title={periodState === 'PAYROLL_FINALIZED' ? 'Period is locked' : `Recompute attendance for ${monthLabel}`}
-                      >
-                        {processMonth.isPending
-                          ? <Loader2 className="h-3 w-3 animate-spin" />
-                          : <Play className="h-3 w-3" />}
-                        {processMonth.isPending ? 'Processing…' : 'Process'}
-                      </Button>
+                      {isProcessing ? (
+                        <button
+                          className="inline-flex items-center gap-1 h-7 px-2 text-xs rounded-md border border-info/40 bg-info/10 text-info"
+                          onClick={() => {
+                            if (processingPollRef.current) clearInterval(processingPollRef.current)
+                            processingPollRef.current = null
+                            setProcessingMonth(null)
+                            refetch()
+                          }}
+                          title="Recompute is running in background — click to stop auto-refresh"
+                        >
+                          <Loader2 className="h-3 w-3 animate-spin" />
+                          Processing… ×
+                        </button>
+                      ) : (
+                        <Button
+                          variant="outline"
+                          className="h-7 px-2 text-xs gap-1"
+                          onClick={() => processMonth.mutate()}
+                          disabled={processMonth.isPending || periodState === 'PAYROLL_FINALIZED'}
+                          title={periodState === 'PAYROLL_FINALIZED' ? 'Period is locked' : `Recompute attendance for ${monthLabel}`}
+                        >
+                          {processMonth.isPending
+                            ? <Loader2 className="h-3 w-3 animate-spin" />
+                            : <Play className="h-3 w-3" />}
+                          {processMonth.isPending ? 'Starting…' : 'Process'}
+                        </Button>
+                      )}
                       <Button
                         size="icon" variant="ghost" className="h-7 w-7"
                         onClick={() => setCompact(c => !c)}
