@@ -654,7 +654,7 @@ async function fetchPunches(
     windowEnd   = localToUtc(date, '23:59:59', tz).toISOString()
   }
 
-  const { data } = await supabase
+  const { data, error: punchErr } = await supabase
     .from('attendance_punch_logs')
     .select('id, punched_at, direction, source')
     .eq('tenant_id', tenantId)
@@ -662,6 +662,10 @@ async function fetchPunches(
     .gte('punched_at', windowStart)
     .lte('punched_at', windowEnd)
     .order('punched_at', { ascending: true })
+
+  if (punchErr) {
+    throw new Error(`fetchPunches: DB query failed — ${punchErr.message}`)
+  }
 
   return ((data ?? []) as Array<{ id: string; punched_at: string; direction: string; source: string }>)
     .map((r) => ({

@@ -387,8 +387,8 @@ export function MusterRoll() {
     },
     onError: (err: any) => {
       const msg = (err?.message ?? '') as string
-      if (msg.includes('PERIOD_LOCKED')) {
-        toast.error('Period is locked', { description: 'Reverse the payroll finalization before reprocessing.' })
+      if (err?.error === 'PERIOD_LOCKED') {
+        toast.error('Period is finalized', { description: 'Reverse the payroll finalization before reprocessing.' })
       } else {
         toast.error('Failed to start recompute', { description: msg || 'Unexpected error. Check server logs.' })
       }
