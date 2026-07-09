@@ -59,37 +59,48 @@ export default async function musterRoute(fastify: FastifyInstance) {
         }
       }
 
-      // Fetch active employees — for managers, only direct reports
-      let empQuery = fastify.supabase
-        .from('employees')
-        .select('id, first_name, last_name, employee_code')
-        .eq('tenant_id', req.tenantId)
-        .eq('status', 'active')
-        .order('employee_code')
+      // Fetch active employees — for managers, only direct reports.
+      // PostgREST caps results at max-rows (default 1000) so we paginate in
+      // batches of 1000 until the page is shorter than the batch size.
+      type EmpRow = { id: string; first_name: string; last_name: string; employee_code: string }
 
+      let reportIdFilter: string[] | null = null
       if (isMgr && managerEmployeeId) {
-        // Get IDs of direct reports via job_history
         const { data: reports } = await fastify.supabase
           .from('job_history')
           .select('employee_id')
           .eq('tenant_id', req.tenantId)
           .eq('manager_id', managerEmployeeId)
           .eq('is_current', true)
-        const reportIds = (reports ?? []).map((r: any) => r.employee_id)
-        if (reportIds.length === 0) {
+        reportIdFilter = (reports ?? []).map((r: any) => r.employee_id)
+        if (reportIdFilter.length === 0) {
           return reply.send({ month, employees: [] })
         }
-        empQuery = empQuery.in('id', reportIds)
       }
 
-      const { data: employees, error: empError } = await empQuery
-
-      if (empError) {
-        req.log.error({ err: empError }, 'muster employees query failed')
-        return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch employees' })
+      const EMP_BATCH = 1000
+      const employees: EmpRow[] = []
+      let empFrom = 0
+      while (true) {
+        let q = fastify.supabase
+          .from('employees')
+          .select('id, first_name, last_name, employee_code')
+          .eq('tenant_id', req.tenantId)
+          .eq('status', 'active')
+          .order('employee_code')
+          .range(empFrom, empFrom + EMP_BATCH - 1)
+        if (reportIdFilter) q = q.in('id', reportIdFilter)
+        const { data: page, error: empError } = await q
+        if (empError) {
+          req.log.error({ err: empError }, 'muster employees query failed')
+          return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch employees' })
+        }
+        employees.push(...((page ?? []) as EmpRow[]))
+        if (!page || page.length < EMP_BATCH) break
+        empFrom += EMP_BATCH
       }
 
-      if (!employees || employees.length === 0) {
+      if (employees.length === 0) {
         return reply.send({ month, employees: [] })
       }
 

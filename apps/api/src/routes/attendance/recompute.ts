@@ -102,18 +102,27 @@ export default async function attendanceRecomputeRoute(fastify: FastifyInstance)
     // For large tenants (1000+ employees × 30 days) the loop takes 5–20 minutes,
     // far exceeding Railway's HTTP timeout.  We return 202 immediately and let
     // setImmediate carry the work so the HTTP response is never held.
-    const { data: employees, error: empErr } = await fastify.supabase
-      .from('employees')
-      .select('id')
-      .eq('tenant_id', req.tenantId)
-      .eq('status', 'active')
-
-    if (empErr) {
-      req.log.error({ err: empErr }, 'failed to fetch employees for recompute')
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch employees' })
+    //
+    // PostgREST caps results at max-rows (default 1000) — paginate to get ALL
+    // active employees regardless of tenant size.
+    const EMP_BATCH = 1000
+    const empIds: string[] = []
+    let empFrom = 0
+    while (true) {
+      const { data: page, error: empErr } = await fastify.supabase
+        .from('employees')
+        .select('id')
+        .eq('tenant_id', req.tenantId)
+        .eq('status', 'active')
+        .range(empFrom, empFrom + EMP_BATCH - 1)
+      if (empErr) {
+        req.log.error({ err: empErr }, 'failed to fetch employees for recompute')
+        return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch employees' })
+      }
+      empIds.push(...((page ?? []) as Array<{ id: string }>).map((e) => e.id))
+      if (!page || page.length < EMP_BATCH) break
+      empFrom += EMP_BATCH
     }
-
-    const empIds = ((employees ?? []) as Array<{ id: string }>).map((e) => e.id)
 
     if (empIds.length === 0) {
       return reply.code(200).send({
