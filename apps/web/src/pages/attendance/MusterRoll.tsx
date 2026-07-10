@@ -342,10 +342,57 @@ export function MusterRoll() {
   }
 
   // Processing state — true while background recompute is running on the server.
-  // The API returns 202 immediately; we poll by auto-refreshing every 30s until
-  // the user dismisses or navigates away.
+  // The API returns 202 immediately with a run_id; we poll the run status every
+  // 10s via GET /attendance/recompute/runs, and also refresh the muster grid
+  // every 30s so data appears as workers finish.
   const [processingMonth, setProcessingMonth] = useState<string | null>(null)
+  const [activeRunId,     setActiveRunId]     = useState<string | null>(null)
   const processingPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const runPollRef        = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  // Poll the recompute run status while processing
+  const { data: runsData } = useQuery({
+    queryKey: ['recompute-runs', profile?.tenant_id ?? ''],
+    queryFn:  () => api.get<{ runs: Array<{
+      run_id: string; status: string; employees_queued: number;
+      employees_succeeded: number; employees_failed: number;
+      rows_upserted: number; rows_protected: number;
+      started_at: string; finished_at: string | null;
+      error_summary: Array<{ employee_id: string; error: string }> | null
+    }>}>('/attendance/recompute/runs'),
+    enabled:  !!activeRunId,
+    refetchInterval: activeRunId ? 10_000 : false,
+  })
+
+  const activeRun = runsData?.runs?.find(r => r.run_id === activeRunId) ?? null
+
+  // When the active run finishes, clear the polling and notify
+  useEffect(() => {
+    if (!activeRun) return
+    if (activeRun.status === 'running') return
+    // Run is done — clear run polling
+    if (runPollRef.current) { clearInterval(runPollRef.current); runPollRef.current = null }
+    if (activeRun.status === 'completed') {
+      toast.success(`Recompute complete for ${monthLabel}`, {
+        description: `${activeRun.employees_succeeded} employees · ${activeRun.rows_upserted} rows written`,
+      })
+    } else if (activeRun.status === 'partial') {
+      toast.warning(`Recompute finished with errors`, {
+        description: `${activeRun.employees_succeeded} succeeded · ${activeRun.employees_failed} failed. Check Railway logs for details.`,
+        duration: 15_000,
+      })
+    } else if (activeRun.status === 'failed') {
+      toast.error(`Recompute failed`, {
+        description: `All ${activeRun.employees_failed} employees failed. Check Railway logs for details.`,
+        duration: 15_000,
+      })
+    }
+    // Stop muster auto-refresh once the run finishes
+    if (processingPollRef.current) { clearInterval(processingPollRef.current); processingPollRef.current = null }
+    setProcessingMonth(null)
+    setActiveRunId(null)
+    refetch()
+  }, [activeRun?.status]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (processingMonth !== ms) {
@@ -353,26 +400,32 @@ export function MusterRoll() {
       if (processingPollRef.current) clearInterval(processingPollRef.current)
       processingPollRef.current = null
       setProcessingMonth(null)
+      setActiveRunId(null)
     }
   }, [ms, processingMonth])
 
-  // Clean up interval on unmount
-  useEffect(() => () => { if (processingPollRef.current) clearInterval(processingPollRef.current) }, [])
+  // Clean up intervals on unmount
+  useEffect(() => () => {
+    if (processingPollRef.current) clearInterval(processingPollRef.current)
+    if (runPollRef.current)        clearInterval(runPollRef.current)
+  }, [])
 
   const processMonth = useMutation({
     mutationFn: () => {
       const lastDay = new Date(year, month + 1, 0).toISOString().slice(0, 10)
-      return api.post<{ status: string; employees_queued?: number }>('/attendance/recompute', {
+      return api.post<{ status: string; run_id?: string | null; employees_queued?: number }>('/attendance/recompute', {
         from_date: `${ms}-01`,
         to_date:   lastDay,
       })
     },
     onSuccess: (data) => {
       if ((data as any)?.status === 'processing') {
-        // 202 — background job started; poll every 30s and auto-refresh
+        // 202 — background job started; track the run and poll every 30s for grid refresh
         setProcessingMonth(ms)
+        const rid = (data as any)?.run_id ?? null
+        setActiveRunId(rid)
         toast.info(`Recompute started for ${monthLabel}`, {
-          description: `Processing ${(data as any)?.employees_queued ?? ''} employees in background. The muster roll will refresh every 30 seconds.`,
+          description: `${(data as any)?.employees_queued ?? '?'} employees queued. Status updates every 10 seconds.`,
           duration: 10_000,
         })
         if (processingPollRef.current) clearInterval(processingPollRef.current)
@@ -628,6 +681,7 @@ export function MusterRoll() {
                             if (processingPollRef.current) clearInterval(processingPollRef.current)
                             processingPollRef.current = null
                             setProcessingMonth(null)
+                            setActiveRunId(null)
                             refetch()
                           }}
                           title="Recompute is running in background — click to stop auto-refresh"

@@ -1401,10 +1401,12 @@ export async function recomputeRange(
     }
   }
 
-  // Anomaly sync — fire-and-forget, errors must not block the recompute result
+  // Anomaly sync — fire-and-forget, errors must not block the recompute result.
+  // Use safeComputed (not computed) so we don't generate ghost anomalies for dates
+  // that were skipped due to leave_approval / manual / wo_credit protection.
   setImmediate(() => {
     Promise.all(
-      computed.map((r) => {
+      safeComputed.map((r) => {
         const anomalies = detectAnomalies(r, policy)
         return syncAnomalies(supabase, tenant_id, r.employee_id, r.date, anomalies)
       }),

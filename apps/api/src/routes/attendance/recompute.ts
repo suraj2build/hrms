@@ -3,14 +3,15 @@
  *
  * Manually trigger an AttendanceEngine recompute for a date range.
  *
- * If `employee_id` is provided, recompute only that employee.
+ * If `employee_id` is provided, recompute only that employee (synchronous).
  * Otherwise, recompute ALL active employees in the tenant for the date range
- * (runs in parallel, bounded to the given date window).
+ * (background 202: returns immediately, updates attendance_recompute_runs).
  *
  * Protected: hr_admin / super_admin only.
  *
- * Response:
- *   { employees_processed, rows_upserted, from_date, to_date, duration_ms }
+ * GET /attendance/recompute/runs
+ * Returns the 10 most recent recompute run records for this tenant.
+ * Used by the Muster Roll UI to show run status without polling the muster data.
  */
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
@@ -29,6 +30,24 @@ const bodySchema = z.object({
 export default async function attendanceRecomputeRoute(fastify: FastifyInstance) {
   const adminAuth = { preHandler: [fastify.authenticate, requireRole(...HR_ADMIN_ROLES)] }
 
+  // ── GET /attendance/recompute/runs ─────────────────────────────────────────
+  fastify.get('/attendance/recompute/runs', adminAuth, async (req: any, reply) => {
+    const { data, error } = await fastify.supabase
+      .from('attendance_recompute_runs')
+      .select('run_id, trigger_source, from_date, to_date, employees_queued, employees_succeeded, employees_failed, rows_upserted, rows_protected, status, error_summary, started_at, finished_at')
+      .eq('tenant_id', req.tenantId)
+      .order('started_at', { ascending: false })
+      .limit(10)
+
+    if (error) {
+      req.log.error({ err: error }, 'recompute/runs query failed')
+      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch recompute runs' })
+    }
+
+    return reply.send({ runs: data ?? [] })
+  })
+
+  // ── POST /attendance/recompute ─────────────────────────────────────────────
   fastify.post('/attendance/recompute', adminAuth, async (req: any, reply) => {
 
     const parsed = bodySchema.safeParse(req.body)
@@ -64,7 +83,6 @@ export default async function attendanceRecomputeRoute(fastify: FastifyInstance)
 
     // ── Single employee ───────────────────────────────────────────────────────
     if (employee_id) {
-      // Verify the employee belongs to the caller's tenant
       const { data: emp } = await fastify.supabase
         .from('employees')
         .select('id')
@@ -85,9 +103,28 @@ export default async function attendanceRecomputeRoute(fastify: FastifyInstance)
           changed_by:  req.userId,
         })
 
+        // Write a completed run record so it shows up in the runs list
+        await fastify.supabase
+          .from('attendance_recompute_runs')
+          .insert({
+            tenant_id:           req.tenantId,
+            triggered_by:        req.userId,
+            trigger_source:      'single_employee',
+            from_date,
+            to_date,
+            employees_queued:    1,
+            employees_succeeded: 1,
+            employees_failed:    0,
+            rows_upserted:       result.rows_upserted,
+            rows_protected:      result.rows_protected,
+            status:              'completed',
+            finished_at:         new Date().toISOString(),
+          })
+
         return reply.send({
           employees_processed: 1,
           rows_upserted:       result.rows_upserted,
+          rows_protected:      result.rows_protected,
           from_date,
           to_date,
           duration_ms: Date.now() - started,
@@ -126,30 +163,58 @@ export default async function attendanceRecomputeRoute(fastify: FastifyInstance)
 
     if (empIds.length === 0) {
       return reply.code(200).send({
-        status:              'completed',
-        employees_queued:    0,
+        status:           'completed',
+        employees_queued: 0,
         from_date,
         to_date,
       })
     }
 
-    // Return 202 before the loop starts so the HTTP connection is released.
+    // Create the run record before returning 202 so the UI can poll it
+    let runId: string | null = null
+    {
+      const { data: runRow, error: runErr } = await fastify.supabase
+        .from('attendance_recompute_runs')
+        .insert({
+          tenant_id:        req.tenantId,
+          triggered_by:     req.userId,
+          trigger_source:   'process_button',
+          from_date,
+          to_date,
+          employees_queued: empIds.length,
+          status:           'running',
+        })
+        .select('run_id')
+        .single()
+      if (runErr) {
+        req.log.warn({ err: runErr }, 'recompute: failed to create run log row — continuing without observability')
+      } else {
+        runId = (runRow as any).run_id
+      }
+    }
+
     reply.code(202).send({
       status:           'processing',
+      run_id:           runId,
       employees_queued: empIds.length,
       from_date,
       to_date,
-      message: `Recomputing attendance for ${empIds.length} employees. Refresh the muster roll in a few minutes.`,
+      message: `Recomputing attendance for ${empIds.length} employees. Check run status via GET /attendance/recompute/runs.`,
     })
 
-    // Background recompute — runs after the response is flushed.
+    // Background recompute — runs after the HTTP response is flushed.
+    // Capture everything we need before the request object may be GC'd.
     const tenantId  = req.tenantId
     const userId    = req.userId
     const log       = req.log
+
     setImmediate(async () => {
       const CONCURRENCY = 16
-      let totalUpserted = 0
-      let failedCount   = 0
+      let totalUpserted  = 0
+      let totalProtected = 0
+      let failedCount    = 0
+      // Collect up to 100 per-employee errors for the error_summary JSONB column
+      const errors: Array<{ employee_id: string; error: string }> = []
 
       for (let i = 0; i < empIds.length; i += CONCURRENCY) {
         const batch = empIds.slice(i, i + CONCURRENCY)
@@ -164,17 +229,60 @@ export default async function attendanceRecomputeRoute(fastify: FastifyInstance)
             }),
           ),
         )
-        for (const r of results) {
+        for (let j = 0; j < results.length; j++) {
+          const r     = results[j]!
+          const empId = batch[j]!
           if (r.status === 'fulfilled') {
-            totalUpserted += r.value.rows_upserted
+            totalUpserted  += r.value.rows_upserted
+            totalProtected += r.value.rows_protected
           } else {
             failedCount++
-            log.warn({ reason: r.reason }, 'bulk recompute: one employee failed')
+            const errMsg = r.reason instanceof Error ? r.reason.message : String(r.reason)
+            log.warn({ empId, from_date, to_date, err: errMsg }, 'bulk recompute: employee failed')
+            if (errors.length < 100) {
+              errors.push({ employee_id: empId, error: errMsg })
+            }
           }
         }
       }
 
-      log.info({ employees: empIds.length, failed: failedCount, rows_upserted: totalUpserted, from_date, to_date }, 'bulk recompute: done')
+      const succeeded   = empIds.length - failedCount
+      const finalStatus = failedCount === 0
+        ? 'completed'
+        : failedCount === empIds.length
+          ? 'failed'
+          : 'partial'
+
+      log.info({
+        event:         'bulk_recompute_done',
+        run_id:        runId,
+        from_date,
+        to_date,
+        employees:     empIds.length,
+        succeeded,
+        failed:        failedCount,
+        rows_upserted: totalUpserted,
+        rows_protected: totalProtected,
+        status:        finalStatus,
+      }, 'bulk recompute: done')
+
+      if (runId) {
+        const { error: updateErr } = await fastify.supabase
+          .from('attendance_recompute_runs')
+          .update({
+            employees_succeeded: succeeded,
+            employees_failed:    failedCount,
+            rows_upserted:       totalUpserted,
+            rows_protected:      totalProtected,
+            status:              finalStatus,
+            error_summary:       errors.length > 0 ? errors : null,
+            finished_at:         new Date().toISOString(),
+          })
+          .eq('run_id', runId)
+        if (updateErr) {
+          log.warn({ err: updateErr, run_id: runId }, 'recompute: failed to update run log row')
+        }
+      }
     })
   })
 }
