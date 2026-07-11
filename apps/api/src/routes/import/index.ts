@@ -3,7 +3,7 @@
 
 import type { FastifyInstance } from 'fastify'
 import { z }                    from 'zod'
-import { generateCSV, MASTER_TEMPLATES } from '../../lib/import-engine/templates.js'
+import { generateCSV, generateSalaryComponentsXlsx, MASTER_TEMPLATES } from '../../lib/import-engine/templates.js'
 import { validateImportRows }            from '../../lib/import-engine/validator.js'
 import { runImport, createImportJob }    from '../../lib/import-engine/importer.js'
 import {
@@ -96,6 +96,14 @@ export default async function importRoutes(fastify: FastifyInstance) {
         error:   'INVALID_MASTER_TYPE',
         message: `Unknown masterType "${masterType}". Valid: ${VALID_MASTER_TYPES.join(', ')}`,
       })
+    }
+
+    if (masterType === 'salary_components') {
+      const today = new Date().toISOString().split('T')[0]
+      const xlsx  = await generateSalaryComponentsXlsx(today)
+      reply.header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+      reply.header('Content-Disposition', 'attachment; filename="salary_components_upload.xlsx"')
+      return reply.send(xlsx)
     }
 
     if (masterType === 'employee_salary_upload') {

@@ -893,8 +893,9 @@ export function ImportWorkspace() {
     try {
       const response = await api.getRaw(`/import/templates/${selectedMaster}`)
 
-      if (selectedMaster === 'employee_salary_upload') {
-        // API now returns a fully-formed XLSX workbook — save it directly.
+      // Masters that return a fully-formed XLSX from the API — save binary directly
+      const XLSX_NATIVE_MASTERS = new Set(['employee_salary_upload', 'salary_components'])
+      if (XLSX_NATIVE_MASTERS.has(selectedMaster)) {
         const arrayBuffer = await response.arrayBuffer()
         const blob = new Blob([arrayBuffer], {
           type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -902,7 +903,7 @@ export function ImportWorkspace() {
         const url = URL.createObjectURL(blob)
         const a   = document.createElement('a')
         a.href     = url
-        a.download = 'employee_salary_upload.xlsx'
+        a.download = `${selectedMaster}.xlsx`
         document.body.appendChild(a)
         a.click()
         document.body.removeChild(a)
@@ -921,9 +922,14 @@ export function ImportWorkspace() {
     } catch (err) {
       // Fallback: generate from MASTER_CONFIGS when API is unreachable.
       if (selectedMaster === 'employee_salary_upload') {
-        // Dynamic template cannot be generated offline — the component master is required.
         toast.error('Template download failed', {
           description: 'The Salary Upload template requires a live connection to fetch the Salary Component Master. Please retry.',
+        })
+        return
+      }
+      if (selectedMaster === 'salary_components') {
+        toast.error('Template download failed', {
+          description: 'The Salary Components template requires a live connection. Please retry.',
         })
         return
       }
@@ -1024,9 +1030,9 @@ export function ImportWorkspace() {
           if (Object.keys(parsedManifest).length > 0) setTemplateManifest(parsedManifest)
         }
 
-        // Prefer the named "Employee Upload" sheet from new multi-sheet XLSX templates;
-        // fall back to index 0 for backward-compat with old 2-sheet "Salary Upload" files.
-        const dataSheetName = wb.SheetNames.find(n => n === 'Employee Upload') ?? wb.SheetNames[0]
+        // Prefer named data sheets from enterprise XLSX templates; fall back to index 0.
+        const KNOWN_DATA_SHEETS = new Set(['Employee Upload', 'Salary Component Upload'])
+        const dataSheetName = wb.SheetNames.find(n => KNOWN_DATA_SHEETS.has(n)) ?? wb.SheetNames[0]
         const ws = wb.Sheets[dataSheetName]
 
         // Get raw array-of-arrays to skip # comment rows before building objects

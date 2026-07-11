@@ -1,5 +1,7 @@
 // ── Universal Master Import Framework — Template Definitions ─────────────────
 
+import ExcelJS from 'exceljs'
+
 export interface ColumnSpec {
   key: string
   label: string
@@ -1713,6 +1715,370 @@ export function generateCSV(masterType: string): string {
   }
 
   return lines.join('\n')
+}
+
+// ── Enterprise XLSX — Salary Component Admin Upload ───────────────────────────
+
+const SC_NAVY  = 'FF1B3D6B'
+const SC_BLUE  = 'FF2E6FE6'
+const SC_RED   = 'FFDC2626'
+const SC_GREEN = 'FF166534'
+const SC_TEAL  = 'FF15B8A6'
+const SC_WHITE = 'FFFFFFFF'
+const SC_LGREY = 'FFF1F5F9'
+
+interface ScColDef {
+  key:      string
+  required: boolean
+  group:    string
+  color:    string
+  width:    number
+  dv:       string | null
+}
+
+// Display order: Identity → Behaviour → Statutory → Display
+// Header cell values are the raw keys (normaliseKey strips trailing " *" and lowercases)
+const SC_COLS: ScColDef[] = [
+  { key: 'code',              required: true,  group: 'IDENTITY',  color: SC_NAVY,  width: 18, dv: null },
+  { key: 'name',              required: true,  group: 'IDENTITY',  color: SC_NAVY,  width: 30, dv: null },
+  { key: 'component_type',    required: true,  group: 'IDENTITY',  color: SC_NAVY,  width: 22, dv: '"earning,deduction,employer_contribution"' },
+  { key: 'is_variable',       required: false, group: 'BEHAVIOUR', color: SC_BLUE,  width: 14, dv: '"true,false"' },
+  { key: 'is_basic',          required: false, group: 'BEHAVIOUR', color: SC_BLUE,  width: 12, dv: '"true,false"' },
+  { key: 'affects_pf',        required: false, group: 'BEHAVIOUR', color: SC_BLUE,  width: 12, dv: '"true,false"' },
+  { key: 'affects_nlc',       required: false, group: 'BEHAVIOUR', color: SC_BLUE,  width: 12, dv: '"true,false"' },
+  { key: 'is_taxable',        required: false, group: 'STATUTORY', color: SC_RED,   width: 12, dv: '"true,false"' },
+  { key: 'is_pf_applicable',  required: false, group: 'STATUTORY', color: SC_RED,   width: 16, dv: '"true,false"' },
+  { key: 'is_esi_applicable', required: false, group: 'STATUTORY', color: SC_RED,   width: 16, dv: '"true,false"' },
+  { key: 'is_pt_applicable',  required: false, group: 'STATUTORY', color: SC_RED,   width: 16, dv: '"true,false"' },
+  { key: 'is_lwf_applicable', required: false, group: 'STATUTORY', color: SC_RED,   width: 16, dv: '"true,false"' },
+  { key: 'display_order',     required: false, group: 'DISPLAY',   color: SC_GREEN, width: 14, dv: null },
+  { key: 'description',       required: false, group: 'DISPLAY',   color: SC_GREEN, width: 36, dv: null },
+]
+
+// Group ranges (1-indexed column positions) for the merged label row
+const SC_GROUPS = [
+  { label: '# IDENTITY',  from: 1,  to: 3,  color: SC_NAVY  },
+  { label: '# BEHAVIOUR', from: 4,  to: 7,  color: SC_BLUE  },
+  { label: '# STATUTORY', from: 8,  to: 12, color: SC_RED   },
+  { label: '# DISPLAY',   from: 13, to: 14, color: SC_GREEN },
+]
+
+function scColLetter(n: number): string {
+  let r = ''
+  while (n > 0) { n--; r = String.fromCharCode(65 + (n % 26)) + r; n = Math.floor(n / 26) }
+  return r
+}
+
+function scFill(argb: string): ExcelJS.FillPattern {
+  return { type: 'pattern', pattern: 'solid', fgColor: { argb } }
+}
+
+function scFont(o: Partial<ExcelJS.Font> = {}): Partial<ExcelJS.Font> {
+  return { name: 'Calibri', size: 10, ...o }
+}
+
+/**
+ * Generate a 4-sheet enterprise XLSX workbook for the Salary Component admin upload.
+ *
+ * Sheet 1 — Instructions            : purpose, how-to, colour key, import rules
+ * Sheet 2 — Salary Component Upload : data entry with colour groups, dropdowns,
+ *                                     conditional formatting for required fields,
+ *                                     and sheet protection (headers locked)
+ * Sheet 3 — Reference               : field descriptions grouped by section
+ * Sheet 4 — CognixHR_Metadata       : hidden; carries import-type manifest
+ */
+export async function generateSalaryComponentsXlsx(generatedOn: string): Promise<Buffer> {
+  const wb = new ExcelJS.Workbook()
+  wb.creator  = 'CognixHR'
+  wb.created  = new Date()
+  wb.modified = new Date()
+
+  const NCOLS        = SC_COLS.length                                       // 14
+  const SAMPLE_COUNT = MASTER_TEMPLATES['salary_components'].sampleRows.length  // 2
+  const DATA_ROWS    = 200
+  const FIRST_ROW    = 3                             // row 1 = group labels, row 2 = headers
+  const LAST_ROW     = 2 + SAMPLE_COUNT + DATA_ROWS // = 204
+
+  // ── Sheet 1: Instructions ─────────────────────────────────────────────────
+  const wsI = wb.addWorksheet('Instructions')
+  wsI.getColumn(1).width = 96
+
+  const addTitleI = (text: string, bg: string, size = 16) => {
+    const r = wsI.addRow([text])
+    r.height = size >= 14 ? 40 : 24
+    const c = r.getCell(1)
+    c.font      = scFont({ bold: true, color: { argb: SC_WHITE }, size })
+    c.fill      = scFill(bg)
+    c.alignment = { vertical: 'middle', horizontal: 'left', indent: 2 }
+  }
+  const addSectionI = (text: string) => {
+    wsI.addRow([])
+    const r = wsI.addRow([text])
+    r.height = 22
+    const c = r.getCell(1)
+    c.font      = scFont({ bold: true, color: { argb: SC_WHITE }, size: 11 })
+    c.fill      = scFill(SC_BLUE)
+    c.alignment = { vertical: 'middle', horizontal: 'left', indent: 1 }
+  }
+  const addBodyI = (text: string) => {
+    const r = wsI.addRow([text])
+    r.height = 17
+    r.getCell(1).font = scFont({ size: 10 })
+  }
+
+  addTitleI('CognixHR — Salary Component Master Upload', SC_NAVY, 16)
+  addTitleI(`Administrator template  ·  Generated: ${generatedOn}`, SC_BLUE, 11)
+
+  addSectionI('PURPOSE')
+  addBodyI('This template is used by administrators to bulk-create or update Salary Components.')
+  addBodyI('Salary Components are the building blocks of employee compensation:')
+  addBodyI('  • Earnings (Basic Salary, HRA, Special Allowance, …)')
+  addBodyI('  • Deductions (PF, PT, ESI, LWF, …)')
+  addBodyI('  • Employer Contributions (PF Employer, ESI Employer, Gratuity, …)')
+  addBodyI('')
+  addBodyI('Behaviour flags control how each component is treated in payroll calculations.')
+  addBodyI('Statutory flags control which compliance deductions and contributions apply.')
+
+  addSectionI('HOW TO USE')
+  addBodyI('1.  Go to the "Salary Component Upload" sheet (second tab).')
+  addBodyI('2.  Row 1 shows the column group — do not edit it.')
+  addBodyI('3.  Row 2 is the column header — do not rename or reorder columns.')
+  addBodyI('4.  Rows 3-4 are sample rows — clear them before uploading (or leave; invalid codes are skipped).')
+  addBodyI('5.  Enter one salary component per row from row 5 onwards:')
+  addBodyI('       A — code            (required — unique code, e.g. SC-BASIC)')
+  addBodyI('       B — name            (required — display name on payslips)')
+  addBodyI('       C — component_type  (required — earning / deduction / employer_contribution)')
+  addBodyI('       D-G — Behaviour flags   (true / false, or leave blank for false)')
+  addBodyI('       H-L — Statutory flags   (true / false, or leave blank for false)')
+  addBodyI('       M — display_order    (integer; controls payslip sort order)')
+  addBodyI('       N — description      (optional notes — not used in calculations)')
+  addBodyI('6.  Save as .xlsx and upload via CognixHR → Import → Salary Components.')
+
+  addSectionI('IMPORT RULES (UPSERT)')
+  addBodyI('•  code is the upsert key. Existing components (matched by code) are updated; new codes are created.')
+  addBodyI('•  Changing a code creates a new component — clean up duplicates in Payroll → Salary Components.')
+  addBodyI('•  Boolean fields: "true" or "false" (case-insensitive). Blank defaults to false.')
+  addBodyI('•  component_type must be exactly one of the three values (dropdowns enforce this).')
+  addBodyI('•  display_order must be a whole number. Gaps are fine; duplicate orders are allowed.')
+
+  addSectionI('COLUMN COLOUR KEY')
+  addBodyI('  ■ Navy blue  (A-C)  — Identity: the three required fields')
+  addBodyI('  ■ Royal blue (D-G)  — Behaviour: payroll calculation flags')
+  addBodyI('  ■ Red        (H-L)  — Statutory: tax and compliance flags')
+  addBodyI('  ■ Dark green (M-N)  — Display: sort order and annotation')
+
+  // ── Sheet 2: Salary Component Upload (data entry) ─────────────────────────
+  const wsD = wb.addWorksheet('Salary Component Upload')
+  SC_COLS.forEach((col, i) => { wsD.getColumn(i + 1).width = col.width })
+
+  // Row 1: Group label row — # prefix ensures upload parser skips it (row[0] starts with #)
+  {
+    const vals: (string | null)[] = new Array(NCOLS).fill(null)
+    for (const g of SC_GROUPS) vals[g.from - 1] = g.label
+    const gr = wsD.addRow(vals)
+    gr.height = 20
+    for (const g of SC_GROUPS) {
+      wsD.mergeCells(`${scColLetter(g.from)}${gr.number}:${scColLetter(g.to)}${gr.number}`)
+      const cell = gr.getCell(g.from)
+      cell.fill      = scFill(g.color)
+      cell.font      = scFont({ bold: true, italic: true, color: { argb: SC_WHITE }, size: 9 })
+      cell.alignment = { vertical: 'middle', horizontal: 'center' }
+    }
+  }
+
+  // Row 2: Column headers — upload parser uses these as row keys (normaliseKey strips " *")
+  {
+    const hr = wsD.addRow(SC_COLS.map(c => c.required ? `${c.key} *` : c.key))
+    hr.height = 26
+    hr.eachCell((cell, colNo) => {
+      cell.fill      = scFill(SC_COLS[colNo - 1].color)
+      cell.font      = scFont({ bold: true, color: { argb: SC_WHITE }, size: 11 })
+      cell.alignment = { vertical: 'middle', horizontal: 'center' }
+      cell.border    = { bottom: { style: 'medium', color: { argb: SC_TEAL } } }
+    })
+    for (let i = 1; i <= 3; i++) {
+      hr.getCell(i).alignment = { vertical: 'middle', horizontal: 'left' }
+    }
+  }
+
+  // Rows 3-4: Sample rows (grey italic — parser reads them as data until user clears)
+  for (const sample of MASTER_TEMPLATES['salary_components'].sampleRows) {
+    const sr = wsD.addRow(SC_COLS.map(c => (sample as Record<string, string>)[c.key] ?? ''))
+    sr.height = 18
+    sr.eachCell(cell => {
+      cell.fill      = scFill(SC_LGREY)
+      cell.font      = scFont({ italic: true, color: { argb: 'FF6B7280' } })
+      cell.alignment = { vertical: 'middle', horizontal: 'left' }
+    })
+  }
+
+  // Rows 5-204: 200 empty data entry rows
+  for (let i = 0; i < DATA_ROWS; i++) wsD.addRow([])
+
+  // Data validation dropdowns (rows 3-204 = sample + data)
+  // ws.dataValidations exists at runtime but is missing from ExcelJS's TS types — cast to any
+  const dv = (wsD as any).dataValidations
+  SC_COLS.forEach((col, idx) => {
+    if (!col.dv) return
+    const letter = scColLetter(idx + 1)
+    dv.add(`${letter}${FIRST_ROW}:${letter}${LAST_ROW}`, {
+      type:             'list',
+      allowBlank:       true,
+      formulae:         [col.dv],
+      showErrorMessage: true,
+      errorTitle:       'Invalid value',
+      error:            col.key === 'component_type'
+        ? 'Must be: earning, deduction, or employer_contribution'
+        : 'Must be: true or false',
+    })
+  })
+
+  // Conditional formatting: highlight empty required cells (cols A-C) with yellow
+  // Use 'expression' + ISBLANK so the rule type is within ExcelJS's typed union
+  wsD.addConditionalFormatting({
+    ref: `A${FIRST_ROW}:C${LAST_ROW}`,
+    rules: [
+      {
+        type:     'expression',
+        priority: 1,
+        formulae: [`ISBLANK(A${FIRST_ROW})`],
+        style:    { fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFFF99' } } },
+      },
+    ],
+  })
+
+  // Sheet protection: unlock data rows 3-204, keep header rows 1-2 locked
+  for (let r = FIRST_ROW; r <= LAST_ROW; r++) {
+    for (let c = 1; c <= NCOLS; c++) {
+      wsD.getCell(r, c).protection = { locked: false }
+    }
+  }
+  wsD.protect('', { selectLockedCells: false, selectUnlockedCells: false })
+
+  // Freeze rows 1-2 and column A
+  wsD.views = [{ state: 'frozen', ySplit: 2, xSplit: 1, topLeftCell: 'B3', activeCell: 'A5' }]
+
+  // Auto-filter on header row (row 2)
+  wsD.autoFilter = { from: { row: 2, column: 1 }, to: { row: 2, column: NCOLS } }
+
+  // ── Sheet 3: Reference ────────────────────────────────────────────────────
+  const wsR = wb.addWorksheet('Reference')
+  ;[22, 10, 38, 60].forEach((w, i) => { wsR.getColumn(i + 1).width = w })
+
+  const addRefTitle = (text: string, bg: string, size = 16) => {
+    const r = wsR.addRow([text])
+    r.height = size >= 14 ? 40 : 24
+    const c = r.getCell(1)
+    c.font      = scFont({ bold: true, color: { argb: SC_WHITE }, size })
+    c.fill      = scFill(bg)
+    c.alignment = { vertical: 'middle', horizontal: 'left', indent: 2 }
+    wsR.mergeCells(`A${r.number}:D${r.number}`)
+  }
+  addRefTitle('Salary Component Field Reference', SC_NAVY, 16)
+  addRefTitle(`All 14 import fields  ·  Generated: ${generatedOn}`, SC_BLUE, 11)
+
+  const refGroups: Array<{
+    group: string
+    color: string
+    fields: Array<{ key: string; req: string; allowed: string; desc: string }>
+  }> = [
+    {
+      group: 'IDENTITY (columns A-C)',
+      color: SC_NAVY,
+      fields: [
+        { key: 'code',           req: 'Required', allowed: 'Text (e.g. SC-BASIC)',                        desc: 'Unique component code — the upsert key. Uppercase recommended.' },
+        { key: 'name',           req: 'Required', allowed: 'Text (e.g. Basic Salary)',                    desc: 'Display name shown on payslips and CTC reports.' },
+        { key: 'component_type', req: 'Required', allowed: 'earning | deduction | employer_contribution', desc: 'Category — determines which section of the payslip this component appears in.' },
+      ],
+    },
+    {
+      group: 'BEHAVIOUR (columns D-G)',
+      color: SC_BLUE,
+      fields: [
+        { key: 'is_variable', req: 'Optional', allowed: 'true | false', desc: 'Variable pay — amount differs each cycle (e.g. overtime, incentives). Default: false.' },
+        { key: 'is_basic',    req: 'Optional', allowed: 'true | false', desc: 'Basic Salary — used as basis for HRA, PF wage, and derived calculations. Default: false.' },
+        { key: 'affects_pf',  req: 'Optional', allowed: 'true | false', desc: 'Include in PF wage calculation (typically Basic + DA + Special Allowance). Default: false.' },
+        { key: 'affects_nlc', req: 'Optional', allowed: 'true | false', desc: 'Include in Net Labour Cost — total employer spend including contributions. Default: false.' },
+      ],
+    },
+    {
+      group: 'STATUTORY (columns H-L)',
+      color: SC_RED,
+      fields: [
+        { key: 'is_taxable',        req: 'Optional', allowed: 'true | false', desc: 'Taxable under income tax provisions. Default: false.' },
+        { key: 'is_pf_applicable',  req: 'Optional', allowed: 'true | false', desc: 'PF deduction applicable on this component. Default: false.' },
+        { key: 'is_esi_applicable', req: 'Optional', allowed: 'true | false', desc: 'ESI (Employee State Insurance) applicable. Default: false.' },
+        { key: 'is_pt_applicable',  req: 'Optional', allowed: 'true | false', desc: 'Professional Tax applicable. Default: false.' },
+        { key: 'is_lwf_applicable', req: 'Optional', allowed: 'true | false', desc: 'Labour Welfare Fund applicable. Default: false.' },
+      ],
+    },
+    {
+      group: 'DISPLAY (columns M-N)',
+      color: SC_GREEN,
+      fields: [
+        { key: 'display_order', req: 'Optional', allowed: 'Integer (e.g. 1, 10)', desc: 'Sort order on payslips and CTC statements. Lower numbers appear first.' },
+        { key: 'description',   req: 'Optional', allowed: 'Any text',             desc: 'Optional notes or explanation for administrators. Not used in payroll calculations.' },
+      ],
+    },
+  ]
+
+  const REF_HEADERS = ['Field', 'Required', 'Allowed Values', 'Description']
+  for (const grp of refGroups) {
+    wsR.addRow([])
+    const gh = wsR.addRow([grp.group])
+    gh.height = 22
+    const ghc = gh.getCell(1)
+    ghc.font      = scFont({ bold: true, color: { argb: SC_WHITE }, size: 11 })
+    ghc.fill      = scFill(grp.color)
+    ghc.alignment = { vertical: 'middle', horizontal: 'left', indent: 1 }
+    wsR.mergeCells(`A${gh.number}:D${gh.number}`)
+
+    const ch = wsR.addRow(REF_HEADERS)
+    ch.height = 18
+    ch.eachCell(cell => {
+      cell.font      = scFont({ bold: true, size: 10 })
+      cell.fill      = scFill(SC_LGREY)
+      cell.alignment = { vertical: 'middle', horizontal: 'center' }
+      cell.border    = { bottom: { style: 'thin', color: { argb: 'FFE2E8F0' } } }
+    })
+    ch.getCell(1).alignment = { horizontal: 'left' }
+    ch.getCell(4).alignment = { horizontal: 'left', wrapText: true }
+
+    for (let i = 0; i < grp.fields.length; i++) {
+      const f  = grp.fields[i]
+      const dr = wsR.addRow([f.key, f.req, f.allowed, f.desc])
+      dr.height = 18
+      if (i % 2 === 0) {
+        dr.eachCell({ includeEmpty: true }, cell => { cell.fill = scFill('FFFAFBFF') })
+      }
+      dr.eachCell(cell => {
+        cell.font      = scFont({ size: 10 })
+        cell.alignment = { vertical: 'middle', wrapText: true }
+      })
+      dr.getCell(2).alignment = { vertical: 'middle', horizontal: 'center' }
+    }
+  }
+  wsR.views = [{ state: 'frozen', ySplit: 2, topLeftCell: 'A3' }]
+
+  // ── Sheet 4: CognixHR_Metadata (very hidden) ──────────────────────────────
+  const wsM = wb.addWorksheet('CognixHR_Metadata')
+  wsM.state = 'veryHidden'
+
+  const metaRows: string[][] = [
+    ['key',            'value'],
+    ['product',        'CognixHR'],
+    ['import_type',    'salary_components'],
+    ['generated_at',   generatedOn],
+    ['schema_version', '1'],
+    ['column_count',   String(NCOLS)],
+    ...SC_COLS.map((c, i) => [`col_${i}`, `${c.key}|${c.group}`]),
+  ]
+  for (const row of metaRows) wsM.addRow(row)
+  wsM.getColumn(1).width = 20
+  wsM.getColumn(2).width = 50
+
+  const buf = await wb.xlsx.writeBuffer()
+  return Buffer.from(buf as ArrayBuffer)
 }
 
 export function getTemplateSpec(masterType: string): TemplateSpec | null {
