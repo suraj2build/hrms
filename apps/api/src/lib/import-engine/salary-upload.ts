@@ -24,6 +24,7 @@ import {
   validateReferenceIntegrity,
   MetadataValidationError,
   ReferenceIntegrityError,
+  WORKBOOK_ERROR_CODES,
   type WorkbookManifest,
   type MasterMapping,
   type ImportContext,
@@ -126,56 +127,6 @@ export async function fetchActiveComponents(
   })
 }
 
-/**
- * Fetch ALL components (including inactive) keyed by lowercase name.
- * Used by the validator to distinguish "inactive" from "unknown" in error messages.
- */
-async function fetchAllComponentsByLowerName(
-  supabase: SupabaseClient,
-  tenantId: string,
-): Promise<Map<string, ComponentMeta>> {
-  const { data } = await supabase
-    .from('salary_components')
-    .select('id, name, code, component_type, is_active')
-    .eq('tenant_id', tenantId)
-    .order('name')
-
-  const map = new Map<string, ComponentMeta>()
-  for (const row of (data ?? []) as ComponentMeta[]) {
-    map.set(row.name.trim().toLowerCase(), row)
-  }
-  return map
-}
-
-// ── Name normalization ────────────────────────────────────────────────────────
-
-/**
- * Collapse whitespace, dots, hyphens, and underscores then lowercase.
- * "HRA", "H.R.A", "H-R-A", "h r a" all → "hra".
- * Used for both duplicate detection and column-header matching.
- */
-function normalizeName(name: string): string {
-  return name.trim().replace(/[\s.\-_]+/g, '').toLowerCase()
-}
-
-// ── Duplicate name check ──────────────────────────────────────────────────────
-
-/**
- * Returns display names that appear more than once in the active component set.
- * Comparison uses normalizeName() so "HRA" and "H.R.A" are treated as the same.
- * Duplicate names make the template column mapping ambiguous and must be fixed
- * in the Salary Component Master before generating a template.
- */
-export function findDuplicateComponentNames(components: ComponentMeta[]): string[] {
-  const seen  = new Map<string, string>()  // normalized → original display name
-  const dupes = new Set<string>()
-  for (const c of components) {
-    const nk = normalizeName(c.name)
-    if (seen.has(nk)) dupes.add(seen.get(nk)!)
-    else               seen.set(nk, c.name)
-  }
-  return [...dupes]
-}
 
 // ── Import Manifest ───────────────────────────────────────────────────────────
 
@@ -753,42 +704,49 @@ export async function validateSalaryUploadRows(
     }
   }
 
-  // Fetch all components including inactive — for better error messages
-  const allCompByLowerName = await fetchAllComponentsByLowerName(supabase, tenantId)
+  // Phase 3: component manifest is mandatory — salary upload requires the v2 XLSX
+  // template. v1 XLSX workbooks are rejected at resolveMetadata (Stage 1); CSV
+  // uploads have no manifest. Without manifest.components there is no positional
+  // mapping and we cannot safely process any component column.
+  if (!manifest?.components) {
+    throw new MetadataValidationError(
+      WORKBOOK_ERROR_CODES.MANIFEST_FIELD_MISSING,
+      'This file is missing the salary component manifest. ' +
+      'Please upload the XLSX template downloaded from CognixHR — ' +
+      'CSV and older template files are no longer accepted for salary data.',
+    )
+  }
 
   // Current template version
   const currentTemplateVersion = computeTemplateVersion(activeComponents)
   const templateOutdated = !!templateVersion && templateVersion !== currentTemplateVersion
 
-  // Build lowercase name → ComponentMeta lookup (active only)
-  const compByLowercaseName = new Map<string, ComponentMeta>()
-  for (const c of activeComponents) {
-    compByLowercaseName.set(c.name.trim().toLowerCase(), c)
-  }
-
-  // Build type map for payroll estimate computation
+  // Build component_id → component_type map for payroll estimate computation
   const compTypeById = new Map<string, string>()
   for (const c of activeComponents) {
     compTypeById.set(c.id, c.component_type)
   }
 
-  // Classify headers from the first row
-  const firstRowKeys = rows.length > 0 ? Object.keys(rows[0]) : []
-  const componentCols:  Array<{ key: string; meta: ComponentMeta }> = []
-  const inactiveCols:   string[] = []
-  const unknownCols:    string[] = []
+  // Build manifest-based column map: normalised-header-name → entityId.
+  // All column identity comes from the workbook manifest (fixed at generation
+  // time and validated by validateReferenceIntegrity above). No DB name lookup.
+  const manifestEntries = JSON.parse(manifest.components) as Array<{
+    position: number; id: string; code: string; name: string
+  }>
+  const manifestByHeader = new Map<string, string>()  // normalised name → entityId
+  for (const m of manifestEntries) {
+    manifestByHeader.set(m.name.replace(/\s*\*\s*$/, '').trim().toLowerCase(), m.id)
+  }
 
+  // Classify headers: manifest-known component columns vs fixed/unrecognized (skip)
+  const firstRowKeys = rows.length > 0 ? Object.keys(rows[0]) : []
+  const componentCols: Array<{ key: string; entityId: string }> = []
   for (const key of firstRowKeys) {
-    const lk = key.trim().toLowerCase()
-    if (FIXED_KEYS.has(lk)) continue
-    const activeMeta = compByLowercaseName.get(lk)
-    if (activeMeta) {
-      componentCols.push({ key, meta: activeMeta })
-    } else {
-      const anyMeta = allCompByLowerName.get(lk)
-      if (anyMeta && !anyMeta.is_active) inactiveCols.push(key)
-      else                                unknownCols.push(key)
-    }
+    if (FIXED_KEYS.has(key)) continue
+    const entityId = manifestByHeader.get(key)
+    if (entityId) componentCols.push({ key, entityId })
+    // Columns not in the manifest are silently ignored — validateReferenceIntegrity
+    // already confirmed that all manifest entity IDs are active and present.
   }
 
   const validatedRows: ValidatedRow[] = []
@@ -800,24 +758,6 @@ export async function validateSalaryUploadRows(
     const errors:   RowError[] = []
     const warnings: RowError[] = []
     const norm: Record<string, unknown> = {}
-
-    // Inactive component columns
-    for (const col of inactiveCols) {
-      errors.push({
-        field:    col,
-        message:  `Component "${col}" is no longer active. Download a fresh template to get the current column list.`,
-        severity: 'error',
-      })
-    }
-
-    // Unknown columns
-    for (const col of unknownCols) {
-      errors.push({
-        field:    col,
-        message:  `Unknown component "${col}". Download the latest template — it is generated from your Salary Component Master.`,
-        severity: 'error',
-      })
-    }
 
     const d: Record<string, string> = {}
     for (const k of Object.keys(raw)) d[k] = (raw[k] ?? '').trim()
@@ -843,19 +783,19 @@ export async function validateSalaryUploadRows(
     }
 
     // Component columns — numeric, non-negative, empty = skip (0)
-    const compAmounts: Record<string, number> = {}  // component_id → monthly amount
-    for (const { key, meta } of componentCols) {
+    const compAmounts: Record<string, number> = {}  // entityId → monthly amount
+    for (const { key, entityId } of componentCols) {
       const val = (d[key] ?? '').trim()
       if (!val || val === '') continue  // blank = skip (treat as not set)
       const n = parseFloat(val)
       if (isNaN(n) || n < 0) {
         errors.push({
           field:    key,
-          message:  `Invalid amount "${val}" for "${meta.name}" — must be a non-negative number`,
+          message:  `Invalid amount "${val}" for "${key}" — must be a non-negative number`,
           severity: 'error',
         })
       } else {
-        compAmounts[meta.id] = n
+        compAmounts[entityId] = n
       }
     }
     norm.components = compAmounts

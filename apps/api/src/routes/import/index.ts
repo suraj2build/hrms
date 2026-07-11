@@ -11,7 +11,6 @@ import {
   generateSalaryUploadXlsx,
   validateSalaryUploadRows,
   runSalaryUploadJob,
-  findDuplicateComponentNames,
   type SalaryManifest,
 } from '../../lib/import-engine/salary-upload.js'
 import {
@@ -128,13 +127,6 @@ export default async function importRoutes(fastify: FastifyInstance) {
         return reply.code(400).send({
           error:   'NO_COMPONENTS',
           message: 'No salary components found. Go to Payroll → Salary Components and create at least one component before downloading the salary upload template.',
-        })
-      }
-      const dupes = findDuplicateComponentNames(components)
-      if (dupes.length > 0) {
-        return reply.code(400).send({
-          error:   'DUPLICATE_COMPONENT_NAMES',
-          message: `Salary Component Master has duplicate display names: ${dupes.join(', ')}. Fix these in Payroll → Salary Components before generating the upload template.`,
         })
       }
       const today = new Date().toISOString().split('T')[0]
