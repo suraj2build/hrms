@@ -1,10 +1,15 @@
 // ── Enterprise Import Platform — Chunk Executor ──────────────────────────────
 //
-// Generic chunked execution engine. All bulk imports funnel through here:
+// Self-healing chunk execution engine. All bulk imports funnel through here.
+//
+// Capabilities:
 //   • Pre-creates import_job_chunks (idempotent — safe to re-run)
-//   • Writes validation failures to import_job_errors
+//   • Immutable chunk checksum for deterministic replay identity
+//   • Writes validation failures to import_job_errors with error_category
 //   • Processes eligible rows in chunks (default 5 000 rows/chunk)
 //   • Skips 'completed' chunks on resume (crash recovery / checkpoint)
+//   • Heartbeat timer (5 s) lets watchdog detect frozen workers
+//   • Per-chunk timing metrics written to import_job_metrics
 //   • Stamps import_jobs progress + last_activity_at after every chunk
 //
 // rotation_policies is intentionally excluded — its grouped multi-row write
@@ -15,8 +20,9 @@ import type { ValidatedRow }   from './validator.js'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-export const DEFAULT_CHUNK_SIZE = 5_000
-const ERROR_BATCH_SIZE          = 200
+export const DEFAULT_CHUNK_SIZE   = 5_000
+const ERROR_BATCH_SIZE            = 200
+const HEARTBEAT_INTERVAL_MS       = 5_000
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -48,7 +54,64 @@ export interface ExecuteInChunksResult {
   skipped: number
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+// ── Error classification ──────────────────────────────────────────────────────
+
+function classifyError(
+  message: string,
+  stage:   'validation' | 'business_validation' | 'write',
+): 'permanent' | 'retryable' | 'fatal' {
+  if (stage === 'validation' || stage === 'business_validation') return 'permanent'
+
+  const m = message.toLowerCase()
+
+  // Fatal: the entire import is invalid at the job level
+  if (
+    m.includes('manifest') ||
+    m.includes('schema version') ||
+    m.includes('different tenant') ||
+    m.includes('template mismatch')
+  ) return 'fatal'
+
+  // Retryable: transient infrastructure failures
+  if (
+    m.includes('timeout') ||
+    m.includes('connection') ||
+    m.includes('network') ||
+    m.includes('unavailable') ||
+    m.includes('econnreset') ||
+    m.includes('econnrefused') ||
+    m.includes('503') ||
+    m.includes('429') ||
+    m.includes('too many requests')
+  ) return 'retryable'
+
+  // Default: permanent (FK violation, duplicate key, type error, etc.)
+  return 'permanent'
+}
+
+// ── Chunk checksum ────────────────────────────────────────────────────────────
+// djb2 hash over the structural identity of a chunk — jobId + chunkNo + rows.
+// Written once at chunk creation; never updated. Lets replay verify it is
+// processing the exact same row range as the original run.
+
+function djb2(s: string): number {
+  let h = 5381
+  for (let i = 0; i < s.length; i++) {
+    h = (((h << 5) + h) ^ s.charCodeAt(i)) >>> 0
+  }
+  return h
+}
+
+function computeChunkChecksum(
+  jobId:    string,
+  chunkNo:  number,
+  startRow: number,
+  endRow:   number,
+): string {
+  return djb2(`${jobId}:${chunkNo}:${startRow}:${endRow}`).toString(16).padStart(8, '0')
+}
+
+// ── Row-key extraction ────────────────────────────────────────────────────────
 
 const ROW_KEY_CANDIDATES = [
   'employee_code', 'code', 'email', 'name', 'policy_name',
@@ -63,6 +126,8 @@ function getRowKey(vr: ValidatedRow): string | null {
   return null
 }
 
+// ── Error writer ──────────────────────────────────────────────────────────────
+
 export async function writeImportErrors(
   supabase: SupabaseClient,
   tenantId: string,
@@ -75,28 +140,30 @@ export async function writeImportErrors(
   for (const vr of rows) {
     for (const e of vr.errors) {
       records.push({
-        import_job_id: jobId,
-        tenant_id:     tenantId,
-        row_number:    vr.rowNumber,
-        row_key:       getRowKey(vr),
-        error_stage:   stage,
-        error_code:    e.field === '_db' ? 'DB_ERROR' : `FIELD_${e.field.toUpperCase()}`,
-        error_message: e.message,
-        raw_payload:   vr.originalData,
+        import_job_id:  jobId,
+        tenant_id:      tenantId,
+        row_number:     vr.rowNumber,
+        row_key:        getRowKey(vr),
+        error_stage:    stage,
+        error_code:     e.field === '_db' ? 'DB_ERROR' : `FIELD_${e.field.toUpperCase()}`,
+        error_message:  e.message,
+        error_category: classifyError(e.message, stage),
+        raw_payload:    vr.originalData,
       })
     }
     // Row is invalid but has no error messages — emit a generic entry so
     // the UI always has something to display.
     if (vr.errors.length === 0) {
       records.push({
-        import_job_id: jobId,
-        tenant_id:     tenantId,
-        row_number:    vr.rowNumber,
-        row_key:       getRowKey(vr),
-        error_stage:   stage,
-        error_code:    'UNKNOWN',
-        error_message: 'Row failed without a specific error message.',
-        raw_payload:   vr.originalData,
+        import_job_id:  jobId,
+        tenant_id:      tenantId,
+        row_number:     vr.rowNumber,
+        row_key:        getRowKey(vr),
+        error_stage:    stage,
+        error_code:     'UNKNOWN',
+        error_message:  'Row failed without a specific error message.',
+        error_category: classifyError('', stage),
+        raw_payload:    vr.originalData,
       })
     }
   }
@@ -145,17 +212,23 @@ export async function executeInChunks({
   }
   const totalChunks = chunks.length
 
-  // 4. Upsert chunk records — ignoreDuplicates so a resume doesn't overwrite
-  //    'completed' status with 'pending'.
-  const chunkRecords = chunks.map((ch, idx) => ({
-    import_job_id: jobId,
-    tenant_id:     tenantId,
-    chunk_no:      idx + 1,
-    start_row:     ch[0].rowNumber,
-    end_row:       ch[ch.length - 1].rowNumber,
-    status:        'pending',
-    attempt:       0,
-  }))
+  // 4. Upsert chunk records with immutable checksum.
+  //    ignoreDuplicates: on resume, skip existing rows — preserves 'completed' status.
+  const chunkRecords = chunks.map((ch, idx) => {
+    const chunkNo  = idx + 1
+    const startRow = ch[0].rowNumber
+    const endRow   = ch[ch.length - 1].rowNumber
+    return {
+      import_job_id: jobId,
+      tenant_id:     tenantId,
+      chunk_no:      chunkNo,
+      start_row:     startRow,
+      end_row:       endRow,
+      checksum:      computeChunkChecksum(jobId, chunkNo, startRow, endRow),
+      status:        'pending',
+      attempt:       0,
+    }
+  })
 
   await supabase
     .from('import_job_chunks')
@@ -164,7 +237,7 @@ export async function executeInChunks({
   // 5. Fetch live chunk statuses (to detect already-completed chunks on resume)
   const { data: liveChunks } = await supabase
     .from('import_job_chunks')
-    .select('chunk_no, id, status, success_count, failure_count')
+    .select('chunk_no, id, status, success_count, failure_count, attempt')
     .eq('import_job_id', jobId)
     .order('chunk_no', { ascending: true })
 
@@ -173,6 +246,7 @@ export async function executeInChunks({
     status:        string
     success_count: number
     failure_count: number
+    attempt:       number
   }>()
   for (const row of liveChunks ?? []) {
     chunkMeta.set(row.chunk_no as number, {
@@ -180,6 +254,7 @@ export async function executeInChunks({
       status:        row.status        as string,
       success_count: (row.success_count as number) ?? 0,
       failure_count: (row.failure_count as number) ?? 0,
+      attempt:       (row.attempt       as number) ?? 0,
     })
   }
 
@@ -216,89 +291,155 @@ export async function executeInChunks({
     totalSkipped = skippedCount
   }
 
-  // 8. Process each chunk
-  for (let idx = 0; idx < chunks.length; idx++) {
-    const chunkNo = idx + 1
-    const chunk   = chunks[idx]
-    const meta    = chunkMeta.get(chunkNo)
+  // 8. Heartbeat timer — stamps import_jobs.heartbeat_at every 5 s so a watchdog
+  //    can distinguish active workers from frozen/dead ones.
+  const heartbeatTimer = setInterval(() => {
+    supabase
+      .from('import_jobs')
+      .update({ heartbeat_at: new Date().toISOString() })
+      .eq('id', jobId)
+      .then(() => {}) // fire-and-forget; errors are non-fatal
+  }, HEARTBEAT_INTERVAL_MS)
 
-    // Checkpoint: skip already-completed chunks
-    if (meta?.status === 'completed') continue
+  // Per-chunk timing accumulators for job-level aggregate metrics
+  let totalChunkMs  = 0
+  let peakChunkMs   = 0
+  let chunksRan     = 0
 
-    const startedAt = new Date().toISOString()
+  try {
+    // 9. Process each chunk
+    for (let idx = 0; idx < chunks.length; idx++) {
+      const chunkNo = idx + 1
+      const chunk   = chunks[idx]
+      const meta    = chunkMeta.get(chunkNo)
 
-    // Mark chunk as processing
-    await supabase
-      .from('import_job_chunks')
-      .update({
-        status:     'processing',
-        attempt:    (meta?.status ? 1 : 0) + 1,
-        started_at: startedAt,
-      })
-      .eq('import_job_id', jobId)
-      .eq('chunk_no', chunkNo)
+      // Checkpoint: skip already-completed chunks
+      if (meta?.status === 'completed') continue
 
-    try {
-      // Snapshot which rows are currently valid (to detect write-failures below)
-      const validBefore = new Set(chunk.filter((vr) => vr.isValid).map((vr) => vr.rowNumber))
-
-      const result = await processChunk(chunk)
-
-      // Rows that were valid before but became invalid during processing = write failures
-      const writeFailures = chunk.filter(
-        (vr) => validBefore.has(vr.rowNumber) && !vr.isValid,
-      )
-      if (writeFailures.length > 0) {
-        await writeImportErrors(supabase, tenantId, jobId, writeFailures, 'write')
-      }
-
-      totalCreated += result.created
-      totalUpdated += result.updated
-      totalFailed  += result.failed
-      totalSkipped += result.skipped
-
-      const processedRows = Math.min(chunkNo * chunkSize, eligibleRows.length)
-      const completedAt   = new Date().toISOString()
+      const chunkStartMs = Date.now()
+      const startedAt    = new Date(chunkStartMs).toISOString()
 
       await supabase
         .from('import_job_chunks')
         .update({
-          status:        'completed',
-          success_count: result.created + result.updated,
-          failure_count: result.failed,
-          completed_at:  completedAt,
+          status:     'processing',
+          attempt:    (meta?.attempt ?? 0) + 1,
+          started_at: startedAt,
         })
         .eq('import_job_id', jobId)
         .eq('chunk_no', chunkNo)
 
-      await supabase
+      try {
+        const validBefore = new Set(chunk.filter((vr) => vr.isValid).map((vr) => vr.rowNumber))
+
+        const dbWriteStart = Date.now()
+        const result       = await processChunk(chunk)
+        const dbWriteMs    = Date.now() - dbWriteStart
+
+        // Rows that were valid before but became invalid = write failures
+        const writeFailures = chunk.filter(
+          (vr) => validBefore.has(vr.rowNumber) && !vr.isValid,
+        )
+        if (writeFailures.length > 0) {
+          await writeImportErrors(supabase, tenantId, jobId, writeFailures, 'write')
+        }
+
+        totalCreated += result.created
+        totalUpdated += result.updated
+        totalFailed  += result.failed
+        totalSkipped += result.skipped
+
+        const processedRows    = Math.min(chunkNo * chunkSize, eligibleRows.length)
+        const chunkDurationMs  = Date.now() - chunkStartMs
+        const completedAt      = new Date().toISOString()
+        const rps              = chunkDurationMs > 0
+          ? Math.round((chunk.length / chunkDurationMs) * 1000 * 100) / 100
+          : 0
+
+        // Track for job-level aggregate
+        totalChunkMs += chunkDurationMs
+        peakChunkMs   = Math.max(peakChunkMs, chunkDurationMs)
+        chunksRan++
+
+        // Update chunk state
+        await supabase
+          .from('import_job_chunks')
+          .update({
+            status:        'completed',
+            success_count: result.created + result.updated,
+            failure_count: result.failed,
+            completed_at:  completedAt,
+          })
+          .eq('import_job_id', jobId)
+          .eq('chunk_no', chunkNo)
+
+        // Update job progress
+        await supabase
+          .from('import_jobs')
+          .update({
+            processed_rows:   processedRows,
+            created_rows:     totalCreated,
+            updated_rows:     totalUpdated,
+            failed_rows:      totalFailed,
+            skipped_rows:     totalSkipped,
+            current_chunk:    chunkNo,
+            last_activity_at: completedAt,
+          })
+          .eq('id', jobId)
+
+        // Insert per-chunk metrics (non-blocking — errors are non-fatal)
+        supabase
+          .from('import_job_metrics')
+          .insert({
+            import_job_id:    jobId,
+            tenant_id:        tenantId,
+            chunk_no:         chunkNo,
+            chunk_duration_ms: chunkDurationMs,
+            db_write_ms:       dbWriteMs,
+            rows_per_second:   rps,
+            success_count:     result.created + result.updated,
+            failure_count:     result.failed,
+            retry_count:       (meta?.attempt ?? 0),
+          })
+          .then(() => {})
+
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+
+        await supabase
+          .from('import_job_chunks')
+          .update({
+            status:        'failed',
+            error_summary: msg.slice(0, 1000),
+            completed_at:  new Date().toISOString(),
+          })
+          .eq('import_job_id', jobId)
+          .eq('chunk_no', chunkNo)
+
+        throw err
+      }
+    }
+
+  } finally {
+    // Always clear heartbeat — even if a chunk threw
+    clearInterval(heartbeatTimer)
+
+    // Write job-level throughput metrics if any chunks ran
+    if (chunksRan > 0) {
+      const totalEligible   = eligibleRows.length
+      const totalElapsedMs  = totalChunkMs
+      const avgRps          = totalElapsedMs > 0
+        ? Math.round((totalEligible / totalElapsedMs) * 1000 * 100) / 100
+        : 0
+
+      supabase
         .from('import_jobs')
         .update({
-          processed_rows:   processedRows,
-          created_rows:     totalCreated,
-          updated_rows:     totalUpdated,
-          failed_rows:      totalFailed,
-          skipped_rows:     totalSkipped,
-          current_chunk:    chunkNo,
-          last_activity_at: completedAt,
+          peak_chunk_ms:    peakChunkMs,
+          avg_rows_per_sec: avgRps,
         })
         .eq('id', jobId)
-
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
-
-      await supabase
-        .from('import_job_chunks')
-        .update({
-          status:        'failed',
-          error_summary: msg.slice(0, 1000),
-          completed_at:  new Date().toISOString(),
-        })
-        .eq('import_job_id', jobId)
-        .eq('chunk_no', chunkNo)
-
-      // Rethrow — the caller's outer catch will mark the job as failed
-      throw err
+        .then(() => {})
     }
   }
 

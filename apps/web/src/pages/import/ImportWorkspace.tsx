@@ -1253,7 +1253,18 @@ export function ImportWorkspace() {
       }
 
     },
-    onError: (e: Error) => toast.error('Import failed', { description: e.message }),
+    onError: (e: Error) => {
+      // Surface concurrency conflict with a specific message + link to history
+      const body = (e as any)?.response?.data ?? (e as any)?.data
+      if (body?.error === 'IMPORT_ALREADY_RUNNING') {
+        toast.error('Import already running', {
+          description: `A ${selectedMaster} import is still in progress. Check Import History or cancel it first.`,
+          action: { label: 'History', onClick: () => setActiveTab('history') },
+        })
+      } else {
+        toast.error('Import failed', { description: e.message })
+      }
+    },
   })
 
   // ── Cancel job (from History) ──────────────────────────────────────────────
@@ -1407,18 +1418,25 @@ export function ImportWorkspace() {
     const etaText   = etaSec == null ? null
       : etaSec < 60 ? `~${etaSec}s`
       : `~${Math.ceil(etaSec / 60)}m`
+    const heartbeatAt      = (j.heartbeat_at as string) ?? null
+    const isHeartbeatStale = heartbeatAt != null
+      && (j.status as string) === 'importing'
+      && (Date.now() - new Date(heartbeatAt).getTime()) > 60_000
+
     return {
       pct,
       processed,
       total,
       rps,
       etaText,
-      stage:   (j.current_stage as string) ?? 'processing',
-      created: (j.created_rows  as number) ?? 0,
-      updated: (j.updated_rows  as number) ?? 0,
-      failed:  (j.failed_rows   as number) ?? 0,
-      chunk:   (j.current_chunk as number) ?? null,
-      chunks:  (j.total_chunks  as number) ?? null,
+      stage:            (j.current_stage as string) ?? 'processing',
+      created:          (j.created_rows  as number) ?? 0,
+      updated:          (j.updated_rows  as number) ?? 0,
+      failed:           (j.failed_rows   as number) ?? 0,
+      chunk:            (j.current_chunk as number) ?? null,
+      chunks:           (j.total_chunks  as number) ?? null,
+      heartbeatAt,
+      isHeartbeatStale,
     }
   }, [polledJob, parsedRows.length])
 
@@ -2195,6 +2213,13 @@ export function ImportWorkspace() {
                           <p className="text-[10px] text-muted-foreground">remaining</p>
                         </div>
                       </div>
+
+                      {liveProgress.isHeartbeatStale && (
+                        <div className="flex items-center gap-1.5 rounded-md border border-warning/40 bg-warning/10 px-2.5 py-2 text-xs text-warning-foreground">
+                          <span className="shrink-0">⚠</span>
+                          <span>Worker heartbeat is stale — the import may be frozen. Refresh the page for an up-to-date status.</span>
+                        </div>
+                      )}
                     </>
                   )}
 
