@@ -24,6 +24,7 @@ interface ComponentMeta {
   name:           string
   code:           string
   component_type: string
+  is_active:      boolean
 }
 
 // component_type ordering: earnings first, deductions second, employer last
@@ -46,11 +47,30 @@ const FIXED_KEYS = new Set([
 
 const DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/
 
-// ── Active component loader ────────────────────────────────────────────────────
+// ── Template version fingerprint ──────────────────────────────────────────────
 
 /**
- * Fetch all salary components for the tenant, ordered by type then name.
- * No is_active filter — all tenant components are included.
+ * Compute a stable fingerprint of the active component set.
+ * Used to detect stale templates (downloaded before a component was added/removed).
+ * Algorithm: djb2 hash of sorted component IDs — no Node.js crypto required.
+ */
+export function computeTemplateVersion(components: ComponentMeta[]): string {
+  const payload = [...components]
+    .sort((a, b) => a.id.localeCompare(b.id))
+    .map(c => c.id)
+    .join(',')
+  let h = 5381
+  for (let i = 0; i < payload.length; i++) {
+    h = (((h << 5) + h) ^ payload.charCodeAt(i)) >>> 0
+  }
+  return `v${components.length}_${h.toString(16).padStart(8, '0')}`
+}
+
+// ── Component loaders ─────────────────────────────────────────────────────────
+
+/**
+ * Fetch active salary components for the tenant, ordered by type then name.
+ * Only is_active = true components are included — used for template generation.
  */
 export async function fetchActiveComponents(
   supabase: SupabaseClient,
@@ -58,8 +78,9 @@ export async function fetchActiveComponents(
 ): Promise<ComponentMeta[]> {
   const { data, error } = await supabase
     .from('salary_components')
-    .select('id, name, code, component_type')
+    .select('id, name, code, component_type, is_active')
     .eq('tenant_id', tenantId)
+    .eq('is_active', true)
     .order('name')
 
   if (error) throw new Error(error.message)
@@ -72,18 +93,75 @@ export async function fetchActiveComponents(
   })
 }
 
+/**
+ * Fetch ALL components (including inactive) keyed by lowercase name.
+ * Used by the validator to distinguish "inactive" from "unknown" in error messages.
+ */
+async function fetchAllComponentsByLowerName(
+  supabase: SupabaseClient,
+  tenantId: string,
+): Promise<Map<string, ComponentMeta>> {
+  const { data } = await supabase
+    .from('salary_components')
+    .select('id, name, code, component_type, is_active')
+    .eq('tenant_id', tenantId)
+    .order('name')
+
+  const map = new Map<string, ComponentMeta>()
+  for (const row of (data ?? []) as ComponentMeta[]) {
+    map.set(row.name.trim().toLowerCase(), row)
+  }
+  return map
+}
+
+// ── Duplicate name check ──────────────────────────────────────────────────────
+
+/**
+ * Returns display names that appear more than once in the active component set.
+ * Duplicate names make the template column mapping ambiguous and must be fixed
+ * in the Salary Component Master before generating a template.
+ */
+export function findDuplicateComponentNames(components: ComponentMeta[]): string[] {
+  const seen   = new Map<string, string>()  // lowercase → original display name
+  const dupes  = new Set<string>()
+  for (const c of components) {
+    const lk = c.name.trim().toLowerCase()
+    if (seen.has(lk)) dupes.add(seen.get(lk)!)
+    else               seen.set(lk, c.name)
+  }
+  return [...dupes]
+}
+
+// ── Extended validation result ────────────────────────────────────────────────
+
+export interface SalaryValidationResult extends ValidationResult {
+  payrollEstimate: {
+    monthly:  number
+    annual:   number
+    currency: 'INR'
+  }
+  templateOutdated:        boolean
+  currentTemplateVersion:  string
+}
+
 // ── Template generator ─────────────────────────────────────────────────────────
 
 /**
  * Generate a CSV template from the tenant's active salary components.
  *
- * Comment rows (lines starting with #) are stripped by the frontend parser
- * for both CSV and XLSX uploads, so they serve as human guidance only.
+ * Embeds the template version and ordered component IDs in comment rows so
+ * the frontend can:
+ *   1. Detect a stale template on re-upload (compare version to current master).
+ *   2. Build a proper XLSX with a stable component-ID metadata sheet.
+ *
+ * Comment rows (lines starting with #) are stripped by the frontend parser.
  */
 export function generateSalaryUploadCsv(
   components: ComponentMeta[],
   generatedOn: string,
 ): string {
+  const version = computeTemplateVersion(components)
+
   // Group by type for the section summary comment
   const byType: Record<string, ComponentMeta[]> = {}
   for (const c of components) {
@@ -100,7 +178,10 @@ export function generateSalaryUploadCsv(
   const compHeaders    = components.map(c => c.name)
   const allHeaders     = [...fixedHeaders, ...compHeaders, 'notes']
 
-  // Sample row — 10 000 for earnings, 0 for deductions (only representative)
+  // Ordered component IDs — matches column order after the 3 fixed columns
+  const compIds = components.map(c => c.id).join(',')
+
+  // Sample row — 10 000 for earnings, 0 for deductions (representative only)
   const sampleRow = [
     'EMP001',
     'Sample Employee',
@@ -114,6 +195,8 @@ export function generateSalaryUploadCsv(
   const lines = [
     '# CognixHR — Employee Salary Upload Template',
     `# Generated from Salary Component Master on ${generatedOn}`,
+    `# template_version: ${version}`,
+    `# component_ids: ${compIds}`,
     '# Do not rename, add, or remove columns.',
     '# Download a fresh template whenever you add components to the master.',
     '# Required: employee_code, effective_from   Optional: employee_name, notes',
@@ -134,47 +217,60 @@ export function generateSalaryUploadCsv(
  *
  * Dynamic column matching:
  *   - Header keys arrive lowercase (frontend normaliseKey strips * and lowercases).
- *   - We build a lowercase lookup map from the tenant's salary_components names.
- *   - Unknown headers (not in the master) are rejected.
+ *   - We build a lowercase lookup map from the tenant's active salary_components names.
+ *   - Unknown headers → error; inactive headers → descriptive error (not "unknown").
  *
- * For each row:
- *   - employee_code — required
- *   - effective_from — required, YYYY-MM-DD
- *   - Each component column — optional, non-negative number (empty = skip)
- *   - Unknown columns — error on every row where they appear
+ * Optional templateVersion: compared against the current master fingerprint to
+ * surface a stale-template warning in the UI before the user imports.
  *
- * DB checks (after row-level pass):
- *   - Resolves employee_code → employee_id
- *   - Marks isDuplicate = true when a row for the same employee + effective_from
- *     already exists in employee_compensations
+ * Returns SalaryValidationResult which extends ValidationResult with:
+ *   - payrollEstimate: sum of (earnings + employer_contribution) × 12 over valid rows
+ *   - templateOutdated / currentTemplateVersion
  */
 export async function validateSalaryUploadRows(
-  supabase: SupabaseClient,
-  tenantId: string,
-  rows: Record<string, string>[],
-): Promise<ValidationResult> {
-  // Fetch active components once
-  const components = await fetchActiveComponents(supabase, tenantId)
+  supabase:        SupabaseClient,
+  tenantId:        string,
+  rows:            Record<string, string>[],
+  templateVersion?: string,
+): Promise<SalaryValidationResult> {
+  // Fetch active components (template source of truth)
+  const activeComponents = await fetchActiveComponents(supabase, tenantId)
 
-  // Build lowercase name → ComponentMeta lookup
+  // Fetch all components including inactive — for better error messages
+  const allCompByLowerName = await fetchAllComponentsByLowerName(supabase, tenantId)
+
+  // Current template version
+  const currentTemplateVersion = computeTemplateVersion(activeComponents)
+  const templateOutdated = !!templateVersion && templateVersion !== currentTemplateVersion
+
+  // Build lowercase name → ComponentMeta lookup (active only)
   const compByLowercaseName = new Map<string, ComponentMeta>()
-  for (const c of components) {
+  for (const c of activeComponents) {
     compByLowercaseName.set(c.name.trim().toLowerCase(), c)
+  }
+
+  // Build type map for payroll estimate computation
+  const compTypeById = new Map<string, string>()
+  for (const c of activeComponents) {
+    compTypeById.set(c.id, c.component_type)
   }
 
   // Classify headers from the first row
   const firstRowKeys = rows.length > 0 ? Object.keys(rows[0]) : []
-  const componentCols: Array<{ key: string; meta: ComponentMeta }> = []
-  const unknownCols: string[] = []
+  const componentCols:  Array<{ key: string; meta: ComponentMeta }> = []
+  const inactiveCols:   string[] = []
+  const unknownCols:    string[] = []
 
   for (const key of firstRowKeys) {
     const lk = key.trim().toLowerCase()
     if (FIXED_KEYS.has(lk)) continue
-    const meta = compByLowercaseName.get(lk)
-    if (meta) {
-      componentCols.push({ key, meta })
+    const activeMeta = compByLowercaseName.get(lk)
+    if (activeMeta) {
+      componentCols.push({ key, meta: activeMeta })
     } else {
-      unknownCols.push(key)
+      const anyMeta = allCompByLowerName.get(lk)
+      if (anyMeta && !anyMeta.is_active) inactiveCols.push(key)
+      else                                unknownCols.push(key)
     }
   }
 
@@ -188,7 +284,16 @@ export async function validateSalaryUploadRows(
     const warnings: RowError[] = []
     const norm: Record<string, unknown> = {}
 
-    // Unknown columns — report on every row so the per-row error table is useful
+    // Inactive component columns
+    for (const col of inactiveCols) {
+      errors.push({
+        field:    col,
+        message:  `Component "${col}" is no longer active. Download a fresh template to get the current column list.`,
+        severity: 'error',
+      })
+    }
+
+    // Unknown columns
     for (const col of unknownCols) {
       errors.push({
         field:    col,
@@ -224,7 +329,7 @@ export async function validateSalaryUploadRows(
     const compAmounts: Record<string, number> = {}  // component_id → monthly amount
     for (const { key, meta } of componentCols) {
       const val = (d[key] ?? '').trim()
-      if (!val || val === '') continue  // blank = skip (treat as 0 / not set)
+      if (!val || val === '') continue  // blank = skip (treat as not set)
       const n = parseFloat(val)
       if (isNaN(n) || n < 0) {
         errors.push({
@@ -326,9 +431,22 @@ export async function validateSalaryUploadRows(
       vr.isValid = false
     } else {
       vr.normalizedData.employee_id = empId
-      // isDuplicate = already has active compensation → update path
-      if (existingCompSet.has(empId)) {
-        vr.isDuplicate = true
+      if (existingCompSet.has(empId)) vr.isDuplicate = true
+    }
+  }
+
+  // ── Payroll estimate ──────────────────────────────────────────────────────────
+  // Sum (earnings + employer_contribution) monthly amounts over all valid rows.
+  // Mirrors the CTC computation in importSalaryUpload.
+
+  let payrollMonthly = 0
+  for (const vr of validatedRows) {
+    if (!vr.isValid) continue
+    const comps = (vr.normalizedData.components as Record<string, number>) ?? {}
+    for (const [compId, amount] of Object.entries(comps)) {
+      const ctype = compTypeById.get(compId)
+      if (ctype === 'earning' || ctype === 'employer_contribution') {
+        payrollMonthly += amount
       }
     }
   }
@@ -357,6 +475,13 @@ export async function validateSalaryUploadRows(
     duplicateRows,
     rows: validatedRows,
     summary: { errorCategories, missingRequired, invalidEnums: [], duplicateFields: [] },
+    payrollEstimate: {
+      monthly:  Math.round(payrollMonthly * 100) / 100,
+      annual:   Math.round(payrollMonthly * 12 * 100) / 100,
+      currency: 'INR',
+    },
+    templateOutdated,
+    currentTemplateVersion,
   }
 }
 
@@ -549,20 +674,21 @@ async function writeJobRows(
  * same job-tracking and progress-polling flow.
  */
 export async function runSalaryUploadJob(
-  supabase:      SupabaseClient,
-  tenantId:      string,
-  createdBy:     string,
-  mode:          ImportMode,
-  rows:          Record<string, string>[],
-  fileName:      string,
-  existingJobId: string,
+  supabase:        SupabaseClient,
+  tenantId:        string,
+  createdBy:       string,
+  mode:            ImportMode,
+  rows:            Record<string, string>[],
+  fileName:        string,
+  existingJobId:   string,
+  templateVersion?: string,
 ): Promise<SalaryUploadResult> {
   const startedAt = Date.now()
   const jobId     = existingJobId
 
   try {
-    // Validate
-    const validation = await validateSalaryUploadRows(supabase, tenantId, rows)
+    // Validate (templateVersion passed through for staleness tracking)
+    const validation = await validateSalaryUploadRows(supabase, tenantId, rows, templateVersion)
 
     await supabase
       .from('import_jobs')
@@ -593,7 +719,7 @@ export async function runSalaryUploadJob(
     await supabase.from('import_jobs').update({ status: 'importing' }).eq('id', jobId)
 
     const rowStatuses: Record<number, 'created' | 'updated' | 'failed' | 'skipped'> = {}
-    let totalFailed = validation.invalidRows
+    let totalFailed  = validation.invalidRows
     let totalSkipped = 0
 
     for (const vr of validation.rows) {
@@ -611,21 +737,20 @@ export async function runSalaryUploadJob(
 
     const result = await importSalaryUpload(supabase, tenantId, createdBy, eligibleRows, mode)
 
-    // Populate row statuses from import results
     for (const vr of eligibleRows) {
       if (!vr.isValid) { rowStatuses[vr.rowNumber] = 'failed'; continue }
       if (vr.isDuplicate) rowStatuses[vr.rowNumber] = 'updated'
       else                rowStatuses[vr.rowNumber] = 'created'
     }
 
-    totalFailed += result.failed
+    totalFailed  += result.failed
     totalSkipped += result.skipped
     const duration = Date.now() - startedAt
 
     await supabase
       .from('import_jobs')
       .update({
-        status:       'completed',
+        status:        'completed',
         created_rows:  result.created,
         updated_rows:  result.updated,
         failed_rows:   totalFailed,

@@ -11,6 +11,7 @@ import {
   generateSalaryUploadCsv,
   validateSalaryUploadRows,
   runSalaryUploadJob,
+  findDuplicateComponentNames,
 } from '../../lib/import-engine/salary-upload.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 
@@ -37,6 +38,7 @@ const validateBodySchema = z.object({
     .min(1, 'At least one row is required')
     .max(5000, 'Maximum 5000 rows per request'),
   mode: z.enum(IMPORT_MODES).default('upsert'),
+  templateVersion: z.string().optional(),
 })
 
 const runBodySchema = z.object({
@@ -50,6 +52,7 @@ const runBodySchema = z.object({
     .max(5000, 'Maximum 5000 rows per request'),
   fileName: z.string().min(1, 'fileName is required'),
   mode: z.enum(IMPORT_MODES).default('upsert'),
+  templateVersion: z.string().optional(),
 })
 
 // ── Plugin ────────────────────────────────────────────────────────────────────
@@ -91,6 +94,13 @@ export default async function importRoutes(fastify: FastifyInstance) {
           message: 'No salary components found. Go to Payroll → Salary Components and create at least one component before downloading the salary upload template.',
         })
       }
+      const dupes = findDuplicateComponentNames(components)
+      if (dupes.length > 0) {
+        return reply.code(400).send({
+          error:   'DUPLICATE_COMPONENT_NAMES',
+          message: `Salary Component Master has duplicate display names: ${dupes.join(', ')}. Fix these in Payroll → Salary Components before generating the upload template.`,
+        })
+      }
       const today = new Date().toISOString().split('T')[0]
       const csv = generateSalaryUploadCsv(components, today)
       reply.header('Content-Type', 'text/csv; charset=utf-8')
@@ -119,7 +129,7 @@ export default async function importRoutes(fastify: FastifyInstance) {
       })
     }
 
-    const { masterType, rows } = parsed.data
+    const { masterType, rows, templateVersion } = parsed.data
 
     if (SEEDED_MASTER_TYPES[masterType]) {
       return reply.code(400).send({
@@ -130,7 +140,7 @@ export default async function importRoutes(fastify: FastifyInstance) {
 
     if (masterType === 'employee_salary_upload') {
       try {
-        const result = await validateSalaryUploadRows(fastify.supabase, req.tenantId, rows)
+        const result = await validateSalaryUploadRows(fastify.supabase, req.tenantId, rows, templateVersion)
         return reply.send({ data: result })
       } catch (err) {
         fastify.log.error(err)
@@ -172,7 +182,7 @@ export default async function importRoutes(fastify: FastifyInstance) {
       })
     }
 
-    const { masterType, rows, fileName, mode } = parsed.data
+    const { masterType, rows, fileName, mode, templateVersion } = parsed.data
 
     if (SEEDED_MASTER_TYPES[masterType]) {
       return reply.code(400).send({
@@ -201,7 +211,7 @@ export default async function importRoutes(fastify: FastifyInstance) {
         })
       }
       reply.code(202).send({ data: { importJobId: jobId, status: 'processing' } })
-      runSalaryUploadJob(fastify.supabase, req.tenantId, req.userId, mode, rows, fileName, jobId)
+      runSalaryUploadJob(fastify.supabase, req.tenantId, req.userId, mode, rows, fileName, jobId, templateVersion)
         .catch(err => fastify.log.error({ err, jobId }, 'Background salary upload import failed'))
       return
     }
