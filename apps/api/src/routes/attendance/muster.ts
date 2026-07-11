@@ -78,19 +78,12 @@ export default async function musterRoute(fastify: FastifyInstance) {
         }
       }
 
-      // Start the attendance query immediately — it's independent of the employee
-      // list (uses only tenant_id + date range).  Running it in parallel with the
-      // employee pagination cuts total wall-clock time from (emp_pages + att) to
-      // max(emp_pages, att), saving 2–10 s for large tenants.
-      const attendanceQueryPromise = fastify.supabase
-        .from('attendance_daily')
-        .select('employee_id, date, status, work_hours, late_minutes')
-        .eq('tenant_id', req.tenantId)
-        .gte('date', fromDate)
-        .lte('date', toDate)
-        .limit(MUSTER_ROW_LIMIT)
+      // Paginate both employees and attendance_daily in batches of 1000.
+      // PostgREST enforces max-rows=1000 as a hard server ceiling: even an explicit
+      // .limit(200_000) is silently capped at 1000.  Using .range() issues Range
+      // headers that page through the full result set.
+      const BATCH = 1000
 
-      const EMP_BATCH = 1000
       const employees: EmpRow[] = []
       let empFrom = 0
       while (true) {
@@ -100,7 +93,7 @@ export default async function musterRoute(fastify: FastifyInstance) {
           .eq('tenant_id', req.tenantId)
           .eq('status', 'active')
           .order('employee_code')
-          .range(empFrom, empFrom + EMP_BATCH - 1)
+          .range(empFrom, empFrom + BATCH - 1)
         if (reportIdFilter) q = q.in('id', reportIdFilter)
         const { data: page, error: empError } = await q
         if (empError) {
@@ -108,32 +101,39 @@ export default async function musterRoute(fastify: FastifyInstance) {
           return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch employees' })
         }
         employees.push(...((page ?? []) as EmpRow[]))
-        if (!page || page.length < EMP_BATCH) break
-        empFrom += EMP_BATCH
+        if (!page || page.length < BATCH) break
+        empFrom += BATCH
       }
 
       if (employees.length === 0) {
         return reply.send({ month, employees: [] })
       }
 
-      // Await the attendance query that was already running in parallel
-      const { data: daily, error: dailyError } = await attendanceQueryPromise
-
-      if (dailyError) {
-        req.log.error({ err: dailyError }, 'muster daily query failed')
-        return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch attendance records' })
-      }
-
-      if ((daily?.length ?? 0) >= MUSTER_ROW_LIMIT) {
-        reply.header('X-Truncated', 'true')
+      type DailyRawRow = { date: string; status: string; work_hours: number; late_minutes: number; employee_id: string }
+      const daily: DailyRawRow[] = []
+      let dailyFrom = 0
+      while (true) {
+        const { data: page, error: dailyError } = await fastify.supabase
+          .from('attendance_daily')
+          .select('employee_id, date, status, work_hours, late_minutes')
+          .eq('tenant_id', req.tenantId)
+          .gte('date', fromDate)
+          .lte('date', toDate)
+          .range(dailyFrom, dailyFrom + BATCH - 1)
+        if (dailyError) {
+          req.log.error({ err: dailyError }, 'muster daily query failed')
+          return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch attendance records' })
+        }
+        daily.push(...((page ?? []) as DailyRawRow[]))
+        if (!page || page.length < BATCH) break
+        dailyFrom += BATCH
       }
 
       // Build a lookup: employeeId → date → daily row
-      type DailyRecord     = { date: string; status: string | null; work_hours: number; late_minutes: number }
-      type DailyRawRow     = { date: string; status: string;        work_hours: number; late_minutes: number; employee_id: string }
+      type DailyRecord = { date: string; status: string | null; work_hours: number; late_minutes: number }
       const empDailyMap = new Map<string, Map<string, DailyRecord>>()
 
-      for (const row of (daily ?? []) as DailyRawRow[]) {
+      for (const row of daily) {
         let dateMap = empDailyMap.get(row.employee_id)
         if (!dateMap) {
           dateMap = new Map()
