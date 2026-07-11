@@ -12,6 +12,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { fetchAllRows } from '../../lib/supabase-paginate.js'
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -268,18 +269,21 @@ export default async function attendanceHealthIndexRoute(fastify: FastifyInstanc
       // Resolve target employees
       let targetIds: string[] = employee_ids ?? []
       if (targetIds.length === 0) {
-        const { data: activeEmps, error: empErr } = await fastify.supabase
-          .from('employees')
-          .select('id')
-          .eq('tenant_id', req.tenantId)
-          .eq('status', 'active')
-          .limit(500)
-
-        if (empErr) {
+        let activeEmps: any[]
+        try {
+          activeEmps = await fetchAllRows((from, to) =>
+            fastify.supabase
+              .from('employees')
+              .select('id')
+              .eq('tenant_id', req.tenantId)
+              .eq('status', 'active')
+              .range(from, to),
+          )
+        } catch (empErr) {
           req.log.error({ err: empErr }, 'employee fetch for health compute failed')
           return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch active employees' })
         }
-        targetIds = ((activeEmps ?? []) as any[]).map((e) => e.id)
+        targetIds = activeEmps.map((e) => e.id)
       }
 
       if (targetIds.length === 0) {
