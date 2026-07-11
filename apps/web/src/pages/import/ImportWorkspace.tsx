@@ -961,10 +961,12 @@ export function ImportWorkspace() {
    * This ensures re-uploads of downloaded templates work without manual editing.
    */
   function normaliseKey(k: string): string {
-    // Strip the trailing " *" required-marker, trim, and lower-case so header
-    // casing from third-party editors (e.g. "Employee_Code") still matches the
-    // lower-case snake_case keys every master template uses.
-    return k.replace(/\s*\*\s*$/, '').trim().toLowerCase()
+    // Strip trailing " *" required-marker, trim, lowercase, then convert any
+    // remaining spaces to underscores. This ensures XLSX column headers like
+    // "Employee Code *" normalise to "employee_code" (matching FIXED_KEYS and
+    // SALARY_FIXED_HEADERS) rather than "employee code" (space mismatch that
+    // caused identity columns to fall through to positional-key resolution).
+    return k.replace(/\s*\*\s*$/, '').trim().toLowerCase().replace(/\s+/g, '_')
   }
 
   /**
@@ -1708,19 +1710,41 @@ export function ImportWorkspace() {
                     <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3">
                       Template Fields — {masterConfig.label}
                     </p>
-                    <div className="flex flex-wrap gap-2">
-                      {masterConfig.requiredFields.map(f => (
-                        <Badge key={f} variant="default" className="font-mono text-xs">
-                          {f} *
-                        </Badge>
-                      ))}
-                      {masterConfig.optionalFields.map(f => (
-                        <Badge key={f} variant="outline" className="font-mono text-xs">
-                          {f}
-                        </Badge>
-                      ))}
-                    </div>
-                    <p className="text-xs text-muted-foreground mt-3">* Required fields</p>
+                    {selectedMaster === 'employee_salary_upload' ? (
+                      <>
+                        <p className="text-xs text-muted-foreground mb-3">
+                          The template has one <strong>column per salary component</strong> from your active
+                          Salary Component Master, plus the fixed identity columns below.
+                          Each row = one employee on one effective date.
+                        </p>
+                        <div className="flex flex-wrap gap-2">
+                          <Badge variant="default" className="font-mono text-xs">employee_code *</Badge>
+                          <Badge variant="default" className="font-mono text-xs">effective_from *</Badge>
+                          <Badge variant="secondary" className="font-mono text-xs">[one column per active component]</Badge>
+                          <Badge variant="outline" className="font-mono text-xs">employee_name</Badge>
+                          <Badge variant="outline" className="font-mono text-xs">notes</Badge>
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-3">
+                          * Required &nbsp;·&nbsp; Download the template to see all component columns for your tenant.
+                        </p>
+                      </>
+                    ) : (
+                      <>
+                        <div className="flex flex-wrap gap-2">
+                          {masterConfig.requiredFields.map(f => (
+                            <Badge key={f} variant="default" className="font-mono text-xs">
+                              {f} *
+                            </Badge>
+                          ))}
+                          {masterConfig.optionalFields.map(f => (
+                            <Badge key={f} variant="outline" className="font-mono text-xs">
+                              {f}
+                            </Badge>
+                          ))}
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-3">* Required fields</p>
+                      </>
+                    )}
                   </div>
 
                   <div className="flex justify-end">
