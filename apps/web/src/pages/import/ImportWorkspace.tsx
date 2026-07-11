@@ -892,83 +892,25 @@ export function ImportWorkspace() {
     setIsDownloading(true)
     try {
       const response = await api.getRaw(`/import/templates/${selectedMaster}`)
-      const text = await response.text()
 
       if (selectedMaster === 'employee_salary_upload') {
-        // Parse comment rows for version, component-ID metadata, and import manifest
-        const lines = text.split(/\r?\n/)
-        let extractedVersion: string | null = null
-        const componentIds: string[] = []
-        const manifest: Record<string, string> = {}
-
-        for (const line of lines) {
-          const t = line.trim()
-          if (t.startsWith('# template_version:')) {
-            extractedVersion = t.replace('# template_version:', '').trim()
-          } else if (t.startsWith('# component_ids:')) {
-            componentIds.push(
-              ...t.replace('# component_ids:', '').trim().split(',').map(s => s.trim()).filter(Boolean),
-            )
-          } else if (t.startsWith('# manifest_tenant_id:')) {
-            manifest.tenantId = t.replace('# manifest_tenant_id:', '').trim()
-          } else if (t.startsWith('# manifest_generated_by:')) {
-            manifest.generatedBy = t.replace('# manifest_generated_by:', '').trim()
-          } else if (t.startsWith('# manifest_import_type:')) {
-            manifest.importType = t.replace('# manifest_import_type:', '').trim()
-          } else if (t.startsWith('# manifest_schema_version:')) {
-            manifest.schemaVersion = t.replace('# manifest_schema_version:', '').trim()
-          } else if (t.startsWith('# manifest_expected_columns:')) {
-            manifest.expectedColumnCount = t.replace('# manifest_expected_columns:', '').trim()
-          }
-        }
-        if (extractedVersion) setTemplateVersion(extractedVersion)
-        if (Object.keys(manifest).length > 0) setTemplateManifest(manifest)
-
-        // Build data rows (strip # comment lines for the sheet)
-        const dataLines = lines.filter(l => !l.trimStart().startsWith('#'))
-        const parsed = Papa.parse<string[]>(dataLines.join('\n'), { header: false, skipEmptyLines: true })
-        const rows = parsed.data as string[][]
-        if (rows.length === 0) throw new Error('Empty template response')
-
-        const wb = XLSX.utils.book_new()
-        const ws = XLSX.utils.aoa_to_sheet(rows)
-
-        // Freeze header row; lock first 3 identifier columns (code, name, date)
-        ws['!views'] = [{ state: 'frozen', ySplit: 1, xSplit: 3, topLeftCell: 'D2' }]
-
-        // Column widths: wider for fixed identity columns, uniform for component amounts
-        const headers = rows[0] ?? []
-        ws['!cols'] = headers.map((_, i) => ({ wch: i === 0 ? 18 : i < 3 ? 24 : i === headers.length - 1 ? 20 : 15 }))
-
-        XLSX.utils.book_append_sheet(wb, ws, 'Salary Upload')
-
-        // Metadata sheet — component IDs and import manifest travel with the file.
-        // Component IDs allow stable matching on re-upload after name changes.
-        // Manifest fields allow the backend to reject cross-tenant and wrong-type uploads.
-        const metaRows: string[][] = [
-          ['key', 'value'],
-          ['template_version', extractedVersion ?? ''],
-          ['generated_at', new Date().toISOString().split('T')[0]],
-          ['product', 'CognixHR'],
-          ['component_count', String(componentIds.length)],
-          // Manifest fields (written with manifest_ prefix for explicit re-parsing on upload)
-          ['manifest_import_type',          manifest.importType          ?? ''],
-          ['manifest_schema_version',        manifest.schemaVersion       ?? ''],
-          ['manifest_expected_columns',      manifest.expectedColumnCount ?? ''],
-          ['manifest_tenant_id',             manifest.tenantId            ?? ''],
-          ['manifest_generated_by',          manifest.generatedBy         ?? ''],
-        ]
-        // Map component column → stable ID (cols 3..N-1 after the 3 fixed cols)
-        headers.slice(3, headers.length - 1).forEach((name, i) => {
-          metaRows.push([`component_${i}`, `${componentIds[i] ?? ''}|${name}`])
+        // API now returns a fully-formed XLSX workbook — save it directly.
+        const arrayBuffer = await response.arrayBuffer()
+        const blob = new Blob([arrayBuffer], {
+          type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         })
-        const metaWs = XLSX.utils.aoa_to_sheet(metaRows)
-        metaWs['!cols'] = [{ wch: 20 }, { wch: 56 }]
-        XLSX.utils.book_append_sheet(wb, metaWs, 'CognixHR_Metadata')
-
-        XLSX.writeFile(wb, 'employee_salary_upload_template.xlsx')
+        const url = URL.createObjectURL(blob)
+        const a   = document.createElement('a')
+        a.href     = url
+        a.download = 'employee_salary_upload.xlsx'
+        document.body.appendChild(a)
+        a.click()
+        document.body.removeChild(a)
+        URL.revokeObjectURL(url)
         return
       }
+
+      const text = await response.text()
 
       const parsed = Papa.parse<string[]>(text, { header: false })
       const rows = parsed.data as string[][]
@@ -1082,8 +1024,10 @@ export function ImportWorkspace() {
           if (Object.keys(parsedManifest).length > 0) setTemplateManifest(parsedManifest)
         }
 
-        const sheetName = wb.SheetNames[0]
-        const ws = wb.Sheets[sheetName]
+        // Prefer the named "Employee Upload" sheet from new multi-sheet XLSX templates;
+        // fall back to index 0 for backward-compat with old 2-sheet "Salary Upload" files.
+        const dataSheetName = wb.SheetNames.find(n => n === 'Employee Upload') ?? wb.SheetNames[0]
+        const ws = wb.Sheets[dataSheetName]
 
         // Get raw array-of-arrays to skip # comment rows before building objects
         const raw = XLSX.utils.sheet_to_json<string[]>(ws, { header: 1, defval: '' }) as string[][]

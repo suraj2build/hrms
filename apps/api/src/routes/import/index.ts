@@ -8,7 +8,7 @@ import { validateImportRows }            from '../../lib/import-engine/validator
 import { runImport, createImportJob }    from '../../lib/import-engine/importer.js'
 import {
   fetchActiveComponents,
-  generateSalaryUploadCsv,
+  generateSalaryUploadXlsx,
   validateSalaryUploadRows,
   runSalaryUploadJob,
   findDuplicateComponentNames,
@@ -114,10 +114,10 @@ export default async function importRoutes(fastify: FastifyInstance) {
         })
       }
       const today = new Date().toISOString().split('T')[0]
-      const csv = generateSalaryUploadCsv(components, today, req.tenantId, req.userId)
-      reply.header('Content-Type', 'text/csv; charset=utf-8')
-      reply.header('Content-Disposition', 'attachment; filename="template-employee_salary_upload.csv"')
-      return reply.send(csv)
+      const xlsx  = await generateSalaryUploadXlsx(components, today, req.tenantId, req.userId)
+      reply.header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+      reply.header('Content-Disposition', 'attachment; filename="employee_salary_upload.xlsx"')
+      return reply.send(xlsx)
     }
 
     const csv = generateCSV(masterType)

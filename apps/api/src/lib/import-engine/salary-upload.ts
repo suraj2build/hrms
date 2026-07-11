@@ -8,7 +8,7 @@
  * monthly amounts only; component names, codes, and IDs are never exposed.
  *
  * Flow:
- *   GET  /import/templates/employee_salary_upload   → CSV with dynamic headers
+ *   GET  /import/templates/employee_salary_upload   → XLSX with dynamic headers
  *   POST /import/validate  { masterType: 'employee_salary_upload', rows }
  *   POST /import/run       { masterType: 'employee_salary_upload', rows, ... }
  */
@@ -17,15 +17,22 @@ import type { SupabaseClient }                 from '@supabase/supabase-js'
 import type { ValidationResult, ValidatedRow, RowError } from './validator.js'
 import type { ImportMode }                     from './importer.js'
 import { executeInChunks, writeImportErrors } from './chunk-executor.js'
+import ExcelJS                                from 'exceljs'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 interface ComponentMeta {
-  id:             string
-  name:           string
-  code:           string
-  component_type: string
-  is_active:      boolean
+  id:                  string
+  name:                string
+  code:                string
+  component_type:      string
+  is_active:           boolean
+  is_variable?:        boolean | null
+  is_basic?:           boolean | null
+  affects_pf?:         boolean | null
+  is_pt_applicable?:   boolean | null
+  is_esi_applicable?:  boolean | null
+  is_lwf_applicable?:  boolean | null
 }
 
 // component_type ordering: earnings first, deductions second, employer last
@@ -82,7 +89,7 @@ export async function fetchActiveComponents(
 ): Promise<ComponentMeta[]> {
   const { data, error } = await supabase
     .from('salary_components')
-    .select('id, name, code, component_type, is_active')
+    .select('id, name, code, component_type, is_active, is_variable, is_basic, affects_pf, is_pt_applicable, is_esi_applicable, is_lwf_applicable')
     .eq('tenant_id', tenantId)
     .eq('is_active', true)
     .order('name')
@@ -254,6 +261,298 @@ export function generateSalaryUploadCsv(
   ]
 
   return lines.join('\n') + '\n'
+}
+
+// ── Enterprise XLSX Template Generator ───────────────────────────────────────
+
+const XL_NAVY  = 'FF1B3D6B'
+const XL_BLUE  = 'FF2E6FE6'
+const XL_RED   = 'FFDC2626'
+const XL_TEAL  = 'FF15B8A6'
+const XL_WHITE = 'FFFFFFFF'
+const XL_LGREY = 'FFF1F5F9'
+
+const COMP_TYPE_COLOR: Record<string, string> = {
+  earning:               XL_BLUE,
+  deduction:             XL_RED,
+  employer_contribution: XL_TEAL,
+}
+
+function xlFill(argb: string): ExcelJS.FillPattern {
+  return { type: 'pattern', pattern: 'solid', fgColor: { argb } }
+}
+
+function xlFont(overrides: Partial<ExcelJS.Font>): Partial<ExcelJS.Font> {
+  return { name: 'Calibri', size: 10, ...overrides }
+}
+
+function titleRow(ws: ExcelJS.Worksheet, text: string, bg: string, fontSize = 16) {
+  const r = ws.addRow([text])
+  r.height = fontSize === 16 ? 40 : 24
+  const c = r.getCell(1)
+  c.value     = text
+  c.font      = xlFont({ bold: true, color: { argb: XL_WHITE }, size: fontSize })
+  c.fill      = xlFill(bg)
+  c.alignment = { vertical: 'middle', horizontal: 'left', indent: 2 }
+  return r
+}
+
+function sectionHead(ws: ExcelJS.Worksheet, text: string) {
+  ws.addRow([])
+  const r = ws.addRow([text])
+  r.height = 22
+  const c = r.getCell(1)
+  c.font      = xlFont({ bold: true, color: { argb: XL_WHITE }, size: 11 })
+  c.fill      = xlFill(XL_BLUE)
+  c.alignment = { vertical: 'middle', horizontal: 'left', indent: 1 }
+}
+
+function bodyLine(ws: ExcelJS.Worksheet, text: string) {
+  const r = ws.addRow([text])
+  r.height = 17
+  r.getCell(1).font = xlFont({ size: 10 })
+}
+
+/**
+ * Generate a 4-sheet enterprise XLSX workbook for the employee salary upload.
+ *
+ * Sheet 1 — Employee Upload  : data entry (first sheet, matched by name in the parser)
+ * Sheet 2 — Instructions     : step-by-step guide + component summary
+ * Sheet 3 — Component Master : read-only reference grouped by type
+ * Sheet 4 — CognixHR_Metadata: hidden; carries manifest + stable component-ID mappings
+ */
+export async function generateSalaryUploadXlsx(
+  components:   ComponentMeta[],
+  generatedOn:  string,
+  tenantId?:    string,
+  generatedBy?: string,
+): Promise<Buffer> {
+  const wb = new ExcelJS.Workbook()
+  wb.creator  = 'CognixHR'
+  wb.created  = new Date()
+  wb.modified = new Date()
+
+  const version  = computeTemplateVersion(components)
+  const earnings = components.filter(c => c.component_type === 'earning')
+  const deducts  = components.filter(c => c.component_type === 'deduction')
+  const employer = components.filter(c => c.component_type === 'employer_contribution')
+
+  // ── Sheet 1: Employee Upload ──────────────────────────────────────────────
+  const wsData = wb.addWorksheet('Employee Upload')
+
+  // Rows 1-4: comment metadata (prefixed with # so the upload parser skips them)
+  const commentLines = [
+    `# CognixHR — Employee Salary Upload`,
+    `# Template Version: ${version}  ·  Generated: ${generatedOn}  ·  Components: ${components.length}`,
+    `# Earnings: ${earnings.length}  ·  Deductions: ${deducts.length}  ·  Employer Contributions: ${employer.length}`,
+    `# ── Do not edit rows 1-4 or rename any column ──────────────────────────`,
+  ]
+  for (const text of commentLines) {
+    const r = wsData.addRow([text])
+    r.height = 14
+    const c  = r.getCell(1)
+    c.font      = xlFont({ italic: true, color: { argb: 'FF9CA3AF' }, size: 9 })
+    c.alignment = { horizontal: 'left' }
+  }
+
+  // Row 5: column headers — navy for identity cols, type color for component cols
+  const headerVals = [
+    'Employee Code *',
+    'Employee Name',
+    'Effective From *',
+    ...components.map(c => c.name),
+    'Notes',
+  ]
+  const hRow = wsData.addRow(headerVals)
+  hRow.height = 26
+  hRow.eachCell((cell, colNo) => {
+    const bg = (colNo >= 4 && colNo <= 3 + components.length)
+      ? (COMP_TYPE_COLOR[components[colNo - 4].component_type] ?? XL_NAVY)
+      : XL_NAVY
+    cell.fill      = xlFill(bg)
+    cell.font      = xlFont({ bold: true, color: { argb: XL_WHITE }, size: 11 })
+    cell.alignment = { vertical: 'middle', horizontal: colNo <= 3 ? 'left' : 'center' }
+    cell.border    = { bottom: { style: 'medium', color: { argb: XL_TEAL } } }
+  })
+
+  // Row 6: sample row (light grey, italic, to make it visually distinct)
+  const sampleVals = [
+    'EMP001',
+    'Sample Employee',
+    generatedOn,
+    ...components.map(c => c.component_type === 'deduction' ? 0 : 10000),
+    '',
+  ]
+  const sRow = wsData.addRow(sampleVals)
+  sRow.height = 18
+  sRow.eachCell(cell => {
+    cell.fill      = xlFill(XL_LGREY)
+    cell.font      = xlFont({ italic: true, color: { argb: 'FF6B7280' } })
+    cell.alignment = { horizontal: 'left' }
+  })
+
+  // Rows 7-206: 200 blank data entry rows
+  for (let i = 0; i < 200; i++) wsData.addRow([])
+
+  // Column widths
+  wsData.getColumn(1).width = 20   // Employee Code
+  wsData.getColumn(2).width = 30   // Employee Name
+  wsData.getColumn(3).width = 20   // Effective From
+  for (let i = 4; i <= 3 + components.length; i++) wsData.getColumn(i).width = 16
+  wsData.getColumn(4 + components.length).width = 26  // Notes
+
+  // Freeze: rows 1-5 (ySplit=5), columns A-C (xSplit=3)
+  wsData.views = [{ state: 'frozen', ySplit: 5, xSplit: 3, topLeftCell: 'D6', activeCell: 'A7' }]
+
+  // ── Sheet 2: Instructions ─────────────────────────────────────────────────
+  const wsInstr = wb.addWorksheet('Instructions')
+  wsInstr.getColumn(1).width = 96
+
+  titleRow(wsInstr, 'CognixHR — Employee Salary Upload', XL_NAVY, 16)
+  titleRow(wsInstr, `Generated: ${generatedOn}  ·  Template Version: ${version}  ·  Components: ${components.length}`, XL_BLUE, 11)
+
+  sectionHead(wsInstr, 'HOW TO USE THIS TEMPLATE')
+  bodyLine(wsInstr, '1.  Go to the "Employee Upload" sheet (first tab).')
+  bodyLine(wsInstr, '2.  Rows 1–4 are template metadata (greyed out). Do not edit them.')
+  bodyLine(wsInstr, '3.  Row 5 is the column header. Do not rename, add, or remove any column.')
+  bodyLine(wsInstr, '4.  Row 6 is a sample row — delete it or leave it (it will be skipped if the employee code does not exist).')
+  bodyLine(wsInstr, '5.  Enter one employee per row starting from row 7:')
+  bodyLine(wsInstr, '       Column A — Employee Code   (required — must match your HR master exactly)')
+  bodyLine(wsInstr, '       Column B — Employee Name   (optional — for reference, not imported)')
+  bodyLine(wsInstr, '       Column C — Effective From  (required — YYYY-MM-DD format, e.g. 2026-04-01)')
+  bodyLine(wsInstr, '       Column D+ — Monthly amount for each salary component')
+  bodyLine(wsInstr, '                   Enter 0 for deductions not applicable to this employee')
+  bodyLine(wsInstr, '                   Leave blank or 0 for unused earning components')
+  bodyLine(wsInstr, '       Last col — Notes  (optional — HR annotation only, not imported)')
+  bodyLine(wsInstr, '6.  Save as .xlsx and upload via CognixHR → Import → Employee Salary Upload.')
+
+  sectionHead(wsInstr, 'IMPORTANT NOTES')
+  bodyLine(wsInstr, '•  This template is generated directly from your active Salary Component Master.')
+  bodyLine(wsInstr, '•  If you add or deactivate components, download a fresh template. Stale templates are rejected on upload.')
+  bodyLine(wsInstr, '•  One row = one employee on one effective date. Do not split across rows.')
+  bodyLine(wsInstr, '•  Amounts should be monthly figures in Indian Rupees — numbers only, no commas or currency symbols.')
+  bodyLine(wsInstr, '•  The "Component Master" sheet is read-only reference. Do not modify it.')
+
+  sectionHead(wsInstr, 'COLUMN COLOUR KEY')
+  bodyLine(wsInstr, '  ■ Navy blue   (columns A, B, C)  — Employee identity and effective date')
+  bodyLine(wsInstr, '  ■ Royal blue  (earning columns)  — Earnings paid to the employee')
+  bodyLine(wsInstr, '  ■ Red         (deduction columns) — Amounts deducted from employee gross')
+  bodyLine(wsInstr, '  ■ Teal        (employer columns) — Employer statutory contributions')
+
+  sectionHead(wsInstr, `ACTIVE COMPONENT SUMMARY  (${components.length} components)`)
+  const typeGroups: [string, ComponentMeta[]][] = [
+    ['EARNINGS', earnings],
+    ['DEDUCTIONS', deducts],
+    ['EMPLOYER CONTRIBUTIONS', employer],
+  ]
+  for (const [label, comps] of typeGroups) {
+    if (!comps.length) continue
+    wsInstr.addRow([])
+    const gr = wsInstr.addRow([`${label}  (${comps.length})`])
+    gr.getCell(1).font = xlFont({ bold: true, size: 10 })
+    for (const c of comps) {
+      bodyLine(wsInstr, `    ${c.code.padEnd(24)}${c.name}`)
+    }
+  }
+
+  // ── Sheet 3: Component Master ─────────────────────────────────────────────
+  const wsMaster = wb.addWorksheet('Component Master')
+
+  const masterCols = ['Code', 'Component Name', 'Type', 'Variable', 'Is Basic', 'PF', 'PT', 'ESI', 'LWF']
+  const masterWidths = [18, 38, 24, 10, 10, 8, 8, 8, 8]
+  masterCols.forEach((_, i) => { wsMaster.getColumn(i + 1).width = masterWidths[i] })
+
+  const tm1 = titleRow(wsMaster, 'Salary Component Master — Reference', XL_NAVY, 16)
+  wsMaster.mergeCells(`A${tm1.number}:I${tm1.number}`)
+
+  const tm2 = titleRow(wsMaster, `Active components as of ${generatedOn}  ·  Read only`, XL_BLUE, 11)
+  wsMaster.mergeCells(`A${tm2.number}:I${tm2.number}`)
+
+  const masterTypeGroups: [string, ComponentMeta[], string][] = [
+    ['EARNINGS', earnings, XL_BLUE],
+    ['DEDUCTIONS', deducts, XL_RED],
+    ['EMPLOYER CONTRIBUTIONS', employer, XL_TEAL],
+  ]
+
+  for (const [groupLabel, comps, groupColor] of masterTypeGroups) {
+    if (!comps.length) continue
+
+    wsMaster.addRow([])  // spacer
+
+    const gh = wsMaster.addRow([`${groupLabel}  (${comps.length})`])
+    gh.height = 22
+    const ghc = gh.getCell(1)
+    ghc.font      = xlFont({ bold: true, color: { argb: XL_WHITE }, size: 11 })
+    ghc.fill      = xlFill(groupColor)
+    ghc.alignment = { vertical: 'middle', horizontal: 'left', indent: 1 }
+    wsMaster.mergeCells(`A${gh.number}:I${gh.number}`)
+
+    const ch = wsMaster.addRow(masterCols)
+    ch.height = 18
+    ch.eachCell(cell => {
+      cell.font      = xlFont({ bold: true, size: 10 })
+      cell.fill      = xlFill(XL_LGREY)
+      cell.alignment = { vertical: 'middle', horizontal: 'center' }
+      cell.border    = { bottom: { style: 'thin', color: { argb: 'FFE2E8F0' } } }
+    })
+    ch.getCell(1).alignment = { horizontal: 'left' }
+    ch.getCell(2).alignment = { horizontal: 'left' }
+    ch.getCell(3).alignment = { horizontal: 'left' }
+
+    for (let i = 0; i < comps.length; i++) {
+      const c   = comps[i]
+      const yes = (v: boolean | null | undefined) => v ? '✓' : ''
+      const dr  = wsMaster.addRow([
+        c.code,
+        c.name,
+        TYPE_LABELS[c.component_type] ?? c.component_type,
+        yes(c.is_variable),
+        yes(c.is_basic),
+        yes(c.affects_pf),
+        yes(c.is_pt_applicable),
+        yes(c.is_esi_applicable),
+        yes(c.is_lwf_applicable),
+      ])
+      dr.height = 18
+      if (i % 2 === 0) {
+        dr.eachCell({ includeEmpty: true }, cell => { cell.fill = xlFill('FFFAFBFF') })
+      }
+      dr.eachCell(cell => {
+        cell.font      = xlFont({ size: 10 })
+        cell.alignment = { vertical: 'middle', horizontal: 'center' }
+      })
+      dr.getCell(1).alignment = { horizontal: 'left' }
+      dr.getCell(2).alignment = { horizontal: 'left' }
+      dr.getCell(3).alignment = { horizontal: 'left' }
+    }
+  }
+
+  wsMaster.views = [{ state: 'frozen', ySplit: 2, topLeftCell: 'A3' }]
+
+  // ── Sheet 4: CognixHR_Metadata (hidden) ──────────────────────────────────
+  const wsMeta = wb.addWorksheet('CognixHR_Metadata')
+  wsMeta.state = 'veryHidden'
+
+  const manifestRows: string[][] = [
+    ['key',                       'value'],
+    ['template_version',          version],
+    ['generated_at',              generatedOn],
+    ['product',                   'CognixHR'],
+    ['component_count',           String(components.length)],
+    ['manifest_import_type',      'employee_salary_upload'],
+    ['manifest_schema_version',   String(SCHEMA_VERSION)],
+    ['manifest_expected_columns', String(components.length)],
+  ]
+  if (tenantId)    manifestRows.push(['manifest_tenant_id',    tenantId])
+  if (generatedBy) manifestRows.push(['manifest_generated_by', generatedBy])
+  components.forEach((c, i) => manifestRows.push([`component_${i}`, `${c.id}|${c.name}`]))
+
+  for (const row of manifestRows) wsMeta.addRow(row)
+  wsMeta.getColumn(1).width = 28
+  wsMeta.getColumn(2).width = 60
+
+  const buf = await wb.xlsx.writeBuffer()
+  return Buffer.from(buf as ArrayBuffer)
 }
 
 // ── Validator ─────────────────────────────────────────────────────────────────
