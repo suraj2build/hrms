@@ -806,6 +806,8 @@ export function ImportWorkspace() {
   const [activeTab, setActiveTab] = useState<ActiveTab>('import')
   // Template version extracted from downloaded CSV/XLSX — sent to backend to detect stale templates
   const [templateVersion, setTemplateVersion] = useState<string | null>(null)
+  // Import manifest extracted from downloaded template — sent back to prevent cross-tenant reuse
+  const [templateManifest, setTemplateManifest] = useState<Record<string, string> | null>(null)
   // Extended validation state for employee_salary_upload (not persisted in session)
   const [salaryPayrollEstimate, setSalaryPayrollEstimate] = useState<{ monthly: number; annual: number } | null>(null)
   const [salaryTemplateOutdated, setSalaryTemplateOutdated] = useState(false)
@@ -891,10 +893,11 @@ export function ImportWorkspace() {
       const text = await response.text()
 
       if (selectedMaster === 'employee_salary_upload') {
-        // Parse comment rows for version and component-ID metadata
+        // Parse comment rows for version, component-ID metadata, and import manifest
         const lines = text.split(/\r?\n/)
         let extractedVersion: string | null = null
         const componentIds: string[] = []
+        const manifest: Record<string, string> = {}
 
         for (const line of lines) {
           const t = line.trim()
@@ -904,9 +907,20 @@ export function ImportWorkspace() {
             componentIds.push(
               ...t.replace('# component_ids:', '').trim().split(',').map(s => s.trim()).filter(Boolean),
             )
+          } else if (t.startsWith('# manifest_tenant_id:')) {
+            manifest.tenantId = t.replace('# manifest_tenant_id:', '').trim()
+          } else if (t.startsWith('# manifest_generated_by:')) {
+            manifest.generatedBy = t.replace('# manifest_generated_by:', '').trim()
+          } else if (t.startsWith('# manifest_import_type:')) {
+            manifest.importType = t.replace('# manifest_import_type:', '').trim()
+          } else if (t.startsWith('# manifest_schema_version:')) {
+            manifest.schemaVersion = t.replace('# manifest_schema_version:', '').trim()
+          } else if (t.startsWith('# manifest_expected_columns:')) {
+            manifest.expectedColumnCount = t.replace('# manifest_expected_columns:', '').trim()
           }
         }
         if (extractedVersion) setTemplateVersion(extractedVersion)
+        if (Object.keys(manifest).length > 0) setTemplateManifest(manifest)
 
         // Build data rows (strip # comment lines for the sheet)
         const dataLines = lines.filter(l => !l.trimStart().startsWith('#'))
@@ -926,14 +940,21 @@ export function ImportWorkspace() {
 
         XLSX.utils.book_append_sheet(wb, ws, 'Salary Upload')
 
-        // Metadata sheet — component IDs travel with the file for stable matching
-        // on re-upload even after component names change.
+        // Metadata sheet — component IDs and import manifest travel with the file.
+        // Component IDs allow stable matching on re-upload after name changes.
+        // Manifest fields allow the backend to reject cross-tenant and wrong-type uploads.
         const metaRows: string[][] = [
           ['key', 'value'],
           ['template_version', extractedVersion ?? ''],
           ['generated_at', new Date().toISOString().split('T')[0]],
           ['product', 'CognixHR'],
           ['component_count', String(componentIds.length)],
+          // Manifest fields (written with manifest_ prefix for explicit re-parsing on upload)
+          ['manifest_import_type',          manifest.importType          ?? ''],
+          ['manifest_schema_version',        manifest.schemaVersion       ?? ''],
+          ['manifest_expected_columns',      manifest.expectedColumnCount ?? ''],
+          ['manifest_tenant_id',             manifest.tenantId            ?? ''],
+          ['manifest_generated_by',          manifest.generatedBy         ?? ''],
         ]
         // Map component column → stable ID (cols 3..N-1 after the 3 fixed cols)
         headers.slice(3, headers.length - 1).forEach((name, i) => {
@@ -1040,15 +1061,23 @@ export function ImportWorkspace() {
         if (!data || !(data instanceof ArrayBuffer)) return
         const wb = XLSX.read(new Uint8Array(data), { type: 'array', cellDates: true })
 
-        // Extract template version from CognixHR_Metadata sheet (salary upload only)
+        // Extract template version and import manifest from CognixHR_Metadata sheet
         if (selectedMaster === 'employee_salary_upload' && wb.SheetNames.includes('CognixHR_Metadata')) {
           const metaWs = wb.Sheets['CognixHR_Metadata']
           const metaRows = XLSX.utils.sheet_to_json<string[]>(metaWs, { header: 1 }) as string[][]
+          const parsedManifest: Record<string, string> = {}
           for (const [key, value] of metaRows.slice(1)) {
-            if (String(key) === 'template_version' && value) {
-              setTemplateVersion(String(value))
-            }
+            const k = String(key ?? '')
+            const v = String(value ?? '')
+            if (k === 'template_version' && v) {
+              setTemplateVersion(v)
+            } else if (k === 'manifest_tenant_id'        && v) { parsedManifest.tenantId            = v }
+            else if   (k === 'manifest_generated_by'     && v) { parsedManifest.generatedBy         = v }
+            else if   (k === 'manifest_import_type'      && v) { parsedManifest.importType          = v }
+            else if   (k === 'manifest_schema_version'   && v) { parsedManifest.schemaVersion       = v }
+            else if   (k === 'manifest_expected_columns' && v) { parsedManifest.expectedColumnCount = v }
           }
+          if (Object.keys(parsedManifest).length > 0) setTemplateManifest(parsedManifest)
         }
 
         const sheetName = wb.SheetNames[0]
@@ -1110,6 +1139,9 @@ export function ImportWorkspace() {
         mode,
         ...(selectedMaster === 'employee_salary_upload' && templateVersion
           ? { templateVersion }
+          : {}),
+        ...(selectedMaster === 'employee_salary_upload' && templateManifest
+          ? { manifest: templateManifest }
           : {}),
       }),
     onSuccess: (response) => {
@@ -1177,6 +1209,9 @@ export function ImportWorkspace() {
         mode,
         ...(selectedMaster === 'employee_salary_upload' && templateVersion
           ? { templateVersion }
+          : {}),
+        ...(selectedMaster === 'employee_salary_upload' && templateManifest
+          ? { manifest: templateManifest }
           : {}),
       }),
     onSuccess: (response) => {
@@ -1386,6 +1421,7 @@ export function ImportWorkspace() {
     setErrorPage(1)
     setSessionRestoredNotice(false)
     setTemplateVersion(null)
+    setTemplateManifest(null)
     setSalaryPayrollEstimate(null)
     setSalaryTemplateOutdated(false)
   }
@@ -1417,6 +1453,7 @@ export function ImportWorkspace() {
     setImportResult(null)
     setErrorPage(1)
     setTemplateVersion(null)
+    setTemplateManifest(null)
     setSalaryPayrollEstimate(null)
     setSalaryTemplateOutdated(false)
   }

@@ -40,6 +40,9 @@ const TYPE_LABELS: Record<string, string> = {
   employer_contribution: 'EMPLOYER CONTRIBUTIONS',
 }
 
+// Increment whenever the CSV/XLSX manifest format changes in a breaking way.
+const SCHEMA_VERSION = 1
+
 // Fixed columns — always present regardless of component master
 const FIXED_KEYS = new Set([
   'employee_code', 'employee_name', 'effective_from', 'notes',
@@ -114,22 +117,51 @@ async function fetchAllComponentsByLowerName(
   return map
 }
 
+// ── Name normalization ────────────────────────────────────────────────────────
+
+/**
+ * Collapse whitespace, dots, hyphens, and underscores then lowercase.
+ * "HRA", "H.R.A", "H-R-A", "h r a" all → "hra".
+ * Used for both duplicate detection and column-header matching.
+ */
+function normalizeName(name: string): string {
+  return name.trim().replace(/[\s.\-_]+/g, '').toLowerCase()
+}
+
 // ── Duplicate name check ──────────────────────────────────────────────────────
 
 /**
  * Returns display names that appear more than once in the active component set.
+ * Comparison uses normalizeName() so "HRA" and "H.R.A" are treated as the same.
  * Duplicate names make the template column mapping ambiguous and must be fixed
  * in the Salary Component Master before generating a template.
  */
 export function findDuplicateComponentNames(components: ComponentMeta[]): string[] {
-  const seen   = new Map<string, string>()  // lowercase → original display name
-  const dupes  = new Set<string>()
+  const seen  = new Map<string, string>()  // normalized → original display name
+  const dupes = new Set<string>()
   for (const c of components) {
-    const lk = c.name.trim().toLowerCase()
-    if (seen.has(lk)) dupes.add(seen.get(lk)!)
-    else               seen.set(lk, c.name)
+    const nk = normalizeName(c.name)
+    if (seen.has(nk)) dupes.add(seen.get(nk)!)
+    else               seen.set(nk, c.name)
   }
   return [...dupes]
+}
+
+// ── Import Manifest ───────────────────────────────────────────────────────────
+
+/**
+ * Lightweight manifest embedded in the CSV/XLSX template at generation time.
+ * The frontend sends it back on validate/run; the backend validates it to
+ * prevent cross-tenant reuse, wrong file type, or broken schema versions.
+ *
+ * All values are strings on the wire (CSV comment lines, XLSX cell values).
+ */
+export interface SalaryManifest {
+  tenantId?:            string
+  generatedBy?:         string
+  importType?:          string
+  schemaVersion?:       string
+  expectedColumnCount?: string
 }
 
 // ── Extended validation result ────────────────────────────────────────────────
@@ -149,16 +181,20 @@ export interface SalaryValidationResult extends ValidationResult {
 /**
  * Generate a CSV template from the tenant's active salary components.
  *
- * Embeds the template version and ordered component IDs in comment rows so
- * the frontend can:
- *   1. Detect a stale template on re-upload (compare version to current master).
+ * Embeds the template version, ordered component IDs, and an import manifest
+ * in comment rows so the frontend can:
+ *   1. Detect a stale template on re-upload.
  *   2. Build a proper XLSX with a stable component-ID metadata sheet.
+ *   3. Send the manifest back on validate/run so the backend can reject
+ *      cross-tenant reuse and wrong-file-type uploads.
  *
  * Comment rows (lines starting with #) are stripped by the frontend parser.
  */
 export function generateSalaryUploadCsv(
-  components: ComponentMeta[],
+  components:  ComponentMeta[],
   generatedOn: string,
+  tenantId?:   string,
+  generatedBy?: string,
 ): string {
   const version = computeTemplateVersion(components)
 
@@ -192,11 +228,20 @@ export function generateSalaryUploadCsv(
     '',
   ]
 
+  const manifestLines: string[] = [
+    `# manifest_import_type: employee_salary_upload`,
+    `# manifest_schema_version: ${SCHEMA_VERSION}`,
+    `# manifest_expected_columns: ${components.length}`,
+  ]
+  if (tenantId)    manifestLines.push(`# manifest_tenant_id: ${tenantId}`)
+  if (generatedBy) manifestLines.push(`# manifest_generated_by: ${generatedBy}`)
+
   const lines = [
     '# CognixHR — Employee Salary Upload Template',
     `# Generated from Salary Component Master on ${generatedOn}`,
     `# template_version: ${version}`,
     `# component_ids: ${compIds}`,
+    ...manifestLines,
     '# Do not rename, add, or remove columns.',
     '# Download a fresh template whenever you add components to the master.',
     '# Required: employee_code, effective_from   Optional: employee_name, notes',
@@ -228,11 +273,33 @@ export function generateSalaryUploadCsv(
  *   - templateOutdated / currentTemplateVersion
  */
 export async function validateSalaryUploadRows(
-  supabase:        SupabaseClient,
-  tenantId:        string,
-  rows:            Record<string, string>[],
+  supabase:         SupabaseClient,
+  tenantId:         string,
+  rows:             Record<string, string>[],
   templateVersion?: string,
+  manifest?:        SalaryManifest,
 ): Promise<SalaryValidationResult> {
+  // ── Manifest validation ─────────────────────────────────────────────────────
+  // Reject cross-tenant reuse and wrong-file-type uploads before any DB work.
+  if (manifest) {
+    if (manifest.tenantId && manifest.tenantId !== tenantId) {
+      throw new Error(
+        'Template mismatch: this file was generated for a different tenant. Download a fresh template from your account.',
+      )
+    }
+    if (manifest.importType && manifest.importType !== 'employee_salary_upload') {
+      throw new Error(
+        `Template mismatch: this file is for import type "${manifest.importType}", not "employee_salary_upload".`,
+      )
+    }
+    const sv = manifest.schemaVersion ? parseInt(manifest.schemaVersion, 10) : null
+    if (sv !== null && !isNaN(sv) && sv !== SCHEMA_VERSION) {
+      throw new Error(
+        `Template schema version ${sv} is no longer supported. Download a fresh template.`,
+      )
+    }
+  }
+
   // Fetch active components (template source of truth)
   const activeComponents = await fetchActiveComponents(supabase, tenantId)
 
@@ -399,20 +466,22 @@ export async function validateSalaryUploadRows(
     }
   }
 
-  // 2. Check which employees already have an active compensation
+  // 2. Check which employees already have an active compensation (fetch effective_from too)
   const resolvedIds = [...empCodeMap.values()]
-  const existingCompSet = new Set<string>()  // employee_id
+  const existingCompMap = new Map<string, string>()  // employee_id → existing effective_from
   if (resolvedIds.length > 0) {
     for (let i = 0; i < resolvedIds.length; i += 500) {
       const chunk = resolvedIds.slice(i, i + 500)
       const { data } = await supabase
         .from('employee_compensations')
-        .select('employee_id')
+        .select('employee_id, effective_from')
         .eq('tenant_id', tenantId)
         .eq('is_active', true)
         .in('employee_id', chunk)
       if (data) {
-        for (const r of data as any[]) existingCompSet.add(r.employee_id as string)
+        for (const r of data as any[]) {
+          existingCompMap.set(r.employee_id as string, r.effective_from as string)
+        }
       }
     }
   }
@@ -431,7 +500,19 @@ export async function validateSalaryUploadRows(
       vr.isValid = false
     } else {
       vr.normalizedData.employee_id = empId
-      if (existingCompSet.has(empId)) vr.isDuplicate = true
+      const existingEffectiveFrom = existingCompMap.get(empId)
+      if (existingEffectiveFrom) {
+        vr.isDuplicate = true
+        // Back-dating warning: upload date is earlier than the current active package
+        const uploadDate = vr.normalizedData.effective_from as string | undefined
+        if (uploadDate && uploadDate < existingEffectiveFrom) {
+          vr.warnings.push({
+            field:    'effective_from',
+            message:  `Employee already has an active package effective ${existingEffectiveFrom}. Uploading ${uploadDate} will back-date their compensation.`,
+            severity: 'warning',
+          })
+        }
+      }
     }
   }
 
@@ -674,21 +755,22 @@ async function writeJobRows(
  * same job-tracking and progress-polling flow.
  */
 export async function runSalaryUploadJob(
-  supabase:        SupabaseClient,
-  tenantId:        string,
-  createdBy:       string,
-  mode:            ImportMode,
-  rows:            Record<string, string>[],
-  fileName:        string,
-  existingJobId:   string,
+  supabase:         SupabaseClient,
+  tenantId:         string,
+  createdBy:        string,
+  mode:             ImportMode,
+  rows:             Record<string, string>[],
+  fileName:         string,
+  existingJobId:    string,
   templateVersion?: string,
+  manifest?:        SalaryManifest,
 ): Promise<SalaryUploadResult> {
   const startedAt = Date.now()
   const jobId     = existingJobId
 
   try {
-    // Validate (templateVersion passed through for staleness tracking)
-    const validation = await validateSalaryUploadRows(supabase, tenantId, rows, templateVersion)
+    // Validate (templateVersion and manifest passed through for staleness/security checks)
+    const validation = await validateSalaryUploadRows(supabase, tenantId, rows, templateVersion, manifest)
 
     await supabase
       .from('import_jobs')

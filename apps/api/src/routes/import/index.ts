@@ -12,6 +12,7 @@ import {
   validateSalaryUploadRows,
   runSalaryUploadJob,
   findDuplicateComponentNames,
+  type SalaryManifest,
 } from '../../lib/import-engine/salary-upload.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 
@@ -28,6 +29,15 @@ const IMPORT_MODES = ['create_only', 'update_only', 'upsert', 'validate_only'] a
 
 // ── Zod schemas ───────────────────────────────────────────────────────────────
 
+// Manifest sent back by the frontend on validate/run (all string values from CSV/XLSX)
+const manifestSchema = z.object({
+  tenantId:            z.string().optional(),
+  generatedBy:         z.string().optional(),
+  importType:          z.string().optional(),
+  schemaVersion:       z.string().optional(),
+  expectedColumnCount: z.string().optional(),
+}).optional()
+
 const validateBodySchema = z.object({
   masterType: z.string().refine(
     (v) => VALID_MASTER_TYPES.includes(v),
@@ -39,6 +49,7 @@ const validateBodySchema = z.object({
     .max(5000, 'Maximum 5000 rows per request'),
   mode: z.enum(IMPORT_MODES).default('upsert'),
   templateVersion: z.string().optional(),
+  manifest: manifestSchema,
 })
 
 const runBodySchema = z.object({
@@ -53,6 +64,7 @@ const runBodySchema = z.object({
   fileName: z.string().min(1, 'fileName is required'),
   mode: z.enum(IMPORT_MODES).default('upsert'),
   templateVersion: z.string().optional(),
+  manifest: manifestSchema,
 })
 
 // ── Plugin ────────────────────────────────────────────────────────────────────
@@ -102,7 +114,7 @@ export default async function importRoutes(fastify: FastifyInstance) {
         })
       }
       const today = new Date().toISOString().split('T')[0]
-      const csv = generateSalaryUploadCsv(components, today)
+      const csv = generateSalaryUploadCsv(components, today, req.tenantId, req.userId)
       reply.header('Content-Type', 'text/csv; charset=utf-8')
       reply.header('Content-Disposition', 'attachment; filename="template-employee_salary_upload.csv"')
       return reply.send(csv)
@@ -129,7 +141,7 @@ export default async function importRoutes(fastify: FastifyInstance) {
       })
     }
 
-    const { masterType, rows, templateVersion } = parsed.data
+    const { masterType, rows, templateVersion, manifest } = parsed.data
 
     if (SEEDED_MASTER_TYPES[masterType]) {
       return reply.code(400).send({
@@ -140,13 +152,18 @@ export default async function importRoutes(fastify: FastifyInstance) {
 
     if (masterType === 'employee_salary_upload') {
       try {
-        const result = await validateSalaryUploadRows(fastify.supabase, req.tenantId, rows, templateVersion)
+        const result = await validateSalaryUploadRows(
+          fastify.supabase, req.tenantId, rows, templateVersion, manifest as SalaryManifest | undefined,
+        )
         return reply.send({ data: result })
       } catch (err) {
         fastify.log.error(err)
-        return reply.code(500).send({
-          error:   'VALIDATION_ERROR',
-          message: err instanceof Error ? err.message : 'Unexpected error during validation',
+        // Manifest validation errors are 400, not 500
+        const msg = err instanceof Error ? err.message : 'Unexpected error during validation'
+        const isManifestError = msg.includes('Template mismatch') || msg.includes('schema version')
+        return reply.code(isManifestError ? 400 : 500).send({
+          error:   isManifestError ? 'MANIFEST_ERROR' : 'VALIDATION_ERROR',
+          message: msg,
         })
       }
     }
@@ -182,7 +199,7 @@ export default async function importRoutes(fastify: FastifyInstance) {
       })
     }
 
-    const { masterType, rows, fileName, mode, templateVersion } = parsed.data
+    const { masterType, rows, fileName, mode, templateVersion, manifest } = parsed.data
 
     if (SEEDED_MASTER_TYPES[masterType]) {
       return reply.code(400).send({
@@ -211,8 +228,10 @@ export default async function importRoutes(fastify: FastifyInstance) {
         })
       }
       reply.code(202).send({ data: { importJobId: jobId, status: 'processing' } })
-      runSalaryUploadJob(fastify.supabase, req.tenantId, req.userId, mode, rows, fileName, jobId, templateVersion)
-        .catch(err => fastify.log.error({ err, jobId }, 'Background salary upload import failed'))
+      runSalaryUploadJob(
+        fastify.supabase, req.tenantId, req.userId, mode, rows, fileName, jobId,
+        templateVersion, manifest as SalaryManifest | undefined,
+      ).catch(err => fastify.log.error({ err, jobId }, 'Background salary upload import failed'))
       return
     }
 
