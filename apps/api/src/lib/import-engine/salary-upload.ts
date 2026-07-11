@@ -1072,103 +1072,92 @@ export async function importSalaryUpload(
       }))
 
     try {
-      if (vr.isDuplicate) {
-        // ── 3-step safe insert for employees with an existing active compensation ──
-        //
-        // Step 1: INSERT as is_active=false — zero constraint risk because the
-        // partial unique index uidx_comp_one_active only covers is_active=true rows.
-        const { data: newComp, error: insertErr } = await supabase
-          .from('employee_compensations')
-          .insert({
-            tenant_id:           tenantId,
-            employee_id:         employeeId,
-            salary_structure_id: structureId,
-            effective_from:      effectiveFrom,
-            ctc_annual:          ctcAnnual,
-            is_active:           false,
-            notes,
-            created_by:          createdBy,
-          })
-          .select('id')
-          .single()
+      // Universal 3-step safe insert — used for ALL rows regardless of isDuplicate.
+      //
+      // isDuplicate detection (done at validation time) can silently miss employees
+      // who already have an active compensation if the DB query fails or is not
+      // reached. Any branch that INSERTs with is_active=true while an active record
+      // exists will hit uidx_comp_one_active. The 3-step is immune:
+      //
+      //   Step 1 — INSERT as is_active=false.
+      //     The partial unique index only covers is_active=true rows — guaranteed
+      //     to never conflict regardless of what records already exist.
+      //
+      //   Step 2 — UPDATE any existing active record to is_active=false.
+      //     For "new" employees (no active comp) this is a no-op (0 rows matched).
+      //     The count of rows closed tells us created vs updated.
+      //
+      //   Step 3 — UPDATE new record to is_active=true.
+      //     After step 2 there is no competing is_active=true record for this
+      //     employee. The trigger fn_close_prev_compensation fires but finds nothing
+      //     to close. The unique constraint passes cleanly.
 
-        if (insertErr || !newComp) {
-          throw new Error(insertErr?.message ?? 'Failed to create compensation record')
-        }
-        const newCompId = newComp.id as string
+      // Step 1
+      const { data: newComp, error: insertErr } = await supabase
+        .from('employee_compensations')
+        .insert({
+          tenant_id:           tenantId,
+          employee_id:         employeeId,
+          salary_structure_id: structureId,
+          effective_from:      effectiveFrom,
+          ctc_annual:          ctcAnnual,
+          is_active:           false,
+          notes,
+          created_by:          createdBy,
+        })
+        .select('id')
+        .single()
 
-        // Insert component rows now (while new record is still inactive).
-        if (compRows.length > 0) {
-          const { error: ccErr } = await supabase
-            .from('employee_compensation_components')
-            .insert(compRows.map(r => ({ ...r, compensation_id: newCompId })))
-          if (ccErr) {
-            // Clean up the inactive record before propagating the error.
-            supabase.from('employee_compensations').delete().eq('id', newCompId).then(() => {}, () => {})
-            throw new Error(ccErr.message)
-          }
-        }
+      if (insertErr || !newComp) {
+        throw new Error(insertErr?.message ?? 'Failed to create compensation record')
+      }
+      const newCompId = newComp.id as string
 
-        // Step 2: Close the currently-active record for this employee.
-        // After this call commits, no is_active=true record exists for this employee.
-        const prevDate = new Date(effectiveFrom)
-        prevDate.setDate(prevDate.getDate() - 1)
-        const { error: closeErr } = await supabase
-          .from('employee_compensations')
-          .update({ is_active: false, effective_to: prevDate.toISOString().split('T')[0] })
-          .eq('tenant_id', tenantId)
-          .eq('employee_id', employeeId)
-          .eq('is_active', true)
-
-        if (closeErr) {
-          // Close failed — roll back the inactive insert before reporting the error.
+      // Insert component rows while the record is still inactive.
+      if (compRows.length > 0) {
+        const { error: ccErr } = await supabase
+          .from('employee_compensation_components')
+          .insert(compRows.map(r => ({ ...r, compensation_id: newCompId })))
+        if (ccErr) {
           supabase.from('employee_compensations').delete().eq('id', newCompId).then(() => {}, () => {})
-          throw new Error(`Failed to close previous compensation: ${closeErr.message}`)
+          throw new Error(ccErr.message)
         }
+      }
 
-        // Step 3: Activate the new record.
-        // No other is_active=true record exists for this employee (step 2 closed it),
-        // so the unique constraint passes. The trigger fn_close_prev_compensation
-        // fires after this UPDATE but finds nothing to close — it is a no-op.
-        const { error: activateErr } = await supabase
-          .from('employee_compensations')
-          .update({ is_active: true })
-          .eq('id', newCompId)
+      // Step 2 — close any existing active record (no-op when none exists).
+      // Exclude the new record itself so same-id collisions are impossible.
+      const prevDate = new Date(effectiveFrom)
+      prevDate.setDate(prevDate.getDate() - 1)
+      const { data: closedRows, error: closeErr } = await supabase
+        .from('employee_compensations')
+        .update({ is_active: false, effective_to: prevDate.toISOString().split('T')[0] })
+        .eq('tenant_id', tenantId)
+        .eq('employee_id', employeeId)
+        .eq('is_active', true)
+        .neq('id', newCompId)
+        .select('id')
 
-        if (activateErr) {
-          throw new Error(`Failed to activate new compensation: ${activateErr.message}`)
-        }
+      if (closeErr) {
+        supabase.from('employee_compensations').delete().eq('id', newCompId).then(() => {}, () => {})
+        throw new Error(`Failed to close previous compensation: ${closeErr.message}`)
+      }
 
+      // Step 3 — activate the new record (old is closed, trigger is a no-op).
+      const { error: activateErr } = await supabase
+        .from('employee_compensations')
+        .update({ is_active: true })
+        .eq('id', newCompId)
+
+      if (activateErr) {
+        throw new Error(`Failed to activate new compensation: ${activateErr.message}`)
+      }
+
+      // created vs updated based on whether step 2 actually closed a record.
+      const wasUpdate = (closedRows?.length ?? 0) > 0
+      if (wasUpdate) {
+        vr.isDuplicate = true  // sync flag so row-status tracking shows 'updated'
         updated++
       } else {
-        // ── Direct insert for new employees (no existing active compensation) ──
-        const { data: newComp, error: compErr } = await supabase
-          .from('employee_compensations')
-          .insert({
-            tenant_id:           tenantId,
-            employee_id:         employeeId,
-            salary_structure_id: structureId,
-            effective_from:      effectiveFrom,
-            ctc_annual:          ctcAnnual,
-            is_active:           true,
-            notes,
-            created_by:          createdBy,
-          })
-          .select('id')
-          .single()
-
-        if (compErr || !newComp) {
-          throw new Error(compErr?.message ?? 'Failed to create compensation record')
-        }
-        const compId = newComp.id as string
-
-        if (compRows.length > 0) {
-          const { error: ccErr } = await supabase
-            .from('employee_compensation_components')
-            .insert(compRows.map(r => ({ ...r, compensation_id: compId })))
-          if (ccErr) throw new Error(ccErr.message)
-        }
-
         created++
       }
     } catch (err) {
