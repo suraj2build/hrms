@@ -170,10 +170,12 @@ export async function writeImportErrors(
 
   if (records.length === 0) return
 
+  // import_job_errors table may not exist in older DB schemas — fire-and-forget.
   for (let i = 0; i < records.length; i += ERROR_BATCH_SIZE) {
-    await supabase
+    supabase
       .from('import_job_errors')
       .insert(records.slice(i, i + ERROR_BATCH_SIZE))
+      .then(() => {}).catch(() => {})
   }
 }
 
@@ -212,8 +214,7 @@ export async function executeInChunks({
   }
   const totalChunks = chunks.length
 
-  // 4. Upsert chunk records with immutable checksum.
-  //    ignoreDuplicates: on resume, skip existing rows — preserves 'completed' status.
+  // 4. Upsert chunk records (fire-and-forget — table may not exist in older DB schemas)
   const chunkRecords = chunks.map((ch, idx) => {
     const chunkNo  = idx + 1
     const startRow = ch[0].rowNumber
@@ -230,16 +231,19 @@ export async function executeInChunks({
     }
   })
 
-  await supabase
+  supabase
     .from('import_job_chunks')
     .upsert(chunkRecords, { onConflict: 'import_job_id,chunk_no', ignoreDuplicates: true })
+    .then(() => {})
 
   // 5. Fetch live chunk statuses (to detect already-completed chunks on resume)
+  //    Non-fatal — import_job_chunks table may not exist in older DB schemas.
   const { data: liveChunks } = await supabase
     .from('import_job_chunks')
     .select('chunk_no, id, status, success_count, failure_count, attempt')
     .eq('import_job_id', jobId)
     .order('chunk_no', { ascending: true })
+    .catch(() => ({ data: null, error: null }))
 
   const chunkMeta = new Map<number, {
     id:            string
@@ -260,11 +264,12 @@ export async function executeInChunks({
 
   const isResume = [...chunkMeta.values()].some((m) => m.status === 'completed')
 
-  // 6. Update job with total chunk count and stage
-  await supabase
+  // 6. Update job stage (fire-and-forget — total_chunks/current_stage columns may not exist)
+  supabase
     .from('import_jobs')
     .update({ total_chunks: totalChunks, current_stage: 'writing' })
     .eq('id', jobId)
+    .then(() => {})
 
   // 7. Initialise running counters
   let totalCreated: number
@@ -291,14 +296,14 @@ export async function executeInChunks({
     totalSkipped = skippedCount
   }
 
-  // 8. Heartbeat timer — stamps import_jobs.heartbeat_at every 5 s so a watchdog
-  //    can distinguish active workers from frozen/dead ones.
+  // 8. Heartbeat timer — fire-and-forget; heartbeat_at may not exist in older DB schemas.
   const heartbeatTimer = setInterval(() => {
     supabase
       .from('import_jobs')
       .update({ heartbeat_at: new Date().toISOString() })
       .eq('id', jobId)
-      .then(() => {}) // fire-and-forget; errors are non-fatal
+      .then(() => {})
+      .catch(() => {})
   }, HEARTBEAT_INTERVAL_MS)
 
   // Per-chunk timing accumulators for job-level aggregate metrics
@@ -319,7 +324,7 @@ export async function executeInChunks({
       const chunkStartMs = Date.now()
       const startedAt    = new Date(chunkStartMs).toISOString()
 
-      await supabase
+      supabase
         .from('import_job_chunks')
         .update({
           status:     'processing',
@@ -328,6 +333,7 @@ export async function executeInChunks({
         })
         .eq('import_job_id', jobId)
         .eq('chunk_no', chunkNo)
+        .then(() => {}).catch(() => {})
 
       try {
         const validBefore = new Set(chunk.filter((vr) => vr.isValid).map((vr) => vr.rowNumber))
@@ -361,8 +367,8 @@ export async function executeInChunks({
         peakChunkMs   = Math.max(peakChunkMs, chunkDurationMs)
         chunksRan++
 
-        // Update chunk state
-        await supabase
+        // Update chunk state (fire-and-forget — table may not exist in older DB schemas)
+        supabase
           .from('import_job_chunks')
           .update({
             status:        'completed',
@@ -372,28 +378,26 @@ export async function executeInChunks({
           })
           .eq('import_job_id', jobId)
           .eq('chunk_no', chunkNo)
+          .then(() => {}).catch(() => {})
 
-        // Update job progress
+        // Update job progress — only columns present since migration 108
         await supabase
           .from('import_jobs')
           .update({
-            processed_rows:   processedRows,
-            created_rows:     totalCreated,
-            updated_rows:     totalUpdated,
-            failed_rows:      totalFailed,
-            skipped_rows:     totalSkipped,
-            current_chunk:    chunkNo,
-            last_activity_at: completedAt,
+            created_rows:  totalCreated,
+            updated_rows:  totalUpdated,
+            failed_rows:   totalFailed,
+            skipped_rows:  totalSkipped,
           })
           .eq('id', jobId)
 
-        // Insert per-chunk metrics (non-blocking — errors are non-fatal)
+        // Per-chunk metrics (fire-and-forget — table may not exist in older DB schemas)
         supabase
           .from('import_job_metrics')
           .insert({
-            import_job_id:    jobId,
-            tenant_id:        tenantId,
-            chunk_no:         chunkNo,
+            import_job_id:     jobId,
+            tenant_id:         tenantId,
+            chunk_no:          chunkNo,
             chunk_duration_ms: chunkDurationMs,
             db_write_ms:       dbWriteMs,
             rows_per_second:   rps,
@@ -401,12 +405,13 @@ export async function executeInChunks({
             failure_count:     result.failed,
             retry_count:       (meta?.attempt ?? 0),
           })
-          .then(() => {})
+          .then(() => {}).catch(() => {})
 
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err)
 
-        await supabase
+        // fire-and-forget — table may not exist in older DB schemas
+        supabase
           .from('import_job_chunks')
           .update({
             status:        'failed',
@@ -415,6 +420,7 @@ export async function executeInChunks({
           })
           .eq('import_job_id', jobId)
           .eq('chunk_no', chunkNo)
+          .then(() => {}).catch(() => {})
 
         throw err
       }
@@ -432,6 +438,7 @@ export async function executeInChunks({
         ? Math.round((totalEligible / totalElapsedMs) * 1000 * 100) / 100
         : 0
 
+      // fire-and-forget — peak_chunk_ms/avg_rows_per_sec may not exist in older DB schemas
       supabase
         .from('import_jobs')
         .update({
@@ -439,7 +446,7 @@ export async function executeInChunks({
           avg_rows_per_sec: avgRps,
         })
         .eq('id', jobId)
-        .then(() => {})
+        .then(() => {}).catch(() => {})
     }
   }
 

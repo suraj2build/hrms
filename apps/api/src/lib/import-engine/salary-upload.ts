@@ -1046,6 +1046,23 @@ export async function importSalaryUpload(
     }
     const ctcAnnual = Math.round(ctcMonthly * 12 * 100) / 100
 
+    // Close previous active compensation BEFORE inserting the new one.
+    // The DB trigger fn_close_prev_compensation is an AFTER trigger, which runs
+    // after the unique constraint check. For bulk INSERTs the constraint fires first
+    // (old + new both is_active=true → violation). Explicitly close the old record
+    // here so the INSERT sees no active record for this employee.
+    if (vr.isDuplicate) {
+      const prevDate = new Date(effectiveFrom)
+      prevDate.setDate(prevDate.getDate() - 1)
+      const { error: closeErr } = await supabase
+        .from('employee_compensations')
+        .update({ is_active: false, effective_to: prevDate.toISOString().split('T')[0] })
+        .eq('tenant_id', tenantId)
+        .eq('employee_id', employeeId)
+        .eq('is_active', true)
+      if (closeErr) throw new Error(`Failed to close previous compensation: ${closeErr.message}`)
+    }
+
     const { data: newComp, error: compErr } = await supabase
       .from('employee_compensations')
       .insert({
@@ -1224,18 +1241,28 @@ export async function runSalaryUploadJob(
 
     const duration = Date.now() - startedAt
 
+    // Write row-level results to import_job_rows so the UI can surface
+    // per-row status and error details (table exists since migration 108).
+    const rowStatuses: Record<number, 'created' | 'updated' | 'failed' | 'skipped'> = {}
+    for (const vr of invalidRows)  rowStatuses[vr.rowNumber] = 'failed'
+    for (const vr of modeSkipped)  rowStatuses[vr.rowNumber] = 'skipped'
+    for (const vr of eligibleRows) {
+      if (!vr.isValid)      rowStatuses[vr.rowNumber] = 'failed'
+      else if (vr.isDuplicate) rowStatuses[vr.rowNumber] = 'updated'
+      else                  rowStatuses[vr.rowNumber] = 'created'
+    }
+    await writeJobRows(supabase, jobId, tenantId, validation.rows, rowStatuses)
+
     await supabase
       .from('import_jobs')
       .update({
-        status:           'completed',
-        processed_rows:   eligibleRows.length,
-        created_rows:     result.created,
-        updated_rows:     result.updated,
-        failed_rows:      result.failed,
-        skipped_rows:     result.skipped,
-        duration_ms:      duration,
-        completed_at:     new Date().toISOString(),
-        last_activity_at: new Date().toISOString(),
+        status:       'completed',
+        created_rows: result.created,
+        updated_rows: result.updated,
+        failed_rows:  result.failed,
+        skipped_rows: result.skipped,
+        duration_ms:  duration,
+        completed_at: new Date().toISOString(),
       })
       .eq('id', jobId)
 
