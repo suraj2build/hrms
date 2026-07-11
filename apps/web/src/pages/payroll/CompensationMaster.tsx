@@ -34,6 +34,7 @@ interface SalaryStructure {
   code:             string
   description:      string | null
   is_active:        boolean
+  is_default:       boolean
   created_at:       string
   pf_applicable?:   boolean
   esi_applicable?:  boolean
@@ -101,6 +102,7 @@ interface StructureForm {
   code:            string
   description:     string
   is_active:       boolean
+  is_default:      boolean
   pf_applicable:   boolean
   esi_applicable:  boolean
   tds_applicable:  boolean
@@ -114,7 +116,7 @@ interface AddComponentForm {
 }
 
 const EMPTY_STRUCTURE_FORM: StructureForm = {
-  name: '', code: '', description: '', is_active: true,
+  name: '', code: '', description: '', is_active: true, is_default: false,
   pf_applicable: true, esi_applicable: true, tds_applicable: true,
   pf_ceiling_mode: 'follow_policy',
 }
@@ -209,14 +211,25 @@ function StructureDialog({
             </div>
             <div className="space-y-1.5">
               <label className="text-xs font-medium text-muted-foreground">Status</label>
-              <div className="flex items-center gap-2 h-9">
-                <input
-                  type="checkbox" id="dlg_active"
-                  checked={form.is_active}
-                  onChange={e => set('is_active', e.target.checked)}
-                  className="rounded"
-                />
-                <label htmlFor="dlg_active" className="text-sm cursor-pointer">Active</label>
+              <div className="flex flex-col gap-1.5 h-9 justify-center">
+                <label className="flex items-center gap-2 cursor-pointer text-sm">
+                  <input
+                    type="checkbox" id="dlg_active"
+                    checked={form.is_active}
+                    onChange={e => set('is_active', e.target.checked)}
+                    className="rounded"
+                  />
+                  Active
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer text-sm">
+                  <input
+                    type="checkbox" id="dlg_default"
+                    checked={form.is_default}
+                    onChange={e => set('is_default', e.target.checked)}
+                    className="rounded"
+                  />
+                  <span>Set as Default</span>
+                </label>
               </div>
             </div>
             <div className="col-span-2 space-y-1.5">
@@ -579,6 +592,7 @@ export function CompensationMaster() {
       code:            s.code,
       description:     s.description ?? '',
       is_active:       s.is_active,
+      is_default:      s.is_default ?? false,
       pf_applicable:   s.pf_applicable  ?? true,
       esi_applicable:  s.esi_applicable ?? true,
       tds_applicable:  s.tds_applicable ?? true,
@@ -726,6 +740,9 @@ export function CompensationMaster() {
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
                         <span className="text-sm font-medium text-foreground truncate">{s.name}</span>
+                        {s.is_default && (
+                          <Badge className="text-[9px] rounded-full shrink-0 py-0 bg-[#15B8A6] text-white border-0">Default</Badge>
+                        )}
                         {!s.is_active && (
                           <Badge variant="secondary" className="text-[9px] rounded-full shrink-0 py-0">Inactive</Badge>
                         )}
