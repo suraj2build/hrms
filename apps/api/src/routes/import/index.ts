@@ -6,11 +6,17 @@ import { z }                    from 'zod'
 import { generateCSV, MASTER_TEMPLATES } from '../../lib/import-engine/templates.js'
 import { validateImportRows }            from '../../lib/import-engine/validator.js'
 import { runImport, createImportJob }    from '../../lib/import-engine/importer.js'
+import {
+  fetchActiveComponents,
+  generateSalaryUploadCsv,
+  validateSalaryUploadRows,
+  runSalaryUploadJob,
+} from '../../lib/import-engine/salary-upload.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 
 // ── Shared constants ──────────────────────────────────────────────────────────
 
-const VALID_MASTER_TYPES = Object.keys(MASTER_TEMPLATES)
+const VALID_MASTER_TYPES = [...Object.keys(MASTER_TEMPLATES), 'employee_salary_upload']
 
 // Master types that are pre-seeded per tenant and must not be overwritten via import.
 const SEEDED_MASTER_TYPES: Record<string, string> = {
@@ -77,6 +83,21 @@ export default async function importRoutes(fastify: FastifyInstance) {
       })
     }
 
+    if (masterType === 'employee_salary_upload') {
+      const components = await fetchActiveComponents(fastify.supabase, req.tenantId)
+      if (components.length === 0) {
+        return reply.code(400).send({
+          error:   'NO_COMPONENTS',
+          message: 'No salary components found. Go to Payroll → Salary Components and create at least one component before downloading the salary upload template.',
+        })
+      }
+      const today = new Date().toISOString().split('T')[0]
+      const csv = generateSalaryUploadCsv(components, today)
+      reply.header('Content-Type', 'text/csv; charset=utf-8')
+      reply.header('Content-Disposition', 'attachment; filename="template-employee_salary_upload.csv"')
+      return reply.send(csv)
+    }
+
     const csv = generateCSV(masterType)
 
     reply.header('Content-Type', 'text/csv; charset=utf-8')
@@ -105,6 +126,19 @@ export default async function importRoutes(fastify: FastifyInstance) {
         error:   'SEEDED_MASTER',
         message: SEEDED_MASTER_TYPES[masterType],
       })
+    }
+
+    if (masterType === 'employee_salary_upload') {
+      try {
+        const result = await validateSalaryUploadRows(fastify.supabase, req.tenantId, rows)
+        return reply.send({ data: result })
+      } catch (err) {
+        fastify.log.error(err)
+        return reply.code(500).send({
+          error:   'VALIDATION_ERROR',
+          message: err instanceof Error ? err.message : 'Unexpected error during validation',
+        })
+      }
     }
 
     try {
@@ -145,6 +179,31 @@ export default async function importRoutes(fastify: FastifyInstance) {
         error:   'SEEDED_MASTER',
         message: SEEDED_MASTER_TYPES[masterType],
       })
+    }
+
+    if (masterType === 'employee_salary_upload') {
+      let jobId: string
+      try {
+        jobId = await createImportJob(
+          fastify.supabase,
+          req.tenantId,
+          req.userId,
+          masterType,
+          mode,
+          fileName,
+          rows.length,
+        )
+      } catch (err) {
+        fastify.log.error(err)
+        return reply.code(500).send({
+          error:   'IMPORT_ERROR',
+          message: err instanceof Error ? err.message : 'Failed to create import job',
+        })
+      }
+      reply.code(202).send({ data: { importJobId: jobId, status: 'processing' } })
+      runSalaryUploadJob(fastify.supabase, req.tenantId, req.userId, mode, rows, fileName, jobId)
+        .catch(err => fastify.log.error({ err, jobId }, 'Background salary upload import failed'))
+      return
     }
 
     // Create the job record synchronously so we can return 202 immediately.

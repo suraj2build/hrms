@@ -106,6 +106,8 @@ type MasterType =
   | 'document_types'
   | 'identity_types'
   | 'relationship_types'
+  // Dynamic salary upload
+  | 'employee_salary_upload'
 
 type Step = 'download' | 'upload' | 'validate' | 'import' | 'complete'
 // NOTE: must match backend ImportMode — 'create_only' / 'update_only', NOT 'create' / 'update'
@@ -217,7 +219,7 @@ interface FlatJobRow {
 // ─── Session Persistence ──────────────────────────────────────────────────────
 
 // Sensitive master types whose row data must not be written to localStorage
-const SENSITIVE_IMPORT_TYPES: MasterType[] = ['employee_compensation', 'compensation_revisions', 'employee_bank_details']
+const SENSITIVE_IMPORT_TYPES: MasterType[] = ['employee_compensation', 'compensation_revisions', 'employee_bank_details', 'employee_salary_upload']
 // Max rows to persist — very large files are re-uploaded after refresh
 const SESSION_ROW_LIMIT = 5_000
 const SESSION_TTL_MS    = 24 * 60 * 60 * 1000  // 24 h
@@ -628,6 +630,15 @@ const MASTER_CONFIGS: MasterConfig[] = [
     icon: UserCheck,
     requiredFields: ['employee_code', 'shift_code', 'effective_from'],
     optionalFields: [],
+    group: 'onboarding',
+  },
+  {
+    type: 'employee_salary_upload',
+    label: 'Employee Salary Upload',
+    description: 'Set component-wise monthly salary — columns generated from Salary Component Master',
+    icon: Wallet,
+    requiredFields: ['employee_code', 'effective_from'],
+    optionalFields: ['employee_name', 'notes'],
     group: 'onboarding',
   },
   // ── Reference data ────────────────────────────────────────────────────────────
@@ -1091,8 +1102,9 @@ export function ImportWorkspace() {
         asset_categories:      ['asset-categories'],
         salary_structures:     ['salary-structures'],
         holiday_calendar:      ['holiday-calendar'],
-        employee_bank_details: ['employees'],
-        positions:             ['positions'],
+        employee_bank_details:   ['employees'],
+        positions:               ['positions'],
+        employee_salary_upload:  ['employees'],
       }
       const keysToInvalidate = selectedMaster ? (MASTER_QUERY_KEYS[selectedMaster] ?? []) : []
       for (const k of keysToInvalidate) {
