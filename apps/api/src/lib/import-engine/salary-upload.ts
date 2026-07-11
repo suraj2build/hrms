@@ -1022,80 +1022,86 @@ export async function importSalaryUpload(
     }
   }
 
-  for (const vr of validRows) {
+  // Process rows concurrently (10 at a time) — each row needs 2 sequential DB
+  // calls (insert compensation → get id → insert components) so we can't batch
+  // all at once, but parallelising across rows gives a ~10x throughput gain.
+  const CONCURRENCY = 10
+
+  async function processRow(vr: ValidatedRow): Promise<void> {
     const norm = vr.normalizedData
-    try {
-      if (mode === 'create_only' && vr.isDuplicate) { skipped++; continue }
-      if (mode === 'update_only' && !vr.isDuplicate) { skipped++; continue }
+    if (mode === 'create_only' && vr.isDuplicate) { skipped++; return }
+    if (mode === 'update_only' && !vr.isDuplicate) { skipped++; return }
 
-      const employeeId    = norm.employee_id   as string
-      const effectiveFrom = norm.effective_from as string
-      const notes         = (norm.notes as string | undefined) ?? null
-      const components    = (norm.components   as Record<string, number>) ?? {}
+    const employeeId    = norm.employee_id   as string
+    const effectiveFrom = norm.effective_from as string
+    const notes         = (norm.notes as string | undefined) ?? null
+    const components    = (norm.components   as Record<string, number>) ?? {}
 
-      // CTC = (earnings + employer_contributions) × 12
-      // Deductions reduce take-home but are not added to CTC
-      let ctcMonthly = 0
-      for (const [compId, amount] of Object.entries(components)) {
-        const compType = compTypeMap.get(compId)
-        if (compType === 'earning' || compType === 'employer_contribution') {
-          ctcMonthly += amount
-        }
+    let ctcMonthly = 0
+    for (const [compId, amount] of Object.entries(components)) {
+      const compType = compTypeMap.get(compId)
+      if (compType === 'earning' || compType === 'employer_contribution') {
+        ctcMonthly += amount
       }
-      const ctcAnnual = Math.round(ctcMonthly * 12 * 100) / 100
+    }
+    const ctcAnnual = Math.round(ctcMonthly * 12 * 100) / 100
 
-      // Insert new compensation row (DB trigger closes the old active one)
-      const { data: newComp, error: compErr } = await supabase
-        .from('employee_compensations')
-        .insert({
-          tenant_id:           tenantId,
-          employee_id:         employeeId,
-          salary_structure_id: structureId,
-          effective_from:      effectiveFrom,
-          ctc_annual:          ctcAnnual,
-          is_active:           true,
-          notes,
-          created_by:          createdBy,
-        })
-        .select('id')
-        .single()
-
-      if (compErr || !newComp) {
-        throw new Error(compErr?.message ?? 'Failed to create compensation record')
-      }
-      const compId = newComp.id as string
-
-      // Insert component rows for each non-zero amount
-      const compRows = Object.entries(components)
-        .filter(([, amount]) => amount > 0)
-        .map(([salaryComponentId, amount], seq) => ({
-          tenant_id:            tenantId,
-          compensation_id:      compId,
-          salary_component_id:  salaryComponentId,
-          calculation_type:     'fixed',
-          value:                amount,
-          computed_monthly:     Math.round(amount * 100) / 100,
-          computed_annual:      Math.round(amount * 12 * 100) / 100,
-          sequence:             seq,
-        }))
-
-      if (compRows.length > 0) {
-        const { error: ccErr } = await supabase
-          .from('employee_compensation_components')
-          .insert(compRows)
-        if (ccErr) throw new Error(ccErr.message)
-      }
-
-      if (vr.isDuplicate) updated++
-      else                created++
-    } catch (err) {
-      vr.errors.push({
-        field:    '_db',
-        message:  err instanceof Error ? err.message : String(err),
-        severity: 'error',
+    const { data: newComp, error: compErr } = await supabase
+      .from('employee_compensations')
+      .insert({
+        tenant_id:           tenantId,
+        employee_id:         employeeId,
+        salary_structure_id: structureId,
+        effective_from:      effectiveFrom,
+        ctc_annual:          ctcAnnual,
+        is_active:           true,
+        notes,
+        created_by:          createdBy,
       })
-      vr.isValid = false
-      failed++
+      .select('id')
+      .single()
+
+    if (compErr || !newComp) {
+      throw new Error(compErr?.message ?? 'Failed to create compensation record')
+    }
+    const compId = newComp.id as string
+
+    const compRows = Object.entries(components)
+      .filter(([, amount]) => amount > 0)
+      .map(([salaryComponentId, amount], seq) => ({
+        tenant_id:            tenantId,
+        compensation_id:      compId,
+        salary_component_id:  salaryComponentId,
+        calculation_type:     'fixed',
+        value:                amount,
+        computed_monthly:     Math.round(amount * 100) / 100,
+        computed_annual:      Math.round(amount * 12 * 100) / 100,
+        sequence:             seq,
+      }))
+
+    if (compRows.length > 0) {
+      const { error: ccErr } = await supabase
+        .from('employee_compensation_components')
+        .insert(compRows)
+      if (ccErr) throw new Error(ccErr.message)
+    }
+
+    if (vr.isDuplicate) updated++
+    else                created++
+  }
+
+  for (let i = 0; i < validRows.length; i += CONCURRENCY) {
+    const batch = validRows.slice(i, i + CONCURRENCY)
+    const results = await Promise.allSettled(batch.map(vr => processRow(vr)))
+    for (let j = 0; j < results.length; j++) {
+      const res = results[j]
+      if (res.status === 'rejected') {
+        const vr = batch[j]
+        const msg = res.reason instanceof Error ? res.reason.message : String(res.reason)
+        vr.errors.push({ field: '_db', message: msg, severity: 'error' })
+        vr.isValid = false
+        failed++
+      }
     }
   }
 
@@ -1210,6 +1216,9 @@ export async function runSalaryUploadJob(
       eligibleRows,
       invalidRows,
       skippedCount: modeSkipped.length,
+      // Salary import does 2 DB calls per row; keep chunks small so the
+      // progress bar updates every ~100 rows instead of once at the end.
+      chunkSize: 100,
       processChunk: (rows) => importSalaryUpload(supabase, tenantId, createdBy, rows, mode),
     })
 
