@@ -238,14 +238,16 @@ export async function executeInChunks({
 
   // 5. Fetch live chunk statuses (to detect already-completed chunks on resume)
   //    Non-fatal — import_job_chunks table may not exist in older DB schemas.
-  let liveChunks: Array<Record<string, unknown>> | null = null
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let liveChunksRaw: any[] = []
   try {
     const res = await supabase
       .from('import_job_chunks')
       .select('chunk_no, id, status, success_count, failure_count, attempt')
       .eq('import_job_id', jobId)
       .order('chunk_no', { ascending: true })
-    liveChunks = res.data as typeof liveChunks
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    liveChunksRaw = (res.data as any[]) ?? []
   } catch { /* table may not exist */ }
 
   const chunkMeta = new Map<number, {
@@ -255,7 +257,7 @@ export async function executeInChunks({
     failure_count: number
     attempt:       number
   }>()
-  for (const row of liveChunks ?? []) {
+  for (const row of liveChunksRaw) {
     chunkMeta.set(row.chunk_no as number, {
       id:            row.id            as string,
       status:        row.status        as string,
