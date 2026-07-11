@@ -341,7 +341,7 @@ export default async function importRoutes(fastify: FastifyInstance) {
     let query = fastify.supabase
       .from('import_jobs')
       .select(
-        'id, master_type, mode, file_name, status, total_rows, valid_rows, invalid_rows, created_rows, updated_rows, failed_rows, skipped_rows, processed_rows, current_chunk, total_chunks, current_stage, duration_ms, peak_chunk_ms, avg_rows_per_sec, last_activity_at, heartbeat_at, created_by, created_at, completed_at',
+        'id, master_type, mode, file_name, status, total_rows, valid_rows, invalid_rows, created_rows, updated_rows, failed_rows, skipped_rows, duration_ms, created_by, created_at, completed_at',
         { count: 'exact' },
       )
       .eq('tenant_id', req.tenantId)
@@ -375,7 +375,7 @@ export default async function importRoutes(fastify: FastifyInstance) {
 
     const { data: job, error } = await fastify.supabase
       .from('import_jobs')
-      .select('*, import_job_chunks(chunk_no, status, success_count, failure_count, started_at, completed_at)')
+      .select('id, master_type, mode, file_name, status, total_rows, valid_rows, invalid_rows, created_rows, updated_rows, failed_rows, skipped_rows, duration_ms, error_summary, warnings, import_options, created_by, created_at, completed_at, started_at')
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
       .single()
