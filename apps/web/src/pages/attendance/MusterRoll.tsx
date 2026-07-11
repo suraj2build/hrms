@@ -996,7 +996,19 @@ export function MusterRoll() {
                                           </span>
                                         )
                                       ) : (
-                                        <span className={cn('inline-block', chipWEmpty)} />
+                                        d < todayStr ? (
+                                          <span
+                                            title={`${emp.name} · ${d}\nNo record — attendance not processed`}
+                                            className={cn(
+                                              'inline-flex items-center justify-center rounded text-muted-foreground/35 font-medium select-none',
+                                              chipW,
+                                            )}
+                                          >
+                                            –
+                                          </span>
+                                        ) : (
+                                          <span className={cn('inline-block', chipWEmpty)} />
+                                        )
                                       )}
                                     </td>
                                   )
