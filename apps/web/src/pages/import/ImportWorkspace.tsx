@@ -1067,9 +1067,24 @@ export function ImportWorkspace() {
                    !String(row[0] ?? '').trimStart().startsWith('#'),
         )
 
+        // For salary upload, component columns are keyed by 1-based Excel column
+        // position rather than the header name. The column header text becomes
+        // presentation-only — renaming, translating, or accidentally editing it
+        // does not affect resolution. Fixed columns (employee_code, etc.) keep
+        // their name-based keys since they are stable platform constants.
+        const SALARY_FIXED_HEADERS = new Set([
+          'employee_code', 'employee_name', 'effective_from', 'notes',
+        ])
+        const usePositionalKeys = selectedMaster === 'employee_salary_upload'
+
         const rows: Record<string, string>[] = dataRows.map((row) => {
           const obj: Record<string, string> = {}
-          headers.forEach((h, i) => { obj[h] = cellToString(row[i]) })
+          headers.forEach((h, i) => {
+            const key = usePositionalKeys && !SALARY_FIXED_HEADERS.has(h)
+              ? String(i + 1)   // 1-based Excel column position
+              : h
+            obj[key] = cellToString(row[i])
+          })
           return obj
         })
         setParsedRows(rows)

@@ -727,26 +727,29 @@ export async function validateSalaryUploadRows(
     compTypeById.set(c.id, c.component_type)
   }
 
-  // Build manifest-based column map: normalised-header-name → entityId.
-  // All column identity comes from the workbook manifest (fixed at generation
-  // time and validated by validateReferenceIntegrity above). No DB name lookup.
+  // Build pure positional column map: 1-based Excel column position → entityId.
+  // The frontend emits component columns with their 1-based position as the key
+  // (e.g. "4" for column D). Column header text is never used for resolution —
+  // users can rename, translate, or reformat headers without affecting imports.
   const manifestEntries = JSON.parse(manifest.components) as Array<{
     position: number; id: string; code: string; name: string
   }>
-  const manifestByHeader = new Map<string, string>()  // normalised name → entityId
+  const manifestByPosition = new Map<number, string>()  // 1-based position → entityId
   for (const m of manifestEntries) {
-    manifestByHeader.set(m.name.replace(/\s*\*\s*$/, '').trim().toLowerCase(), m.id)
+    manifestByPosition.set(m.position, m.id)
   }
 
-  // Classify headers: manifest-known component columns vs fixed/unrecognized (skip)
+  // Classify columns: fixed-name keys (employee_code etc.) are skipped;
+  // numeric-string keys are 1-based column positions resolved via the manifest.
   const firstRowKeys = rows.length > 0 ? Object.keys(rows[0]) : []
   const componentCols: Array<{ key: string; entityId: string }> = []
   for (const key of firstRowKeys) {
     if (FIXED_KEYS.has(key)) continue
-    const entityId = manifestByHeader.get(key)
-    if (entityId) componentCols.push({ key, entityId })
-    // Columns not in the manifest are silently ignored — validateReferenceIntegrity
-    // already confirmed that all manifest entity IDs are active and present.
+    const pos = parseInt(key, 10)
+    if (Number.isInteger(pos) && pos > 0) {
+      const entityId = manifestByPosition.get(pos)
+      if (entityId) componentCols.push({ key, entityId })
+    }
   }
 
   const validatedRows: ValidatedRow[] = []
