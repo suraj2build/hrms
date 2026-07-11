@@ -13,11 +13,22 @@
  *   POST /import/run       { masterType: 'employee_salary_upload', rows, ... }
  */
 
+import { randomUUID }                          from 'crypto'
 import type { SupabaseClient }                 from '@supabase/supabase-js'
 import type { ValidationResult, ValidatedRow, RowError } from './validator.js'
 import type { ImportMode }                     from './importer.js'
 import { executeInChunks, writeImportErrors } from './chunk-executor.js'
 import ExcelJS                                from 'exceljs'
+import {
+  resolveMetadata,
+  validateReferenceIntegrity,
+  MetadataValidationError,
+  ReferenceIntegrityError,
+  WORKBOOK_ERROR_CODES,
+  type WorkbookManifest,
+  type MasterMapping,
+  type ImportContext,
+} from '../enterprise-import/index.js'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -26,6 +37,7 @@ interface ComponentMeta {
   name:                string
   code:                string
   component_type:      string
+  display_order:       number | null
   is_active:           boolean
   is_variable?:        boolean | null
   is_basic?:           boolean | null
@@ -49,7 +61,8 @@ const TYPE_LABELS: Record<string, string> = {
 }
 
 // Increment whenever the CSV/XLSX manifest format changes in a breaking way.
-const SCHEMA_VERSION = 1
+// v2: structured JSON component manifest, display_order-based column positions, strengthened hash.
+const SCHEMA_VERSION = 2
 
 // Fixed columns — always present regardless of component master
 const FIXED_KEYS = new Set([
@@ -62,13 +75,17 @@ const DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/
 
 /**
  * Compute a stable fingerprint of the active component set.
- * Used to detect stale templates (downloaded before a component was added/removed).
- * Algorithm: djb2 hash of sorted component IDs — no Node.js crypto required.
+ * Used to detect stale templates (downloaded before a component was added/removed,
+ * renamed, reordered, or had its type/active status changed).
+ *
+ * Algorithm: djb2 hash of sorted component IDs, each entry includes
+ * display_order, component_type, and is_active so any structural change
+ * to the master invalidates in-flight workbooks.
  */
 export function computeTemplateVersion(components: ComponentMeta[]): string {
   const payload = [...components]
     .sort((a, b) => a.id.localeCompare(b.id))
-    .map(c => c.id)
+    .map(c => `${c.id}|${c.display_order ?? ''}|${c.component_type}|${c.is_active}`)
     .join(',')
   let h = 5381
   for (let i = 0; i < payload.length; i++) {
@@ -89,14 +106,20 @@ export async function fetchActiveComponents(
 ): Promise<ComponentMeta[]> {
   const { data, error } = await supabase
     .from('salary_components')
-    .select('id, name, code, component_type, is_active, is_variable, is_basic, affects_pf, is_pt_applicable, is_esi_applicable, is_lwf_applicable')
+    .select('id, name, code, component_type, display_order, is_active, is_variable, is_basic, affects_pf, is_pt_applicable, is_esi_applicable, is_lwf_applicable')
     .eq('tenant_id', tenantId)
     .eq('is_active', true)
-    .order('name')
+    .order('display_order', { ascending: true, nullsFirst: false })
 
   if (error) throw new Error(error.message)
 
+  // In-memory stable sort: display_order → component_type → name
+  // Preserves intended column order for tenants that have set display_order;
+  // falls back to type-then-name for components without one.
   return ((data ?? []) as ComponentMeta[]).sort((a, b) => {
+    const ado = a.display_order ?? 9999
+    const bdo = b.display_order ?? 9999
+    if (ado !== bdo) return ado - bdo
     const ao = TYPE_ORDER[a.component_type] ?? 99
     const bo = TYPE_ORDER[b.component_type] ?? 99
     if (ao !== bo) return ao - bo
@@ -104,72 +127,35 @@ export async function fetchActiveComponents(
   })
 }
 
-/**
- * Fetch ALL components (including inactive) keyed by lowercase name.
- * Used by the validator to distinguish "inactive" from "unknown" in error messages.
- */
-async function fetchAllComponentsByLowerName(
-  supabase: SupabaseClient,
-  tenantId: string,
-): Promise<Map<string, ComponentMeta>> {
-  const { data } = await supabase
-    .from('salary_components')
-    .select('id, name, code, component_type, is_active')
-    .eq('tenant_id', tenantId)
-    .order('name')
-
-  const map = new Map<string, ComponentMeta>()
-  for (const row of (data ?? []) as ComponentMeta[]) {
-    map.set(row.name.trim().toLowerCase(), row)
-  }
-  return map
-}
-
-// ── Name normalization ────────────────────────────────────────────────────────
-
-/**
- * Collapse whitespace, dots, hyphens, and underscores then lowercase.
- * "HRA", "H.R.A", "H-R-A", "h r a" all → "hra".
- * Used for both duplicate detection and column-header matching.
- */
-function normalizeName(name: string): string {
-  return name.trim().replace(/[\s.\-_]+/g, '').toLowerCase()
-}
-
-// ── Duplicate name check ──────────────────────────────────────────────────────
-
-/**
- * Returns display names that appear more than once in the active component set.
- * Comparison uses normalizeName() so "HRA" and "H.R.A" are treated as the same.
- * Duplicate names make the template column mapping ambiguous and must be fixed
- * in the Salary Component Master before generating a template.
- */
-export function findDuplicateComponentNames(components: ComponentMeta[]): string[] {
-  const seen  = new Map<string, string>()  // normalized → original display name
-  const dupes = new Set<string>()
-  for (const c of components) {
-    const nk = normalizeName(c.name)
-    if (seen.has(nk)) dupes.add(seen.get(nk)!)
-    else               seen.set(nk, c.name)
-  }
-  return [...dupes]
-}
 
 // ── Import Manifest ───────────────────────────────────────────────────────────
 
 /**
- * Lightweight manifest embedded in the CSV/XLSX template at generation time.
+ * Manifest embedded in the XLSX CognixHR_Metadata sheet at generation time.
  * The frontend sends it back on validate/run; the backend validates it to
  * prevent cross-tenant reuse, wrong file type, or broken schema versions.
  *
- * All values are strings on the wire (CSV comment lines, XLSX cell values).
+ * v1 fields are kept for backward compat with workbooks generated before v2.
+ * v2 fields are added in schema version 2; the backend uses them in Phase 2+.
+ * All values are strings on the wire (XLSX cell values).
  */
 export interface SalaryManifest {
+  // v1 — read by frontend parser and sent back on validate/run
   tenantId?:            string
   generatedBy?:         string
   importType?:          string
   schemaVersion?:       string
   expectedColumnCount?: string
+  // v2 — additional fields present in workbooks generated by schema v2+
+  workbookId?:          string
+  componentHash?:       string
+  componentCount?:      string
+  manifestVersion?:     string
+  workbookType?:        string
+  generatorVersion?:    string
+  generatedAt?:         string
+  signature?:           string
+  components?:          string  // JSON array: [{position, id, code, name}]
 }
 
 // ── Extended validation result ────────────────────────────────────────────────
@@ -533,23 +519,60 @@ export async function generateSalaryUploadXlsx(
   const wsMeta = wb.addWorksheet('CognixHR_Metadata')
   wsMeta.state = 'veryHidden'
 
+  const workbookId = randomUUID()
+
+  // Structured JSON component manifest — position is 1-based Excel column index.
+  // Fixed columns: A=1 (employee_code), B=2 (employee_name), C=3 (effective_from).
+  // Component columns start at D=4.
+  const componentsManifest = components.map((c, i) => ({
+    position: i + 4,
+    id:       c.id,
+    code:     c.code,
+    name:     c.name,
+  }))
+
+  // Deterministic workbook signature: djb2 of canonical metadata fields.
+  // Detects tampering with the metadata sheet outside normal generation.
+  const sigPayload = [tenantId ?? '', workbookId, String(SCHEMA_VERSION), version, generatedOn].join('|')
+  let sigH = 5381
+  for (let i = 0; i < sigPayload.length; i++) {
+    sigH = (((sigH << 5) + sigH) ^ sigPayload.charCodeAt(i)) >>> 0
+  }
+  const signature = sigH.toString(16).padStart(8, '0')
+
   const manifestRows: string[][] = [
     ['key',                       'value'],
-    ['template_version',          version],
-    ['generated_at',              generatedOn],
-    ['product',                   'CognixHR'],
+    // ── v2 canonical fields ───────────────────────────────────────────────
+    ['manifest_version',          '2'],
+    ['workbook_type',             'employee_salary_upload'],
+    ['schema_version',            String(SCHEMA_VERSION)],
     ['component_count',           String(components.length)],
+    ['component_hash',            version],
+    ['generator_version',         '1.0.0'],
+    ['generated_at',              generatedOn],
+    ['workbook_id',               workbookId],
+    ['signature',                 signature],
+    ['product',                   'CognixHR'],
+    // ── v1 keys kept for backward compat with frontend manifest parser ────
+    ['template_version',          version],
     ['manifest_import_type',      'employee_salary_upload'],
     ['manifest_schema_version',   String(SCHEMA_VERSION)],
     ['manifest_expected_columns', String(components.length)],
+    // ── structured component manifest (replaces scattered component_N rows)
+    ['components',                JSON.stringify(componentsManifest)],
   ]
-  if (tenantId)    manifestRows.push(['manifest_tenant_id',    tenantId])
-  if (generatedBy) manifestRows.push(['manifest_generated_by', generatedBy])
-  components.forEach((c, i) => manifestRows.push([`component_${i}`, `${c.id}|${c.name}`]))
+  if (tenantId) {
+    manifestRows.push(['tenant_id',            tenantId])
+    manifestRows.push(['manifest_tenant_id',   tenantId])   // backward compat
+  }
+  if (generatedBy) {
+    manifestRows.push(['generated_by',          generatedBy])
+    manifestRows.push(['manifest_generated_by', generatedBy])  // backward compat
+  }
 
   for (const row of manifestRows) wsMeta.addRow(row)
   wsMeta.getColumn(1).width = 28
-  wsMeta.getColumn(2).width = 60
+  wsMeta.getColumn(2).width = 120
 
   const buf = await wb.xlsx.writeBuffer()
   return Buffer.from(buf as ArrayBuffer)
@@ -578,26 +601,33 @@ export async function validateSalaryUploadRows(
   rows:             Record<string, string>[],
   templateVersion?: string,
   manifest?:        SalaryManifest,
+  userId?:          string,
 ): Promise<SalaryValidationResult> {
-  // ── Manifest validation ─────────────────────────────────────────────────────
-  // Reject cross-tenant reuse and wrong-file-type uploads before any DB work.
+  // ── Manifest validation (framework) ────────────────────────────────────────
+  // Five-stage pipeline: schema → identity → tenant → hash → signature.
+  // Stages 4 and 5 are skipped gracefully when the corresponding manifest
+  // fields are absent (e.g. workbooks generated before v2 or without a hash).
   if (manifest) {
-    if (manifest.tenantId && manifest.tenantId !== tenantId) {
-      throw new Error(
-        'Template mismatch: this file was generated for a different tenant. Download a fresh template from your account.',
-      )
+    const svRaw = manifest.schemaVersion ? parseInt(manifest.schemaVersion, 10) : NaN
+    const workbookManifest: WorkbookManifest = {
+      schemaVersion:    isNaN(svRaw) ? SCHEMA_VERSION : svRaw,
+      tenantId:         manifest.tenantId,
+      workbookType:     manifest.workbookType ?? manifest.importType,
+      workbookId:       manifest.workbookId,
+      masterHash:       manifest.componentHash,
+      signature:        manifest.signature,
+      generatedAt:      manifest.generatedAt,
+      generatedBy:      manifest.generatedBy,
+      generatorVersion: manifest.generatorVersion,
     }
-    if (manifest.importType && manifest.importType !== 'employee_salary_upload') {
-      throw new Error(
-        `Template mismatch: this file is for import type "${manifest.importType}", not "employee_salary_upload".`,
-      )
-    }
-    const sv = manifest.schemaVersion ? parseInt(manifest.schemaVersion, 10) : null
-    if (sv !== null && !isNaN(sv) && sv !== SCHEMA_VERSION) {
-      throw new Error(
-        `Template schema version ${sv} is no longer supported. Download a fresh template.`,
-      )
-    }
+    await resolveMetadata(workbookManifest, {
+      tenantId,
+      expectedWorkbookType: 'employee_salary_upload',
+      computeCurrentHash:   async () => {
+        const comps = await fetchActiveComponents(supabase, tenantId)
+        return computeTemplateVersion(comps)
+      },
+    })
   }
 
   // ── Default salary structure prerequisite ──────────────────────────────────
@@ -634,41 +664,91 @@ export async function validateSalaryUploadRows(
   // Fetch active components (template source of truth)
   const activeComponents = await fetchActiveComponents(supabase, tenantId)
 
-  // Fetch all components including inactive — for better error messages
-  const allCompByLowerName = await fetchAllComponentsByLowerName(supabase, tenantId)
+  // ── Reference integrity validation (framework) ──────────────────────────────
+  // Validates component column mappings from v2+ structured manifest before any
+  // row is parsed. Only runs when the workbook includes a structured components
+  // JSON (v2+). Malformed JSON is silently skipped — row-level validation will
+  // surface the resulting errors naturally.
+  if (manifest?.components) {
+    let mappings: MasterMapping[] | null = null
+    try {
+      const raw = JSON.parse(manifest.components) as Array<{
+        position: number; id: string; code: string; name: string
+      }>
+      mappings = raw.map(m => ({ position: m.position, entityId: m.id, code: m.code, name: m.name }))
+    } catch {
+      // malformed — skip
+    }
+    if (mappings) {
+      const activeById = new Map(activeComponents.map(c => [c.id, c]))
+      const ctx: ImportContext = {
+        tenantId,
+        userId:      userId ?? 'unknown',
+        workbookType: 'employee_salary_upload',
+        requestId:   randomUUID(),
+        workbookId:  manifest.workbookId,
+      }
+      const countRaw = manifest.componentCount ? parseInt(manifest.componentCount, 10) : NaN
+      await validateReferenceIntegrity<ComponentMeta>(mappings, {
+        context:              ctx,
+        expectedMappingCount: isNaN(countRaw) ? undefined : countRaw,
+        lookupActiveEntities: async (ids) => {
+          const result = new Map<string, ComponentMeta>()
+          for (const id of ids) {
+            const c = activeById.get(id)
+            if (c) result.set(id, c)
+          }
+          return result
+        },
+      })
+    }
+  }
+
+  // Phase 3: component manifest is mandatory — salary upload requires the v2 XLSX
+  // template. v1 XLSX workbooks are rejected at resolveMetadata (Stage 1); CSV
+  // uploads have no manifest. Without manifest.components there is no positional
+  // mapping and we cannot safely process any component column.
+  if (!manifest?.components) {
+    throw new MetadataValidationError(
+      WORKBOOK_ERROR_CODES.MANIFEST_FIELD_MISSING,
+      'This file is missing the salary component manifest. ' +
+      'Please upload the XLSX template downloaded from CognixHR — ' +
+      'CSV and older template files are no longer accepted for salary data.',
+    )
+  }
 
   // Current template version
   const currentTemplateVersion = computeTemplateVersion(activeComponents)
   const templateOutdated = !!templateVersion && templateVersion !== currentTemplateVersion
 
-  // Build lowercase name → ComponentMeta lookup (active only)
-  const compByLowercaseName = new Map<string, ComponentMeta>()
-  for (const c of activeComponents) {
-    compByLowercaseName.set(c.name.trim().toLowerCase(), c)
-  }
-
-  // Build type map for payroll estimate computation
+  // Build component_id → component_type map for payroll estimate computation
   const compTypeById = new Map<string, string>()
   for (const c of activeComponents) {
     compTypeById.set(c.id, c.component_type)
   }
 
-  // Classify headers from the first row
-  const firstRowKeys = rows.length > 0 ? Object.keys(rows[0]) : []
-  const componentCols:  Array<{ key: string; meta: ComponentMeta }> = []
-  const inactiveCols:   string[] = []
-  const unknownCols:    string[] = []
+  // Build pure positional column map: 1-based Excel column position → entityId.
+  // The frontend emits component columns with their 1-based position as the key
+  // (e.g. "4" for column D). Column header text is never used for resolution —
+  // users can rename, translate, or reformat headers without affecting imports.
+  const manifestEntries = JSON.parse(manifest.components) as Array<{
+    position: number; id: string; code: string; name: string
+  }>
+  const manifestByPosition = new Map<number, string>()  // 1-based position → entityId
+  for (const m of manifestEntries) {
+    manifestByPosition.set(m.position, m.id)
+  }
 
+  // Classify columns: fixed-name keys (employee_code etc.) are skipped;
+  // numeric-string keys are 1-based column positions resolved via the manifest.
+  const firstRowKeys = rows.length > 0 ? Object.keys(rows[0]) : []
+  const componentCols: Array<{ key: string; entityId: string }> = []
   for (const key of firstRowKeys) {
-    const lk = key.trim().toLowerCase()
-    if (FIXED_KEYS.has(lk)) continue
-    const activeMeta = compByLowercaseName.get(lk)
-    if (activeMeta) {
-      componentCols.push({ key, meta: activeMeta })
-    } else {
-      const anyMeta = allCompByLowerName.get(lk)
-      if (anyMeta && !anyMeta.is_active) inactiveCols.push(key)
-      else                                unknownCols.push(key)
+    if (FIXED_KEYS.has(key)) continue
+    const pos = parseInt(key, 10)
+    if (Number.isInteger(pos) && pos > 0) {
+      const entityId = manifestByPosition.get(pos)
+      if (entityId) componentCols.push({ key, entityId })
     }
   }
 
@@ -681,24 +761,6 @@ export async function validateSalaryUploadRows(
     const errors:   RowError[] = []
     const warnings: RowError[] = []
     const norm: Record<string, unknown> = {}
-
-    // Inactive component columns
-    for (const col of inactiveCols) {
-      errors.push({
-        field:    col,
-        message:  `Component "${col}" is no longer active. Download a fresh template to get the current column list.`,
-        severity: 'error',
-      })
-    }
-
-    // Unknown columns
-    for (const col of unknownCols) {
-      errors.push({
-        field:    col,
-        message:  `Unknown component "${col}". Download the latest template — it is generated from your Salary Component Master.`,
-        severity: 'error',
-      })
-    }
 
     const d: Record<string, string> = {}
     for (const k of Object.keys(raw)) d[k] = (raw[k] ?? '').trim()
@@ -724,19 +786,19 @@ export async function validateSalaryUploadRows(
     }
 
     // Component columns — numeric, non-negative, empty = skip (0)
-    const compAmounts: Record<string, number> = {}  // component_id → monthly amount
-    for (const { key, meta } of componentCols) {
+    const compAmounts: Record<string, number> = {}  // entityId → monthly amount
+    for (const { key, entityId } of componentCols) {
       const val = (d[key] ?? '').trim()
       if (!val || val === '') continue  // blank = skip (treat as not set)
       const n = parseFloat(val)
       if (isNaN(n) || n < 0) {
         errors.push({
           field:    key,
-          message:  `Invalid amount "${val}" for "${meta.name}" — must be a non-negative number`,
+          message:  `Invalid amount "${val}" for "${key}" — must be a non-negative number`,
           severity: 'error',
         })
       } else {
-        compAmounts[meta.id] = n
+        compAmounts[entityId] = n
       }
     }
     norm.components = compAmounts
@@ -1101,7 +1163,7 @@ export async function runSalaryUploadJob(
 
   try {
     // Validate (templateVersion and manifest passed through for staleness/security checks)
-    const validation = await validateSalaryUploadRows(supabase, tenantId, rows, templateVersion, manifest)
+    const validation = await validateSalaryUploadRows(supabase, tenantId, rows, templateVersion, manifest, createdBy)
 
     await supabase
       .from('import_jobs')

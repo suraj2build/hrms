@@ -1011,7 +1011,10 @@ export function ImportWorkspace() {
         if (!data || !(data instanceof ArrayBuffer)) return
         const wb = XLSX.read(new Uint8Array(data), { type: 'array', cellDates: true })
 
-        // Extract template version and import manifest from CognixHR_Metadata sheet
+        // Extract template version and import manifest from CognixHR_Metadata sheet.
+        // Reads both v2 canonical keys (workbook_id, components, etc.) and v1
+        // backward-compat keys (manifest_*). v2 keys appear first in the sheet and
+        // take priority; v1 keys only fill in fields not already set by a v2 key.
         if (selectedMaster === 'employee_salary_upload' && wb.SheetNames.includes('CognixHR_Metadata')) {
           const metaWs = wb.Sheets['CognixHR_Metadata']
           const metaRows = XLSX.utils.sheet_to_json<string[]>(metaWs, { header: 1 }) as string[][]
@@ -1019,13 +1022,27 @@ export function ImportWorkspace() {
           for (const [key, value] of metaRows.slice(1)) {
             const k = String(key ?? '')
             const v = String(value ?? '')
-            if (k === 'template_version' && v) {
-              setTemplateVersion(v)
-            } else if (k === 'manifest_tenant_id'        && v) { parsedManifest.tenantId            = v }
-            else if   (k === 'manifest_generated_by'     && v) { parsedManifest.generatedBy         = v }
-            else if   (k === 'manifest_import_type'      && v) { parsedManifest.importType          = v }
-            else if   (k === 'manifest_schema_version'   && v) { parsedManifest.schemaVersion       = v }
-            else if   (k === 'manifest_expected_columns' && v) { parsedManifest.expectedColumnCount = v }
+            if (!v) continue
+            // ── v2 canonical keys ──────────────────────────────────────────────
+            if      (k === 'template_version')            { setTemplateVersion(v) }
+            else if (k === 'workbook_id')                 { parsedManifest.workbookId          = v }
+            else if (k === 'workbook_type')               { parsedManifest.workbookType         = v }
+            else if (k === 'component_hash')              { parsedManifest.componentHash        = v }
+            else if (k === 'component_count')             { parsedManifest.componentCount       = v }
+            else if (k === 'manifest_version')            { parsedManifest.manifestVersion      = v }
+            else if (k === 'generator_version')           { parsedManifest.generatorVersion     = v }
+            else if (k === 'generated_at')                { parsedManifest.generatedAt          = v }
+            else if (k === 'signature')                   { parsedManifest.signature            = v }
+            else if (k === 'components')                  { parsedManifest.components           = v }
+            else if (k === 'tenant_id')                   { parsedManifest.tenantId             = v }
+            else if (k === 'generated_by')                { parsedManifest.generatedBy          = v }
+            else if (k === 'schema_version')              { parsedManifest.schemaVersion        = v }
+            // ── v1 backward-compat keys (only fill if not already set by v2) ──
+            else if (k === 'manifest_tenant_id')          { parsedManifest.tenantId          = parsedManifest.tenantId          || v }
+            else if (k === 'manifest_generated_by')       { parsedManifest.generatedBy       = parsedManifest.generatedBy       || v }
+            else if (k === 'manifest_import_type')        { parsedManifest.importType         = v }
+            else if (k === 'manifest_schema_version')     { parsedManifest.schemaVersion     = parsedManifest.schemaVersion     || v }
+            else if (k === 'manifest_expected_columns')   { parsedManifest.expectedColumnCount = v }
           }
           if (Object.keys(parsedManifest).length > 0) setTemplateManifest(parsedManifest)
         }
@@ -1050,9 +1067,24 @@ export function ImportWorkspace() {
                    !String(row[0] ?? '').trimStart().startsWith('#'),
         )
 
+        // For salary upload, component columns are keyed by 1-based Excel column
+        // position rather than the header name. The column header text becomes
+        // presentation-only — renaming, translating, or accidentally editing it
+        // does not affect resolution. Fixed columns (employee_code, etc.) keep
+        // their name-based keys since they are stable platform constants.
+        const SALARY_FIXED_HEADERS = new Set([
+          'employee_code', 'employee_name', 'effective_from', 'notes',
+        ])
+        const usePositionalKeys = selectedMaster === 'employee_salary_upload'
+
         const rows: Record<string, string>[] = dataRows.map((row) => {
           const obj: Record<string, string> = {}
-          headers.forEach((h, i) => { obj[h] = cellToString(row[i]) })
+          headers.forEach((h, i) => {
+            const key = usePositionalKeys && !SALARY_FIXED_HEADERS.has(h)
+              ? String(i + 1)   // 1-based Excel column position
+              : h
+            obj[key] = cellToString(row[i])
+          })
           return obj
         })
         setParsedRows(rows)
