@@ -647,14 +647,12 @@ export async function validateSalaryUploadRows(
         throw new Error(
           'No default salary structure is configured. ' +
           'A default salary structure is required before employee compensation can be imported. ' +
-          'Go to: Payroll → Salary Structures. ' +
-          'Create or mark one structure as Default, then validate again.',
+          'Go to: Payroll → Salary Structures — create or mark one structure as Default, then validate again.',
         )
       }
       if (count > 1) {
         throw new Error(
-          'Multiple default salary structures are marked as default. ' +
-          'Exactly one default salary structure is required. ' +
+          'Multiple default salary structures are configured. Exactly one default is required. ' +
           'Go to: Payroll → Salary Structures and ensure only one structure is set as Default.',
         )
       }

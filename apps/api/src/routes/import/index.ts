@@ -187,6 +187,11 @@ export default async function importRoutes(fastify: FastifyInstance) {
             violations: err.violations,
           })
         }
+        // Plain Error = user-actionable pre-flight failure (e.g. missing salary structure).
+        // Non-Error throwables (DB driver crash, OOM) stay as 500.
+        if (err instanceof Error) {
+          return reply.code(400).send({ error: 'VALIDATION_ERROR', message: msg })
+        }
         return reply.code(500).send({ error: 'VALIDATION_ERROR', message: msg })
       }
     }
