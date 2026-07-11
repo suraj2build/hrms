@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { logAction } from '../../lib/audit-service.js'
 import { EventType, MODULE } from '../../platform/events/index.js'
+import { fetchAllRows } from '../../lib/supabase-paginate.js'
 
 // NOTE: After migration 016 (lean employees), the following columns were removed
 // from the employees table and relocated to dedicated sub-tables:
@@ -100,17 +101,22 @@ export default async function employeeRoutes(fastify: FastifyInstance) {
   // manager (or whose manager is outside the active set). Registered before
   // /employees/:id so "org-tree" is not matched as an id.
   fastify.get('/employees/org-tree', hrAdminAuth, async (request, reply) => {
-    const { data: emps, error } = await fastify.supabase
-      .from('employees')
-      .select('id, employee_code, first_name, last_name, email, status, manager_id')
-      .eq('tenant_id', request.tenantId)
-      .neq('status', 'separated')
-      .order('first_name', { ascending: true })
-      .limit(1000)
+    let emps: any[]
+    try {
+      emps = await fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('employees')
+          .select('id, employee_code, first_name, last_name, email, status, manager_id')
+          .eq('tenant_id', request.tenantId)
+          .neq('status', 'separated')
+          .order('first_name', { ascending: true })
+          .range(from, to),
+      )
+    } catch (error: any) {
+      return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    }
 
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
-
-    const rows = (emps ?? []) as any[]
+    const rows = emps as any[]
     if (rows.length === 0) return reply.send({ data: { roots: [], total: 0 } })
 
     const empIds = rows.map((e) => e.id)

@@ -18,6 +18,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { fetchAllRows } from '../../lib/supabase-paginate.js'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -794,19 +795,20 @@ export default async function workforceOptimizationRoute(fastify: FastifyInstanc
     const { from, to } = parsed.data
 
     // ── Step 1: Fetch all active employees for this tenant ──────────────────
-    const { data: empRows, error: empErr } = await fastify.supabase
-      .from('employees')
-      .select('id, first_name, last_name, employee_code')
-      .eq('tenant_id', req.tenantId)
-      .eq('status', 'active')
-      .limit(1000)
-
-    if (empErr) {
-      req.log.error({ err: empErr }, 'employee fetch for compute failed')
+    let employees: any[]
+    try {
+      employees = await fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('employees')
+          .select('id, first_name, last_name, employee_code')
+          .eq('tenant_id', req.tenantId)
+          .eq('status', 'active')
+          .range(from, to),
+      )
+    } catch (err) {
+      req.log.error({ err }, 'employee fetch for compute failed')
       return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch active employees' })
     }
-
-    const employees = ((empRows ?? []) as any[])
     if (employees.length === 0) {
       return reply.send({ employees_computed: 0, hints_generated: 0 })
     }

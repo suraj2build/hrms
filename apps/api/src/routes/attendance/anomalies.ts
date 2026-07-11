@@ -15,6 +15,7 @@ import { z } from 'zod'
 import { eventBus } from '../../lib/event-bus.js'
 import { recomputeRange } from '../../lib/attendance-engine.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { fetchAllRows } from '../../lib/supabase-paginate.js'
 
 const dateRe = /^\d{4}-\d{2}-\d{2}$/
 
@@ -116,21 +117,24 @@ export default async function attendanceAnomaliesRoute(fastify: FastifyInstance)
     const periodEnd = nextMonthDate.toISOString().slice(0, 10)
 
     // ── Fetch anomalies for this month (flat — no nested join) ───────────────────
-    const { data: anomalies, error } = await fastify.supabase
-      .from('attendance_anomalies')
-      .select('id, type, severity, resolved, date, employee_id')
-      .eq('tenant_id', req.tenantId)
-      .gte('date', periodStart)
-      .lt('date', periodEnd)
-      .limit(10_000)
-
-    if (error) {
+    let anomalies: any[]
+    try {
+      anomalies = await fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('attendance_anomalies')
+          .select('id, type, severity, resolved, date, employee_id')
+          .eq('tenant_id', req.tenantId)
+          .gte('date', periodStart)
+          .lt('date', periodEnd)
+          .range(from, to),
+      )
+    } catch (error) {
       req.log.error({ err: error }, 'anomaly summary query failed')
       return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch anomaly summary' })
     }
 
     // ── Fetch department info for all affected employees in one query ─────────────
-    const affectedEmpIds = [...new Set((anomalies ?? []).map((r: any) => r.employee_id).filter(Boolean))]
+    const affectedEmpIds = [...new Set((anomalies).map((r: any) => r.employee_id).filter(Boolean))]
 
     const { data: empDeptRows } = affectedEmpIds.length > 0
       ? await fastify.supabase
@@ -184,7 +188,7 @@ export default async function attendanceAnomaliesRoute(fastify: FastifyInstance)
 
     const orgByType: Record<string, number> = {}
 
-    for (const row of (anomalies ?? []) as any[]) {
+    for (const row of (anomalies) as any[]) {
       const dept     = empDeptMap[row.employee_id] ?? { department_id: '__none__', department_name: 'Unassigned' }
       const deptId   = dept.department_id
       const deptName = dept.department_name
