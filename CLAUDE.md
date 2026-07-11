@@ -26,6 +26,32 @@ any user-facing copy, title, email, marketing, or new code. If you find a stray
 - The Resend test sender address `onboarding@resend.dev` (display name is
   "CognixHR"); real sender is overridden via the `EMAIL_FROM` env var.
 
+## Supabase data fetching — UNIVERSAL RULE
+
+**NEVER use `.limit(N)` to fetch a complete dataset from a tenant-scoped table.**
+PostgREST enforces a server-side `max-rows = 1000` ceiling that silently overrides any `.limit()` value — even `.limit(200_000)` returns exactly 1,000 rows with no error and no truncation signal. This caused the entire Muster Roll to show blank attendance for all 2,877 employees despite correct data in the DB.
+
+**Rule:** Any API endpoint that must return a complete dataset must use `fetchAllRows()`:
+
+```ts
+import { fetchAllRows } from '../../lib/supabase-paginate.js'
+
+const rows = await fetchAllRows((from, to) =>
+  fastify.supabase
+    .from('attendance_daily')
+    .select('employee_id, date, status')
+    .eq('tenant_id', req.tenantId)
+    .gte('date', fromDate)
+    .range(from, to),   // ← range replaces limit
+)
+```
+
+`.limit()` is only acceptable for intentionally bounded queries (e.g. "last 5 notifications", "top 20 results") where truncation is the desired behaviour.
+
+Tables known to exceed 1,000 rows at enterprise scale: `employees`, `attendance_daily`, `raw_punches`, `attendance_anomalies`, `payroll_records`, `audit_logs`.
+
+---
+
 ## Employee picker / search — UNIVERSAL RULE
 
 **NEVER use raw UUID dropdowns for employee selection.** Every field that picks an employee must use a **search-by-name-or-employee-code** pattern:
