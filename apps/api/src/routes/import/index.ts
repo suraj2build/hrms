@@ -239,21 +239,34 @@ export default async function importRoutes(fastify: FastifyInstance) {
     // ── Concurrency guard ─────────────────────────────────────────────────
     // Only one active write import per master type per tenant at a time.
     // validate_only jobs are exempt — they make no DB changes.
+    // Jobs stuck in an active status for > 30 min are treated as stale/dead
+    // and auto-failed so they no longer block new runs.
     if (mode !== 'validate_only') {
       const { data: activeJob } = await fastify.supabase
         .from('import_jobs')
-        .select('id, status')
+        .select('id, status, created_at')
         .eq('tenant_id', req.tenantId)
         .eq('master_type', masterType)
         .in('status', ['validating', 'importing', 'processing'])
         .maybeSingle()
 
       if (activeJob) {
-        return reply.code(409).send({
-          error:       'IMPORT_ALREADY_RUNNING',
-          message:     `A ${masterType} import is already in progress (job ${activeJob.id}). Wait for it to complete or cancel it before starting a new one.`,
-          activeJobId: (activeJob as any).id,
-        })
+        const ageMs = Date.now() - new Date((activeJob as any).created_at).getTime()
+        const STUCK_TIMEOUT_MS = 30 * 60 * 1000  // 30 minutes
+        if (ageMs > STUCK_TIMEOUT_MS) {
+          // Mark stale job as failed so it no longer blocks new imports
+          await fastify.supabase
+            .from('import_jobs')
+            .update({ status: 'failed', completed_at: new Date().toISOString() })
+            .eq('id', (activeJob as any).id)
+          fastify.log.warn({ jobId: (activeJob as any).id }, 'Auto-failed stale import job (stuck > 30 min)')
+        } else {
+          return reply.code(409).send({
+            error:       'IMPORT_ALREADY_RUNNING',
+            message:     `A ${masterType} import is already in progress (job ${(activeJob as any).id}). Wait for it to complete or cancel it before starting a new one.`,
+            activeJobId: (activeJob as any).id,
+          })
+        }
       }
     }
 
@@ -461,6 +474,7 @@ export default async function importRoutes(fastify: FastifyInstance) {
 
   // ── GET /import/jobs/:id/errors ──────────────────────────────────────────
   // Paginated error list from import_job_errors (enterprise chunked imports).
+  // Table may not exist in older DB schemas — returns empty list gracefully.
   // Query: ?stage=validation|write&page=&limit=
   fastify.get('/jobs/:id/errors', auth, async (req: any, reply) => {
     if (!requireHrAdmin(req, reply)) return
@@ -502,9 +516,10 @@ export default async function importRoutes(fastify: FastifyInstance) {
 
     const { data, error, count } = await query
 
+    // Table may not exist in older DB schemas — return empty list rather than 500
     if (error) {
-      fastify.log.error(error)
-      return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+      fastify.log.warn({ err: error }, 'import_job_errors query failed — table may not exist yet')
+      return reply.send({ data: [], total: 0, page: pageNum, limit: limitNum })
     }
 
     return reply.send({
@@ -517,6 +532,7 @@ export default async function importRoutes(fastify: FastifyInstance) {
 
   // ── GET /import/jobs/:id/metrics ─────────────────────────────────────────
   // Per-chunk timing metrics from import_job_metrics.
+  // Table may not exist in older DB schemas — returns empty list gracefully.
   fastify.get('/jobs/:id/metrics', auth, async (req: any, reply) => {
     if (!requireHrAdmin(req, reply)) return
 
@@ -540,9 +556,10 @@ export default async function importRoutes(fastify: FastifyInstance) {
       .eq('import_job_id', id)
       .order('chunk_no', { ascending: true })
 
+    // Table may not exist in older DB schemas — return empty list rather than 500
     if (error) {
-      fastify.log.error(error)
-      return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+      fastify.log.warn({ err: error }, 'import_job_metrics query failed — table may not exist yet')
+      return reply.send({ data: [] })
     }
 
     return reply.send({ data: data ?? [] })
