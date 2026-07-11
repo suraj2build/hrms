@@ -971,17 +971,16 @@ export async function validateSalaryUploadRows(
  *     so this insert is guaranteed to never violate the constraint regardless of DB
  *     state or any race condition.
  *
- *   Step 2 — UPDATE old active record to is_active=false.
+ *   Step 2 — UPDATE old active record to is_active=false (no effective_to set).
  *     Now no is_active=true record exists for this employee.
  *     If this step fails the new record is deleted and the row is marked failed.
+ *     NOTE: effective_to is NOT set here — doing so would violate the CHECK
+ *     constraint (effective_to >= effective_from) when backdating.
  *
  *   Step 3 — UPDATE new record to is_active=true.
  *     The trigger fn_close_prev_compensation fires AFTER this UPDATE; it looks for
  *     other is_active=true records for this employee and finds none (step 2 closed
  *     the old one), so it is a no-op. The unique constraint passes cleanly.
- *
- * For new employees (isDuplicate=false) there is no existing active record, so we
- * INSERT directly with is_active=true — no risk of constraint conflict.
  *
  * All rows are processed sequentially; same-employee multiple-row uploads are
  * handled naturally because each row's step 2 closes whatever is currently active
@@ -1126,11 +1125,16 @@ export async function importSalaryUpload(
 
       // Step 2 — close any existing active record (no-op when none exists).
       // Exclude the new record itself so same-id collisions are impossible.
-      const prevDate = new Date(effectiveFrom)
-      prevDate.setDate(prevDate.getDate() - 1)
+      //
+      // We set ONLY is_active=false here, never effective_to. Setting
+      // effective_to = new_effective_from - 1 day would violate the CHECK
+      // constraint (effective_to >= effective_from) when backdating — i.e.
+      // when new_effective_from < old comp's effective_from. is_active=false
+      // is the authoritative closed-record signal; effective_to is optional
+      // and informational only.
       const { data: closedRows, error: closeErr } = await supabase
         .from('employee_compensations')
-        .update({ is_active: false, effective_to: prevDate.toISOString().split('T')[0] })
+        .update({ is_active: false })
         .eq('tenant_id', tenantId)
         .eq('employee_id', employeeId)
         .eq('is_active', true)
