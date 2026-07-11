@@ -3,12 +3,12 @@
 
 import type { FastifyInstance } from 'fastify'
 import { z }                    from 'zod'
-import { generateCSV, MASTER_TEMPLATES } from '../../lib/import-engine/templates.js'
+import { generateCSV, generateSalaryComponentsXlsx, MASTER_TEMPLATES } from '../../lib/import-engine/templates.js'
 import { validateImportRows }            from '../../lib/import-engine/validator.js'
 import { runImport, createImportJob }    from '../../lib/import-engine/importer.js'
 import {
   fetchActiveComponents,
-  generateSalaryUploadCsv,
+  generateSalaryUploadXlsx,
   validateSalaryUploadRows,
   runSalaryUploadJob,
   findDuplicateComponentNames,
@@ -98,6 +98,14 @@ export default async function importRoutes(fastify: FastifyInstance) {
       })
     }
 
+    if (masterType === 'salary_components') {
+      const today = new Date().toISOString().split('T')[0]
+      const xlsx  = await generateSalaryComponentsXlsx(today)
+      reply.header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+      reply.header('Content-Disposition', 'attachment; filename="salary_components_upload.xlsx"')
+      return reply.send(xlsx)
+    }
+
     if (masterType === 'employee_salary_upload') {
       const components = await fetchActiveComponents(fastify.supabase, req.tenantId)
       if (components.length === 0) {
@@ -114,10 +122,10 @@ export default async function importRoutes(fastify: FastifyInstance) {
         })
       }
       const today = new Date().toISOString().split('T')[0]
-      const csv = generateSalaryUploadCsv(components, today, req.tenantId, req.userId)
-      reply.header('Content-Type', 'text/csv; charset=utf-8')
-      reply.header('Content-Disposition', 'attachment; filename="template-employee_salary_upload.csv"')
-      return reply.send(csv)
+      const xlsx  = await generateSalaryUploadXlsx(components, today, req.tenantId, req.userId)
+      reply.header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+      reply.header('Content-Disposition', 'attachment; filename="employee_salary_upload.xlsx"')
+      return reply.send(xlsx)
     }
 
     const csv = generateCSV(masterType)
