@@ -816,6 +816,8 @@ export function ImportWorkspace() {
   // Mutation timeout flags — set after deadline to expose cancel UI (set to false on mutation settle)
   const [validateTimedOut, setValidateTimedOut] = useState(false)
   const [importTimedOut, setImportTimedOut] = useState(false)
+  // Timestamp when the 202 was received — used to compute rows/sec and ETA in live progress
+  const importStartedAtRef = useRef<number | null>(null)
 
   // ── History Filters ───────────────────────────────────────────────────────
   const [historyMasterFilter, setHistoryMasterFilter] = useState<string>('all')
@@ -1217,6 +1219,7 @@ export function ImportWorkspace() {
     onSuccess: (response) => {
       if (selectedMaster) clearSession(selectedMaster)
       const data = response.data
+      importStartedAtRef.current = Date.now()
       setImportResult(data)
       setCurrentStep('complete')
       queryClient.invalidateQueries({ queryKey: ['import-jobs'] })
@@ -1376,7 +1379,7 @@ export function ImportWorkspace() {
   ])
 
   // ── Poll job until complete (async import) ────────────────────────────────
-  // After the API returns 202 the counts are unknown. Poll every 3s until the
+  // After the API returns 202 the counts are unknown. Poll every 2s until the
   // job settles (completed/failed), then fill in the result counts.
   const jobIsSettled = importResult?.created !== undefined
   const { data: polledJob } = useQuery({
@@ -1386,9 +1389,39 @@ export function ImportWorkspace() {
     enabled: currentStep === 'complete' && !!importResult?.importJobId && !jobIsSettled,
     refetchInterval: (query) => {
       const s = query.state.data?.data?.status as string | undefined
-      return s === 'completed' || s === 'failed' ? false : 3000
+      return s === 'completed' || s === 'failed' ? false : 2000
     },
   })
+
+  // Derive live progress from latest polled job snapshot
+  const liveProgress = React.useMemo(() => {
+    const j = polledJob?.data
+    if (!j) return null
+    const processed = (j.processed_rows as number) ?? 0
+    const total     = (j.total_rows     as number) ?? parsedRows.length
+    const pct       = total > 0 ? Math.round((processed / total) * 100) : 0
+    const elapsed   = importStartedAtRef.current ? (Date.now() - importStartedAtRef.current) / 1000 : 0
+    const rps       = elapsed > 2 && processed > 0 ? Math.round(processed / elapsed) : null
+    const remaining = total - processed
+    const etaSec    = rps && rps > 0 ? Math.ceil(remaining / rps) : null
+    const etaText   = etaSec == null ? null
+      : etaSec < 60 ? `~${etaSec}s`
+      : `~${Math.ceil(etaSec / 60)}m`
+    return {
+      pct,
+      processed,
+      total,
+      rps,
+      etaText,
+      stage:   (j.current_stage as string) ?? 'processing',
+      created: (j.created_rows  as number) ?? 0,
+      updated: (j.updated_rows  as number) ?? 0,
+      failed:  (j.failed_rows   as number) ?? 0,
+      chunk:   (j.current_chunk as number) ?? null,
+      chunks:  (j.total_chunks  as number) ?? null,
+    }
+  }, [polledJob, parsedRows.length])
+
   React.useEffect(() => {
     if (!polledJob?.data) return
     const j = polledJob.data
@@ -2108,9 +2141,66 @@ export function ImportWorkspace() {
               )}
 
               {currentStep === 'complete' && importResult && !jobIsSettled && (
-                <div className="flex flex-col items-center gap-3 py-10">
-                  <Loader2 className="h-8 w-8 animate-spin text-primary" />
-                  <p className="text-sm text-muted-foreground">Import is running… checking progress</p>
+                <div className="flex flex-col gap-4 py-6 px-2">
+                  <div className="flex items-center gap-3">
+                    <Loader2 className="h-5 w-5 animate-spin text-primary shrink-0" />
+                    <div>
+                      <p className="text-sm font-medium">Import running</p>
+                      <p className="text-xs text-muted-foreground">{fileName}</p>
+                    </div>
+                    {liveProgress?.stage && (
+                      <Badge variant="outline" className="ml-auto capitalize text-xs">
+                        {liveProgress.stage.replace('_', ' ')}
+                      </Badge>
+                    )}
+                  </div>
+
+                  {liveProgress && liveProgress.total > 0 && (
+                    <>
+                      {/* Progress bar */}
+                      <div className="space-y-1.5">
+                        <div className="flex justify-between text-xs text-muted-foreground">
+                          <span>{liveProgress.processed.toLocaleString()} / {liveProgress.total.toLocaleString()} rows</span>
+                          <span className="font-medium text-foreground">{liveProgress.pct}%</span>
+                        </div>
+                        <div className="h-2 rounded-full bg-muted overflow-hidden">
+                          <div
+                            className="h-full rounded-full bg-primary transition-all duration-500"
+                            style={{ width: `${liveProgress.pct}%` }}
+                          />
+                        </div>
+                        {(liveProgress.rps != null || liveProgress.etaText != null) && (
+                          <div className="flex gap-3 text-xs text-muted-foreground">
+                            {liveProgress.rps != null && <span>{liveProgress.rps.toLocaleString()} rows/sec</span>}
+                            {liveProgress.etaText && <span>ETA {liveProgress.etaText}</span>}
+                            {liveProgress.chunks != null && liveProgress.chunk != null && (
+                              <span>chunk {liveProgress.chunk}/{liveProgress.chunks}</span>
+                            )}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Running counts */}
+                      <div className="grid grid-cols-3 gap-2 text-center">
+                        <div className="rounded-md bg-success/10 px-2 py-1.5">
+                          <p className="text-base font-bold text-success">{(liveProgress.created + liveProgress.updated).toLocaleString()}</p>
+                          <p className="text-[10px] text-muted-foreground">written</p>
+                        </div>
+                        <div className="rounded-md bg-destructive/10 px-2 py-1.5">
+                          <p className="text-base font-bold text-destructive">{liveProgress.failed.toLocaleString()}</p>
+                          <p className="text-[10px] text-muted-foreground">failed</p>
+                        </div>
+                        <div className="rounded-md bg-muted px-2 py-1.5">
+                          <p className="text-base font-bold">{(liveProgress.total - liveProgress.processed).toLocaleString()}</p>
+                          <p className="text-[10px] text-muted-foreground">remaining</p>
+                        </div>
+                      </div>
+                    </>
+                  )}
+
+                  {(!liveProgress || liveProgress.total === 0) && (
+                    <p className="text-xs text-muted-foreground text-center">Waiting for first progress update…</p>
+                  )}
                 </div>
               )}
 

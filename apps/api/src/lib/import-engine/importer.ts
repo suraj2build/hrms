@@ -1,8 +1,10 @@
 // ── Universal Master Import Framework — Importer ─────────────────────────────
 
-import type { SupabaseClient } from '@supabase/supabase-js'
-import { validateImportRows }  from './validator.js'
-import type { ValidatedRow }   from './validator.js'
+import type { SupabaseClient }                   from '@supabase/supabase-js'
+import { validateImportRows }                    from './validator.js'
+import type { ValidatedRow }                     from './validator.js'
+import { executeInChunks, writeImportErrors }    from './chunk-executor.js'
+import type { ChunkProcessorFn }                 from './chunk-executor.js'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -1177,6 +1179,45 @@ async function batchInsert(
   return { created, updated, failed, skipped, errors }
 }
 
+// ── Types that cannot be chunked ─────────────────────────────────────────────
+// rotation_policies groups rows by policy_name and does a delete-then-insert
+// of ALL rules for a policy. Splitting mid-policy would corrupt rule sets.
+const UNCHUNKED_TYPES = new Set(['rotation_policies'])
+
+// ── Generic TABLE_MAP chunk processor ────────────────────────────────────────
+// Wraps batchInsert for use as a ChunkProcessorFn. Maps write-errors back onto
+// the ValidatedRow objects so the chunk executor can collect them.
+async function batchChunk(
+  supabase: SupabaseClient,
+  tenantId: string,
+  config:   TableConfig,
+  rows:     ValidatedRow[],
+  mode:     ImportMode,
+): Promise<{ created: number; updated: number; failed: number; skipped: number }> {
+  const records = rows.map((vr) => config.mapRow(tenantId, vr.normalizedData))
+  const result  = await batchInsert(supabase, config.table, records, config.uniqueColumn, mode)
+
+  let created = 0
+  let updated = 0
+  let failed  = 0
+
+  const failedSet = new Set(result.errors.map((e) => e.index))
+  for (let i = 0; i < rows.length; i++) {
+    const vr  = rows[i]
+    const err = result.errors.find((e) => e.index === i)
+    if (err) {
+      vr.errors.push({ field: '_db', message: err.message, severity: 'error' })
+      vr.isValid = false
+      failed++
+    } else if (!failedSet.has(i)) {
+      if (mode === 'update_only' || (mode === 'upsert' && vr.isDuplicate)) updated++
+      else created++
+    }
+  }
+
+  return { created, updated, failed, skipped: 0 }
+}
+
 // ── Row-level result writer ───────────────────────────────────────────────────
 
 async function writeRowResults(
@@ -1303,154 +1344,87 @@ export async function runImport(
       .update({ status: 'importing' })
       .eq('id', jobId)
 
-    // ── 6. Run import (custom handler or generic batch insert) ──────────
-    const rowStatuses: Record<number, 'created' | 'updated' | 'failed' | 'skipped'> = {}
-    let totalCreated = 0
-    let totalUpdated = 0
-    let totalFailed  = validation.invalidRows // rows that failed validation
-    let totalSkipped = 0
+    // ── 6. Partition rows ────────────────────────────────────────────────
+    const invalidRows:  ValidatedRow[] = []
+    const modeSkipped:  ValidatedRow[] = []
+    const eligibleRows: ValidatedRow[] = []
 
-    // Mark already-invalid rows
     for (const vr of validation.rows) {
-      if (!vr.isValid) rowStatuses[vr.rowNumber] = 'failed'
+      if (!vr.isValid) {
+        invalidRows.push(vr)
+        continue
+      }
+      if (mode === 'create_only' && vr.isDuplicate) { modeSkipped.push(vr); continue }
+      if (mode === 'update_only' && !vr.isDuplicate) { modeSkipped.push(vr); continue }
+      eligibleRows.push(vr)
     }
 
-    const customHandler = CUSTOM_HANDLERS[masterType]
-    if (customHandler) {
-      // Filter to rows eligible under the requested mode
-      const eligibleRows = validation.rows.filter((vr) => {
-        if (!vr.isValid) return false
-        if (mode === 'create_only' && vr.isDuplicate) return false
-        if (mode === 'update_only' && !vr.isDuplicate) return false
-        return true
+    let totalCreated: number
+    let totalUpdated: number
+    let totalFailed:  number
+    let totalSkipped: number
+
+    if (UNCHUNKED_TYPES.has(masterType)) {
+      // ── 6a. Unchunked path (rotation_policies) ───────────────────────
+      // Grouped multi-row writes that cannot be split at arbitrary boundaries.
+      await writeImportErrors(supabase, tenantId, jobId, invalidRows, 'validation')
+
+      const handler = CUSTOM_HANDLERS[masterType]!
+      const result  = await handler(supabase, tenantId, createdBy, eligibleRows, mode)
+
+      const writeFailures = eligibleRows.filter((vr) => !vr.isValid)
+      if (writeFailures.length > 0) {
+        await writeImportErrors(supabase, tenantId, jobId, writeFailures, 'write')
+      }
+
+      totalCreated = result.created
+      totalUpdated = result.updated
+      totalFailed  = invalidRows.length + result.failed
+      totalSkipped = modeSkipped.length + result.skipped
+    } else {
+      // ── 6b. Chunked path (all other types) ──────────────────────────
+      const customHandler = CUSTOM_HANDLERS[masterType]
+      let processChunk: ChunkProcessorFn
+
+      if (customHandler) {
+        processChunk = (rows) => customHandler(supabase, tenantId, createdBy, rows, mode)
+      } else {
+        const config = TABLE_MAP[masterType]
+        if (!config) throw new Error(`No table config for master type: ${masterType}`)
+        processChunk = (rows) => batchChunk(supabase, tenantId, config, rows, mode)
+      }
+
+      const result = await executeInChunks({
+        supabase,
+        tenantId,
+        jobId,
+        eligibleRows,
+        invalidRows,
+        skippedCount: modeSkipped.length,
+        processChunk,
       })
 
-      // Rows skipped due to mode mismatch
-      for (const vr of validation.rows) {
-        if (!vr.isValid) continue
-        if (mode === 'create_only' && vr.isDuplicate) {
-          rowStatuses[vr.rowNumber] = 'skipped'
-          totalSkipped++
-        } else if (mode === 'update_only' && !vr.isDuplicate) {
-          rowStatuses[vr.rowNumber] = 'skipped'
-          totalSkipped++
-        }
-      }
-
-      const onProgress: ProgressCallback = async (counts) => {
-        await supabase
-          .from('import_jobs')
-          .update({
-            created_rows: counts.created,
-            updated_rows: counts.updated,
-            failed_rows:  counts.failed + validation.invalidRows,
-          })
-          .eq('id', jobId)
-      }
-
-      const result = await customHandler(supabase, tenantId, createdBy, eligibleRows, mode, onProgress)
-      totalCreated += result.created
-      totalUpdated += result.updated
-      totalFailed  += result.failed
-      totalSkipped += result.skipped
-
-      // Write per-row statuses from handler results
-      for (const vr of eligibleRows) {
-        if (!vr.isValid) {
-          rowStatuses[vr.rowNumber] = 'failed'
-        } else if (vr.isDuplicate) {
-          rowStatuses[vr.rowNumber] = 'updated'
-        } else {
-          rowStatuses[vr.rowNumber] = 'created'
-        }
-      }
-    } else {
-      // Generic TABLE_MAP path
-      const config = TABLE_MAP[masterType]
-      if (!config) {
-        throw new Error(`No table config for master type: ${masterType}`)
-      }
-
-      const toProcess: Array<{ vr: ValidatedRow; record: Record<string, unknown> }> = []
-
-      for (const vr of validation.rows) {
-        if (!vr.isValid) continue
-
-        if (mode === 'create_only' && vr.isDuplicate) {
-          rowStatuses[vr.rowNumber] = 'skipped'
-          totalSkipped++
-          continue
-        }
-
-        if (mode === 'update_only' && !vr.isDuplicate) {
-          rowStatuses[vr.rowNumber] = 'skipped'
-          totalSkipped++
-          continue
-        }
-
-        const record = config.mapRow(tenantId, vr.normalizedData)
-        toProcess.push({ vr, record })
-      }
-
-      const records = toProcess.map((p) => p.record)
-      const result  = await batchInsert(
-        supabase,
-        config.table,
-        records,
-        config.uniqueColumn,
-        mode,
-      )
-
-      for (let i = 0; i < toProcess.length; i++) {
-        const { vr } = toProcess[i]
-        const batchError = result.errors.find((e) => e.index === i)
-        if (batchError) {
-          rowStatuses[vr.rowNumber] = 'failed'
-          vr.errors.push({ field: '_db', message: batchError.message, severity: 'error' })
-        } else if (mode === 'update_only') {
-          rowStatuses[vr.rowNumber] = 'updated'
-        } else if (mode === 'upsert' && vr.isDuplicate) {
-          rowStatuses[vr.rowNumber] = 'updated'
-        } else {
-          rowStatuses[vr.rowNumber] = 'created'
-        }
-      }
-
-      // Count created/updated by checking row statuses (errors.index maps back to toProcess)
-      const failedIndices = new Set(result.errors.map((e) => e.index))
-      let batchCreated = 0
-      let batchUpdated = 0
-      for (let idx = 0; idx < toProcess.length; idx++) {
-        if (failedIndices.has(idx)) continue
-        if (toProcess[idx].vr.isDuplicate || mode === 'update_only') {
-          batchUpdated++
-        } else {
-          batchCreated++
-        }
-      }
-
-      totalCreated += batchCreated
-      totalUpdated += batchUpdated
-      totalFailed  += result.failed
-      totalSkipped += result.skipped
+      totalCreated = result.created
+      totalUpdated = result.updated
+      totalFailed  = result.failed
+      totalSkipped = result.skipped
     }
-
-    // ── 8. Write row-level results ───────────────────────────────────────
-    await writeRowResults(supabase, jobId, tenantId, validation.rows, rowStatuses)
 
     const duration_ms = Date.now() - startedAt
 
-    // ── 9. Finalise job ──────────────────────────────────────────────────
+    // ── 7. Finalise job ──────────────────────────────────────────────────
     await supabase
       .from('import_jobs')
       .update({
-        status:       'completed',
-        created_rows: totalCreated,
-        updated_rows: totalUpdated,
-        failed_rows:  totalFailed,
-        skipped_rows: totalSkipped,
+        status:          'completed',
+        processed_rows:  eligibleRows.length,
+        created_rows:    totalCreated,
+        updated_rows:    totalUpdated,
+        failed_rows:     totalFailed,
+        skipped_rows:    totalSkipped,
         duration_ms,
-        completed_at: new Date().toISOString(),
+        completed_at:    new Date().toISOString(),
+        last_activity_at: new Date().toISOString(),
       })
       .eq('id', jobId)
 

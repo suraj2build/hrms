@@ -326,7 +326,7 @@ export default async function importRoutes(fastify: FastifyInstance) {
 
     const { data: job, error } = await fastify.supabase
       .from('import_jobs')
-      .select('*')
+      .select('*, import_job_chunks(chunk_no, status, success_count, failure_count, started_at, completed_at)')
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
       .single()
@@ -394,6 +394,62 @@ export default async function importRoutes(fastify: FastifyInstance) {
       .range(offset, offset + limitNum - 1)
 
     if (status) query = query.eq('status', status)
+
+    const { data, error, count } = await query
+
+    if (error) {
+      fastify.log.error(error)
+      return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    }
+
+    return reply.send({
+      data,
+      total: count ?? 0,
+      page:  pageNum,
+      limit: limitNum,
+    })
+  })
+
+  // ── GET /import/jobs/:id/errors ──────────────────────────────────────────
+  // Paginated error list from import_job_errors (enterprise chunked imports).
+  // Query: ?stage=validation|write&page=&limit=
+  fastify.get('/jobs/:id/errors', auth, async (req: any, reply) => {
+    if (!requireHrAdmin(req, reply)) return
+
+    const { id } = req.params as { id: string }
+    const {
+      stage,
+      page  = '1',
+      limit = '50',
+    } = req.query as Record<string, string>
+
+    // Verify job belongs to this tenant
+    const { data: job, error: jobErr } = await fastify.supabase
+      .from('import_jobs')
+      .select('id')
+      .eq('id', id)
+      .eq('tenant_id', req.tenantId)
+      .single()
+
+    if (jobErr || !job) {
+      return reply.code(404).send({ error: 'NOT_FOUND', message: 'Import job not found' })
+    }
+
+    const pageNum  = Math.max(1, parseInt(page)  || 1)
+    const limitNum = Math.min(500, Math.max(1, parseInt(limit) || 50))
+    const offset   = (pageNum - 1) * limitNum
+
+    let query = fastify.supabase
+      .from('import_job_errors')
+      .select(
+        'id, row_number, row_key, error_stage, error_code, error_message, raw_payload, created_at',
+        { count: 'exact' },
+      )
+      .eq('import_job_id', id)
+      .order('row_number', { ascending: true })
+      .range(offset, offset + limitNum - 1)
+
+    if (stage) query = query.eq('error_stage', stage)
 
     const { data, error, count } = await query
 
