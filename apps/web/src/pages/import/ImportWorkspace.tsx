@@ -106,6 +106,8 @@ type MasterType =
   | 'document_types'
   | 'identity_types'
   | 'relationship_types'
+  // Dynamic salary upload
+  | 'employee_salary_upload'
 
 type Step = 'download' | 'upload' | 'validate' | 'import' | 'complete'
 // NOTE: must match backend ImportMode — 'create_only' / 'update_only', NOT 'create' / 'update'
@@ -141,6 +143,14 @@ interface BackendValidationResult {
   invalidRows:   number
   duplicateRows: number
   rows:          BackendValidatedRow[]
+  // Extended fields for employee_salary_upload
+  payrollEstimate?: {
+    monthly:  number
+    annual:   number
+    currency: string
+  }
+  templateOutdated?:       boolean
+  currentTemplateVersion?: string
 }
 
 // Frontend-normalised result (errors flattened for display)
@@ -217,7 +227,7 @@ interface FlatJobRow {
 // ─── Session Persistence ──────────────────────────────────────────────────────
 
 // Sensitive master types whose row data must not be written to localStorage
-const SENSITIVE_IMPORT_TYPES: MasterType[] = ['employee_compensation', 'compensation_revisions', 'employee_bank_details']
+const SENSITIVE_IMPORT_TYPES: MasterType[] = ['employee_compensation', 'compensation_revisions', 'employee_bank_details', 'employee_salary_upload']
 // Max rows to persist — very large files are re-uploaded after refresh
 const SESSION_ROW_LIMIT = 5_000
 const SESSION_TTL_MS    = 24 * 60 * 60 * 1000  // 24 h
@@ -630,6 +640,15 @@ const MASTER_CONFIGS: MasterConfig[] = [
     optionalFields: [],
     group: 'onboarding',
   },
+  {
+    type: 'employee_salary_upload',
+    label: 'Employee Salary Upload',
+    description: 'Set component-wise monthly salary — columns generated from Salary Component Master',
+    icon: Wallet,
+    requiredFields: ['employee_code', 'effective_from'],
+    optionalFields: ['employee_name', 'notes'],
+    group: 'onboarding',
+  },
   // ── Reference data ────────────────────────────────────────────────────────────
   {
     type: 'document_types',
@@ -733,6 +752,14 @@ function StepIndicator({ current }: { current: Step }) {
   )
 }
 
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function formatInr(amount: number): string {
+  if (amount >= 1_00_00_000) return `₹${(amount / 1_00_00_000).toFixed(2)} Cr`
+  if (amount >= 1_00_000)    return `₹${(amount / 1_00_000).toFixed(2)} L`
+  return `₹${amount.toLocaleString('en-IN')}`
+}
+
 // ─── Main Component ────────────────────────────────────────────────────────────
 
 export function ImportWorkspace() {
@@ -777,6 +804,13 @@ export function ImportWorkspace() {
   const [validationResult, setValidationResult] = useState<ValidationResult | null>(initialSession?.validationResult ?? null)
   const [importResult, setImportResult] = useState<ImportResult | null>(null)
   const [activeTab, setActiveTab] = useState<ActiveTab>('import')
+  // Template version extracted from downloaded CSV/XLSX — sent to backend to detect stale templates
+  const [templateVersion, setTemplateVersion] = useState<string | null>(null)
+  // Import manifest extracted from downloaded template — sent back to prevent cross-tenant reuse
+  const [templateManifest, setTemplateManifest] = useState<Record<string, string> | null>(null)
+  // Extended validation state for employee_salary_upload (not persisted in session)
+  const [salaryPayrollEstimate, setSalaryPayrollEstimate] = useState<{ monthly: number; annual: number } | null>(null)
+  const [salaryTemplateOutdated, setSalaryTemplateOutdated] = useState(false)
   // True when a previous session was auto-applied on mount or master switch
   const [sessionRestoredNotice, setSessionRestoredNotice] = useState<boolean>(initialSession !== null)
   // Mutation timeout flags — set after deadline to expose cancel UI (set to false on mutation settle)
@@ -857,27 +891,106 @@ export function ImportWorkspace() {
     try {
       const response = await api.getRaw(`/import/templates/${selectedMaster}`)
       const text = await response.text()
+
+      if (selectedMaster === 'employee_salary_upload') {
+        // Parse comment rows for version, component-ID metadata, and import manifest
+        const lines = text.split(/\r?\n/)
+        let extractedVersion: string | null = null
+        const componentIds: string[] = []
+        const manifest: Record<string, string> = {}
+
+        for (const line of lines) {
+          const t = line.trim()
+          if (t.startsWith('# template_version:')) {
+            extractedVersion = t.replace('# template_version:', '').trim()
+          } else if (t.startsWith('# component_ids:')) {
+            componentIds.push(
+              ...t.replace('# component_ids:', '').trim().split(',').map(s => s.trim()).filter(Boolean),
+            )
+          } else if (t.startsWith('# manifest_tenant_id:')) {
+            manifest.tenantId = t.replace('# manifest_tenant_id:', '').trim()
+          } else if (t.startsWith('# manifest_generated_by:')) {
+            manifest.generatedBy = t.replace('# manifest_generated_by:', '').trim()
+          } else if (t.startsWith('# manifest_import_type:')) {
+            manifest.importType = t.replace('# manifest_import_type:', '').trim()
+          } else if (t.startsWith('# manifest_schema_version:')) {
+            manifest.schemaVersion = t.replace('# manifest_schema_version:', '').trim()
+          } else if (t.startsWith('# manifest_expected_columns:')) {
+            manifest.expectedColumnCount = t.replace('# manifest_expected_columns:', '').trim()
+          }
+        }
+        if (extractedVersion) setTemplateVersion(extractedVersion)
+        if (Object.keys(manifest).length > 0) setTemplateManifest(manifest)
+
+        // Build data rows (strip # comment lines for the sheet)
+        const dataLines = lines.filter(l => !l.trimStart().startsWith('#'))
+        const parsed = Papa.parse<string[]>(dataLines.join('\n'), { header: false, skipEmptyLines: true })
+        const rows = parsed.data as string[][]
+        if (rows.length === 0) throw new Error('Empty template response')
+
+        const wb = XLSX.utils.book_new()
+        const ws = XLSX.utils.aoa_to_sheet(rows)
+
+        // Freeze header row; lock first 3 identifier columns (code, name, date)
+        ws['!views'] = [{ state: 'frozen', ySplit: 1, xSplit: 3, topLeftCell: 'D2' }]
+
+        // Column widths: wider for fixed identity columns, uniform for component amounts
+        const headers = rows[0] ?? []
+        ws['!cols'] = headers.map((_, i) => ({ wch: i === 0 ? 18 : i < 3 ? 24 : i === headers.length - 1 ? 20 : 15 }))
+
+        XLSX.utils.book_append_sheet(wb, ws, 'Salary Upload')
+
+        // Metadata sheet — component IDs and import manifest travel with the file.
+        // Component IDs allow stable matching on re-upload after name changes.
+        // Manifest fields allow the backend to reject cross-tenant and wrong-type uploads.
+        const metaRows: string[][] = [
+          ['key', 'value'],
+          ['template_version', extractedVersion ?? ''],
+          ['generated_at', new Date().toISOString().split('T')[0]],
+          ['product', 'CognixHR'],
+          ['component_count', String(componentIds.length)],
+          // Manifest fields (written with manifest_ prefix for explicit re-parsing on upload)
+          ['manifest_import_type',          manifest.importType          ?? ''],
+          ['manifest_schema_version',        manifest.schemaVersion       ?? ''],
+          ['manifest_expected_columns',      manifest.expectedColumnCount ?? ''],
+          ['manifest_tenant_id',             manifest.tenantId            ?? ''],
+          ['manifest_generated_by',          manifest.generatedBy         ?? ''],
+        ]
+        // Map component column → stable ID (cols 3..N-1 after the 3 fixed cols)
+        headers.slice(3, headers.length - 1).forEach((name, i) => {
+          metaRows.push([`component_${i}`, `${componentIds[i] ?? ''}|${name}`])
+        })
+        const metaWs = XLSX.utils.aoa_to_sheet(metaRows)
+        metaWs['!cols'] = [{ wch: 20 }, { wch: 56 }]
+        XLSX.utils.book_append_sheet(wb, metaWs, 'CognixHR_Metadata')
+
+        XLSX.writeFile(wb, 'employee_salary_upload_template.xlsx')
+        return
+      }
+
       const parsed = Papa.parse<string[]>(text, { header: false })
       const rows = parsed.data as string[][]
-
       const wb = XLSX.utils.book_new()
       const ws = XLSX.utils.aoa_to_sheet(rows)
       XLSX.utils.book_append_sheet(wb, ws, 'Template')
       XLSX.writeFile(wb, `${selectedMaster}_import_template.xlsx`)
     } catch (err) {
       // Fallback: generate from MASTER_CONFIGS when API is unreachable.
-      // Column names match templates.ts exactly (no * suffixes in header row).
+      if (selectedMaster === 'employee_salary_upload') {
+        // Dynamic template cannot be generated offline — the component master is required.
+        toast.error('Template download failed', {
+          description: 'The Salary Upload template requires a live connection to fetch the Salary Component Master. Please retry.',
+        })
+        return
+      }
       const cfg = MASTER_CONFIGS.find(m => m.type === selectedMaster)
       if (cfg) {
-        const required = cfg.requiredFields
-        const optional = cfg.optionalFields
         const headerRow = [
-          ...required.map((f) => `${f} *`),   // * suffix = visual hint only
-          ...optional,
+          ...cfg.requiredFields.map((f) => `${f} *`),
+          ...cfg.optionalFields,
         ]
         const wb = XLSX.utils.book_new()
         const ws = XLSX.utils.aoa_to_sheet([
-          // Instruction row (informational — delete before upload)
           ['# Required fields marked with *. Delete this row before uploading. Date format: YYYY-MM-DD.'],
           headerRow,
         ])
@@ -947,6 +1060,26 @@ export function ImportWorkspace() {
         const data = e.target?.result
         if (!data || !(data instanceof ArrayBuffer)) return
         const wb = XLSX.read(new Uint8Array(data), { type: 'array', cellDates: true })
+
+        // Extract template version and import manifest from CognixHR_Metadata sheet
+        if (selectedMaster === 'employee_salary_upload' && wb.SheetNames.includes('CognixHR_Metadata')) {
+          const metaWs = wb.Sheets['CognixHR_Metadata']
+          const metaRows = XLSX.utils.sheet_to_json<string[]>(metaWs, { header: 1 }) as string[][]
+          const parsedManifest: Record<string, string> = {}
+          for (const [key, value] of metaRows.slice(1)) {
+            const k = String(key ?? '')
+            const v = String(value ?? '')
+            if (k === 'template_version' && v) {
+              setTemplateVersion(v)
+            } else if (k === 'manifest_tenant_id'        && v) { parsedManifest.tenantId            = v }
+            else if   (k === 'manifest_generated_by'     && v) { parsedManifest.generatedBy         = v }
+            else if   (k === 'manifest_import_type'      && v) { parsedManifest.importType          = v }
+            else if   (k === 'manifest_schema_version'   && v) { parsedManifest.schemaVersion       = v }
+            else if   (k === 'manifest_expected_columns' && v) { parsedManifest.expectedColumnCount = v }
+          }
+          if (Object.keys(parsedManifest).length > 0) setTemplateManifest(parsedManifest)
+        }
+
         const sheetName = wb.SheetNames[0]
         const ws = wb.Sheets[sheetName]
 
@@ -1004,12 +1137,22 @@ export function ImportWorkspace() {
         masterType: selectedMaster,
         rows: parsedRows,
         mode,
+        ...(selectedMaster === 'employee_salary_upload' && templateVersion
+          ? { templateVersion }
+          : {}),
+        ...(selectedMaster === 'employee_salary_upload' && templateManifest
+          ? { manifest: templateManifest }
+          : {}),
       }),
     onSuccess: (response) => {
       const raw = response.data
-      // Flatten per-row error arrays into individual display rows
       const data = flattenValidationRows(raw)
       setValidationResult(data)
+      // Capture extended salary-upload fields
+      if (selectedMaster === 'employee_salary_upload') {
+        setSalaryPayrollEstimate(raw.payrollEstimate ?? null)
+        setSalaryTemplateOutdated(raw.templateOutdated ?? false)
+      }
       if (raw.invalidRows === 0) {
         toast.success('Validation passed', { description: `All ${raw.totalRows} rows are valid.` })
       } else {
@@ -1064,6 +1207,12 @@ export function ImportWorkspace() {
         rows: parsedRows,
         fileName,
         mode,
+        ...(selectedMaster === 'employee_salary_upload' && templateVersion
+          ? { templateVersion }
+          : {}),
+        ...(selectedMaster === 'employee_salary_upload' && templateManifest
+          ? { manifest: templateManifest }
+          : {}),
       }),
     onSuccess: (response) => {
       if (selectedMaster) clearSession(selectedMaster)
@@ -1091,8 +1240,9 @@ export function ImportWorkspace() {
         asset_categories:      ['asset-categories'],
         salary_structures:     ['salary-structures'],
         holiday_calendar:      ['holiday-calendar'],
-        employee_bank_details: ['employees'],
-        positions:             ['positions'],
+        employee_bank_details:   ['employees'],
+        positions:               ['positions'],
+        employee_salary_upload:  ['employees'],
       }
       const keysToInvalidate = selectedMaster ? (MASTER_QUERY_KEYS[selectedMaster] ?? []) : []
       for (const k of keysToInvalidate) {
@@ -1270,6 +1420,10 @@ export function ImportWorkspace() {
     setImportResult(null)
     setErrorPage(1)
     setSessionRestoredNotice(false)
+    setTemplateVersion(null)
+    setTemplateManifest(null)
+    setSalaryPayrollEstimate(null)
+    setSalaryTemplateOutdated(false)
   }
 
   function selectMaster(type: MasterType) {
@@ -1298,6 +1452,10 @@ export function ImportWorkspace() {
     }
     setImportResult(null)
     setErrorPage(1)
+    setTemplateVersion(null)
+    setTemplateManifest(null)
+    setSalaryPayrollEstimate(null)
+    setSalaryTemplateOutdated(false)
   }
 
   // ── Render ─────────────────────────────────────────────────────────────────
@@ -1696,6 +1854,46 @@ export function ImportWorkspace() {
                         <MetricCard label="Invalid Rows" value={validationResult.invalidRows} variant="destructive" />
                         <MetricCard label="Duplicates" value={validationResult.duplicateRows ?? 0} variant="warning" />
                       </MetricRow>
+
+                      {/* Payroll estimate — salary upload only */}
+                      {selectedMaster === 'employee_salary_upload' && salaryPayrollEstimate && salaryPayrollEstimate.annual > 0 && (
+                        <div className="rounded-lg border border-accent-teal/25 bg-accent-teal/5 px-4 py-3 space-y-2">
+                          <p className="text-[11px] font-bold text-accent-teal uppercase tracking-wider">
+                            Estimated Payroll Impact
+                          </p>
+                          <div className="flex gap-8">
+                            <div>
+                              <p className="text-[11px] text-muted-foreground">Monthly</p>
+                              <p className="text-lg font-semibold text-foreground tabular-nums">
+                                {formatInr(salaryPayrollEstimate.monthly)}
+                              </p>
+                            </div>
+                            <div>
+                              <p className="text-[11px] text-muted-foreground">Annual</p>
+                              <p className="text-lg font-semibold text-foreground tabular-nums">
+                                {formatInr(salaryPayrollEstimate.annual)}
+                              </p>
+                            </div>
+                          </div>
+                          <p className="text-[11px] text-muted-foreground">
+                            Based on {validationResult.validRows} valid row{validationResult.validRows !== 1 ? 's' : ''} — earnings + employer contributions only
+                          </p>
+                        </div>
+                      )}
+
+                      {/* Stale template warning — salary upload only */}
+                      {selectedMaster === 'employee_salary_upload' && salaryTemplateOutdated && (
+                        <div className="rounded-md border border-warning/30 bg-warning/5 p-3 flex items-start gap-3">
+                          <AlertTriangle className="h-4 w-4 text-warning shrink-0 mt-0.5" />
+                          <div className="text-sm space-y-0.5">
+                            <p className="font-medium text-warning">Template may be outdated</p>
+                            <p className="text-muted-foreground text-xs">
+                              Your Salary Component Master has changed since this template was downloaded.
+                              Download a fresh template to avoid missing or renamed components.
+                            </p>
+                          </div>
+                        </div>
+                      )}
 
                       {/* Success state */}
                       {validationResult.invalidRows === 0 && (

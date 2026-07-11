@@ -6,11 +6,19 @@ import { z }                    from 'zod'
 import { generateCSV, MASTER_TEMPLATES } from '../../lib/import-engine/templates.js'
 import { validateImportRows }            from '../../lib/import-engine/validator.js'
 import { runImport, createImportJob }    from '../../lib/import-engine/importer.js'
+import {
+  fetchActiveComponents,
+  generateSalaryUploadCsv,
+  validateSalaryUploadRows,
+  runSalaryUploadJob,
+  findDuplicateComponentNames,
+  type SalaryManifest,
+} from '../../lib/import-engine/salary-upload.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 
 // ── Shared constants ──────────────────────────────────────────────────────────
 
-const VALID_MASTER_TYPES = Object.keys(MASTER_TEMPLATES)
+const VALID_MASTER_TYPES = [...Object.keys(MASTER_TEMPLATES), 'employee_salary_upload']
 
 // Master types that are pre-seeded per tenant and must not be overwritten via import.
 const SEEDED_MASTER_TYPES: Record<string, string> = {
@@ -20,6 +28,15 @@ const SEEDED_MASTER_TYPES: Record<string, string> = {
 const IMPORT_MODES = ['create_only', 'update_only', 'upsert', 'validate_only'] as const
 
 // ── Zod schemas ───────────────────────────────────────────────────────────────
+
+// Manifest sent back by the frontend on validate/run (all string values from CSV/XLSX)
+const manifestSchema = z.object({
+  tenantId:            z.string().optional(),
+  generatedBy:         z.string().optional(),
+  importType:          z.string().optional(),
+  schemaVersion:       z.string().optional(),
+  expectedColumnCount: z.string().optional(),
+}).optional()
 
 const validateBodySchema = z.object({
   masterType: z.string().refine(
@@ -31,6 +48,8 @@ const validateBodySchema = z.object({
     .min(1, 'At least one row is required')
     .max(5000, 'Maximum 5000 rows per request'),
   mode: z.enum(IMPORT_MODES).default('upsert'),
+  templateVersion: z.string().optional(),
+  manifest: manifestSchema,
 })
 
 const runBodySchema = z.object({
@@ -44,6 +63,8 @@ const runBodySchema = z.object({
     .max(5000, 'Maximum 5000 rows per request'),
   fileName: z.string().min(1, 'fileName is required'),
   mode: z.enum(IMPORT_MODES).default('upsert'),
+  templateVersion: z.string().optional(),
+  manifest: manifestSchema,
 })
 
 // ── Plugin ────────────────────────────────────────────────────────────────────
@@ -77,6 +98,28 @@ export default async function importRoutes(fastify: FastifyInstance) {
       })
     }
 
+    if (masterType === 'employee_salary_upload') {
+      const components = await fetchActiveComponents(fastify.supabase, req.tenantId)
+      if (components.length === 0) {
+        return reply.code(400).send({
+          error:   'NO_COMPONENTS',
+          message: 'No salary components found. Go to Payroll → Salary Components and create at least one component before downloading the salary upload template.',
+        })
+      }
+      const dupes = findDuplicateComponentNames(components)
+      if (dupes.length > 0) {
+        return reply.code(400).send({
+          error:   'DUPLICATE_COMPONENT_NAMES',
+          message: `Salary Component Master has duplicate display names: ${dupes.join(', ')}. Fix these in Payroll → Salary Components before generating the upload template.`,
+        })
+      }
+      const today = new Date().toISOString().split('T')[0]
+      const csv = generateSalaryUploadCsv(components, today, req.tenantId, req.userId)
+      reply.header('Content-Type', 'text/csv; charset=utf-8')
+      reply.header('Content-Disposition', 'attachment; filename="template-employee_salary_upload.csv"')
+      return reply.send(csv)
+    }
+
     const csv = generateCSV(masterType)
 
     reply.header('Content-Type', 'text/csv; charset=utf-8')
@@ -98,13 +141,31 @@ export default async function importRoutes(fastify: FastifyInstance) {
       })
     }
 
-    const { masterType, rows } = parsed.data
+    const { masterType, rows, templateVersion, manifest } = parsed.data
 
     if (SEEDED_MASTER_TYPES[masterType]) {
       return reply.code(400).send({
         error:   'SEEDED_MASTER',
         message: SEEDED_MASTER_TYPES[masterType],
       })
+    }
+
+    if (masterType === 'employee_salary_upload') {
+      try {
+        const result = await validateSalaryUploadRows(
+          fastify.supabase, req.tenantId, rows, templateVersion, manifest as SalaryManifest | undefined,
+        )
+        return reply.send({ data: result })
+      } catch (err) {
+        fastify.log.error(err)
+        // Manifest validation errors are 400, not 500
+        const msg = err instanceof Error ? err.message : 'Unexpected error during validation'
+        const isManifestError = msg.includes('Template mismatch') || msg.includes('schema version')
+        return reply.code(isManifestError ? 400 : 500).send({
+          error:   isManifestError ? 'MANIFEST_ERROR' : 'VALIDATION_ERROR',
+          message: msg,
+        })
+      }
     }
 
     try {
@@ -138,13 +199,40 @@ export default async function importRoutes(fastify: FastifyInstance) {
       })
     }
 
-    const { masterType, rows, fileName, mode } = parsed.data
+    const { masterType, rows, fileName, mode, templateVersion, manifest } = parsed.data
 
     if (SEEDED_MASTER_TYPES[masterType]) {
       return reply.code(400).send({
         error:   'SEEDED_MASTER',
         message: SEEDED_MASTER_TYPES[masterType],
       })
+    }
+
+    if (masterType === 'employee_salary_upload') {
+      let jobId: string
+      try {
+        jobId = await createImportJob(
+          fastify.supabase,
+          req.tenantId,
+          req.userId,
+          masterType,
+          mode,
+          fileName,
+          rows.length,
+        )
+      } catch (err) {
+        fastify.log.error(err)
+        return reply.code(500).send({
+          error:   'IMPORT_ERROR',
+          message: err instanceof Error ? err.message : 'Failed to create import job',
+        })
+      }
+      reply.code(202).send({ data: { importJobId: jobId, status: 'processing' } })
+      runSalaryUploadJob(
+        fastify.supabase, req.tenantId, req.userId, mode, rows, fileName, jobId,
+        templateVersion, manifest as SalaryManifest | undefined,
+      ).catch(err => fastify.log.error({ err, jobId }, 'Background salary upload import failed'))
+      return
     }
 
     // Create the job record synchronously so we can return 202 immediately.
