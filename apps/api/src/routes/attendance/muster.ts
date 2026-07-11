@@ -42,7 +42,7 @@ export default async function musterRoute(fastify: FastifyInstance) {
       const fromDate = `${month}-01`
       // Last day of the month
       const [y, m] = month.split('-').map(Number)
-      const toDate = new Date(y, m, 0).toISOString().slice(0, 10)  // day 0 of next month = last day of this month
+      const toDate = new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10)  // day 0 of next month = last day of this month
 
       // For managers: resolve their employee_id so we can scope to direct reports
       let managerEmployeeId: string | null = null
