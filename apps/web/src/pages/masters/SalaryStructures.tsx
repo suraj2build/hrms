@@ -11,7 +11,7 @@ import { toast }                                  from 'sonner'
 import { useQuery, useMutation, useQueryClient }  from '@tanstack/react-query'
 import {
   GitMerge, Plus, Pencil, Trash2, Loader2,
-  ChevronRight, ChevronDown, Layers,
+  ChevronRight, ChevronDown, Layers, Star,
 } from 'lucide-react'
 import { PageContainer }  from '@/components/layout/PageContainer'
 import { PageHeader }     from '@/components/layout/PageHeader'
@@ -51,6 +51,7 @@ interface SalaryStructure {
   name:        string
   description: string | null
   is_active:   boolean
+  is_default:  boolean
   created_at:  string
   salary_structure_components: StructureComponent[]
 }
@@ -142,6 +143,15 @@ export function SalaryStructures() {
     onError: (e: Error) => toast.error('Delete failed', { description: e.message }),
   })
 
+  const setDefaultMut = useMutation({
+    mutationFn: (id: string) => api.put(`/masters/salary-structures/${id}`, { is_default: true }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['salary-structures'] })
+      toast.success('Default structure updated')
+    },
+    onError: (e: Error) => toast.error('Failed to set default', { description: e.message }),
+  })
+
   return (
     <PageContainer>
       <PageHeader
@@ -209,6 +219,16 @@ export function SalaryStructures() {
                       {activeComps.length} component{activeComps.length !== 1 ? 's' : ''}
                     </span>
 
+                    {s.is_default && (
+                      <Badge
+                        variant="default"
+                        className="rounded-full text-xs shrink-0 bg-[#15B8A6] text-white border-0"
+                      >
+                        <Star className="h-2.5 w-2.5 mr-1 fill-current" />
+                        Default
+                      </Badge>
+                    )}
+
                     <Badge
                       variant={s.is_active ? 'success' : 'secondary'}
                       className="rounded-full text-xs shrink-0"
@@ -218,6 +238,17 @@ export function SalaryStructures() {
 
                     {isAdmin && (
                       <div className="flex items-center gap-1 shrink-0">
+                        {!s.is_default && s.is_active && (
+                          <Button
+                            size="icon" variant="ghost"
+                            className="h-7 w-7 text-muted-foreground hover:text-[#15B8A6]"
+                            title="Set as default"
+                            disabled={setDefaultMut.isPending}
+                            onClick={() => setDefaultMut.mutate(s.id)}
+                          >
+                            <Star className="h-3.5 w-3.5" />
+                          </Button>
+                        )}
                         <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => openEdit(s)}>
                           <Pencil className="h-3.5 w-3.5" />
                         </Button>

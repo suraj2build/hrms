@@ -60,6 +60,7 @@ export const structureSchema = z.object({
   code:            z.string().min(1, 'Code is required').max(50),
   description:     z.string().optional(),
   is_active:       z.boolean().optional().default(true),
+  is_default:      z.boolean().optional(),
   pf_applicable:   z.boolean().optional().default(true),
   esi_applicable:  z.boolean().optional().default(true),
   tds_applicable:  z.boolean().optional().default(true),
@@ -268,6 +269,20 @@ export async function updateStructure(
 ): Promise<StoreResult> {
   const parsed = structureUpdateSchema.safeParse(body)
   if (!parsed.success) return fail(400, 'VALIDATION', parsed.error.issues[0]?.message ?? 'Invalid structure')
+
+  // Atomically clear the existing default before setting this one.
+  // The partial-unique index (WHERE is_default = true) only allows one per tenant,
+  // so we must clear first to avoid a constraint violation.
+  if (parsed.data.is_default === true) {
+    const { error: clearErr } = await supabase
+      .from('salary_structures')
+      .update({ is_default: false })
+      .eq('tenant_id', tenantId)
+      .eq('is_default', true)
+      .neq('id', id)
+    if (clearErr) return dbFail(clearErr)
+  }
+
   const { data, error } = await supabase
     .from('salary_structures')
     .update(parsed.data)
