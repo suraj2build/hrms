@@ -13,9 +13,10 @@
  *   POST /import/run       { masterType: 'employee_salary_upload', rows, ... }
  */
 
-import type { SupabaseClient } from '@supabase/supabase-js'
+import type { SupabaseClient }                 from '@supabase/supabase-js'
 import type { ValidationResult, ValidatedRow, RowError } from './validator.js'
-import type { ImportMode } from './importer.js'
+import type { ImportMode }                     from './importer.js'
+import { executeInChunks, writeImportErrors } from './chunk-executor.js'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -800,56 +801,51 @@ export async function runSalaryUploadJob(
 
     await supabase.from('import_jobs').update({ status: 'importing' }).eq('id', jobId)
 
-    const rowStatuses: Record<number, 'created' | 'updated' | 'failed' | 'skipped'> = {}
-    let totalFailed  = validation.invalidRows
-    let totalSkipped = 0
+    // Partition rows
+    const invalidRows:  ValidatedRow[] = []
+    const modeSkipped:  ValidatedRow[] = []
+    const eligibleRows: ValidatedRow[] = []
 
     for (const vr of validation.rows) {
-      if (!vr.isValid) { rowStatuses[vr.rowNumber] = 'failed'; continue }
-      if (mode === 'create_only' && vr.isDuplicate) { rowStatuses[vr.rowNumber] = 'skipped'; totalSkipped++; continue }
-      if (mode === 'update_only' && !vr.isDuplicate) { rowStatuses[vr.rowNumber] = 'skipped'; totalSkipped++; continue }
+      if (!vr.isValid) { invalidRows.push(vr); continue }
+      if (mode === 'create_only' && vr.isDuplicate) { modeSkipped.push(vr); continue }
+      if (mode === 'update_only' && !vr.isDuplicate) { modeSkipped.push(vr); continue }
+      eligibleRows.push(vr)
     }
 
-    const eligibleRows = validation.rows.filter(vr => {
-      if (!vr.isValid) return false
-      if (mode === 'create_only' && vr.isDuplicate) return false
-      if (mode === 'update_only' && !vr.isDuplicate) return false
-      return true
+    const result = await executeInChunks({
+      supabase,
+      tenantId,
+      jobId,
+      eligibleRows,
+      invalidRows,
+      skippedCount: modeSkipped.length,
+      processChunk: (rows) => importSalaryUpload(supabase, tenantId, createdBy, rows, mode),
     })
 
-    const result = await importSalaryUpload(supabase, tenantId, createdBy, eligibleRows, mode)
-
-    for (const vr of eligibleRows) {
-      if (!vr.isValid) { rowStatuses[vr.rowNumber] = 'failed'; continue }
-      if (vr.isDuplicate) rowStatuses[vr.rowNumber] = 'updated'
-      else                rowStatuses[vr.rowNumber] = 'created'
-    }
-
-    totalFailed  += result.failed
-    totalSkipped += result.skipped
     const duration = Date.now() - startedAt
 
     await supabase
       .from('import_jobs')
       .update({
-        status:        'completed',
-        created_rows:  result.created,
-        updated_rows:  result.updated,
-        failed_rows:   totalFailed,
-        skipped_rows:  totalSkipped,
-        duration_ms:   duration,
-        completed_at:  new Date().toISOString(),
+        status:           'completed',
+        processed_rows:   eligibleRows.length,
+        created_rows:     result.created,
+        updated_rows:     result.updated,
+        failed_rows:      result.failed,
+        skipped_rows:     result.skipped,
+        duration_ms:      duration,
+        completed_at:     new Date().toISOString(),
+        last_activity_at: new Date().toISOString(),
       })
       .eq('id', jobId)
-
-    await writeJobRows(supabase, jobId, tenantId, validation.rows, rowStatuses)
 
     return {
       importJobId: jobId,
       created:     result.created,
       updated:     result.updated,
-      failed:      totalFailed,
-      skipped:     totalSkipped,
+      failed:      result.failed,
+      skipped:     result.skipped,
       duration_ms: duration,
     }
   } catch (err) {
