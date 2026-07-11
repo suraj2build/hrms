@@ -42,6 +42,7 @@ import {
   computeMonthTotals,
   countMissingRecords,
   computeEmployeeSummary,
+  resolveImpliedAbsences,
 } from '@/lib/attendance/selectors'
 import { formatMonthLabel } from '@/lib/attendance/attendance-period-context'
 
@@ -132,13 +133,14 @@ function monthStr(y: number, m: number) {
 // computeSummary and computePayableDays are imported from @/lib/attendance/selectors
 
 /** Generate and trigger download of a CSV export for the visible muster grid. */
-function exportMusterCsv(employees: EmployeeMuster[], dates: string[], monthLabel: string) {
+function exportMusterCsv(employees: EmployeeMuster[], dates: string[], monthLabel: string, todayStr: string) {
   if (!employees.length || !dates.length) return
   const header = ['Employee Code', 'Employee Name', ...dates, 'P', 'L', 'A', 'Lv', 'H', 'OT', 'MP', 'Payable Days']
   const rows = employees.map(emp => {
-    const dayMap = new Map(emp.days.map(d => [d.date, d]))
-    const summary = computeSummary(emp.days)
-    const payable = computePayableDays(emp.days)
+    const resolvedDays = resolveImpliedAbsences(emp.days, emp.joining_date, todayStr)
+    const dayMap = new Map(resolvedDays.map(d => [d.date, d]))
+    const summary = computeSummary(resolvedDays)
+    const payable = computePayableDays(resolvedDays)
     const dayCells = dates.map(d => dayMap.get(d)?.status ?? '')
     return [
       emp.employee_code,
@@ -226,9 +228,11 @@ export function MusterRoll() {
   // read model, ensuring the stat chips, Payroll Impact rail, and the grid are all
   // consistent with each other and with /attendance/payroll-summary.
   const monthTotals = useMemo(() => {
-    const summaries = allEmployees.map(emp => computeEmployeeSummary(emp.days))
+    const summaries = allEmployees.map(emp =>
+      computeEmployeeSummary(resolveImpliedAbsences(emp.days, emp.joining_date, todayStr))
+    )
     return computeMonthTotals(summaries)
-  }, [allEmployees])
+  }, [allEmployees, todayStr])
 
   // Aliases kept for template readability (used in JSX below)
   const payrollMetrics = useMemo(() => ({
@@ -250,8 +254,16 @@ export function MusterRoll() {
 
   // Phase 7 — Missing records: past working weekdays (Mon–Fri) with no status.
   // These are unprocessed days — a payroll-critical signal.
+  // After implied-absence resolution, null-status past employed days become 'absent'
+  // and are no longer "missing records" — they're counted as LOP. Only genuinely
+  // unprocessed days (pre-joining, or if the engine skipped a record) remain null.
   const missingRecordCount = useMemo(
-    () => countMissingRecords(allEmployees, todayStr),
+    () => countMissingRecords(
+      allEmployees.map(emp => ({
+        days: resolveImpliedAbsences(emp.days, emp.joining_date, todayStr),
+      })),
+      todayStr,
+    ),
     [allEmployees, todayStr],
   )
 
@@ -276,16 +288,15 @@ export function MusterRoll() {
       const matchSearch = !q || e.name.toLowerCase().includes(q) || e.employee_code.toLowerCase().includes(q)
       if (!matchSearch) return false
       if (statusFilter === 'all') return true
-      const s = computeSummary(e.days)
+      const resolved = resolveImpliedAbsences(e.days, e.joining_date, todayStr)
+      const s = computeSummary(resolved)
       if (statusFilter === 'has-exceptions')   return (s.absent ?? 0) > 0 || (s.late ?? 0) > 0
       if (statusFilter === 'has-absence')      return (s.absent ?? 0) > 0
       if (statusFilter === 'has-late')         return (s.late ?? 0) > 0
       if (statusFilter === 'on-leave')         return (s.leave ?? 0) > 0
-      // Phase 6 — LOP risk: 3+ absent days this month
       if (statusFilter === 'lop-risk')         return (s.absent ?? 0) >= 3
-      // Phase 6 — missing records: at least one past weekday with no status
       if (statusFilter === 'missing-records') {
-        return e.days.some(d => {
+        return resolved.some(d => {
           if (!d.status && d.date < todayStr) {
             const dow = new Date(`${d.date}T12:00:00.000Z`).getUTCDay()
             return dow >= 1 && dow <= 5
@@ -334,12 +345,12 @@ export function MusterRoll() {
   }
 
   const handleExport = useCallback(() => {
-    exportMusterCsv(employees, dates, monthLabel)
-  }, [employees, dates, monthLabel])
+    exportMusterCsv(employees, dates, monthLabel, todayStr)
+  }, [employees, dates, monthLabel, todayStr])
 
   function handleExportSelected() {
     const sel = employees.filter(e => selected.has(e.employee_id))
-    exportMusterCsv(sel, dates, monthLabel)
+    exportMusterCsv(sel, dates, monthLabel, todayStr)
   }
 
   // Processing state — true while background recompute is running on the server.
@@ -882,9 +893,10 @@ export function MusterRoll() {
                         </thead>
                         <tbody>
                           {pagedEmployees.map((emp, eIdx) => {
-                            const dayMap  = new Map(emp.days.map(d => [d.date, d]))
-                            const summary = computeSummary(emp.days)
-                            const payable = computePayableDays(emp.days)
+                            const resolvedDays = resolveImpliedAbsences(emp.days, emp.joining_date, todayStr)
+                            const dayMap  = new Map(resolvedDays.map(d => [d.date, d]))
+                            const summary = computeSummary(resolvedDays)
+                            const payable = computePayableDays(resolvedDays)
                             // Phase 3: LOP risk at 3+ absent (threshold for payroll deduction risk)
                             const lopRisk = (summary.absent ?? 0) >= 3
                             // Phase 3: missing punch / no punch indicator
@@ -998,32 +1010,17 @@ export function MusterRoll() {
                                         )
                                       ) : (
                                         d < todayStr ? (
-                                          // Past date, no attendance record.
-                                          // If the employee had not yet joined on this date, mark as
-                                          // Not Applicable (–).  Otherwise treat as Absent (A) — an
-                                          // active employee with no punch and no exception is absent.
-                                          emp.joining_date && d < emp.joining_date ? (
-                                            <span
-                                              title={`${emp.name} · ${d}\nNot applicable — before joining date`}
-                                              className={cn(
-                                                'inline-flex items-center justify-center rounded text-muted-foreground/35 font-medium select-none',
-                                                chipW,
-                                              )}
-                                            >
-                                              –
-                                            </span>
-                                          ) : (
-                                            <span
-                                              title={`${emp.name} · ${d}\nAbsent — no attendance record`}
-                                              className={cn(
-                                                'inline-flex items-center justify-center rounded font-semibold',
-                                                chipW,
-                                                STATUS_CELL['absent'],
-                                              )}
-                                            >
-                                              A
-                                            </span>
-                                          )
+                                          // Past date, no record after resolveImpliedAbsences —
+                                          // this means the date is before the employee's joining date.
+                                          <span
+                                            title={`${emp.name} · ${d}\nNot applicable — before joining date`}
+                                            className={cn(
+                                              'inline-flex items-center justify-center rounded text-muted-foreground/35 font-medium select-none',
+                                              chipW,
+                                            )}
+                                          >
+                                            –
+                                          </span>
                                         ) : (
                                           <span className={cn('inline-block', chipWEmpty)} />
                                         )

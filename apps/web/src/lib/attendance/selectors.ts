@@ -82,6 +82,35 @@ export interface EmployeeSummary {
   missing_punch: number  // missing_punch + no_punch combined
 }
 
+// ── Implied absence resolution ────────────────────────────────────────────────
+
+/**
+ * Resolves implied absent days before any computation or rendering.
+ *
+ * Rule: an active employee with no attendance_daily record on a past date
+ * that falls on or after their joining_date is absent — not "no record."
+ * The muted dash (–) is reserved for dates outside the employment period
+ * (before joining or after relieving).
+ *
+ * Returns a new DayRecord[] — never mutates the original.
+ *
+ * @param days        Employee's days array as returned by the muster API.
+ * @param joiningDate Employee's joining date (YYYY-MM-DD), or null if unknown.
+ * @param todayStr    Today's date (YYYY-MM-DD) — future dates stay null.
+ */
+export function resolveImpliedAbsences(
+  days: DayRecord[],
+  joiningDate: string | null | undefined,
+  todayStr:    string,
+): DayRecord[] {
+  return days.map(d => {
+    if (d.status !== null)                          return d  // already has a status
+    if (d.date >= todayStr)                         return d  // future date — blank, not absent
+    if (joiningDate && d.date < joiningDate)        return d  // before employment — not applicable
+    return { ...d, status: 'absent' }                        // employed past day, no record → absent
+  })
+}
+
 // ── Selectors ─────────────────────────────────────────────────────────────────
 
 /**
