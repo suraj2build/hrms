@@ -19,6 +19,15 @@ import type { ValidationResult, ValidatedRow, RowError } from './validator.js'
 import type { ImportMode }                     from './importer.js'
 import { executeInChunks, writeImportErrors } from './chunk-executor.js'
 import ExcelJS                                from 'exceljs'
+import {
+  resolveMetadata,
+  validateReferenceIntegrity,
+  MetadataValidationError,
+  ReferenceIntegrityError,
+  type WorkbookManifest,
+  type MasterMapping,
+  type ImportContext,
+} from '../enterprise-import/index.js'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -641,26 +650,33 @@ export async function validateSalaryUploadRows(
   rows:             Record<string, string>[],
   templateVersion?: string,
   manifest?:        SalaryManifest,
+  userId?:          string,
 ): Promise<SalaryValidationResult> {
-  // ── Manifest validation ─────────────────────────────────────────────────────
-  // Reject cross-tenant reuse and wrong-file-type uploads before any DB work.
+  // ── Manifest validation (framework) ────────────────────────────────────────
+  // Five-stage pipeline: schema → identity → tenant → hash → signature.
+  // Stages 4 and 5 are skipped gracefully when the corresponding manifest
+  // fields are absent (e.g. workbooks generated before v2 or without a hash).
   if (manifest) {
-    if (manifest.tenantId && manifest.tenantId !== tenantId) {
-      throw new Error(
-        'Template mismatch: this file was generated for a different tenant. Download a fresh template from your account.',
-      )
+    const svRaw = manifest.schemaVersion ? parseInt(manifest.schemaVersion, 10) : NaN
+    const workbookManifest: WorkbookManifest = {
+      schemaVersion:    isNaN(svRaw) ? SCHEMA_VERSION : svRaw,
+      tenantId:         manifest.tenantId,
+      workbookType:     manifest.workbookType ?? manifest.importType,
+      workbookId:       manifest.workbookId,
+      masterHash:       manifest.componentHash,
+      signature:        manifest.signature,
+      generatedAt:      manifest.generatedAt,
+      generatedBy:      manifest.generatedBy,
+      generatorVersion: manifest.generatorVersion,
     }
-    if (manifest.importType && manifest.importType !== 'employee_salary_upload') {
-      throw new Error(
-        `Template mismatch: this file is for import type "${manifest.importType}", not "employee_salary_upload".`,
-      )
-    }
-    const sv = manifest.schemaVersion ? parseInt(manifest.schemaVersion, 10) : null
-    if (sv !== null && !isNaN(sv) && sv !== SCHEMA_VERSION) {
-      throw new Error(
-        `Template schema version ${sv} is no longer supported. Download a fresh template.`,
-      )
-    }
+    await resolveMetadata(workbookManifest, {
+      tenantId,
+      expectedWorkbookType: 'employee_salary_upload',
+      computeCurrentHash:   async () => {
+        const comps = await fetchActiveComponents(supabase, tenantId)
+        return computeTemplateVersion(comps)
+      },
+    })
   }
 
   // ── Default salary structure prerequisite ──────────────────────────────────
@@ -696,6 +712,46 @@ export async function validateSalaryUploadRows(
 
   // Fetch active components (template source of truth)
   const activeComponents = await fetchActiveComponents(supabase, tenantId)
+
+  // ── Reference integrity validation (framework) ──────────────────────────────
+  // Validates component column mappings from v2+ structured manifest before any
+  // row is parsed. Only runs when the workbook includes a structured components
+  // JSON (v2+). Malformed JSON is silently skipped — row-level validation will
+  // surface the resulting errors naturally.
+  if (manifest?.components) {
+    let mappings: MasterMapping[] | null = null
+    try {
+      const raw = JSON.parse(manifest.components) as Array<{
+        position: number; id: string; code: string; name: string
+      }>
+      mappings = raw.map(m => ({ position: m.position, entityId: m.id, code: m.code, name: m.name }))
+    } catch {
+      // malformed — skip
+    }
+    if (mappings) {
+      const activeById = new Map(activeComponents.map(c => [c.id, c]))
+      const ctx: ImportContext = {
+        tenantId,
+        userId:      userId ?? 'unknown',
+        workbookType: 'employee_salary_upload',
+        requestId:   randomUUID(),
+        workbookId:  manifest.workbookId,
+      }
+      const countRaw = manifest.componentCount ? parseInt(manifest.componentCount, 10) : NaN
+      await validateReferenceIntegrity<ComponentMeta>(mappings, {
+        context:              ctx,
+        expectedMappingCount: isNaN(countRaw) ? undefined : countRaw,
+        lookupActiveEntities: async (ids) => {
+          const result = new Map<string, ComponentMeta>()
+          for (const id of ids) {
+            const c = activeById.get(id)
+            if (c) result.set(id, c)
+          }
+          return result
+        },
+      })
+    }
+  }
 
   // Fetch all components including inactive — for better error messages
   const allCompByLowerName = await fetchAllComponentsByLowerName(supabase, tenantId)
@@ -1164,7 +1220,7 @@ export async function runSalaryUploadJob(
 
   try {
     // Validate (templateVersion and manifest passed through for staleness/security checks)
-    const validation = await validateSalaryUploadRows(supabase, tenantId, rows, templateVersion, manifest)
+    const validation = await validateSalaryUploadRows(supabase, tenantId, rows, templateVersion, manifest, createdBy)
 
     await supabase
       .from('import_jobs')

@@ -3,7 +3,7 @@
 // Domain-agnostic: callers inject domain callbacks (hash provider, tenant ID).
 // Payroll must never be imported here — this is platform infrastructure.
 
-import type { WorkbookDescriptor }                  from './workbook-descriptor.js'
+import type { WorkbookManifest }                       from './workbook-manifest.js'
 import { MetadataValidationError, WORKBOOK_ERROR_CODES } from './workbook-errors.js'
 
 // Schema versions this runtime accepts. Reject everything else.
@@ -22,17 +22,15 @@ export interface MetadataResolverOptions {
   expectedWorkbookType: string
 
   /**
-   * Domain-provided callback that returns the current master hash for this
-   * tenant. MetadataResolver compares it to manifest.masterHash in Stage 4.
-   *
-   * Keeping this as a callback (not a DB query inside the resolver) ensures
-   * the resolver stays domain-agnostic.
+   * Domain-provided callback that returns the current master hash for this tenant.
+   * Only called when manifest.masterHash is present (Stage 4).
+   * Keeping this as a callback ensures the resolver stays domain-agnostic.
    */
   computeCurrentHash: () => Promise<string>
 }
 
-// djb2 hash — mirrors the implementation in salary-upload.ts.
-// IMPORTANT: Any change here must be mirrored in generateSalaryUploadXlsx().
+// djb2 hash — must match the implementation in salary-upload.ts generateSalaryUploadXlsx().
+// IMPORTANT: changing this algorithm requires a SCHEMA_VERSION bump.
 function djb2(input: string): string {
   let h = 5381
   for (let i = 0; i < input.length; i++) {
@@ -42,23 +40,24 @@ function djb2(input: string): string {
 }
 
 /**
- * Run the five metadata-validation stages against a parsed WorkbookDescriptor.
+ * Run five metadata-validation stages against a WorkbookManifest.
  *
- * Stage 1 — Schema Validation:     schemaVersion is in SUPPORTED_SCHEMA_VERSIONS
- * Stage 2 — Identity Validation:   workbookType matches the expected import type
- * Stage 3 — Tenant Validation:     tenantId matches the authenticated tenant
- * Stage 4 — Master Hash Validation: masterHash matches current master snapshot
- * Stage 5 — Signature Validation:  signature matches recomputed djb2 checksum
+ * Stage 1 — Schema:     schemaVersion is in SUPPORTED_SCHEMA_VERSIONS
+ * Stage 2 — Identity:   workbookType matches expectedWorkbookType
+ * Stage 3 — Tenant:     tenantId matches the authenticated tenant
+ * Stage 4 — Hash:       masterHash matches current master snapshot (skipped if empty)
+ * Stage 5 — Signature:  signature matches recomputed djb2 checksum (skipped if empty)
  *
- * Returns the descriptor unchanged on success.
+ * Accepts WorkbookManifest directly so callers with a full WorkbookDescriptor
+ * pass descriptor.manifest, and callers working with legacy JSON manifests can
+ * construct a WorkbookManifest without a full descriptor.
+ *
  * Throws MetadataValidationError on any failed stage.
  */
 export async function resolveMetadata(
-  descriptor: WorkbookDescriptor,
-  opts:       MetadataResolverOptions,
-): Promise<WorkbookDescriptor> {
-  const { manifest } = descriptor
-
+  manifest: WorkbookManifest,
+  opts:     MetadataResolverOptions,
+): Promise<void> {
   // ── Stage 1: Schema Validation ────────────────────────────────────────────
   if (!SUPPORTED_SCHEMA_VERSIONS.includes(manifest.schemaVersion)) {
     throw new MetadataValidationError(
@@ -70,7 +69,7 @@ export async function resolveMetadata(
   }
 
   // ── Stage 2: Workbook Identity Validation ─────────────────────────────────
-  if (manifest.workbookType !== opts.expectedWorkbookType) {
+  if (manifest.workbookType && manifest.workbookType !== opts.expectedWorkbookType) {
     throw new MetadataValidationError(
       WORKBOOK_ERROR_CODES.WORKBOOK_TYPE_MISMATCH,
       `This file is for import type "${manifest.workbookType}", ` +
@@ -94,7 +93,7 @@ export async function resolveMetadata(
       throw new MetadataValidationError(
         WORKBOOK_ERROR_CODES.MASTER_HASH_MISMATCH,
         'The master configuration has changed since this workbook was generated. ' +
-        'Download a fresh template — the upload column layout no longer matches the current master.',
+        'Download a fresh template — the column layout no longer matches the current master.',
       )
     }
   }
@@ -108,9 +107,7 @@ export async function resolveMetadata(
       manifest.masterHash,
       manifest.generatedAt,
     ].join('|')
-    const expectedSig = djb2(sigPayload)
-
-    if (manifest.signature !== expectedSig) {
+    if (manifest.signature !== djb2(sigPayload)) {
       throw new MetadataValidationError(
         WORKBOOK_ERROR_CODES.SIGNATURE_INVALID,
         'Workbook metadata signature is invalid — the metadata sheet may have been modified. ' +
@@ -118,6 +115,4 @@ export async function resolveMetadata(
       )
     }
   }
-
-  return descriptor
 }

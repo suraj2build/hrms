@@ -14,6 +14,10 @@ import {
   findDuplicateComponentNames,
   type SalaryManifest,
 } from '../../lib/import-engine/salary-upload.js'
+import {
+  MetadataValidationError,
+  ReferenceIntegrityError,
+} from '../../lib/enterprise-import/index.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 
 // ── Shared constants ──────────────────────────────────────────────────────────
@@ -29,13 +33,25 @@ const IMPORT_MODES = ['create_only', 'update_only', 'upsert', 'validate_only'] a
 
 // ── Zod schemas ───────────────────────────────────────────────────────────────
 
-// Manifest sent back by the frontend on validate/run (all string values from CSV/XLSX)
+// Manifest sent back by the frontend on validate/run (all string values from CSV/XLSX).
+// v1 fields kept for backward compat; v2 fields added in schema version 2.
 const manifestSchema = z.object({
+  // v1
   tenantId:            z.string().optional(),
   generatedBy:         z.string().optional(),
   importType:          z.string().optional(),
   schemaVersion:       z.string().optional(),
   expectedColumnCount: z.string().optional(),
+  // v2
+  workbookId:          z.string().optional(),
+  componentHash:       z.string().optional(),
+  componentCount:      z.string().optional(),
+  manifestVersion:     z.string().optional(),
+  workbookType:        z.string().optional(),
+  generatorVersion:    z.string().optional(),
+  generatedAt:         z.string().optional(),
+  signature:           z.string().optional(),
+  components:          z.string().optional(),
 }).optional()
 
 const validateBodySchema = z.object({
@@ -161,18 +177,25 @@ export default async function importRoutes(fastify: FastifyInstance) {
     if (masterType === 'employee_salary_upload') {
       try {
         const result = await validateSalaryUploadRows(
-          fastify.supabase, req.tenantId, rows, templateVersion, manifest as SalaryManifest | undefined,
+          fastify.supabase, req.tenantId, rows, templateVersion,
+          manifest as SalaryManifest | undefined, req.userId,
         )
         return reply.send({ data: result })
       } catch (err) {
         fastify.log.error(err)
-        // Manifest validation errors are 400, not 500
         const msg = err instanceof Error ? err.message : 'Unexpected error during validation'
-        const isManifestError = msg.includes('Template mismatch') || msg.includes('schema version')
-        return reply.code(isManifestError ? 400 : 500).send({
-          error:   isManifestError ? 'MANIFEST_ERROR' : 'VALIDATION_ERROR',
-          message: msg,
-        })
+        if (err instanceof MetadataValidationError) {
+          return reply.code(400).send({ error: 'MANIFEST_ERROR', message: msg, code: err.code })
+        }
+        if (err instanceof ReferenceIntegrityError) {
+          return reply.code(400).send({
+            error:      'INTEGRITY_ERROR',
+            message:    msg,
+            code:       err.code,
+            violations: err.violations,
+          })
+        }
+        return reply.code(500).send({ error: 'VALIDATION_ERROR', message: msg })
       }
     }
 

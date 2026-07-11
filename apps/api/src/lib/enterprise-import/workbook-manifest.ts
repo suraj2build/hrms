@@ -7,15 +7,15 @@
  * sheet at generation time. Validated by MetadataResolver before any row is processed.
  */
 export interface WorkbookManifest {
-  workbookId:       string   // UUID assigned at generation time
-  workbookType:     string   // e.g. 'employee_salary_upload'
-  tenantId:         string
-  generatedBy:      string   // user ID of the person who downloaded the template
-  generatedAt:      string   // ISO date string (YYYY-MM-DD)
-  schemaVersion:    number   // bumped on breaking manifest changes
-  generatorVersion: string   // '1.0.0' — semver of the generation code
-  masterHash:       string   // fingerprint of the master data at generation time
-  signature:        string   // djb2 checksum of canonical metadata fields
+  schemaVersion:     number    // required — Stage 1 always validates this
+  workbookId?:       string    // UUID assigned at generation time
+  workbookType?:     string    // e.g. 'employee_salary_upload'
+  tenantId?:         string    // Stage 3 is skipped when absent
+  generatedBy?:      string    // informational; not validated
+  generatedAt?:      string    // ISO date string; used in signature payload
+  generatorVersion?: string    // semver of the generation code; informational
+  masterHash?:       string    // Stage 4 is skipped when absent
+  signature?:        string    // Stage 5 is skipped when absent
 }
 
 /**
