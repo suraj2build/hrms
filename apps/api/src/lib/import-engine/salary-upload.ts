@@ -962,14 +962,21 @@ export async function validateSalaryUploadRows(
 /**
  * Import employee salary upload rows.
  *
- * For each valid row:
- *   1. Compute CTC annual = (earnings + employer_contributions) × 12.
- *   2. Insert employee_compensations with is_active=true.
- *      The DB trigger fn_close_prev_compensation auto-closes the old active row.
- *   3. Insert employee_compensation_components (one row per component with a value > 0).
+ * Two-phase execution to avoid uidx_comp_one_active constraint violations:
  *
- * Requires a default salary structure (is_default=true) to exist in the tenant.
- * Returns early with a per-row error if none is found.
+ * PHASE 1 — Close all old active compensations (sequential, before any inserts).
+ *   The DB unique index `uidx_comp_one_active` only allows one is_active=true row
+ *   per (tenant_id, employee_id). The trigger `fn_close_prev_compensation` is an
+ *   AFTER INSERT trigger — it fires AFTER the constraint check, so the INSERT fails
+ *   before the trigger ever runs. We must explicitly close old records first.
+ *   Processing closes sequentially prevents race conditions when the same employee
+ *   appears more than once in the upload (different effective dates).
+ *
+ * PHASE 2 — Insert new compensations (sequential).
+ *   After phase 1, no employee in this batch has an active compensation, so inserts
+ *   cannot conflict with each other. Sequential processing also handles same-employee
+ *   multiple rows correctly (each insert triggers fn_close_prev_compensation which
+ *   closes the one inserted just before it for the same employee).
  */
 export async function importSalaryUpload(
   supabase:  SupabaseClient,
@@ -1022,20 +1029,47 @@ export async function importSalaryUpload(
     }
   }
 
-  // Process rows concurrently (10 at a time) — each row needs 2 sequential DB
-  // calls (insert compensation → get id → insert components) so we can't batch
-  // all at once, but parallelising across rows gives a ~10x throughput gain.
-  const CONCURRENCY = 10
+  // ── PHASE 1: Close all old active compensations ───────────────────────────────
+  // Must happen before ANY insert so no employee has two is_active=true records
+  // at any point during phase 2. Sequential so the same employee twice doesn't race.
+  for (const vr of validRows) {
+    if (!vr.isValid) continue
+    if (mode === 'create_only') continue   // create_only never updates existing
+    if (!vr.isDuplicate)        continue   // no existing active comp to close
 
-  async function processRow(vr: ValidatedRow): Promise<void> {
-    const norm = vr.normalizedData
-    if (mode === 'create_only' && vr.isDuplicate) { skipped++; return }
-    if (mode === 'update_only' && !vr.isDuplicate) { skipped++; return }
+    const employeeId    = vr.normalizedData.employee_id   as string
+    const effectiveFrom = vr.normalizedData.effective_from as string
+    const prevDate = new Date(effectiveFrom)
+    prevDate.setDate(prevDate.getDate() - 1)
 
-    const employeeId    = norm.employee_id   as string
-    const effectiveFrom = norm.effective_from as string
-    const notes         = (norm.notes as string | undefined) ?? null
-    const components    = (norm.components   as Record<string, number>) ?? {}
+    const { error: closeErr } = await supabase
+      .from('employee_compensations')
+      .update({ is_active: false, effective_to: prevDate.toISOString().split('T')[0] })
+      .eq('tenant_id', tenantId)
+      .eq('employee_id', employeeId)
+      .eq('is_active', true)
+
+    if (closeErr) {
+      vr.errors.push({ field: '_db', message: `Failed to close previous compensation: ${closeErr.message}`, severity: 'error' })
+      vr.isValid = false
+      failed++
+    }
+  }
+
+  // ── PHASE 2: Insert new compensations ────────────────────────────────────────
+  // All old active records are already closed, so the unique constraint cannot fire.
+  // Sequential processing handles same-employee-multiple-rows correctly:
+  // each insert triggers fn_close_prev_compensation which closes the previous insert
+  // for that employee before the next one goes in.
+  for (const vr of validRows) {
+    if (!vr.isValid) continue
+    if (mode === 'create_only' && vr.isDuplicate)  { skipped++; continue }
+    if (mode === 'update_only' && !vr.isDuplicate) { skipped++; continue }
+
+    const employeeId    = vr.normalizedData.employee_id   as string
+    const effectiveFrom = vr.normalizedData.effective_from as string
+    const notes         = (vr.normalizedData.notes as string | undefined) ?? null
+    const components    = (vr.normalizedData.components   as Record<string, number>) ?? {}
 
     let ctcMonthly = 0
     for (const [compId, amount] of Object.entries(components)) {
@@ -1046,79 +1080,54 @@ export async function importSalaryUpload(
     }
     const ctcAnnual = Math.round(ctcMonthly * 12 * 100) / 100
 
-    // Close previous active compensation BEFORE inserting the new one.
-    // The DB trigger fn_close_prev_compensation is an AFTER trigger, which runs
-    // after the unique constraint check. For bulk INSERTs the constraint fires first
-    // (old + new both is_active=true → violation). Explicitly close the old record
-    // here so the INSERT sees no active record for this employee.
-    if (vr.isDuplicate) {
-      const prevDate = new Date(effectiveFrom)
-      prevDate.setDate(prevDate.getDate() - 1)
-      const { error: closeErr } = await supabase
+    try {
+      const { data: newComp, error: compErr } = await supabase
         .from('employee_compensations')
-        .update({ is_active: false, effective_to: prevDate.toISOString().split('T')[0] })
-        .eq('tenant_id', tenantId)
-        .eq('employee_id', employeeId)
-        .eq('is_active', true)
-      if (closeErr) throw new Error(`Failed to close previous compensation: ${closeErr.message}`)
-    }
+        .insert({
+          tenant_id:           tenantId,
+          employee_id:         employeeId,
+          salary_structure_id: structureId,
+          effective_from:      effectiveFrom,
+          ctc_annual:          ctcAnnual,
+          is_active:           true,
+          notes,
+          created_by:          createdBy,
+        })
+        .select('id')
+        .single()
 
-    const { data: newComp, error: compErr } = await supabase
-      .from('employee_compensations')
-      .insert({
-        tenant_id:           tenantId,
-        employee_id:         employeeId,
-        salary_structure_id: structureId,
-        effective_from:      effectiveFrom,
-        ctc_annual:          ctcAnnual,
-        is_active:           true,
-        notes,
-        created_by:          createdBy,
-      })
-      .select('id')
-      .single()
-
-    if (compErr || !newComp) {
-      throw new Error(compErr?.message ?? 'Failed to create compensation record')
-    }
-    const compId = newComp.id as string
-
-    const compRows = Object.entries(components)
-      .filter(([, amount]) => amount > 0)
-      .map(([salaryComponentId, amount], seq) => ({
-        tenant_id:            tenantId,
-        compensation_id:      compId,
-        salary_component_id:  salaryComponentId,
-        calculation_type:     'fixed',
-        value:                amount,
-        computed_monthly:     Math.round(amount * 100) / 100,
-        computed_annual:      Math.round(amount * 12 * 100) / 100,
-        sequence:             seq,
-      }))
-
-    if (compRows.length > 0) {
-      const { error: ccErr } = await supabase
-        .from('employee_compensation_components')
-        .insert(compRows)
-      if (ccErr) throw new Error(ccErr.message)
-    }
-
-    if (vr.isDuplicate) updated++
-    else                created++
-  }
-
-  for (let i = 0; i < validRows.length; i += CONCURRENCY) {
-    const batch = validRows.slice(i, i + CONCURRENCY)
-    const results = await Promise.allSettled(batch.map(vr => processRow(vr)))
-    for (let j = 0; j < results.length; j++) {
-      const res = results[j]
-      if (res.status === 'rejected') {
-        const vr = batch[j]
-        const msg = res.reason instanceof Error ? res.reason.message : String(res.reason)
-        vr.errors.push({ field: '_db', message: msg, severity: 'error' })
-        vr.isValid = false
-        failed++
+      if (compErr || !newComp) {
+        throw new Error(compErr?.message ?? 'Failed to create compensation record')
       }
+      const compId = newComp.id as string
+
+      const compRows = Object.entries(components)
+        .filter(([, amount]) => amount > 0)
+        .map(([salaryComponentId, amount], seq) => ({
+          tenant_id:            tenantId,
+          compensation_id:      compId,
+          salary_component_id:  salaryComponentId,
+          calculation_type:     'fixed',
+          value:                amount,
+          computed_monthly:     Math.round(amount * 100) / 100,
+          computed_annual:      Math.round(amount * 12 * 100) / 100,
+          sequence:             seq,
+        }))
+
+      if (compRows.length > 0) {
+        const { error: ccErr } = await supabase
+          .from('employee_compensation_components')
+          .insert(compRows)
+        if (ccErr) throw new Error(ccErr.message)
+      }
+
+      if (vr.isDuplicate) updated++
+      else                created++
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      vr.errors.push({ field: '_db', message: msg, severity: 'error' })
+      vr.isValid = false
+      failed++
     }
   }
 
