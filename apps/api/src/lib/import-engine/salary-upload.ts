@@ -301,6 +301,37 @@ export async function validateSalaryUploadRows(
     }
   }
 
+  // ── Default salary structure prerequisite ──────────────────────────────────
+  // Import cannot succeed without exactly one active default salary structure.
+  // Check this early so validation fails with a clear action before any DB work.
+  {
+    const { data: defaultStructures, error: structErr } = await supabase
+      .from('salary_structures')
+      .select('id')
+      .eq('tenant_id', tenantId)
+      .eq('is_default', true)
+      .eq('is_active', true)
+
+    if (!structErr) {
+      const count = (defaultStructures ?? []).length
+      if (count === 0) {
+        throw new Error(
+          'No default salary structure is configured. ' +
+          'A default salary structure is required before employee compensation can be imported. ' +
+          'Go to: Payroll → Salary Structures. ' +
+          'Create or mark one structure as Default, then validate again.',
+        )
+      }
+      if (count > 1) {
+        throw new Error(
+          'Multiple default salary structures are marked as default. ' +
+          'Exactly one default salary structure is required. ' +
+          'Go to: Payroll → Salary Structures and ensure only one structure is set as Default.',
+        )
+      }
+    }
+  }
+
   // Fetch active components (template source of truth)
   const activeComponents = await fetchActiveComponents(supabase, tenantId)
 
