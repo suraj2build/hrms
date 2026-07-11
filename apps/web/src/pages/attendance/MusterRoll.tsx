@@ -58,6 +58,7 @@ interface EmployeeMuster {
   employee_id:   string
   employee_code: string
   name:          string
+  joining_date:  string | null
   days:          DayRecord[]
 }
 
@@ -997,15 +998,32 @@ export function MusterRoll() {
                                         )
                                       ) : (
                                         d < todayStr ? (
-                                          <span
-                                            title={`${emp.name} · ${d}\nNo record — attendance not processed`}
-                                            className={cn(
-                                              'inline-flex items-center justify-center rounded text-muted-foreground/35 font-medium select-none',
-                                              chipW,
-                                            )}
-                                          >
-                                            –
-                                          </span>
+                                          // Past date, no attendance record.
+                                          // If the employee had not yet joined on this date, mark as
+                                          // Not Applicable (–).  Otherwise treat as Absent (A) — an
+                                          // active employee with no punch and no exception is absent.
+                                          emp.joining_date && d < emp.joining_date ? (
+                                            <span
+                                              title={`${emp.name} · ${d}\nNot applicable — before joining date`}
+                                              className={cn(
+                                                'inline-flex items-center justify-center rounded text-muted-foreground/35 font-medium select-none',
+                                                chipW,
+                                              )}
+                                            >
+                                              –
+                                            </span>
+                                          ) : (
+                                            <span
+                                              title={`${emp.name} · ${d}\nAbsent — no attendance record`}
+                                              className={cn(
+                                                'inline-flex items-center justify-center rounded font-semibold',
+                                                chipW,
+                                                STATUS_CELL['absent'],
+                                              )}
+                                            >
+                                              A
+                                            </span>
+                                          )
                                         ) : (
                                           <span className={cn('inline-block', chipWEmpty)} />
                                         )

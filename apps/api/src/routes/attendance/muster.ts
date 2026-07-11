@@ -62,7 +62,7 @@ export default async function musterRoute(fastify: FastifyInstance) {
       // Fetch active employees — for managers, only direct reports.
       // PostgREST caps results at max-rows (default 1000) so we paginate in
       // batches of 1000 until the page is shorter than the batch size.
-      type EmpRow = { id: string; first_name: string; last_name: string; employee_code: string }
+      type EmpRow = { id: string; first_name: string; last_name: string; employee_code: string; joining_date: string | null }
 
       let reportIdFilter: string[] | null = null
       if (isMgr && managerEmployeeId) {
@@ -89,7 +89,7 @@ export default async function musterRoute(fastify: FastifyInstance) {
       while (true) {
         let q = fastify.supabase
           .from('employees')
-          .select('id, first_name, last_name, employee_code')
+          .select('id, first_name, last_name, employee_code, joining_date')
           .eq('tenant_id', req.tenantId)
           .eq('status', 'active')
           .order('employee_code')
@@ -159,7 +159,7 @@ export default async function musterRoute(fastify: FastifyInstance) {
       }
 
       // Assemble per-employee rows
-      const result = (employees as { id: string; first_name: string; last_name: string; employee_code: string }[])
+      const result = (employees as EmpRow[])
         .map((emp) => {
           const dateMap = empDailyMap.get(emp.id) ?? new Map<string, DailyRecord>()
           const days = allDays.map((d) => {
@@ -172,6 +172,7 @@ export default async function musterRoute(fastify: FastifyInstance) {
             employee_id:   emp.id,
             employee_code: emp.employee_code,
             name:          `${emp.first_name} ${emp.last_name}`,
+            joining_date:  emp.joining_date ?? null,
             days,
           }
         })
