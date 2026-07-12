@@ -10,6 +10,7 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { fetchAllRows } from './supabase-paginate.js'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -104,19 +105,16 @@ export async function buildCompensationCoverageAudit(
 ): Promise<CompensationCoverageAudit> {
   const today = new Date().toISOString().slice(0, 10)
 
-  // ── 1. Fetch all active employees ─────────────────────────────────────────
-  const { data: employees, error: empErr } = await supabase
-    .from('employees')
-    .select('id, employee_code, first_name, last_name')
-    .eq('tenant_id', tenantId)
-    .eq('status', 'active')
-    .order('employee_code')
-
-  if (empErr) {
-    throw new Error(`Coverage audit: failed to fetch active employees — ${empErr.message}`)
-  }
-
-  const empList = (employees ?? []) as RawEmployee[]
+  // ── 1. Fetch all active employees (paginated — employees can exceed 1000 rows) ─
+  const empList = await fetchAllRows<RawEmployee>((from, to) =>
+    supabase
+      .from('employees')
+      .select('id, employee_code, first_name, last_name')
+      .eq('tenant_id', tenantId)
+      .eq('status', 'active')
+      .order('employee_code')
+      .range(from, to) as any,
+  )
   const total   = empList.length
 
   // Early-out: no active employees is a valid (trivially "ready") state
@@ -165,14 +163,23 @@ export async function buildCompensationCoverageAudit(
   if (compList.length > 0) {
     const compIds = compList.map(c => c.id)
     for (let i = 0; i < compIds.length; i += CHUNK) {
-      const { data: components, error: ccErr } = await supabase
-        .from('employee_compensation_components')
-        .select('compensation_id, computed_monthly, salary_components(component_type)')
-        .in('compensation_id', compIds.slice(i, i + CHUNK))
+      // fetchAllRows prevents silent truncation: 400 compensations × ~20 components
+      // easily exceeds the PostgREST max-rows=1000 ceiling per request.
+      let components: any[]
+      try {
+        components = await fetchAllRows((from, to) =>
+          supabase
+            .from('employee_compensation_components')
+            .select('compensation_id, computed_monthly, salary_components(component_type)')
+            .in('compensation_id', compIds.slice(i, i + CHUNK))
+            .order('compensation_id')
+            .range(from, to) as any,
+        )
+      } catch {
+        continue  // non-fatal — treated as no data for this chunk
+      }
 
-      if (ccErr || !components) continue  // non-fatal — treated as no data
-
-      for (const cc of components as any[]) {
+      for (const cc of components) {
         const cid = cc.compensation_id as string
         componentCountByComp.set(cid, (componentCountByComp.get(cid) ?? 0) + 1)
 
