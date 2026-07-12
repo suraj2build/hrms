@@ -3010,29 +3010,36 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
   // Cross-run forensic timeline — all payroll_run_events for the tenant, ordered
   // by recency, with run context joined.
   fastify.get('/payroll/forensics', hrAdminAuth, async (req: any, reply) => {
-    const tenantId = req.tenantId as string
-    const { run_id, month, event_type, limit = '100', offset = '0' } =
-      (req.query ?? {}) as Record<string, string>
+    try {
+      const tenantId = req.tenantId as string
+      const { run_id, month, event_type, limit = '100', offset = '0' } =
+        (req.query ?? {}) as Record<string, string>
 
-    let q = fastify.supabase
-      .from('payroll_run_events')
-      .select(`
-        id, run_id, event_type, employee_id, month, payload, error_details, created_at,
-        payroll_runs ( month, status ),
-        employees ( employee_code, profiles!profile_id ( full_name ) )
-      `, { count: 'exact' })
-      .eq('tenant_id', tenantId)
-      .order('created_at', { ascending: false })
-      .range(Number(offset), Number(offset) + Number(limit) - 1)
+      // employees has two FKs to profiles (created_by + profile_id from migration 351),
+      // so embedding profiles inside employees is ambiguous. Select first_name/last_name directly.
+      let q = fastify.supabase
+        .from('payroll_run_events')
+        .select(`
+          id, run_id, event_type, employee_id, month, payload, error_details, created_at,
+          payroll_runs ( month, status ),
+          employees ( employee_code, first_name, last_name )
+        `, { count: 'exact' })
+        .eq('tenant_id', tenantId)
+        .order('created_at', { ascending: false })
+        .range(Number(offset), Number(offset) + Number(limit) - 1)
 
-    if (run_id)     q = q.eq('run_id', run_id)
-    if (month)      q = q.eq('month', month)
-    if (event_type) q = q.eq('event_type', event_type)
+      if (run_id)     q = q.eq('run_id', run_id)
+      if (month)      q = q.eq('month', month)
+      if (event_type) q = q.eq('event_type', event_type)
 
-    const { data, error, count } = await q
-    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch forensic events')
+      const { data, error, count } = await q
+      if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch forensic events')
 
-    return reply.send({ data: data ?? [], total: count ?? 0 })
+      return reply.send({ data: data ?? [], total: count ?? 0 })
+    } catch (err: any) {
+      req.log.error({ err, tenant_id: req.tenantId }, 'payroll forensics failed')
+      return reply.code(500).send({ error: 'FORENSICS_FAILED', message: err?.message ?? 'Failed to fetch forensic events' })
+    }
   })
 
   // ── GET /payroll/readiness-score ─────────────────────────────────────────────
@@ -3538,27 +3545,31 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
   // ── GET /payroll/approval-stages ──────────────────────────────────────────────
   // List maker-checker log entries for payroll governance.
   fastify.get('/payroll/approval-stages', hrAdminAuth, async (req: any, reply) => {
-    const tenantId = req.tenantId as string
-    const { status, entity_type } = (req.query ?? {}) as Record<string, string>
+    try {
+      const tenantId = req.tenantId as string
+      const { status, entity_type } = (req.query ?? {}) as Record<string, string>
 
-    let q = fastify.supabase
-      .from('maker_checker_log')
-      .select(`
-        id, entity_type, entity_id, action, status, maker_data, checker_notes,
-        submitted_at, reviewed_at, sla_hours, is_escalated,
-        maker:profiles!maker_checker_log_maker_id_fkey(full_name),
-        checker:profiles!maker_checker_log_checker_id_fkey(full_name)
-      `)
-      .eq('tenant_id', tenantId)
-      .order('submitted_at', { ascending: false })
-      .limit(100)
+      let q = fastify.supabase
+        .from('maker_checker_log')
+        .select(`
+          id, entity_type, entity_id, action, status, maker_data, checker_notes,
+          submitted_at, reviewed_at, sla_hours, is_escalated,
+          maker:profiles!maker_checker_log_maker_id_fkey(full_name),
+          checker:profiles!maker_checker_log_checker_id_fkey(full_name)
+        `)
+        .eq('tenant_id', tenantId)
+        .order('submitted_at', { ascending: false })
+        .limit(100)
 
-    if (status)      q = q.eq('status', status)
-    if (entity_type) q = q.eq('entity_type', entity_type)
+      if (status)      q = q.eq('status', status)
+      if (entity_type) q = q.eq('entity_type', entity_type)
 
-    const { data, error } = await q
-    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch approval stages')
-    return reply.send({ data: data ?? [] })
+      const { data, error } = await q
+      if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch approval stages')
+      return reply.send({ data: data ?? [] })
+    } catch (err: any) {
+      return serverError(req, reply, err, ErrorCode.QUERY_FAILED, 'Failed to fetch approval stages')
+    }
   })
 
   // ── POST /payroll/approval-stages/:id/approve ─────────────────────────────────
