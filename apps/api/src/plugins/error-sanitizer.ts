@@ -64,6 +64,19 @@ const errorSanitizerPlugin: FastifyPluginAsync = async (fastify) => {
       dirty = true
     }
 
+    // Pattern C: { stack: '...' } — server-side stack trace must never reach clients.
+    if (typeof obj.stack === 'string') {
+      fastify.log.error({ ...logCtx, original_stack: obj.stack }, 'error-sanitizer: stripped stack field')
+      delete obj.stack
+      dirty = true
+    }
+
+    // Baseline: every 5xx emits a structured log entry so correlation/request IDs
+    // are always captured even when no sanitization was needed (e.g. safe static messages).
+    if (!dirty) {
+      fastify.log.warn({ ...logCtx, error_code: typeof obj.error === 'string' ? obj.error : null }, '5xx response')
+    }
+
     return dirty ? JSON.stringify(obj) : payload
   })
 }

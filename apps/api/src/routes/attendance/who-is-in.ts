@@ -290,7 +290,7 @@ export default async function whoIsInRoute(fastify: FastifyInstance) {
     })
   } catch (err: any) {
     req.log.error({ err }, 'who-is-in unhandled error')
-    return reply.code(500).send({ error: 'INTERNAL_ERROR', message: err?.message ?? String(err), stack: err?.stack })
+    return reply.code(500).send({ error: 'INTERNAL_ERROR', message: err?.message ?? String(err) })
   }
   })
 }

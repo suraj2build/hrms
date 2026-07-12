@@ -39,6 +39,21 @@ jobs:
       # known-failing ones) then asserts every column the API references exists.
       - run: npm run db:check-drift
 
+  tenant-isolation:
+    name: Tenant isolation ratchet
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      # Fails if any new .from('table') call on a tenant-scoped table lacks a
+      # .eq('tenant_id', ...) guard.  Existing violations are tracked in
+      # scripts/tenant-isolation-baseline.json; only additions break CI.
+      # To fix: add the filter, update DOCUMENTED_EXCEPTIONS, or re-run
+      # --save-baseline after genuinely reducing the count.
+      - run: node scripts/check-tenant-isolation.mjs --ratchet
+
   verify:
     name: Typecheck & tests
     runs-on: ubuntu-latest

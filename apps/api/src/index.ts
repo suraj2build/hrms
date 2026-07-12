@@ -420,14 +420,11 @@ async function start() {
     }, 'unhandled request error')
 
     return reply.code(statusCode).send({
-      success: false,
-      error: {
-        code:    (err as any).code ?? (statusCode >= 500 ? 'INTERNAL_ERROR' : 'REQUEST_ERROR'),
-        // Never leak internals for 5xx; surface the message for 4xx (validation etc.)
-        message: statusCode >= 500
-          ? 'An unexpected error occurred. Please try again later.'
-          : err.message,
-      },
+      error:   (err as any).code ?? (statusCode >= 500 ? 'INTERNAL_ERROR' : 'REQUEST_ERROR'),
+      // Never leak internals for 5xx; surface the message for 4xx (validation etc.)
+      message: statusCode >= 500
+        ? 'An unexpected error occurred. Please try again later.'
+        : err.message,
     })
   })
 
