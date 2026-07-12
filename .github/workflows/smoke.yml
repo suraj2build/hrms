@@ -1,0 +1,36 @@
+name: Smoke test
+
+on:
+  # Run manually from the Actions tab — select target environment before triggering
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment'
+        required: true
+        type: choice
+        options:
+          - production
+          - staging
+
+jobs:
+  smoke:
+    name: API health check (${{ inputs.environment }})
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Run smoke test
+        env:
+          SMOKE_BASE_URL:    ${{ vars.SMOKE_BASE_URL }}
+          SUPABASE_URL:      ${{ vars.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          SMOKE_EMAIL:       ${{ secrets.SMOKE_EMAIL }}
+          SMOKE_PASSWORD:    ${{ secrets.SMOKE_PASSWORD }}
+          SMOKE_TIMEOUT_MS:  '30000'
+        run: node scripts/smoke-test.mjs
