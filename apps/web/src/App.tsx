@@ -562,13 +562,33 @@ function AuthProvider({ children }: { children: React.ReactNode }) {
       },
     )
 
-    // ── DEMO LIVE — DISABLED (data exposure risk)
-    // Auto sign-in was disabled because the demo account had access to real
-    // tenant data. Re-enable only after isolating the demo tenant to fixture-only
-    // data and confirming no production data is reachable.
-    // Original gate was: VITE_DEMO_LOGIN=true build flag.
-    const demoLoginEnabled = false
-    void demoLoginEnabled  // suppress unused-variable lint
+    // ── DEMO LIVE — auto sign-in to the seeded "Demo" tenant.
+    // Controlled entirely by the VITE_ENABLE_DEMO_LOGIN build flag:
+    //   production  → unset (or false) — demo login disabled
+    //   staging/QA  → VITE_ENABLE_DEMO_LOGIN=true — demo login enabled
+    // The API enforces a second layer of protection: the demo tenant's
+    // allow_login=false blocks all requests even if a token slips through.
+    const demoLoginEnabled = import.meta.env.VITE_ENABLE_DEMO_LOGIN === 'true'
+    if (demoLoginEnabled) {
+      const demoEmail    = (import.meta.env.VITE_DEMO_EMAIL as string)    || 'demo@cognixhr.app'
+      const demoPassword = (import.meta.env.VITE_DEMO_PASSWORD as string) || 'CognixDemo!1'
+      // Validate any stored session before trusting it — a stale refresh token
+      // (e.g. after a re-seed) leaves the app stuck on "Invalid token". Drop it
+      // and sign in fresh when validation fails.
+      const ensureDemoSession = async () => {
+        const { data } = await supabase.auth.getSession()
+        if (data.session) {
+          const { error } = await supabase.auth.getUser()
+          if (!error) return
+          await supabase.auth.signOut().catch(() => {})
+        }
+        const { error: signInError } = await supabase.auth.signInWithPassword({
+          email: demoEmail, password: demoPassword,
+        })
+        if (signInError) console.warn('[demo-login] sign-in failed:', signInError.message)
+      }
+      void ensureDemoSession()
+    }
 
     return () => subscription.unsubscribe()
   }, [setProfile, setTenant, setLoading, setAccessToken, setBootstrapping])

@@ -21,6 +21,7 @@ interface ProfileCacheEntry {
   employeeId:        string | null
   isActive:          boolean
   isActiveCheckedAt: number  // timestamp of last DB-fresh is_active check (ISSUE-023)
+  allowLogin:        boolean  // tenant.allow_login — false blocks all access for this workspace
   expiresAt:         number
 }
 
@@ -85,35 +86,34 @@ const authPlugin: FastifyPluginAsync = async (fastify) => {
       // Check cache first
       const cached = profileCache.get(userId)
       if (cached && cached.expiresAt > Date.now()) {
-        // Evict and re-check any cached demo-tenant entry so the block takes
-        // effect immediately without waiting for the 5-minute CACHE_TTL to expire.
-        if (cached.tenantId === 'd0000000-0000-0000-0000-000000000001') {
-          profileCache.delete(userId)
-        } else {
-          // Role/tenantId are stable for the full CACHE_TTL, but is_active can change
-          // at any moment (admin deactivates account). Re-check it from DB every
-          // IS_ACTIVE_TTL (60 s) so the deactivation → block window stays tight. (ISSUE-023)
-          let isActive = cached.isActive
-          if (cached.isActiveCheckedAt + IS_ACTIVE_TTL < Date.now()) {
-            const { data: freshProfile } = await fastify.supabase
-              .from('profiles')
-              .select('is_active')
-              .eq('id', userId)
-              .single()
-            isActive = (freshProfile as any)?.is_active ?? false
-            profileCache.set(userId, { ...cached, isActive, isActiveCheckedAt: Date.now() })
-          }
-          if (!isActive) {
-            return reply.code(401).send({ error: 'Unauthorized', message: 'Account is deactivated' })
-          }
-          request.tenantId   = cached.tenantId
-          request.userRole   = cached.role
-          request.employeeId = cached.employeeId
-          return
+        // allow_login is an operational setting — cached for the full CACHE_TTL (5 min).
+        // If an admin disables login for the workspace the effect lands within 5 minutes.
+        if (!cached.allowLogin) {
+          return reply.code(403).send({ error: 'TENANT_LOGIN_DISABLED', message: 'Login is not available for this workspace.' })
         }
+        // Role/tenantId are stable for the full CACHE_TTL, but is_active can change
+        // at any moment (admin deactivates account). Re-check it from DB every
+        // IS_ACTIVE_TTL (60 s) so the deactivation → block window stays tight. (ISSUE-023)
+        let isActive = cached.isActive
+        if (cached.isActiveCheckedAt + IS_ACTIVE_TTL < Date.now()) {
+          const { data: freshProfile } = await fastify.supabase
+            .from('profiles')
+            .select('is_active')
+            .eq('id', userId)
+            .single()
+          isActive = (freshProfile as any)?.is_active ?? false
+          profileCache.set(userId, { ...cached, isActive, isActiveCheckedAt: Date.now() })
+        }
+        if (!isActive) {
+          return reply.code(401).send({ error: 'Unauthorized', message: 'Account is deactivated' })
+        }
+        request.tenantId   = cached.tenantId
+        request.userRole   = cached.role
+        request.employeeId = cached.employeeId
+        return
       }
 
-      // Cache miss — one DB lookup
+      // Cache miss — load profile then tenant (allow_login + subscription state)
       const { data: profile } = await fastify.supabase
         .from('profiles')
         .select('tenant_id, role, employee_id, is_active')
@@ -134,18 +134,24 @@ const authPlugin: FastifyPluginAsync = async (fastify) => {
         })
       }
 
-      // Demo tenant is blocked — the public demo login was disabled due to data
-      // exposure. Reject all API requests from the demo tenant at the auth layer
-      // so no data is served even if someone holds a valid demo session token.
-      if (profile.tenant_id === 'd0000000-0000-0000-0000-000000000001') {
-        return reply.code(403).send({
-          error:   'DEMO_DISABLED',
-          message: 'The demo environment is temporarily unavailable.',
-        })
-      }
-
       if (!(profile as any).is_active) {
         return reply.code(401).send({ error: 'Unauthorized', message: 'Account is deactivated' })
+      }
+
+      // Load tenant — needed for allow_login check (all requests) and subscription
+      // gate (write requests). One query covers both; avoids a second round-trip on
+      // first-request writes.
+      const { data: tenant } = await fastify.supabase
+        .from('tenants')
+        .select('allow_login, status, trial_ends_at')
+        .eq('id', profile.tenant_id)
+        .single()
+
+      if (!tenant?.allow_login) {
+        return reply.code(403).send({
+          error:   'TENANT_LOGIN_DISABLED',
+          message: 'Login is not available for this workspace.',
+        })
       }
 
       profileCache.set(userId, {
@@ -154,11 +160,12 @@ const authPlugin: FastifyPluginAsync = async (fastify) => {
         employeeId:        (profile as any).employee_id ?? null,
         isActive:          (profile as any).is_active ?? true,
         isActiveCheckedAt: Date.now(),
+        allowLogin:        tenant.allow_login,
         expiresAt:         Date.now() + CACHE_TTL,
       })
 
-      request.tenantId = profile.tenant_id
-      request.userRole = profile.role
+      request.tenantId   = profile.tenant_id
+      request.userRole   = profile.role
       request.employeeId = (profile as any).employee_id ?? null
 
       // ── Subscription / trial gate ──────────────────────────────────────────
@@ -170,11 +177,8 @@ const authPlugin: FastifyPluginAsync = async (fastify) => {
       const method = request.method
       const isWrite = method === 'POST' || method === 'PUT' || method === 'PATCH' || method === 'DELETE'
       if (isWrite && !request.url.startsWith('/billing') && !request.url.startsWith('/support')) {
-        const { data: tenant } = await fastify.supabase
-          .from('tenants')
-          .select('status, trial_ends_at')
-          .eq('id', profile.tenant_id)
-          .single()
+        // Reuse the tenant row already fetched above — saves a second round-trip
+        // on write requests that hit this (cache-miss) path.
         if (tenant) {
           const trialExpired = tenant.status === 'trial' && tenant.trial_ends_at != null &&
             new Date(tenant.trial_ends_at).getTime() < Date.now()
