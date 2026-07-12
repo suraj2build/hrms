@@ -78,8 +78,10 @@ export default async function essSignalsRoutes(fastify: FastifyInstance) {
     const [todayAtt, ownPendingLeave, ownPendingReg, expiringDocs, leaveBal, mgrLeaveRows, mgrReg] =
       await Promise.all([
         employeeId
-          ? safe(fastify.supabase.from('attendance').select('check_in, check_out, status')
-              .eq('employee_id', employeeId).eq('tenant_id', tenantId).eq('date', today).maybeSingle()
+          ? safe(fastify.supabase.from('attendance_logs').select('check_in, check_out')
+              .eq('employee_id', employeeId).eq('tenant_id', tenantId)
+              .gte('check_in', today).lte('check_in', today + 'T23:59:59.999Z')
+              .order('check_in', { ascending: false }).limit(1).maybeSingle()
               .then(r => r.data as any), null)
           : Promise.resolve(null),
         employeeId

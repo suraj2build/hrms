@@ -68,7 +68,7 @@ export default async function essReflectionRoutes(fastify: FastifyInstance) {
         .order('to_date', { ascending: false }).limit(1)
         .then(r => (r.data ?? []) as any[]), [] as any[]),
       // Last ~10 days attendance → "on time all week" pattern.
-      safe(fastify.supabase.from('attendance')
+      safe(fastify.supabase.from('attendance_daily')
         .select('date, status')
         .eq('employee_id', employeeId).eq('tenant_id', tenantId)
         .gte('date', daysAgoISO(9)).order('date', { ascending: false }).limit(14)

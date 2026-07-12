@@ -72,7 +72,7 @@ export default async function essProgressRoutes(fastify: FastifyInstance) {
     const since60 = daysAgoISO(62)  // covers this + previous calendar month
 
     const [attRows, recRows] = await Promise.all([
-      safe(fastify.supabase.from('attendance')
+      safe(fastify.supabase.from('attendance_daily')
         .select('date, status')
         .eq('employee_id', employeeId).eq('tenant_id', tenantId)
         .gte('date', since30).order('date', { ascending: false }).limit(60)

@@ -104,6 +104,7 @@ export default async function essHomeRoutes(fastify: FastifyInstance) {
       pendingRegCnt,
       colleaguesRes,
       recentLeaveEndedRes,
+      todayPunchRes,
     ] = await Promise.all([
       // 1. Employee basic record
       employeeId
@@ -120,10 +121,10 @@ export default async function essHomeRoutes(fastify: FastifyInstance) {
             .eq('is_current', true).maybeSingle()
         : Promise.resolve({ data: null }),
 
-      // 3. Today's attendance record
+      // 3. Today's attendance summary (status + work hours from daily aggregate)
       employeeId
-        ? fastify.supabase.from('attendance')
-            .select('check_in, check_out, total_hours, status')
+        ? fastify.supabase.from('attendance_daily')
+            .select('status, work_hours')
             .eq('employee_id', employeeId).eq('tenant_id', tenantId)
             .eq('date', today).maybeSingle()
         : Promise.resolve({ data: null }),
@@ -145,7 +146,7 @@ export default async function essHomeRoutes(fastify: FastifyInstance) {
         : Promise.resolve({ data: [] }),
 
       // 6. Upcoming holidays (next 60 days, first 5)
-      fastify.supabase.from('holidays')
+      fastify.supabase.from('holiday_calendar')
         .select('id, name, date')
         .eq('tenant_id', tenantId)
         .gte('date', today).lte('date', in60Days)
@@ -198,6 +199,14 @@ export default async function essHomeRoutes(fastify: FastifyInstance) {
             .in('status', ['approved', 'APPROVED'])
             .eq('to_date', offsetISO(-1)).limit(1)
         : Promise.resolve({ data: [] }),
+
+      // 13. Today's first check-in / last check-out from punch log
+      employeeId
+        ? fastify.supabase.from('attendance_logs').select('check_in, check_out')
+            .eq('employee_id', employeeId).eq('tenant_id', tenantId)
+            .gte('check_in', today).lte('check_in', today + 'T23:59:59.999Z')
+            .order('check_in', { ascending: true }).limit(1).maybeSingle()
+        : Promise.resolve({ data: null }),
     ])
 
     // ── Profile ──────────────────────────────────────────────────────────────
@@ -220,11 +229,12 @@ export default async function essHomeRoutes(fastify: FastifyInstance) {
     }
 
     // ── Today's attendance ────────────────────────────────────────────────────
-    const todayAtt = (todayAttRes.data ?? null) as any
+    const todayAtt   = (todayAttRes.data   ?? null) as any
+    const todayPunch = (todayPunchRes.data  ?? null) as any
     const today_snapshot = {
-      check_in:    todayAtt?.check_in    ?? null,
-      check_out:   todayAtt?.check_out   ?? null,
-      total_hours: todayAtt?.total_hours ?? null,
+      check_in:    todayPunch?.check_in  ?? null,
+      check_out:   todayPunch?.check_out ?? null,
+      total_hours: todayAtt?.work_hours  ?? null,
       status:      todayAtt?.status      ?? 'absent',
     }
 
