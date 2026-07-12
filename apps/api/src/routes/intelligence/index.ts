@@ -10,6 +10,7 @@ import type { FastifyInstance } from 'fastify'
 import { computeUpcoming } from '../../lib/compliance-calendar.js'
 import { computeLifecycleRisks, type LifecycleCategory } from '../../lib/lifecycle-expiry.js'
 import { buildDailyDigest, buildWeeklyDigest, buildMonthlyDigest } from '../../lib/digest-builder.js'
+import { fetchAllRows } from '../../lib/supabase-paginate.js'
 
 interface SourceRecord { table: string; count: number; sample?: string }
 
@@ -613,24 +614,27 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
       // Active employees (lean schema — no department on employees)
       let empRows: any[] = []
       try {
-        const { data } = await fastify.supabase
-          .from('employees')
-          .select('id, joining_date')
-          .eq('tenant_id', tenantId)
-          .eq('status', 'active')
-          .limit(2000)
-        empRows = data ?? []
+        empRows = await fetchAllRows((from, to) =>
+          fastify.supabase
+            .from('employees')
+            .select('id, joining_date')
+            .eq('tenant_id', tenantId)
+            .eq('status', 'active')
+            .range(from, to)
+        )
       } catch (_e) { empRows = [] }
 
       // Department comes from the current job_history row (is_current=true) + departments join
       const empToDept = new Map<string, { id: string; name: string }>()
       try {
-        const { data: jh } = await fastify.supabase
-          .from('job_history')
-          .select('employee_id, department_id, departments(id, name)')
-          .eq('tenant_id', tenantId)
-          .eq('is_current', true)
-          .limit(5000)
+        const jh = await fetchAllRows((from, to) =>
+          fastify.supabase
+            .from('job_history')
+            .select('employee_id, department_id, departments(id, name)')
+            .eq('tenant_id', tenantId)
+            .eq('is_current', true)
+            .range(from, to)
+        )
         for (const r of jh ?? []) {
           const dep: any = r.departments
           if (r.department_id) empToDept.set(r.employee_id, { id: r.department_id, name: dep?.name ?? 'Unknown' })
@@ -697,23 +701,25 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
     // Fetch all employees once (lean schema has no termination_date)
     let allEmp: any[] = []
     try {
-      const { data } = await fastify.supabase
-        .from('employees')
-        .select('id, joining_date')
-        .eq('tenant_id', tenantId)
-        .limit(5000)
-      allEmp = data ?? []
+      allEmp = await fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('employees')
+          .select('id, joining_date')
+          .eq('tenant_id', tenantId)
+          .range(from, to)
+      )
     } catch (_e) { allEmp = [] }
 
     // Separations carry the exit date (last_working_date); fall back to relieved_at
     let allSep: any[] = []
     try {
-      const { data } = await fastify.supabase
-        .from('employee_separation')
-        .select('id, employee_id, last_working_date, relieved_at')
-        .eq('tenant_id', tenantId)
-        .limit(5000)
-      allSep = data ?? []
+      allSep = await fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('employee_separation')
+          .select('id, employee_id, last_working_date, relieved_at')
+          .eq('tenant_id', tenantId)
+          .range(from, to)
+      )
     } catch (_e) { allSep = [] }
 
     // employee_id -> exit date (YYYY-MM-DD)
@@ -961,13 +967,14 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
       // Active employees with their site assignment (employees.site_id → sites).
       let empRows: any[] = []
       try {
-        const { data } = await fastify.supabase
-          .from('employees')
-          .select('id, site_id, joining_date')
-          .eq('tenant_id', tenantId)
-          .eq('status', 'active')
-          .limit(5000)
-        empRows = data ?? []
+        empRows = await fetchAllRows((from, to) =>
+          fastify.supabase
+            .from('employees')
+            .select('id, site_id, joining_date')
+            .eq('tenant_id', tenantId)
+            .eq('status', 'active')
+            .range(from, to)
+        )
       } catch (_e) { empRows = [] }
 
       // Site dimension lookup (resilient: site_type/city/region/zone may be

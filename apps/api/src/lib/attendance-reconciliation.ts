@@ -26,6 +26,7 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { fetchAllRows } from './supabase-paginate.js'
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -212,15 +213,17 @@ async function checkMissingDailyRows(
   scanTo:    string,
 ): Promise<ReconciliationIssue[]> {
   // Get all employee+date combos that have sessions
-  const { data: sessions, error: sessErr } = await supabase
-    .from('attendance_logs')
-    .select('employee_id, check_in')
-    .eq('tenant_id', tenantId)
-    .gte('check_in', `${scanFrom}T00:00:00Z`)
-    .lte('check_in', `${scanTo}T23:59:59Z`)
-    .limit(2000)
+  const sessions = await fetchAllRows((from, to) =>
+    supabase
+      .from('attendance_logs')
+      .select('employee_id, check_in')
+      .eq('tenant_id', tenantId)
+      .gte('check_in', `${scanFrom}T00:00:00Z`)
+      .lte('check_in', `${scanTo}T23:59:59Z`)
+      .range(from, to)
+  )
 
-  if (sessErr || !sessions?.length) return []
+  if (!sessions?.length) return []
 
   // Build set of employee+date from sessions
   const sessionDates = new Map<string, string>()  // key: empId|date, value: date
@@ -276,17 +279,19 @@ async function checkDuplicateSessions(
   scanFrom:  string,
   scanTo:    string,
 ): Promise<ReconciliationIssue[]> {
-  const { data, error } = await supabase
-    .from('attendance_logs')
-    .select('id, employee_id, check_in, check_out, is_complete')
-    .eq('tenant_id', tenantId)
-    .gte('check_in', `${scanFrom}T00:00:00Z`)
-    .lte('check_in', `${scanTo}T23:59:59Z`)
-    .order('employee_id')
-    .order('check_in')
-    .limit(3000)
+  const data = await fetchAllRows((from, to) =>
+    supabase
+      .from('attendance_logs')
+      .select('id, employee_id, check_in, check_out, is_complete')
+      .eq('tenant_id', tenantId)
+      .gte('check_in', `${scanFrom}T00:00:00Z`)
+      .lte('check_in', `${scanTo}T23:59:59Z`)
+      .order('employee_id')
+      .order('check_in')
+      .range(from, to)
+  )
 
-  if (error || !data?.length) return []
+  if (!data?.length) return []
 
   // Group by employee+date
   const byEmpDate = new Map<string, any[]>()
@@ -330,17 +335,19 @@ async function checkCrossDaySessions(
   scanFrom:  string,
   scanTo:    string,
 ): Promise<ReconciliationIssue[]> {
-  const { data, error } = await supabase
-    .from('attendance_logs')
-    .select('id, employee_id, check_in, check_out')
-    .eq('tenant_id', tenantId)
-    .eq('is_complete', true)
-    .gte('check_in', `${scanFrom}T00:00:00Z`)
-    .lte('check_in', `${scanTo}T23:59:59Z`)
-    .not('check_out', 'is', null)
-    .limit(2000)
+  const data = await fetchAllRows((from, to) =>
+    supabase
+      .from('attendance_logs')
+      .select('id, employee_id, check_in, check_out')
+      .eq('tenant_id', tenantId)
+      .eq('is_complete', true)
+      .gte('check_in', `${scanFrom}T00:00:00Z`)
+      .lte('check_in', `${scanTo}T23:59:59Z`)
+      .not('check_out', 'is', null)
+      .range(from, to)
+  )
 
-  if (error || !data?.length) return []
+  if (!data?.length) return []
 
   const issues: ReconciliationIssue[] = []
   for (const row of data as any[]) {
@@ -470,15 +477,15 @@ async function checkMissingRawSource(
   if (dErr || !dailyRows?.length) return []
 
   // Get all employees with at least one raw log in the range
-  const { data: rawRows, error: rErr } = await supabase
-    .from('attendance_raw_logs')
-    .select('employee_code, timestamp')
-    .eq('tenant_id', tenantId)
-    .gte('timestamp', `${scanFrom}T00:00:00Z`)
-    .lte('timestamp', `${scanTo}T23:59:59Z`)
-    .limit(5000)
-
-  if (rErr) return []
+  const rawRows = await fetchAllRows((from, to) =>
+    supabase
+      .from('attendance_raw_logs')
+      .select('employee_code, timestamp')
+      .eq('tenant_id', tenantId)
+      .gte('timestamp', `${scanFrom}T00:00:00Z`)
+      .lte('timestamp', `${scanTo}T23:59:59Z`)
+      .range(from, to)
+  )
 
   // Map employee_code → dates with raw logs
   // We don't have employee_id on raw_logs, so we need to join via employees
