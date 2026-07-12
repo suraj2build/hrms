@@ -265,13 +265,13 @@ export default async function successionRoutes(fastify: FastifyInstance) {
 
     const { data, error } = await supabase
       .from('succession_plans')
-      .insert({ tenant_id: tenantId, position_title: position_title.trim(), department, incumbent_id: incumbent_id || null, risk_level, notes, created_by: req.user.id })
+      .insert({ tenant_id: tenantId, position_title: position_title.trim(), department, incumbent_id: incumbent_id || null, risk_level, notes, created_by: req.userId })
       .select('id')
       .single()
 
     if (error) return reply.status(500).send({ error: error.message })
 
-    await logAction(supabase, { tenantId, tableName: 'succession_plans', recordId: data.id, action: 'INSERT', performedBy: req.user.id, newData: { position_title, risk_level } })
+    await logAction(supabase, { tenantId, tableName: 'succession_plans', recordId: data.id, action: 'INSERT', performedBy: req.userId, newData: { position_title, risk_level } })
     return reply.status(201).send({ data })
   })
 
@@ -290,7 +290,7 @@ export default async function successionRoutes(fastify: FastifyInstance) {
 
     const { error } = await supabase.from('succession_plans').update(update).eq('tenant_id', tenantId).eq('id', id)
     if (error) return reply.status(500).send({ error: error.message })
-    await logAction(supabase, { tenantId, tableName: 'succession_plans', recordId: id, action: 'UPDATE', performedBy: req.user.id, newData: update })
+    await logAction(supabase, { tenantId, tableName: 'succession_plans', recordId: id, action: 'UPDATE', performedBy: req.userId, newData: update })
     return reply.send({ data: { updated: true } })
   })
 
@@ -301,7 +301,7 @@ export default async function successionRoutes(fastify: FastifyInstance) {
     const { id } = req.params as { id: string }
     const { error } = await supabase.from('succession_plans').update({ status: 'archived' }).eq('tenant_id', tenantId).eq('id', id)
     if (error) return reply.status(500).send({ error: error.message })
-    await logAction(supabase, { tenantId, tableName: 'succession_plans', recordId: id, action: 'UPDATE', performedBy: req.user.id, newData: { status: 'archived' } })
+    await logAction(supabase, { tenantId, tableName: 'succession_plans', recordId: id, action: 'UPDATE', performedBy: req.userId, newData: { status: 'archived' } })
     return reply.send({ data: { archived: true } })
   })
 
@@ -316,7 +316,7 @@ export default async function successionRoutes(fastify: FastifyInstance) {
 
     const { data, error } = await supabase
       .from('succession_candidates')
-      .insert({ tenant_id: tenantId, plan_id, employee_id, readiness_level, readiness_score: readiness_score ?? null, strengths, gaps, development_plan, notes, nominated_by: req.user.id })
+      .insert({ tenant_id: tenantId, plan_id, employee_id, readiness_level, readiness_score: readiness_score ?? null, strengths, gaps, development_plan, notes, nominated_by: req.userId })
       .select('id')
       .single()
 
@@ -325,7 +325,7 @@ export default async function successionRoutes(fastify: FastifyInstance) {
       if (error.code === '23514') return reply.status(400).send({ error: 'VALIDATION_ERROR', message: error.message })
       return reply.status(500).send({ error: error.message })
     }
-    await logAction(supabase, { tenantId, tableName: 'succession_candidates', recordId: data.id, action: 'INSERT', performedBy: req.user.id, newData: { plan_id, employee_id, readiness_level } })
+    await logAction(supabase, { tenantId, tableName: 'succession_candidates', recordId: data.id, action: 'INSERT', performedBy: req.userId, newData: { plan_id, employee_id, readiness_level } })
     return reply.status(201).send({ data })
   })
 
@@ -485,7 +485,7 @@ export default async function successionRoutes(fastify: FastifyInstance) {
         action_type:  action_type || 'course',
         description:  description.trim(),
         target_date:  target_date || null,
-        created_by:   req.user.id,
+        created_by:   req.userId,
       })
       .select('id')
       .single()
@@ -673,7 +673,7 @@ export default async function successionRoutes(fastify: FastifyInstance) {
         title:        title.trim(),
         participants: participants ?? [],
         status:       'open',
-        created_by:   req.user.id,
+        created_by:   req.userId,
       })
       .select('id')
       .single()
@@ -725,7 +725,7 @@ export default async function successionRoutes(fastify: FastifyInstance) {
       .insert({
         session_id:    sessionId,
         tenant_id:     tenantId,
-        changed_by:    req.user.id,
+        changed_by:    req.userId,
         candidate_id,
         employee_id,
         field_changed,

@@ -1757,7 +1757,7 @@ export default async function preJoineeRoutes(fastify: FastifyInstance) {
     const { tenantId }        = req
 
     // Fetch invitation + validate ownership
-    const { data: inv, error: invErr } = await req.supabase
+    const { data: inv, error: invErr } = await fastify.supabase
       .from('pre_joinee_invitations')
       .select('id, first_name, last_name, designation, joining_date, employee_id')
       .eq('id', id)
@@ -1767,7 +1767,7 @@ export default async function preJoineeRoutes(fastify: FastifyInstance) {
     if (invErr || !inv) return reply.code(404).send({ error: 'NOT_FOUND' })
 
     // Update buddy
-    const { error: updErr } = await req.supabase
+    const { error: updErr } = await fastify.supabase
       .from('pre_joinee_invitations')
       .update({ buddy_employee_id: buddy_employee_id ?? null, updated_at: new Date().toISOString() })
       .eq('id', id)
@@ -1789,13 +1789,13 @@ export default async function preJoineeRoutes(fastify: FastifyInstance) {
     if (buddy_employee_id) {
       try {
         const [{ data: buddy }, { data: tenant }] = await Promise.all([
-          req.supabase
+          fastify.supabase
             .from('employees')
             .select('first_name, last_name, email, job_history!job_history_employee_id_fkey(designation_name, is_current)')
             .eq('id', buddy_employee_id)
             .eq('tenant_id', tenantId)
             .maybeSingle(),
-          req.supabase
+          fastify.supabase
             .from('tenants')
             .select('name')
             .eq('id', tenantId)

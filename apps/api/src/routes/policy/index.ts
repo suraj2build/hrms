@@ -102,7 +102,7 @@ export default async function policyRoutes(fastify: FastifyInstance) {
     if (!parsed.success) return reply.status(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message ?? 'Invalid request body' })
     const { question, language } = parsed.data
 
-    const employeeId = await getEmployeeId(req.user.id)
+    const employeeId = await getEmployeeId(req.userId)
 
     // Detect language: explicit param > Hindi Devanagari script detection > English
     const isHindi = language === 'hi' || /[ऀ-ॿ]/.test(question)
@@ -181,7 +181,7 @@ export default async function policyRoutes(fastify: FastifyInstance) {
     const { data: policies, error } = await q
     if (error) return reply.status(500).send({ error: error.message })
 
-    const employeeId = await getEmployeeId(req.user.id)
+    const employeeId = await getEmployeeId(req.userId)
     const ackedIds = new Set<string>()
 
     if (employeeId) {
@@ -355,7 +355,7 @@ export default async function policyRoutes(fastify: FastifyInstance) {
 
     let ackStatus = 'not_required'
     if (data.requires_acknowledgement) {
-      const employeeId = await getEmployeeId(req.user.id)
+      const employeeId = await getEmployeeId(req.userId)
       if (employeeId) {
         const { data: ack } = await supabase
           .from('policy_acknowledgements')
@@ -400,7 +400,7 @@ export default async function policyRoutes(fastify: FastifyInstance) {
         requires_acknowledgement,
         effective_from: effective_from || null,
         is_mandatory,
-        created_by:     req.user.id,
+        created_by:     req.userId,
         status:         'draft',
       })
       .select('id')
@@ -413,7 +413,7 @@ export default async function policyRoutes(fastify: FastifyInstance) {
       tableName:   'hr_policies',
       recordId:    data.id,
       action:      'INSERT',
-      performedBy: req.user.id,
+      performedBy: req.userId,
       newData:     { title, category },
     })
 
@@ -457,7 +457,7 @@ export default async function policyRoutes(fastify: FastifyInstance) {
       tableName:   'hr_policies',
       recordId:    id,
       action:      'UPDATE',
-      performedBy: req.user.id,
+      performedBy: req.userId,
       newData:     update,
     })
 
@@ -475,7 +475,7 @@ export default async function policyRoutes(fastify: FastifyInstance) {
       .update({
         status:       'published',
         published_at: new Date().toISOString(),
-        published_by: req.user.id,
+        published_by: req.userId,
       })
       .eq('tenant_id', tenantId)
       .eq('id', id)
@@ -539,7 +539,7 @@ export default async function policyRoutes(fastify: FastifyInstance) {
       tableName:   'hr_policies',
       recordId:    id,
       action:      'UPDATE',
-      performedBy: req.user.id,
+      performedBy: req.userId,
       newData:     { status: 'published' },
     })
 
@@ -565,7 +565,7 @@ export default async function policyRoutes(fastify: FastifyInstance) {
       tableName:   'hr_policies',
       recordId:    id,
       action:      'UPDATE',
-      performedBy: req.user.id,
+      performedBy: req.userId,
       newData:     { status: 'archived' },
     })
 
@@ -578,7 +578,7 @@ export default async function policyRoutes(fastify: FastifyInstance) {
     const tenantId = req.tenantId
     const { id }   = req.params as { id: string }
 
-    const employeeId = await getEmployeeId(req.user.id)
+    const employeeId = await getEmployeeId(req.userId)
     if (!employeeId) {
       return reply.status(400).send({ error: 'No employee profile linked to your account' })
     }
