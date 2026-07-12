@@ -135,6 +135,7 @@ export default async function operationalHealthRoutes(fastify: FastifyInstance) 
       fastify.supabase
         .from('scheduler_heartbeats')
         .select('scheduler_name, last_heartbeat_at, status, tick_count, last_error')
+        .eq('tenant_id', tenantId)
         .order('last_heartbeat_at', { ascending: false }),
 
       // 5. Durable queue metrics

@@ -293,10 +293,11 @@ export default async function surveyRoutes(fastify: FastifyInstance) {
 
   // ── Admin: list all surveys ────────────────────────────────────────────────────
 
-  fastify.get('/admin', hrAuth, async (_req, reply) => {
+  fastify.get('/admin', hrAuth, async (req: any, reply) => {
     const { data, error } = await supabase
       .from('surveys')
       .select('id, title, description, status, due_date, created_at, survey_type, is_anonymous')
+      .eq('tenant_id', req.tenantId)
       .order('created_at', { ascending: false })
 
     if (error) return reply.status(500).send({ error: error.message })
@@ -308,6 +309,7 @@ export default async function surveyRoutes(fastify: FastifyInstance) {
       const { data: asgns } = await supabase
         .from('survey_assignments')
         .select('survey_id, completed_at')
+        .eq('tenant_id', req.tenantId)
         .in('survey_id', surveyIds)
 
       for (const a of asgns ?? []) {
@@ -407,6 +409,7 @@ export default async function surveyRoutes(fastify: FastifyInstance) {
       .from('surveys')
       .update({ ...updates, updated_at: new Date().toISOString() })
       .eq('id', id)
+      .eq('tenant_id', (req as any).tenantId)
 
     if (error) return reply.status(500).send({ error: error.message })
     return reply.send({ data: { ok: true } })

@@ -183,7 +183,9 @@ export default async function trustIntelligenceRoutes(fastify: FastifyInstance) 
       .order('ingested_at', { ascending: false })
       .limit(100)
     if (status) q = q.eq('status', status)
-    // Include platform-wide (tenant_id IS NULL) and tenant-specific
+    // Scope to this tenant's events plus platform-wide (org_id IS NULL) entries
+    const tenantId = (req as any).tenantId
+    q = q.or(`org_id.eq.${tenantId},org_id.is.null`)
     const { data, error } = await q
     if (error) return reply.status(500).send({ error: error.message })
     return { revisions: data ?? [], total: (data ?? []).length }
