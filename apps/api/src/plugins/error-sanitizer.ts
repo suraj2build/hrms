@@ -49,14 +49,20 @@ const errorSanitizerPlugin: FastifyPluginAsync = async (fastify) => {
       url:           request.url,
     }
 
-    // Pattern A: { error: 'CODE', message: rawDbError }
-    if (typeof obj.message === 'string') {
+    // Responses from serverError() always include requestId (set by the typed helper).
+    // Its presence is our signal that the message is a hardcoded-safe string — skip
+    // Pattern A so callers receive the descriptive message instead of the generic fallback.
+    // Responses from raw reply.code(500) calls have no requestId — sanitize them fully.
+    const fromTypedHelper = typeof obj.requestId !== 'undefined'
+
+    // Pattern A: { error: 'CODE', message: rawDbError } — only for unconverted raw code.
+    if (!fromTypedHelper && typeof obj.message === 'string') {
       fastify.log.error({ ...logCtx, original_message: obj.message }, 'error-sanitizer: stripped message field')
       obj.message = 'An internal error occurred'
       dirty = true
     }
 
-    // Pattern B: { error: rawDbError } — raw message in `error` field, no separate `message` key
+    // Pattern B: { error: rawDbError } — raw message in `error` field, no separate `message` key.
     // Error codes never contain spaces ('DB_ERROR', 'QUERY_FAILED'…); raw DB messages always do.
     if (typeof obj.error === 'string' && !obj.message && obj.error.includes(' ')) {
       fastify.log.error({ ...logCtx, original_error: obj.error }, 'error-sanitizer: stripped error field')
@@ -68,6 +74,13 @@ const errorSanitizerPlugin: FastifyPluginAsync = async (fastify) => {
     if (typeof obj.stack === 'string') {
       fastify.log.error({ ...logCtx, original_stack: obj.stack }, 'error-sanitizer: stripped stack field')
       delete obj.stack
+      dirty = true
+    }
+
+    // Ensure every 5xx carries a requestId in the response body so callers can
+    // report it to support. Raw code paths won't have set it; add it here.
+    if (!fromTypedHelper) {
+      obj.requestId = request.id ?? null
       dirty = true
     }
 

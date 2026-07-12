@@ -61,8 +61,10 @@ export type ApiErrorCode = typeof ErrorCode[keyof typeof ErrorCode]
 // ── Standard error response shape ────────────────────────────────────────────
 
 export interface ApiErrorResponse {
-  error:   string
-  message: string
+  error:      string
+  message:    string
+  /** Fastify request ID — present on 5xx responses so callers can report it to support. */
+  requestId?: string | null
 }
 
 // ── Correlation context (extracted automatically from every request) ──────────
@@ -103,11 +105,20 @@ export function serverError(
   code:    string = ErrorCode.INTERNAL_ERROR,
   message: string = 'An unexpected error occurred',
 ): any {
+  const ctx = reqCtx(req)
   req.log.error(
-    { err, ...reqCtx(req), error_code: code },
+    { err, ...ctx, error_code: code },
     `${code}: ${message}`,
   )
-  return reply.code(500).send({ error: code, message } satisfies ApiErrorResponse)
+  // requestId in the response body lets callers report it to support.
+  // Its presence also signals to the error-sanitizer that this response
+  // is already safe (message is a hardcoded string, not raw DB content)
+  // so the sanitizer's Pattern A will leave the message intact.
+  return reply.code(500).send({
+    error:     code,
+    message,
+    requestId: req.id ?? null,
+  } satisfies ApiErrorResponse)
 }
 
 // ── 4xx — client errors ───────────────────────────────────────────────────────
