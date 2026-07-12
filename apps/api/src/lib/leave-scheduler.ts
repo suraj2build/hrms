@@ -27,6 +27,7 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
+import type { FastifyBaseLogger } from 'fastify'
 import {
   monthlyAccrualJob,
   yearlyAccrualJob,
@@ -80,6 +81,7 @@ let tickCount = 0
  */
 async function writeHeartbeat(
   supabase:   SupabaseClient,
+  log:        FastifyBaseLogger,
   status:     'ok' | 'degraded' | 'error',
   metadata?:  Record<string, unknown>,
   lastError?: string,
@@ -99,14 +101,14 @@ async function writeHeartbeat(
       { onConflict: 'scheduler_name,tenant_id' },
     )
     .then(({ error }) => {
-      if (error) console.warn('[leave-scheduler] heartbeat write failed:', error.message)
+      if (error) log.warn({ err: error }, '[leave-scheduler] heartbeat write failed')
     })
 }
 
-async function fetchAllTenantIds(supabase: SupabaseClient): Promise<string[]> {
+async function fetchAllTenantIds(supabase: SupabaseClient, log: FastifyBaseLogger): Promise<string[]> {
   const { data, error } = await supabase.from('tenants').select('id')
   if (error) {
-    console.error('[leave-scheduler] Failed to fetch tenants:', error.message)
+    log.error({ err: error }, '[leave-scheduler] Failed to fetch tenants')
     return []
   }
   return (data ?? []).map((r: { id: string }) => r.id)
@@ -162,7 +164,7 @@ async function hasJobRunForKey(
  */
 const STALE_THRESHOLD_MS = 30 * 60 * 1000   // 30 minutes
 
-async function expireStaleUploadSessions(supabase: SupabaseClient): Promise<void> {
+async function expireStaleUploadSessions(supabase: SupabaseClient, log: FastifyBaseLogger): Promise<void> {
   const staleCutoff = new Date(Date.now() - STALE_THRESHOLD_MS).toISOString()
 
   const { error, count } = await supabase
@@ -176,9 +178,9 @@ async function expireStaleUploadSessions(supabase: SupabaseClient): Promise<void
     .lt('created_at', staleCutoff)
 
   if (error) {
-    console.warn('[leave-scheduler] upload session orphan sweep failed:', error.message)
+    log.warn({ err: error }, '[leave-scheduler] upload session orphan sweep failed')
   } else if ((count ?? 0) > 0) {
-    console.log(`[leave-scheduler] orphaned ${count} stale upload session(s) (created_at < ${staleCutoff})`)
+    log.info({ count, staleCutoff }, '[leave-scheduler] orphaned stale upload sessions')
   }
 }
 
@@ -189,95 +191,101 @@ async function expireStaleUploadSessions(supabase: SupabaseClient): Promise<void
 export async function execLeaveYearlyAccrual(
   supabase: SupabaseClient,
   payload:  { isCalYearStart: boolean; year: number; leaveYear: number; dayKey: string },
+  log:      FastifyBaseLogger,
 ): Promise<void> {
   const { leaveYear, dayKey } = payload
-  console.log(`[leave-scheduler] job:yearly-accrual year=${leaveYear}`)
-  for (const tenantId of await fetchAllTenantIds(supabase)) {
+  log.info({ leaveYear }, '[leave-scheduler] job:yearly-accrual')
+  for (const tenantId of await fetchAllTenantIds(supabase, log)) {
     await yearlyAccrualJob(supabase, tenantId, leaveYear, null, dayKey)
-      .then(r => console.log(`[leave-scheduler] yearly_accrual tenant=${tenantId} credited=${r.total_days_credited} emp=${r.employees_processed}`))
-      .catch((e: Error) => console.error(`[leave-scheduler] yearly_accrual error tenant=${tenantId}`, e.message))
+      .then(r => log.info({ tenantId, credited: r.total_days_credited, employees: r.employees_processed }, '[leave-scheduler] yearly_accrual ok'))
+      .catch((e: Error) => log.error({ err: e, tenantId }, '[leave-scheduler] yearly_accrual error'))
   }
 }
 
 export async function execLeaveMonthlyAccrual(
   supabase: SupabaseClient,
   payload:  { year: number; monthNum: number },
+  log:      FastifyBaseLogger,
 ): Promise<void> {
   const { year, monthNum } = payload
   const monthKey = `${year}-${String(monthNum).padStart(2, '0')}`
-  console.log(`[leave-scheduler] job:monthly-accrual month=${monthKey}`)
-  for (const tenantId of await fetchAllTenantIds(supabase)) {
+  log.info({ monthKey }, '[leave-scheduler] job:monthly-accrual')
+  for (const tenantId of await fetchAllTenantIds(supabase, log)) {
     await monthlyAccrualJob(supabase, tenantId, year, monthNum)
-      .then(r => console.log(`[leave-scheduler] monthly_accrual tenant=${tenantId} credited=${r.total_days_credited} emp=${r.employees_processed}`))
-      .catch((e: Error) => console.error(`[leave-scheduler] monthly_accrual error tenant=${tenantId}`, e.message))
+      .then(r => log.info({ tenantId, credited: r.total_days_credited, employees: r.employees_processed }, '[leave-scheduler] monthly_accrual ok'))
+      .catch((e: Error) => log.error({ err: e, tenantId }, '[leave-scheduler] monthly_accrual error'))
     await runMonthlyAccrual(supabase, tenantId, year, monthNum)
-      .then(r => console.log(`[leave-scheduler] rule_accrual tenant=${tenantId} credited=${r.total_days_credited} emp=${r.employees_credited} errors=${r.errors.length}`))
-      .catch((e: Error) => console.error(`[leave-scheduler] rule_accrual error tenant=${tenantId}`, e.message))
+      .then(r => log.info({ tenantId, credited: r.total_days_credited, employees: r.employees_credited, errors: r.errors.length }, '[leave-scheduler] rule_accrual ok'))
+      .catch((e: Error) => log.error({ err: e, tenantId }, '[leave-scheduler] rule_accrual error'))
   }
 }
 
 export async function execLeaveCarryForward(
   supabase: SupabaseClient,
   payload:  { fromYear: number; toYear: number },
+  log:      FastifyBaseLogger,
 ): Promise<void> {
   const { fromYear, toYear } = payload
-  console.log(`[leave-scheduler] job:carry-forward ${fromYear}→${toYear}`)
-  for (const tenantId of await fetchAllTenantIds(supabase)) {
+  log.info({ fromYear, toYear }, '[leave-scheduler] job:carry-forward')
+  for (const tenantId of await fetchAllTenantIds(supabase, log)) {
     await carryForwardJob(supabase, tenantId, fromYear, toYear)
-      .then(r => console.log(`[leave-scheduler] carry_forward tenant=${tenantId} credited=${r.total_days_credited} emp=${r.employees_processed}`))
-      .catch((e: Error) => console.error(`[leave-scheduler] carry_forward error tenant=${tenantId}`, e.message))
+      .then(r => log.info({ tenantId, credited: r.total_days_credited, employees: r.employees_processed }, '[leave-scheduler] carry_forward ok'))
+      .catch((e: Error) => log.error({ err: e, tenantId }, '[leave-scheduler] carry_forward error'))
   }
 }
 
 export async function execLeaveCoExpiry(
   supabase: SupabaseClient,
   payload:  { dayKey: string },
+  log:      FastifyBaseLogger,
 ): Promise<void> {
   // Reconstruct a deterministic date from dayKey so idempotency holds even if
   // the job runs slightly after midnight (the queued dayKey stays the same).
   const asOf = new Date(`${payload.dayKey}T12:00:00.000Z`)
-  for (const tenantId of await fetchAllTenantIds(supabase)) {
+  for (const tenantId of await fetchAllTenantIds(supabase, log)) {
     await coExpiryJob(supabase, tenantId, asOf)
       .then(r => {
         if (r.employees_processed > 0) {
-          console.log(`[leave-scheduler] co_expiry tenant=${tenantId} expired=${-r.total_days_credited} emp=${r.employees_processed}`)
+          log.info({ tenantId, expired: -r.total_days_credited, employees: r.employees_processed }, '[leave-scheduler] co_expiry ok')
         }
       })
-      .catch((e: Error) => console.error(`[leave-scheduler] co_expiry error tenant=${tenantId}`, e.message))
+      .catch((e: Error) => log.error({ err: e, tenantId }, '[leave-scheduler] co_expiry error'))
   }
 }
 
 export async function execLeaveEventGrants(
   supabase: SupabaseClient,
   payload:  { dayKey: string },
+  log:      FastifyBaseLogger,
 ): Promise<void> {
   const asOf = new Date(`${payload.dayKey}T12:00:00.000Z`)
-  for (const tenantId of await fetchAllTenantIds(supabase)) {
+  for (const tenantId of await fetchAllTenantIds(supabase, log)) {
     await runEventGrantsForTenant(supabase, tenantId, asOf)
       .then(r => {
         if (r.granted > 0 || r.expired > 0) {
-          console.log(`[leave-scheduler] event_grants tenant=${tenantId} granted=${r.granted} skipped=${r.skipped} expired=${r.expired} errors=${r.errors}`)
+          log.info({ tenantId, granted: r.granted, skipped: r.skipped, expired: r.expired, errors: r.errors }, '[leave-scheduler] event_grants ok')
         }
       })
-      .catch((e: Error) => console.error(`[leave-scheduler] event_grants error tenant=${tenantId}`, e.message))
+      .catch((e: Error) => log.error({ err: e, tenantId }, '[leave-scheduler] event_grants error'))
   }
 }
 
 export async function execLeaveReconciliationJob(
   supabase: SupabaseClient,
   payload:  { dayKey: string; reconcYear: number },
+  log:      FastifyBaseLogger,
 ): Promise<void> {
   const { reconcYear } = payload
-  for (const tenantId of await fetchAllTenantIds(supabase)) {
+  for (const tenantId of await fetchAllTenantIds(supabase, log)) {
     await runLeaveReconciliation(supabase, tenantId, reconcYear, null, 'scheduler')
       .then(r => {
         if (r.issues_found > 0) {
-          console.warn(`[leave-scheduler] reconciliation tenant=${tenantId} issues=${r.issues_found} severity=${r.severity}`)
+          log.warn({ tenantId, issues: r.issues_found, severity: r.severity }, '[leave-scheduler] reconciliation issues found')
         } else {
-          console.log(`[leave-scheduler] reconciliation tenant=${tenantId} clean`)
+          log.info({ tenantId }, '[leave-scheduler] reconciliation clean')
         }
       })
-      .catch((e: Error) => console.error(`[leave-scheduler] reconciliation error tenant=${tenantId}`, e.message))
+      .catch((e: Error) => log.error({ err: e, tenantId }, '[leave-scheduler] reconciliation error'))
   }
 }
 
@@ -286,7 +294,7 @@ export async function execLeaveReconciliationJob(
 // independent durable sub-jobs rather than running the work synchronously.
 // Each sub-job has its own timeout and does not block the others.
 
-export async function tick(supabase: SupabaseClient): Promise<void> {
+export async function tick(supabase: SupabaseClient, log: FastifyBaseLogger): Promise<void> {
   tickCount++
 
   const now       = new Date()
@@ -299,12 +307,12 @@ export async function tick(supabase: SupabaseClient): Promise<void> {
   const yearKey   = String(year)
 
   // Write a heartbeat immediately so liveness is updated even if jobs are skipped.
-  await writeHeartbeat(supabase, 'ok', { tick: tickCount, day: dayKey })
+  await writeHeartbeat(supabase, log, 'ok', { tick: tickCount, day: dayKey })
 
   // ── 0. Upload session orphan sweep ──────────────────────────────────────────
   // Stays in-process: it's fast, cross-tenant, and needs no per-tenant loop.
-  await expireStaleUploadSessions(supabase).catch(
-    (e: Error) => console.warn('[leave-scheduler] upload orphan sweep error:', e.message),
+  await expireStaleUploadSessions(supabase, log).catch(
+    (e: Error) => log.warn({ err: e }, '[leave-scheduler] upload orphan sweep error'),
   )
 
   // ── Year-boundary flags ──────────────────────────────────────────────────────
@@ -316,23 +324,23 @@ export async function tick(supabase: SupabaseClient): Promise<void> {
   // ── 1. Yearly accrual ────────────────────────────────────────────────────────
   if ((isCalYearStart || isFYStart) && ran.yearlyAccrual !== yearKey) {
     const leaveYear = isCalYearStart ? year : year - 1
-    console.log(`[leave-scheduler] Yearly accrual due for year ${leaveYear} — enqueuing sub-job`)
+    log.info({ leaveYear }, '[leave-scheduler] yearly accrual due — enqueuing sub-job')
     await durableQueue.enqueue(
       'leave-yearly-accrual',
       { isCalYearStart, year, leaveYear, dayKey },
       { idempotencyKey: `leave-yearly-accrual:${yearKey}`, timeoutMs: 5 * 60 * 1_000 },
-    ).catch((e: Error) => console.error('[leave-scheduler] enqueue leave-yearly-accrual failed:', e.message))
+    ).catch((e: Error) => log.error({ err: e }, '[leave-scheduler] enqueue leave-yearly-accrual failed'))
     ran.yearlyAccrual = yearKey
   }
 
   // ── 2. Monthly accrual ───────────────────────────────────────────────────────
   if (dom <= MONTHLY_SAFE_DAYS && ran.monthlyAccrual !== monthKey) {
-    console.log(`[leave-scheduler] Monthly accrual due for ${monthKey} — enqueuing sub-job`)
+    log.info({ monthKey }, '[leave-scheduler] monthly accrual due — enqueuing sub-job')
     await durableQueue.enqueue(
       'leave-monthly-accrual',
       { year, monthNum },
       { idempotencyKey: `leave-monthly-accrual:${monthKey}`, timeoutMs: 5 * 60 * 1_000 },
-    ).catch((e: Error) => console.error('[leave-scheduler] enqueue leave-monthly-accrual failed:', e.message))
+    ).catch((e: Error) => log.error({ err: e }, '[leave-scheduler] enqueue leave-monthly-accrual failed'))
     ran.monthlyAccrual = monthKey
   }
 
@@ -342,12 +350,12 @@ export async function tick(supabase: SupabaseClient): Promise<void> {
   if ((isDecYearEnd || isMarYearEnd) && ran.carryForward !== yearKey) {
     const fromYear = isDecYearEnd ? year     : year - 1
     const toYear   = isDecYearEnd ? year + 1 : year
-    console.log(`[leave-scheduler] Carry-forward due: ${fromYear}→${toYear} — enqueuing sub-job`)
+    log.info({ fromYear, toYear }, '[leave-scheduler] carry-forward due — enqueuing sub-job')
     await durableQueue.enqueue(
       'leave-carry-forward',
       { fromYear, toYear },
       { idempotencyKey: `leave-carry-forward:${yearKey}`, timeoutMs: 5 * 60 * 1_000 },
-    ).catch((e: Error) => console.error('[leave-scheduler] enqueue leave-carry-forward failed:', e.message))
+    ).catch((e: Error) => log.error({ err: e }, '[leave-scheduler] enqueue leave-carry-forward failed'))
     ran.carryForward = yearKey
   }
 
@@ -357,7 +365,7 @@ export async function tick(supabase: SupabaseClient): Promise<void> {
       'leave-co-expiry',
       { dayKey },
       { idempotencyKey: `leave-co-expiry:${dayKey}`, timeoutMs: 2 * 60 * 1_000 },
-    ).catch((e: Error) => console.error('[leave-scheduler] enqueue leave-co-expiry failed:', e.message))
+    ).catch((e: Error) => log.error({ err: e }, '[leave-scheduler] enqueue leave-co-expiry failed'))
     ran.coExpiry = dayKey
   }
 
@@ -367,7 +375,7 @@ export async function tick(supabase: SupabaseClient): Promise<void> {
       'leave-event-grants',
       { dayKey },
       { idempotencyKey: `leave-event-grants:${dayKey}`, timeoutMs: 2 * 60 * 1_000 },
-    ).catch((e: Error) => console.error('[leave-scheduler] enqueue leave-event-grants failed:', e.message))
+    ).catch((e: Error) => log.error({ err: e }, '[leave-scheduler] enqueue leave-event-grants failed'))
     ran.eventGrants = dayKey
   }
 
@@ -378,14 +386,14 @@ export async function tick(supabase: SupabaseClient): Promise<void> {
       'leave-reconciliation',
       { dayKey, reconcYear },
       { idempotencyKey: `leave-reconciliation:${dayKey}`, timeoutMs: 3 * 60 * 1_000 },
-    ).catch((e: Error) => console.error('[leave-scheduler] enqueue leave-reconciliation failed:', e.message))
+    ).catch((e: Error) => log.error({ err: e }, '[leave-scheduler] enqueue leave-reconciliation failed'))
     ran.reconciliation = dayKey
   }
 }
 
 // ── Startup: restore ran state from DB ────────────────────────────────────────
 
-async function restoreState(supabase: SupabaseClient): Promise<void> {
+async function restoreState(supabase: SupabaseClient, log: FastifyBaseLogger): Promise<void> {
   const now      = new Date()
   const year     = now.getUTCFullYear()
   const monthNum = now.getUTCMonth() + 1
@@ -408,38 +416,38 @@ async function restoreState(supabase: SupabaseClient): Promise<void> {
     if (hasExpiry)     ran.coExpiry       = dayKey
     if (hasEventGrants) ran.eventGrants   = dayKey
     if (hasRecon)      ran.reconciliation = dayKey
-    console.log('[leave-scheduler] State restored:', ran)
+    log.info({ ran }, '[leave-scheduler] state restored')
   } catch (e: unknown) {
-    console.warn('[leave-scheduler] Could not restore state from DB:', (e as Error).message)
+    log.warn({ err: e }, '[leave-scheduler] Could not restore state from DB')
   }
 }
 
 // ── Public API ─────────────────────────────────────────────────────────────────
 
 /**
- * Register the leave scheduler with the given Supabase client.
+ * Register the leave scheduler with the given Supabase client and logger.
  * Call once after the Supabase plugin is registered in Fastify startup.
  */
-export function registerLeaveScheduler(supabase: SupabaseClient): void {
+export function registerLeaveScheduler(supabase: SupabaseClient, log: FastifyBaseLogger): void {
   // Periodic enqueue — interval stays as lightweight ticker; durable queue
   // provides crash recovery and retry for the actual work. (ISSUE-028)
   // Hourly idempotency key prevents duplicate runs on concurrent ticks.
   setInterval(() => {
     const key = `leave-scheduler-tick:${new Date().toISOString().slice(0, 13)}`
     durableQueue.enqueue('leave-scheduler-tick', {}, { idempotencyKey: key }).catch((err: Error) => {
-      console.error('[leave-scheduler] enqueue error:', err.message)
-      writeHeartbeat(supabase, 'error', { tick: tickCount }, err.message).catch(() => undefined)
+      log.error({ err }, '[leave-scheduler] enqueue error')
+      writeHeartbeat(supabase, log, 'error', { tick: tickCount }, err.message).catch(() => undefined)
     })
   }, TICK_MS)
 
   // Restore state and run the first tick directly — ensures the ran.* guard
   // is populated before the first durable job fires and provides immediate
   // startup behavior if the process restarted mid-day.
-  restoreState(supabase)
-    .then(() => tick(supabase))
-    .then(() => console.log(`📅 Leave scheduler active — ticking every ${TICK_MS / 60_000} min`))
+  restoreState(supabase, log)
+    .then(() => tick(supabase, log))
+    .then(() => log.info({ tickIntervalMin: TICK_MS / 60_000 }, '[leave-scheduler] active'))
     .catch((err: Error) => {
-      console.error('[leave-scheduler] startup error (interval still active):', err.message)
-      writeHeartbeat(supabase, 'error', { tick: tickCount }, err.message).catch(() => undefined)
+      log.error({ err }, '[leave-scheduler] startup error (interval still active)')
+      writeHeartbeat(supabase, log, 'error', { tick: tickCount }, err.message).catch(() => undefined)
     })
 }

@@ -463,7 +463,7 @@ async function start() {
 
   // Leave scheduler — optional module, isolated from critical path
   await safeRegisterModule('leave-scheduler', async () => {
-    registerLeaveScheduler(fastify.supabase)
+    registerLeaveScheduler(fastify.supabase, fastify.log)
   }, fastify.log)
 
   // Attendance API scheduler — polls external punch-data sources on their configured intervals
@@ -546,25 +546,25 @@ async function start() {
     await runPollTick(fastify.supabase)
   })
   durableQueue.register('leave-scheduler-tick', async (_payload, _job) => {
-    await runLeaveSchedulerTick(fastify.supabase)
+    await runLeaveSchedulerTick(fastify.supabase, fastify.log)
   })
   durableQueue.register('leave-yearly-accrual', async (payload, _job) => {
-    await execLeaveYearlyAccrual(fastify.supabase, payload as { isCalYearStart: boolean; year: number; leaveYear: number; dayKey: string })
+    await execLeaveYearlyAccrual(fastify.supabase, payload as { isCalYearStart: boolean; year: number; leaveYear: number; dayKey: string }, fastify.log)
   })
   durableQueue.register('leave-monthly-accrual', async (payload, _job) => {
-    await execLeaveMonthlyAccrual(fastify.supabase, payload as { year: number; monthNum: number })
+    await execLeaveMonthlyAccrual(fastify.supabase, payload as { year: number; monthNum: number }, fastify.log)
   })
   durableQueue.register('leave-carry-forward', async (payload, _job) => {
-    await execLeaveCarryForward(fastify.supabase, payload as { fromYear: number; toYear: number })
+    await execLeaveCarryForward(fastify.supabase, payload as { fromYear: number; toYear: number }, fastify.log)
   })
   durableQueue.register('leave-co-expiry', async (payload, _job) => {
-    await execLeaveCoExpiry(fastify.supabase, payload as { dayKey: string })
+    await execLeaveCoExpiry(fastify.supabase, payload as { dayKey: string }, fastify.log)
   })
   durableQueue.register('leave-event-grants', async (payload, _job) => {
-    await execLeaveEventGrants(fastify.supabase, payload as { dayKey: string })
+    await execLeaveEventGrants(fastify.supabase, payload as { dayKey: string }, fastify.log)
   })
   durableQueue.register('leave-reconciliation', async (payload, _job) => {
-    await execLeaveReconciliationJob(fastify.supabase, payload as { dayKey: string; reconcYear: number })
+    await execLeaveReconciliationJob(fastify.supabase, payload as { dayKey: string; reconcYear: number }, fastify.log)
   })
   durableQueue.register('detect-absconding', async (_payload, _job) => {
     const { scanAndEscalate } = await import('./lib/absconding-engine.js')
