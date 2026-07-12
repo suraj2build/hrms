@@ -570,8 +570,11 @@ async function executePayrollRun(
     payload:    { employee_count: empList.length, initiated_by: initiatedBy ?? 'system' },
   })
 
-  // Delete existing slips (idempotent re-trigger)
-  await supabase.from('payroll_slips').delete().eq('run_id', runId)
+  // Delete existing slips (idempotent re-trigger).
+  // Both predicates are required: run_id scopes to this run, tenant_id ensures
+  // the DELETE cannot affect another tenant's slips if runId is ever replayed
+  // or reconstructed in a durable-queue edge case.
+  await supabase.from('payroll_slips').delete().eq('run_id', runId).eq('tenant_id', tenantId)
 
   // ── Per-employee processing loop ──────────────────────────────────────────
   const succeededSlips: PayrollSlipResult[] = []
