@@ -3104,7 +3104,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       .select(`
         id, run_id, event_type, employee_id, month, payload, error_details, created_at,
         payroll_runs ( month, status ),
-        employees ( employee_code, profiles ( full_name ) )
+        employees ( employee_code, profiles!profile_id ( full_name ) )
       `, { count: 'exact' })
       .eq('tenant_id', tenantId)
       .order('created_at', { ascending: false })
@@ -3730,7 +3730,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
         id, employee_id, month, gross_pay, net_pay, total_deductions, lop_amount, status, held_reason,
         employees (
           employee_code,
-          profiles ( full_name ),
+          profiles!profile_id ( full_name ),
           bank_details:employee_bank_statutory ( account_number_masked:account_number, bank_name, ifsc_code )
         )
       `)

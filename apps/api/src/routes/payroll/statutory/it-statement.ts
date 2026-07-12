@@ -100,7 +100,7 @@ async function buildITStatement(
     // Employee profile
     fastify.supabase
       .from('employees')
-      .select('id, employee_code, joining_date, profiles(full_name)')
+      .select('id, employee_code, joining_date, profiles!profile_id(full_name)')
       .eq('id', employeeId)
       .eq('tenant_id', tenantId)
       .maybeSingle(),

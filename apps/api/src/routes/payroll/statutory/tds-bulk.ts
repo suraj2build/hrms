@@ -299,7 +299,7 @@ export default async function tdsBulkRoutes(fastify: FastifyInstance) {
         employees!inner (
           id,
           employee_code,
-          profiles (full_name)
+          profiles!profile_id (full_name)
         )
       `, { count: 'exact' })
       .eq('tenant_id', req.tenantId)

@@ -52,7 +52,7 @@ export default async function certificationRoutes(fastify: FastifyInstance) {
       .from('employee_certifications')
       .select(`
         *,
-        employees!inner(id, employee_code, profiles(full_name))
+        employees!inner(id, employee_code, profiles!profile_id(full_name))
       `, { count: 'exact' })
       .eq('tenant_id', req.tenantId)
       .order('expiry_date', { ascending: true, nullsFirst: false })
@@ -99,7 +99,7 @@ export default async function certificationRoutes(fastify: FastifyInstance) {
 
     const { data, error } = await fastify.supabase
       .from('employee_certifications')
-      .select('*, employees(id, employee_code, profiles(full_name))')
+      .select('*, employees(id, employee_code, profiles!profile_id(full_name))')
       .eq('tenant_id', req.tenantId)
       .eq('status', 'active')
       .not('expiry_date', 'is', null)
@@ -184,7 +184,7 @@ export default async function certificationRoutes(fastify: FastifyInstance) {
     const { data, error } = await fastify.supabase
       .from('employee_certifications')
       .insert({ ...parsed.data, status, tenant_id: req.tenantId, created_by: req.userId })
-      .select('*, employees(id, employee_code, profiles(full_name))')
+      .select('*, employees(id, employee_code, profiles!profile_id(full_name))')
       .single()
 
     if (error) {

@@ -897,7 +897,7 @@ export async function exportGeneralLedger(
       debit_amount, credit_amount, currency,
       entry_type, source_component_code, source_component_name,
       cost_center_id, department_id,
-      employees ( employee_code, profiles ( full_name ) ),
+      employees ( employee_code, profiles!profile_id ( full_name ) ),
       payroll_financial_ledgers ( ledger_month )
     `)
     .eq('ledger_id', ledgerId)

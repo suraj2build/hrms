@@ -552,7 +552,7 @@ export async function buildEmployeePayrollSnapshot(
     // Fetch employee meta for the blob
     const { data: emp } = await supabase
       .from('employees')
-      .select('employee_code, profiles ( full_name )')
+      .select('employee_code, profiles!profile_id ( full_name )')
       .eq('id', employeeId)
       .maybeSingle()
 
@@ -601,7 +601,7 @@ export async function buildPayrollRunSnapshot(
     .select(`
       employee_id, month, gross_pay, total_deductions, net_pay,
       payable_days, lop_days, overtime_hours, total_working_days,
-      employees ( employee_code, profiles ( full_name ) )
+      employees ( employee_code, profiles!profile_id ( full_name ) )
     `)
     .eq('run_id', runId)
     .eq('tenant_id', tenantId)

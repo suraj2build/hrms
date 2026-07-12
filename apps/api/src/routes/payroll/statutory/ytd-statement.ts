@@ -89,7 +89,7 @@ async function buildYTDStatement(
   const [empResult, slipsResult] = await Promise.all([
     fastify.supabase
       .from('employees')
-      .select('id, employee_code, profiles (full_name)')
+      .select('id, employee_code, profiles!profile_id (full_name)')
       .eq('id', employeeId)
       .eq('tenant_id', tenantId)
       .maybeSingle(),

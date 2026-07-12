@@ -616,7 +616,7 @@ ${section('Part D — Loss from House Property (Home Loan Interest)', hlDecls,
         employees!inner (
           id,
           employee_code,
-          profiles (id, full_name)
+          profiles!profile_id (id, full_name)
         ),
         declaration_proofs (id, file_name, document_state, uploaded_at)
       `)
@@ -1041,7 +1041,7 @@ ${section('Part D — Loss from House Property (Home Loan Interest)', hlDecls,
         tax_declarations!inner (
           id, declaration_category, section, declared_amount, approved_amount,
           financial_year, employee_id,
-          employees!inner (employee_code, profiles(full_name))
+          employees!inner (employee_code, profiles!profile_id(full_name))
         )
       `)
       .eq('tenant_id', req.tenantId)
@@ -1170,7 +1170,7 @@ ${section('Part D — Loss from House Property (Home Loan Interest)', hlDecls,
         *,
         employees!inner (
           employee_code,
-          profiles (full_name)
+          profiles!profile_id (full_name)
         )
       `)
       .eq('tenant_id', req.tenantId)
