@@ -1,9 +1,13 @@
 #!/usr/bin/env node
 /**
- * seed-enterprise.mjs — CognixHR UAT enterprise dataset generator.
+ * seed-enterprise.mjs — CognixHR EAC enterprise dataset generator.
  *
  * Generates a realistic enterprise with 6-level hierarchy, compensation,
- * leave balances, and 3 months of attendance history.
+ * leave balances, 3 months of attendance history, and EAC scenario mix:
+ *   - 8%  employees on notice (L5/L6)
+ *   - 5%  employees on probation (L6)
+ *   - 12% employees on night-shift schedule (9 hrs + overtime)
+ *   - 15% employees with salary revision history (two comp records)
  *
  * Required env vars:
  *   SUPABASE_URL              Supabase project URL
@@ -11,9 +15,9 @@
  *   SEED_TENANT_ID            UUID of the tenant to populate
  *
  * Optional:
- *   SEED_COUNT            Target employee count (default 1000, max 5000)
+ *   SEED_COUNT              Target employee count (default 1000, max 5000)
  *   SEED_ATTENDANCE_MONTHS  Months of attendance history (default 3, max 6)
- *   SEED_CLEAR            'true' → delete existing SE* seed data first
+ *   SEED_CLEAR              'true' → delete existing SE* seed data first
  */
 
 import { randomUUID } from 'node:crypto'
@@ -125,6 +129,15 @@ const COMP_IDS = {
   PF_ER:   randomUUID(),
 }
 
+// ── EAC scenario mix ───────────────────────────────────────────────────────────
+const SCENARIO = {
+  ON_NOTICE_L6:  0.08,  // 8%  of L6 employees → status: on_notice
+  ON_NOTICE_L5:  0.08,  // 8%  of L5 employees → status: on_notice
+  PROBATION_L6:  0.05,  // 5%  of L6 employees → employment_type: probation
+  NIGHT_SHIFT:   0.12,  // 12% of employees → 9 hr shifts with overtime
+  SAL_REVISION:  0.15,  // 15% of active employees → prior lower-CTC comp record
+}
+
 const ATT_TABLE = [
   { status: 'present',  work_hours: 8.0, is_payable: true,  day_fraction: 1.0, w: 80 },
   { status: 'late',     work_hours: 7.0, is_payable: true,  day_fraction: 1.0, w:  5 },
@@ -132,11 +145,21 @@ const ATT_TABLE = [
   { status: 'leave',    work_hours: 0.0, is_payable: true,  day_fraction: 1.0, w:  5 },
   { status: 'absent',   work_hours: 0.0, is_payable: false, day_fraction: 0.0, w:  5 },
 ]
-const W_TOTAL = ATT_TABLE.reduce((s, a) => s + a.w, 0)
-function pickAtt() {
-  let r = Math.random() * W_TOTAL
-  for (const a of ATT_TABLE) { r -= a.w; if (r <= 0) return a }
-  return ATT_TABLE[0]
+const ATT_TABLE_NIGHT = [
+  { status: 'present',  work_hours: 9.0, is_payable: true,  day_fraction: 1.0, w: 85 },
+  { status: 'late',     work_hours: 8.0, is_payable: true,  day_fraction: 1.0, w:  5 },
+  { status: 'half_day', work_hours: 4.5, is_payable: true,  day_fraction: 0.5, w:  3 },
+  { status: 'leave',    work_hours: 0.0, is_payable: true,  day_fraction: 1.0, w:  4 },
+  { status: 'absent',   work_hours: 0.0, is_payable: false, day_fraction: 0.0, w:  3 },
+]
+const W_TOTAL       = ATT_TABLE.reduce((s, a)       => s + a.w, 0)
+const W_TOTAL_NIGHT = ATT_TABLE_NIGHT.reduce((s, a) => s + a.w, 0)
+function pickAtt(night = false) {
+  const table = night ? ATT_TABLE_NIGHT : ATT_TABLE
+  const total = night ? W_TOTAL_NIGHT   : W_TOTAL
+  let r = Math.random() * total
+  for (const a of table) { r -= a.w; if (r <= 0) return a }
+  return table[0]
 }
 
 function buildDates(months) {
@@ -155,7 +178,7 @@ function buildDates(months) {
 // ── Main ───────────────────────────────────────────────────────────────────────
 async function main() {
   const sep = '─'.repeat(60)
-  console.log('CognixHR Enterprise Seed')
+  console.log('CognixHR Enterprise Seed — EAC Edition')
   console.log(`Tenant: ${TID}`)
   console.log(`Target: ${COUNT} employees | Attendance: ${ATT_MON} months`)
   console.log(sep)
@@ -243,12 +266,23 @@ async function main() {
     return pool[ei % pool.length]
   }
 
-  const joiningBase = new Date('2020-01-01').getTime()
+  // Pre-compute scenario cutoffs per level
+  const onNoticeCutoff = [0, 0, 0, 0,
+    Math.floor(counts[4] * SCENARIO.ON_NOTICE_L5),  // L5
+    Math.floor(counts[5] * SCENARIO.ON_NOTICE_L6),  // L6
+  ]
+  const probationCutoff = [0, 0, 0, 0, 0,
+    onNoticeCutoff[5] + Math.floor(counts[5] * SCENARIO.PROBATION_L6),
+  ]
 
-  const empRows     = []
-  const jobRows     = []
-  const compMeta    = []  // { empId, compId, ctcAnnual, basicMon, hraMon, specMon, pfMon }
-  let   seq         = 1
+  const joiningBase = new Date('2019-01-01').getTime()
+
+  const empRows    = []
+  const jobRows    = []
+  const compMeta   = []   // { empId, compId, ctcAnnual, basicMon, hraMon, specMon, pfMon, joinDate, isNightShift, isSalRevision }
+  const nightShiftIds = new Set()
+  let   seq        = 1
+  let   scenarioCounts = { onNotice: 0, probation: 0, nightShift: 0, salRevision: 0 }
 
   for (let li = 0; li < 6; li++) {
     for (let ei = 0; ei < counts[li]; ei++) {
@@ -270,14 +304,42 @@ async function main() {
       const pfMon      = r2(basicMon * 0.12)
       const specMon    = r2(ctcMon - basicMon - hraMon)
       const compId     = randomUUID()
-      const joinMs     = joiningBase + Math.random() * 4 * 365 * 86400000
+      // Backdated joining: L1-L3 execs joined 3-6 years ago; L5/L6 1-3 years ago
+      const joiningSpan = li < 3 ? 5 * 365 * 86400000 : 3 * 365 * 86400000
+      const joinMs     = joiningBase + Math.random() * joiningSpan
       const joinDate   = new Date(joinMs).toISOString().slice(0, 10)
+
+      // ── Scenario: employee status ──
+      let empStatus = 'active'
+      if ((li === 5 && ei < onNoticeCutoff[5]) || (li === 4 && ei < onNoticeCutoff[4])) {
+        empStatus = 'on_notice'
+        scenarioCounts.onNotice++
+      }
+
+      // ── Scenario: employment type ──
+      let empType
+      if (li === 0) {
+        empType = 'permanent'
+      } else if (li === 5 && ei >= onNoticeCutoff[5] && ei < probationCutoff[5]) {
+        empType = 'probation'
+        scenarioCounts.probation++
+      } else {
+        empType = pick(EMP_TYPES)
+      }
+
+      // ── Scenario: night shift (random 12%) ──
+      const isNightShift = Math.random() < SCENARIO.NIGHT_SHIFT
+      if (isNightShift) { nightShiftIds.add(id); scenarioCounts.nightShift++ }
+
+      // ── Scenario: salary revision (15% of active employees) ──
+      const isSalRevision = empStatus === 'active' && Math.random() < SCENARIO.SAL_REVISION
+      if (isSalRevision) scenarioCounts.salRevision++
 
       empRows.push({
         id, tenant_id: TID,
         employee_code: code,
         first_name: firstName, last_name: lastName, email,
-        joining_date: joinDate, status: 'active',
+        joining_date: joinDate, status: empStatus,
         work_location_id: loc.id, manager_id: mgr,
       })
 
@@ -285,12 +347,12 @@ async function main() {
         id: randomUUID(), tenant_id: TID, employee_id: id,
         department_id: subDept.id, designation_id: desig.id,
         grade_id: grade.id, work_location_id: loc.id,
-        employment_type: li === 0 ? 'permanent' : pick(EMP_TYPES),
+        employment_type: empType,
         effective_from: joinDate, is_current: true,
         reason_for_change: 'Initial Hire',
       })
 
-      compMeta.push({ empId: id, compId, ctcAnnual, basicMon, hraMon, specMon, pfMon, joinDate })
+      compMeta.push({ empId: id, compId, ctcAnnual, basicMon, hraMon, specMon, pfMon, joinDate, isSalRevision })
       seq++
     }
   }
@@ -306,25 +368,51 @@ async function main() {
   // ── 5. Compensations ──────────────────────────────────────────────────────────
   console.log('\n5. Compensations')
 
-  const compRows = compMeta.map(({ empId, compId, ctcAnnual, joinDate }) => ({
-    id: compId, tenant_id: TID, employee_id: empId,
-    salary_structure_id: null,
-    effective_from: joinDate, is_active: true,
-    ctc_annual: ctcAnnual,
-    // ctc_monthly is GENERATED — omitted intentionally
-  }))
-  await ins('employee_compensations', compRows)
-  console.log(`   employee_compensations: ${compRows.length}`)
+  // For salary-revision employees: insert a prior inactive record first, then the active one.
+  const compRows = []
+  const priorCompMeta = []  // prior (inactive) records for revision employees
 
-  const compComponents = compMeta.flatMap(({ compId, ctcAnnual, basicMon, hraMon, specMon, pfMon }) => [
+  for (const cm of compMeta) {
+    if (cm.isSalRevision) {
+      // Prior record: ~80% of current CTC, effective from join date, now inactive
+      const priorCTC     = roundCTC(cm.ctcAnnual * (0.75 + Math.random() * 0.10))
+      const priorMon     = priorCTC / 12
+      const priorBasic   = r2(priorMon * 0.40)
+      const priorHRA     = r2(priorBasic * 0.50)
+      const priorPF      = r2(priorBasic * 0.12)
+      const priorSpec    = r2(priorMon - priorBasic - priorHRA)
+      const priorId      = randomUUID()
+      // Revision effective 12-18 months after joining
+      const revisionMs   = new Date(cm.joinDate).getTime() + (365 + randInt(0, 180)) * 86400000
+      const revisionDate = new Date(revisionMs).toISOString().slice(0, 10)
+      compRows.push({ id: priorId, tenant_id: TID, employee_id: cm.empId, salary_structure_id: null, effective_from: cm.joinDate, is_active: false, ctc_annual: priorCTC })
+      priorCompMeta.push({ compId: priorId, basicMon: priorBasic, hraMon: priorHRA, specMon: priorSpec, pfMon: priorPF })
+      // Current active record is effective from revision date
+      compRows.push({ id: cm.compId, tenant_id: TID, employee_id: cm.empId, salary_structure_id: null, effective_from: revisionDate, is_active: true, ctc_annual: cm.ctcAnnual })
+    } else {
+      compRows.push({ id: cm.compId, tenant_id: TID, employee_id: cm.empId, salary_structure_id: null, effective_from: cm.joinDate, is_active: true, ctc_annual: cm.ctcAnnual })
+    }
+  }
+  await ins('employee_compensations', compRows)
+  console.log(`   employee_compensations: ${compRows.length} (incl. ${priorCompMeta.length} prior/revision records)`)
+
+  const compComponents = compMeta.flatMap(({ compId, basicMon, hraMon, specMon, pfMon }) => [
     { id: randomUUID(), tenant_id: TID, compensation_id: compId, salary_component_id: COMP_IDS.BASIC,   calculation_type: 'pct_of_ctc',   value: 40, computed_monthly: basicMon, computed_annual: r2(basicMon * 12), sequence: 1 },
     { id: randomUUID(), tenant_id: TID, compensation_id: compId, salary_component_id: COMP_IDS.HRA,     calculation_type: 'pct_of_basic', value: 50, computed_monthly: hraMon,   computed_annual: r2(hraMon * 12),   sequence: 2 },
     { id: randomUUID(), tenant_id: TID, compensation_id: compId, salary_component_id: COMP_IDS.SPECIAL, calculation_type: 'balance',      value:  0, computed_monthly: specMon,  computed_annual: r2(specMon * 12),  sequence: 3 },
     { id: randomUUID(), tenant_id: TID, compensation_id: compId, salary_component_id: COMP_IDS.PF_EE,   calculation_type: 'pct_of_basic', value: 12, computed_monthly: pfMon,    computed_annual: r2(pfMon * 12),    sequence: 4 },
     { id: randomUUID(), tenant_id: TID, compensation_id: compId, salary_component_id: COMP_IDS.PF_ER,   calculation_type: 'pct_of_basic', value: 12, computed_monthly: pfMon,    computed_annual: r2(pfMon * 12),    sequence: 5 },
   ])
-  await ins('employee_compensation_components', compComponents)
-  console.log(`   employee_compensation_components: ${compComponents.length}`)
+  // Also add components for prior (inactive) comp records
+  const priorComponents = priorCompMeta.flatMap(({ compId, basicMon, hraMon, specMon, pfMon }) => [
+    { id: randomUUID(), tenant_id: TID, compensation_id: compId, salary_component_id: COMP_IDS.BASIC,   calculation_type: 'pct_of_ctc',   value: 40, computed_monthly: basicMon, computed_annual: r2(basicMon * 12), sequence: 1 },
+    { id: randomUUID(), tenant_id: TID, compensation_id: compId, salary_component_id: COMP_IDS.HRA,     calculation_type: 'pct_of_basic', value: 50, computed_monthly: hraMon,   computed_annual: r2(hraMon * 12),   sequence: 2 },
+    { id: randomUUID(), tenant_id: TID, compensation_id: compId, salary_component_id: COMP_IDS.SPECIAL, calculation_type: 'balance',      value:  0, computed_monthly: specMon,  computed_annual: r2(specMon * 12),  sequence: 3 },
+    { id: randomUUID(), tenant_id: TID, compensation_id: compId, salary_component_id: COMP_IDS.PF_EE,   calculation_type: 'pct_of_basic', value: 12, computed_monthly: pfMon,    computed_annual: r2(pfMon * 12),    sequence: 4 },
+    { id: randomUUID(), tenant_id: TID, compensation_id: compId, salary_component_id: COMP_IDS.PF_ER,   calculation_type: 'pct_of_basic', value: 12, computed_monthly: pfMon,    computed_annual: r2(pfMon * 12),    sequence: 5 },
+  ])
+  await ins('employee_compensation_components', [...compComponents, ...priorComponents])
+  console.log(`   employee_compensation_components: ${compComponents.length + priorComponents.length}`)
 
   // ── 6. Leave balances ─────────────────────────────────────────────────────────
   console.log('\n6. Leave balances')
@@ -363,14 +451,15 @@ async function main() {
   }
 
   for (const emp of empRows) {
+    const night = nightShiftIds.has(emp.id)
     for (const date of dates) {
-      const a = pickAtt()
+      const a = pickAtt(night)
       attBuf.push({
         id: randomUUID(), tenant_id: TID, employee_id: emp.id, date,
         status: a.status, work_hours: a.work_hours,
         is_payable: a.is_payable, day_fraction: a.day_fraction,
         late_minutes:     a.status === 'late' ? randInt(5, 60) : 0,
-        overtime_minutes: 0,
+        overtime_minutes: night && a.status === 'present' ? randInt(30, 120) : 0,
         confidence_score: 100, confidence_level: 'high',
       })
     }
@@ -383,14 +472,20 @@ async function main() {
   const lvlLabels = ['L1 Exec','L2 Director','L3 Sr Manager','L4 Manager','L5 Senior','L6 Associate']
   console.log('\n' + sep)
   console.log('✓  Enterprise seed complete')
-  console.log(`   Tenant:           ${TID}`)
-  console.log(`   Employees:        ${empRows.length.toLocaleString()}`)
-  counts.forEach((n, i) => console.log(`     ${lvlLabels[i].padEnd(16)} ${n}`))
-  console.log(`   Compensations:    ${compRows.length.toLocaleString()}`)
-  console.log(`   Components:       ${compComponents.length.toLocaleString()}`)
-  console.log(`   Leave balances:   ${leaveRows.length.toLocaleString()}`)
-  console.log(`   Attendance rows:  ${attDone.toLocaleString()}`)
-  console.log(`   Date range:       ${dates[0]} → ${dates[dates.length - 1]}`)
+  console.log(`   Tenant:              ${TID}`)
+  console.log(`   Employees:           ${empRows.length.toLocaleString()}`)
+  counts.forEach((n, i) => console.log(`     ${lvlLabels[i].padEnd(18)} ${n}`))
+  console.log(`   Compensations:       ${compRows.length.toLocaleString()} (${priorCompMeta.length} revision records)`)
+  console.log(`   Components:          ${(compComponents.length + priorComponents.length).toLocaleString()}`)
+  console.log(`   Leave balances:      ${leaveRows.length.toLocaleString()}`)
+  console.log(`   Attendance rows:     ${attDone.toLocaleString()}`)
+  console.log(`   Date range:          ${dates[0]} → ${dates[dates.length - 1]}`)
+  console.log()
+  console.log('   EAC scenario mix:')
+  console.log(`     On notice:         ${scenarioCounts.onNotice}  (${(scenarioCounts.onNotice / empRows.length * 100).toFixed(1)}%)`)
+  console.log(`     Probation:         ${scenarioCounts.probation}  (${(scenarioCounts.probation / empRows.length * 100).toFixed(1)}%)`)
+  console.log(`     Night shift:       ${scenarioCounts.nightShift}  (${(scenarioCounts.nightShift / empRows.length * 100).toFixed(1)}%)`)
+  console.log(`     Salary revision:   ${scenarioCounts.salRevision}  (${(scenarioCounts.salRevision / empRows.length * 100).toFixed(1)}%)`)
   console.log()
 }
 

@@ -1,4 +1,4 @@
-# CognixHR Business Flow Certification — 5,000 Employee Edition
+# CognixHR Enterprise Acceptance Certification — 5,000 Employee Edition
 
 > **Purpose:** Prove the platform can support a complete payroll cycle for an
 > enterprise of 5,000 employees without encountering a production-blocking defect.
@@ -6,7 +6,7 @@
 > Every flow below must be executed against the seeded enterprise tenant
 > (`SEED_TENANT_ID`) and its result recorded as PASS / FAIL / BLOCKED.
 > Screenshots or API response bodies are required evidence for any PASS.
-> Any FAIL is logged in the UAT Bug Register before proceeding.
+> Any FAIL is logged in the EAC Defect Register before proceeding.
 
 ---
 
@@ -14,7 +14,7 @@
 
 - [ ] Enterprise dataset seeded: `node scripts/seed-enterprise.mjs` completed with 0 errors
 - [ ] Smoke suite green: `node scripts/smoke-test.mjs` → 5/5 probes pass
-- [ ] UAT Bug Register open: https://claude.ai/code/artifact/4c36f677-ef7b-4c24-83da-f8f4469a4203
+- [ ] EAC Defect Register open: https://claude.ai/code/artifact/4c36f677-ef7b-4c24-83da-f8f4469a4203
 - [ ] Test session logged in as HR admin user on the enterprise tenant
 
 ---
@@ -138,7 +138,7 @@
 
 ## Regression guard (after all flows)
 
-Run the following after completing all 7 flows to confirm nothing was broken by the UAT activity itself:
+Run the following after completing all 7 flows to confirm nothing was broken by the EAC activity itself:
 
 ```sh
 # 1. Smoke suite
@@ -160,8 +160,8 @@ curl -H "Authorization: Bearer $TOKEN" \
 
 ## Sign-off
 
-| Flow | Tester | Date | Result | Bug IDs |
-|------|--------|------|--------|---------|
+| Flow | Tester | Date | Result | Defect IDs |
+|------|--------|------|--------|------------|
 | Flow 1 — Onboarding | | | | |
 | Flow 2 — Attendance | | | | |
 | Flow 3 — Leave      | | | | |
@@ -172,8 +172,8 @@ curl -H "Authorization: Bearer $TOKEN" \
 | Regression guard    | | | | |
 
 **Certification verdict:**
-- [ ] **PASS** — All 7 flows completed with PASS; 0 open P0/P1 bugs; regression guard green
-- [ ] **CONDITIONAL PASS** — Flows complete; only P2/P3 open bugs; documented exceptions accepted
-- [ ] **FAIL** — One or more P0/P1 bugs blocking a flow; certification deferred
+- [ ] **PASS** — All 7 flows completed with PASS; 0 open P0/P1 defects; regression guard green
+- [ ] **CONDITIONAL PASS** — Flows complete; only P2/P3 open defects; documented exceptions accepted
+- [ ] **FAIL** — One or more P0/P1 defects blocking a flow; certification deferred
 
 Signed: ___________________________ Date: ___________
