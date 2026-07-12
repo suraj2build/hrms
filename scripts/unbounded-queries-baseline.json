@@ -1,6 +1,6 @@
 {
-  "generated": "2026-07-12T07:24:09.452Z",
-  "count": 250,
+  "generated": "2026-07-12T16:33:18.043Z",
+  "count": 248,
   "keys": [
     "apps/api/src/lib/accrual-engine.ts:89:employees",
     "apps/api/src/lib/ai/assistant-tools.ts:1074:attendance_daily",
@@ -41,8 +41,6 @@
     "apps/api/src/lib/lifecycle-expiry.ts:162:employees",
     "apps/api/src/lib/org-context.ts:291:employees",
     "apps/api/src/lib/payroll-accounting-engine.ts:605:employees",
-    "apps/api/src/lib/payroll-compensation-coverage.ts:109:employees",
-    "apps/api/src/lib/payroll-compensation-coverage.ts:146:employee_compensations",
     "apps/api/src/lib/payroll-engine.ts:508:attendance_daily",
     "apps/api/src/lib/payroll-snapshot-engine.ts:219:attendance_daily",
     "apps/api/src/lib/poll-scheduler.ts:106:employees",

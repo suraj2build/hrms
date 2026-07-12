@@ -141,6 +141,7 @@ export async function buildCompensationCoverageAudit(
   const compList: RawCompensation[] = []
   for (let i = 0; i < empIds.length; i += CHUNK) {
     const { data, error: compErr } = await supabase
+      // lint-query-ok: bounded by uidx_comp_one_active — max 1 active comp per employee, CHUNK=400 ≤ 1000 rows
       .from('employee_compensations')
       .select('id, employee_id, ctc_annual, ctc_monthly, effective_from')
       .eq('tenant_id', tenantId)
