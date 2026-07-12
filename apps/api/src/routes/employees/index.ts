@@ -192,9 +192,9 @@ export default async function employeeRoutes(fastify: FastifyInstance) {
   // GET /employees — HR admin / super_admin only
   // Employees and managers access their own or team data via scoped ESS/manager endpoints.
   fastify.get('/employees', hrAdminAuth, async (request, reply) => {
-    const { status, page = '1', limit = '100', department_id, location_id, grade_id, designation_id } =
+    const { status, page = '1', limit = '50', department_id, location_id, grade_id, designation_id, search } =
       request.query as Record<string, string>
-    const parsedLimit = Math.min(500, Math.max(1, parseInt(limit) || 100))
+    const parsedLimit = Math.min(500, Math.max(1, parseInt(limit) || 50))
     const parsedPage  = Math.max(1, parseInt(page) || 1)
     const offset      = (parsedPage - 1) * parsedLimit
 
@@ -230,6 +230,10 @@ export default async function employeeRoutes(fastify: FastifyInstance) {
 
     if (status && status !== 'all') {
       query = query.eq('status', status)
+    }
+    if (search?.trim()) {
+      const term = `%${search.trim()}%`
+      query = query.or(`first_name.ilike.${term},last_name.ilike.${term},employee_code.ilike.${term},email.ilike.${term}`)
     }
     if (restrictIds) query = query.in('id', restrictIds)
 

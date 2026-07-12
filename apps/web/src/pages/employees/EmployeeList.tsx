@@ -10,7 +10,7 @@
  * Data wired to GET /employees (enriched with job_history joins)
  */
 
-import { useState, useMemo, memo } from 'react'
+import { useState, useMemo, useEffect, useRef, memo } from 'react'
 import { useNavigate, Navigate } from 'react-router-dom'
 import { SignedImage } from '@/components/SignedImage'
 import { PageHeader } from '@/components/layout/PageHeader'
@@ -125,10 +125,12 @@ function deriveAccessDisplay(emp: EmployeeListItem): {
 
 function StatsStrip({
   employees,
+  total,
   sitesCount,
   cities,
 }: {
   employees:  EmployeeListItem[]
+  total:      number
   sitesCount: number
   cities:     number
 }) {
@@ -148,15 +150,15 @@ function StatsStrip({
       if (!e.user_account || e.user_account.status === 'no_account') noLogin++
     }
 
-    return { total: employees.length, operational, onboarding, noLogin, newThisMonth }
-  }, [employees])
+    return { total, operational, onboarding, noLogin, newThisMonth }
+  }, [employees, total])
 
   const opPct = stats.total > 0 ? Math.round((stats.operational / stats.total) * 100) : 0
 
   const cards = [
     {
       label: 'WORKFORCE',
-      value: stats.total.toString(),
+      value: stats.total.toLocaleString(),
       sub:   stats.newThisMonth > 0 ? `↑ ${stats.newThisMonth} joined this month` : 'Active roster',
       subColor: stats.newThisMonth > 0 ? '#16a34a' : 'var(--muted-foreground)',
       accent: '#10b981',
@@ -210,6 +212,16 @@ function StatsStrip({
 type SortKey = 'name' | 'code' | 'department' | 'status' | 'joining_date'
 type SortDir = 'asc' | 'desc'
 
+// ── Inline debounce hook ──────────────────────────────────────────────────────
+function useDebounce<T>(value: T, delay: number): T {
+  const [debounced, setDebounced] = useState(value)
+  useEffect(() => {
+    const t = setTimeout(() => setDebounced(value), delay)
+    return () => clearTimeout(t)
+  }, [value, delay])
+  return debounced
+}
+
 export function EmployeeList() {
   const navigate    = useNavigate()
   const basePath    = useBasePath()
@@ -226,15 +238,73 @@ export function EmployeeList() {
   const [page,         setPage]         = useState(1)
   const [selected,     setSelected]     = useState<Set<string>>(new Set())
 
-  const PAGE_SIZE = 20
+  const PAGE_SIZE     = 50
+  const debouncedSearch = useDebounce(search, 300)
+
+  // Reset page when any filter/search changes
+  const prevFiltersRef = useRef({ debouncedSearch, statusFilter, deptFilter, locFilter, accessFilter })
+  useEffect(() => {
+    const prev = prevFiltersRef.current
+    if (
+      prev.debouncedSearch !== debouncedSearch ||
+      prev.statusFilter    !== statusFilter    ||
+      prev.deptFilter      !== deptFilter      ||
+      prev.locFilter       !== locFilter       ||
+      prev.accessFilter    !== accessFilter
+    ) {
+      setPage(1)
+      prevFiltersRef.current = { debouncedSearch, statusFilter, deptFilter, locFilter, accessFilter }
+    }
+  }, [debouncedSearch, statusFilter, deptFilter, locFilter, accessFilter])
 
   // ── Queries ────────────────────────────────────────────────────────────────
 
-  const { data, isLoading } = useQuery<{ data: EmployeeListItem[]; total: number }>({
-    queryKey: ['employees', 'list'],
-    queryFn:  () => api.get('/employees?limit=200'),
+  // Build server-side query params. Status, dept, location go to the backend.
+  // Access filter is profile-level data, kept client-side.
+  const queryParams = useMemo(() => {
+    const p = new URLSearchParams({ page: String(page), limit: String(PAGE_SIZE) })
+    if (debouncedSearch.trim()) p.set('search', debouncedSearch.trim())
+    if (statusFilter !== 'all') {
+      // Map operational-state labels to DB status column values
+      const statusMap: Record<string, string> = {
+        'On Notice': 'on_notice',
+        'Inactive':  'inactive',
+        'Separated': 'separated',
+        'Operational': 'active',
+        'Probation':   'active',
+        'Onboarding':  'active',
+        'Contract':    'active',
+        'Intern':      'active',
+      }
+      const dbStatus = statusMap[statusFilter]
+      if (dbStatus) p.set('status', dbStatus)
+    }
+    if (deptFilter !== 'all') p.set('department_id', deptFilter)
+    if (locFilter  !== 'all') p.set('location_id',   locFilter)
+    return p.toString()
+  }, [page, debouncedSearch, statusFilter, deptFilter, locFilter])
+
+  const { data, isLoading, isFetching } = useQuery<{ data: EmployeeListItem[]; total: number }>({
+    queryKey: ['employees', 'list', queryParams],
+    queryFn:  () => api.get(`/employees?${queryParams}`),
     staleTime: 30_000,
-    enabled:  isAdmin,   // don't fire for non-admins (backend rejects 403 anyway)
+    enabled:  isAdmin,
+    placeholderData: (prev) => prev,  // keep previous page visible while loading next
+  })
+
+  // Separate lightweight queries for filter dropdowns — not affected by pagination
+  const { data: deptsData } = useQuery<{ data: { id: string; name: string }[] }>({
+    queryKey: ['departments'],
+    queryFn:  () => api.get('/departments'),
+    staleTime: 300_000,
+    enabled:  isAdmin,
+  })
+
+  const { data: locsData } = useQuery<{ data: { id: string; name: string; city?: string | null }[] }>({
+    queryKey: ['masters', 'work-locations'],
+    queryFn:  () => api.get('/masters/work-locations'),
+    staleTime: 300_000,
+    enabled:  isAdmin,
   })
 
   const { data: sitesData } = useQuery<{ data: Site[] }>({
@@ -243,70 +313,32 @@ export function EmployeeList() {
     staleTime: 120_000,
   })
 
-  const allEmployees = useMemo(() => data?.data ?? [], [data])
-  const sites        = sitesData?.data ?? []
+  const pageEmployees = useMemo(() => data?.data ?? [], [data])
+  const serverTotal   = data?.total ?? 0
+  const sites         = sitesData?.data ?? []
+  const departments   = deptsData?.data ?? []
+  const locations     = locsData?.data  ?? []
+  const cities        = useMemo(
+    () => new Set(locations.map(l => l.city).filter(Boolean)).size,
+    [locations],
+  )
 
-  // Unique departments + locations for filter dropdowns
-  const { departments, locations, cities } = useMemo(() => {
-    const depts = new Map<string, string>()
-    const locs  = new Map<string, string>()
-    const citySet = new Set<string>()
-    for (const e of allEmployees) {
-      if (e.department?.id) depts.set(e.department.id, e.department.name)
-      if (e.work_location?.id) {
-        locs.set(e.work_location.id, e.work_location.name)
-        if (e.work_location.city) citySet.add(e.work_location.city)
-      }
-    }
-    return {
-      departments: [...depts.entries()].map(([id, name]) => ({ id, name })),
-      locations:   [...locs.entries()].map(([id, name]) => ({ id, name })),
-      cities:      citySet.size,
-    }
-  }, [allEmployees])
-
-  // ── Filter + sort + paginate ───────────────────────────────────────────────
-
+  // Access filter is client-side (profile-level, not a backend param)
   const filtered = useMemo(() => {
-    let arr = allEmployees
+    if (accessFilter === 'all') return pageEmployees
+    return pageEmployees.filter(e => (e.user_account?.status ?? 'no_account') === accessFilter)
+  }, [pageEmployees, accessFilter])
 
-    if (statusFilter !== 'all') {
-      // Map filter value to operational state label
-      arr = arr.filter(e => {
-        const op = deriveOpState(e)
-        return op.label.toLowerCase() === statusFilter.toLowerCase()
-      })
-    }
-
-    if (accessFilter !== 'all') {
-      arr = arr.filter(e => (e.user_account?.status ?? 'no_account') === accessFilter)
-    }
-
-    if (deptFilter !== 'all') {
-      arr = arr.filter(e => e.department?.id === deptFilter)
-    }
-
-    if (locFilter !== 'all') {
-      arr = arr.filter(e => e.work_location?.id === locFilter)
-    }
-
-    if (search.trim()) {
-      const q = search.toLowerCase()
-      arr = arr.filter(e =>
-        `${e.first_name} ${e.last_name}`.toLowerCase().includes(q) ||
-        e.employee_code.toLowerCase().includes(q) ||
-        e.email.toLowerCase().includes(q) ||
-        (e.department?.name.toLowerCase().includes(q) ?? false) ||
-        (e.designation?.name.toLowerCase().includes(q) ?? false) ||
-        (e.work_location?.name.toLowerCase().includes(q) ?? false),
-      )
-    }
-
-    return arr
-  }, [allEmployees, statusFilter, accessFilter, deptFilter, locFilter, search])
+  // For operational-state status labels that all map to DB 'active', further
+  // narrow client-side within the returned page.
+  const statusNarrow = useMemo(() => {
+    const activeLabels = new Set(['Operational', 'Probation', 'Onboarding', 'Contract', 'Intern'])
+    if (!activeLabels.has(statusFilter)) return filtered
+    return filtered.filter(e => deriveOpState(e).label === statusFilter)
+  }, [filtered, statusFilter])
 
   const sorted = useMemo(() => {
-    const arr = [...filtered]
+    const arr = [...statusNarrow]
     const dir = sortDir === 'asc' ? 1 : -1
     arr.sort((a, b) => {
       switch (sortKey) {
@@ -324,15 +356,15 @@ export function EmployeeList() {
       }
     })
     return arr
-  }, [filtered, sortKey, sortDir])
+  }, [statusNarrow, sortKey, sortDir])
 
   const selectedEmails = useMemo(
-    () => allEmployees.filter(e => selected.has(e.id)).map(e => e.email),
-    [allEmployees, selected],
+    () => pageEmployees.filter(e => selected.has(e.id)).map(e => e.email),
+    [pageEmployees, selected],
   )
 
-  const totalPages   = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE))
-  const pageItems    = sorted.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
+  const totalPages   = Math.max(1, Math.ceil(serverTotal / PAGE_SIZE))
+  const pageItems    = sorted
   const allPageIds   = pageItems.map(e => e.id)
   const allSelected  = allPageIds.length > 0 && allPageIds.every(id => selected.has(id))
   const someSelected = allPageIds.some(id => selected.has(id)) && !allSelected
@@ -398,7 +430,7 @@ export function EmployeeList() {
         <div style={{ marginBottom: 20 }}>
           <PageHeader
             title="People Operations"
-            subtitle={`Live workforce operational stream — ${allEmployees.length} people across ${sites.length} site${sites.length !== 1 ? 's' : ''}`}
+            subtitle={`Live workforce operational stream — ${serverTotal} people across ${sites.length} site${sites.length !== 1 ? 's' : ''}`}
             actions={
               <>
                 <span style={{
@@ -434,7 +466,7 @@ export function EmployeeList() {
 
         {/* ── Stats strip ──────────────────────────────────────────────────── */}
         <div style={{ marginBottom: 20 }}>
-          <StatsStrip employees={allEmployees} sitesCount={sites.length} cities={cities} />
+          <StatsStrip employees={pageEmployees} total={serverTotal} sitesCount={sites.length} cities={cities} />
         </div>
 
         {/* ── Toolbar ──────────────────────────────────────────────────────── */}
@@ -484,7 +516,7 @@ export function EmployeeList() {
               label: 'Dept', value: deptFilter,
               options: [
                 { v: 'all', l: 'Dept' },
-                ...departments.map(d => ({ v: d.id, l: d.name })),
+                ...[...departments].sort((a, b) => a.name.localeCompare(b.name)).map(d => ({ v: d.id, l: d.name })),
               ],
               onChange: (v: string) => { setDeptFilter(v); setPage(1) },
             },
@@ -492,7 +524,7 @@ export function EmployeeList() {
               label: 'Location', value: locFilter,
               options: [
                 { v: 'all', l: 'Location' },
-                ...locations.map(l => ({ v: l.id, l: l.name })),
+                ...[...locations].sort((a, b) => a.name.localeCompare(b.name)).map(l => ({ v: l.id, l: l.name })),
               ],
               onChange: (v: string) => { setLocFilter(v); setPage(1) },
             },
@@ -514,7 +546,10 @@ export function EmployeeList() {
           {/* Right: count + view toggle */}
           <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 12 }}>
             <span style={{ fontSize: 12.5, color: 'var(--muted-foreground)', fontWeight: 500, whiteSpace: 'nowrap' }}>
-              {sorted.length} of {allEmployees.length} people
+              {isFetching && !isLoading
+                ? <span style={{ opacity: .6 }}>Loading…</span>
+                : <>{serverTotal.toLocaleString()} people · page {page} of {totalPages}</>
+              }
             </span>
             <div style={{ display: 'flex', border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden' }}>
               {[
@@ -602,7 +637,7 @@ export function EmployeeList() {
         {totalPages > 1 && (
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 16 }}>
             <span style={{ fontSize: 12, color: 'var(--muted-foreground)' }}>
-              Page {page} of {totalPages} · {sorted.length} results
+              Page {page} of {totalPages} · {serverTotal.toLocaleString()} total employees
             </span>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               <PageBtn disabled={page === 1} onClick={() => setPage(p => p - 1)}>
