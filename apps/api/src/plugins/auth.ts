@@ -85,26 +85,32 @@ const authPlugin: FastifyPluginAsync = async (fastify) => {
       // Check cache first
       const cached = profileCache.get(userId)
       if (cached && cached.expiresAt > Date.now()) {
-        // Role/tenantId are stable for the full CACHE_TTL, but is_active can change
-        // at any moment (admin deactivates account). Re-check it from DB every
-        // IS_ACTIVE_TTL (60 s) so the deactivation → block window stays tight. (ISSUE-023)
-        let isActive = cached.isActive
-        if (cached.isActiveCheckedAt + IS_ACTIVE_TTL < Date.now()) {
-          const { data: freshProfile } = await fastify.supabase
-            .from('profiles')
-            .select('is_active')
-            .eq('id', userId)
-            .single()
-          isActive = (freshProfile as any)?.is_active ?? false
-          profileCache.set(userId, { ...cached, isActive, isActiveCheckedAt: Date.now() })
+        // Evict and re-check any cached demo-tenant entry so the block takes
+        // effect immediately without waiting for the 5-minute CACHE_TTL to expire.
+        if (cached.tenantId === 'd0000000-0000-0000-0000-000000000001') {
+          profileCache.delete(userId)
+        } else {
+          // Role/tenantId are stable for the full CACHE_TTL, but is_active can change
+          // at any moment (admin deactivates account). Re-check it from DB every
+          // IS_ACTIVE_TTL (60 s) so the deactivation → block window stays tight. (ISSUE-023)
+          let isActive = cached.isActive
+          if (cached.isActiveCheckedAt + IS_ACTIVE_TTL < Date.now()) {
+            const { data: freshProfile } = await fastify.supabase
+              .from('profiles')
+              .select('is_active')
+              .eq('id', userId)
+              .single()
+            isActive = (freshProfile as any)?.is_active ?? false
+            profileCache.set(userId, { ...cached, isActive, isActiveCheckedAt: Date.now() })
+          }
+          if (!isActive) {
+            return reply.code(401).send({ error: 'Unauthorized', message: 'Account is deactivated' })
+          }
+          request.tenantId   = cached.tenantId
+          request.userRole   = cached.role
+          request.employeeId = cached.employeeId
+          return
         }
-        if (!isActive) {
-          return reply.code(401).send({ error: 'Unauthorized', message: 'Account is deactivated' })
-        }
-        request.tenantId   = cached.tenantId
-        request.userRole   = cached.role
-        request.employeeId = cached.employeeId
-        return
       }
 
       // Cache miss — one DB lookup
@@ -125,6 +131,16 @@ const authPlugin: FastifyPluginAsync = async (fastify) => {
         return reply.code(403).send({
           error:   'NO_TENANT',
           message: 'This account is not linked to a tenant workspace.',
+        })
+      }
+
+      // Demo tenant is blocked — the public demo login was disabled due to data
+      // exposure. Reject all API requests from the demo tenant at the auth layer
+      // so no data is served even if someone holds a valid demo session token.
+      if (profile.tenant_id === 'd0000000-0000-0000-0000-000000000001') {
+        return reply.code(403).send({
+          error:   'DEMO_DISABLED',
+          message: 'The demo environment is temporarily unavailable.',
         })
       }
 

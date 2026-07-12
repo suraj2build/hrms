@@ -562,38 +562,13 @@ function AuthProvider({ children }: { children: React.ReactNode }) {
       },
     )
 
-    // ── DEMO LIVE — auto sign-in to the seeded "Demo" tenant against the REAL
-    // API (not the resolver). Gated STRICTLY behind the build flag
-    // VITE_DEMO_LOGIN=true so it is impossible to trigger on production.
-    //
-    // SECURITY: a previous version also accepted a `?demo-login` URL param on
-    // ANY deployment, which let a visitor auto-login to the seeded demo account
-    // on the real production portal — an unauthenticated login path. That URL
-    // trigger has been removed. Demo deployments must set VITE_DEMO_LOGIN=true;
-    // the optional `?demo-login` param now only acts WITHIN such a build.
-    const demoLoginEnabled = import.meta.env.VITE_DEMO_LOGIN === 'true'
-    const wantsDemoLogin = demoLoginEnabled
-    if (wantsDemoLogin) {
-      const demoEmail    = (import.meta.env.VITE_DEMO_EMAIL as string)    || 'demo@cognixhr.app'
-      const demoPassword = (import.meta.env.VITE_DEMO_PASSWORD as string) || 'CognixDemo!1'
-      // Robust auto-login: a stored session may be DEAD — e.g. its refresh token
-      // belongs to a demo auth user that a re-seed rebuilt. Trusting it leaves the
-      // app stuck on "Invalid token". So validate any existing session and, if it
-      // fails, drop it and sign in fresh.
-      const ensureDemoSession = async () => {
-        const { data } = await supabase.auth.getSession()
-        if (data.session) {
-          const { error } = await supabase.auth.getUser()
-          if (!error) return                    // session is valid — nothing to do
-          await supabase.auth.signOut().catch(() => {})  // discard the dead session
-        }
-        const { error: signInError } = await supabase.auth.signInWithPassword({
-          email: demoEmail, password: demoPassword,
-        })
-        if (signInError) console.warn('[demo-login] sign-in failed:', signInError.message)
-      }
-      void ensureDemoSession()
-    }
+    // ── DEMO LIVE — DISABLED (data exposure risk)
+    // Auto sign-in was disabled because the demo account had access to real
+    // tenant data. Re-enable only after isolating the demo tenant to fixture-only
+    // data and confirming no production data is reachable.
+    // Original gate was: VITE_DEMO_LOGIN=true build flag.
+    const demoLoginEnabled = false
+    void demoLoginEnabled  // suppress unused-variable lint
 
     return () => subscription.unsubscribe()
   }, [setProfile, setTenant, setLoading, setAccessToken, setBootstrapping])
