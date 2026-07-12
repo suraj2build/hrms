@@ -104,6 +104,46 @@ These will be revisited after launch, based on observed employee behavior.
 
 ---
 
+## API error responses — UNIVERSAL RULE
+
+**NEVER use raw `reply.code(N).send({ error: '...', message: error.message })` in API routes.**  
+DB error messages (PostgREST, Supabase) contain table names, constraint names, and query details — they must never reach clients. Use the typed helpers from `apps/api/src/lib/api-errors.ts` instead.
+
+```ts
+import { serverError, notFound, forbidden, validationError, conflictError, ErrorCode } from '../../lib/api-errors.js'
+
+// 500 — DB error: the raw `error` object is logged server-side only; message is a safe string
+if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch employees')
+
+// 404
+if (!data) return notFound(reply, 'EMPLOYEE_NOT_FOUND', 'Employee not found')
+
+// 403
+if (!isAllowed) return forbidden(reply, 'FORBIDDEN', 'HR admin access required')
+
+// 400 (validation)
+if (!parsed.success) return validationError(reply, ErrorCode.VALIDATION_ERROR, parsed.error.issues[0].message)
+
+// 409 (conflict)
+return conflictError(reply, 'ALREADY_EXISTS', 'A record already exists')
+```
+
+**ErrorCode mapping by operation:**
+- SELECT / GET / fetch → `ErrorCode.QUERY_FAILED`
+- INSERT → `ErrorCode.INSERT_FAILED`
+- UPDATE / upsert → `ErrorCode.UPDATE_FAILED`
+- DELETE → `ErrorCode.DELETE_FAILED`
+- Engine / computation errors → `ErrorCode.COMPUTE_FAILED`
+
+**`serverError()` logs automatically** (structured, with requestId/tenantId/userId context). If there's a `req.log.error(...)` immediately before a `reply.code(500)`, remove the manual log — it would double-log.
+
+**No helpers for 422 or 503** — leave those as `reply.code(422).send(...)` / `reply.code(503).send(...)`.
+
+**CI enforces this** via `scripts/check-manual-500s.mjs` (ratchet: count of raw `reply.code(500)` may only decrease) and `scripts/check-console-error.mjs` (ratchet: console.error may only decrease).  
+Update baselines after a batch conversion: `node scripts/check-manual-500s.mjs --update`.
+
+---
+
 ## Tenant licensing — the contract HRMS depends on
 
 Tenant licensing is owned by the **owner portal** (a separate deployment,

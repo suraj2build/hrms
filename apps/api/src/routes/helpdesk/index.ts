@@ -16,6 +16,7 @@ import { logAction } from '../../lib/audit-service.js'
 import { resolveAssistantChain } from '../../lib/ai/config.js'
 import { chatCompleteWithFallback } from '../../lib/ai/llm.js'
 import { WhatsAppProvider } from '../../lib/whatsapp-provider.js'
+import { serverError, notFound, forbidden, validationError, conflictError, ErrorCode } from '../../lib/api-errors.js'
 
 // Default SLA windows by priority (used when no tenant policy row exists).
 // Response = time to first HR reply; Resolution = time to resolve/close.
@@ -141,7 +142,7 @@ export default async function helpdeskRoutes(fastify: FastifyInstance) {
   // GET /helpdesk/tickets/my?status=open
   fastify.get('/tickets/my', auth, async (req: any, reply) => {
     const employeeId = await resolveCallerEmployeeId(fastify, req.userId, req.tenantId)
-    if (!employeeId) return reply.code(403).send({ error: 'PROFILE_NOT_LINKED', message: 'Your profile is not linked to an employee record' })
+    if (!employeeId) return forbidden(reply, 'PROFILE_NOT_LINKED', 'Your profile is not linked to an employee record')
 
     const qs = z.object({
       status: z.string().optional(),
@@ -171,14 +172,14 @@ export default async function helpdeskRoutes(fastify: FastifyInstance) {
     q = q.range(offset, offset + limit - 1)
 
     const [{ data, count, error }, { count: openCount }] = await Promise.all([q, openCountQ])
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch tickets')
     return reply.send({ data: data ?? [], total: count ?? 0, open_count: openCount ?? 0, limit, offset })
   })
 
   // POST /helpdesk/tickets — employee creates a ticket
   fastify.post('/tickets', auth, async (req: any, reply) => {
     const employeeId = await resolveCallerEmployeeId(fastify, req.userId, req.tenantId)
-    if (!employeeId) return reply.code(403).send({ error: 'PROFILE_NOT_LINKED', message: 'Your profile is not linked to an employee record' })
+    if (!employeeId) return forbidden(reply, 'PROFILE_NOT_LINKED', 'Your profile is not linked to an employee record')
 
     const schema = z.object({
       subject:     z.string().min(3).max(200),
@@ -187,7 +188,7 @@ export default async function helpdeskRoutes(fastify: FastifyInstance) {
       priority:    z.enum(PRIORITIES).default('medium'),
     })
     const parsed = schema.safeParse(req.body)
-    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+    if (!parsed.success) return validationError(reply, 'VALIDATION_ERROR', parsed.error.issues[0]?.message ?? 'Validation failed')
 
     // AI category detection
     const aiResult = detectCategory(
@@ -228,7 +229,7 @@ export default async function helpdeskRoutes(fastify: FastifyInstance) {
       .select()
       .single()
 
-    if (error) return reply.code(500).send({ error: 'INSERT_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create ticket')
 
     const ticketId     = (data as any).id
     const ticketNumber = (data as any).ticket_number ?? ticketId.slice(0, 8).toUpperCase()
@@ -298,13 +299,13 @@ export default async function helpdeskRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', req.tenantId)
       .maybeSingle()
 
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
-    if (!ticket) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Ticket not found' })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch ticket')
+    if (!ticket) return notFound(reply, 'NOT_FOUND', 'Ticket not found')
 
     if (!isHr) {
       const employeeId = await resolveCallerEmployeeId(fastify, req.userId, req.tenantId)
       if ((ticket as any).employee_id !== employeeId) {
-        return reply.code(403).send({ error: 'FORBIDDEN', message: 'You can only view your own tickets' })
+        return forbidden(reply, 'FORBIDDEN', 'You can only view your own tickets')
       }
     }
 
@@ -333,7 +334,7 @@ export default async function helpdeskRoutes(fastify: FastifyInstance) {
       is_internal: z.boolean().optional(),
     })
     const parsed = schema.safeParse(req.body)
-    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+    if (!parsed.success) return validationError(reply, 'VALIDATION_ERROR', parsed.error.issues[0]?.message ?? 'Validation failed')
 
     const { data: ticket } = await fastify.supabase
       .from('helpdesk_tickets')
@@ -342,11 +343,11 @@ export default async function helpdeskRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', req.tenantId)
       .maybeSingle()
 
-    if (!ticket) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Ticket not found' })
+    if (!ticket) return notFound(reply, 'NOT_FOUND', 'Ticket not found')
 
     const employeeId = isHr ? null : await resolveCallerEmployeeId(fastify, req.userId, req.tenantId)
     if (!isHr && (ticket as any).employee_id !== employeeId) {
-      return reply.code(403).send({ error: 'FORBIDDEN', message: 'You can only comment on your own tickets' })
+      return forbidden(reply, 'FORBIDDEN', 'You can only comment on your own tickets')
     }
 
     // Only HR may post internal notes.
@@ -365,7 +366,7 @@ export default async function helpdeskRoutes(fastify: FastifyInstance) {
       .select('id, author_id, author_role, body, is_internal, created_at')
       .single()
 
-    if (error) return reply.code(500).send({ error: 'INSERT_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to add comment')
 
     // Status transitions on reply + first-response capture (HR public reply).
     const patch: Record<string, any> = {}
@@ -436,7 +437,7 @@ export default async function helpdeskRoutes(fastify: FastifyInstance) {
     }).safeParse(req.query)
 
     if (!qs.success) {
-      return reply.code(400).send({ error: 'VALIDATION_ERROR', message: qs.error.issues[0]?.message })
+      return validationError(reply, 'VALIDATION_ERROR', qs.error.issues[0]?.message ?? 'Validation failed')
     }
 
     const { page, limit, ...f } = qs.data
@@ -460,7 +461,7 @@ export default async function helpdeskRoutes(fastify: FastifyInstance) {
     else if (f.assigned_to)                 q = q.eq('assigned_to', f.assigned_to)
 
     const { data, count, error } = await q
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch tickets')
     return reply.send({ data: data ?? [], total: count ?? 0, page, limit, pages: Math.ceil((count ?? 0) / limit) })
   })
 
@@ -482,7 +483,7 @@ export default async function helpdeskRoutes(fastify: FastifyInstance) {
     ])
 
     const fetchErr = totalRes.error ?? openRes.error ?? breachedRes.error ?? resBreachedRes.error ?? statusRes.error
-    if (fetchErr) return reply.code(500).send({ error: 'DB_ERROR', message: fetchErr.message })
+    if (fetchErr) return serverError(req, reply, fetchErr, ErrorCode.QUERY_FAILED, 'Failed to fetch stats')
 
     const byStatus: Record<string, number> = {}
     for (const r of (statusRes.data ?? []) as { status: string }[]) {
@@ -505,7 +506,7 @@ export default async function helpdeskRoutes(fastify: FastifyInstance) {
     const { id } = req.params as { id: string }
     const schema = z.object({ assigned_to: z.string().uuid().nullable() })
     const parsed = schema.safeParse(req.body)
-    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+    if (!parsed.success) return validationError(reply, 'VALIDATION_ERROR', parsed.error.issues[0]?.message ?? 'Validation failed')
 
     const { data, error } = await fastify.supabase
       .from('helpdesk_tickets')
@@ -515,7 +516,7 @@ export default async function helpdeskRoutes(fastify: FastifyInstance) {
       .select()
       .single()
 
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to assign ticket')
 
     await logAction(fastify.supabase, {
       tenantId:    req.tenantId,
@@ -554,7 +555,7 @@ export default async function helpdeskRoutes(fastify: FastifyInstance) {
       resolution_note: z.string().max(5000).optional(),
     })
     const parsed = schema.safeParse(req.body)
-    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+    if (!parsed.success) return validationError(reply, 'VALIDATION_ERROR', parsed.error.issues[0]?.message ?? 'Validation failed')
 
     const { data: ticket } = await fastify.supabase
       .from('helpdesk_tickets')
@@ -562,7 +563,7 @@ export default async function helpdeskRoutes(fastify: FastifyInstance) {
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
       .maybeSingle()
-    if (!ticket) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Ticket not found' })
+    if (!ticket) return notFound(reply, 'NOT_FOUND', 'Ticket not found')
 
     const now = new Date().toISOString()
     const patch: Record<string, any> = { status: parsed.data.status }
@@ -578,7 +579,7 @@ export default async function helpdeskRoutes(fastify: FastifyInstance) {
       .select()
       .single()
 
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update ticket status')
 
     await logAction(fastify.supabase, {
       tenantId:    req.tenantId,
@@ -623,7 +624,7 @@ export default async function helpdeskRoutes(fastify: FastifyInstance) {
       .in('role', ['super_admin', 'hr_admin'])
       .order('full_name', { ascending: true })
 
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch agents')
     return reply.send({ data: data ?? [] })
   })
 
@@ -657,7 +658,7 @@ export default async function helpdeskRoutes(fastify: FastifyInstance) {
       })).min(1),
     })
     const parsed = schema.safeParse(req.body)
-    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+    if (!parsed.success) return validationError(reply, 'VALIDATION_ERROR', parsed.error.issues[0]?.message ?? 'Validation failed')
 
     const rows = parsed.data.policies.map(p => ({
       tenant_id:        req.tenantId,
@@ -672,7 +673,7 @@ export default async function helpdeskRoutes(fastify: FastifyInstance) {
       .from('helpdesk_sla_policies')
       .upsert(rows, { onConflict: 'tenant_id,priority' })
 
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update SLA policies')
 
     await logAction(fastify.supabase, {
       tenantId:    req.tenantId,
@@ -695,10 +696,10 @@ export default async function helpdeskRoutes(fastify: FastifyInstance) {
       comment: z.string().max(1000).optional(),
     })
     const parsed = schema.safeParse(req.body)
-    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+    if (!parsed.success) return validationError(reply, 'VALIDATION_ERROR', parsed.error.issues[0]?.message ?? 'Validation failed')
 
     const employeeId = await resolveCallerEmployeeId(fastify, req.userId, req.tenantId)
-    if (!employeeId) return reply.code(403).send({ error: 'PROFILE_NOT_LINKED' })
+    if (!employeeId) return forbidden(reply, 'PROFILE_NOT_LINKED')
 
     const { data: ticket } = await fastify.supabase
       .from('helpdesk_tickets')
@@ -707,10 +708,10 @@ export default async function helpdeskRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', req.tenantId)
       .maybeSingle()
 
-    if (!ticket) return reply.code(404).send({ error: 'NOT_FOUND' })
-    if ((ticket as any).employee_id !== employeeId) return reply.code(403).send({ error: 'FORBIDDEN' })
+    if (!ticket) return notFound(reply, 'NOT_FOUND')
+    if ((ticket as any).employee_id !== employeeId) return forbidden(reply, 'FORBIDDEN')
     if (!['resolved', 'closed'].includes((ticket as any).status)) return reply.code(422).send({ error: 'NOT_RESOLVED', message: 'CSAT is only available after resolution' })
-    if ((ticket as any).csat_submitted_at) return reply.code(409).send({ error: 'ALREADY_RATED', message: 'You already rated this ticket' })
+    if ((ticket as any).csat_submitted_at) return conflictError(reply, 'ALREADY_RATED', 'You already rated this ticket')
 
     const { error } = await fastify.supabase
       .from('helpdesk_tickets')
@@ -718,7 +719,7 @@ export default async function helpdeskRoutes(fastify: FastifyInstance) {
       .eq('id', req.params.id)
       .eq('tenant_id', req.tenantId)
 
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to submit CSAT rating')
     return reply.code(201).send({ success: true })
   })
 
@@ -736,7 +737,7 @@ export default async function helpdeskRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', req.tenantId)
       .maybeSingle()
 
-    if (!ticket) return reply.code(404).send({ error: 'NOT_FOUND' })
+    if (!ticket) return notFound(reply, 'NOT_FOUND')
 
     const t = ticket as any
     const publicThread = (t.comments ?? [])
@@ -786,7 +787,7 @@ Write a helpful, professional HR reply to address the employee's concern:`
       resolution_note: z.string().max(5000).optional(),
     })
     const parsed = schema.safeParse(req.body)
-    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+    if (!parsed.success) return validationError(reply, 'VALIDATION_ERROR', parsed.error.issues[0]?.message ?? 'Validation failed')
 
     const now  = new Date().toISOString()
     const patch: Record<string, any> = { status: parsed.data.status }
@@ -801,7 +802,7 @@ Write a helpful, professional HR reply to address the employee's concern:`
       .eq('tenant_id', req.tenantId)
       .select('id')
 
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update ticket statuses')
 
     await logAction(fastify.supabase, {
       tenantId:    req.tenantId,
@@ -821,7 +822,7 @@ Write a helpful, professional HR reply to address the employee's concern:`
   fastify.post('/tickets/:id/merge', hrAdminAuth, async (req: any, reply) => {
     const schema = z.object({ merge_into: z.string().uuid() })
     const parsed = schema.safeParse(req.body)
-    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+    if (!parsed.success) return validationError(reply, 'VALIDATION_ERROR', parsed.error.issues[0]?.message ?? 'Validation failed')
     if (parsed.data.merge_into === req.params.id) return reply.code(422).send({ error: 'SELF_MERGE' })
 
     const { data: target } = await fastify.supabase
@@ -831,7 +832,7 @@ Write a helpful, professional HR reply to address the employee's concern:`
       .eq('tenant_id', req.tenantId)
       .maybeSingle()
 
-    if (!target) return reply.code(404).send({ error: 'TARGET_NOT_FOUND' })
+    if (!target) return notFound(reply, 'TARGET_NOT_FOUND')
 
     const { error } = await fastify.supabase
       .from('helpdesk_tickets')
@@ -839,7 +840,7 @@ Write a helpful, professional HR reply to address the employee's concern:`
       .eq('id', req.params.id)
       .eq('tenant_id', req.tenantId)
 
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to merge ticket')
 
     // Add a system note on the target ticket
     await fastify.supabase.from('helpdesk_ticket_comments').insert({
@@ -892,7 +893,7 @@ Write a helpful, professional HR reply to address the employee's concern:`
   fastify.post('/tickets/:id/rate', auth, async (req: any, reply) => {
     const { id } = req.params as { id: string }
     const { rating, comment } = req.body as { rating: number; comment?: string }
-    if (!rating || rating < 1 || rating > 5) return reply.status(400).send({ error: 'rating must be 1-5' })
+    if (!rating || rating < 1 || rating > 5) return validationError(reply, 'VALIDATION_ERROR', 'rating must be 1-5')
     const tenantId = req.tenantId
     // Verify ticket belongs to this tenant and is resolved
     const { data: ticket } = await fastify.supabase
@@ -901,8 +902,8 @@ Write a helpful, professional HR reply to address the employee's concern:`
       .eq('id', id)
       .eq('tenant_id', tenantId)
       .single()
-    if (!ticket) return reply.status(404).send({ error: 'Ticket not found' })
-    if ((ticket as any).status !== 'resolved') return reply.status(400).send({ error: 'Can only rate resolved tickets' })
+    if (!ticket) return notFound(reply, 'NOT_FOUND', 'Ticket not found')
+    if ((ticket as any).status !== 'resolved') return validationError(reply, 'INVALID_STATE', 'Can only rate resolved tickets')
     const { error } = await fastify.supabase
       .from('helpdesk_tickets')
       .update({
@@ -912,7 +913,7 @@ Write a helpful, professional HR reply to address the employee's concern:`
       })
       .eq('id', id)
       .eq('tenant_id', tenantId)
-    if (error) return reply.status(500).send({ error: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to rate ticket')
     return reply.send({ data: { rated: true } })
   })
 
@@ -984,7 +985,7 @@ Write a helpful, professional HR reply to address the employee's concern:`
       .eq('tenant_id', req.tenantId)
       .order('category', { ascending: true })
 
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch category SLA policies')
     return reply.send({ data: data ?? [] })
   })
 
@@ -997,7 +998,7 @@ Write a helpful, professional HR reply to address the employee's concern:`
       resolution_hours: z.number().int().min(1).max(2160),
     })
     const parsed = schema.safeParse(req.body)
-    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+    if (!parsed.success) return validationError(reply, 'VALIDATION_ERROR', parsed.error.issues[0]?.message ?? 'Validation failed')
 
     const { error } = await fastify.supabase
       .from('helpdesk_category_sla')
@@ -1012,7 +1013,7 @@ Write a helpful, professional HR reply to address the employee's concern:`
         { onConflict: 'tenant_id,category' },
       )
 
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update category SLA')
 
     await logAction(fastify.supabase, {
       tenantId:    req.tenantId,
@@ -1034,7 +1035,7 @@ Write a helpful, professional HR reply to address the employee's concern:`
     const { data: ticket } = await fastify.supabase
       .from('helpdesk_tickets').select('category, subject, description')
       .eq('id', id).eq('tenant_id', req.tenantId).maybeSingle()
-    if (!ticket) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Ticket not found' })
+    if (!ticket) return notFound(reply, 'NOT_FOUND', 'Ticket not found')
 
     const { data: similar } = await fastify.supabase
       .from('helpdesk_tickets')
@@ -1074,11 +1075,11 @@ Write a helpful, professional HR reply to address the employee's concern:`
       .select('id, subject, description, resolution_note, status, kb_promoted')
       .eq('id', id).eq('tenant_id', req.tenantId).maybeSingle()
 
-    if (!ticket) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Ticket not found' })
+    if (!ticket) return notFound(reply, 'NOT_FOUND', 'Ticket not found')
     if ((ticket as any).status !== 'resolved' && (ticket as any).status !== 'closed')
-      return reply.code(400).send({ error: 'INVALID_STATE', message: 'Only resolved tickets can be promoted to KB' })
+      return validationError(reply, 'INVALID_STATE', 'Only resolved tickets can be promoted to KB')
     if ((ticket as any).kb_promoted)
-      return reply.code(409).send({ error: 'ALREADY_PROMOTED', message: 'Ticket already promoted to KB' })
+      return conflictError(reply, 'ALREADY_PROMOTED', 'Ticket already promoted to KB')
 
     let kbSummary = (ticket as any).resolution_note ?? ''
     try {
@@ -1117,7 +1118,7 @@ Write a helpful, professional HR reply to address the employee's concern:`
     const { data, error } = await fastify.supabase
       .from('helpdesk_escalation_matrix').select('*')
       .eq('tenant_id', req.tenantId).order('category').order('level')
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch escalation matrix')
     return reply.send({ data: data ?? [] })
   })
 
@@ -1129,14 +1130,14 @@ Write a helpful, professional HR reply to address the employee's concern:`
       notify_after_hours: z.number().int().min(1).default(24),
     })
     const parsed = schema.safeParse(req.body)
-    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+    if (!parsed.success) return validationError(reply, 'VALIDATION_ERROR', parsed.error.issues[0]?.message ?? 'Validation failed')
 
     const { error } = await fastify.supabase.from('helpdesk_escalation_matrix').upsert({
       tenant_id:          req.tenantId,
       ...parsed.data,
     }, { onConflict: 'tenant_id,category,level' })
 
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update escalation matrix')
     return reply.send({ data: { updated: true } })
   })
 }

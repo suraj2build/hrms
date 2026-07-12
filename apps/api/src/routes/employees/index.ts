@@ -4,6 +4,7 @@ import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { logAction } from '../../lib/audit-service.js'
 import { EventType, MODULE } from '../../platform/events/index.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
+import { serverError, notFound, forbidden, validationError, conflictError, ErrorCode } from '../../lib/api-errors.js'
 
 // NOTE: After migration 016 (lean employees), the following columns were removed
 // from the employees table and relocated to dedicated sub-tables:
@@ -39,7 +40,7 @@ export default async function employeeRoutes(fastify: FastifyInstance) {
 
     const parsed = searchSchema.safeParse(request.query)
     if (!parsed.success) {
-      return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+      return validationError(reply, ErrorCode.VALIDATION_ERROR, parsed.error.issues[0]?.message ?? 'Validation failed')
     }
 
     const { q, limit } = parsed.data
@@ -61,7 +62,7 @@ export default async function employeeRoutes(fastify: FastifyInstance) {
     const { data, error } = await query
 
     if (error) {
-      return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+      return serverError(request, reply, error, ErrorCode.QUERY_FAILED, 'Failed to search employees')
     }
 
     // Enrich with current department from job_history for the sublabel
@@ -113,7 +114,7 @@ export default async function employeeRoutes(fastify: FastifyInstance) {
           .range(from, to),
       )
     } catch (error: any) {
-      return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+      return serverError(request, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch org tree')
     }
 
     const rows = emps as any[]
@@ -212,7 +213,7 @@ export default async function employeeRoutes(fastify: FastifyInstance) {
       if (designation_id) jhq = jhq.eq('designation_id', designation_id)
       if (grade_id)       jhq = jhq.eq('grade_id', grade_id)
       const { data: jhRows, error: jhErr } = await jhq
-      if (jhErr) return reply.code(500).send({ error: 'DB_ERROR', message: jhErr.message })
+      if (jhErr) return serverError(request, reply, jhErr, ErrorCode.QUERY_FAILED, 'Failed to filter by job history')
       restrictIds = (jhRows ?? []).map((r: any) => r.employee_id as string)
       if (restrictIds.length === 0) return reply.send({ data: [], total: 0 })
     }
@@ -233,7 +234,7 @@ export default async function employeeRoutes(fastify: FastifyInstance) {
     if (restrictIds) query = query.in('id', restrictIds)
 
     const { data, error, count } = await query
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(request, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch employees')
 
     const rows = data ?? []
     if (rows.length === 0) return reply.send({ data: [], total: 0 })
@@ -325,7 +326,7 @@ export default async function employeeRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', request.tenantId)
       .single()
 
-    if (error) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Employee not found' })
+    if (error) return notFound(reply, 'EMPLOYEE_NOT_FOUND', 'Employee not found')
 
     return reply.send(data)
   })
@@ -334,14 +335,14 @@ export default async function employeeRoutes(fastify: FastifyInstance) {
   fastify.post('/employees', hrAdminAuth, async (request, reply) => {
     const parsed = createEmployeeSchema.safeParse(request.body)
     if (!parsed.success) {
-      return reply.code(400).send({ error: 'VALIDATION', message: parsed.error.errors[0]?.message })
+      return validationError(reply, ErrorCode.VALIDATION_ERROR, parsed.error.errors[0]?.message ?? 'Validation failed')
     }
 
     // Generate employee code via the tenant sequence (idempotent, race-safe)
     const { data: generatedCode, error: codeErr } = await fastify.supabase
       .rpc('generate_employee_code', { p_tenant_id: request.tenantId })
     if (codeErr || !generatedCode) {
-      return reply.code(500).send({ error: 'CODE_GEN_ERROR', message: `Failed to generate employee code: ${codeErr?.message ?? 'unknown'}` })
+      return serverError(request, reply, codeErr, ErrorCode.INTERNAL_ERROR, 'Failed to generate employee code')
     }
     const code = generatedCode as string
 
@@ -351,7 +352,7 @@ export default async function employeeRoutes(fastify: FastifyInstance) {
       .select()
       .single()
 
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(request, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create employee')
 
     // Fire-and-forget — never await, never blocks
     fastify.eventPublisher.publish({
@@ -381,7 +382,7 @@ export default async function employeeRoutes(fastify: FastifyInstance) {
       .single()
 
     if (!callerProfile?.employee_id) {
-      return reply.code(400).send({ error: 'NO_EMPLOYEE_LINK', message: 'Profile not linked to an employee record' })
+      return forbidden(reply, 'NO_EMPLOYEE_LINK', 'Profile not linked to an employee record')
     }
 
     const schema = z.object({
@@ -390,11 +391,11 @@ export default async function employeeRoutes(fastify: FastifyInstance) {
 
     const parsed = schema.safeParse(req.body)
     if (!parsed.success) {
-      return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+      return validationError(reply, ErrorCode.VALIDATION_ERROR, parsed.error.issues[0]?.message ?? 'Validation failed')
     }
 
     if (Object.keys(parsed.data).length === 0) {
-      return reply.code(400).send({ error: 'NO_CHANGES', message: 'No updatable fields provided' })
+      return validationError(reply, 'NO_CHANGES', 'No updatable fields provided')
     }
 
     const { data, error } = await fastify.supabase
@@ -405,7 +406,7 @@ export default async function employeeRoutes(fastify: FastifyInstance) {
       .select('id, first_name, last_name, phone, email')
       .single()
 
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update employee')
     return reply.send({ data })
   })
 
@@ -428,7 +429,7 @@ export default async function employeeRoutes(fastify: FastifyInstance) {
     const { id } = request.params as { id: string }
 
     const parsed = PutEmployeeSchema.safeParse(request.body)
-    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message ?? 'Invalid request body' })
+    if (!parsed.success) return validationError(reply, ErrorCode.VALIDATION_ERROR, parsed.error.issues[0]?.message ?? 'Invalid request body')
 
     // Validate: employee exists and belongs to this tenant before touching it
     const { data: existing, error: findError } = await fastify.supabase
@@ -439,7 +440,7 @@ export default async function employeeRoutes(fastify: FastifyInstance) {
       .single()
 
     if (findError || !existing) {
-      return reply.code(404).send({ error: 'NOT_FOUND', message: 'Employee not found' })
+      return notFound(reply, 'EMPLOYEE_NOT_FOUND', 'Employee not found')
     }
 
     // Strip fields the caller must never overwrite
@@ -460,7 +461,7 @@ export default async function employeeRoutes(fastify: FastifyInstance) {
       .select()
       .single()
 
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(request, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update employee')
 
     await logAction(fastify.supabase, {
       tenantId:    request.tenantId,
@@ -489,11 +490,11 @@ export default async function employeeRoutes(fastify: FastifyInstance) {
       .single()
 
     if (findError || !existing) {
-      return reply.code(404).send({ error: 'NOT_FOUND', message: 'Employee not found' })
+      return notFound(reply, 'EMPLOYEE_NOT_FOUND', 'Employee not found')
     }
 
     if (existing.status === 'separated') {
-      return reply.code(409).send({ error: 'CONFLICT', message: 'Employee is already separated' })
+      return conflictError(reply, ErrorCode.CONFLICT, 'Employee is already separated')
     }
 
     const { error } = await fastify.supabase
@@ -502,7 +503,7 @@ export default async function employeeRoutes(fastify: FastifyInstance) {
       .eq('id', id)
       .eq('tenant_id', request.tenantId)
 
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(request, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to separate employee')
 
     return reply.send({ message: 'Employee separated successfully' })
   })

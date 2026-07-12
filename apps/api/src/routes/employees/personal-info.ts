@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { optStr } from '../../lib/zod-form.js'
+import { serverError, notFound, forbidden, validationError, ErrorCode } from '../../lib/api-errors.js'
 
 // clearable*: blanking a field ('' or null) writes null so it is actually
 // CLEARED on save (not silently left at the old value). A field OMITTED from
@@ -42,7 +43,7 @@ export default async function personalInfoRoutes(fastify: FastifyInstance) {
   // HR admins see any employee; a regular employee may only see their own.
   fastify.get('/employees/:id/personal-info', auth, async (req: any, reply) => {
     if (!await verifyEmployee(fastify, req.params.id, req.tenantId))
-      return reply.code(404).send({ error: 'NOT_FOUND', message: 'Employee not found' })
+      return notFound(reply, 'EMPLOYEE_NOT_FOUND', 'Employee not found')
 
     const isHrAdmin = (HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)
     if (!isHrAdmin) {
@@ -53,7 +54,7 @@ export default async function personalInfoRoutes(fastify: FastifyInstance) {
         .eq('tenant_id', req.tenantId)
         .single()
       if (!callerProfile?.employee_id || callerProfile.employee_id !== req.params.id) {
-        return reply.code(403).send({ error: 'FORBIDDEN', message: 'You can only view your own personal info' })
+        return forbidden(reply, 'FORBIDDEN', 'You can only view your own personal info')
       }
     }
 
@@ -64,18 +65,18 @@ export default async function personalInfoRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', req.tenantId)
       .single()
     if (error && error.code !== 'PGRST116')
-      return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch personal information')
     return reply.send({ data: data ?? null })
   })
 
   // PUT /employees/:id/personal-info  (upsert) — HR admin only
   fastify.put('/employees/:id/personal-info', hrAdminAuth, async (req: any, reply) => {
     if (!await verifyEmployee(fastify, req.params.id, req.tenantId))
-      return reply.code(404).send({ error: 'NOT_FOUND', message: 'Employee not found' })
+      return notFound(reply, 'EMPLOYEE_NOT_FOUND', 'Employee not found')
     const parsed = schema.partial().safeParse(req.body)
     if (!parsed.success) {
       const issue = parsed.error.issues[0]
-      return reply.code(400).send({ error: 'VALIDATION', message: `${issue.path.join('.') || 'body'}: ${issue.message}` })
+      return validationError(reply, ErrorCode.VALIDATION_ERROR, `${issue.path.join('.') || 'body'}: ${issue.message}`)
     }
     const { data, error } = await fastify.supabase
       .from('employee_personal_info')
@@ -85,7 +86,7 @@ export default async function personalInfoRoutes(fastify: FastifyInstance) {
       )
       .select()
       .single()
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to save personal information')
     return reply.send(data)
   })
 }

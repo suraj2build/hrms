@@ -54,6 +54,22 @@ jobs:
       # --save-baseline after genuinely reducing the count.
       - run: node scripts/check-tenant-isolation.mjs --ratchet
 
+  error-hygiene:
+    name: Error hygiene ratchet
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      # Prevents regression of Gate 4 (Phase B) api-errors.ts adoption.
+      # Fails if raw reply.code(500).send() count increases in API routes —
+      # new routes must use serverError() from lib/api-errors.ts instead.
+      - run: node scripts/check-manual-500s.mjs
+      # Fails if console.error() count increases in API routes/lib —
+      # structured logging (req.log.error) must be used instead.
+      - run: node scripts/check-console-error.mjs
+
   verify:
     name: Typecheck & tests
     runs-on: ubuntu-latest

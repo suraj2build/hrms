@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { serverError, notFound, validationError, ErrorCode } from '../../lib/api-errors.js'
 
 // clearable*: a field the user can blank out to CLEAR it. '' or null → null so
 // the upsert writes null (erases the value). A field simply OMITTED from the
@@ -50,7 +51,7 @@ export default async function bankStatutoryRoutes(fastify: FastifyInstance) {
   // GET /employees/:id/bank-statutory
   fastify.get('/employees/:id/bank-statutory', hrAdminAuth, async (req: any, reply) => {
     if (!await verifyEmployee(fastify, req.params.id, req.tenantId))
-      return reply.code(404).send({ error: 'NOT_FOUND', message: 'Employee not found' })
+      return notFound(reply, 'EMPLOYEE_NOT_FOUND', 'Employee not found')
     const { data, error } = await fastify.supabase
       .from('employee_bank_statutory')
       .select('*')
@@ -58,7 +59,7 @@ export default async function bankStatutoryRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', req.tenantId)
       .single()
     if (error && error.code !== 'PGRST116')
-      return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch bank and statutory information')
     // Merge PT state (ptax_state_config latest row) so the employee profile can
     // show and edit the assigned PT state alongside bank/statutory details.
     const { data: ptRow } = await fastify.supabase
@@ -99,10 +100,10 @@ export default async function bankStatutoryRoutes(fastify: FastifyInstance) {
   // PUT /employees/:id/bank-statutory  (upsert)
   fastify.put('/employees/:id/bank-statutory', hrAdminAuth, async (req: any, reply) => {
     if (!await verifyEmployee(fastify, req.params.id, req.tenantId))
-      return reply.code(404).send({ error: 'NOT_FOUND', message: 'Employee not found' })
+      return notFound(reply, 'EMPLOYEE_NOT_FOUND', 'Employee not found')
     const parsed = schema.partial().safeParse(req.body)
     if (!parsed.success)
-      return reply.code(400).send({ error: 'VALIDATION', message: parsed.error.issues[0].message })
+      return validationError(reply, ErrorCode.VALIDATION_ERROR, parsed.error.issues[0].message)
 
     // Extract state codes — go to their own tables, not employee_bank_statutory.
     const ptStateCode  = parsed.data.pt_state_code
@@ -155,7 +156,7 @@ export default async function bankStatutoryRoutes(fastify: FastifyInstance) {
       )
       .select()
       .single()
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to save bank and statutory information')
     return reply.send(data)
   })
 }

@@ -27,6 +27,7 @@ import { emitEvent } from '../../lib/event-emitter.js'
 import { eventBus }  from '../../lib/event-bus.js'
 import { writeLedgerEntry, dateToMonth } from '../../lib/ledger-writer.js'
 import { isLeaveLedgerShadowEnabled, recordShadowDrift } from '../../lib/leave-ledger-shadow.js'
+import { serverError, notFound, forbidden, validationError, conflictError, ErrorCode } from '../../lib/api-errors.js'
 
 const dateRe = /^\d{4}-\d{2}-\d{2}$/
 
@@ -162,7 +163,7 @@ export default async function leaveRoute(fastify: FastifyInstance) {
       .order('name')
 
     if (error) {
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch leave types' })
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch leave types')
     }
     return reply.send(data ?? [])
   })
@@ -171,24 +172,18 @@ export default async function leaveRoute(fastify: FastifyInstance) {
   fastify.post('/attendance/leave/apply', auth, async (req, reply) => {
     const parsed = applySchema.safeParse(req.body)
     if (!parsed.success) {
-      return reply.code(400).send({
-        error: 'VALIDATION_ERROR',
-        message: parsed.error.issues[0]?.message,
-      })
+      return validationError(reply, ErrorCode.VALIDATION_ERROR, parsed.error.issues[0]?.message ?? 'Validation failed')
     }
 
     const { from_date, to_date, session } = parsed.data
     if (from_date > to_date) {
-      return reply.code(400).send({ error: 'INVALID_DATES', message: 'from_date must be ≤ to_date' })
+      return validationError(reply, 'INVALID_DATES', 'from_date must be ≤ to_date')
     }
 
     // Half-day validation: must be a single day and the leave type must allow it.
     if (session !== 'full_day') {
       if (from_date !== to_date) {
-        return reply.code(400).send({
-          error:   'INVALID_HALF_DAY',
-          message: 'A half-day leave must be for a single date (from_date = to_date)',
-        })
+        return validationError(reply, 'INVALID_HALF_DAY', 'A half-day leave must be for a single date (from_date = to_date)')
       }
       const { data: lt } = await fastify.supabase
         .from('leave_types')
@@ -213,10 +208,7 @@ export default async function leaveRoute(fastify: FastifyInstance) {
       .single()
 
     if (!profile?.employee_id) {
-      return reply.code(400).send({
-        error:   'NO_EMPLOYEE_LINK',
-        message: 'Your profile is not linked to an employee record',
-      })
+      return validationError(reply, 'NO_EMPLOYEE_LINK', 'Your profile is not linked to an employee record')
     }
 
     // Roster-aware working-days for display (the engine is the only valid source —
@@ -249,8 +241,7 @@ export default async function leaveRoute(fastify: FastifyInstance) {
       .single()
 
     if (error) {
-      req.log.error({ err: error }, 'leave apply insert failed')
-      return reply.code(500).send({ error: 'INSERT_FAILED', message: 'Failed to submit leave application' })
+      return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to submit leave application')
     }
 
     return reply.code(201).send({ data })
@@ -275,7 +266,7 @@ export default async function leaveRoute(fastify: FastifyInstance) {
       .order('from_date', { ascending: false })
 
     if (error) {
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch applications' })
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch applications')
     }
     return reply.send(data ?? [])
   })
@@ -295,7 +286,7 @@ export default async function leaveRoute(fastify: FastifyInstance) {
       .order('created_at', { ascending: false })
 
     if (error) {
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch pending leaves' })
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch pending leaves')
     }
 
     const rows = (data ?? []).map((r: Record<string, unknown>) => {
@@ -333,18 +324,15 @@ export default async function leaveRoute(fastify: FastifyInstance) {
       .single()
 
     if (fetchError || !app) {
-      return reply.code(404).send({ error: 'NOT_FOUND', message: 'Application not found' })
+      return notFound(reply, 'NOT_FOUND', 'Application not found')
     }
     if (app.status !== 'pending') {
-      return reply.code(409).send({ error: 'ALREADY_ACTIONED', message: `Application is already ${app.status}` })
+      return conflictError(reply, 'ALREADY_ACTIONED', `Application is already ${app.status}`)
     }
 
     // Segregation of duties — a user may not approve their own leave (F3).
     if (await isSelfApproval(fastify.supabase, req.tenantId as string, (req as any).userId, app.employee_id as string)) {
-      return reply.code(403).send({
-        error:   'SELF_APPROVAL_FORBIDDEN',
-        message: 'You cannot approve your own leave application.',
-      })
+      return forbidden(reply, 'SELF_APPROVAL_FORBIDDEN', 'You cannot approve your own leave application.')
     }
 
     // Fetch leave type for paid flag + sandwich flag
@@ -371,8 +359,7 @@ export default async function leaveRoute(fastify: FastifyInstance) {
         { halfDay: isHalfDay },
       )
     } catch (err) {
-      fastify.log.error({ err, leaveId: id }, 'leave approve: computeWorkingLeaveDays threw')
-      return reply.code(500).send({ error: 'COMPUTE_FAILED', message: 'Failed to compute working leave days' })
+      return serverError(req, reply, err, ErrorCode.COMPUTE_FAILED, 'Failed to compute working leave days')
     }
 
     // Pre-approve balance check + atomic deduction (paid leave only).
@@ -413,8 +400,7 @@ export default async function leaveRoute(fastify: FastifyInstance) {
         p_year:          paidYear,
       })
       if (deductErr) {
-        req.log.error({ err: deductErr }, 'checked_deduct_leave_balance RPC failed')
-        return reply.code(500).send({ error: 'BALANCE_DEDUCT_FAILED', message: 'Failed to deduct leave balance' })
+        return serverError(req, reply, deductErr, ErrorCode.BALANCE_DEDUCT_FAILED, 'Failed to deduct leave balance')
       }
       if (!deducted) {
         return reply.code(422).send({
@@ -437,8 +423,7 @@ export default async function leaveRoute(fastify: FastifyInstance) {
       .eq('tenant_id', req.tenantId)
 
     if (updateError) {
-      req.log.error({ err: updateError }, 'leave approve update failed')
-      return reply.code(500).send({ error: 'UPDATE_FAILED', message: 'Failed to approve application' })
+      return serverError(req, reply, updateError, ErrorCode.UPDATE_FAILED, 'Failed to approve application')
     }
 
     // Apply leave days to attendance_daily — ONLY on roster working dates.
@@ -655,10 +640,10 @@ export default async function leaveRoute(fastify: FastifyInstance) {
       .single()
 
     if (fetchError || !app) {
-      return reply.code(404).send({ error: 'NOT_FOUND', message: 'Application not found' })
+      return notFound(reply, 'NOT_FOUND', 'Application not found')
     }
     if (app.status !== 'pending') {
-      return reply.code(409).send({ error: 'ALREADY_ACTIONED', message: `Application is already ${app.status}` })
+      return conflictError(reply, 'ALREADY_ACTIONED', `Application is already ${app.status}`)
     }
 
     const { error } = await fastify.supabase
@@ -668,7 +653,7 @@ export default async function leaveRoute(fastify: FastifyInstance) {
       .eq('tenant_id', req.tenantId)
 
     if (error) {
-      return reply.code(500).send({ error: 'UPDATE_FAILED', message: 'Failed to reject application' })
+      return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to reject application')
     }
 
     // DB-level event (non-blocking)
@@ -716,13 +701,10 @@ export default async function leaveRoute(fastify: FastifyInstance) {
       .single()
 
     if (fetchError || !app) {
-      return reply.code(404).send({ error: 'NOT_FOUND', message: 'Application not found' })
+      return notFound(reply, 'NOT_FOUND', 'Application not found')
     }
     if (app.status !== 'approved') {
-      return reply.code(409).send({
-        error:   'INVALID_STATE',
-        message: `Only approved leaves can be cancelled (current status: ${app.status})`,
-      })
+      return conflictError(reply, 'INVALID_STATE', `Only approved leaves can be cancelled (current status: ${app.status})`)
     }
 
     // Non-admins may only cancel their own leave
@@ -734,7 +716,7 @@ export default async function leaveRoute(fastify: FastifyInstance) {
         .eq('tenant_id', req.tenantId)
         .single()
       if (!callerProfile?.employee_id || callerProfile.employee_id !== app.employee_id) {
-        return reply.code(403).send({ error: 'FORBIDDEN', message: 'You may only cancel your own leave applications' })
+        return forbidden(reply, 'FORBIDDEN', 'You may only cancel your own leave applications')
       }
     }
 
@@ -784,8 +766,7 @@ export default async function leaveRoute(fastify: FastifyInstance) {
       .eq('tenant_id', req.tenantId)
 
     if (cancelErr) {
-      req.log.error({ err: cancelErr }, 'leave cancel update failed')
-      return reply.code(500).send({ error: 'UPDATE_FAILED', message: 'Failed to cancel application' })
+      return serverError(req, reply, cancelErr, ErrorCode.UPDATE_FAILED, 'Failed to cancel application')
     }
 
     // Reverse attendance_daily rows that were created by this leave approval.
@@ -866,10 +847,10 @@ export default async function leaveRoute(fastify: FastifyInstance) {
         .single()
 
       if (!callerProfile?.employee_id) {
-        return reply.code(403).send({ error: 'NO_EMPLOYEE_LINK', message: 'Profile not linked to an employee record' })
+        return forbidden(reply, 'NO_EMPLOYEE_LINK', 'Profile not linked to an employee record')
       }
       if (callerProfile.employee_id !== employeeId) {
-        return reply.code(403).send({ error: 'FORBIDDEN', message: 'You can only view your own leave balance' })
+        return forbidden(reply, 'FORBIDDEN', 'You can only view your own leave balance')
       }
     }
 
@@ -880,7 +861,7 @@ export default async function leaveRoute(fastify: FastifyInstance) {
       .eq('id', employeeId)
       .eq('tenant_id', req.tenantId)
       .maybeSingle()
-    if (!emp) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Employee not found' })
+    if (!emp) return notFound(reply, 'NOT_FOUND', 'Employee not found')
 
     // C6 feature flag: LEAVE_LEDGER_AUTHORITATIVE (default OFF).
     // When ON: balance is derived from Σ(leave_accrual_ledger) rather than
@@ -898,7 +879,7 @@ export default async function leaveRoute(fastify: FastifyInstance) {
         .eq('year', year)
         .eq('is_expired', false)
 
-      if (ledgerErr) return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch leave balances from ledger' })
+      if (ledgerErr) return serverError(req, reply, ledgerErr, ErrorCode.QUERY_FAILED, 'Failed to fetch leave balances from ledger')
 
       const balMap: Record<string, { balance: number; entitlement: number; lt: any }> = {}
       for (const row of (ledgerRows ?? []) as any[]) {
@@ -940,7 +921,7 @@ export default async function leaveRoute(fastify: FastifyInstance) {
         .gt('days', 0),
     ])
 
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch leave balances' })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch leave balances')
 
     // Build a lookup: leave_type_id → total accrued days this year
     const accrualByType: Record<string, number> = {}
@@ -1003,7 +984,7 @@ export default async function leaveRoute(fastify: FastifyInstance) {
         .single()
 
       if (!callerProfile?.employee_id) {
-        return reply.code(403).send({ error: 'NO_EMPLOYEE_LINK', message: 'Profile not linked to an employee record' })
+        return forbidden(reply, 'NO_EMPLOYEE_LINK', 'Profile not linked to an employee record')
       }
 
       const { data: directReports } = await fastify.supabase
@@ -1128,7 +1109,7 @@ export default async function leaveRoute(fastify: FastifyInstance) {
       to:   z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'to must be YYYY-MM-DD'),
     }).safeParse(req.query)
     if (!q.success) {
-      return reply.code(400).send({ error: 'VALIDATION_ERROR', message: q.error.issues[0]?.message })
+      return validationError(reply, ErrorCode.VALIDATION_ERROR, q.error.issues[0]?.message ?? 'Validation failed')
     }
     const { from, to } = q.data
 
@@ -1215,7 +1196,7 @@ export default async function leaveRoute(fastify: FastifyInstance) {
     })
     const parsed = balanceSchema.safeParse(req.body)
     if (!parsed.success) {
-      return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+      return validationError(reply, ErrorCode.VALIDATION_ERROR, parsed.error.issues[0]?.message ?? 'Validation failed')
     }
     const year = parsed.data.year ?? new Date().getFullYear()
     const { data, error } = await fastify.supabase
@@ -1231,7 +1212,7 @@ export default async function leaveRoute(fastify: FastifyInstance) {
       .select('id, balance, year')
       .single()
 
-    if (error) return reply.code(500).send({ error: 'UPSERT_FAILED', message: 'Failed to set leave balance' })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to set leave balance')
 
     // Audit log — balance set/updated by HR admin on behalf of employee
     await logAction(fastify.supabase, {
@@ -1264,7 +1245,7 @@ export default async function leaveRoute(fastify: FastifyInstance) {
     })
     const parsed = schema.safeParse(req.body)
     if (!parsed.success) {
-      return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+      return validationError(reply, ErrorCode.VALIDATION_ERROR, parsed.error.issues[0]?.message ?? 'Validation failed')
     }
     const year = parsed.data.year ?? new Date().getFullYear()
     const { error } = await fastify.supabase.rpc('set_opening_balance', {
@@ -1275,8 +1256,7 @@ export default async function leaveRoute(fastify: FastifyInstance) {
       p_year:          year,
     })
     if (error) {
-      req.log.error({ err: error }, 'set_opening_balance failed')
-      return reply.code(500).send({ error: 'OPENING_BALANCE_FAILED', message: 'Failed to set opening balance' })
+      return serverError(req, reply, error, ErrorCode.OPENING_BALANCE_FAILED, 'Failed to set opening balance')
     }
     return reply.send({ data: { ...parsed.data, year } })
   })
@@ -1302,7 +1282,7 @@ export default async function leaveRoute(fastify: FastifyInstance) {
     })
     const parsed = schema.safeParse(req.body)
     if (!parsed.success) {
-      return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+      return validationError(reply, ErrorCode.VALIDATION_ERROR, parsed.error.issues[0]?.message ?? 'Validation failed')
     }
     const year = parsed.data.year ?? new Date().getFullYear()
 
@@ -1312,8 +1292,7 @@ export default async function leaveRoute(fastify: FastifyInstance) {
       fastify.supabase.from('leave_types').select('id, name').eq('tenant_id', req.tenantId),
     ])
     if (empRes.error || ltRes.error) {
-      req.log.error({ empErr: empRes.error, ltErr: ltRes.error }, 'opening-balance bulk: lookup failed')
-      return reply.code(500).send({ error: 'LOOKUP_FAILED', message: 'Failed to load employees / leave types' })
+      return serverError(req, reply, empRes.error ?? ltRes.error, ErrorCode.LOOKUP_FAILED, 'Failed to load employees / leave types')
     }
     const empByCode = new Map((empRes.data ?? []).map((e: any) => [String(e.employee_code).toLowerCase(), e.id as string]))
     const empIds    = new Set((empRes.data ?? []).map((e: any) => e.id as string))
@@ -1366,12 +1345,12 @@ export default async function leaveRoute(fastify: FastifyInstance) {
     })
     const parsed = bulkSchema.safeParse(req.body)
     if (!parsed.success) {
-      return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+      return validationError(reply, ErrorCode.VALIDATION_ERROR, parsed.error.issues[0]?.message ?? 'Validation failed')
     }
     const { employee_ids, leave_type_id, from_date, to_date, reason } = parsed.data
 
     if (from_date > to_date) {
-      return reply.code(400).send({ error: 'INVALID_DATES', message: 'from_date must be ≤ to_date' })
+      return validationError(reply, 'INVALID_DATES', 'from_date must be ≤ to_date')
     }
 
     // Verify leave type belongs to tenant
@@ -1381,7 +1360,7 @@ export default async function leaveRoute(fastify: FastifyInstance) {
       .eq('id', leave_type_id)
       .eq('tenant_id', req.tenantId)
       .maybeSingle()
-    if (!lt) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Leave type not found' })
+    if (!lt) return notFound(reply, 'NOT_FOUND', 'Leave type not found')
 
     const dates = expandDateRange(from_date, to_date)
     const now   = new Date().toISOString()
@@ -1405,8 +1384,7 @@ export default async function leaveRoute(fastify: FastifyInstance) {
     const { data: insertedApps, error: appErr } = await fastify.supabase
       .from('leave_requests').insert(appRows).select('id, employee_id')
     if (appErr) {
-      req.log.error({ err: appErr }, 'bulk-assign leave_requests insert failed')
-      return reply.code(500).send({ error: 'INSERT_FAILED', message: 'Failed to create leave requests' })
+      return serverError(req, reply, appErr, ErrorCode.INSERT_FAILED, 'Failed to create leave requests')
     }
     // employee → application id, for keying idempotent consumption ledger rows.
     const appIdByEmp = new Map<string, string>(
@@ -1535,7 +1513,7 @@ export default async function leaveRoute(fastify: FastifyInstance) {
         .eq('tenant_id', req.tenantId)
         .single()
       if (!prof?.employee_id || prof.employee_id !== employeeId) {
-        return reply.code(403).send({ error: 'FORBIDDEN', message: 'You may only view your own ledger' })
+        return forbidden(reply, 'FORBIDDEN', 'You may only view your own ledger')
       }
     }
 
@@ -1546,7 +1524,7 @@ export default async function leaveRoute(fastify: FastifyInstance) {
       .eq('id', employeeId)
       .eq('tenant_id', req.tenantId)
       .maybeSingle()
-    if (!emp) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Employee not found' })
+    if (!emp) return notFound(reply, 'NOT_FOUND', 'Employee not found')
 
     let dbq = fastify.supabase
       .from('leave_accrual_ledger')
@@ -1565,7 +1543,7 @@ export default async function leaveRoute(fastify: FastifyInstance) {
 
     const { data, error, count } = await dbq
 
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch ledger' })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch ledger')
 
     return reply.send({
       data:   data ?? [],

@@ -18,6 +18,7 @@ import {
   type ComponentInput,
 } from '../../lib/compensation-engine.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { serverError, notFound, forbidden, validationError, conflictError, ErrorCode } from '../../lib/api-errors.js'
 
 // ── Zod schemas ───────────────────────────────────────────────────────────────
 
@@ -64,9 +65,10 @@ async function verifyEmployee(fastify: any, employeeId: string, tenantId: string
 async function assertCompensationAccess(
   fastify:    any,
   req:        any,
+  reply:      any,
   employeeId: string,
-): Promise<{ code: number; body: object } | null> {
-  if ((HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) return null
+): Promise<boolean> {
+  if ((HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) return false
 
   const { data: profile } = await fastify.supabase
     .from('profiles')
@@ -77,10 +79,11 @@ async function assertCompensationAccess(
 
   const callerEmpId = (profile as any)?.employee_id
   if (!callerEmpId) {
-    return { code: 403, body: { error: 'FORBIDDEN', message: 'Profile not linked to an employee record' } }
+    forbidden(reply, 'FORBIDDEN', 'Profile not linked to an employee record')
+    return true
   }
 
-  if (callerEmpId === employeeId) return null  // self
+  if (callerEmpId === employeeId) return false  // self
 
   // Allow the employee's direct manager
   const { data: targetEmp } = await fastify.supabase
@@ -90,9 +93,10 @@ async function assertCompensationAccess(
     .eq('tenant_id', req.tenantId)
     .maybeSingle()
 
-  if ((targetEmp as any)?.manager_id === callerEmpId) return null
+  if ((targetEmp as any)?.manager_id === callerEmpId) return false
 
-  return { code: 403, body: { error: 'FORBIDDEN', message: 'You can only view your own or your direct reports\' compensation' } }
+  forbidden(reply, 'FORBIDDEN', 'You can only view your own or your direct reports\' compensation')
+  return true
 }
 
 /**
@@ -274,11 +278,11 @@ export default async function compensationRoutes(fastify: FastifyInstance) {
 
   fastify.put('/compensation-policy', auth, async (req: any, reply) => {
     if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole))
-      return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
+      return forbidden(reply, 'FORBIDDEN', 'HR admin access required')
 
     const parsed = policySchema.safeParse(req.body)
     if (!parsed.success)
-      return reply.code(400).send({ error: 'VALIDATION', message: parsed.error.issues[0]?.message ?? 'Invalid policy' })
+      return validationError(reply, ErrorCode.VALIDATION_ERROR, parsed.error.issues[0]?.message ?? 'Invalid policy')
 
     const { data, error } = await fastify.supabase
       .from('compensation_policies')
@@ -290,18 +294,17 @@ export default async function compensationRoutes(fastify: FastifyInstance) {
       .single()
 
     if (error)
-      return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+      return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to save compensation policy')
 
     return reply.send({ data: { ...data, is_configured: true } })
   })
 
   // ── GET /employees/:id/compensation  → active compensation ──────────────────
   fastify.get('/employees/:id/compensation', auth, async (req: any, reply) => {
-    const accessDenied = await assertCompensationAccess(fastify, req, req.params.id)
-    if (accessDenied) return reply.code(accessDenied.code).send(accessDenied.body)
+    if (await assertCompensationAccess(fastify, req, reply, req.params.id)) return
 
     if (!await verifyEmployee(fastify, req.params.id, req.tenantId))
-      return reply.code(404).send({ error: 'NOT_FOUND', message: 'Employee not found' })
+      return notFound(reply, 'EMPLOYEE_NOT_FOUND', 'Employee not found')
 
     const { data, error } = await fastify.supabase
       .from('employee_compensations')
@@ -315,7 +318,7 @@ export default async function compensationRoutes(fastify: FastifyInstance) {
       .maybeSingle()
 
     if (error)
-      return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch compensation')
     if (!data)
       return reply.send({ data: null })
 
@@ -339,11 +342,10 @@ export default async function compensationRoutes(fastify: FastifyInstance) {
 
   // ── GET /employees/:id/compensation/history ──────────────────────────────────
   fastify.get('/employees/:id/compensation/history', auth, async (req: any, reply) => {
-    const accessDenied = await assertCompensationAccess(fastify, req, req.params.id)
-    if (accessDenied) return reply.code(accessDenied.code).send(accessDenied.body)
+    if (await assertCompensationAccess(fastify, req, reply, req.params.id)) return
 
     if (!await verifyEmployee(fastify, req.params.id, req.tenantId))
-      return reply.code(404).send({ error: 'NOT_FOUND', message: 'Employee not found' })
+      return notFound(reply, 'EMPLOYEE_NOT_FOUND', 'Employee not found')
 
     const { data, error } = await fastify.supabase
       .from('employee_compensations')
@@ -356,7 +358,7 @@ export default async function compensationRoutes(fastify: FastifyInstance) {
       .order('effective_from', { ascending: false })
 
     if (error)
-      return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch compensation history')
 
     const rows = (data ?? []).map((rec: any) => {
       const shaped = shapeComponents(rec.employee_compensation_components ?? [])
@@ -379,8 +381,7 @@ export default async function compensationRoutes(fastify: FastifyInstance) {
 
   // ── GET /employees/:id/compensation/:compId ──────────────────────────────────
   fastify.get('/employees/:id/compensation/:compId', auth, async (req: any, reply) => {
-    const accessDenied = await assertCompensationAccess(fastify, req, req.params.id)
-    if (accessDenied) return reply.code(accessDenied.code).send(accessDenied.body)
+    if (await assertCompensationAccess(fastify, req, reply, req.params.id)) return
 
     const { data, error } = await fastify.supabase
       .from('employee_compensations')
@@ -394,9 +395,9 @@ export default async function compensationRoutes(fastify: FastifyInstance) {
       .maybeSingle()
 
     if (error)
-      return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch compensation record')
     if (!data)
-      return reply.code(404).send({ error: 'NOT_FOUND', message: 'Compensation not found' })
+      return notFound(reply, 'NOT_FOUND', 'Compensation not found')
 
     const shaped = shapeComponents(data.employee_compensation_components ?? [])
     return reply.send({
@@ -410,14 +411,14 @@ export default async function compensationRoutes(fastify: FastifyInstance) {
   // ── POST /employees/:id/compensation → new revision ──────────────────────────
   fastify.post('/employees/:id/compensation', auth, async (req: any, reply) => {
     if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole))
-      return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
+      return forbidden(reply, 'FORBIDDEN', 'HR admin access required')
 
     if (!await verifyEmployee(fastify, req.params.id, req.tenantId))
-      return reply.code(404).send({ error: 'NOT_FOUND', message: 'Employee not found' })
+      return notFound(reply, 'EMPLOYEE_NOT_FOUND', 'Employee not found')
 
     const parsed = createCompensationSchema.safeParse(req.body)
     if (!parsed.success)
-      return reply.code(400).send({ error: 'VALIDATION', message: parsed.error.issues[0].message })
+      return validationError(reply, ErrorCode.VALIDATION_ERROR, parsed.error.issues[0].message)
 
     const { components: reqComponents, ...compensationData } = parsed.data
     const ctcAnnual = compensationData.ctc_annual
@@ -431,7 +432,7 @@ export default async function compensationRoutes(fastify: FastifyInstance) {
       .in('id', compIds)
 
     if (scErr)
-      return reply.code(500).send({ error: 'DB_ERROR', message: scErr.message })
+      return serverError(req, reply, scErr, ErrorCode.QUERY_FAILED, 'Failed to fetch salary components')
 
     const scMap = new Map<string, any>((scRows ?? []).map((r: any) => [r.id, r]))
 
@@ -501,7 +502,7 @@ export default async function compensationRoutes(fastify: FastifyInstance) {
       try {
         pfIdMap = await resolvePfSalaryComponents(fastify, req.tenantId)
       } catch (err: any) {
-        return reply.code(500).send({ error: 'PF_SETUP_FAILED', message: err.message })
+        return serverError(req, reply, err, ErrorCode.INSERT_FAILED, 'Failed to set up PF salary components')
       }
     }
 
@@ -543,7 +544,7 @@ export default async function compensationRoutes(fastify: FastifyInstance) {
         .eq('employee_id', req.params.id)
         .eq('is_active', true)
       if (supersedeErr)
-        return reply.code(500).send({ error: 'DB_ERROR', message: supersedeErr.message })
+        return serverError(req, reply, supersedeErr, ErrorCode.UPDATE_FAILED, 'Failed to supersede prior compensation')
     }
 
     // ── Insert compensation header ─────────────────────────────────────────────
@@ -559,7 +560,7 @@ export default async function compensationRoutes(fastify: FastifyInstance) {
       .single()
 
     if (compErr)
-      return reply.code(500).send({ error: 'DB_ERROR', message: compErr.message })
+      return serverError(req, reply, compErr, ErrorCode.INSERT_FAILED, 'Failed to create compensation record')
 
     // ── Insert components ─────────────────────────────────────────────────────
     const { error: compCompErr } = await fastify.supabase
@@ -570,8 +571,9 @@ export default async function compensationRoutes(fastify: FastifyInstance) {
       // Rollback header
       await fastify.supabase.from('employee_compensations').delete().eq('id', comp.id)
       // 23505 = unique_violation (duplicate salary_component_id in this compensation)
-      const status = compCompErr.code === '23505' ? 409 : 500
-      return reply.code(status).send({ error: 'DB_ERROR', message: compCompErr.message })
+      if (compCompErr.code === '23505')
+        return conflictError(reply, ErrorCode.CONFLICT, 'Duplicate salary component in this compensation')
+      return serverError(req, reply, compCompErr, ErrorCode.INSERT_FAILED, 'Failed to insert compensation components')
     }
 
     // ── Return full shaped record ──────────────────────────────────────────────
@@ -609,7 +611,7 @@ export default async function compensationRoutes(fastify: FastifyInstance) {
   // LOP on the next payroll run).
   fastify.delete('/employees/:id/compensation/:compId', auth, async (req: any, reply) => {
     if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
-      return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
+      return forbidden(reply, 'FORBIDDEN', 'HR admin access required')
     }
     const { id, compId } = req.params as { id: string; compId: string }
 
@@ -621,7 +623,7 @@ export default async function compensationRoutes(fastify: FastifyInstance) {
       .eq('employee_id', id)
       .eq('tenant_id', req.tenantId)
       .maybeSingle()
-    if (!target) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Compensation record not found' })
+    if (!target) return notFound(reply, 'NOT_FOUND', 'Compensation record not found')
 
     // Block deletion if any finalized payroll slip referenced this compensation
     // period — keep historical pay auditable. (Best-effort: skip if column absent.)
@@ -634,7 +636,7 @@ export default async function compensationRoutes(fastify: FastifyInstance) {
       .eq('id', compId)
       .eq('employee_id', id)
       .eq('tenant_id', req.tenantId)
-    if (delErr) return reply.code(500).send({ error: 'DB_ERROR', message: delErr.message })
+    if (delErr) return serverError(req, reply, delErr, ErrorCode.DELETE_FAILED, 'Failed to delete compensation record')
 
     // If we removed the active record, reactivate the latest remaining one.
     if (target.is_active) {

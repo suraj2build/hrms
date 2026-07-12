@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { serverError, notFound, forbidden, validationError, ErrorCode } from '../../lib/api-errors.js'
 
 const schema = z.object({
   identity_type_id: z.string().uuid('Invalid identity type'),
@@ -33,33 +34,33 @@ export default async function identityRoutes(fastify: FastifyInstance) {
         .eq('tenant_id', req.tenantId)
         .maybeSingle()
       if (!profile || (profile as any).employee_id !== req.params.id) {
-        return reply.code(403).send({ error: 'FORBIDDEN', message: 'Access denied' })
+        return forbidden(reply, 'FORBIDDEN', 'Access denied')
       }
     }
 
     if (!await verifyEmployee(fastify, req.params.id, req.tenantId))
-      return reply.code(404).send({ error: 'NOT_FOUND', message: 'Employee not found' })
+      return notFound(reply, 'EMPLOYEE_NOT_FOUND', 'Employee not found')
     const { data, error } = await fastify.supabase
       .from('employee_identity')
       .select('*, identity_types(id, name, code)')
       .eq('employee_id', req.params.id)
       .eq('tenant_id', req.tenantId)
       .order('created_at', { ascending: false })
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch identity records')
     return reply.send({ data })
   })
 
   fastify.post('/employees/:id/identity', hrAdminAuth, async (req: any, reply) => {
     if (!await verifyEmployee(fastify, req.params.id, req.tenantId))
-      return reply.code(404).send({ error: 'NOT_FOUND', message: 'Employee not found' })
+      return notFound(reply, 'EMPLOYEE_NOT_FOUND', 'Employee not found')
     const parsed = schema.safeParse(req.body)
     if (!parsed.success)
-      return reply.code(400).send({ error: 'VALIDATION', message: parsed.error.issues[0].message })
+      return validationError(reply, ErrorCode.VALIDATION_ERROR, parsed.error.issues[0].message)
     const { data, error } = await fastify.supabase
       .from('employee_identity')
       .insert({ ...parsed.data, employee_id: req.params.id, tenant_id: req.tenantId })
       .select('*, identity_types(id, name, code)').single()
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create identity record')
     return reply.code(201).send(data)
   })
 
@@ -70,7 +71,7 @@ export default async function identityRoutes(fastify: FastifyInstance) {
       .eq('id', req.params.identityId)
       .eq('employee_id', req.params.id)
       .eq('tenant_id', req.tenantId)
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.DELETE_FAILED, 'Failed to delete identity record')
     return reply.code(204).send()
   })
 }

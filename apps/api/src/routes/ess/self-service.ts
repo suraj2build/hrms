@@ -22,6 +22,7 @@ import { z } from 'zod'
 import { optStr, optDate, optEnum, optUuid } from '../../lib/zod-form.js'
 import { computeLifecycleRisks, summariseLifecycle } from '../../lib/lifecycle-expiry.js'
 import { notifyHrAdmins } from '../../lib/notify.js'
+import { serverError, notFound, forbidden, validationError, conflictError, ErrorCode } from '../../lib/api-errors.js'
 
 const STORAGE_BUCKET = 'employee-files'
 const SIGNED_URL_TTL = 3600
@@ -110,7 +111,7 @@ export default async function essSelfServiceRoutes(fastify: FastifyInstance) {
   async function selfOr400(req: any, reply: any): Promise<string | null> {
     const empId = await resolveEmployeeId(req)
     if (!empId) {
-      reply.code(400).send({ error: 'NO_EMPLOYEE_LINK', message: 'Your profile is not linked to an employee record' })
+      forbidden(reply, 'NO_EMPLOYEE_LINK', 'Your profile is not linked to an employee record')
       return null
     }
     return empId
@@ -138,7 +139,7 @@ export default async function essSelfServiceRoutes(fastify: FastifyInstance) {
       .eq('employee_id', empId).eq('tenant_id', req.tenantId)
       .maybeSingle()
     if (error && error.code !== 'PGRST116')
-      return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch bank and statutory information')
     if (!data) return reply.send({ data: null })
     return reply.send({ data: {
       bank_name:      data.bank_name ?? null,
@@ -164,14 +165,14 @@ export default async function essSelfServiceRoutes(fastify: FastifyInstance) {
       .from('emergency_contacts').select('*')
       .eq('employee_id', empId).eq('tenant_id', req.tenantId)
       .order('is_primary', { ascending: false })
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch emergency contacts')
     return reply.send({ data })
   })
 
   fastify.post('/ess/me/emergency-contacts', auth, async (req: any, reply) => {
     const empId = await selfOr400(req, reply); if (!empId) return
     const parsed = emergencyContactSchema.safeParse(req.body)
-    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION', message: parsed.error.issues[0].message })
+    if (!parsed.success) return validationError(reply, ErrorCode.VALIDATION_ERROR, parsed.error.issues[0].message)
     if (parsed.data.is_primary) {
       await fastify.supabase.from('emergency_contacts')
         .update({ is_primary: false }).eq('employee_id', empId).eq('tenant_id', req.tenantId)
@@ -180,14 +181,14 @@ export default async function essSelfServiceRoutes(fastify: FastifyInstance) {
       .from('emergency_contacts')
       .insert({ ...parsed.data, employee_id: empId, tenant_id: req.tenantId })
       .select().single()
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create emergency contact')
     return reply.code(201).send(data)
   })
 
   fastify.put('/ess/me/emergency-contacts/:contactId', auth, async (req: any, reply) => {
     const empId = await selfOr400(req, reply); if (!empId) return
     const parsed = emergencyContactSchema.partial().safeParse(req.body)
-    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION', message: parsed.error.issues[0].message })
+    if (!parsed.success) return validationError(reply, ErrorCode.VALIDATION_ERROR, parsed.error.issues[0].message)
     if (parsed.data.is_primary) {
       await fastify.supabase.from('emergency_contacts')
         .update({ is_primary: false }).eq('employee_id', empId).eq('tenant_id', req.tenantId)
@@ -197,8 +198,8 @@ export default async function essSelfServiceRoutes(fastify: FastifyInstance) {
       .from('emergency_contacts').update(parsed.data)
       .eq('id', req.params.contactId).eq('employee_id', empId).eq('tenant_id', req.tenantId)
       .select().single()
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
-    if (!data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Contact not found' })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update emergency contact')
+    if (!data) return notFound(reply, 'NOT_FOUND', 'Contact not found')
     return reply.send(data)
   })
 
@@ -207,7 +208,7 @@ export default async function essSelfServiceRoutes(fastify: FastifyInstance) {
     const { error } = await fastify.supabase
       .from('emergency_contacts').delete()
       .eq('id', req.params.contactId).eq('employee_id', empId).eq('tenant_id', req.tenantId)
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.DELETE_FAILED, 'Failed to delete emergency contact')
     return reply.code(204).send()
   })
 
@@ -217,19 +218,19 @@ export default async function essSelfServiceRoutes(fastify: FastifyInstance) {
     const { data, error } = await fastify.supabase
       .from('employee_addresses').select('*')
       .eq('employee_id', empId).eq('tenant_id', req.tenantId).order('address_type')
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch addresses')
     return reply.send({ data })
   })
 
   fastify.post('/ess/me/addresses', auth, async (req: any, reply) => {
     const empId = await selfOr400(req, reply); if (!empId) return
     const parsed = addressSchema.safeParse(req.body)
-    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION', message: parsed.error.issues[0].message })
+    if (!parsed.success) return validationError(reply, ErrorCode.VALIDATION_ERROR, parsed.error.issues[0].message)
     const { data, error } = await fastify.supabase
       .from('employee_addresses')
       .upsert({ ...parsed.data, employee_id: empId, tenant_id: req.tenantId }, { onConflict: 'tenant_id,employee_id,address_type' })
       .select().single()
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to save address')
     return reply.send(data)
   })
 
@@ -238,7 +239,7 @@ export default async function essSelfServiceRoutes(fastify: FastifyInstance) {
     const { error } = await fastify.supabase
       .from('employee_addresses').delete()
       .eq('id', req.params.addressId).eq('employee_id', empId).eq('tenant_id', req.tenantId)
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.DELETE_FAILED, 'Failed to delete address')
     return reply.code(204).send()
   })
 
@@ -248,32 +249,32 @@ export default async function essSelfServiceRoutes(fastify: FastifyInstance) {
     const { data, error } = await fastify.supabase
       .from('employee_family').select('*, relationship_types(id, name, code)')
       .eq('employee_id', empId).eq('tenant_id', req.tenantId).order('name')
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch family members')
     return reply.send({ data })
   })
 
   fastify.post('/ess/me/family', auth, async (req: any, reply) => {
     const empId = await selfOr400(req, reply); if (!empId) return
     const parsed = familySchema.safeParse(req.body)
-    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION', message: parsed.error.issues[0].message })
+    if (!parsed.success) return validationError(reply, ErrorCode.VALIDATION_ERROR, parsed.error.issues[0].message)
     const { data, error } = await fastify.supabase
       .from('employee_family')
       .insert({ ...parsed.data, employee_id: empId, tenant_id: req.tenantId })
       .select('*, relationship_types(id, name)').single()
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to add family member')
     return reply.code(201).send(data)
   })
 
   fastify.put('/ess/me/family/:memberId', auth, async (req: any, reply) => {
     const empId = await selfOr400(req, reply); if (!empId) return
     const parsed = familySchema.partial().safeParse(req.body)
-    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION', message: parsed.error.issues[0].message })
+    if (!parsed.success) return validationError(reply, ErrorCode.VALIDATION_ERROR, parsed.error.issues[0].message)
     const { data, error } = await fastify.supabase
       .from('employee_family').update(parsed.data)
       .eq('id', req.params.memberId).eq('employee_id', empId).eq('tenant_id', req.tenantId)
       .select('*, relationship_types(id, name)').single()
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
-    if (!data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Family member not found' })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update family member')
+    if (!data) return notFound(reply, 'NOT_FOUND', 'Family member not found')
     return reply.send(data)
   })
 
@@ -282,7 +283,7 @@ export default async function essSelfServiceRoutes(fastify: FastifyInstance) {
     const { error } = await fastify.supabase
       .from('employee_family').delete()
       .eq('id', req.params.memberId).eq('employee_id', empId).eq('tenant_id', req.tenantId)
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.DELETE_FAILED, 'Failed to delete family member')
     return reply.code(204).send()
   })
 
@@ -292,44 +293,44 @@ export default async function essSelfServiceRoutes(fastify: FastifyInstance) {
     const { data, error } = await fastify.supabase
       .from('employee_nominations').select('*, relationship_types(id, name)')
       .eq('employee_id', empId).eq('tenant_id', req.tenantId).order('scheme')
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch nominations')
     return reply.send({ data })
   })
 
   fastify.post('/ess/me/nominations', auth, async (req: any, reply) => {
     const empId = await selfOr400(req, reply); if (!empId) return
     const parsed = nominationSchema.safeParse(req.body)
-    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION', message: parsed.error.issues[0].message })
+    if (!parsed.success) return validationError(reply, ErrorCode.VALIDATION_ERROR, parsed.error.issues[0].message)
     if (parsed.data.is_minor && !parsed.data.guardian_name)
-      return reply.code(400).send({ error: 'VALIDATION', message: 'Guardian name required for minor nominees' })
+      return validationError(reply, ErrorCode.VALIDATION_ERROR, 'Guardian name required for minor nominees')
     if (!await validateShareTotal(empId, req.tenantId, parsed.data.scheme, parsed.data.share_percentage))
-      return reply.code(400).send({ error: 'VALIDATION', message: `Total share for ${parsed.data.scheme} would exceed 100%` })
+      return validationError(reply, ErrorCode.VALIDATION_ERROR, `Total share for ${parsed.data.scheme} would exceed 100%`)
     const { data, error } = await fastify.supabase
       .from('employee_nominations')
       .insert({ ...parsed.data, employee_id: empId, tenant_id: req.tenantId })
       .select('*, relationship_types(id, name)').single()
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create nomination')
     return reply.code(201).send(data)
   })
 
   fastify.put('/ess/me/nominations/:nomId', auth, async (req: any, reply) => {
     const empId = await selfOr400(req, reply); if (!empId) return
     const parsed = nominationSchema.partial().safeParse(req.body)
-    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION', message: parsed.error.issues[0].message })
+    if (!parsed.success) return validationError(reply, ErrorCode.VALIDATION_ERROR, parsed.error.issues[0].message)
     if (parsed.data.share_percentage) {
       const { data: existing } = await fastify.supabase
         .from('employee_nominations').select('scheme').eq('id', req.params.nomId)
         .eq('employee_id', empId).eq('tenant_id', req.tenantId).single()
       const scheme = parsed.data.scheme ?? existing?.scheme
       if (scheme && !await validateShareTotal(empId, req.tenantId, scheme, parsed.data.share_percentage, req.params.nomId))
-        return reply.code(400).send({ error: 'VALIDATION', message: `Total share for ${scheme} would exceed 100%` })
+        return validationError(reply, ErrorCode.VALIDATION_ERROR, `Total share for ${scheme} would exceed 100%`)
     }
     const { data, error } = await fastify.supabase
       .from('employee_nominations').update(parsed.data)
       .eq('id', req.params.nomId).eq('employee_id', empId).eq('tenant_id', req.tenantId)
       .select('*, relationship_types(id, name)').single()
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
-    if (!data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Nomination not found' })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update nomination')
+    if (!data) return notFound(reply, 'NOT_FOUND', 'Nomination not found')
     return reply.send(data)
   })
 
@@ -338,7 +339,7 @@ export default async function essSelfServiceRoutes(fastify: FastifyInstance) {
     const { error } = await fastify.supabase
       .from('employee_nominations').delete()
       .eq('id', req.params.nomId).eq('employee_id', empId).eq('tenant_id', req.tenantId)
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.DELETE_FAILED, 'Failed to delete nomination')
     return reply.code(204).send()
   })
 
@@ -360,7 +361,7 @@ export default async function essSelfServiceRoutes(fastify: FastifyInstance) {
       .select('id, name, doc_type, storage_path, file_size, mime_type, expires_at, uploaded_by, created_at')
       .eq('employee_id', empId).eq('tenant_id', req.tenantId)
       .order('created_at', { ascending: false })
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch documents')
     const docs = await Promise.all((data ?? []).map(async (d: any) => ({
       ...d,
       is_own: d.uploaded_by === req.userId,
@@ -373,13 +374,13 @@ export default async function essSelfServiceRoutes(fastify: FastifyInstance) {
   fastify.post('/ess/me/documents', auth, async (req: any, reply) => {
     const empId = await selfOr400(req, reply); if (!empId) return
     const parsed = documentSchema.safeParse(req.body)
-    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION', message: parsed.error.issues[0].message })
+    if (!parsed.success) return validationError(reply, ErrorCode.VALIDATION_ERROR, parsed.error.issues[0].message)
     const { data, error } = await fastify.supabase
       .from('documents')
       .insert({ ...parsed.data, employee_id: empId, tenant_id: req.tenantId, uploaded_by: req.userId })
       .select('id, name, doc_type, storage_path, file_size, mime_type, expires_at, created_at')
       .single()
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to record document')
     return reply.code(201).send({ data: { ...data, is_own: true, signed_url: await signedUrl(data.storage_path), signed_url_expires_in: SIGNED_URL_TTL } })
   })
 
@@ -390,16 +391,16 @@ export default async function essSelfServiceRoutes(fastify: FastifyInstance) {
       .from('documents').select('id, storage_path, uploaded_by')
       .eq('id', req.params.docId).eq('employee_id', empId).eq('tenant_id', req.tenantId)
       .maybeSingle()
-    if (!doc) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Document not found' })
+    if (!doc) return notFound(reply, 'NOT_FOUND', 'Document not found')
     if (doc.uploaded_by !== req.userId)
-      return reply.code(403).send({ error: 'FORBIDDEN', message: 'You can only delete documents you uploaded. Contact HR to remove this document.' })
+      return forbidden(reply, 'FORBIDDEN', 'You can only delete documents you uploaded. Contact HR to remove this document.')
     if (doc.storage_path) {
       await fastify.supabase.storage.from(STORAGE_BUCKET).remove([doc.storage_path]).catch(() => {})
     }
     const { error } = await fastify.supabase
       .from('documents').delete()
       .eq('id', req.params.docId).eq('employee_id', empId).eq('tenant_id', req.tenantId)
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.DELETE_FAILED, 'Failed to delete document')
     return reply.code(204).send()
   })
 
@@ -438,7 +439,7 @@ export default async function essSelfServiceRoutes(fastify: FastifyInstance) {
   fastify.post('/ess/me/separation', auth, async (req: any, reply) => {
     const empId = await selfOr400(req, reply); if (!empId) return
     const parsed = resignationSchema.safeParse(req.body)
-    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION', message: parsed.error.issues[0].message })
+    if (!parsed.success) return validationError(reply, ErrorCode.VALIDATION_ERROR, parsed.error.issues[0].message)
 
     // One separation per employee (UNIQUE tenant_id, employee_id). If a record
     // already exists, the resignation/separation is already under way.
@@ -446,7 +447,7 @@ export default async function essSelfServiceRoutes(fastify: FastifyInstance) {
       .from('employee_separation').select('id')
       .eq('employee_id', empId).eq('tenant_id', req.tenantId).maybeSingle()
     if (existing)
-      return reply.code(409).send({ error: 'ALREADY_EXISTS', message: 'A separation is already in progress. Please track it below or contact HR.' })
+      return conflictError(reply, 'ALREADY_EXISTS', 'A separation is already in progress. Please track it below or contact HR.')
 
     const { data, error } = await fastify.supabase
       .from('employee_separation')
@@ -464,7 +465,7 @@ export default async function essSelfServiceRoutes(fastify: FastifyInstance) {
         created_by:        req.userId,
       })
       .select().single()
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to submit separation request')
 
     // Surface to HR through the existing inbox — no new notification framework.
     const { data: emp } = await fastify.supabase
@@ -495,7 +496,7 @@ export default async function essSelfServiceRoutes(fastify: FastifyInstance) {
       .select('id, asset_code, name, category_id, serial_number, status, assigned_to, notes')
       .eq('assigned_to', empId).eq('tenant_id', req.tenantId)
       .order('name')
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch assets')
     const assets = data ?? []
     const outstanding = assets.filter((a: any) => a.status === 'assigned').length
     return reply.send({ data: assets, outstanding_count: outstanding })
