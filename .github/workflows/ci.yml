@@ -70,6 +70,25 @@ jobs:
       # structured logging (req.log.error) must be used instead.
       - run: node scripts/check-console-error.mjs
 
+  data-correctness:
+    name: Data correctness ratchet (RC-G5-01)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      # RC-G5-01: Prevents silent partial-dataset processing.
+      # PostgREST enforces a server-side max-rows=1000 ceiling that silently
+      # overrides any .limit() — even .limit(5000) returns 1,000 rows with HTTP 200.
+      # Fails if any NEW query against a high-cardinality table (employees,
+      # attendance_daily, payroll_records, etc.) omits fetchAllRows() or uses a
+      # hard-coded .limit(N > 20) that risks truncation.
+      # Existing violations are tracked in scripts/unbounded-queries-baseline.json.
+      # To suppress an intentional exception: // lint-query-ok: <reason> before .from()
+      # To lock in a fix: node scripts/check-unbounded-queries.mjs --save-baseline
+      - run: node scripts/check-unbounded-queries.mjs --ratchet
+
   verify:
     name: Typecheck & tests
     runs-on: ubuntu-latest
