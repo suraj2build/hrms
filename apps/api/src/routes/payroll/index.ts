@@ -227,6 +227,7 @@ import {
   generateAccountingIntegrityHash,
 } from '../../lib/payroll-accounting-engine.js'
 import { durableQueue } from '../../lib/durable-queue.js'
+import { serverError, notFound, forbidden, validationError, conflictError, ErrorCode } from '../../lib/api-errors.js'
 
 const monthRe = /^\d{4}-\d{2}$/
 
@@ -759,7 +760,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
     })
     const parsed = schema.safeParse(req.body)
     if (!parsed.success) {
-      return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+      return validationError(reply, 'VALIDATION_ERROR', parsed.error.issues[0]?.message ?? 'Validation failed')
     }
     const { month, notes, dry_run } = parsed.data
     const tenantId = req.tenantId as string
@@ -767,10 +768,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
     // ── Guard: block payroll runs for future months ───────────────────────────
     const currentYM = new Date().toISOString().slice(0, 7)
     if (month > currentYM) {
-      return reply.code(400).send({
-        error:   'FUTURE_MONTH',
-        message: `Cannot run payroll for a future month (${month}). Current month is ${currentYM}.`,
-      })
+      return validationError(reply, 'FUTURE_MONTH', `Cannot run payroll for a future month (${month}). Current month is ${currentYM}.`)
     }
 
     // ── Pre-flight: compensation coverage audit ──────────────────────────────
@@ -855,16 +853,10 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
         .eq('month', month)
         .maybeSingle()
       if ((existingRun as any)?.status === 'finalized') {
-        return reply.code(409).send({
-          error:   'RUN_FINALIZED',
-          message: `Payroll for ${month} is finalized and cannot be re-run. Roll it back (super_admin) before reprocessing.`,
-        })
+        return conflictError(reply, 'RUN_FINALIZED', `Payroll for ${month} is finalized and cannot be re-run. Roll it back (super_admin) before reprocessing.`)
       }
       if ((existingRun as any)?.status === 'queued' || (existingRun as any)?.status === 'processing') {
-        return reply.code(409).send({
-          error:   'RUN_IN_PROGRESS',
-          message: `Payroll for ${month} is already queued or processing. Wait for it to complete before re-triggering.`,
-        })
+        return conflictError(reply, 'RUN_IN_PROGRESS', `Payroll for ${month} is already queued or processing. Wait for it to complete before re-triggering.`)
       }
     }
 
@@ -878,8 +870,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
         .eq('status', 'active')
         .order('employee_code')
       if (dryEmpErr) {
-        req.log.error({ err: dryEmpErr, month, tenant_id: tenantId }, 'payroll dry run: failed to fetch employees')
-        return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch employees', details: dryEmpErr.message })
+        return serverError(req, reply, dryEmpErr, ErrorCode.QUERY_FAILED, 'Failed to fetch employees')
       }
       const empList = (dryEmployees ?? []) as Array<{ id: string; first_name: string; last_name: string; employee_code: string }>
       const [runYear, runMon] = month.split('-').map(Number)
@@ -888,8 +879,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       try {
         total_working_days = await countWorkingDaysInMonth(fastify.supabase, tenantId, month)
       } catch (wdErr: any) {
-        req.log.error({ err: wdErr, month, tenant_id: tenantId }, 'payroll dry run: holiday calendar query failed')
-        return reply.code(500).send({ error: 'WORKING_DAYS_FETCH_FAILED', message: wdErr?.message ?? 'Failed to count working days' })
+        return serverError(req, reply, wdErr, 'WORKING_DAYS_FETCH_FAILED', 'Failed to count working days')
       }
 
       req.log.info(
@@ -1007,13 +997,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       .single()
 
     if (runErr || !run) {
-      req.log.error({ err: runErr, month, tenant_id: tenantId }, 'payroll run: failed to upsert run row')
-      return reply.code(500).send({
-        error:   'INSERT_FAILED',
-        message: 'Failed to create payroll run',
-        details: runErr?.message,
-        code:    runErr?.code,
-      })
+      return serverError(req, reply, runErr, ErrorCode.INSERT_FAILED, 'Failed to create payroll run')
     }
 
     const runId = (run as { id: string }).id
@@ -1036,8 +1020,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
         .from('payroll_runs')
         .update({ status: 'failed', error_message: `Failed to enqueue job: ${enqErr.message}` })
         .eq('id', runId)
-      req.log.error({ err: enqErr, run_id: runId, month }, 'payroll: failed to enqueue durable job')
-      return reply.code(500).send({ error: 'ENQUEUE_FAILED', message: 'Failed to queue payroll run — please retry' })
+      return serverError(req, reply, enqErr, 'ENQUEUE_FAILED', 'Failed to queue payroll run — please retry')
     }
 
     req.log.info({ event: 'payroll_run_queued', run_id: runId, job_id: jobId, month }, 'payroll run queued')
@@ -1061,7 +1044,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
     })
     const parsed = querySchema.safeParse(req.query)
     if (!parsed.success) {
-      return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+      return validationError(reply, 'VALIDATION_ERROR', parsed.error.issues[0]?.message ?? 'Validation failed')
     }
     const { limit, offset, q } = parsed.data
 
@@ -1081,7 +1064,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
 
     const { data, error, count } = await qb
 
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch runs' })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch runs')
     return reply.send({ data: data ?? [], total: count ?? 0, limit, offset })
   })
 
@@ -1096,7 +1079,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
     })
     const parsed = querySchema.safeParse(req.query)
     if (!parsed.success) {
-      return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+      return validationError(reply, 'VALIDATION_ERROR', parsed.error.issues[0]?.message ?? 'Validation failed')
     }
     const { month }    = parsed.data
     const tenantId     = req.tenantId as string
@@ -1111,7 +1094,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', tenantId)
       .eq('status', 'active')
       .order('employee_code')
-    if (empErr) return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch employees' })
+    if (empErr) return serverError(req, reply, empErr, ErrorCode.QUERY_FAILED, 'Failed to fetch employees')
 
     const empList = (employees ?? []) as Array<{
       id: string; first_name: string; last_name: string; employee_code: string
@@ -1186,14 +1169,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       const audit = await buildCompensationCoverageAudit(fastify.supabase, req.tenantId as string)
       return reply.send({ data: audit })
     } catch (err: any) {
-      req.log.error(
-        { err, tenant_id: req.tenantId },
-        'payroll compensation-coverage audit failed',
-      )
-      return reply.code(500).send({
-        error:   'AUDIT_FAILED',
-        message: err?.message ?? 'Failed to run compensation coverage audit',
-      })
+      return serverError(req, reply, err, 'AUDIT_FAILED', 'Failed to run compensation coverage audit')
     }
   })
 
@@ -1208,7 +1184,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', req.tenantId)
       .single()
 
-    if (error || !data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Run not found' })
+    if (error || !data) return notFound(reply, 'NOT_FOUND', 'Run not found')
     return reply.send({ data })
   })
 
@@ -1235,12 +1211,12 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', tenantId)
       .single()
 
-    if (!run) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Run not found' })
+    if (!run) return notFound(reply, 'NOT_FOUND', 'Run not found')
     if (run.status === 'finalized') {
-      return reply.code(409).send({ error: 'ALREADY_FINALIZED', message: 'Run is already finalized' })
+      return conflictError(reply, 'ALREADY_FINALIZED', 'Run is already finalized')
     }
     if (run.status === 'failed') {
-      return reply.code(409).send({ error: 'RUN_FAILED', message: 'Cannot finalize a failed run — all employees failed during computation' })
+      return conflictError(reply, 'RUN_FAILED', 'Cannot finalize a failed run — all employees failed during computation')
     }
     // partial_failed is finalizable — only the succeeded slips are finalized
 
@@ -1258,16 +1234,10 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
     // is enabled it also requires elevated privilege (segregation of duties).
     if (force_finalize) {
       if (!override_reason || !override_reason.trim()) {
-        return reply.code(400).send({
-          error:   'OVERRIDE_REASON_REQUIRED',
-          message: 'force_finalize requires a non-empty override_reason.',
-        })
+        return validationError(reply, 'OVERRIDE_REASON_REQUIRED', 'force_finalize requires a non-empty override_reason.')
       }
       if (isPayrollDualControlEnabled() && req.userRole !== 'super_admin') {
-        return reply.code(403).send({
-          error:   'FORBIDDEN',
-          message: 'force_finalize requires super_admin when dual control is enabled.',
-        })
+        return forbidden(reply, 'FORBIDDEN', 'force_finalize requires super_admin when dual control is enabled.')
       }
     }
 
@@ -1303,10 +1273,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
           })
         }
         if ((pending as any).maker_id === req.userId) {
-          return reply.code(409).send({
-            error:   'AWAITING_DIFFERENT_CHECKER',
-            message: 'You proposed this finalize; a different authorised user must approve it.',
-          })
+          return conflictError(reply, 'AWAITING_DIFFERENT_CHECKER', 'You proposed this finalize; a different authorised user must approve it.')
         }
         // Preparer ≠ approver (P2.4): the person who RAN the payroll
         // (payroll_runs.created_by) may not be the checker either — otherwise a
@@ -1314,10 +1281,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
         // their own run. Closes the maker-checker gap the proposer-only guard left.
         // super_admin may override (e.g. tiny team) but it is still audit-logged.
         if ((run as any).created_by && (run as any).created_by === req.userId && req.userRole !== 'super_admin') {
-          return reply.code(409).send({
-            error:   'PREPARER_CANNOT_APPROVE',
-            message: 'You prepared (ran) this payroll; a different authorised user must approve it.',
-          })
+          return conflictError(reply, 'PREPARER_CANNOT_APPROVE', 'You prepared (ran) this payroll; a different authorised user must approve it.')
         }
         // Checker step — approve the pending proposal, then proceed to finalize.
         // When the preparer themselves approved via super_admin override, record that
@@ -1639,14 +1603,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       .eq('status', 'draft')
 
     if (slipFinalizeErr) {
-      req.log.error(
-        { err: slipFinalizeErr, run_id: id },
-        'payroll finalize: slip status update failed — run remains draft, retry is safe',
-      )
-      return reply.code(500).send({
-        error:   'SLIP_FINALIZE_FAILED',
-        message: 'Failed to finalize payroll slips — the run remains in draft. Retry finalization.',
-      })
+      return serverError(req, reply, slipFinalizeErr, 'SLIP_FINALIZE_FAILED', 'Failed to finalize payroll slips — the run remains in draft. Retry finalization.')
     }
 
     // ── Mark advance recovery schedules and loan EMIs as paid ─────────────────
@@ -1828,14 +1785,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       // Slips are finalized; run status is not.  Retrying finalization is safe:
       // the slip update will match 0 draft rows (no-op) and only the run status
       // update will re-execute.
-      req.log.error(
-        { err: runFinalizeErr, run_id: id },
-        'payroll finalize: run status update failed after slips finalized — retry finalization to complete',
-      )
-      return reply.code(500).send({
-        error:   'RUN_STATUS_UPDATE_FAILED',
-        message: 'Payroll slips were finalized but run status update failed — retry finalization to complete.',
-      })
+      return serverError(req, reply, runFinalizeErr, 'RUN_STATUS_UPDATE_FAILED', 'Payroll slips were finalized but run status update failed — retry finalization to complete.')
     }
 
     // ── Auto-compute statutory contributions (EPF / ESI / PTax) ──────────────
@@ -2015,7 +1965,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
     })
     const parsed = querySchema.safeParse(req.query)
     if (!parsed.success) {
-      return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+      return validationError(reply, 'VALIDATION_ERROR', parsed.error.issues[0]?.message ?? 'Validation failed')
     }
     const { limit, offset } = parsed.data
 
@@ -2026,7 +1976,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
       .single()
-    if (!run) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Run not found' })
+    if (!run) return notFound(reply, 'NOT_FOUND', 'Run not found')
 
     // Use LEFT JOIN (no !inner) so orphaned slips remain visible when employee row
     // has been archived or soft-deleted — !inner would silently drop those slips.
@@ -2045,8 +1995,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
 
     const { data, error, count } = await q
     if (error) {
-      req.log.error({ err: error, run_id: id, tenant_id: req.tenantId }, 'payroll: failed to fetch run slips')
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch slips' })
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch slips')
     }
 
     const slips = (data ?? []).map((r: any) => {
@@ -2091,7 +2040,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
       .single()
-    if (!run) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Run not found' })
+    if (!run) return notFound(reply, 'NOT_FOUND', 'Run not found')
 
     const EXPORT_LIMIT = 10_000
     const { data: slips, error: slipsError } = await fastify.supabase
@@ -2106,7 +2055,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', req.tenantId)
       .limit(EXPORT_LIMIT)
 
-    if (slipsError) return reply.code(500).send({ error: 'DB_ERROR', message: slipsError.message })
+    if (slipsError) return serverError(req, reply, slipsError, ErrorCode.QUERY_FAILED, 'Failed to export payroll slips')
     if ((slips?.length ?? 0) >= EXPORT_LIMIT) {
       return reply.code(422).send({ error: 'EXPORT_TOO_LARGE', message: 'This payroll run exceeds the online export limit of 10,000 rows. Please contact support for a bulk export.' })
     }
@@ -2157,7 +2106,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       .eq('id', id)
       .eq('tenant_id', tenantId)
       .single()
-    if (!currentRun) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Run not found' })
+    if (!currentRun) return notFound(reply, 'NOT_FOUND', 'Run not found')
 
     // Derive previous month string
     const [cy, cm]  = currentRun.month.split('-').map(Number)
@@ -2190,7 +2139,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
         .maybeSingle(),
     ])
 
-    if (currSlipsError) return reply.code(500).send({ error: 'DB_ERROR', message: currSlipsError.message })
+    if (currSlipsError) return serverError(req, reply, currSlipsError, ErrorCode.QUERY_FAILED, 'Failed to fetch current slips for variance report')
     if ((currentSlips?.length ?? 0) >= VARIANCE_LIMIT) {
       return reply.code(422).send({ error: 'EXPORT_TOO_LARGE', message: 'This payroll run exceeds the variance report limit of 10,000 rows. Please contact support for a bulk export.' })
     }
@@ -2228,7 +2177,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', tenantId)
       .limit(VARIANCE_LIMIT)
 
-    if (prevSlipsError) return reply.code(500).send({ error: 'DB_ERROR', message: prevSlipsError.message })
+    if (prevSlipsError) return serverError(req, reply, prevSlipsError, ErrorCode.QUERY_FAILED, 'Failed to fetch previous slips for variance report')
     if ((prevSlips?.length ?? 0) >= VARIANCE_LIMIT) {
       return reply.code(422).send({ error: 'EXPORT_TOO_LARGE', message: 'The previous payroll run exceeds the variance report limit of 10,000 rows. Please contact support for a bulk export.' })
     }
@@ -2324,7 +2273,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
 
     if (error || !data) {
       req.log.warn({ slip_id: id, tenant_id: req.tenantId, err: error }, 'payroll: slip not found or query error')
-      return reply.code(404).send({ error: 'NOT_FOUND', message: 'Slip not found' })
+      return notFound(reply, 'NOT_FOUND', 'Slip not found')
     }
 
     const slip = data as any
@@ -2347,24 +2296,15 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
         .maybeSingle()
 
       if (profileErr) {
-        req.log.error({ err: profileErr, user_id: req.userId, slip_id: id }, 'payroll: profile lookup failed during slip access check')
-        return reply.code(500).send({ error: 'PROFILE_FETCH_FAILED', message: 'Unable to verify your employee identity' })
+        return serverError(req, reply, profileErr, 'PROFILE_FETCH_FAILED', 'Unable to verify your employee identity')
       }
 
       if (profile?.employee_id !== slip.employee_id) {
-        return reply.code(403).send({
-          error:            'FORBIDDEN',
-          message:          'You can only view your own payslip',
-          visibility_reason: visibility.reason,
-        })
+        return forbidden(reply, 'FORBIDDEN', 'You can only view your own payslip')
       }
 
       if (!visibility.employee_visible) {
-        return reply.code(403).send({
-          error:            'NOT_FINALIZED',
-          message:          visibility.label,
-          visibility_reason: visibility.reason,
-        })
+        return forbidden(reply, 'NOT_FINALIZED', visibility.label)
       }
     }
 
@@ -2395,7 +2335,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       .eq('id', id)
       .eq('tenant_id', tenantId)
       .single()
-    if (!run) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Run not found' })
+    if (!run) return notFound(reply, 'NOT_FOUND', 'Run not found')
 
     // Fetch blockers joined with employee info
     const { data: blockerRows, error: blockerErr } = await fastify.supabase
@@ -2410,8 +2350,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       .order('created_at', { ascending: true })
 
     if (blockerErr) {
-      req.log.error({ err: blockerErr, run_id: id }, 'payroll blockers: query failed')
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch blockers' })
+      return serverError(req, reply, blockerErr, ErrorCode.QUERY_FAILED, 'Failed to fetch blockers')
     }
 
     // Fetch validation rules for enrichment
@@ -2454,7 +2393,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
     })
     const parsed = schema.safeParse(req.body)
     if (!parsed.success) {
-      return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+      return validationError(reply, 'VALIDATION_ERROR', parsed.error.issues[0]?.message ?? 'Validation failed')
     }
     const { action, resolution_note } = parsed.data
     const tenantId = req.tenantId as string
@@ -2467,12 +2406,9 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', tenantId)
       .single()
 
-    if (!blocker) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Blocker not found' })
+    if (!blocker) return notFound(reply, 'NOT_FOUND', 'Blocker not found')
     if (blocker.status !== 'open') {
-      return reply.code(409).send({
-        error: 'ALREADY_RESOLVED',
-        message: `Blocker is already ${blocker.status}`,
-      })
+      return conflictError(reply, 'ALREADY_RESOLVED', `Blocker is already ${blocker.status}`)
     }
 
     const { error: updateErr } = await fastify.supabase
@@ -2487,8 +2423,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', req.tenantId)
 
     if (updateErr) {
-      req.log.error({ err: updateErr, blocker_id: id }, 'payroll blockers: resolve update failed')
-      return reply.code(500).send({ error: 'UPDATE_FAILED', message: 'Failed to update blocker status' })
+      return serverError(req, reply, updateErr, ErrorCode.UPDATE_FAILED, 'Failed to update blocker status')
     }
 
     // Forensic event
@@ -2522,12 +2457,9 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       .eq('id', id)
       .eq('tenant_id', tenantId)
       .single()
-    if (!run) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Run not found' })
+    if (!run) return notFound(reply, 'NOT_FOUND', 'Run not found')
     if (!['failed', 'partial_failed'].includes(run.status)) {
-      return reply.code(409).send({
-        error:   'INVALID_RUN_STATUS',
-        message: `Run status is '${run.status}' — only failed or partial_failed runs can be retried`,
-      })
+      return conflictError(reply, 'INVALID_RUN_STATUS', `Run status is '${run.status}' — only failed or partial_failed runs can be retried`)
     }
 
     // Freeze guard
@@ -2582,10 +2514,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
     try {
       total_working_days = await countWorkingDaysInMonth(fastify.supabase, tenantId, run.month)
     } catch (wdErr: any) {
-      return reply.code(500).send({
-        error:   'WORKING_DAYS_FETCH_FAILED',
-        message: wdErr?.message ?? 'Failed to count working days',
-      })
+      return serverError(req, reply, wdErr, 'WORKING_DAYS_FETCH_FAILED', 'Failed to count working days')
     }
 
     // Fetch validation rules for blocker rebuild
@@ -2735,15 +2664,12 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       .eq('id', id)
       .eq('tenant_id', tenantId)
       .single()
-    if (!run) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Run not found' })
+    if (!run) return notFound(reply, 'NOT_FOUND', 'Run not found')
 
     // Check already frozen
     const alreadyFrozen = await checkFreezeGuard(fastify.supabase, tenantId, run.month)
     if (alreadyFrozen.frozen) {
-      return reply.code(409).send({
-        error:   'ALREADY_FROZEN',
-        message: `Payroll for ${run.month} is already frozen`,
-      })
+      return conflictError(reply, 'ALREADY_FROZEN', `Payroll for ${run.month} is already frozen`)
     }
 
     const { error: freezeErr } = await fastify.supabase
@@ -2758,8 +2684,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       })
 
     if (freezeErr) {
-      req.log.error({ err: freezeErr, run_id: id }, 'payroll freeze: insert failed')
-      return reply.code(500).send({ error: 'FREEZE_FAILED', message: 'Failed to freeze payroll month' })
+      return serverError(req, reply, freezeErr, ErrorCode.INSERT_FAILED, 'Failed to freeze payroll month')
     }
 
     // Reflect the freeze on the run status so ALL views (Run Console, Payroll
@@ -2793,7 +2718,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       .order('stage')
       .order('code')
 
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch validation rules' })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch validation rules')
     return reply.send({ data: data ?? [] })
   })
 
@@ -2802,7 +2727,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
   // Only super_admin can call; hr_admin gets 403.
   fastify.patch('/payroll/validation-rules/:id', hrAdminAuth, async (req: any, reply) => {
     if (!['super_admin'].includes(req.userRole)) {
-      return reply.code(403).send({ error: 'FORBIDDEN', message: 'Only super_admin can modify validation rules' })
+      return forbidden(reply, 'FORBIDDEN', 'Only super_admin can modify validation rules')
     }
 
     const { id } = req.params as { id: string }
@@ -2813,10 +2738,10 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
     })
     const parsed = schema.safeParse(req.body)
     if (!parsed.success) {
-      return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+      return validationError(reply, 'VALIDATION_ERROR', parsed.error.issues[0]?.message ?? 'Validation failed')
     }
     if (Object.keys(parsed.data).length === 0) {
-      return reply.code(400).send({ error: 'VALIDATION_ERROR', message: 'At least one field (enabled, blocking, severity) must be provided' })
+      return validationError(reply, 'VALIDATION_ERROR', 'At least one field (enabled, blocking, severity) must be provided')
     }
 
     const { data, error } = await fastify.supabase
@@ -2826,8 +2751,8 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       .select()
       .single()
 
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: 'Failed to update validation rule' })
-    if (!data)  return reply.code(404).send({ error: 'NOT_FOUND',     message: 'Validation rule not found' })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update validation rule')
+    if (!data)  return notFound(reply, 'NOT_FOUND', 'Validation rule not found')
 
     return reply.send({ data })
   })
@@ -2845,11 +2770,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       .maybeSingle()
 
     if (profileErr) {
-      req.log.error(
-        { err: profileErr, user_id: req.userId, tenant_id: req.tenantId },
-        'payroll my-slips: profile lookup failed',
-      )
-      return reply.code(500).send({ error: 'PROFILE_FETCH_FAILED', message: 'Unable to resolve your employee profile' })
+      return serverError(req, reply, profileErr, 'PROFILE_FETCH_FAILED', 'Unable to resolve your employee profile')
     }
 
     // Profile exists but no employee_id linked — return empty list (not an error)
@@ -2876,11 +2797,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       .order('month', { ascending: false })
 
     if (error) {
-      req.log.error(
-        { err: error, employee_id: profile.employee_id, tenant_id: req.tenantId },
-        'payroll my-slips: slip query failed',
-      )
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch payslips' })
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch payslips')
     }
 
     const slips = (data ?? []).map((r: any) => {
@@ -2931,8 +2848,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       .maybeSingle()
 
     if (profileErr) {
-      req.log.error({ err: profileErr }, 'payroll slips/trend: profile lookup failed')
-      return reply.code(500).send({ error: 'PROFILE_FETCH_FAILED', message: 'Unable to resolve your employee profile' })
+      return serverError(req, reply, profileErr, 'PROFILE_FETCH_FAILED', 'Unable to resolve your employee profile')
     }
 
     if (!profile?.employee_id) {
@@ -2944,7 +2860,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
     })
     const parsed = querySchema.safeParse(req.query)
     if (!parsed.success) {
-      return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+      return validationError(reply, 'VALIDATION_ERROR', parsed.error.issues[0]?.message ?? 'Validation failed')
     }
 
     const { months } = parsed.data
@@ -2963,8 +2879,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       .order('month', { ascending: true })
 
     if (error) {
-      req.log.error({ err: error }, 'payroll slips/trend: query failed')
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch payroll trend' })
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch payroll trend')
     }
 
     // Only include finalized slips in the trend — draft/held slips are not yet authoritative
@@ -2998,12 +2913,12 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', tenantId)
       .maybeSingle()
 
-    if (runErr || !run) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Run not found' })
+    if (runErr || !run) return notFound(reply, 'NOT_FOUND', 'Run not found')
     if (run.status === 'processing') {
-      return reply.code(409).send({ error: 'PROCESSING', message: 'Cannot rollback a run that is currently processing' })
+      return conflictError(reply, 'PROCESSING', 'Cannot rollback a run that is currently processing')
     }
     if (run.status === 'finalized' && req.userRole !== 'super_admin') {
-      return reply.code(403).send({ error: 'FORBIDDEN', message: 'Only super_admin may rollback a finalized run' })
+      return forbidden(reply, 'FORBIDDEN', 'Only super_admin may rollback a finalized run')
     }
 
     // Reset run to draft FIRST. The PI-1 immutability trigger (migration 263)
@@ -3016,12 +2931,12 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       .eq('id', id)
       .eq('tenant_id', tenantId)
 
-    if (updateErr) return reply.code(500).send({ error: 'DB_ERROR', message: updateErr.message })
+    if (updateErr) return serverError(req, reply, updateErr, ErrorCode.UPDATE_FAILED, 'Failed to reset run to draft')
 
     // Now delete the slips (parent run is 'draft' → trigger permits deletion).
     const { error: slipDelErr } = await fastify.supabase
       .from('payroll_slips').delete().eq('run_id', id).eq('tenant_id', tenantId)
-    if (slipDelErr) return reply.code(500).send({ error: 'DB_ERROR', message: `Run reset to draft but slip deletion failed: ${slipDelErr.message}` })
+    if (slipDelErr) return serverError(req, reply, slipDelErr, ErrorCode.DELETE_FAILED, 'Run reset to draft but slip deletion failed')
 
     // If the month was frozen, also lift the freeze so the period is actually
     // runnable again — otherwise the freeze guard blocks the re-run and the
@@ -3031,7 +2946,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
     let unfrozen = false
     if (freezeState.frozen) {
       if (req.userRole !== 'super_admin') {
-        return reply.code(403).send({ error: 'FORBIDDEN', message: 'Only super_admin may reopen a frozen payroll month' })
+        return forbidden(reply, 'FORBIDDEN', 'Only super_admin may reopen a frozen payroll month')
       }
       const { error: unErr } = await fastify.supabase
         .from('payroll_freeze_log')
@@ -3040,7 +2955,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
         .eq('freeze_month', run.month)
         .eq('action', 'freeze')
         .is('unfrozen_at', null)
-      if (unErr) return reply.code(500).send({ error: 'DB_ERROR', message: `Reset to draft but failed to unfreeze month: ${unErr.message}` })
+      if (unErr) return serverError(req, reply, unErr, ErrorCode.UPDATE_FAILED, 'Reset to draft but failed to unfreeze month')
       unfrozen = true
     }
 
@@ -3069,15 +2984,12 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', tenantId)
       .maybeSingle()
 
-    if (runErr || !run) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Run not found' })
+    if (runErr || !run) return notFound(reply, 'NOT_FOUND', 'Run not found')
     if (run.status === 'finalized') {
-      return reply.code(409).send({
-        error:   'RUN_FINALIZED',
-        message: 'Finalized runs cannot be deleted. Roll the run back to draft first (super_admin).',
-      })
+      return conflictError(reply, 'RUN_FINALIZED', 'Finalized runs cannot be deleted. Roll the run back to draft first (super_admin).')
     }
     if (run.status === 'processing') {
-      return reply.code(409).send({ error: 'PROCESSING', message: 'Cannot delete a run that is currently processing' })
+      return conflictError(reply, 'PROCESSING', 'Cannot delete a run that is currently processing')
     }
 
     // Audit BEFORE deletion — the event FK is ON DELETE SET NULL, so the row
@@ -3089,7 +3001,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
 
     const { error: delErr } = await fastify.supabase
       .from('payroll_runs').delete().eq('id', id).eq('tenant_id', tenantId)
-    if (delErr) return reply.code(500).send({ error: 'DB_ERROR', message: delErr.message })
+    if (delErr) return serverError(req, reply, delErr, ErrorCode.DELETE_FAILED, 'Failed to delete payroll run')
 
     return reply.send({ message: `Run for ${run.month} deleted`, run_id: id })
   })
@@ -3118,7 +3030,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
     if (event_type) q = q.eq('event_type', event_type)
 
     const { data, error, count } = await q
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch forensic events')
 
     return reply.send({ data: data ?? [], total: count ?? 0 })
   })
@@ -3210,8 +3122,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       },
     })
     } catch (err: any) {
-      req.log.error({ err, tenant_id: req.tenantId }, 'payroll readiness-score failed')
-      return reply.code(500).send({ error: 'READINESS_SCORE_FAILED', message: err?.message ?? 'Failed to compute readiness score' })
+      return serverError(req, reply, err, 'READINESS_SCORE_FAILED', 'Failed to compute readiness score')
     }
   })
 
@@ -3226,7 +3137,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       .order('frozen_at', { ascending: false })
       .limit(100)
 
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch freeze log')
 
     // Resolve actor names with a plain id→name lookup rather than a PostgREST
     // embed. payroll_freeze_log has TWO foreign keys to profiles (frozen_by and
@@ -3255,17 +3166,17 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
     const tenantId = req.tenantId as string
     const schema = z.object({ month: z.string().regex(/^\d{4}-\d{2}$/), reason: z.string().min(1) })
     const parsed = schema.safeParse(req.body)
-    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION', issues: parsed.error.issues })
+    if (!parsed.success) return validationError(reply, 'VALIDATION_ERROR', parsed.error.issues[0]?.message ?? 'Validation failed')
     const { month, reason } = parsed.data
 
     const already = await checkFreezeGuard(fastify.supabase, tenantId, month)
-    if (already.frozen) return reply.code(409).send({ error: 'ALREADY_FROZEN', message: `${month} is already frozen` })
+    if (already.frozen) return conflictError(reply, 'ALREADY_FROZEN', `${month} is already frozen`)
 
     const { error } = await fastify.supabase.from('payroll_freeze_log').insert({
       tenant_id: tenantId, freeze_month: month, action: 'freeze',
       reason, frozen_by: req.userId, frozen_at: new Date().toISOString(),
     })
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to freeze payroll month')
     return reply.send({ message: `${month} frozen`, month })
   })
 
@@ -3274,15 +3185,15 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
   fastify.post('/payroll/unfreeze-month', hrAdminAuth, async (req: any, reply) => {
     const tenantId = req.tenantId as string
     if (req.userRole !== 'super_admin') {
-      return reply.code(403).send({ error: 'FORBIDDEN', message: 'Only super_admin may unfreeze a payroll month' })
+      return forbidden(reply, 'FORBIDDEN', 'Only super_admin may unfreeze a payroll month')
     }
     const schema = z.object({ month: z.string().regex(/^\d{4}-\d{2}$/), reason: z.string().min(1) })
     const parsed = schema.safeParse(req.body)
-    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION', issues: parsed.error.issues })
+    if (!parsed.success) return validationError(reply, 'VALIDATION_ERROR', parsed.error.issues[0]?.message ?? 'Validation failed')
     const { month, reason } = parsed.data
 
     const already = await checkFreezeGuard(fastify.supabase, tenantId, month)
-    if (!already.frozen) return reply.code(409).send({ error: 'NOT_FROZEN', message: `${month} is not frozen` })
+    if (!already.frozen) return conflictError(reply, 'NOT_FROZEN', `${month} is not frozen`)
 
     // Mark the freeze record as unfrozen
     const { error } = await fastify.supabase
@@ -3292,7 +3203,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       .eq('freeze_month', month)
       .eq('action', 'freeze')
 
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to unfreeze payroll month')
 
     // Revert the run status from 'frozen' back to 'finalized' so views are
     // consistent (mirrors the freeze action that sets status='frozen').
@@ -3492,17 +3403,14 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
     })
     const parsed = schema.safeParse(req.body)
     if (!parsed.success) {
-      return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+      return validationError(reply, 'VALIDATION_ERROR', parsed.error.issues[0]?.message ?? 'Validation failed')
     }
     const { month, statutes, challan_number, reference_note } = parsed.data
 
     const result = await buildStatutoryRecon(tenantId, month)
-    if (!result) return reply.code(404).send({ error: 'NO_RUN', message: `No payroll run found for ${month}` })
+    if (!result) return notFound(reply, 'NO_RUN', `No payroll run found for ${month}`)
     if (result.run.status !== 'finalized') {
-      return reply.code(409).send({
-        error: 'RUN_NOT_FINALIZED',
-        message: `Payroll run for ${month} is '${result.run.status}'. Finalize the run before filing statutory dues.`,
-      })
+      return conflictError(reply, 'RUN_NOT_FINALIZED', `Payroll run for ${month} is '${result.run.status}'. Finalize the run before filing statutory dues.`)
     }
 
     // Existing closures (idempotency guard).
@@ -3550,7 +3458,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       const { error } = await fastify.supabase
         .from('statutory_filing_closures')
         .insert(rowsToInsert)
-      if (error) return reply.code(500).send({ error: 'INSERT_FAILED', message: error.message })
+      if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to record statutory filing')
 
       await logAction(fastify.supabase, {
         tenantId,
@@ -3575,7 +3483,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
     })
     const parsed = schema.safeParse(req.body)
     if (!parsed.success) {
-      return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+      return validationError(reply, 'VALIDATION_ERROR', parsed.error.issues[0]?.message ?? 'Validation failed')
     }
     const { month, statutes } = parsed.data
 
@@ -3587,7 +3495,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       .in('statutory_type', statutes)
       .eq('status', 'filed')
 
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to confirm statutory filings')
     return reply.send({ month, confirmed: statutes })
   })
 
@@ -3602,7 +3510,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
     })
     const parsed = schema.safeParse(req.body)
     if (!parsed.success) {
-      return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+      return validationError(reply, 'VALIDATION_ERROR', parsed.error.issues[0]?.message ?? 'Validation failed')
     }
     const { month, statutes, reason } = parsed.data
 
@@ -3613,7 +3521,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       .eq('month', month)
       .in('statutory_type', statutes)
 
-    if (error) return reply.code(500).send({ error: 'DELETE_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.DELETE_FAILED, 'Failed to reopen statutory filings')
 
     await logAction(fastify.supabase, {
       tenantId,
@@ -3649,7 +3557,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
     if (entity_type) q = q.eq('entity_type', entity_type)
 
     const { data, error } = await q
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch approval stages')
     return reply.send({ data: data ?? [] })
   })
 
@@ -3666,7 +3574,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', tenantId)
       .eq('status', 'pending')
 
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to approve stage')
     return reply.send({ message: 'Approved' })
   })
 
@@ -3683,7 +3591,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', tenantId)
       .eq('status', 'pending')
 
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to reject stage')
     return reply.send({ message: 'Rejected' })
   })
 
@@ -3703,7 +3611,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
 
     if (month) q = q.eq('month', month)
     const { data: runs, error } = await q
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch payout batches')
 
     // Map runs to virtual payout batches
     const batches = (runs ?? []).map(r => ({
@@ -3741,7 +3649,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', tenantId)
       .order('employee_id')
 
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch payout employee details')
 
     const mapped = (slips ?? []).map((s: any) => {
       const bank = (s.employees?.bank_details ?? []).find((b: any) => b.is_primary) ?? s.employees?.bank_details?.[0] ?? null
@@ -3785,17 +3693,17 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', tenantId)
       .maybeSingle()
 
-    if (runErr || !run) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Run not found' })
+    if (runErr || !run) return notFound(reply, 'NOT_FOUND', 'Run not found')
     if ((run as any).status !== 'finalized') {
-      return reply.code(409).send({ error: 'NOT_FINALIZED', message: 'Snapshot can only be created for finalized runs' })
+      return conflictError(reply, 'NOT_FINALIZED', 'Snapshot can only be created for finalized runs')
     }
     if ((run as any).snapshot_id) {
-      return reply.code(409).send({ error: 'SNAPSHOT_EXISTS', message: 'Snapshot already exists for this run', snapshot_id: (run as any).snapshot_id })
+      return conflictError(reply, 'SNAPSHOT_EXISTS', 'Snapshot already exists for this run')
     }
 
     const result = await buildPayrollRunSnapshot(fastify.supabase, id, tenantId, req.userId)
     if ('error' in result) {
-      return reply.code(500).send({ error: 'SNAPSHOT_FAILED', message: result.error })
+      return serverError(req, reply, new Error(result.error), 'SNAPSHOT_FAILED', 'Failed to create payroll run snapshot')
     }
 
     await logRunEvent(fastify.supabase, req.log, {
@@ -3825,8 +3733,8 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', tenantId)
       .maybeSingle()
 
-    if (error)     return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
-    if (!snapshot) return reply.code(404).send({ error: 'NOT_FOUND', message: 'No snapshot found for this run' })
+    if (error)     return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch run snapshot')
+    if (!snapshot) return notFound(reply, 'NOT_FOUND', 'No snapshot found for this run')
 
     // Count employee snapshots
     const { count } = await fastify.supabase
@@ -3849,7 +3757,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       offset:      z.coerce.number().int().min(0).default(0),
     })
     const parsed = qSchema.safeParse(req.query)
-    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+    if (!parsed.success) return validationError(reply, 'VALIDATION_ERROR', parsed.error.issues[0]?.message ?? 'Validation failed')
     const { employee_id, limit, offset } = parsed.data
 
     // Find snapshot for this run
@@ -3860,7 +3768,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', tenantId)
       .maybeSingle()
 
-    if (!manifest) return reply.code(404).send({ error: 'NOT_FOUND', message: 'No snapshot found for this run' })
+    if (!manifest) return notFound(reply, 'NOT_FOUND', 'No snapshot found for this run')
 
     let q = fastify.supabase
       .from('payroll_employee_snapshots')
@@ -3875,7 +3783,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
     if (employee_id) q = (q as any).eq('employee_id', employee_id)
 
     const { data: rows, error, count } = await q
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch employee snapshots')
 
     return reply.send({ data: rows ?? [], total: count ?? 0 })
   })
@@ -3893,7 +3801,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', tenantId)
       .maybeSingle()
 
-    if (!manifest) return reply.code(404).send({ error: 'NOT_FOUND', message: 'No snapshot found for this run' })
+    if (!manifest) return notFound(reply, 'NOT_FOUND', 'No snapshot found for this run')
 
     const result = await validateSnapshotIntegrity(fastify.supabase, (manifest as any).id, tenantId)
 
@@ -3927,12 +3835,12 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       replay_type: z.enum(['dry_replay', 'variance_replay', 'audit_replay']).default('audit_replay'),
     })
     const parsed = bodySchema.safeParse(req.body ?? {})
-    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+    if (!parsed.success) return validationError(reply, 'VALIDATION_ERROR', parsed.error.issues[0]?.message ?? 'Validation failed')
     const { replay_type } = parsed.data
 
     const result = await replayPayrollRun(fastify.supabase, id, tenantId, replay_type, req.userId)
     if ('error' in result) {
-      return reply.code(500).send({ error: 'REPLAY_FAILED', message: result.error })
+      return serverError(req, reply, new Error(result.error), 'REPLAY_FAILED', 'Failed to replay payroll run')
     }
 
     await logRunEvent(fastify.supabase, req.log, {
@@ -3965,7 +3873,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       .order('triggered_at', { ascending: false })
       .limit(20)
 
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch replay sessions')
     return reply.send({ data: data ?? [] })
   })
 
@@ -3984,7 +3892,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       accounting_date:  z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
     })
     const parsed = bodySchema.safeParse(req.body ?? {})
-    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+    if (!parsed.success) return validationError(reply, 'VALIDATION_ERROR', parsed.error.issues[0]?.message ?? 'Validation failed')
 
     const result = await buildPayrollFinancialLedger(
       fastify.supabase, id, tenantId, req.userId,
@@ -3997,9 +3905,9 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       const actionable = new Set(['SNAPSHOT_REQUIRED', 'SNAPSHOT_ARCHIVED', 'LEDGER_EXISTS'])
       const code = (result as any).code as string | undefined
       if (code && actionable.has(code)) {
-        return reply.code(409).send({ error: code, message: result.error })
+        return conflictError(reply, code!, result.error)
       }
-      return reply.code(500).send({ error: 'LEDGER_BUILD_FAILED', message: result.error })
+      return serverError(req, reply, new Error(result.error), 'LEDGER_BUILD_FAILED', 'Failed to build payroll financial ledger')
     }
 
     await logRunEvent(fastify.supabase, req.log, {
@@ -4040,7 +3948,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', tenantId)
       .order('created_at', { ascending: false })
 
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch ledger details')
     return reply.send({ data: data ?? [] })
   })
 
@@ -4057,7 +3965,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       offset:      z.coerce.number().int().min(0).default(0),
     })
     const parsed = qSchema.safeParse(req.query)
-    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+    if (!parsed.success) return validationError(reply, 'VALIDATION_ERROR', parsed.error.issues[0]?.message ?? 'Validation failed')
     const { entry_type, gl_code, employee_id, limit, offset } = parsed.data
 
     let q = fastify.supabase
@@ -4074,7 +3982,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
     if (employee_id) q = (q as any).eq('employee_id', employee_id)
 
     const { data, error, count } = await q
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch ledger entries')
     return reply.send({ data: data ?? [], total: count ?? 0 })
   })
 
@@ -4091,14 +3999,10 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', tenantId)
       .single()
 
-    if (lErr || !ledger) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Ledger not found' })
-    if ((ledger as any).ledger_status === 'posted') return reply.code(409).send({ error: 'ALREADY_POSTED', message: 'Ledger is already posted' })
+    if (lErr || !ledger) return notFound(reply, 'NOT_FOUND', 'Ledger not found')
+    if ((ledger as any).ledger_status === 'posted') return conflictError(reply, 'ALREADY_POSTED', 'Ledger is already posted')
     if ((ledger as any).ledger_status !== 'balanced') {
-      return reply.code(409).send({
-        error:   'NOT_BALANCED',
-        message: `Ledger must be balanced before posting. Current status: ${(ledger as any).ledger_status}. ` +
-                 `Debit: ${(ledger as any).total_debit}, Credit: ${(ledger as any).total_credit}`,
-      })
+      return conflictError(reply, 'NOT_BALANCED', `Ledger must be balanced before posting. Current status: ${(ledger as any).ledger_status}. Debit: ${(ledger as any).total_debit}, Credit: ${(ledger as any).total_credit}`)
     }
 
     const { error: updErr } = await fastify.supabase
@@ -4107,7 +4011,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       .eq('id', ledgerId)
       .eq('tenant_id', req.tenantId)
 
-    if (updErr) return reply.code(500).send({ error: 'POST_FAILED', message: updErr.message })
+    if (updErr) return serverError(req, reply, updErr, ErrorCode.UPDATE_FAILED, 'Failed to post ledger')
 
     await logRunEvent(fastify.supabase, req.log, {
       tenant_id:  tenantId,
@@ -4127,10 +4031,10 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
 
     const bodySchema = z.object({ reason: z.string().min(5).max(500) })
     const parsed = bodySchema.safeParse(req.body ?? {})
-    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+    if (!parsed.success) return validationError(reply, 'VALIDATION_ERROR', parsed.error.issues[0]?.message ?? 'Validation failed')
 
     const result = await reversePayrollLedger(fastify.supabase, ledgerId, tenantId, req.userId, parsed.data.reason)
-    if ('error' in result) return reply.code(400).send({ error: 'REVERSAL_FAILED', message: result.error })
+    if ('error' in result) return validationError(reply, 'REVERSAL_FAILED', result.error)
 
     const { data: origLedger } = await fastify.supabase
       .from('payroll_financial_ledgers')
@@ -4158,10 +4062,10 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       format: z.enum(['csv','tally','sap','zoho','quickbooks','xlsx']).default('csv'),
     })
     const parsed = qSchema.safeParse(req.query)
-    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+    if (!parsed.success) return validationError(reply, 'VALIDATION_ERROR', parsed.error.issues[0]?.message ?? 'Validation failed')
 
     const result = await exportGeneralLedger(fastify.supabase, ledgerId, tenantId, parsed.data.format)
-    if ('error' in result) return reply.code(500).send({ error: 'EXPORT_FAILED', message: result.error })
+    if ('error' in result) return serverError(req, reply, new Error(result.error), 'EXPORT_FAILED', 'Failed to export general ledger')
 
     reply.header('Content-Disposition', `attachment; filename="${result.filename}"`)
     reply.header('Content-Type', result.mime)
@@ -4184,7 +4088,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       .limit(1)
       .maybeSingle()
 
-    if (!ledger) return reply.code(404).send({ error: 'NOT_FOUND', message: 'No ledger found for this run — generate ledger first' })
+    if (!ledger) return notFound(reply, 'NOT_FOUND', 'No ledger found for this run — generate ledger first')
 
     const { data, error } = await fastify.supabase
       .from('payroll_cost_allocations')
@@ -4193,7 +4097,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', tenantId)
       .order('total_cost', { ascending: false })
 
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch cost allocations')
     return reply.send({ data: data ?? [] })
   })
 
@@ -4259,7 +4163,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       .select('gl_account_code, gl_account_name, entry_category, debit_amount, credit_amount')
       .eq('tenant_id', tenantId)
 
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch GL account summary')
 
     // Aggregate by GL account
     const glMap = new Map<string, { code: string; name: string; category: string; totalDebit: number; totalCredit: number }>()
@@ -4302,7 +4206,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       offset:  z.coerce.number().int().min(0).default(0),
     })
     const parsed = qSchema.safeParse(req.query)
-    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+    if (!parsed.success) return validationError(reply, 'VALIDATION_ERROR', parsed.error.issues[0]?.message ?? 'Validation failed')
     const { run_id, status, limit, offset } = parsed.data
 
     let q = fastify.supabase
@@ -4316,7 +4220,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
     if (status) q = (q as any).eq('payment_status', status)
 
     const { data, error, count } = await q
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch payout reconciliation records')
     return reply.send({ data: data ?? [], total: count ?? 0 })
   })
 
@@ -4334,7 +4238,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       failure_reason: z.string().max(500).optional(),
     })
     const parsed = bodySchema.safeParse(req.body ?? {})
-    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+    if (!parsed.success) return validationError(reply, 'VALIDATION_ERROR', parsed.error.issues[0]?.message ?? 'Validation failed')
 
     const update: Record<string, unknown> = {
       payment_status: parsed.data.payment_status,
@@ -4352,26 +4256,20 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       .eq('id', id)
       .eq('tenant_id', tenantId)
       .maybeSingle()
-    if (!oblig) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Payout obligation not found' })
+    if (!oblig) return notFound(reply, 'NOT_FOUND', 'Payout obligation not found')
     const expected = Number((oblig as any).expected_amount ?? 0)
 
     if (parsed.data.payment_status === 'paid') {
       // Default the recorded amount to the expected net if the caller omitted it.
       const paid = parsed.data.paid_amount ?? expected
       if (Math.abs(paid - expected) > 1) {
-        return reply.code(400).send({
-          error:   'AMOUNT_MISMATCH',
-          message: `Paid amount (${paid}) does not match the expected net (${expected}). Use 'partial' for an intentional short payment.`,
-        })
+        return validationError(reply, 'AMOUNT_MISMATCH', `Paid amount (${paid}) does not match the expected net (${expected}). Use 'partial' for an intentional short payment.`)
       }
       update.paid_amount = paid
     } else if (parsed.data.payment_status === 'partial') {
       const paid = parsed.data.paid_amount
       if (paid === undefined || paid <= 0 || paid >= expected) {
-        return reply.code(400).send({
-          error:   'INVALID_PARTIAL_AMOUNT',
-          message: `Partial payment must be greater than 0 and less than the expected net (${expected}).`,
-        })
+        return validationError(reply, 'INVALID_PARTIAL_AMOUNT', `Partial payment must be greater than 0 and less than the expected net (${expected}).`)
       }
       update.paid_amount = paid
     } else if (parsed.data.paid_amount !== undefined) {
@@ -4389,7 +4287,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       .eq('id', id)
       .eq('tenant_id', tenantId)
 
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update payout status')
     return reply.send({ message: 'Payout status updated' })
   })
 
@@ -4403,12 +4301,9 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
     // slips only — never from mutable draft net_pay.
     const { data: runRow } = await fastify.supabase
       .from('payroll_runs').select('status').eq('id', id).eq('tenant_id', tenantId).maybeSingle()
-    if (!runRow) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Payroll run not found' })
+    if (!runRow) return notFound(reply, 'NOT_FOUND', 'Payroll run not found')
     if ((runRow as any).status !== 'finalized') {
-      return reply.code(409).send({
-        error: 'NOT_FINALIZED',
-        message: `Run must be finalized before generating payout obligations (current status: ${(runRow as any).status}).`,
-      })
+      return conflictError(reply, 'NOT_FINALIZED', `Run must be finalized before generating payout obligations (current status: ${(runRow as any).status}).`)
     }
 
     // Check if obligations already exist
@@ -4419,7 +4314,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', tenantId)
 
     if ((existing ?? 0) > 0) {
-      return reply.code(409).send({ error: 'OBLIGATIONS_EXIST', message: `${existing} payout obligations already exist for this run` })
+      return conflictError(reply, 'OBLIGATIONS_EXIST', `${existing} payout obligations already exist for this run`)
     }
 
     // Get ledger id
@@ -4445,7 +4340,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       .eq('run_id', id)
       .eq('tenant_id', tenantId)
 
-    if (sErr || !slips) return reply.code(500).send({ error: 'SLIPS_FETCH_FAILED', message: sErr?.message })
+    if (sErr || !slips) return serverError(req, reply, sErr ?? new Error('Slips not found'), 'SLIPS_FETCH_FAILED', 'Failed to fetch payroll slips for payout obligations')
 
     const obligations = buildPayoutObligations(
       id, tenantId, (ledger as any)?.id ?? null,
@@ -4462,7 +4357,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
     )
 
     const { error: iErr } = await fastify.supabase.from('payroll_payout_reconciliation').insert(obligations)
-    if (iErr) return reply.code(500).send({ error: 'INSERT_FAILED', message: iErr.message })
+    if (iErr) return serverError(req, reply, iErr, ErrorCode.INSERT_FAILED, 'Failed to create payout obligations')
 
     return reply.send({ message: `${obligations.length} payout obligations created`, count: obligations.length })
   })
@@ -4479,7 +4374,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       .order('component_type')
       .order('component_code')
 
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch GL mappings')
     return reply.send({ data: data ?? [] })
   })
 
@@ -4489,7 +4384,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
     const tenantId = req.tenantId as string
 
     const { error } = await fastify.supabase.rpc('seed_default_gl_mappings', { p_tenant_id: tenantId })
-    if (error) return reply.code(500).send({ error: 'SEED_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, 'SEED_FAILED', 'Failed to seed default GL mappings')
     return reply.send({ message: 'Default GL mappings seeded successfully' })
   })
 }
