@@ -22,6 +22,7 @@
 
 import type { FastifyInstance } from 'fastify'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { fetchAllRows } from '../../lib/supabase-paginate.js'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -368,14 +369,18 @@ export default async function leaveSchedulerStatusRoutes(fastify: FastifyInstanc
       hourly_count: 0, by_type: [] as Array<Record<string, unknown>>,
     }
 
-    const { data: requests, error } = await fastify.supabase
-      .from('leave_requests')
-      .select('id, status, session, half_day, hours_requested, start_session, end_session, from_date, leave_types(name)')
-      .eq('tenant_id', req.tenantId)
-      .gte('from_date', yearStart)
-      .lte('from_date', yearEnd)
-
-    if (error) {
+    let requests: any[]
+    try {
+      requests = await fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('leave_requests')
+          .select('id, status, session, half_day, hours_requested, start_session, end_session, from_date, leave_types(name)')
+          .eq('tenant_id', req.tenantId)
+          .gte('from_date', yearStart)
+          .lte('from_date', yearEnd)
+          .range(from, to),
+      )
+    } catch (error) {
       req.log.warn({ err: error }, 'leave_requests analytics fetch failed — returning empty')
       return reply.send({ data: emptyPayload })
     }
@@ -383,7 +388,7 @@ export default async function leaveSchedulerStatusRoutes(fastify: FastifyInstanc
     // Count all non-cancelled requests, broken down by session type. Status is
     // UPPERCASE on leave_requests; this is an activity breakdown (not approvals),
     // so only CANCELLED is excluded.
-    const rows = ((requests ?? []) as any[]).filter(r => r.status !== 'CANCELLED')
+    const rows = requests.filter(r => r.status !== 'CANCELLED')
     const isCross = (r: any) => r.start_session && r.end_session && r.start_session !== r.end_session
 
     let half_day_count = 0, hourly_count = 0, cross_session_count = 0

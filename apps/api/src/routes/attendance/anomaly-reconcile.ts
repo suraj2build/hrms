@@ -39,6 +39,7 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { normalizeAttendanceStatus } from '../../lib/attendance-utils.js'
+import { fetchAllRows } from '../../lib/supabase-paginate.js'
 
 // Statuses that definitively prove attendance happened — no "no punch" is possible
 const ATTENDED_STATUSES = new Set<string>([
@@ -72,20 +73,25 @@ export default async function anomalyReconcileRoute(fastify: FastifyInstance) {
     req.log.info({ event: 'anomaly_reconcile_start', from_date: fromDate, to_date: toDate, dry_run }, 'anomaly reconciliation pass started')
 
     // ── Step 1: Fetch all unresolved no_punch / missing_out anomalies ──────────
-    const { data: anomalies, error: aErr } = await fastify.supabase
-      .from('attendance_anomalies')
-      .select('id, employee_id, date, type, tenant_id')
-      .eq('tenant_id', req.tenantId)
-      .eq('resolved', false)
-      .in('type', ['no_punch', 'missing_out'])
-      .gte('date', fromDate)
-      .lte('date', toDate)
-
-    if (aErr) {
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: aErr.message })
+    type AnomalyRow = { id: string; employee_id: string; date: string; type: string; tenant_id: string }
+    let rows: AnomalyRow[]
+    try {
+      rows = await fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('attendance_anomalies')
+          .select('id, employee_id, date, type, tenant_id')
+          .eq('tenant_id', req.tenantId)
+          .eq('resolved', false)
+          .in('type', ['no_punch', 'missing_out'])
+          .gte('date', fromDate)
+          .lte('date', toDate)
+          .range(from, to),
+      ) as AnomalyRow[]
+    } catch (aErr) {
+      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch anomalies' })
     }
 
-    if (!anomalies || anomalies.length === 0) {
+    if (rows.length === 0) {
       return reply.send({
         scanned:      0,
         auto_resolved: 0,
@@ -97,8 +103,6 @@ export default async function anomalyReconcileRoute(fastify: FastifyInstance) {
 
     // ── Step 2: Batch-fetch attendance_daily for all affected (employee, date) ─
     // Build a set of unique employee_id+date pairs
-    type AnomalyRow = { id: string; employee_id: string; date: string; type: string; tenant_id: string }
-    const rows = anomalies as AnomalyRow[]
 
     const employeeIds = [...new Set(rows.map(r => r.employee_id))]
     const { data: dailyRows, error: dErr } = await fastify.supabase

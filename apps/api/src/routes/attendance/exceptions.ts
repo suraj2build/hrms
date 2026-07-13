@@ -10,6 +10,7 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { EXCEPTION_TAXONOMY, getExceptionMeta, computeSlaAt } from '../../lib/exception-taxonomy.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { fetchAllRows } from '../../lib/supabase-paginate.js'
 
 const dateRe = /^\d{4}-\d{2}-\d{2}$/
 
@@ -127,25 +128,7 @@ export default async function attendanceExceptionsRoute(fastify: FastifyInstance
 
     const { date_from, date_to } = parsed.data
 
-    let q = fastify.supabase
-      .from('attendance_exceptions')
-      .select(
-        'id, exception_category, severity, status, payroll_impacting, sla_breached, requires_investigation',
-      )
-      .eq('tenant_id', req.tenantId)
-      .in('status', ['open', 'acknowledged'])
-
-    if (date_from) q = q.gte('date', date_from)
-    if (date_to)   q = q.lte('date', date_to)
-
-    const { data, error } = await q
-
-    if (error) {
-      req.log.error({ err: error }, 'attendance_exceptions summary query failed')
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch exceptions summary' })
-    }
-
-    const rows = (data ?? []) as Array<{
+    let rows: Array<{
       id: string
       exception_category: string
       severity: string
@@ -154,6 +137,33 @@ export default async function attendanceExceptionsRoute(fastify: FastifyInstance
       sla_breached: boolean
       requires_investigation: boolean
     }>
+    try {
+      rows = await fetchAllRows((from, to) => {
+        let q = fastify.supabase
+          .from('attendance_exceptions')
+          .select(
+            'id, exception_category, severity, status, payroll_impacting, sla_breached, requires_investigation',
+          )
+          .eq('tenant_id', req.tenantId)
+          .in('status', ['open', 'acknowledged'])
+
+        if (date_from) q = q.gte('date', date_from)
+        if (date_to)   q = q.lte('date', date_to)
+
+        return q.range(from, to)
+      }) as Array<{
+        id: string
+        exception_category: string
+        severity: string
+        status: string
+        payroll_impacting: boolean
+        sla_breached: boolean
+        requires_investigation: boolean
+      }>
+    } catch (error) {
+      req.log.error({ err: error }, 'attendance_exceptions summary query failed')
+      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch exceptions summary' })
+    }
 
     const by_category: Record<string, number> = {}
     const by_severity: Record<string, number> = {}

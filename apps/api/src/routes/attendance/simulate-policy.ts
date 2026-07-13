@@ -12,6 +12,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { fetchAllRows } from '../../lib/supabase-paginate.js'
 
 // ── Zod schema ────────────────────────────────────────────────────────────────
 
@@ -257,30 +258,31 @@ export default async function simulatePolicyRoute(fastify: FastifyInstance) {
     }
 
     // Load attendance_daily records for target_date
-    let q = fastify.supabase
-      .from('attendance_daily')
-      .select(
-        `
-          employee_id, status, work_hours, late_minutes,
-          overtime_minutes, is_payable, day_fraction,
-          employees!inner(first_name, last_name, employee_code)
-        `,
-      )
-      .eq('tenant_id', req.tenantId)
-      .eq('date', target_date)
+    let rows: DailyRow[]
+    try {
+      rows = await fetchAllRows((from, to) => {
+        let q = fastify.supabase
+          .from('attendance_daily')
+          .select(
+            `
+              employee_id, status, work_hours, late_minutes,
+              overtime_minutes, is_payable, day_fraction,
+              employees!inner(first_name, last_name, employee_code)
+            `,
+          )
+          .eq('tenant_id', req.tenantId)
+          .eq('date', target_date)
 
-    if (employee_ids && employee_ids.length > 0) {
-      q = q.in('employee_id', employee_ids)
-    }
+        if (employee_ids && employee_ids.length > 0) {
+          q = q.in('employee_id', employee_ids)
+        }
 
-    const { data, error } = await q
-
-    if (error) {
+        return q.range(from, to)
+      }) as unknown as DailyRow[]
+    } catch (error) {
       req.log.error({ err: error }, 'simulate-policy attendance_daily fetch failed')
       return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch attendance data' })
     }
-
-    const rows = (data ?? []) as unknown as DailyRow[]
 
     if (rows.length === 0) {
       return reply.send({
