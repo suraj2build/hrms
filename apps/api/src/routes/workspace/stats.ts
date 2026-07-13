@@ -21,6 +21,7 @@
 import type { FastifyInstance } from 'fastify'
 import { buildActivePeriodSummary, buildLatestDaySnapshot } from '../../lib/attendance-read-model.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { fetchAllRows } from '../../lib/supabase-paginate.js'
 
 export default async function workspaceStatsRoutes(fastify: FastifyInstance) {
   const auth = { preHandler: [fastify.authenticate] }
@@ -429,19 +430,12 @@ export default async function workspaceStatsRoutes(fastify: FastifyInstance) {
       latestRunResult,
       blockersResult,
       anomaliesResult,
-      // compliance_mismatches: active employees missing critical statutory fields
-      missingStatResult,
-      // ot_mismatches: employees with overtime this month but no OT salary component
-      otResult,
-      // deduction_gaps: active employees with pt_applicable but no PT component
+      // deduction_gaps: active employees with pt_applicable=true (using employee_bank_statutory)
       ptaxGapResult,
-      // variance_cases: current month slips vs previous month for same employee
-      currentSlipsResult,
-      prevSlipsResult,
       // pending_validations: payroll validation issues (failed entries)
       validationIssuesResult,
     ] = await Promise.all([
-      // Latest run for current month
+      // Latest run for current month — intentionally .limit(1), not a full-dataset query
       fastify.supabase
         .from('payroll_runs')
         .select('id, month, status, employee_count')
@@ -451,59 +445,30 @@ export default async function workspaceStatsRoutes(fastify: FastifyInstance) {
         .limit(1)
         .maybeSingle(),
 
-      // Blockers: active employees missing active compensation record
+      // Blockers: active employees missing active compensation record.
+      // Use count:exact + head:true — avoids fetching rows and the 1000-row PostgREST cap.
       fastify.supabase
         .from('employees')
-        .select(`id, employee_compensations!left(id, is_active)`, { count: 'exact', head: false })
+        .select(`id, employee_compensations!left(id, is_active)`, { count: 'exact', head: true })
         .eq('tenant_id', tenantId)
         .eq('status', 'active')
         .is('employee_compensations.is_active', null),
 
-      // Unresolved anomalies (affect payroll accuracy)
-      // Column is `resolved` (boolean), not `is_resolved` — see migration schema
+      // Unresolved anomalies — already uses count:exact + head:true (correct)
       fastify.supabase
         .from('attendance_anomalies')
         .select('id', { count: 'exact', head: true })
         .eq('tenant_id', tenantId)
         .eq('resolved', false),
 
-      // compliance_mismatches: active employees missing PAN (TDS) or UAN (EPF) — statutory gap
-      fastify.supabase
-        .from('employee_bank_statutory')
-        .select('id, pan_number, uan_number')
-        .eq('tenant_id', tenantId),
-
-      // ot_mismatches: employees with overtime recorded this month
-      fastify.supabase
-        .from('attendance_daily')
-        .select('employee_id')
-        .eq('tenant_id', tenantId)
-        .gte('date', `${currentMonth}-01`)
-        .lte('date', `${currentMonth}-31`)
-        .gt('overtime_minutes', 0),
-
-      // deduction_gaps: employees with pt_applicable=true (using employee_bank_statutory)
+      // deduction_gaps: employees with pt_applicable=true
       fastify.supabase
         .from('employee_bank_statutory')
         .select('id', { count: 'exact', head: true })
         .eq('tenant_id', tenantId)
         .eq('pt_applicable', true),
 
-      // Current month slips (gross_pay per employee)
-      fastify.supabase
-        .from('payroll_slips')
-        .select('employee_id, gross_pay')
-        .eq('tenant_id', tenantId)
-        .eq('month', currentMonth),
-
-      // Previous month slips (for variance comparison)
-      fastify.supabase
-        .from('payroll_slips')
-        .select('employee_id, gross_pay')
-        .eq('tenant_id', tenantId)
-        .eq('month', prevMonth),
-
-      // Pending validation issues: failed validation results from any run this month
+      // Pending validation issues
       fastify.supabase
         .from('payroll_validation_results')
         .select('id', { count: 'exact', head: true })
@@ -512,30 +477,68 @@ export default async function workspaceStatsRoutes(fastify: FastifyInstance) {
         .eq('auto_resolved', false),
     ])
 
+    // These three queries touch tables that exceed 1000 rows at scale — must use fetchAllRows.
+    const [statRows, otRows, currentSlipsRows, prevSlipsRows] = await Promise.all([
+      // compliance_mismatches: statutory records missing PAN or UAN
+      fetchAllRows<{ id: string; pan_number: string | null; uan_number: string | null }>((from, to) =>
+        fastify.supabase
+          .from('employee_bank_statutory')
+          .select('id, pan_number, uan_number')
+          .eq('tenant_id', tenantId)
+          .range(from, to)
+      ),
+      // ot_mismatches: distinct employees with overtime this month
+      fetchAllRows<{ employee_id: string }>((from, to) =>
+        fastify.supabase
+          .from('attendance_daily')
+          .select('employee_id')
+          .eq('tenant_id', tenantId)
+          .gte('date', `${currentMonth}-01`)
+          .lte('date', `${currentMonth}-31`)
+          .gt('overtime_minutes', 0)
+          .range(from, to)
+      ),
+      // Current month slips for variance comparison
+      fetchAllRows<{ employee_id: string; gross_pay: number }>((from, to) =>
+        fastify.supabase
+          .from('payroll_slips')
+          .select('employee_id, gross_pay')
+          .eq('tenant_id', tenantId)
+          .eq('month', currentMonth)
+          .range(from, to)
+      ),
+      // Previous month slips for variance comparison
+      fetchAllRows<{ employee_id: string; gross_pay: number }>((from, to) =>
+        fastify.supabase
+          .from('payroll_slips')
+          .select('employee_id, gross_pay')
+          .eq('tenant_id', tenantId)
+          .eq('month', prevMonth)
+          .range(from, to)
+      ),
+    ])
+
     const run     = latestRunResult.data as any
     const isFrozen = run?.status === 'finalized'
 
-    // Blockers = employees missing active compensation
-    const blockers = (blockersResult.data ?? []).length
+    // Blockers = employees missing active compensation (real count, not capped array length)
+    const blockers = blockersResult.count ?? 0
 
     // compliance_mismatches: statutory records missing PAN or UAN
-    const statRows = missingStatResult.data ?? []
     const complianceMismatches = statRows.filter(
-      (r: any) => !r.pan_number?.trim() || !r.uan_number?.trim()
+      (r) => !r.pan_number?.trim() || !r.uan_number?.trim()
     ).length
 
-    // ot_mismatches: distinct employees with overtime but no active OT component in their structure
-    // Simple proxy: count of employees with overtime days this month
-    const otEmpSet = new Set((otResult.data ?? []).map((r: any) => r.employee_id))
+    // ot_mismatches: distinct employees with overtime days this month
+    const otEmpSet = new Set(otRows.map((r) => r.employee_id))
     const otMismatches = otEmpSet.size
 
     // variance_cases: employees whose gross changed by >10% vs previous month
-    // Query selects `gross_pay` — use that field name (not gross_amount)
-    const currentSlips = new Map((currentSlipsResult.data ?? []).map(
-      (r: any) => [r.employee_id, Number(r.gross_pay ?? 0)]
+    const currentSlips = new Map(currentSlipsRows.map(
+      (r) => [r.employee_id, Number(r.gross_pay ?? 0)]
     ))
-    const prevSlips    = new Map((prevSlipsResult.data ?? []).map(
-      (r: any) => [r.employee_id, Number(r.gross_pay ?? 0)]
+    const prevSlips = new Map(prevSlipsRows.map(
+      (r) => [r.employee_id, Number(r.gross_pay ?? 0)]
     ))
     let varianceCases = 0
     for (const [empId, currentGross] of currentSlips) {
@@ -611,25 +614,31 @@ export default async function workspaceStatsRoutes(fastify: FastifyInstance) {
 
     const active = totalActive ?? 0
 
-    // EPF: employees with UAN number set (proxy for EPF coverage)
-    const { data: epfRows } = await fastify.supabase
-      .from('employee_bank_statutory')
-      .select('id, uan_number')
-      .eq('tenant_id', tenantId)
+    // EPF/ESI/PAN/PTAX: fetch all statutory rows (table exceeds 1000 rows at scale)
+    const epfRows = await fetchAllRows<{
+      id: string; uan_number: string | null; esi_number?: string | null
+      pan_number?: string | null; pt_applicable?: boolean | null
+    }>((from, to) =>
+      fastify.supabase
+        .from('employee_bank_statutory')
+        .select('id, uan_number, esi_number, pan_number, pt_applicable')
+        .eq('tenant_id', tenantId)
+        .range(from, to)
+    )
 
-    const epfCovered = (epfRows ?? []).filter((r: any) => r.uan_number && r.uan_number.trim()).length
+    const epfCovered = epfRows.filter((r) => r.uan_number && r.uan_number.trim()).length
     const epfMissing  = Math.max(0, active - epfCovered)
 
     // ESI: employees with ESI number set (proxy for ESI coverage)
-    const esiCovered = (epfRows ?? []).filter((r: any) => r.esi_number && r.esi_number.trim()).length
+    const esiCovered = epfRows.filter((r) => r.esi_number && r.esi_number.trim()).length
     const esiMissing  = Math.max(0, active - esiCovered)
 
     // PAN: employees with PAN set (proxy for TDS coverage)
-    const panCovered = (epfRows ?? []).filter((r: any) => r.pan_number && r.pan_number.trim()).length
+    const panCovered = epfRows.filter((r) => r.pan_number && r.pan_number.trim()).length
     const panMissing  = Math.max(0, active - panCovered)
 
     // PTAX: PT applicable flag
-    const ptaxCovered = (epfRows ?? []).filter((r: any) => r.pt_applicable === true).length
+    const ptaxCovered = epfRows.filter((r) => r.pt_applicable === true).length
     const ptaxMissing  = 0 // PTAX coverage depends on state rules, not employee count
 
     // EPF filing gaps: payroll runs this year that aren't finalized (proxy for unfiled challans)
@@ -704,55 +713,60 @@ export default async function workspaceStatsRoutes(fastify: FastifyInstance) {
     const tenantId: string = req.tenantId
     const month = ((req.query as any).month as string) ?? new Date().toISOString().slice(0, 7)
 
-    // Parallel: slips, attendance LOP, OT rows, compliance data, persisted actions
-    const [slipsResult, attResult, otResult, complianceResult, actionsResult] = await Promise.all([
-      fastify.supabase
-        .from('payroll_slips')
-        .select(`
-          employee_id, lop_days, gross_pay,
-          employees!inner(first_name, last_name, employee_code, department_id,
-            departments(name))
-        `)
-        .eq('tenant_id', tenantId)
-        .eq('month', month),
-
+    // All five tables can exceed 1000 rows at scale — use fetchAllRows throughout.
+    const [slips, attRows, otRows, statRows, actionRows] = await Promise.all([
+      fetchAllRows<any>((from, to) =>
+        fastify.supabase
+          .from('payroll_slips')
+          .select(`
+            employee_id, lop_days, gross_pay,
+            employees!inner(first_name, last_name, employee_code, department_id,
+              departments(name))
+          `)
+          .eq('tenant_id', tenantId)
+          .eq('month', month)
+          .range(from, to)
+      ),
       // Attendance LOP aggregated per employee
-      fastify.supabase
-        .from('attendance_daily')
-        .select('employee_id, status, is_payable, overtime_minutes')
-        .eq('tenant_id', tenantId)
-        .gte('date', `${month}-01`)
-        .lte('date', `${month}-31`),
-
-      // OT records grouped by employee (we filter in JS)
-      fastify.supabase
-        .from('attendance_daily')
-        .select('employee_id, overtime_minutes')
-        .eq('tenant_id', tenantId)
-        .gte('date', `${month}-01`)
-        .lte('date', `${month}-31`)
-        .gt('overtime_minutes', 0),
-
-      // Compliance: employees missing PAN or UAN (bank_statutory)
-      fastify.supabase
-        .from('employee_bank_statutory')
-        .select('employee_id, pan_number, uan_number')
-        .eq('tenant_id', tenantId),
-
+      fetchAllRows<any>((from, to) =>
+        fastify.supabase
+          .from('attendance_daily')
+          .select('employee_id, status, is_payable, overtime_minutes')
+          .eq('tenant_id', tenantId)
+          .gte('date', `${month}-01`)
+          .lte('date', `${month}-31`)
+          .range(from, to)
+      ),
+      // OT records grouped by employee
+      fetchAllRows<any>((from, to) =>
+        fastify.supabase
+          .from('attendance_daily')
+          .select('employee_id, overtime_minutes')
+          .eq('tenant_id', tenantId)
+          .gte('date', `${month}-01`)
+          .lte('date', `${month}-31`)
+          .gt('overtime_minutes', 0)
+          .range(from, to)
+      ),
+      // Compliance: employees missing PAN or UAN
+      fetchAllRows<any>((from, to) =>
+        fastify.supabase
+          .from('employee_bank_statutory')
+          .select('employee_id, pan_number, uan_number')
+          .eq('tenant_id', tenantId)
+          .range(from, to)
+      ),
       // Persisted reconciliation actions for this month — latest action per item wins.
-      fastify.supabase
-        .from('payroll_reconciliation_actions')
-        .select('item_id, action_type, notes, actor_id, created_at')
-        .eq('tenant_id', tenantId)
-        .eq('month', month)
-        .order('created_at', { ascending: false }),
+      fetchAllRows<any>((from, to) =>
+        fastify.supabase
+          .from('payroll_reconciliation_actions')
+          .select('item_id, action_type, notes, actor_id, created_at')
+          .eq('tenant_id', tenantId)
+          .eq('month', month)
+          .order('created_at', { ascending: false })
+          .range(from, to)
+      ),
     ])
-
-    const slips      = (slipsResult.data    ?? []) as any[]
-    const attRows    = (attResult.data      ?? []) as any[]
-    const otRows     = (otResult.data       ?? []) as any[]
-    const statRows   = (complianceResult.data ?? []) as any[]
-    const actionRows = (actionsResult.data  ?? []) as any[]
 
     // ── Build latest-action map (item_id → latest persisted action) ───────────
     // Rows are already ordered DESC by created_at so the first row per item_id
