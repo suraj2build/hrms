@@ -10,6 +10,7 @@ import type { FastifyInstance } from 'fastify'
 import {
   isHrAdmin, resolveManagerEmployeeId, getDirectReportIds,
 } from '../../lib/manager-scope.js'
+import { fetchAllRows } from '../../lib/supabase-paginate.js'
 
 export default async function managerTeamAssetsRoute(fastify: FastifyInstance) {
   const auth = { preHandler: [fastify.authenticate] }
@@ -18,12 +19,15 @@ export default async function managerTeamAssetsRoute(fastify: FastifyInstance) {
     let employeeIds: string[]
 
     if (isHrAdmin(req.userRole)) {
-      const { data: emps } = await fastify.supabase
-        .from('employees')
-        .select('id')
-        .eq('tenant_id', req.tenantId)
-        .in('status', ['active', 'on_notice'])
-      employeeIds = ((emps ?? []) as any[]).map(e => e.id)
+      const emps = await fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('employees')
+          .select('id')
+          .eq('tenant_id', req.tenantId)
+          .in('status', ['active', 'on_notice'])
+          .range(from, to)
+      )
+      employeeIds = (emps as any[]).map(e => e.id)
     } else {
       const managerEmpId = await resolveManagerEmployeeId(fastify.supabase, req)
       if (!managerEmpId) return reply.send({ data: [] })

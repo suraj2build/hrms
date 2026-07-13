@@ -22,6 +22,7 @@ import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { logAction }                   from '../../lib/audit-service.js'
 import { resolveAssistantChain }       from '../../lib/ai/config.js'
 import { chatCompleteWithFallback }    from '../../lib/ai/llm.js'
+import { fetchAllRows }                from '../../lib/supabase-paginate.js'
 
 export default async function moodRoutes(fastify: FastifyInstance) {
   const { supabase } = fastify
@@ -285,13 +286,16 @@ export default async function moodRoutes(fastify: FastifyInstance) {
 
     // Participation rate (current month)
     const currentMonthStart = new Date().toISOString().slice(0, 7) + '-01'
-    const [respondentResult, totalEmpResult] = await Promise.all([
-      supabase.from('mood_checkins').select('employee_id', { count: 'exact', head: false })
-        .eq('tenant_id', tenantId).gte('checkin_date', currentMonthStart),
+    const [respondentRows, totalEmpResult] = await Promise.all([
+      fetchAllRows((from, to) =>
+        supabase.from('mood_checkins').select('employee_id')
+          .eq('tenant_id', tenantId).gte('checkin_date', currentMonthStart)
+          .range(from, to)
+      ),
       supabase.from('employees').select('id', { count: 'exact', head: true })
         .eq('tenant_id', tenantId).eq('status', 'active'),
     ])
-    const distinctRespondents = new Set((respondentResult.data ?? []).map((r: any) => r.employee_id)).size
+    const distinctRespondents = new Set(respondentRows.map((r: any) => r.employee_id)).size
     const totalActive         = totalEmpResult.count ?? 0
     const participation_rate  = totalActive > 0
       ? Math.round((distinctRespondents / totalActive) * 100)
@@ -358,13 +362,16 @@ export default async function moodRoutes(fastify: FastifyInstance) {
     since30d.setDate(since30d.getDate() - 30)
     const since30dStr = since30d.toISOString().split('T')[0]
 
-    const [sentimentResult, negativeNotesResult] = await Promise.all([
-      supabase
-        .from('mood_checkins')
-        .select('sentiment_label')
-        .eq('tenant_id', tenantId)
-        .gte('checkin_date', since30dStr)
-        .not('sentiment_label', 'is', null),
+    const [sentimentRows, negativeNotesResult] = await Promise.all([
+      fetchAllRows((from, to) =>
+        supabase
+          .from('mood_checkins')
+          .select('sentiment_label')
+          .eq('tenant_id', tenantId)
+          .gte('checkin_date', since30dStr)
+          .not('sentiment_label', 'is', null)
+          .range(from, to)
+      ),
       supabase
         .from('mood_checkins')
         .select('note, checkin_date, employee_id')
@@ -376,7 +383,7 @@ export default async function moodRoutes(fastify: FastifyInstance) {
         .limit(10),
     ])
 
-    const rows = sentimentResult.data ?? []
+    const rows = sentimentRows
     const total_with_notes = rows.length
     let positive = 0, neutral = 0, negative = 0
     for (const r of rows) {

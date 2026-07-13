@@ -16,6 +16,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { fetchAllRows } from '../../lib/supabase-paginate.js'
 
 export default async function certificationRoutes(fastify: FastifyInstance) {
   const auth = { preHandler: [fastify.authenticate] }
@@ -122,14 +123,18 @@ export default async function certificationRoutes(fastify: FastifyInstance) {
   // ── GET /certifications/stats ─────────────────────────────────────────────
 
   fastify.get('/certifications/stats', hrAuth, async (req: any, reply) => {
-    const { data, error } = await fastify.supabase
-      .from('employee_certifications')
-      .select('cert_type, status, expiry_date')
-      .eq('tenant_id', req.tenantId)
-
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
-
-    const rows = (data ?? []) as any[]
+    let rows: any[]
+    try {
+      rows = await fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('employee_certifications')
+          .select('cert_type, status, expiry_date')
+          .eq('tenant_id', req.tenantId)
+          .range(from, to)
+      ) as any[]
+    } catch (err: any) {
+      return reply.code(500).send({ error: 'QUERY_FAILED', message: err.message })
+    }
     const today = new Date()
     const in30  = new Date(); in30.setDate(today.getDate() + 30)
     const in90  = new Date(); in90.setDate(today.getDate() + 90)

@@ -15,6 +15,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z }                   from 'zod'
 import { HR_ADMIN_ROLES }      from '../../lib/rbac.js'
+import { fetchAllRows }        from '../../lib/supabase-paginate.js'
 // ── Date helpers ──────────────────────────────────────────────────────────────
 
 const dateRe = /^\d{4}-\d{2}-\d{2}$/
@@ -62,20 +63,21 @@ export default async function workforceIntelligenceRoutes(fastify: FastifyInstan
       ? { from: parsed.data.from, to: parsed.data.to }
       : defaultRange(12)
 
-    const { data: rows, error } = await fastify.supabase
-      .from('attendance_daily')
-      .select('date, status')
-      .eq('tenant_id', req.tenantId)
-      .gte('date', range.from)
-      .lte('date', range.to)
-      .in('status', ['present', 'absent', 'late', 'half_day', 'leave'])
-
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch attendance data' })
+    const rows = await fetchAllRows((from, to) =>
+      fastify.supabase
+        .from('attendance_daily')
+        .select('date, status')
+        .eq('tenant_id', req.tenantId)
+        .gte('date', range.from)
+        .lte('date', range.to)
+        .in('status', ['present', 'absent', 'late', 'half_day', 'leave'])
+        .range(from, to),
+    )
 
     // Bucket by ISO week
     const weekMap = new Map<string, { week: string; present: number; absent: number; late: number; total: number }>()
 
-    for (const row of rows ?? []) {
+    for (const row of rows) {
       const wk = isoWeek(row.date)
       const bucket = weekMap.get(wk) ?? { week: wk, present: 0, absent: 0, late: 0, total: 0 }
       bucket.total++
@@ -123,19 +125,20 @@ export default async function workforceIntelligenceRoutes(fastify: FastifyInstan
       : defaultRange(4)
     const threshold = parsed.data.ot_threshold_min
 
-    const { data: rows, error } = await fastify.supabase
-      .from('attendance_daily')
-      .select('employee_id, overtime_minutes, date')
-      .eq('tenant_id', req.tenantId)
-      .gte('date', range.from)
-      .lte('date', range.to)
-      .gt('overtime_minutes', 0)
-
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch OT data' })
+    const rows = await fetchAllRows((from, to) =>
+      fastify.supabase
+        .from('attendance_daily')
+        .select('employee_id, overtime_minutes, date')
+        .eq('tenant_id', req.tenantId)
+        .gte('date', range.from)
+        .lte('date', range.to)
+        .gt('overtime_minutes', 0)
+        .range(from, to),
+    )
 
     // Per-employee aggregation
     const empOtMap = new Map<string, { employee_id: string; total_ot_minutes: number; ot_days: number }>()
-    for (const row of rows ?? []) {
+    for (const row of rows) {
       const e = empOtMap.get(row.employee_id) ?? { employee_id: row.employee_id, total_ot_minutes: 0, ot_days: 0 }
       e.total_ot_minutes += row.overtime_minutes ?? 0
       e.ot_days++
@@ -147,7 +150,7 @@ export default async function workforceIntelligenceRoutes(fastify: FastifyInstan
 
     // Weekly OT hours trend
     const weekOtMap = new Map<string, number>()
-    for (const row of rows ?? []) {
+    for (const row of rows) {
       const wk = isoWeek(row.date)
       weekOtMap.set(wk, (weekOtMap.get(wk) ?? 0) + (row.overtime_minutes ?? 0))
     }
@@ -183,25 +186,28 @@ export default async function workforceIntelligenceRoutes(fastify: FastifyInstan
       ? { from: parsed.data.from, to: parsed.data.to }
       : defaultRange(8)
 
-    const [weeklyOffRes, holidayRes] = await Promise.all([
-      fastify.supabase
-        .from('attendance_daily')
-        .select('employee_id, date, work_hours')
-        .eq('tenant_id', req.tenantId)
-        .eq('worked_on_weekly_off', true)
-        .gte('date', range.from)
-        .lte('date', range.to),
-      fastify.supabase
-        .from('attendance_daily')
-        .select('employee_id, date, work_hours')
-        .eq('tenant_id', req.tenantId)
-        .eq('worked_on_holiday', true)
-        .gte('date', range.from)
-        .lte('date', range.to),
+    const [weeklyOffRows, holidayRows] = await Promise.all([
+      fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('attendance_daily')
+          .select('employee_id, date, work_hours')
+          .eq('tenant_id', req.tenantId)
+          .eq('worked_on_weekly_off', true)
+          .gte('date', range.from)
+          .lte('date', range.to)
+          .range(from, to),
+      ),
+      fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('attendance_daily')
+          .select('employee_id, date, work_hours')
+          .eq('tenant_id', req.tenantId)
+          .eq('worked_on_holiday', true)
+          .gte('date', range.from)
+          .lte('date', range.to)
+          .range(from, to),
+      ),
     ])
-
-    const weeklyOffRows = weeklyOffRes.data ?? []
-    const holidayRows   = holidayRes.data   ?? []
 
     // Weekly trend
     const weekMap = new Map<string, { week: string; weekly_off_instances: number; holiday_instances: number }>()
@@ -320,19 +326,20 @@ export default async function workforceIntelligenceRoutes(fastify: FastifyInstan
       ? { from: parsed.data.from, to: parsed.data.to }
       : defaultRange(8)
 
-    const { data: rows, error } = await fastify.supabase
-      .from('attendance_daily')
-      .select('employee_id, status, work_hours')
-      .eq('tenant_id', req.tenantId)
-      .gte('date', range.from)
-      .lte('date', range.to)
-      .in('status', ['present', 'absent', 'late', 'half_day', 'leave'])
-
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch data' })
+    const rows = await fetchAllRows((from, to) =>
+      fastify.supabase
+        .from('attendance_daily')
+        .select('employee_id, status, work_hours')
+        .eq('tenant_id', req.tenantId)
+        .gte('date', range.from)
+        .lte('date', range.to)
+        .in('status', ['present', 'absent', 'late', 'half_day', 'leave'])
+        .range(from, to),
+    )
 
     // Aggregate per employee
     const empMap = new Map<string, { present: number; absent: number; late: number; total: number }>()
-    for (const row of rows ?? []) {
+    for (const row of rows) {
       const e = empMap.get(row.employee_id) ?? { present: 0, absent: 0, late: 0, total: 0 }
       e.total++
       if (row.status === 'absent' || row.status === 'leave') e.absent++
@@ -387,20 +394,26 @@ export default async function workforceIntelligenceRoutes(fastify: FastifyInstan
 
     const range = defaultRange(4)  // last 4 weeks
 
-    const [dailyRes, otRes, pressureRes, anomalyRes] = await Promise.all([
-      fastify.supabase
-        .from('attendance_daily')
-        .select('status, worked_on_weekly_off, worked_on_holiday, overtime_minutes')
-        .eq('tenant_id', req.tenantId)
-        .gte('date', range.from)
-        .lte('date', range.to),
-      fastify.supabase
-        .from('attendance_daily')
-        .select('employee_id')
-        .eq('tenant_id', req.tenantId)
-        .gte('date', range.from)
-        .lte('date', range.to)
-        .gt('overtime_minutes', 0),
+    const [daily, otRows, pressureRes, anomalyRes] = await Promise.all([
+      fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('attendance_daily')
+          .select('status, worked_on_weekly_off, worked_on_holiday, overtime_minutes')
+          .eq('tenant_id', req.tenantId)
+          .gte('date', range.from)
+          .lte('date', range.to)
+          .range(from, to),
+      ),
+      fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('attendance_daily')
+          .select('employee_id')
+          .eq('tenant_id', req.tenantId)
+          .gte('date', range.from)
+          .lte('date', range.to)
+          .gt('overtime_minutes', 0)
+          .range(from, to),
+      ),
       fastify.supabase
         .from('attendance_daily')
         .select('id', { count: 'exact', head: true })
@@ -415,7 +428,6 @@ export default async function workforceIntelligenceRoutes(fastify: FastifyInstan
         .eq('resolved', false),
     ])
 
-    const daily = dailyRes.data ?? []
     const total = daily.length
     const absent  = daily.filter(d => d.status === 'absent').length
     const late    = daily.filter(d => d.status === 'late').length
@@ -432,7 +444,7 @@ export default async function workforceIntelligenceRoutes(fastify: FastifyInstan
         on_leave_rate:    total > 0 ? parseFloat((onLeave / total * 100).toFixed(1)) : 0,
       },
       overtime: {
-        employees_with_ot: new Set(otRes.data?.map((r: any) => r.employee_id) ?? []).size,
+        employees_with_ot: new Set(otRows.map((r: any) => r.employee_id)).size,
         total_ot_minutes:  daily.reduce((s, d) => s + (d.overtime_minutes ?? 0), 0),
       },
       staffing_pressure: pressureRes.count ?? 0,

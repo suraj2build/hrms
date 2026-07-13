@@ -9,6 +9,7 @@ import { emitPreJoineeJoiningCompleted } from '../../lib/onboarding-orchestrator
 import { reopenInvitationForReupload } from '../../lib/onboarding/reopen-invitation.js'
 import { logAction } from '../../lib/audit-service.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { fetchAllRows } from '../../lib/supabase-paginate.js'
 
 // ── Schemas ───────────────────────────────────────────────────────────────────
 
@@ -503,17 +504,19 @@ export default async function preJoineeRoutes(fastify: FastifyInstance) {
   fastify.get('/onboarding/pre-joinee/stats', auth, async (req: any, reply) => {
     const tenantId: string = req.tenantId
 
-    const { data, error } = await fastify.supabase
-      .from('pre_joinee_invitations')
-      .select('status')
-      .eq('tenant_id', tenantId)
-
-    if (error) {
-      fastify.log.error({ event: 'pre_joinee.stats', tenant_id: tenantId, err: error })
-      return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    let rows: any[]
+    try {
+      rows = await fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('pre_joinee_invitations')
+          .select('status')
+          .eq('tenant_id', tenantId)
+          .range(from, to)
+      ) as any[]
+    } catch (err: any) {
+      fastify.log.error({ event: 'pre_joinee.stats', tenant_id: tenantId, err })
+      return reply.code(500).send({ error: 'DB_ERROR', message: err.message })
     }
-
-    const rows = data ?? []
     let pending = 0, submitted = 0, approved = 0
     for (const r of rows) {
       if (r.status === 'pending') pending++
