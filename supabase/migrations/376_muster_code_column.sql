@@ -34,7 +34,7 @@ SET muster_code = CASE
   WHEN status = 'leave'             THEN 'CL'
   WHEN status = 'overtime'          THEN 'P'
   WHEN status = 'missing_punch'     THEN 'MIS'
-  WHEN status = 'no_punch'          THEN 'NP'
+  WHEN status = 'no_punch'          THEN 'A'   -- no record = Absent on muster
   ELSE NULL
 END
 WHERE muster_code IS NULL;

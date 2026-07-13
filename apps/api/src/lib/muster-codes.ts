@@ -96,6 +96,9 @@ export const MUSTER_CODE_DEFS: Record<MusterCode, MusterCodeDef> = {
 /**
  * Fallback mapping from internal DB `status` to muster code.
  * The processor uses this; the leave route overrides with the specific type.
+ *
+ * no_punch = no biometric record → treated as Absent (A), same as unapproved absence.
+ * missing_punch = single swipe only → MIS (distinct punch exception).
  */
 export const STATUS_TO_MUSTER_CODE: Partial<Record<string, MusterCode>> = {
   present:       'P',
@@ -108,7 +111,7 @@ export const STATUS_TO_MUSTER_CODE: Partial<Record<string, MusterCode>> = {
   leave:         'CL',     // generic fallback; leave route sets CL/EL/SL/etc.
   overtime:      'P',
   missing_punch: 'MIS',
-  no_punch:      'NP',
+  no_punch:      'A',      // no record at all = Absent on muster
 }
 
 /**

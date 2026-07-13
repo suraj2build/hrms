@@ -104,7 +104,7 @@ const STATUS_SHORT: Record<string, string> = {
   leave:         'Lv',   // generic; specific code comes from muster_code field
   overtime:      'P',
   missing_punch: 'MIS',
-  no_punch:      'NP',
+  no_punch:      'A',    // no record = Absent on muster
 }
 
 // CSS classes by internal status (present/late/absent…) and by muster_code for
