@@ -26,16 +26,20 @@ export const PRESENT_STATUSES = new Set<string>(['present', 'late', 'overtime'])
 /**
  * Statuses that count as payable for salary computation.
  * half_day is handled specially — it contributes 0.5, not 1.
+ * Must mirror the day_fraction values in the payroll engine:
+ *   present/late/overtime/holiday/weekly_off/weekend/leave → day_fraction 1.0 → payable
+ *   absent/missing_punch/no_punch                          → day_fraction 0.0 → not payable
  */
 export const PAYABLE_STATUSES = new Set<string>([
-  'present', 'late', 'overtime', 'holiday', 'weekly_off', 'weekend',
+  'present', 'late', 'overtime', 'holiday', 'weekly_off', 'weekend', 'leave',
 ])
 
 /**
  * Statuses that are Loss of Pay (deducted from salary).
- * Only unapproved absence — approved leave is never LOP.
+ * Mirrors payroll engine: LOP = days where day_fraction = 0.0.
+ * missing_punch / no_punch are treated as absent (LOP) per business rule.
  */
-export const LOP_STATUSES = new Set<string>(['absent'])
+export const LOP_STATUSES = new Set<string>(['absent', 'missing_punch', 'no_punch'])
 
 /**
  * Statuses indicating approved leave (not LOP, not payable as regular work).
