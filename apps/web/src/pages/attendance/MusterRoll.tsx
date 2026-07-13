@@ -497,8 +497,8 @@ export function MusterRoll() {
 
   // Density-driven size tokens
   const cellW      = compact ? 'w-[26px] min-w-[26px]' : 'w-[38px] min-w-[38px]'
-  const chipW      = compact ? 'w-[22px] h-[18px] text-[9px]'  : 'w-[30px] h-[22px] text-[10px]'
-  const chipWEmpty = compact ? 'w-[22px] h-[18px]' : 'w-[30px] h-[22px]'
+  const chipW      = compact ? 'w-[28px] h-[18px] text-[9px]'  : 'w-[38px] h-[22px] text-[10px]'
+  const chipWEmpty = compact ? 'w-[28px] h-[18px]' : 'w-[38px] h-[22px]'
 
   // Payroll readiness signal derived from local muster data (no extra query)
   const isAttendanceReady = !isLoading && missingRecordCount === 0
@@ -1116,25 +1116,27 @@ export function MusterRoll() {
                       </div>
                     )}
 
-                    {/* Phase 3 — Legend: extended with operational states */}
-                    <div className="flex flex-wrap gap-3 mt-4 pt-3 px-4 pb-3 border-t border-border text-xs text-muted-foreground">
-                      {[
-                        { label: 'Present (P)',         cls: 'bg-success/20 text-success' },
-                        { label: 'Late (L)',             cls: 'bg-warning/20 text-warning' },
-                        { label: 'Absent (A)',           cls: 'bg-destructive/20 text-destructive' },
-                        { label: 'Half Day (H)',         cls: 'bg-muted text-muted-foreground' },
-                        { label: 'Holiday (Ho)',         cls: 'bg-info/20 text-info' },
-                        { label: 'Leave (Lv)',           cls: 'bg-accent/20 text-accent-foreground' },
-                        { label: 'Overtime (OT)',        cls: 'bg-info/20 text-info' },
-                        { label: 'Missing Punch (MP)',   cls: 'bg-destructive/10 text-destructive ring-1 ring-destructive/40' },
-                        { label: 'Weekend (WE)',         cls: 'bg-muted/30 text-muted-foreground/50' },
-                        { label: 'Weekly Off (WO)',      cls: 'bg-muted/30 text-muted-foreground/50' },
-                      ].map(({ label, cls }) => (
-                        <span key={label} className="flex items-center gap-1">
-                          <span className={cn('inline-flex items-center justify-center w-6 h-4 rounded text-[9px] font-semibold', cls)}>
-                            {label.match(/\((.+)\)/)?.[1]}
+                    {/* Legend — canonical muster codes */}
+                    <div className="flex flex-wrap gap-x-4 gap-y-2 mt-4 pt-3 px-4 pb-3 border-t border-border text-xs text-muted-foreground">
+                      {([
+                        { code: 'P',    label: 'Present',              cls: 'bg-success/20 text-success' },
+                        { code: 'P(L)', label: 'Late',                 cls: 'bg-warning/20 text-warning' },
+                        { code: 'A',    label: 'Absent / No Punch',    cls: 'bg-destructive/20 text-destructive' },
+                        { code: 'MIS',  label: 'Missing Punch',        cls: 'bg-destructive/10 text-destructive ring-1 ring-destructive/40' },
+                        { code: 'HLF',  label: 'Half Day',             cls: 'bg-muted text-muted-foreground' },
+                        { code: 'HL',   label: 'Holiday',              cls: 'bg-info/20 text-info' },
+                        { code: 'PHL',  label: 'Present on Holiday',   cls: 'bg-success/30 text-success ring-1 ring-success/40' },
+                        { code: 'WO',   label: 'Weekly Off / Weekend', cls: 'bg-muted/30 text-muted-foreground/50' },
+                        { code: 'PWO',  label: 'Present on W/Off',     cls: 'bg-success/30 text-success ring-1 ring-success/40' },
+                        { code: 'CL',   label: 'Leave (CL/EL/SL…)',   cls: 'bg-accent/20 text-accent-foreground' },
+                        { code: 'CO',   label: 'Comp Off',             cls: 'bg-info/20 text-info' },
+                        { code: 'LWP',  label: 'Leave Without Pay',    cls: 'bg-destructive/20 text-destructive' },
+                      ] as const).map(({ code, label, cls }) => (
+                        <span key={code} className="flex items-center gap-1.5">
+                          <span className={cn('inline-flex items-center justify-center rounded font-semibold w-[38px] h-[18px] text-[9px]', cls)}>
+                            {code}
                           </span>
-                          {label.split(' (')[0]}
+                          <span>{label}</span>
                         </span>
                       ))}
                     </div>
