@@ -36,6 +36,7 @@ import {
 } from './org-context.js'
 import { resolveShiftBatch, toShiftMeta, type ResolvedShift } from './shift-resolution-engine.js'
 import { isShiftAttributionEnabled } from './attendance-flags.js'
+import { deriveMusterCode } from './muster-codes.js'
 
 // ── Shift defaults (no shift master yet) ──────────────────────────────────────
 const SHIFT_START_HOUR   = 9   // 09:00
@@ -102,6 +103,7 @@ interface DailyRow {
   worked_on_holiday:    boolean   // true when employee punched in on a holiday
   is_payable:           boolean   // payroll eligibility flag
   day_fraction:         number    // 0.0 | 0.5 | 1.0 — direct payroll input
+  muster_code?:         string | null  // canonical display code (P, P_L, A, MIS, HL, etc.)
   // Shift attribution snapshot (migration 260) — written at compute time for audit integrity
   expected_shift_id?:        string | null
   shift_start_time?:         string | null
@@ -740,6 +742,15 @@ export async function processAttendanceForDate(
       }
     }
     // 3. Attendance: computeDaily result stands (present / late / half_day / absent)
+
+    // Derive the canonical muster display code after the priority chain has
+    // resolved the final status.  Leave-type codes (CL, EL, SL …) are NOT set
+    // here — the leave approval route writes them when an approved leave exists.
+    daily.muster_code = deriveMusterCode(
+      daily.status,
+      daily.worked_on_holiday,
+      daily.worked_on_weekly_off,
+    )
 
     incompleteSessions += sessions.filter((s) => !s.is_complete).length
 

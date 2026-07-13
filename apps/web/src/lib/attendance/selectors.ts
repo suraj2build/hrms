@@ -61,6 +61,7 @@ export const FORENSICS_LINKABLE = new Set<string>([
 export interface DayRecord {
   date:         string
   status:       string | null
+  muster_code?: string | null   // canonical display code (P, P_L, A, MIS, HL, CL, EL …)
   work_hours:   number
   late_minutes: number
 }

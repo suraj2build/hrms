@@ -91,21 +91,26 @@ type StatusFilter =
 // ── Status display maps ───────────────────────────────────────────────────────
 // Phase 3 — Extended with operational states: overtime, missing_punch, no_punch
 
+// Fallback display codes for rows that pre-date the muster_code column.
+// When a row has muster_code set, that takes precedence (see cell rendering).
 const STATUS_SHORT: Record<string, string> = {
   present:       'P',
-  late:          'L',
+  late:          'P(L)',
   absent:        'A',
-  half_day:      'H',
-  holiday:       'Ho',
-  weekend:       'WE',
+  half_day:      'HLF',
+  holiday:       'HL',
+  weekend:       'WO',
   weekly_off:    'WO',
-  leave:         'Lv',
-  overtime:      'OT',
-  missing_punch: 'MP',
+  leave:         'Lv',   // generic; specific code comes from muster_code field
+  overtime:      'P',
+  missing_punch: 'MIS',
   no_punch:      'NP',
 }
 
+// CSS classes by internal status (present/late/absent…) and by muster_code for
+// codes that need a distinct colour (PWO, PHL, leave types, LWP, etc.).
 const STATUS_CELL: Record<string, string> = {
+  // ── By DB status ───────────────────────────────────────────────────────────
   present:       'bg-success/20 text-success',
   late:          'bg-warning/20 text-warning',
   absent:        'bg-destructive/20 text-destructive',
@@ -114,10 +119,32 @@ const STATUS_CELL: Record<string, string> = {
   weekend:       'bg-muted/30 text-muted-foreground/50',
   weekly_off:    'bg-muted/30 text-muted-foreground/50',
   leave:         'bg-accent/20 text-accent-foreground',
-  overtime:      'bg-info/20 text-info',
-  // missing_punch / no_punch: distinct destructive border — payroll-critical
+  overtime:      'bg-success/20 text-success',
+  // missing_punch / no_punch: payroll-critical — distinct destructive ring
   missing_punch: 'bg-destructive/10 text-destructive ring-1 ring-destructive/40',
   no_punch:      'bg-destructive/10 text-destructive ring-1 ring-destructive/40',
+  // ── By muster_code (overrides the status-based colour when code is present) ─
+  PWO:     'bg-success/30 text-success ring-1 ring-success/40',
+  PHL:     'bg-success/30 text-success ring-1 ring-success/40',
+  OD:      'bg-success/20 text-success',
+  WFH:     'bg-success/20 text-success',
+  TOUR:    'bg-success/20 text-success',
+  LWP:     'bg-destructive/20 text-destructive',
+  MIS:     'bg-destructive/10 text-destructive ring-1 ring-destructive/40',
+  NP:      'bg-destructive/10 text-destructive ring-1 ring-destructive/40',
+  CL:      'bg-accent/20 text-accent-foreground',
+  EL:      'bg-accent/20 text-accent-foreground',
+  SL:      'bg-accent/20 text-accent-foreground',
+  ML:      'bg-accent/20 text-accent-foreground',
+  PAT:     'bg-accent/20 text-accent-foreground',
+  BL:      'bg-accent/20 text-accent-foreground',
+  CO:      'bg-info/20 text-info',
+  HLF_LWP: 'bg-destructive/10 text-destructive',
+  HLF_A:   'bg-destructive/10 text-destructive',
+  HLF_CL:  'bg-accent/10 text-accent-foreground',
+  HLF_EL:  'bg-accent/10 text-accent-foreground',
+  HLF_SL:  'bg-accent/10 text-accent-foreground',
+  HLF_CO:  'bg-info/10 text-info',
 }
 
 const DOW_SHORT = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa']
@@ -141,7 +168,10 @@ function exportMusterCsv(employees: EmployeeMuster[], dates: string[], monthLabe
     const dayMap = new Map(resolvedDays.map(d => [d.date, d]))
     const summary = computeSummary(resolvedDays)
     const payable = computePayableDays(resolvedDays)
-    const dayCells = dates.map(d => dayMap.get(d)?.status ?? '')
+    const dayCells = dates.map(d => {
+      const rec = dayMap.get(d)
+      return rec ? (rec.muster_code ?? STATUS_SHORT[rec.status ?? ''] ?? '') : ''
+    })
     return [
       emp.employee_code,
       emp.name,
@@ -970,12 +1000,21 @@ export function MusterRoll() {
 
                                 {/* Day cells */}
                                 {dates.map(d => {
-                                  const rec    = dayMap.get(d)
-                                  const status = rec?.status ?? null
-                                  const short  = status ? (STATUS_SHORT[status] ?? status.slice(0, 2).toUpperCase()) : ''
-                                  const cellCls = status ? (STATUS_CELL[status] ?? 'bg-muted text-muted-foreground') : ''
+                                  const rec        = dayMap.get(d)
+                                  const status     = rec?.status ?? null
+                                  const musterCode = rec?.muster_code ?? null
+                                  // Prefer the specific muster_code for display; fall back to STATUS_SHORT
+                                  const short   = status
+                                    ? (musterCode ?? STATUS_SHORT[status] ?? status.slice(0, 2).toUpperCase())
+                                    : ''
+                                  // Colour: use muster_code entry first, then status entry
+                                  const cellCls = status
+                                    ? (musterCode && STATUS_CELL[musterCode]
+                                        ? STATUS_CELL[musterCode]
+                                        : (STATUS_CELL[status] ?? 'bg-muted text-muted-foreground'))
+                                    : ''
                                   const tooltipText = status
-                                    ? `${emp.name} · ${d}\nStatus: ${status}${rec?.work_hours ? `\nHours: ${rec.work_hours}h` : ''}${rec?.late_minutes ? `\nLate: ${rec.late_minutes}m` : ''}${FORENSICS_LINKABLE.has(status) ? '\n↗ Open forensics' : ''}`
+                                    ? `${emp.name} · ${d}\nStatus: ${musterCode ?? status}${rec?.work_hours ? `\nHours: ${rec.work_hours}h` : ''}${rec?.late_minutes ? `\nLate: ${rec.late_minutes}m` : ''}${FORENSICS_LINKABLE.has(status) ? '\n↗ Open forensics' : ''}`
                                     : `${emp.name} · ${d}\nNo record`
 
                                   return (

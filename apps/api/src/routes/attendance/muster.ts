@@ -109,13 +109,13 @@ export default async function musterRoute(fastify: FastifyInstance) {
         return reply.send({ month, employees: [] })
       }
 
-      type DailyRawRow = { date: string; status: string; work_hours: number; late_minutes: number; employee_id: string }
+      type DailyRawRow = { date: string; status: string; muster_code: string | null; work_hours: number; late_minutes: number; employee_id: string }
       const daily: DailyRawRow[] = []
       let dailyFrom = 0
       while (true) {
         const { data: page, error: dailyError } = await fastify.supabase
           .from('attendance_daily')
-          .select('employee_id, date, status, work_hours, late_minutes')
+          .select('employee_id, date, status, muster_code, work_hours, late_minutes')
           .eq('tenant_id', req.tenantId)
           .gte('date', fromDate)
           .lte('date', toDate)
@@ -130,7 +130,7 @@ export default async function musterRoute(fastify: FastifyInstance) {
       }
 
       // Build a lookup: employeeId → date → daily row
-      type DailyRecord = { date: string; status: string | null; work_hours: number; late_minutes: number }
+      type DailyRecord = { date: string; status: string | null; muster_code: string | null; work_hours: number; late_minutes: number }
       const empDailyMap = new Map<string, Map<string, DailyRecord>>()
 
       for (const row of daily) {
@@ -144,6 +144,7 @@ export default async function musterRoute(fastify: FastifyInstance) {
           // normalizeAttendanceStatus ensures lowercase regardless of DB storage case
           // ('Present' → 'present', 'LATE' → 'late', etc.)
           status:       normalizeAttendanceStatus(row.status),
+          muster_code:  row.muster_code ?? null,
           work_hours:   Number(row.work_hours),
           late_minutes: Number(row.late_minutes),
         })
@@ -165,8 +166,8 @@ export default async function musterRoute(fastify: FastifyInstance) {
           const days = allDays.map((d) => {
             const rec = dateMap.get(d)
             return rec
-              ? { date: d, status: rec.status, work_hours: rec.work_hours, late_minutes: rec.late_minutes }
-              : { date: d, status: null,        work_hours: 0,             late_minutes: 0             }
+              ? { date: d, status: rec.status, muster_code: rec.muster_code, work_hours: rec.work_hours, late_minutes: rec.late_minutes }
+              : { date: d, status: null,        muster_code: null,            work_hours: 0,             late_minutes: 0             }
           })
           return {
             employee_id:   emp.id,
