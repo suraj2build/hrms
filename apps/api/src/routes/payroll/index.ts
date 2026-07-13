@@ -20,6 +20,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z }                    from 'zod'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { fetchAllRows } from '../../lib/supabase-paginate.js'
 import { EventType, MODULE } from '../../platform/events/index.js'
 import {
   computePayrollSlip,
@@ -529,22 +530,24 @@ async function executePayrollRun(
   await supabase.from('payroll_runs').update({ status: 'processing' }).eq('id', runId)
 
   // Fetch all active employees
-  const { data: employees, error: empErr } = await supabase
-    .from('employees')
-    .select('id, first_name, last_name, employee_code')
-    .eq('tenant_id', tenantId)
-    .eq('status', 'active')
-    .order('employee_code')
-
-  if (empErr) {
+  let empList: Array<{ id: string; first_name: string; last_name: string; employee_code: string }>
+  try {
+    empList = await fetchAllRows((from, to) =>
+      supabase
+        .from('employees')
+        .select('id, first_name, last_name, employee_code')
+        .eq('tenant_id', tenantId)
+        .eq('status', 'active')
+        .order('employee_code')
+        .range(from, to),
+    ) as typeof empList
+  } catch (empErr: any) {
     log.error({ err: empErr, run_id: runId, month, tenant_id: tenantId }, 'payroll run job: failed to fetch employees')
     await supabase.from('payroll_runs')
       .update({ status: 'failed', error_message: `Employee fetch failed: ${empErr.message}` })
       .eq('id', runId)
     return
   }
-
-  const empList = (employees ?? []) as Array<{ id: string; first_name: string; last_name: string; employee_code: string }>
 
   // Update employee_count now that we know it
   await supabase.from('payroll_runs').update({ employee_count: empList.length }).eq('id', runId)
@@ -863,16 +866,20 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
     // ── DRY RUN: compute + validate without any DB writes ───────────────────
     if (dry_run) {
       // Fetch employees + working days synchronously (dry runs are fast)
-      const { data: dryEmployees, error: dryEmpErr } = await fastify.supabase
-        .from('employees')
-        .select('id, first_name, last_name, employee_code')
-        .eq('tenant_id', tenantId)
-        .eq('status', 'active')
-        .order('employee_code')
-      if (dryEmpErr) {
+      let empList: Array<{ id: string; first_name: string; last_name: string; employee_code: string }>
+      try {
+        empList = await fetchAllRows((from, to) =>
+          fastify.supabase
+            .from('employees')
+            .select('id, first_name, last_name, employee_code')
+            .eq('tenant_id', tenantId)
+            .eq('status', 'active')
+            .order('employee_code')
+            .range(from, to),
+        ) as typeof empList
+      } catch (dryEmpErr: any) {
         return serverError(req, reply, dryEmpErr, ErrorCode.QUERY_FAILED, 'Failed to fetch employees')
       }
-      const empList = (dryEmployees ?? []) as Array<{ id: string; first_name: string; last_name: string; employee_code: string }>
       const [runYear, runMon] = month.split('-').map(Number)
       const runPeriodEnd      = new Date(runYear, runMon, 0).toISOString().slice(0, 10)
       let total_working_days: number

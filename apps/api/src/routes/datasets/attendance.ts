@@ -15,6 +15,7 @@
 
 import type { FastifyInstance } from 'fastify'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { fetchAllRows } from '../../lib/supabase-paginate.js'
 
 function r2(n: number): number { return Math.round(n * 100) / 100 }
 function r1(n: number): number { return Math.round(n * 10) / 10 }
@@ -63,14 +64,20 @@ export default async function attendanceDataset(fastify: FastifyInstance) {
     const deptFilter = q.department_id ?? q.filter_department_id ?? null
 
     // ── Query: attendance rows in range ─────────────────────────────────────────
-    const { data: attRows, error: attErr } = await fastify.supabase
-      .from('attendance_daily')
-      .select('employee_id, date, status, work_hours, late_minutes, overtime_minutes')
-      .eq('tenant_id', tid)
-      .gte('date', fromDate)
-      .lte('date', toDate)
-
-    if (attErr) return reply.code(500).send({ error: 'DB_ERROR', message: attErr.message })
+    let attRows: any[]
+    try {
+      attRows = await fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('attendance_daily')
+          .select('employee_id, date, status, work_hours, late_minutes, overtime_minutes')
+          .eq('tenant_id', tid)
+          .gte('date', fromDate)
+          .lte('date', toDate)
+          .range(from, to),
+      )
+    } catch (err: any) {
+      return reply.code(500).send({ error: 'DB_ERROR', message: err.message })
+    }
 
     // ── Query: employees with current job history ───────────────────────────────
     let empQuery = fastify.supabase
@@ -88,11 +95,11 @@ export default async function attendanceDataset(fastify: FastifyInstance) {
 
     if (deptFilter) empQuery = empQuery.eq('job_history.department_id', deptFilter)
 
-    const { data: employees } = await empQuery
+    const employees = await fetchAllRows((from, to) => (empQuery as any).range(from, to))
 
     // ── Build employee map ──────────────────────────────────────────────────────
     const empMap: Record<string, { code: string; name: string; dept: string; deptId: string; type: string }> = {}
-    for (const emp of (employees ?? []) as any[]) {
+    for (const emp of employees as any[]) {
       const jh = Array.isArray(emp.job_history) ? emp.job_history[0] : emp.job_history
       empMap[emp.id] = {
         code: emp.employee_code,
@@ -107,7 +114,7 @@ export default async function attendanceDataset(fastify: FastifyInstance) {
 
     // ── working_days = distinct dates in the filtered result set ────────────────
     const distinctDates = new Set<string>()
-    for (const row of (attRows ?? []) as any[]) {
+    for (const row of attRows as any[]) {
       if (eligibleIds.has(row.employee_id)) distinctDates.add(row.date)
     }
     const workingDays = distinctDates.size || 1   // avoid /0
@@ -133,7 +140,7 @@ export default async function attendanceDataset(fastify: FastifyInstance) {
 
     const empAgg: Record<string, EmpAgg> = {}
 
-    for (const row of (attRows ?? []) as any[]) {
+    for (const row of attRows as any[]) {
       if (!eligibleIds.has(row.employee_id)) continue
 
       if (!empAgg[row.employee_id]) {
@@ -195,7 +202,7 @@ export default async function attendanceDataset(fastify: FastifyInstance) {
       ? r2(empList.reduce((s, e) => s + e.attendance_rate, 0) / empList.length)
       : 0
 
-    const lateRows = (attRows ?? []) as any[]
+    const lateRows = attRows as any[]
     const lateMinsArr = lateRows
       .filter(r => eligibleIds.has(r.employee_id) && Number(r.late_minutes ?? 0) > 0)
       .map(r => Number(r.late_minutes))

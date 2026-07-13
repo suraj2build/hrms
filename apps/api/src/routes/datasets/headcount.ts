@@ -14,6 +14,7 @@
 
 import type { FastifyInstance } from 'fastify'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { fetchAllRows } from '../../lib/supabase-paginate.js'
 
 function r2(n: number): number { return Math.round(n * 100) / 100 }
 
@@ -107,15 +108,13 @@ export default async function headcountDataset(fastify: FastifyInstance) {
       // separated employees may no longer have is_current=true job_history
     }
 
-    const [{ data: employees, error: empErr }, { data: sepRows }] = await Promise.all([
-      empQuery,
-      sepQuery,
-    ])
-
-    if (empErr) return reply.code(500).send({ error: 'DB_ERROR', message: empErr.message })
-
-    const allEmployees = (employees ?? []) as any[]
-    const allSeps      = (sepRows ?? []) as any[]
+    let allEmployees: any[]
+    try {
+      allEmployees = await fetchAllRows((from, to) => (empQuery as any).range(from, to))
+    } catch (err: any) {
+      return reply.code(500).send({ error: 'DB_ERROR', message: err.message })
+    }
+    const allSeps = await fetchAllRows((from, to) => (sepQuery as any).range(from, to))
 
     // ── Snapshot counts ─────────────────────────────────────────────────────────
     const activeCount    = allEmployees.filter(e => e.status === 'active').length

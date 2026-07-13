@@ -12,6 +12,7 @@
 
 import type { FastifyInstance } from 'fastify'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { fetchAllRows } from '../../lib/supabase-paginate.js'
 
 type GroupBy = 'department' | 'grade' | 'designation' | 'location'
 const VALID_GROUP_BY = new Set<string>(['department', 'grade', 'designation', 'location'])
@@ -73,11 +74,12 @@ export default async function compensationDataset(fastify: FastifyInstance) {
     if (filterGradeId) compQuery = compQuery.eq('employees.job_history.grade_id', filterGradeId)
     if (filterDesgId)  compQuery = compQuery.eq('employees.job_history.designation_id', filterDesgId)
 
-    const { data: compData, error: compErr } = await compQuery
-
-    if (compErr) return reply.code(500).send({ error: 'DB_ERROR', message: compErr.message })
-
-    const comps = (compData ?? []) as any[]
+    let comps: any[]
+    try {
+      comps = await fetchAllRows((from, to) => (compQuery as any).range(from, to))
+    } catch (err: any) {
+      return reply.code(500).send({ error: 'DB_ERROR', message: err.message })
+    }
 
     // ── Group helper ──────────────────────────────────────────────────────────
     function jh(comp: any) {

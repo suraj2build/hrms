@@ -13,6 +13,7 @@
 
 import type { FastifyInstance } from 'fastify'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { fetchAllRows } from '../../lib/supabase-paginate.js'
 
 // Payroll slips advance finalized → processed → paid through the pay cycle.
 // All of these are "final" data for reporting; only 'draft' is excluded.
@@ -181,11 +182,12 @@ export default async function payrollCostDataset(fastify: FastifyInstance) {
     if (filterLocId)   slipsQuery = slipsQuery.eq('employees.job_history.work_location_id', filterLocId)
     if (filterGradeId) slipsQuery = slipsQuery.eq('employees.job_history.grade_id', filterGradeId)
     if (filterDesgId)  slipsQuery = slipsQuery.eq('employees.job_history.designation_id', filterDesgId)
-    const { data: slipsData, error: slipsErr } = await slipsQuery
-
-    if (slipsErr) return reply.code(500).send({ error: 'DB_ERROR', message: slipsErr.message })
-
-    const slips = (slipsData ?? []) as any[]
+    let slips: any[]
+    try {
+      slips = await fetchAllRows((from, to) => (slipsQuery as any).range(from, to))
+    } catch (err: any) {
+      return reply.code(500).send({ error: 'DB_ERROR', message: err.message })
+    }
 
     // ── Per-department aggregation ──────────────────────────────────────────────
     type DeptAgg = {
