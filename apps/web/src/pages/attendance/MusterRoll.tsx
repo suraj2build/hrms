@@ -51,6 +51,7 @@ import { formatMonthLabel } from '@/lib/attendance/attendance-period-context'
 interface DayRecord {
   date:         string
   status:       string | null
+  muster_code?: string | null
   work_hours:   number
   late_minutes: number
 }
