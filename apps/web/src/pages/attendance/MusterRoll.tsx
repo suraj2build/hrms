@@ -497,9 +497,12 @@ export function MusterRoll() {
   const selectedIdsParam = [...selected].join(',')
 
   // Density-driven size tokens
-  const cellW      = compact ? 'w-[26px] min-w-[26px]' : 'w-[38px] min-w-[38px]'
-  const chipW      = compact ? 'w-[28px] h-[18px] text-[9px]'  : 'w-[38px] h-[22px] text-[10px]'
-  const chipWEmpty = compact ? 'w-[28px] h-[18px]' : 'w-[38px] h-[22px]'
+  // cellW = chipW + 4px padding room (px-0.5 on td = 2px each side)
+  const cellW      = compact ? 'w-[28px] min-w-[28px]' : 'w-[42px] min-w-[42px]'
+  // chipW must be narrower than cellW minus td padding (px-0.5 = 2px each side → 4px total)
+  // so the chip never bleeds into adjacent cells on either side.
+  const chipW      = compact ? 'w-[24px] h-[18px] text-[9px]'  : 'w-[36px] h-[22px] text-[10px]'
+  const chipWEmpty = compact ? 'w-[24px] h-[18px]' : 'w-[36px] h-[22px]'
 
   // Payroll readiness signal derived from local muster data (no extra query)
   const isAttendanceReady = !isLoading && missingRecordCount === 0
@@ -936,12 +939,17 @@ export function MusterRoll() {
                             const rowBg = isSelected
                               ? 'bg-primary/5'
                               : eIdx % 2 === 0 ? 'bg-card' : 'bg-muted/20'
+                            // Sticky cells need a fully-opaque background — semi-transparent
+                            // rowBg lets scrolled date chips bleed through on both sides.
+                            const stickyBg = isSelected
+                              ? 'bg-primary/10'
+                              : eIdx % 2 === 0 ? 'bg-card' : 'bg-muted'
 
                             return (
                               // Phase 4: group class enables hover-reveal inline actions
                               <tr key={emp.employee_id} className={cn(rowBg, 'group')}>
                                 {/* Checkbox cell */}
-                                <td className={cn('sticky left-0 z-10 border-b border-border/50 px-1.5 py-1 w-7', rowBg)}>
+                                <td className={cn('sticky left-0 z-10 border-b border-border/50 px-1.5 py-1 w-7', stickyBg)}>
                                   <button
                                     onClick={() => toggleSelect(emp.employee_id)}
                                     className="flex items-center justify-center text-muted-foreground hover:text-primary transition-colors"
@@ -955,7 +963,7 @@ export function MusterRoll() {
                                 {/* Phase 4 — Sticky employee cell with hover-reveal inline actions */}
                                 <td className={cn(
                                   'sticky left-7 z-10 border-b border-border/50 px-3 py-1 min-w-[180px]',
-                                  rowBg,
+                                  stickyBg,
                                 )}>
                                   <div className="flex items-center justify-between gap-1">
                                     <div className="min-w-0">
@@ -1072,7 +1080,7 @@ export function MusterRoll() {
                                 {/* Phase 2 — Summary cell: payable days + per-status breakdown */}
                                 <td className={cn(
                                   'sticky right-0 z-10 border-b border-l border-border/50 px-2 py-1.5 whitespace-nowrap min-w-[80px]',
-                                  rowBg,
+                                  stickyBg,
                                 )}>
                                   <div className="text-[11px] font-semibold text-foreground mb-0.5">
                                     {(payable ?? 0).toFixed(1)}d
@@ -1134,7 +1142,7 @@ export function MusterRoll() {
                         { code: 'LWP',  label: 'Leave Without Pay',    cls: 'bg-destructive/20 text-destructive' },
                       ] as const).map(({ code, label, cls }) => (
                         <span key={code} className="flex items-center gap-1.5">
-                          <span className={cn('inline-flex items-center justify-center rounded font-semibold w-[38px] h-[18px] text-[9px]', cls)}>
+                          <span className={cn('inline-flex items-center justify-center rounded font-semibold w-[36px] h-[18px] text-[9px]', cls)}>
                             {code}
                           </span>
                           <span>{label}</span>
