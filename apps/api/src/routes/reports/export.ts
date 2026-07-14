@@ -557,43 +557,48 @@ export default async function reportExportRoutes(fastify: FastifyInstance) {
     }
 
     // ── Fetch employees ────────────────────────────────────────────────────────
-    let empQuery = fastify.supabase
-      .from('employees')
-      .select(`
+    let employees: any[]
+    try {
+      employees = await fetchAllRows((from, to) => {
+        let q = fastify.supabase
+          .from('employees')
+          .select(`
         id, first_name, last_name, employee_code,
         job_history!job_history_employee_id_fkey(department_id, is_current, departments(name))
       `)
-      .eq('tenant_id', tenantId)
-      .eq('status', 'active')
-      .eq('job_history.is_current', true)
-      .order('employee_code')
-
-    if (department_id) empQuery = empQuery.eq('job_history.department_id', department_id)
-
-    const { data: employees, error: empErr } = await empQuery
-    if (empErr) {
-      req.log.error({ err: empErr }, 'muster-roll export: employee query failed')
+          .eq('tenant_id', tenantId)
+          .eq('status', 'active')
+          .eq('job_history.is_current', true)
+          .order('employee_code')
+        if (department_id) q = q.eq('job_history.department_id', department_id)
+        return q.range(from, to)
+      })
+    } catch (err: any) {
+      req.log.error({ err }, 'muster-roll export: employee query failed')
       return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch employees' })
     }
-    if (!employees || employees.length === 0) {
+    if (employees.length === 0) {
       return reply.code(404).send({ error: 'NO_DATA', message: 'No active employees found for the selected filters.' })
     }
 
     // ── Fetch attendance_daily for the month ──────────────────────────────────
-    const { data: daily, error: attErr } = await fastify.supabase
-      .from('attendance_daily')
-      .select('employee_id, date, status, work_hours, late_minutes, overtime_minutes, day_fraction, is_payable')
-      .eq('tenant_id', tenantId)
-      .gte('date', fromDate)
-      .lte('date', toDate)
-      .limit(MUSTER_EXPORT_LIMIT + 1)
-
-    if (attErr) {
-      req.log.error({ err: attErr }, 'muster-roll export: attendance query failed')
+    let daily: any[]
+    try {
+      daily = await fetchAllRows((rangeFrom, rangeTo) =>
+        fastify.supabase
+          .from('attendance_daily')
+          .select('employee_id, date, status, work_hours, late_minutes, overtime_minutes, day_fraction, is_payable')
+          .eq('tenant_id', tenantId)
+          .gte('date', fromDate)
+          .lte('date', toDate)
+          .range(rangeFrom, rangeTo),
+      )
+    } catch (err: any) {
+      req.log.error({ err }, 'muster-roll export: attendance query failed')
       return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch attendance records' })
     }
 
-    if ((daily?.length ?? 0) > MUSTER_EXPORT_LIMIT) {
+    if (daily.length > MUSTER_EXPORT_LIMIT) {
       return reply.code(422).send({
         error:   'EXPORT_TOO_LARGE',
         message: `Export exceeds ${MUSTER_EXPORT_LIMIT.toLocaleString()} attendance rows. Narrow the filter (e.g. by department) and re-export.`,
@@ -603,7 +608,7 @@ export default async function reportExportRoutes(fastify: FastifyInstance) {
     // attendance map: employeeId → date → record
     type DRow = { status: string; work_hours: number; late_minutes: number; overtime_minutes: number; day_fraction: number | null; is_payable: boolean }
     const attMap = new Map<string, Map<string, DRow>>()
-    for (const row of (daily ?? []) as (DRow & { employee_id: string; date: string })[]) {
+    for (const row of daily as (DRow & { employee_id: string; date: string })[]) {
       if (!attMap.has(row.employee_id)) attMap.set(row.employee_id, new Map())
       attMap.get(row.employee_id)!.set(row.date, row)
     }

@@ -24,6 +24,7 @@ import { resolveAssistantConfig, resolveAssistantChain, resolveAiMode, maskKey }
 import { buildAssistantContext } from '../../lib/ai/assistant-context.js'
 import { ASSISTANT_TOOLS, executeTool } from '../../lib/ai/assistant-tools.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { fetchAllRows } from '../../lib/supabase-paginate.js'
 
 const SYSTEM_BASE =
   'You are the CognixHR Assistant, a helpful in-app assistant for an HR/payroll system. ' +
@@ -240,16 +241,15 @@ export default async function assistantRoutes(fastify: FastifyInstance) {
     const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString()
     const since = new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString()
 
-    const { data, error } = await fastify.supabase
-      .from('ai_usage_log')
-      .select('provider, model, source, prompt_tokens, completion_tokens, total_tokens, created_at')
-      .eq('tenant_id', req.tenantId)
-      .gte('created_at', since)
-      .order('created_at', { ascending: false })
-      .limit(5000)
-    if (error) return reply.code(500).send({ error: 'USAGE_FAILED', message: error.message })
-
-    const rows = (data ?? []) as Array<{ provider: string; source: string; total_tokens: number; prompt_tokens: number; completion_tokens: number; created_at: string }>
+    const rows = (await fetchAllRows((from, to) =>
+      fastify.supabase
+        .from('ai_usage_log')
+        .select('provider, model, source, prompt_tokens, completion_tokens, total_tokens, created_at')
+        .eq('tenant_id', req.tenantId)
+        .gte('created_at', since)
+        .order('created_at', { ascending: false })
+        .range(from, to),
+    ).catch(() => [] as any[])) as Array<{ provider: string; source: string; total_tokens: number; prompt_tokens: number; completion_tokens: number; created_at: string }>
     const monthRows = rows.filter(r => r.created_at >= monthStart)
     const sum = (rs: typeof rows) => rs.reduce((a, r) => ({
       calls: a.calls + 1,

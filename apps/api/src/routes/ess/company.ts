@@ -20,6 +20,7 @@
  */
 
 import type { FastifyInstance } from 'fastify'
+import { fetchAllRows } from '../../lib/supabase-paginate.js'
 
 function todayISO(): string { return new Date().toISOString().slice(0, 10) }
 function safe<T>(p: PromiseLike<T>, fallback: T): Promise<T> {
@@ -52,10 +53,15 @@ export default async function essCompanyRoutes(fastify: FastifyInstance) {
     const sevenDaysAgo = new Date(Date.now() - 7 * 86_400_000).toISOString().slice(0, 10)
     const [empRows, joinerRows, recogRows, feedRows] = await Promise.all([
       // Active roster — for today's company-wide birthdays + anniversaries.
-      safe(fastify.supabase.from('employees')
-        .select('id, first_name, last_name, dob, joining_date')
-        .eq('tenant_id', tenantId).eq('status', 'active').limit(2000)
-        .then(r => (r.data ?? []) as any[]), [] as any[]),
+      safe(
+        fetchAllRows((from, to) =>
+          fastify.supabase.from('employees')
+            .select('id, first_name, last_name, dob, joining_date')
+            .eq('tenant_id', tenantId).eq('status', 'active')
+            .range(from, to),
+        ),
+        [] as any[],
+      ),
       // Recent new joiners — a company "welcome" (joined in the last week).
       safe(fastify.supabase.from('employees')
         .select('id, first_name, last_name, joining_date')

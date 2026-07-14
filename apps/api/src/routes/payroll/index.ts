@@ -2049,21 +2049,15 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       .single()
     if (!run) return notFound(reply, 'NOT_FOUND', 'Run not found')
 
-    const EXPORT_LIMIT = 10_000
-    const { data: slips, error: slipsError } = await fastify.supabase
-      .from('payroll_slips')
-      .select(`
-        employee_id, month,
-        total_working_days, payable_days, lop_days, overtime_hours,
-        ctc_monthly, gross_pay, lop_amount, total_deductions, net_pay,
-        employees(first_name, last_name, employee_code)
-      `)
-      .eq('run_id', id)
-      .eq('tenant_id', req.tenantId)
-      .limit(EXPORT_LIMIT)
-
-    if (slipsError) return serverError(req, reply, slipsError, ErrorCode.QUERY_FAILED, 'Failed to export payroll slips')
-    if ((slips?.length ?? 0) >= EXPORT_LIMIT) {
+    const slips = await fetchAllRows((from, to) =>
+      fastify.supabase
+        .from('payroll_slips')
+        .select(`employee_id, month, total_working_days, payable_days, lop_days, overtime_hours, ctc_monthly, gross_pay, lop_amount, total_deductions, net_pay, employees(first_name, last_name, employee_code)`)
+        .eq('run_id', id)
+        .eq('tenant_id', req.tenantId)
+        .range(from, to),
+    )
+    if (slips.length > 10_000) {
       return reply.code(422).send({ error: 'EXPORT_TOO_LARGE', message: 'This payroll run exceeds the online export limit of 10,000 rows. Please contact support for a bulk export.' })
     }
 
@@ -2073,7 +2067,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       'CTC Monthly', 'Gross Pay', 'LOP Amount', 'Deductions', 'Net Pay',
     ].join(',')
 
-    const rows = (slips ?? []).map((r: any) => {
+    const rows = slips.map((r: any) => {
       const name = r.employees ? `${r.employees.first_name} ${r.employees.last_name}` : ''
       return [
         r.employees?.employee_code ?? '',
@@ -2122,20 +2116,15 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
 
     // Fetch current slips + previous run in parallel
     const VARIANCE_LIMIT = 10_000
-    const [
-      { data: currentSlips, error: currSlipsError },
-      { data: prevRun },
-    ] = await Promise.all([
-      fastify.supabase
-        .from('payroll_slips')
-        .select(`
-          employee_id, gross_pay, net_pay, lop_days, lop_amount,
-          payable_days, total_deductions,
-          employees(first_name, last_name, employee_code)
-        `)
-        .eq('run_id', id)
-        .eq('tenant_id', tenantId)
-        .limit(VARIANCE_LIMIT),
+    const [currentSlips, { data: prevRun }] = await Promise.all([
+      fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('payroll_slips')
+          .select(`employee_id, gross_pay, net_pay, lop_days, lop_amount, payable_days, total_deductions, employees(first_name, last_name, employee_code)`)
+          .eq('run_id', id)
+          .eq('tenant_id', tenantId)
+          .range(from, to),
+      ),
       fastify.supabase
         .from('payroll_runs')
         .select('id, month')
@@ -2146,13 +2135,12 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
         .maybeSingle(),
     ])
 
-    if (currSlipsError) return serverError(req, reply, currSlipsError, ErrorCode.QUERY_FAILED, 'Failed to fetch current slips for variance report')
-    if ((currentSlips?.length ?? 0) >= VARIANCE_LIMIT) {
+    if (currentSlips.length > VARIANCE_LIMIT) {
       return reply.code(422).send({ error: 'EXPORT_TOO_LARGE', message: 'This payroll run exceeds the variance report limit of 10,000 rows. Please contact support for a bulk export.' })
     }
 
-    const totalCurrGross = r2((currentSlips ?? []).reduce((s: number, r: any) => s + r.gross_pay, 0))
-    const totalCurrNet   = r2((currentSlips ?? []).reduce((s: number, r: any) => s + r.net_pay,   0))
+    const totalCurrGross = r2(currentSlips.reduce((s: number, r: any) => s + r.gross_pay, 0))
+    const totalCurrNet   = r2(currentSlips.reduce((s: number, r: any) => s + r.net_pay,   0))
 
     // No previous run — return current totals with no comparison
     if (!prevRun) {
@@ -2161,7 +2149,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
         previous_month: prevMonth,
         has_previous:   false,
         summary: {
-          total_employees:     (currentSlips ?? []).length,
+          total_employees:     currentSlips.length,
           employees_changed:   0,
           gross_change:        0,
           gross_change_pct:    0,
@@ -2177,19 +2165,19 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
     }
 
     // Fetch previous run slips
-    const { data: prevSlips, error: prevSlipsError } = await fastify.supabase
-      .from('payroll_slips')
-      .select('employee_id, gross_pay, net_pay, lop_days, lop_amount, payable_days, total_deductions')
-      .eq('run_id', prevRun.id)
-      .eq('tenant_id', tenantId)
-      .limit(VARIANCE_LIMIT)
-
-    if (prevSlipsError) return serverError(req, reply, prevSlipsError, ErrorCode.QUERY_FAILED, 'Failed to fetch previous slips for variance report')
-    if ((prevSlips?.length ?? 0) >= VARIANCE_LIMIT) {
+    const prevSlips = await fetchAllRows((from, to) =>
+      fastify.supabase
+        .from('payroll_slips')
+        .select('employee_id, gross_pay, net_pay, lop_days, lop_amount, payable_days, total_deductions')
+        .eq('run_id', prevRun.id)
+        .eq('tenant_id', tenantId)
+        .range(from, to),
+    )
+    if (prevSlips.length > VARIANCE_LIMIT) {
       return reply.code(422).send({ error: 'EXPORT_TOO_LARGE', message: 'The previous payroll run exceeds the variance report limit of 10,000 rows. Please contact support for a bulk export.' })
     }
 
-    const prevMap = new Map<string, any>((prevSlips ?? []).map((s: any) => [s.employee_id, s]))
+    const prevMap = new Map<string, any>(prevSlips.map((s: any) => [s.employee_id, s]))
 
     type EmpVariance = {
       employee_id:   string
@@ -2201,7 +2189,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       is_new:   boolean
     }
 
-    const employees: EmpVariance[] = (currentSlips ?? []).map((curr: any) => {
+    const employees: EmpVariance[] = currentSlips.map((curr: any) => {
       const prev = prevMap.get(curr.employee_id) ?? null
       const emp  = curr.employees as { first_name: string; last_name: string; employee_code: string } | null
       return {
@@ -2235,8 +2223,8 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
     // Largest absolute net-pay movers first
     employees.sort((a, b) => Math.abs(b.diff.net_pay) - Math.abs(a.diff.net_pay))
 
-    const totalPrevGross = r2((prevSlips ?? []).reduce((s: number, r: any) => s + r.gross_pay, 0))
-    const totalPrevNet   = r2((prevSlips ?? []).reduce((s: number, r: any) => s + r.net_pay,   0))
+    const totalPrevGross = r2(prevSlips.reduce((s: number, r: any) => s + r.gross_pay, 0))
+    const totalPrevNet   = r2(prevSlips.reduce((s: number, r: any) => s + r.net_pay,   0))
     const grossChange    = r2(totalCurrGross - totalPrevGross)
     const netChange      = r2(totalCurrNet   - totalPrevNet)
 
@@ -2245,7 +2233,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       previous_month: prevMonth,
       has_previous:   true,
       summary: {
-        total_employees:     (currentSlips ?? []).length,
+        total_employees:     currentSlips.length,
         employees_changed:   employees.filter(e => e.diff.net_pay !== 0 || e.diff.gross_pay !== 0).length,
         gross_change:        grossChange,
         gross_change_pct:    totalPrevGross > 0 ? r2((grossChange / totalPrevGross) * 100) : 0,
@@ -4127,22 +4115,23 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
     const parsed   = qSchema.safeParse(req.query)
     const months   = parsed.success ? parsed.data.months : 3
 
-    const [ledgersRes, payoutRes] = await Promise.all([
+    const [ledgersRes, payouts] = await Promise.all([
       fastify.supabase
         .from('payroll_financial_ledgers')
         .select('id, ledger_month, ledger_type, ledger_status, total_debit, total_credit')
         .eq('tenant_id', tenantId)
         .order('ledger_month', { ascending: false })
         .limit(months * 3),
-      fastify.supabase
-        .from('payroll_payout_reconciliation')
-        .select('expected_amount, paid_amount, payment_status')
-        .eq('tenant_id', tenantId)
-        .limit(2000),
+      fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('payroll_payout_reconciliation')
+          .select('expected_amount, paid_amount, payment_status')
+          .eq('tenant_id', tenantId)
+          .range(from, to),
+      ),
     ])
 
-    const ledgers  = (ledgersRes.data ?? []) as any[]
-    const payouts  = (payoutRes.data  ?? []) as any[]
+    const ledgers = (ledgersRes.data ?? []) as any[]
 
     const totalPayrollLiability = ledgers
       .filter(l => l.ledger_type === 'payroll' && l.ledger_status !== 'reversed')

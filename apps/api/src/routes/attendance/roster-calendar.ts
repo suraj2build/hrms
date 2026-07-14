@@ -25,6 +25,7 @@
  */
 
 import type { FastifyInstance } from 'fastify'
+import { fetchAllRows } from '../../lib/supabase-paginate.js'
 import {
   buildEmployeeRosterCalendar,
   resolveRosterDay,
@@ -504,26 +505,28 @@ export default async function rosterCalendarRoutes(fastify: FastifyInstance) {
     if (!month) return reply.code(400).send({ error: 'month required (YYYY-MM)' })
 
     // Fetch all employees (optionally filtered by roster)
-    let empQ = supabase
-      .from('employees')
-      .select('id, first_name, last_name, roster_id, site_id')
-      .eq('tenant_id', tenantId)
-      .eq('status', 'active')
-
-    if (rosterIds) {
-      empQ = empQ.in('roster_id', rosterIds.split(','))
+    let employees: any[]
+    try {
+      employees = await fetchAllRows((from, to) => {
+        let q = supabase
+          .from('employees')
+          .select('id, first_name, last_name, roster_id, site_id')
+          .eq('tenant_id', tenantId)
+          .eq('status', 'active')
+        if (rosterIds) q = q.in('roster_id', rosterIds.split(','))
+        return q.range(from, to)
+      })
+    } catch (err: any) {
+      return reply.code(500).send({ error: err.message })
     }
-
-    const { data: employees, error: empErr } = await empQ.limit(200)
-    if (empErr) return reply.code(500).send({ error: empErr.message })
 
     // Build calendars for all employees (parallel, batched)
     const BATCH = 10
     const allCalendars: Array<{ employee_id: string; working_days: number; weekly_offs: number; alt_sat_offs: number; fatigue_days: number }> = []
 
     try {
-      for (let i = 0; i < (employees ?? []).length; i += BATCH) {
-        const batch = (employees ?? []).slice(i, i + BATCH)
+      for (let i = 0; i < employees.length; i += BATCH) {
+        const batch = employees.slice(i, i + BATCH)
         const results = await Promise.all(
           batch.map(async (emp: Record<string, string>) => {
             const cal = await buildEmployeeRosterCalendar(supabase, tenantId, emp.id, month)

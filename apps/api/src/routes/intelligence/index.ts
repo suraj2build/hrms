@@ -981,12 +981,14 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
       // absent in deployments where migration 248 has not yet been applied).
       const siteMeta = new Map<string, { name: string; city: string | null; region: string | null; zone: string | null; site_type: string | null }>()
       try {
-        const { data: sites } = await fastify.supabase
-          .from('sites')
-          .select('*')
-          .eq('tenant_id', tenantId)
-          .limit(2000)
-        for (const s of sites ?? []) {
+        const sites = await fetchAllRows((from, to) =>
+          fastify.supabase
+            .from('sites')
+            .select('*')
+            .eq('tenant_id', tenantId)
+            .range(from, to),
+        ).catch(() => [] as any[])
+        for (const s of sites) {
           siteMeta.set(s.id, {
             name:      s.name ?? 'Unnamed Site',
             city:      s.city ?? null,
@@ -1252,14 +1254,16 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
         // Employees linked to a completed onboarding draft
         let completedEmpIds: string[] = []
         try {
-          const { data: drafts } = await fastify.supabase
-            .from('draft_employee_profiles')
-            .select('linked_employee_id')
-            .eq('tenant_id', tenantId)
-            .not('linked_employee_id', 'is', null)
-            .limit(1000)
+          const drafts = await fetchAllRows((from, to) =>
+            fastify.supabase
+              .from('draft_employee_profiles')
+              .select('linked_employee_id')
+              .eq('tenant_id', tenantId)
+              .not('linked_employee_id', 'is', null)
+              .range(from, to),
+          ).catch(() => [] as any[])
           const ids = new Set<string>()
-          for (const s of (drafts ?? [])) {
+          for (const s of drafts) {
             if (s.linked_employee_id) ids.add(s.linked_employee_id)
           }
           completedEmpIds = Array.from(ids)
@@ -1270,7 +1274,7 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
           .eq('tenant_id', tenantId)
           .eq('status', 'active')
         if (completedEmpIds.length > 0) {
-          query = query.not('id', 'in', `(${completedEmpIds.slice(0, 200).map(id => `"${id}"`).join(',')})`) as any
+          query = query.not('id', 'in', `(${completedEmpIds.map(id => `"${id}"`).join(',')})`) as any
         }
         const { data } = await (query as any).limit(50)
         employees = data ?? []

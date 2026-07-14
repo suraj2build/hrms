@@ -6,6 +6,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { fetchAllRows } from '../../lib/supabase-paginate.js'
 
 const TEMPLATE_TYPES = [
   'performance_bonus',
@@ -242,14 +243,20 @@ export default async function variablePayRoutes(fastify: FastifyInstance) {
   fastify.get('/batches/:id/payouts', auth, async (req: any, reply) => {
     const { id } = req.params as { id: string }
 
-    const { data, error } = await fastify.supabase
-      .from('variable_payouts')
-      .select('*, employees(id, first_name, last_name, employee_code)')
-      .eq('batch_id', id)
-      .eq('tenant_id', req.tenantId).limit(1000)
-
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
-    return reply.send({ data: data ?? [] })
+    let data: any[]
+    try {
+      data = await fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('variable_payouts')
+          .select('*, employees(id, first_name, last_name, employee_code)')
+          .eq('batch_id', id)
+          .eq('tenant_id', req.tenantId)
+          .range(from, to),
+      )
+    } catch (err: any) {
+      return reply.code(500).send({ error: 'QUERY_FAILED', message: err.message })
+    }
+    return reply.send({ data })
   })
 
   // ── POST /payroll/variable-pay/batches/:id/submit ────────────────────────────

@@ -53,6 +53,7 @@ import crypto from 'node:crypto'
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { testConnection, effectiveModel, type AssistantConfig } from '../../lib/ai/llm.js'
+import { fetchAllRows } from '../../lib/supabase-paginate.js'
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -912,19 +913,20 @@ export default async function ownerRoutes(fastify: FastifyInstance) {
     const tenantId = q.tenant_id ?? null
     const since    = new Date(Date.now() - days * 86400_000).toISOString()
 
-    let query = fastify.supabase
-      .from('api_usage_log')
-      .select('tenant_id, endpoint, method, status_code, response_ms, created_at')
-      .gte('created_at', since)
-      .order('created_at', { ascending: false })
-      .limit(5000)
-
-    if (tenantId) query = query.eq('tenant_id', tenantId)
-
-    const { data, error } = await query
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
-
-    const rows = data ?? []
+    let rows: any[]
+    try {
+      rows = await fetchAllRows((from, to) => {
+        let q = fastify.supabase
+          .from('api_usage_log')
+          .select('tenant_id, endpoint, method, status_code, response_ms, created_at')
+          .gte('created_at', since)
+          .order('created_at', { ascending: false })
+        if (tenantId) q = q.eq('tenant_id', tenantId)
+        return q.range(from, to)
+      })
+    } catch (err: any) {
+      return reply.code(500).send({ error: 'DB_ERROR', message: err.message })
+    }
 
     // Aggregate by tenant
     const byTenant: Record<string, { total: number; errors: number; avg_ms: number; tenant_id: string }> = {}
@@ -972,17 +974,22 @@ export default async function ownerRoutes(fastify: FastifyInstance) {
     const days         = Math.min(30, Math.max(1, Number(q.days ?? 7)))
     const since        = new Date(Date.now() - days * 86400_000).toISOString()
 
-    const { data, error } = await fastify.supabase
-      .from('api_usage_log')
-      .select('id, endpoint, method, status_code, response_ms, ip_address, created_at')
-      .eq('tenant_id', tenantId)
-      .gte('created_at', since)
-      .order('created_at', { ascending: false })
-      .limit(2000)
+    let data: any[]
+    try {
+      data = await fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('api_usage_log')
+          .select('id, endpoint, method, status_code, response_ms, ip_address, created_at')
+          .eq('tenant_id', tenantId)
+          .gte('created_at', since)
+          .order('created_at', { ascending: false })
+          .range(from, to),
+      )
+    } catch (err: any) {
+      return reply.code(500).send({ error: 'DB_ERROR', message: err.message })
+    }
 
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
-
-    return reply.send({ data: data ?? [], meta: { tenant_id: tenantId, days } })
+    return reply.send({ data, meta: { tenant_id: tenantId, days } })
   })
 
   // ══════════════════════════════════════════════════════════════════════════════
@@ -1388,19 +1395,26 @@ export default async function ownerRoutes(fastify: FastifyInstance) {
     const tenantId = q.tenant_id ?? null
     const since    = new Date(Date.now() - days * 86400_000).toISOString()
 
-    let usageQ = fastify.supabase
-      .from('ai_usage_log')
-      .select('tenant_id, provider, model, source, prompt_tokens, completion_tokens, total_tokens, created_at')
-      .gte('created_at', since)
-      .order('created_at', { ascending: false })
-      .limit(20000)
-    if (tenantId) usageQ = usageQ.eq('tenant_id', tenantId)
-
-    const [{ data: usage, error: uErr }, { data: prices }] = await Promise.all([
-      usageQ,
-      fastify.supabase.from('ai_price_table').select('provider, model, prompt_per_mtok, completion_per_mtok'),
-    ])
-    if (uErr) return reply.code(500).send({ error: 'DB_ERROR', message: uErr.message })
+    let usage: any[]
+    let prices: any[] | null
+    try {
+      const [usageRows, pricesResult] = await Promise.all([
+        fetchAllRows((from, to) => {
+          let q = fastify.supabase
+            .from('ai_usage_log')
+            .select('tenant_id, provider, model, source, prompt_tokens, completion_tokens, total_tokens, created_at')
+            .gte('created_at', since)
+            .order('created_at', { ascending: false })
+          if (tenantId) q = q.eq('tenant_id', tenantId)
+          return q.range(from, to)
+        }),
+        fastify.supabase.from('ai_price_table').select('provider, model, prompt_per_mtok, completion_per_mtok'),
+      ])
+      usage = usageRows
+      prices = pricesResult.data
+    } catch (err: any) {
+      return reply.code(500).send({ error: 'DB_ERROR', message: err.message })
+    }
 
     // Price lookup: exact provider+model, else provider '*' fallback, else 0.
     const priceMap = new Map<string, { p: number; c: number }>()
@@ -1412,7 +1426,7 @@ export default async function ownerRoutes(fastify: FastifyInstance) {
       return (pt / 1e6) * pr.p + (ct / 1e6) * pr.c
     }
 
-    const rows = (usage ?? []) as any[]
+    const rows = usage as any[]
     const byTenant: Record<string, { tenant_id: string; tenant_name: string | null; calls: number; prompt: number; completion: number; total_tokens: number; managed_cost: number; total_cost: number }> = {}
     for (const r of rows) {
       const t = byTenant[r.tenant_id] ??= { tenant_id: r.tenant_id, tenant_name: null, calls: 0, prompt: 0, completion: 0, total_tokens: 0, managed_cost: 0, total_cost: 0 }

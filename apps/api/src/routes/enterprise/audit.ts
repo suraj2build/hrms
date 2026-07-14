@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { fetchAllRows } from '../../lib/supabase-paginate.js'
 
 export default async function auditRoutes(fastify: FastifyInstance) {
 
@@ -57,14 +58,19 @@ export default async function auditRoutes(fastify: FastifyInstance) {
 
   // GET /enterprise/audit/logs/tables — distinct table_names present (for the filter dropdown)
   fastify.get('/audit/logs/tables', hrAdminAuth, async (req: any, reply) => {
-    const { data, error } = await fastify.supabase
-      .from('audit_logs')
-      .select('table_name')
-      .eq('tenant_id', req.tenantId)
-      .limit(5000)
-
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
-    const tables = Array.from(new Set((data ?? []).map((r: any) => r.table_name))).sort()
+    let rows: any[]
+    try {
+      rows = await fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('audit_logs')
+          .select('table_name')
+          .eq('tenant_id', req.tenantId)
+          .range(from, to),
+      )
+    } catch (err: any) {
+      return reply.code(500).send({ error: 'DB_ERROR', message: err.message })
+    }
+    const tables = Array.from(new Set(rows.map((r: any) => r.table_name))).sort()
     return reply.send({ data: tables })
   })
 
@@ -74,7 +80,7 @@ export default async function auditRoutes(fastify: FastifyInstance) {
       const query = req.query as Record<string, string | undefined>
       const tenant_id = (req as any).tenantId as string | undefined
 
-      const limit   = Math.min(Number(query.limit ?? 200), 1000)
+      const EXPORT_CAP = Math.min(Number(query.limit ?? 200), 5000)
       const format  = query.format === 'csv' ? 'csv' : 'json'
       const from    = query.from
       const to      = query.to
@@ -87,7 +93,6 @@ export default async function auditRoutes(fastify: FastifyInstance) {
         .from('platform_events')
         .select('event_id,event_type,module,entity_type,entity_id,actor_id,severity,timestamp,correlation_id')
         .order('timestamp', { ascending: false })
-        .limit(limit)
 
       // Tenant isolation is mandatory — never export another tenant's events.
       qb = qb.eq('tenant_id', tenant_id)
@@ -98,18 +103,8 @@ export default async function auditRoutes(fastify: FastifyInstance) {
       if (event_type)  qb = qb.eq('event_type', event_type)
       if (entity_type) qb = qb.eq('entity_type', entity_type)
 
-      const { data, error } = await qb
-
-      if (error) {
-        if (format === 'csv') {
-          reply.header('Content-Type', 'text/csv')
-          reply.header('Content-Disposition', 'attachment; filename="audit-export.csv"')
-          return reply.send('event_id,event_type,module,entity_type,entity_id,actor_id,severity,timestamp,correlation_id\n')
-        }
-        return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
-      }
-
-      const events = data ?? []
+      const allRows = await fetchAllRows((pageFrom, pageTo) => qb.range(pageFrom, pageTo))
+      const events = allRows.slice(0, EXPORT_CAP)
 
       if (format === 'csv') {
         const headers = 'event_id,event_type,module,entity_type,entity_id,actor_id,severity,timestamp,correlation_id'
