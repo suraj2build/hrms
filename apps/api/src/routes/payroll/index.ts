@@ -67,10 +67,11 @@ async function applyTdsForRun(
   slip: PayrollSlipResult,
   ctx?: TenantPayrollCtx,
 ): Promise<PayrollSlipResult> {
-  // Use pre-fetched TDS settings when available — avoids per-employee statutory query
+  // Use pre-fetched TDS settings when available — avoids per-employee statutory query.
+  // ctx.tdsEnabled === undefined means the pre-fetch errored; fall back to per-employee query.
   let tdsEnabled: boolean
   let tdsDefaultRegime: string
-  if (ctx) {
+  if (ctx && ctx.tdsEnabled !== undefined) {
     tdsEnabled       = ctx.tdsEnabled
     tdsDefaultRegime = ctx.tdsDefaultRegime
   } else {
@@ -254,7 +255,7 @@ const SUMMARY_ONLY_AUTO_THRESHOLD = 200
 
 /** Tenant-level config pre-fetched once per run to avoid per-employee N+1 queries. */
 type TenantPayrollCtx = {
-  tdsEnabled:       boolean
+  tdsEnabled?:      boolean         // undefined = pre-fetch errored → per-employee fallback query
   tdsDefaultRegime: 'old' | 'new'
   taxTableCache:    TaxTableCache
   statutoryCache:   StatutoryTenantCache
@@ -635,14 +636,17 @@ async function executePayrollRun(
         .limit(1)
         .maybeSingle(),
     ])
-    if (tdsResult.error) log.warn({ err: tdsResult.error, tenant_id: tenantId }, 'payroll run: TDS settings query error — TDS may be disabled for this run')
+    if (tdsResult.error) log.warn({ err: tdsResult.error, tenant_id: tenantId }, 'payroll run: TDS settings query error — per-employee fallback will apply')
     if (epfResult.error)  log.warn({ err: epfResult.error,  tenant_id: tenantId }, 'payroll run: EPF config query error — per-employee fallback will apply')
     if (esiResult.error)  log.warn({ err: esiResult.error,  tenant_id: tenantId }, 'payroll run: ESI config query error — per-employee fallback will apply')
     tenantCtx = {
-      tdsEnabled:       tdsResult.data?.tds_enabled       ?? false,
+      tdsEnabled:       tdsResult.error ? undefined : (tdsResult.data?.tds_enabled ?? false),
       tdsDefaultRegime: (tdsResult.data?.tds_default_regime ?? 'new') as 'old' | 'new',
       taxTableCache:    taxCache,
-      statutoryCache:   { epfConfigRow: epfResult.data, esiConfigRow: esiResult.data },
+      statutoryCache:   {
+        epfConfigRow: epfResult.error ? undefined : epfResult.data,
+        esiConfigRow: esiResult.error ? undefined : esiResult.data,
+      },
     }
   } catch (ctxErr: any) {
     log.warn(
@@ -658,82 +662,113 @@ async function executePayrollRun(
   await runConcurrent(empList, async (emp) => {
     const empCtx = { employee_id: emp.id, employee_code: emp.employee_code, month, run_id: runId }
 
-    try {
-      let compensation: Awaited<ReturnType<typeof fetchActiveCompensation>>
-      let attendance:   Awaited<ReturnType<typeof fetchAttendanceSummary>>
+    // settled guards against both timeout-then-computation and computation-then-timeout
+    // writing to the shared result arrays concurrently (Promise.race does NOT cancel
+    // the losing branch — it just ignores its return value).
+    let settled = false
+
+    const processEmp = async (): Promise<void> => {
       try {
-        ;[compensation, attendance] = await Promise.all([
-          fetchActiveCompensation(supabase, tenantId, emp.id, runPeriodEnd),
-          fetchAttendanceSummary(supabase, tenantId, emp.id, month),
-        ])
-      } catch (fetchErr: any) {
-        const reason = fetchErr?.message ?? 'Unknown data fetch error'
-        log.error({ ...empCtx, err: fetchErr, stage: 'data_fetch' }, 'payroll: data fetch failed — skipping employee')
+        let compensation: Awaited<ReturnType<typeof fetchActiveCompensation>>
+        let attendance:   Awaited<ReturnType<typeof fetchAttendanceSummary>>
+        try {
+          ;[compensation, attendance] = await Promise.all([
+            fetchActiveCompensation(supabase, tenantId, emp.id, runPeriodEnd),
+            fetchAttendanceSummary(supabase, tenantId, emp.id, month),
+          ])
+        } catch (fetchErr: any) {
+          const reason = fetchErr?.message ?? 'Unknown data fetch error'
+          log.error({ ...empCtx, err: fetchErr, stage: 'data_fetch' }, 'payroll: data fetch failed — skipping employee')
+          await logRunEvent(supabase, log, {
+            tenant_id: tenantId, run_id: runId, event_type: 'data_fetch_failed',
+            employee_id: emp.id, month, error_details: { message: reason, stack: fetchErr?.stack },
+          })
+          if (!settled) { settled = true; failedEmployees.push({ employee_id: emp.id, employee_code: emp.employee_code, failure_stage: 'data_fetch', reason }) }
+          return
+        }
+
+        const advLoanDeductions = await fetchAdvanceLoanDeductions(supabase, tenantId, emp.id, month)
+        const compValidation    = validateCompensation(compensation, { employeeId: emp.id, month }, runPeriodEnd)
+
+        if (compValidation.blocking_errors.length > 0) {
+          const reason = compValidation.blocking_errors[0]
+          log.error({ ...empCtx, errors: compValidation.blocking_errors, stage: 'compensation_validation' }, 'payroll: compensation validation blocking error')
+          await logRunEvent(supabase, log, {
+            tenant_id: tenantId, run_id: runId,
+            event_type: compensation ? 'compensation_invalid' : 'compensation_missing',
+            employee_id: emp.id, month,
+            payload: { errors: compValidation.blocking_errors }, error_details: { message: reason },
+          })
+          if (!settled) { settled = true; failedEmployees.push({ employee_id: emp.id, employee_code: emp.employee_code, failure_stage: 'compensation_validation', reason, details: { errors: compValidation.blocking_errors } }) }
+          return
+        }
+
+        if (compValidation.warnings.length > 0) {
+          log.warn({ ...empCtx, warnings: compValidation.warnings }, 'payroll: compensation warnings (non-blocking)')
+        }
+
+        const result   = await computeSlipWithStatutory(supabase, tenantId, { tenantId, employeeId: emp.id, month, compensation, attendance, total_working_days, advance_loan_deductions: advLoanDeductions }, month, tenantCtx)
+        const slipRow  = buildSlipRow(tenantId, runId, result, month)
+        const slipValid = validatePayrollSlipPayload(slipRow, { employeeId: emp.id, month })
+
+        if (!slipValid.valid) {
+          log.error({ ...empCtx, validation_errors: slipValid.errors, stage: 'slip_validation' }, 'payroll: slip payload validation failed')
+          await logRunEvent(supabase, log, {
+            tenant_id: tenantId, run_id: runId, event_type: 'validation_failed',
+            employee_id: emp.id, month, payload: slipRow, error_details: { validation_errors: slipValid.errors },
+          })
+          if (!settled) { settled = true; failedEmployees.push({ employee_id: emp.id, employee_code: emp.employee_code, failure_stage: 'slip_validation', reason: `Slip payload validation failed: ${slipValid.errors[0]}`, details: { validation_errors: slipValid.errors } }) }
+          return
+        }
+
+        const { error: insertErr } = await supabase.from('payroll_slips').insert(slipRow)
+        if (insertErr) {
+          log.error({ ...empCtx, err: insertErr, stage: 'db_insert' }, 'payroll: DB insert failed for employee slip')
+          await logRunEvent(supabase, log, {
+            tenant_id: tenantId, run_id: runId, event_type: 'slip_insert_failed',
+            employee_id: emp.id, month, payload: slipRow,
+            error_details: { message: insertErr.message, code: insertErr.code, details: insertErr.details, hint: insertErr.hint },
+          })
+          if (!settled) { settled = true; failedEmployees.push({ employee_id: emp.id, employee_code: emp.employee_code, failure_stage: 'db_insert', reason: insertErr.message, details: { code: insertErr.code, details: insertErr.details, hint: insertErr.hint } }) }
+          return
+        }
+
         await logRunEvent(supabase, log, {
-          tenant_id: tenantId, run_id: runId, event_type: 'data_fetch_failed',
-          employee_id: emp.id, month, error_details: { message: reason, stack: fetchErr?.stack },
+          tenant_id: tenantId, run_id: runId, event_type: 'slip_computed', employee_id: emp.id, month,
+          payload: { gross_pay: result.gross_pay, net_pay: result.net_pay, lop_days: result.lop_days, payable_days: result.payable_days, total_deductions: result.total_deductions, has_warning: !!result.warning },
         })
-        failedEmployees.push({ employee_id: emp.id, employee_code: emp.employee_code, failure_stage: 'data_fetch', reason })
-        return
+        if (!settled) { settled = true; succeededSlips.push(result) }
+
+      } catch (unexpectedErr: any) {
+        const reason = unexpectedErr?.message ?? 'Unexpected error during payroll computation'
+        log.error({ ...empCtx, err: unexpectedErr, stage: 'unexpected' }, 'payroll: unexpected per-employee error')
+        if (!settled) { settled = true; failedEmployees.push({ employee_id: emp.id, employee_code: emp.employee_code, failure_stage: 'unexpected', reason, details: { stack: unexpectedErr?.stack } }) }
       }
-
-      const advLoanDeductions = await fetchAdvanceLoanDeductions(supabase, tenantId, emp.id, month)
-      const compValidation    = validateCompensation(compensation, { employeeId: emp.id, month }, runPeriodEnd)
-
-      if (compValidation.blocking_errors.length > 0) {
-        const reason = compValidation.blocking_errors[0]
-        log.error({ ...empCtx, errors: compValidation.blocking_errors, stage: 'compensation_validation' }, 'payroll: compensation validation blocking error')
-        await logRunEvent(supabase, log, {
-          tenant_id: tenantId, run_id: runId,
-          event_type: compensation ? 'compensation_invalid' : 'compensation_missing',
-          employee_id: emp.id, month,
-          payload: { errors: compValidation.blocking_errors }, error_details: { message: reason },
-        })
-        failedEmployees.push({ employee_id: emp.id, employee_code: emp.employee_code, failure_stage: 'compensation_validation', reason, details: { errors: compValidation.blocking_errors } })
-        return
-      }
-
-      if (compValidation.warnings.length > 0) {
-        log.warn({ ...empCtx, warnings: compValidation.warnings }, 'payroll: compensation warnings (non-blocking)')
-      }
-
-      const result   = await computeSlipWithStatutory(supabase, tenantId, { tenantId, employeeId: emp.id, month, compensation, attendance, total_working_days, advance_loan_deductions: advLoanDeductions }, month, tenantCtx)
-      const slipRow  = buildSlipRow(tenantId, runId, result, month)
-      const slipValid = validatePayrollSlipPayload(slipRow, { employeeId: emp.id, month })
-
-      if (!slipValid.valid) {
-        log.error({ ...empCtx, validation_errors: slipValid.errors, stage: 'slip_validation' }, 'payroll: slip payload validation failed')
-        await logRunEvent(supabase, log, {
-          tenant_id: tenantId, run_id: runId, event_type: 'validation_failed',
-          employee_id: emp.id, month, payload: slipRow, error_details: { validation_errors: slipValid.errors },
-        })
-        failedEmployees.push({ employee_id: emp.id, employee_code: emp.employee_code, failure_stage: 'slip_validation', reason: `Slip payload validation failed: ${slipValid.errors[0]}`, details: { validation_errors: slipValid.errors } })
-        return
-      }
-
-      const { error: insertErr } = await supabase.from('payroll_slips').insert(slipRow)
-      if (insertErr) {
-        log.error({ ...empCtx, err: insertErr, stage: 'db_insert' }, 'payroll: DB insert failed for employee slip')
-        await logRunEvent(supabase, log, {
-          tenant_id: tenantId, run_id: runId, event_type: 'slip_insert_failed',
-          employee_id: emp.id, month, payload: slipRow,
-          error_details: { message: insertErr.message, code: insertErr.code, details: insertErr.details, hint: insertErr.hint },
-        })
-        failedEmployees.push({ employee_id: emp.id, employee_code: emp.employee_code, failure_stage: 'db_insert', reason: insertErr.message, details: { code: insertErr.code, details: insertErr.details, hint: insertErr.hint } })
-        return
-      }
-
-      await logRunEvent(supabase, log, {
-        tenant_id: tenantId, run_id: runId, event_type: 'slip_computed', employee_id: emp.id, month,
-        payload: { gross_pay: result.gross_pay, net_pay: result.net_pay, lop_days: result.lop_days, payable_days: result.payable_days, total_deductions: result.total_deductions, has_warning: !!result.warning },
-      })
-      succeededSlips.push(result)
-
-    } catch (unexpectedErr: any) {
-      const reason = unexpectedErr?.message ?? 'Unexpected error during payroll computation'
-      log.error({ ...empCtx, err: unexpectedErr, stage: 'unexpected' }, 'payroll: unexpected per-employee error')
-      failedEmployees.push({ employee_id: emp.id, employee_code: emp.employee_code, failure_stage: 'unexpected', reason, details: { stack: unexpectedErr?.stack } })
     }
+
+    let timeoutHandle: ReturnType<typeof setTimeout>
+    await Promise.race([
+      processEmp(),
+      new Promise<void>(resolve => {
+        timeoutHandle = setTimeout(() => {
+          if (!settled) {
+            settled = true
+            log.error(
+              { ...empCtx, stage: 'timeout' },
+              `payroll: employee timed out after ${DRY_RUN_EMP_TIMEOUT_MS / 1000}s — marking as failed`,
+            )
+            failedEmployees.push({
+              employee_id:   emp.id,
+              employee_code: emp.employee_code,
+              failure_stage: 'unexpected',
+              reason:        `Timed out after ${DRY_RUN_EMP_TIMEOUT_MS / 1000}s`,
+            })
+          }
+          resolve()
+        }, DRY_RUN_EMP_TIMEOUT_MS)
+      }),
+    ])
+    clearTimeout(timeoutHandle!)
   })
 
   // ── Aggregate + finalise run row ──────────────────────────────────────────
@@ -832,12 +867,16 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       /** Compute and validate all slips without writing to the DB. */
       dry_run: z.boolean().optional().default(false),
       /** Return only summary fields (net_pay, gross_pay, status) per employee.
-       *  Auto-enabled when employee count exceeds SUMMARY_ONLY_AUTO_THRESHOLD. */
-      summary_only: z.boolean().optional().default(false),
+       *  Auto-enabled when employee count exceeds SUMMARY_ONLY_AUTO_THRESHOLD.
+       *  Pass false explicitly to force component_breakdown on small tenants. */
+      summary_only: z.boolean().optional(),
       /** Scope the dry run to a specific subset of employees (UUIDs).
        *  Omit to run for all active employees. */
       employee_ids: z.array(z.string().uuid()).min(1).max(500).optional(),
-    })
+    }).refine(
+      data => !data.employee_ids || data.dry_run === true,
+      { message: 'employee_ids filter is only supported for dry runs (dry_run: true)', path: ['employee_ids'] },
+    )
     const parsed = schema.safeParse(req.body)
     if (!parsed.success) {
       return validationError(reply, 'VALIDATION_ERROR', parsed.error.issues[0]?.message ?? 'Validation failed')
@@ -1016,14 +1055,17 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
             .limit(1)
             .maybeSingle(),
         ])
-        if (tdsResult.error) req.log.warn({ err: tdsResult.error, tenant_id: tenantId }, 'payroll dry run: TDS settings query error — TDS may be disabled for this run')
+        if (tdsResult.error) req.log.warn({ err: tdsResult.error, tenant_id: tenantId }, 'payroll dry run: TDS settings query error — per-employee fallback will apply')
         if (epfResult.error)  req.log.warn({ err: epfResult.error,  tenant_id: tenantId }, 'payroll dry run: EPF config query error — per-employee fallback will apply')
         if (esiResult.error)  req.log.warn({ err: esiResult.error,  tenant_id: tenantId }, 'payroll dry run: ESI config query error — per-employee fallback will apply')
         tenantCtx = {
-          tdsEnabled:       tdsResult.data?.tds_enabled       ?? false,
+          tdsEnabled:       tdsResult.error ? undefined : (tdsResult.data?.tds_enabled ?? false),
           tdsDefaultRegime: (tdsResult.data?.tds_default_regime ?? 'new') as 'old' | 'new',
           taxTableCache:    taxCache,
-          statutoryCache:   { epfConfigRow: epfResult.data, esiConfigRow: esiResult.data },
+          statutoryCache:   {
+            epfConfigRow: epfResult.error ? undefined : epfResult.data,
+            esiConfigRow: esiResult.error ? undefined : esiResult.data,
+          },
         }
       } catch (ctxErr: any) {
         req.log.warn(
@@ -1131,8 +1173,9 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
         'payroll dry run complete',
       )
 
-      // Use summary_only when explicitly requested or when employee count is large
-      const useSummary = summary_only || empList.length > SUMMARY_ONLY_AUTO_THRESHOLD
+      // Use summary_only when explicitly requested; auto-enable for large tenants only
+      // when the caller didn't pass the flag at all (undefined vs false).
+      const useSummary = summary_only ?? (empList.length > SUMMARY_ONLY_AUTO_THRESHOLD)
 
       return reply.send({
         dry_run:           true,

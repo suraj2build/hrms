@@ -90,10 +90,14 @@ export interface EmployeeStatutoryParams {
 }
 
 /** Pre-fetched tenant-level statutory config — identical for every employee in a run.
- *  Pass to resolveEmployeeStatutoryParams to skip the epf_config / esi_config queries. */
+ *  Pass to resolveEmployeeStatutoryParams to skip the epf_config / esi_config queries.
+ *
+ *  null  = query succeeded but no config row exists for this month (use engine default)
+ *  undefined = query failed; resolveEmployeeStatutoryParams will fall back to a
+ *              per-employee DB lookup instead of using the (incorrect) cached null. */
 export interface StatutoryTenantCache {
-  epfConfigRow: any | null
-  esiConfigRow: any | null
+  epfConfigRow: any | null | undefined
+  esiConfigRow: any | null | undefined
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -146,16 +150,18 @@ export async function resolveEmployeeStatutoryParams(
       .eq('tenant_id', tenantId)
       .maybeSingle(),
 
-    // EPF config — skip DB when pre-fetched (same row for all employees)
-    tenantCache
+    // EPF config — skip DB when pre-fetched (same row for all employees).
+    // undefined in cache = pre-fetch failed; fall back to per-employee query.
+    // null in cache = pre-fetch succeeded but no config row exists for this month.
+    (tenantCache && tenantCache.epfConfigRow !== undefined)
       ? Promise.resolve({ data: tenantCache.epfConfigRow, error: null })
       : buildDateGuardedQuery(
           supabase.from('epf_config').select('*').eq('tenant_id', tenantId),
           month,
         ),
 
-    // ESI config — skip DB when pre-fetched (same row for all employees)
-    tenantCache
+    // ESI config — same undefined/null semantics as EPF above.
+    (tenantCache && tenantCache.esiConfigRow !== undefined)
       ? Promise.resolve({ data: tenantCache.esiConfigRow, error: null })
       : buildDateGuardedQuery(
           supabase.from('esi_config').select('*').eq('tenant_id', tenantId),

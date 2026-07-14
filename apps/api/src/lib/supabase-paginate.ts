@@ -31,12 +31,16 @@
  * @param queryFn  A function that accepts (from, to) and returns the Supabase
  *                 query with .range(from, to) appended.  Keep all other filters,
  *                 selects, and orderings inside queryFn — only the range varies.
- * @param batchSize  Rows per request.  Must not exceed the PostgREST max-rows
- *                   setting (default 1,000).  Defaults to 1,000.
+ * @param batchSize  Rows per request.  Must be LESS THAN the PostgREST max-rows
+ *                   setting (Supabase default: 1,000).  Using a value less than
+ *                   max-rows guarantees the stopping condition (data.length < batchSize)
+ *                   is never triggered by a server-side cap masquerading as the
+ *                   last page.  Defaults to 500 — half of Supabase's default
+ *                   max-rows — which is safe even if the project lowers max-rows.
  */
 export async function fetchAllRows<T>(
   queryFn: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: unknown }>,
-  batchSize = 1000,
+  batchSize = 500,
 ): Promise<T[]> {
   const rows: T[] = []
   let from = 0

@@ -199,6 +199,10 @@ async function loadSlabs(
     .order('slab_order', { ascending: true })
 
   if (error || !data || (data as any[]).length === 0) {
+    console.warn(
+      `[payroll][tax] loadSlabs: using hardcoded ${regime} fallback slabs for FY ${financialYear}` +
+      (error ? ` (db error: ${(error as any)?.message ?? error})` : ' (no rows in it_tax_slabs)'),
+    )
     return regime === 'new' ? FALLBACK_NEW_SLABS : FALLBACK_OLD_SLABS
   }
 
