@@ -685,6 +685,7 @@ async function executePayrollRun(
         } catch (fetchErr: any) {
           const reason = fetchErr?.message ?? 'Unknown data fetch error'
           log.error({ ...empCtx, err: fetchErr, stage: 'data_fetch' }, 'payroll: data fetch failed — skipping employee')
+          if (settled) return
           await logRunEvent(supabase, log, {
             tenant_id: tenantId, run_id: runId, event_type: 'data_fetch_failed',
             employee_id: emp.id, month, error_details: { message: reason, stack: fetchErr?.stack },
@@ -699,6 +700,7 @@ async function executePayrollRun(
         if (compValidation.blocking_errors.length > 0) {
           const reason = compValidation.blocking_errors[0]
           log.error({ ...empCtx, errors: compValidation.blocking_errors, stage: 'compensation_validation' }, 'payroll: compensation validation blocking error')
+          if (settled) return
           await logRunEvent(supabase, log, {
             tenant_id: tenantId, run_id: runId,
             event_type: compensation ? 'compensation_invalid' : 'compensation_missing',
@@ -719,6 +721,7 @@ async function executePayrollRun(
 
         if (!slipValid.valid) {
           log.error({ ...empCtx, validation_errors: slipValid.errors, stage: 'slip_validation' }, 'payroll: slip payload validation failed')
+          if (settled) return
           await logRunEvent(supabase, log, {
             tenant_id: tenantId, run_id: runId, event_type: 'validation_failed',
             employee_id: emp.id, month, payload: slipRow, error_details: { validation_errors: slipValid.errors },
@@ -740,6 +743,18 @@ async function executePayrollRun(
             error_details: { message: insertErr.message, code: insertErr.code, details: insertErr.details, hint: insertErr.hint },
           })
           if (!settled) { settled = true; failedEmployees.push({ employee_id: emp.id, employee_code: emp.employee_code, failure_stage: 'db_insert', reason: insertErr.message, details: { code: insertErr.code, details: insertErr.details, hint: insertErr.hint } }) }
+          return
+        }
+
+        // Post-insert settled check: if the timeout fired while the INSERT was in-flight,
+        // delete the orphaned row so DB state stays consistent with the run totals.
+        if (settled) {
+          await supabase.from('payroll_slips')
+            .delete()
+            .eq('run_id', runId)
+            .eq('tenant_id', tenantId)
+            .eq('employee_id', emp.id)
+            .eq('month', month)
           return
         }
 
@@ -774,6 +789,13 @@ async function executePayrollRun(
                 failure_stage: 'unexpected',
                 reason:        `Timed out after ${DRY_RUN_EMP_TIMEOUT_MS / 1000}s`,
               })
+              // Fire-and-forget audit write — resolve() runs immediately so the race
+              // is not blocked on this DB write.
+              logRunEvent(supabase, log, {
+                tenant_id: tenantId, run_id: runId, event_type: 'employee_timed_out',
+                employee_id: emp.id, month,
+                error_details: { message: `Timed out after ${DRY_RUN_EMP_TIMEOUT_MS / 1000}s` },
+              }).catch((err: any) => log.warn({ err, ...empCtx }, 'payroll: failed to write timeout audit event'))
             }
             resolve()
           }, DRY_RUN_EMP_TIMEOUT_MS)
@@ -790,6 +812,25 @@ async function executePayrollRun(
   const totalNet        = round2(succeededSlips.reduce((s, r) => s + r.net_pay,          0))
   const totalLop        = round2(succeededSlips.reduce((s, r) => s + r.lop_amount,       0))
 
+  // Variable payouts live outside the slip engine — fetch approved amounts for the
+  // month and include them in total_gross so run-level cost metrics are accurate.
+  let totalVariablePay = 0
+  try {
+    const { data: vpRows, error: vpErr } = await supabase
+      .from('variable_payouts')
+      .select('amount, variable_payout_batches!inner(status, payout_month)')
+      .eq('tenant_id', tenantId)
+      .eq('variable_payout_batches.status', 'approved')
+      .eq('variable_payout_batches.payout_month', month)
+    if (vpErr) {
+      log.warn({ err: vpErr, run_id: runId, month }, 'payroll: variable pay query failed — total_gross will exclude variable pay')
+    } else {
+      totalVariablePay = round2((vpRows ?? []).reduce((s: number, p: any) => s + Number(p.amount ?? 0), 0))
+    }
+  } catch (vpErr: any) {
+    log.warn({ err: vpErr, run_id: runId, month }, 'payroll: variable pay query threw — total_gross will exclude variable pay')
+  }
+
   const runStatus: 'draft' | 'partial_failed' | 'failed' =
     succeededSlips.length === 0 && empList.length > 0
       ? 'failed'
@@ -802,7 +843,7 @@ async function executePayrollRun(
   const runUpdatePayload: Record<string, unknown> = {
     status:           runStatus,
     employee_count:   succeededSlips.length,
-    total_gross:      totalGross,
+    total_gross:      round2(totalGross + totalVariablePay),
     total_deductions: totalDeductions,
     total_net:        totalNet,
     total_lop_amount: totalLop,

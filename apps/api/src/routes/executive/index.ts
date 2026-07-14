@@ -21,6 +21,7 @@ import { z }                    from 'zod'
 import { computeLifecycleRisks, summariseLifecycle } from '../../lib/lifecycle-expiry.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -720,25 +721,47 @@ export default async function executiveRoutes(fastify: FastifyInstance) {
     const monthCount = parsed.data.months
     const oldestMonth = monthsAgo(monthCount)
 
-    // Phase 1: resolve the latest finalized run's month before querying slip-level data.
-    // Payroll is processed for the prior month, so currentMonth() would return zero rows
-    // until the current month's run is finalized. Using the latest run's month ensures
-    // component mix, dept snapshots, and variable pay always reflect real finalized data.
-    const payrollRunsRes = await fastify.supabase
-      .from('payroll_runs')
-      .select('id, month, status, total_gross, total_net, employee_count')
-      .eq('tenant_id', req.tenantId)
-      .in('status', ['completed', 'finalized'])
-      .gte('month', oldestMonth)
-      .order('month', { ascending: true })
+    // Phase 1A — payroll runs + queries independent of latestPayrollMonth, all in parallel.
+    // revisionImpactRes and otTrendRes use only oldestMonth so they don't need to wait
+    // for the runs result — starting them in parallel saves one sequential round-trip.
+    const [payrollRunsRes, revisionImpactRes, otTrendRes] = await Promise.all([
+      fastify.supabase
+        .from('payroll_runs')
+        .select('id, month, status, total_gross, total_net, employee_count')
+        .eq('tenant_id', req.tenantId)
+        .in('status', ['completed', 'finalized'])
+        .gte('month', oldestMonth)
+        .order('month', { ascending: true }),
+
+      // independent of latestPayrollMonth — runs in parallel with Phase 1A
+      fastify.supabase
+        .from('compensation_revisions')
+        .select('revision_type, delta_amount, delta_pct, effective_date, status')
+        .eq('tenant_id', req.tenantId)
+        .eq('status', 'approved')
+        .gte('effective_date', monthStart(oldestMonth))
+        .order('effective_date', { ascending: true }),
+
+      // independent of latestPayrollMonth — runs in parallel with Phase 1A
+      fastify.supabase
+        .from('payroll_dept_snapshots')
+        .select('month, total_ot_cost')
+        .eq('tenant_id', req.tenantId)
+        .gte('month', oldestMonth)
+        .order('month', { ascending: true }),
+    ])
+
+    if (payrollRunsRes.error) {
+      return serverError(req, reply, payrollRunsRes.error, ErrorCode.QUERY_FAILED, 'Failed to load payroll runs')
+    }
 
     const runs = payrollRunsRes.data ?? []
     const latestRun = runs[runs.length - 1] as any
     // Falls back to current calendar month only when no finalized runs exist yet.
     const latestPayrollMonth = latestRun?.month ?? currentMonth()
 
-    // Phase 2: remaining queries — current-period ones use latestPayrollMonth.
-    const [currentMonthSlips, revisionImpactRes, deptSnapshotRes, otTrendRes, variableMonthRes] = await Promise.all([
+    // Phase 2 — queries that depend on latestPayrollMonth resolved above.
+    const [currentMonthSlips, deptSnapshotRes, variableMonthRes] = await Promise.all([
       // P5.4 — current finalized slips for component-level payroll mix
       fetchAllRows((from, to) =>
         fastify.supabase
@@ -750,15 +773,6 @@ export default async function executiveRoutes(fastify: FastifyInstance) {
           .range(from, to),
       ).catch(() => [] as any[]),
 
-      // Compensation revision delta impact (approved in period)
-      fastify.supabase
-        .from('compensation_revisions')
-        .select('revision_type, delta_amount, delta_pct, effective_date, status')
-        .eq('tenant_id', req.tenantId)
-        .eq('status', 'approved')
-        .gte('effective_date', monthStart(oldestMonth))
-        .order('effective_date', { ascending: true }),
-
       // Latest month dept snapshot for cost breakdown
       fastify.supabase
         .from('payroll_dept_snapshots')
@@ -767,14 +781,6 @@ export default async function executiveRoutes(fastify: FastifyInstance) {
         .eq('month', latestPayrollMonth)
         .order('total_gross', { ascending: false })
         .limit(10),
-
-      // P5.6 — overtime cost trend across months (from dept snapshots)
-      fastify.supabase
-        .from('payroll_dept_snapshots')
-        .select('month, total_ot_cost')
-        .eq('tenant_id', req.tenantId)
-        .gte('month', oldestMonth)
-        .order('month', { ascending: true }),
 
       // P5.4 — approved variable pay for the current month (the "variable" bucket)
       fastify.supabase
