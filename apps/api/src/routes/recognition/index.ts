@@ -13,6 +13,7 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { WhatsAppProvider } from '../../lib/whatsapp-provider.js'
+import { fetchAllRows } from '../../lib/supabase-paginate.js'
 
 const CreateAwardSchema = z.object({
   name:                 z.string().min(1),
@@ -512,13 +513,20 @@ export default async function recognitionRoutes(fastify: FastifyInstance) {
   // ── Formal Award Programs (admin CRUD) ───────────────────────────────────
 
   fastify.get('/recognition/admin/awards', hrAuth, async (req: any, reply) => {
-    const { data, error } = await fastify.supabase
-      .from('formal_awards')
-      .select('*')
-      .eq('tenant_id', req.tenantId)
-      .order('created_at', { ascending: false }).limit(200)
-    if (error) return reply.code(500).send({ error: error.message })
-    return reply.send({ data: data ?? [] })
+    try {
+      const data = await fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('formal_awards')
+          .select('*')
+          .eq('tenant_id', req.tenantId)
+          .order('created_at', { ascending: false })
+          .range(from, to)
+      )
+      return reply.send({ data })
+    } catch (err) {
+      req.log.error({ err }, 'formal_awards list query failed')
+      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch awards' })
+    }
   })
 
   fastify.post('/recognition/admin/awards', hrAuth, async (req: any, reply) => {
@@ -631,15 +639,22 @@ export default async function recognitionRoutes(fastify: FastifyInstance) {
 
   fastify.get('/recognition/admin/awards/:awardId/rounds/:roundId/nominations', hrAuth, async (req: any, reply) => {
     const { roundId } = req.params as { awardId: string; roundId: string }
-    const { data, error } = await fastify.supabase
-      .from('award_nominations')
-      .select(`id, justification, status, created_at,
-        employees!award_nominations_nominee_id_fkey(id, first_name, last_name, employee_code, designation:designations(name), department:departments!department_id(name)),
-        profiles!award_nominations_nominated_by_fkey(id, full_name)`)
-      .eq('tenant_id', req.tenantId).eq('round_id', roundId)
-      .order('created_at', { ascending: false }).limit(500)
-    if (error) return reply.code(500).send({ error: error.message })
-    return reply.send({ data: data ?? [] })
+    try {
+      const data = await fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('award_nominations')
+          .select(`id, justification, status, created_at,
+            employees!award_nominations_nominee_id_fkey(id, first_name, last_name, employee_code, designation:designations(name), department:departments!department_id(name)),
+            profiles!award_nominations_nominated_by_fkey(id, full_name)`)
+          .eq('tenant_id', req.tenantId).eq('round_id', roundId)
+          .order('created_at', { ascending: false })
+          .range(from, to)
+      )
+      return reply.send({ data })
+    } catch (err) {
+      req.log.error({ err }, 'award_nominations list query failed')
+      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch nominations' })
+    }
   })
 
   fastify.post('/recognition/admin/awards/:awardId/rounds/:roundId/nominations', { preHandler: fastify.authenticate }, async (req: any, reply) => {

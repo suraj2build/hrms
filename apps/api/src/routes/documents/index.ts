@@ -18,6 +18,7 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { logAction } from '../../lib/audit-service.js'
+import { fetchAllRows } from '../../lib/supabase-paginate.js'
 
 const MAX_FILE_SIZE = 5 * 1024 * 1024 // 5 MB
 
@@ -82,21 +83,25 @@ export default async function documentRoutes(fastify: FastifyInstance) {
   fastify.get('/documents', auth, async (req: any, reply) => {
     const { doc_type } = req.query as { doc_type?: string }
 
-    let query = (fastify as any).supabase
-      .from('documents')
-      .select('id, name, doc_type, storage_path, file_size, mime_type, expires_at, created_at, employee_id')
-      .eq('tenant_id', req.tenantId)
-      .order('created_at', { ascending: false })
-      .limit(500)
-
-    if (doc_type) query = query.eq('doc_type', doc_type)
-
-    const { data, error } = await query
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    let data: any[]
+    try {
+      data = await fetchAllRows((from, to) => {
+        let query = (fastify as any).supabase
+          .from('documents')
+          .select('id, name, doc_type, storage_path, file_size, mime_type, expires_at, created_at, employee_id')
+          .eq('tenant_id', req.tenantId)
+          .order('created_at', { ascending: false })
+        if (doc_type) query = query.eq('doc_type', doc_type)
+        return query.range(from, to)
+      })
+    } catch (err) {
+      req.log.error({ err }, 'documents list query failed')
+      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch documents' })
+    }
 
     // Attach signed URLs in parallel (best-effort — null if storage path invalid)
     const docs = await Promise.all(
-      (data ?? []).map(async (doc: any) => ({
+      data.map(async (doc: any) => ({
         ...doc,
         signed_url: doc.storage_path
           ? await createSignedUrl(fastify, doc.storage_path)

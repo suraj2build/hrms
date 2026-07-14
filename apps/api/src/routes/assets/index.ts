@@ -14,6 +14,7 @@ import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { logAction } from '../../lib/audit-service.js'
 import { eventBus } from '../../lib/event-bus.js'
 import { resolveCallerEmployeeId } from '../../lib/manager-scope.js'
+import { fetchAllRows } from '../../lib/supabase-paginate.js'
 
 // ── Schemas ──────────────────────────────────────────────────────────────────
 
@@ -54,29 +55,33 @@ export default async function assetsRoutes(fastify: FastifyInstance) {
       status?: string; category_id?: string; search?: string
     }
 
-    let q = fastify.supabase
-      .from('assets')
-      .select(`
-        id, asset_code, category_id, name, serial_number, purchase_date,
-        purchase_cost, status, assigned_to, notes, created_at, updated_at,
-        asset_categories ( name ),
-        employees:assigned_to ( id, first_name, last_name, employee_code )
-      `)
-      .eq('tenant_id', req.tenantId)
-      .order('created_at', { ascending: false })
-      .limit(500)
-
-    if (status)      q = q.eq('status', status)
-    if (category_id) q = q.eq('category_id', category_id)
-    if (search) {
-      const s = `%${search}%`
-      q = q.or(`asset_code.ilike.${s},name.ilike.${s},serial_number.ilike.${s}`)
+    let data: any[]
+    try {
+      data = await fetchAllRows((from, to) => {
+        let q = fastify.supabase
+          .from('assets')
+          .select(`
+            id, asset_code, category_id, name, serial_number, purchase_date,
+            purchase_cost, status, assigned_to, notes, created_at, updated_at,
+            asset_categories ( name ),
+            employees:assigned_to ( id, first_name, last_name, employee_code )
+          `)
+          .eq('tenant_id', req.tenantId)
+          .order('created_at', { ascending: false })
+        if (status)      q = q.eq('status', status)
+        if (category_id) q = q.eq('category_id', category_id)
+        if (search) {
+          const s = `%${search}%`
+          q = q.or(`asset_code.ilike.${s},name.ilike.${s},serial_number.ilike.${s}`)
+        }
+        return q.range(from, to)
+      })
+    } catch (err) {
+      req.log.error({ err }, 'assets list query failed')
+      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch assets' })
     }
 
-    const { data, error } = await q
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
-
-    const rows = (data ?? []).map((a: any) => ({
+    const rows = data.map((a: any) => ({
       ...a,
       category_name:       a.asset_categories?.name ?? null,
       assigned_to_name:    empName(a.employees),
@@ -302,31 +307,39 @@ export default async function assetsRoutes(fastify: FastifyInstance) {
 
     // Resilient: a missing assets/asset_categories relationship on a drifted DB
     // must not break the whole profile — degrade to an empty list instead of 500.
-    const { data: assigned, error: aErr } = await fastify.supabase
-      .from('assets')
-      .select('id, asset_code, name, serial_number, status, category_id, asset_categories ( name )')
-      .eq('tenant_id', req.tenantId)
-      .eq('assigned_to', id)
-      .eq('status', 'assigned')
-      .order('asset_code')
-      .limit(200)
-    if (aErr) req.log.warn({ err: aErr, employeeId: id }, 'assets list query failed — returning empty')
+    const assigned = await fetchAllRows((from, to) =>
+      fastify.supabase
+        .from('assets')
+        .select('id, asset_code, name, serial_number, status, category_id, asset_categories ( name )')
+        .eq('tenant_id', req.tenantId)
+        .eq('assigned_to', id)
+        .eq('status', 'assigned')
+        .order('asset_code')
+        .range(from, to)
+    ).catch((err: unknown) => {
+      req.log.warn({ err, employeeId: id }, 'assets list query failed — returning empty')
+      return [] as any[]
+    })
 
-    const { data: history, error: hErr } = await fastify.supabase
-      .from('employee_asset_ledger')
-      .select('id, asset_id, action, action_date, condition_notes, created_at, assets ( asset_code, name )')
-      .eq('tenant_id', req.tenantId)
-      .eq('employee_id', id)
-      .order('created_at', { ascending: false })
-      .limit(500)
-    if (hErr) req.log.warn({ err: hErr, employeeId: id }, 'asset ledger query failed — returning empty')
+    const history = await fetchAllRows((from, to) =>
+      fastify.supabase
+        .from('employee_asset_ledger')
+        .select('id, asset_id, action, action_date, condition_notes, created_at, assets ( asset_code, name )')
+        .eq('tenant_id', req.tenantId)
+        .eq('employee_id', id)
+        .order('created_at', { ascending: false })
+        .range(from, to)
+    ).catch((err: unknown) => {
+      req.log.warn({ err, employeeId: id }, 'asset ledger query failed — returning empty')
+      return [] as any[]
+    })
 
     return reply.send({
       data: {
-        assigned: (assigned ?? []).map((a: any) => ({
+        assigned: assigned.map((a: any) => ({
           ...a, category_name: a.asset_categories?.name ?? null, asset_categories: undefined,
         })),
-        history: (history ?? []).map((h: any) => ({
+        history: history.map((h: any) => ({
           ...h,
           asset_code: h.assets?.asset_code ?? null,
           asset_name: h.assets?.name ?? null,
@@ -377,33 +390,45 @@ export default async function assetsRoutes(fastify: FastifyInstance) {
   fastify.get('/ess/me/asset-requests', auth, async (req: any, reply) => {
     const empId = await resolveCallerEmployeeId(fastify.supabase, req.userId, req.tenantId)
     if (!empId) return reply.send({ data: [] })
-    const { data, error } = await fastify.supabase
-      .from('asset_requests')
-      .select('*, asset_categories(name)')
-      .eq('tenant_id', req.tenantId).eq('employee_id', empId)
-      .order('requested_at', { ascending: false })
-      .limit(200)
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
-    return reply.send({ data: (data ?? []).map((r: any) => ({ ...r, category_name: r.asset_categories?.name ?? null, asset_categories: undefined })) })
+    try {
+      const data = await fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('asset_requests')
+          .select('*, asset_categories(name)')
+          .eq('tenant_id', req.tenantId).eq('employee_id', empId)
+          .order('requested_at', { ascending: false })
+          .range(from, to)
+      )
+      return reply.send({ data: data.map((r: any) => ({ ...r, category_name: r.asset_categories?.name ?? null, asset_categories: undefined })) })
+    } catch (err) {
+      req.log.error({ err }, 'ess asset-requests list query failed')
+      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch asset requests' })
+    }
   })
 
   // HR: list all requests
   fastify.get('/asset-requests', hrAdminAuth, async (req: any, reply) => {
     const status = (req.query as any)?.status as string | undefined
-    let q = fastify.supabase
-      .from('asset_requests')
-      .select('*, asset_categories(name), employees(first_name, last_name, employee_code)')
-      .eq('tenant_id', req.tenantId).order('requested_at', { ascending: false }).limit(500)
-    if (status && status !== 'all') q = q.eq('status', status)
-    const { data, error } = await q
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
-    return reply.send({ data: (data ?? []).map((r: any) => ({
-      ...r,
-      category_name:  r.asset_categories?.name ?? null,
-      employee_name:  empName(r.employees),
-      employee_code:  r.employees?.employee_code ?? null,
-      asset_categories: undefined, employees: undefined,
-    })) })
+    try {
+      const data = await fetchAllRows((from, to) => {
+        let q = fastify.supabase
+          .from('asset_requests')
+          .select('*, asset_categories(name), employees(first_name, last_name, employee_code)')
+          .eq('tenant_id', req.tenantId).order('requested_at', { ascending: false })
+        if (status && status !== 'all') q = q.eq('status', status)
+        return q.range(from, to)
+      })
+      return reply.send({ data: data.map((r: any) => ({
+        ...r,
+        category_name:  r.asset_categories?.name ?? null,
+        employee_name:  empName(r.employees),
+        employee_code:  r.employees?.employee_code ?? null,
+        asset_categories: undefined, employees: undefined,
+      })) })
+    } catch (err) {
+      req.log.error({ err }, 'asset-requests list query failed')
+      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch asset requests' })
+    }
   })
 
   // HR: approve / reject

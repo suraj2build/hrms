@@ -21,6 +21,7 @@ import { orchestrateWorkforceEvent } from '../../lib/workforce-orchestrator.js'
 import {
   isHrAdmin, resolveCallerEmployeeId, getDirectReportIds,
 } from '../../lib/manager-scope.js'
+import { fetchAllRows } from '../../lib/supabase-paginate.js'
 
 const dateRe = /^\d{4}-\d{2}-\d{2}$/
 
@@ -282,26 +283,29 @@ export default async function regularisationRoute(fastify: FastifyInstance) {
   // HR admin views all pending correction requests across the tenant.
   fastify.get('/attendance/regularisation/pending', hrAdminAuth, async (req, reply) => {
 
-    const { data, error } = await fastify.supabase
-      .from('attendance_regularisation')
-      .select(`
-        id, date, requested_check_in, requested_check_out, reason, status,
-        rejection_reason, sla_deadline, sla_breached, created_at, approved_at,
-        employees!inner(id, first_name, last_name, employee_code)
-      `)
-      .eq('tenant_id', req.tenantId)
-      .eq('status', 'pending')
-      .order('created_at', { ascending: false })
-      .limit(500)
-
-    if (error) {
-      req.log.error({ err: error }, 'regularisation pending query failed')
+    let data: any[]
+    try {
+      data = await fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('attendance_regularisation')
+          .select(`
+            id, date, requested_check_in, requested_check_out, reason, status,
+            rejection_reason, sla_deadline, sla_breached, created_at, approved_at,
+            employees!inner(id, first_name, last_name, employee_code)
+          `)
+          .eq('tenant_id', req.tenantId)
+          .eq('status', 'pending')
+          .order('created_at', { ascending: false })
+          .range(from, to)
+      )
+    } catch (err) {
+      req.log.error({ err }, 'regularisation pending query failed')
       return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch pending requests' })
     }
 
     // Flatten employee info for easier frontend consumption
     const now = new Date()
-    const rows = (data ?? []).map((r: Record<string, unknown>) => {
+    const rows = data.map((r: Record<string, unknown>) => {
       const emp = r.employees as { id: string; first_name: string; last_name: string; employee_code: string } | null
       const slaDeadline = r.sla_deadline ? new Date(r.sla_deadline as string) : null
       const isBreached = slaDeadline ? now > slaDeadline : false
@@ -363,32 +367,32 @@ export default async function regularisationRoute(fastify: FastifyInstance) {
 
     const reportIds = directReports.map((e: any) => e.id)
 
-    let query = fastify.supabase
-      .from('attendance_regularisation')
-      .select(`
-        id, date, regularization_type, requested_check_in, requested_check_out,
-        reason, status, rejection_reason, sla_deadline, sla_breached, created_at, approved_at,
-        employees!inner(id, first_name, last_name, employee_code)
-      `, { count: 'exact' })
-      .eq('tenant_id', req.tenantId)
-      .in('employee_id', reportIds)
-      .order('created_at', { ascending: false })
-
-    if (statusFilter) query = query.eq('status', statusFilter)
-    else query = query.eq('status', 'pending')
-    if (from) query = query.gte('date', from)
-    if (to)   query = query.lte('date', to)
-    query = query.limit(200)
-
-    const { data, count, error } = await query
-
-    if (error) {
-      req.log.error({ err: error }, 'regularisation team-list query failed')
+    let data: any[]
+    try {
+      data = await fetchAllRows((rangeFrom, rangeTo) => {
+        let query = fastify.supabase
+          .from('attendance_regularisation')
+          .select(`
+            id, date, regularization_type, requested_check_in, requested_check_out,
+            reason, status, rejection_reason, sla_deadline, sla_breached, created_at, approved_at,
+            employees!inner(id, first_name, last_name, employee_code)
+          `)
+          .eq('tenant_id', req.tenantId)
+          .in('employee_id', reportIds)
+          .order('created_at', { ascending: false })
+        if (statusFilter) query = query.eq('status', statusFilter)
+        else query = query.eq('status', 'pending')
+        if (from) query = query.gte('date', from)
+        if (to)   query = query.lte('date', to)
+        return query.range(rangeFrom, rangeTo)
+      })
+    } catch (err) {
+      req.log.error({ err }, 'regularisation team-list query failed')
       return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch team requests' })
     }
 
     const now = new Date()
-    const rows = (data ?? []).map((r: any) => {
+    const rows = data.map((r: any) => {
       const emp = r.employees as { id: string; first_name: string; last_name: string; employee_code: string } | null
       const slaDeadline = r.sla_deadline ? new Date(r.sla_deadline) : null
       const hoursRemaining = slaDeadline ? Math.round((slaDeadline.getTime() - now.getTime()) / 3_600_000) : null
@@ -409,7 +413,7 @@ export default async function regularisationRoute(fastify: FastifyInstance) {
       }
     })
 
-    return reply.send({ data: rows, total: count ?? 0 })
+    return reply.send({ data: rows, total: data.length })
   })
 
   // ── POST /attendance/regularisation/bulk-approve ──────────────────────────────
