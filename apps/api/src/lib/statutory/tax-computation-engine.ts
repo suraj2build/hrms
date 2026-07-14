@@ -374,7 +374,7 @@ async function computeSingleRegime(
   trace.push({ step: `${stepNum()}. Surcharge`, description: '10% (>50L) / 15% (>1Cr) / 25% (>2Cr)', value: surcharge })
 
   // ── Cess ─────────────────────────────────────────────────────────────────────
-  const cessRate = stdCfg.cess_rate || 0.04
+  const cessRate = stdCfg.cess_rate ?? 0.04
   const cess = Math.round((taxAfterRebate + surcharge) * cessRate * 100) / 100
   trace.push({ step: `${stepNum()}. Health & Education Cess`, description: `${(cessRate * 100).toFixed(0)}% on (tax + surcharge)`, value: cess })
 
