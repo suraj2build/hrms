@@ -75,11 +75,17 @@ async function applyTdsForRun(
     tdsEnabled       = ctx.tdsEnabled
     tdsDefaultRegime = ctx.tdsDefaultRegime
   } else {
-    const { data: s } = await supabase
+    const { data: s, error: fallbackErr } = await supabase
       .from('payroll_statutory_settings')
       .select('tds_enabled, tds_default_regime')
       .eq('tenant_id', tenantId)
       .maybeSingle()
+    if (fallbackErr) {
+      // Pre-fetch already failed; this per-employee fallback also failed.
+      // Log and skip TDS rather than silently applying wrong settings.
+      console.warn(`[payroll][tds] per-employee fallback query failed for tenant ${tenantId}: ${fallbackErr.message} — skipping TDS for employee ${employeeId}`)
+      return slip
+    }
     tdsEnabled       = s?.tds_enabled       ?? false
     tdsDefaultRegime = s?.tds_default_regime ?? 'new'
   }
@@ -721,6 +727,10 @@ async function executePayrollRun(
           return
         }
 
+        // Guard: if timeout already fired and marked this employee as failed, abort
+        // before inserting to avoid a DB row that the run totals will never count.
+        if (settled) return
+
         const { error: insertErr } = await supabase.from('payroll_slips').insert(slipRow)
         if (insertErr) {
           log.error({ ...empCtx, err: insertErr, stage: 'db_insert' }, 'payroll: DB insert failed for employee slip')
@@ -747,28 +757,31 @@ async function executePayrollRun(
     }
 
     let timeoutHandle: ReturnType<typeof setTimeout>
-    await Promise.race([
-      processEmp(),
-      new Promise<void>(resolve => {
-        timeoutHandle = setTimeout(() => {
-          if (!settled) {
-            settled = true
-            log.error(
-              { ...empCtx, stage: 'timeout' },
-              `payroll: employee timed out after ${DRY_RUN_EMP_TIMEOUT_MS / 1000}s — marking as failed`,
-            )
-            failedEmployees.push({
-              employee_id:   emp.id,
-              employee_code: emp.employee_code,
-              failure_stage: 'unexpected',
-              reason:        `Timed out after ${DRY_RUN_EMP_TIMEOUT_MS / 1000}s`,
-            })
-          }
-          resolve()
-        }, DRY_RUN_EMP_TIMEOUT_MS)
-      }),
-    ])
-    clearTimeout(timeoutHandle!)
+    try {
+      await Promise.race([
+        processEmp(),
+        new Promise<void>(resolve => {
+          timeoutHandle = setTimeout(() => {
+            if (!settled) {
+              settled = true
+              log.error(
+                { ...empCtx, stage: 'timeout' },
+                `payroll: employee timed out after ${DRY_RUN_EMP_TIMEOUT_MS / 1000}s — marking as failed`,
+              )
+              failedEmployees.push({
+                employee_id:   emp.id,
+                employee_code: emp.employee_code,
+                failure_stage: 'unexpected',
+                reason:        `Timed out after ${DRY_RUN_EMP_TIMEOUT_MS / 1000}s`,
+              })
+            }
+            resolve()
+          }, DRY_RUN_EMP_TIMEOUT_MS)
+        }),
+      ])
+    } finally {
+      clearTimeout(timeoutHandle!)
+    }
   })
 
   // ── Aggregate + finalise run row ──────────────────────────────────────────

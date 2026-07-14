@@ -720,26 +720,35 @@ export default async function executiveRoutes(fastify: FastifyInstance) {
     const monthCount = parsed.data.months
     const oldestMonth = monthsAgo(monthCount)
 
-    // P5.4 — current finalized slips for component-level payroll mix
-    const currentMonthSlips = await fetchAllRows((from, to) =>
-      fastify.supabase
-        .from('payroll_slips')
-        .select('component_breakdown, gross_pay')
-        .eq('tenant_id', req.tenantId)
-        .eq('month', currentMonth())
-        .in('status', ['finalized'])
-        .range(from, to),
-    ).catch(() => [] as any[])
+    // Phase 1: resolve the latest finalized run's month before querying slip-level data.
+    // Payroll is processed for the prior month, so currentMonth() would return zero rows
+    // until the current month's run is finalized. Using the latest run's month ensures
+    // component mix, dept snapshots, and variable pay always reflect real finalized data.
+    const payrollRunsRes = await fastify.supabase
+      .from('payroll_runs')
+      .select('id, month, status, total_gross, total_net, employee_count')
+      .eq('tenant_id', req.tenantId)
+      .in('status', ['completed', 'finalized'])
+      .gte('month', oldestMonth)
+      .order('month', { ascending: true })
 
-    const [payrollRunsRes, revisionImpactRes, deptSnapshotRes, otTrendRes, variableMonthRes] = await Promise.all([
-      // Payroll runs for trend
-      fastify.supabase
-        .from('payroll_runs')
-        .select('id, month, status, total_gross, total_net, employee_count')
-        .eq('tenant_id', req.tenantId)
-        .in('status', ['completed', 'finalized'])
-        .gte('month', oldestMonth)
-        .order('month', { ascending: true }),
+    const runs = payrollRunsRes.data ?? []
+    const latestRun = runs[runs.length - 1] as any
+    // Falls back to current calendar month only when no finalized runs exist yet.
+    const latestPayrollMonth = latestRun?.month ?? currentMonth()
+
+    // Phase 2: remaining queries — current-period ones use latestPayrollMonth.
+    const [currentMonthSlips, revisionImpactRes, deptSnapshotRes, otTrendRes, variableMonthRes] = await Promise.all([
+      // P5.4 — current finalized slips for component-level payroll mix
+      fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('payroll_slips')
+          .select('component_breakdown, gross_pay')
+          .eq('tenant_id', req.tenantId)
+          .eq('month', latestPayrollMonth)
+          .in('status', ['finalized'])
+          .range(from, to),
+      ).catch(() => [] as any[]),
 
       // Compensation revision delta impact (approved in period)
       fastify.supabase
@@ -755,7 +764,7 @@ export default async function executiveRoutes(fastify: FastifyInstance) {
         .from('payroll_dept_snapshots')
         .select('department_id, department_name, headcount, total_gross, total_net, total_ot_cost')
         .eq('tenant_id', req.tenantId)
-        .eq('month', currentMonth())
+        .eq('month', latestPayrollMonth)
         .order('total_gross', { ascending: false })
         .limit(10),
 
@@ -773,10 +782,8 @@ export default async function executiveRoutes(fastify: FastifyInstance) {
         .select('amount, variable_payout_batches!inner(status, payout_month)')
         .eq('tenant_id', req.tenantId)
         .eq('variable_payout_batches.status', 'approved')
-        .eq('variable_payout_batches.payout_month', currentMonth()),
+        .eq('variable_payout_batches.payout_month', latestPayrollMonth),
     ])
-
-    const runs = payrollRunsRes.data ?? []
 
     // Monthly payroll cost trend
     const payroll_cost_trend = runs.map((r: any) => ({
@@ -787,12 +794,11 @@ export default async function executiveRoutes(fastify: FastifyInstance) {
       avg_cost_per_head: safeAvg(Number(r.total_gross ?? 0), r.employee_count ?? 0),
     }))
 
-    // Latest run metrics
-    const latestRun = runs[runs.length - 1] as any
+    // Latest run metrics (latestRun computed above from Phase 1)
     const payroll_current_gross    = latestRun ? Number(latestRun.total_gross ?? 0) : 0
     const payroll_current_net      = latestRun ? Number(latestRun.total_net   ?? 0) : 0
     const payroll_current_headcount = latestRun?.employee_count ?? 0
-    const payroll_current_month     = latestRun?.month ?? currentMonth()
+    const payroll_current_month     = latestPayrollMonth
 
     // Month-over-month change
     const prevRun = runs.length >= 2 ? runs[runs.length - 2] as any : null
@@ -845,7 +851,7 @@ export default async function executiveRoutes(fastify: FastifyInstance) {
     const fixed_excl_ot = Math.max(0, Math.round(fixed_pay - ot_cost_current))
 
     const component_mix = {
-      month:               currentMonth(),
+      month:               latestPayrollMonth,
       fixed_pay:           fixed_excl_ot,
       variable_pay:        Math.round(variable_pay),
       statutory_cost:      Math.round(employer_statutory),
