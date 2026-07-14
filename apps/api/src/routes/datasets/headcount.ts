@@ -114,7 +114,7 @@ export default async function headcountDataset(fastify: FastifyInstance) {
     } catch (err: any) {
       return reply.code(500).send({ error: 'DB_ERROR', message: err.message })
     }
-    const allSeps = await fetchAllRows((from, to) => (sepQuery as any).range(from, to))
+    const allSeps: any[] = await fetchAllRows((from, to) => (sepQuery as any).range(from, to))
 
     // ── Snapshot counts ─────────────────────────────────────────────────────────
     const activeCount    = allEmployees.filter(e => e.status === 'active').length

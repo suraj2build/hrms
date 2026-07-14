@@ -852,7 +852,7 @@ export default async function executiveRoutes(fastify: FastifyInstance) {
       ot_cost:             Math.round(ot_cost_current),
       employee_deductions: Math.round(employee_deductions),
       gross_total:         Math.round(fixed_pay),
-      has_data:            (mixSlipsRes.data ?? []).length > 0,
+      has_data:            currentMonthSlips.length > 0,
     }
 
     // ── P5.6 — overtime cost trend (monthly, across the window) ────────────────

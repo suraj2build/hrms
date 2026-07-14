@@ -339,7 +339,7 @@ export default async function reportsRoutes(fastify: FastifyInstance) {
     if (q.department_id)   empQuerySR = empQuerySR.eq('job_history.department_id', q.department_id)
     if (q.employment_type) empQuerySR = empQuerySR.eq('job_history.employment_type', q.employment_type)
 
-    const employees = await fetchAllRows((from, to) => empQuerySR.range(from, to))
+    const employees: any[] = await fetchAllRows((from, to) => empQuerySR.range(from, to))
 
     const eligibleIds = new Set(employees.map((e: any) => e.id))
     const empMap: Record<string, { code: string; name: string; dept: string; type: string }> = {}
@@ -471,7 +471,7 @@ export default async function reportsRoutes(fastify: FastifyInstance) {
     if (q.department_id)   empQueryStat = empQueryStat.eq('job_history.department_id', q.department_id)
     if (q.employment_type) empQueryStat = empQueryStat.eq('job_history.employment_type', q.employment_type)
 
-    const employees = await fetchAllRows((from, to) => empQueryStat.range(from, to))
+    const employees: any[] = await fetchAllRows((from, to) => empQueryStat.range(from, to))
 
     const eligibleIds = new Set(employees.map((e: any) => e.id))
     const empMap: Record<string, { code: string; name: string; dept: string; type: string }> = {}
