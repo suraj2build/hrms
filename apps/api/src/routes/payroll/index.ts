@@ -1437,6 +1437,194 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
     })
   })
 
+  // ── GET /payroll/preflight ───────────────────────────────────────────────────
+  //
+  // Pre-run readiness check for a given month.  Runs all validation gates in
+  // parallel and returns a single structured report so operators can identify
+  // and fix issues before triggering a live run or full dry-run.
+  //
+  // Unlike the dry-run, this endpoint is cheap (no slip computation) and returns
+  // in <200 ms regardless of headcount.
+  //
+  // MUST be registered before /payroll/runs/:id so the router doesn't mistake
+  // "preflight" for a run ID.
+  fastify.get('/payroll/preflight', hrAdminAuth, async (req: any, reply) => {
+    const schema = z.object({
+      month: z.string().regex(monthRe, 'month must be YYYY-MM').default(
+        () => new Date().toISOString().slice(0, 7),
+      ),
+    })
+    const parsed = schema.safeParse(req.query)
+    if (!parsed.success) {
+      return validationError(reply, 'VALIDATION_ERROR', parsed.error.issues[0]?.message ?? 'Validation failed')
+    }
+    const { month } = parsed.data
+    const tenantId  = req.tenantId as string
+    const monthDate = `${month}-01`
+
+    // All checks fire in parallel — each is wrapped in Promise.allSettled so one
+    // failure doesn't suppress the rest.
+    const [coverageResult, workingDaysResult, statutoryResult, variablePayResult, existingRunResult] =
+      await Promise.allSettled([
+        buildCompensationCoverageAudit(fastify.supabase, tenantId),
+
+        countWorkingDaysInMonth(fastify.supabase, tenantId, month),
+
+        Promise.all([
+          fastify.supabase
+            .from('payroll_statutory_settings')
+            .select('tds_enabled')
+            .eq('tenant_id', tenantId)
+            .maybeSingle(),
+          fastify.supabase
+            .from('epf_config')
+            .select('id')
+            .eq('tenant_id', tenantId)
+            .lte('effective_from', monthDate)
+            .or(`effective_to.is.null,effective_to.gte.${monthDate}`)
+            .order('effective_from', { ascending: false })
+            .limit(1)
+            .maybeSingle(),
+          fastify.supabase
+            .from('esi_config')
+            .select('id')
+            .eq('tenant_id', tenantId)
+            .lte('effective_from', monthDate)
+            .or(`effective_to.is.null,effective_to.gte.${monthDate}`)
+            .order('effective_from', { ascending: false })
+            .limit(1)
+            .maybeSingle(),
+        ]),
+
+        fastify.supabase
+          .from('variable_payouts')
+          .select('amount, variable_payout_batches!inner(id, status, payout_month)')
+          .eq('tenant_id', tenantId)
+          .eq('variable_payout_batches.status', 'approved')
+          .eq('variable_payout_batches.payout_month', month),
+
+        fastify.supabase
+          .from('payroll_runs')
+          .select('id, status, employee_count, created_at, total_gross, total_net')
+          .eq('tenant_id', tenantId)
+          .eq('month', month)
+          .maybeSingle(),
+      ])
+
+    // ── Coverage ─────────────────────────────────────────────────────────────
+    const coverage = coverageResult.status === 'fulfilled' ? coverageResult.value : null
+
+    // ── Calendar / working days ──────────────────────────────────────────────
+    const calendar_configured = workingDaysResult.status === 'fulfilled'
+    const working_days        = calendar_configured ? workingDaysResult.value : null
+
+    // ── Statutory config ─────────────────────────────────────────────────────
+    let tds_configured = false
+    let epf_configured = false
+    let esi_configured = false
+    if (statutoryResult.status === 'fulfilled') {
+      const [tdsRes, epfRes, esiRes] = statutoryResult.value
+      tds_configured = !tdsRes.error && tdsRes.data !== null
+      epf_configured = !epfRes.error && epfRes.data !== null
+      esi_configured = !esiRes.error && esiRes.data !== null
+    }
+
+    // ── Variable pay ─────────────────────────────────────────────────────────
+    let approved_batches    = 0
+    let variable_total      = 0
+    if (variablePayResult.status === 'fulfilled' && !variablePayResult.value.error) {
+      const vpRows = variablePayResult.value.data ?? []
+      const batchIds = new Set(vpRows.map((r: any) => (r.variable_payout_batches as any)?.id))
+      approved_batches = batchIds.size
+      variable_total   = vpRows.reduce((s: number, r: any) => s + Number(r.amount ?? 0), 0)
+    }
+
+    // ── Existing run ─────────────────────────────────────────────────────────
+    const existingRun = existingRunResult.status === 'fulfilled' && !existingRunResult.value.error
+      ? existingRunResult.value.data
+      : null
+
+    // ── Blockers & warnings ──────────────────────────────────────────────────
+    const blockers: string[] = []
+    const warnings: string[] = []
+
+    if (!coverage) {
+      blockers.push('Compensation coverage check failed — verify DB connectivity and retry')
+    } else if (!coverage.ready_for_payroll) {
+      if (coverage.employees_missing_compensation > 0)
+        blockers.push(`${coverage.employees_missing_compensation} employee(s) have no active compensation`)
+      if (coverage.employees_zero_ctc > 0)
+        blockers.push(`${coverage.employees_zero_ctc} employee(s) have zero CTC`)
+      if (coverage.employees_with_no_components > 0)
+        blockers.push(`${coverage.employees_with_no_components} employee(s) have no salary components`)
+      if (coverage.employees_with_invalid_components > 0)
+        blockers.push(`${coverage.employees_with_invalid_components} employee(s) have invalid component amounts`)
+    }
+
+    if (!calendar_configured) {
+      blockers.push('Holiday calendar not configured — working days cannot be computed (run will abort)')
+    }
+
+    if (existingRun?.status === 'finalized') {
+      blockers.push('A finalized run already exists for this month — rollback required before re-running')
+    }
+
+    if (!tds_configured) warnings.push('TDS settings not found — TDS will be skipped for all employees')
+    if (!epf_configured) warnings.push('EPF config not found — EPF will be skipped (per-employee fallback)')
+    if (!esi_configured) warnings.push('ESI config not found — ESI will be skipped (per-employee fallback)')
+
+    if ((coverage?.employees_future_dated ?? 0) > 0) {
+      warnings.push(`${coverage!.employees_future_dated} employee(s) have future-dated compensation — previous active records will be used`)
+    }
+
+    if (approved_batches > 0) {
+      warnings.push(
+        `${approved_batches} approved variable pay batch(es) (₹${Math.round(variable_total).toLocaleString()}) will be included in run totals`,
+      )
+    }
+
+    if (existingRun && existingRun.status !== 'finalized') {
+      warnings.push(`An existing ${existingRun.status} run is present — triggering again will replace it`)
+    }
+
+    return reply.send({
+      month,
+      ready:    blockers.length === 0,
+      blockers,
+      warnings,
+      employees: coverage ? {
+        total_active:          coverage.total_active_employees,
+        coverage_percent:      coverage.coverage_percent,
+        missing_compensation:  coverage.employees_missing_compensation,
+        zero_ctc:              coverage.employees_zero_ctc,
+        no_components:         coverage.employees_with_no_components,
+        invalid_components:    coverage.employees_with_invalid_components,
+        future_dated:          coverage.employees_future_dated,
+      } : null,
+      calendar: {
+        configured:   calendar_configured,
+        working_days,
+      },
+      statutory: {
+        tds_configured,
+        epf_configured,
+        esi_configured,
+      },
+      variable_pay: {
+        approved_batches,
+        total_amount: Math.round(variable_total),
+      },
+      existing_run: existingRun ? {
+        id:             existingRun.id,
+        status:         existingRun.status,
+        employee_count: existingRun.employee_count,
+        total_gross:    Number(existingRun.total_gross ?? 0),
+        total_net:      Number(existingRun.total_net   ?? 0),
+        created_at:     existingRun.created_at,
+      } : null,
+    })
+  })
+
   // ── GET /payroll/compensation-coverage ─────────────────────────────────────
   //
   // Compensation coverage audit — returns a full per-employee breakdown of
