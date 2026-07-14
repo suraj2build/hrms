@@ -335,6 +335,10 @@ const fastify = Fastify({
   // can exceed Fastify's 1 MB default. 16 MB is generous for those payloads while
   // still bounding request size to prevent unbounded-body DoS.
   bodyLimit: 16 * 1024 * 1024,
+  // Payroll dry runs can take several minutes for large tenants.
+  // 5-minute ceiling keeps Railway from silently closing a hung connection while
+  // still providing a hard backstop if the engine hangs entirely.
+  requestTimeout: 300_000,
 })
 
 async function start() {
