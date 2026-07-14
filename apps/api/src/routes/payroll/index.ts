@@ -791,12 +791,15 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       /** Return only summary fields (net_pay, gross_pay, status) per employee.
        *  Auto-enabled when employee count exceeds SUMMARY_ONLY_AUTO_THRESHOLD. */
       summary_only: z.boolean().optional().default(false),
+      /** Scope the dry run to a specific subset of employees (UUIDs).
+       *  Omit to run for all active employees. */
+      employee_ids: z.array(z.string().uuid()).min(1).max(500).optional(),
     })
     const parsed = schema.safeParse(req.body)
     if (!parsed.success) {
       return validationError(reply, 'VALIDATION_ERROR', parsed.error.issues[0]?.message ?? 'Validation failed')
     }
-    const { month, notes, dry_run, summary_only } = parsed.data
+    const { month, notes, dry_run, summary_only, employee_ids } = parsed.data
     const tenantId = req.tenantId as string
 
     // ── Guard: block payroll runs for future months ───────────────────────────
@@ -896,18 +899,31 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
 
     // ── DRY RUN: compute + validate without any DB writes ───────────────────
     if (dry_run) {
-      // Fetch employees + working days synchronously (dry runs are fast)
+      // Fetch employees — either the requested subset or all active employees
       let empList: Array<{ id: string; first_name: string; last_name: string; employee_code: string }>
       try {
-        empList = await fetchAllRows((from, to) =>
-          fastify.supabase
+        if (employee_ids && employee_ids.length > 0) {
+          // Targeted dry run: only the requested employees (validated against tenant + active)
+          const { data, error } = await fastify.supabase
             .from('employees')
             .select('id, first_name, last_name, employee_code')
             .eq('tenant_id', tenantId)
             .eq('status', 'active')
+            .in('id', employee_ids)
             .order('employee_code')
-            .range(from, to),
-        ) as typeof empList
+          if (error) throw error
+          empList = (data ?? []) as typeof empList
+        } else {
+          empList = await fetchAllRows((from, to) =>
+            fastify.supabase
+              .from('employees')
+              .select('id, first_name, last_name, employee_code')
+              .eq('tenant_id', tenantId)
+              .eq('status', 'active')
+              .order('employee_code')
+              .range(from, to),
+          ) as typeof empList
+        }
       } catch (dryEmpErr: any) {
         return serverError(req, reply, dryEmpErr, ErrorCode.QUERY_FAILED, 'Failed to fetch employees')
       }
