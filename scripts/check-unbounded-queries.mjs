@@ -57,14 +57,44 @@ const BASELINE  = path.join(ROOT, 'scripts/unbounded-queries-baseline.json')
 // and NOT single-row / widget-bounded risks silent truncation at 1,000 rows.
 // Add new large tables here as the schema grows.
 const HIGH_CARDINALITY_TABLES = new Set([
+  // Core workforce
   'employees',
+  'draft_employee_profiles',
+  'employee_compensations',
+  'employee_bank_statutory',
+  'employee_certifications',
+  'employee_documents',
+  // Attendance
   'attendance_daily',
   'attendance_logs',
+  'attendance_anomalies',
+  'attendance_punch_logs',
   'raw_punches',
-  'payroll_records',
-  'audit_logs',
+  // Leave
   'leave_requests',
-  'employee_compensations',
+  'leave_balances',
+  // Payroll
+  'payroll_records',
+  'payroll_slips',
+  'payroll_adjustments',
+  'payroll_payout_reconciliation',
+  'variable_payouts',
+  'arrear_records',
+  'epf_contributions',
+  // Talent / succession
+  'succession_plans',
+  'talent_roles',
+  'mood_checkins',
+  // Assets / docs / recognition
+  'asset_assignments',
+  // Recruitment
+  'applications',
+  'pre_joinee_invitations',
+  // Operations / infrastructure
+  'sites',
+  'audit_logs',
+  'api_usage_log',
+  'ai_usage_log',
   'helpdesk_tickets',
   'notifications',
 ])

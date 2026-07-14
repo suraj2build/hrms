@@ -17,6 +17,7 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { logAction } from '../../lib/audit-service.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { fetchAllRows } from '../../lib/supabase-paginate.js'
 
 // ── Shared helpers ────────────────────────────────────────────────────────────
 
@@ -94,11 +95,15 @@ async function build24QDataset(supabase: any, tenantId: string, quarter: string,
   const qNum   = Number(quarter.slice(1))
   const months = quarterMonths(qNum, financialYear)
 
-  const { data: slipsData } = await supabase
-    .from('payroll_slips')
-    .select('employee_id, month, gross_pay, tds_deducted, employees(employee_code, first_name, last_name)')
-    .eq('tenant_id', tenantId).in('month', months).eq('status', 'finalized')
-  const slips = (slipsData ?? []) as any[]
+  const slips = await fetchAllRows((from, to) =>
+    supabase
+      .from('payroll_slips')
+      .select('employee_id, month, gross_pay, tds_deducted, employees(employee_code, first_name, last_name)')
+      .eq('tenant_id', tenantId)
+      .in('month', months)
+      .eq('status', 'finalized')
+      .range(from, to),
+  ) as any[]
 
   const empIds = [...new Set(slips.map(r => r.employee_id))]
   const panMap = new Map<string, string>()
@@ -360,18 +365,7 @@ export default async function filingPackRoutes(fastify: FastifyInstance) {
     }
     const { month } = parsed.data
 
-    const [epfResult, regResult, tenantResult] = await Promise.all([
-      fastify.supabase
-        .from('epf_contributions')
-        .select(`
-          employee_id, pf_wages, employee_contribution, voluntary_pf,
-          employer_pf, employer_eps, edli_contribution,
-          employees(employee_code, first_name, last_name)
-        `)
-        .eq('tenant_id', req.tenantId)
-        .eq('contribution_month', month)
-        .order('employees(employee_code)', { ascending: true }),
-
+    const [regResult, tenantResult] = await Promise.all([
       fastify.supabase
         .from('statutory_registrations')
         .select('registration_number, code_label')
@@ -388,9 +382,25 @@ export default async function filingPackRoutes(fastify: FastifyInstance) {
         .single(),
     ])
 
-    if (epfResult.error) return reply.code(500).send({ error: 'QUERY_FAILED', message: epfResult.error.message })
+    let rows: any[]
+    try {
+      rows = await fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('epf_contributions')
+          .select(`
+            employee_id, pf_wages, employee_contribution, voluntary_pf,
+            employer_pf, employer_eps, edli_contribution,
+            employees(employee_code, first_name, last_name)
+          `)
+          .eq('tenant_id', req.tenantId)
+          .eq('contribution_month', month)
+          .order('employees(employee_code)', { ascending: true })
+          .range(from, to),
+      )
+    } catch (epfErr: any) {
+      return reply.code(500).send({ error: 'QUERY_FAILED', message: epfErr.message })
+    }
 
-    const rows     = (epfResult.data ?? []) as any[]
     const reg      = (regResult.data   as any) ?? {}
     const tenant   = (tenantResult.data as any) ?? {}
 

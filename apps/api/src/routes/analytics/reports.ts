@@ -17,6 +17,7 @@
 
 import type { FastifyInstance } from 'fastify'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { fetchAllRows }  from '../../lib/supabase-paginate.js'
 
 export default async function reportsRoutes(fastify: FastifyInstance) {
   // All report endpoints expose tenant-wide data (full salary register,
@@ -65,19 +66,24 @@ export default async function reportsRoutes(fastify: FastifyInstance) {
     if (q.department_id) empQuery = empQuery.eq('job_history.department_id', q.department_id)
     if (q.employment_type) empQuery = empQuery.eq('job_history.employment_type', q.employment_type)
 
-    const { data: employees, error } = await empQuery
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    let employees: any[]
+    try {
+      employees = await fetchAllRows((from, to) => (empQuery as any).range(from, to))
+    } catch (error: any) {
+      return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    }
 
     // Fetch separations in range for attrition calculation
-    let sepQuery = fastify.supabase
-      .from('employees')
-      .select('id, employee_code, first_name, last_name, updated_at, status')
-      .eq('tenant_id', tid)
-      .eq('status', 'separated')
-      .gte('updated_at', fromMonth)
-      .lte('updated_at', `${toMonth.slice(0, 7)}-31`)
-
-    const { data: separations } = await sepQuery
+    const separations = await fetchAllRows((from, to) =>
+      fastify.supabase
+        .from('employees')
+        .select('id, employee_code, first_name, last_name, updated_at, status')
+        .eq('tenant_id', tid)
+        .eq('status', 'separated')
+        .gte('updated_at', fromMonth)
+        .lte('updated_at', `${toMonth.slice(0, 7)}-31`)
+        .range(from, to),
+    )
 
     // Build monthly breakdown
     const months: Record<string, { month: string; joiners: number; separations: number }> = {}
@@ -89,11 +95,11 @@ export default async function reportsRoutes(fastify: FastifyInstance) {
       d.setMonth(d.getMonth() + 1)
     }
 
-    for (const emp of employees ?? []) {
+    for (const emp of employees) {
       const jd = emp.joining_date ? emp.joining_date.slice(0, 7) : null
       if (jd && months[jd]) months[jd].joiners++
     }
-    for (const sep of separations ?? []) {
+    for (const sep of separations) {
       const sd = sep.updated_at ? sep.updated_at.slice(0, 7) : null
       if (sd && months[sd]) months[sd].separations++
     }
@@ -101,7 +107,7 @@ export default async function reportsRoutes(fastify: FastifyInstance) {
     // Department breakdown (current headcount)
     const deptBreakdown: Record<string, number> = {}
     const typeBreakdown: Record<string, number> = {}
-    for (const emp of employees ?? []) {
+    for (const emp of employees) {
       if (emp.status === 'separated') continue
       const jh = Array.isArray(emp.job_history) ? emp.job_history[0] : emp.job_history
       const deptName = (jh?.departments as { name?: string } | null)?.name ?? 'Unassigned'
@@ -110,13 +116,13 @@ export default async function reportsRoutes(fastify: FastifyInstance) {
       typeBreakdown[empType]  = (typeBreakdown[empType] ?? 0) + 1
     }
 
-    const activeCount = (employees ?? []).filter(e => e.status === 'active').length
+    const activeCount = employees.filter(e => e.status === 'active').length
 
     return reply.send({
       summary: {
-        total_employees:  (employees ?? []).length,
+        total_employees:  employees.length,
         active_employees: activeCount,
-        total_separations: (separations ?? []).length,
+        total_separations: separations.length,
       },
       monthly_trend: Object.values(months),
       department_breakdown: Object.entries(deptBreakdown)
@@ -124,7 +130,7 @@ export default async function reportsRoutes(fastify: FastifyInstance) {
         .sort((a, b) => b.count - a.count),
       employment_type_breakdown: Object.entries(typeBreakdown)
         .map(([type, count]) => ({ type, count })),
-      employees: (employees ?? []).map(emp => {
+      employees: employees.map(emp => {
         const jh = Array.isArray(emp.job_history) ? emp.job_history[0] : emp.job_history
         return {
           employee_code: emp.employee_code,
@@ -156,52 +162,51 @@ export default async function reportsRoutes(fastify: FastifyInstance) {
     const toDate   = q.to   ?? today
 
     // Fetch attendance_daily rows in range
-    let attQuery = fastify.supabase
-      .from('attendance_daily')
-      .select('employee_id, date, status, work_hours, late_minutes, overtime_minutes')
-      .eq('tenant_id', tid)
-      .gte('date', fromDate)
-      .lte('date', toDate)
-
-    if (q.employee_id) attQuery = attQuery.eq('employee_id', q.employee_id)
-
-    const { data: attRows, error: attErr } = await attQuery
-    if (attErr) return reply.code(500).send({ error: 'DB_ERROR', message: attErr.message })
+    const attRows = await fetchAllRows((from, to) => {
+      let aq = fastify.supabase
+        .from('attendance_daily')
+        .select('employee_id, date, status, work_hours, late_minutes, overtime_minutes')
+        .eq('tenant_id', tid)
+        .gte('date', fromDate)
+        .lte('date', toDate)
+      if (q.employee_id) aq = aq.eq('employee_id', q.employee_id)
+      return aq.range(from, to)
+    })
 
     // Fetch leave requests in range (APPROVED only)
-    let leaveQuery = fastify.supabase
-      .from('leave_requests')
-      .select(`
-        employee_id, computed_days, status,
-        leave_types ( name )
-      `)
-      .eq('tenant_id', tid)
-      .eq('status', 'APPROVED')
-      .lte('from_date', toDate)
-      .gte('to_date', fromDate)
-
-    if (q.employee_id) leaveQuery = leaveQuery.eq('employee_id', q.employee_id)
-
-    const { data: leaveRows } = await leaveQuery
+    const leaveRows = await fetchAllRows((from, to) => {
+      let lq = fastify.supabase
+        .from('leave_requests')
+        .select(`
+          employee_id, computed_days, status,
+          leave_types ( name )
+        `)
+        .eq('tenant_id', tid)
+        .eq('status', 'APPROVED')
+        .lte('from_date', toDate)
+        .gte('to_date', fromDate)
+      if (q.employee_id) lq = lq.eq('employee_id', q.employee_id)
+      return lq.range(from, to)
+    })
 
     // Fetch employee names — optionally filtered by department
-    let empQuery = fastify.supabase
-      .from('employees')
-      .select(`
-        id, employee_code, first_name, last_name,
-        job_history!job_history_employee_id_fkey ( department_id, is_current, departments ( name ) )
-      `)
-      .eq('tenant_id', tid)
-      .eq('job_history.is_current', true)
-      .neq('status', 'separated')
-
-    if (q.department_id) empQuery = empQuery.eq('job_history.department_id', q.department_id)
-
-    const { data: employees } = await empQuery
+    const employees = await fetchAllRows((from, to) => {
+      let eq2 = fastify.supabase
+        .from('employees')
+        .select(`
+          id, employee_code, first_name, last_name,
+          job_history!job_history_employee_id_fkey ( department_id, is_current, departments ( name ) )
+        `)
+        .eq('tenant_id', tid)
+        .eq('job_history.is_current', true)
+        .neq('status', 'separated')
+      if (q.department_id) eq2 = eq2.eq('job_history.department_id', q.department_id)
+      return eq2.range(from, to)
+    })
 
     // Build employee map
     const empMap: Record<string, { code: string; name: string; dept: string }> = {}
-    for (const emp of employees ?? []) {
+    for (const emp of employees) {
       const jh = Array.isArray(emp.job_history) ? emp.job_history[0] : emp.job_history
       empMap[emp.id] = {
         code: emp.employee_code,
@@ -221,7 +226,7 @@ export default async function reportsRoutes(fastify: FastifyInstance) {
     // Only include employees found in empMap (respects department filter)
     const eligibleIds = new Set(Object.keys(empMap))
 
-    for (const row of attRows ?? []) {
+    for (const row of attRows) {
       if (!eligibleIds.has(row.employee_id)) continue
       if (!summary[row.employee_id]) {
         const emp = empMap[row.employee_id]
@@ -250,7 +255,7 @@ export default async function reportsRoutes(fastify: FastifyInstance) {
     }
 
     // Add leave days
-    for (const lr of leaveRows ?? []) {
+    for (const lr of leaveRows) {
       if (!eligibleIds.has(lr.employee_id)) continue
       if (!summary[lr.employee_id]) {
         const emp = empMap[lr.employee_id]
@@ -300,22 +305,28 @@ export default async function reportsRoutes(fastify: FastifyInstance) {
     const month = q.month ?? `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
 
     // Fetch active compensations with their components
-    const { data: comps, error: compErr } = await fastify.supabase
-      .from('employee_compensations')
-      .select(`
-        id, employee_id, ctc_annual, ctc_monthly, effective_from,
-        employee_compensation_components (
-          computed_monthly, computed_annual, sequence,
-          salary_components ( name, code, component_type )
-        )
-      `)
-      .eq('tenant_id', tid)
-      .eq('is_active', true)
-
-    if (compErr) return reply.code(500).send({ error: 'DB_ERROR', message: compErr.message })
+    let comps: any[]
+    try {
+      comps = await fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('employee_compensations')
+          .select(`
+            id, employee_id, ctc_annual, ctc_monthly, effective_from,
+            employee_compensation_components (
+              computed_monthly, computed_annual, sequence,
+              salary_components ( name, code, component_type )
+            )
+          `)
+          .eq('tenant_id', tid)
+          .eq('is_active', true)
+          .range(from, to),
+      )
+    } catch (compErr: any) {
+      return reply.code(500).send({ error: 'DB_ERROR', message: compErr.message })
+    }
 
     // Fetch employees with job history for name + dept
-    let empQuery = fastify.supabase
+    let empQuerySR = fastify.supabase
       .from('employees')
       .select(`
         id, employee_code, first_name, last_name,
@@ -323,16 +334,16 @@ export default async function reportsRoutes(fastify: FastifyInstance) {
       `)
       .eq('tenant_id', tid)
       .eq('job_history.is_current', true)
-      .neq('status', 'separated')
+      .neq('status', 'separated') as any
 
-    if (q.department_id)   empQuery = empQuery.eq('job_history.department_id', q.department_id)
-    if (q.employment_type) empQuery = empQuery.eq('job_history.employment_type', q.employment_type)
+    if (q.department_id)   empQuerySR = empQuerySR.eq('job_history.department_id', q.department_id)
+    if (q.employment_type) empQuerySR = empQuerySR.eq('job_history.employment_type', q.employment_type)
 
-    const { data: employees } = await empQuery
+    const employees = await fetchAllRows((from, to) => empQuerySR.range(from, to))
 
-    const eligibleIds = new Set((employees ?? []).map(e => e.id))
+    const eligibleIds = new Set(employees.map((e: any) => e.id))
     const empMap: Record<string, { code: string; name: string; dept: string; type: string }> = {}
-    for (const emp of employees ?? []) {
+    for (const emp of employees) {
       const jh = Array.isArray(emp.job_history) ? emp.job_history[0] : emp.job_history
       empMap[emp.id] = {
         code: emp.employee_code,
@@ -344,7 +355,7 @@ export default async function reportsRoutes(fastify: FastifyInstance) {
 
     // Collect all unique component names (for table columns)
     const componentNames = new Set<string>()
-    for (const comp of comps ?? []) {
+    for (const comp of comps) {
       for (const cc of (comp.employee_compensation_components as any[]) ?? []) {
         const sc = cc.salary_components
         if (sc?.name) componentNames.add(sc.name)
@@ -357,7 +368,7 @@ export default async function reportsRoutes(fastify: FastifyInstance) {
     let totalCTC = 0
     let totalMonthly = 0
 
-    for (const comp of comps ?? []) {
+    for (const comp of comps) {
       if (!eligibleIds.has(comp.employee_id)) continue
       const emp = empMap[comp.employee_id]
       if (!emp) continue
@@ -411,26 +422,35 @@ export default async function reportsRoutes(fastify: FastifyInstance) {
     const q   = req.query as Record<string, string>
 
     // Employee bank + statutory details
-    const { data: statutory, error: statErr } = await fastify.supabase
-      .from('employee_bank_statutory')
-      .select(`
-        employee_id,
-        pan:pan_number, aadhaar:aadhaar_number, uan:uan_number, pf_number, esi_number,
-        pt_applicable, lwf_applicable, tax_regime
-      `)
-      .eq('tenant_id', tid)
-
-    if (statErr) return reply.code(500).send({ error: 'DB_ERROR', message: statErr.message })
+    let statutory: any[]
+    try {
+      statutory = await fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('employee_bank_statutory')
+          .select(`
+            employee_id,
+            pan:pan_number, aadhaar:aadhaar_number, uan:uan_number, pf_number, esi_number,
+            pt_applicable, lwf_applicable, tax_regime
+          `)
+          .eq('tenant_id', tid)
+          .range(from, to),
+      )
+    } catch (statErr: any) {
+      return reply.code(500).send({ error: 'DB_ERROR', message: statErr.message })
+    }
 
     // Active compensations for gross/CTC
-    const { data: comps } = await fastify.supabase
-      .from('employee_compensations')
-      .select('employee_id, ctc_monthly, ctc_annual')
-      .eq('tenant_id', tid)
-      .eq('is_active', true)
+    const statComps = await fetchAllRows((from, to) =>
+      fastify.supabase
+        .from('employee_compensations')
+        .select('employee_id, ctc_monthly, ctc_annual')
+        .eq('tenant_id', tid)
+        .eq('is_active', true)
+        .range(from, to),
+    )
 
     const compMap: Record<string, { ctc_monthly: number; ctc_annual: number }> = {}
-    for (const c of comps ?? []) {
+    for (const c of statComps) {
       compMap[c.employee_id] = {
         ctc_monthly: Number(c.ctc_monthly ?? 0),
         ctc_annual:  Number(c.ctc_annual  ?? 0),
@@ -438,7 +458,7 @@ export default async function reportsRoutes(fastify: FastifyInstance) {
     }
 
     // Employees with job history
-    let empQuery = fastify.supabase
+    let empQueryStat = fastify.supabase
       .from('employees')
       .select(`
         id, employee_code, first_name, last_name,
@@ -446,16 +466,16 @@ export default async function reportsRoutes(fastify: FastifyInstance) {
       `)
       .eq('tenant_id', tid)
       .eq('job_history.is_current', true)
-      .neq('status', 'separated')
+      .neq('status', 'separated') as any
 
-    if (q.department_id)   empQuery = empQuery.eq('job_history.department_id', q.department_id)
-    if (q.employment_type) empQuery = empQuery.eq('job_history.employment_type', q.employment_type)
+    if (q.department_id)   empQueryStat = empQueryStat.eq('job_history.department_id', q.department_id)
+    if (q.employment_type) empQueryStat = empQueryStat.eq('job_history.employment_type', q.employment_type)
 
-    const { data: employees } = await empQuery
+    const employees = await fetchAllRows((from, to) => empQueryStat.range(from, to))
 
-    const eligibleIds = new Set((employees ?? []).map(e => e.id))
+    const eligibleIds = new Set(employees.map((e: any) => e.id))
     const empMap: Record<string, { code: string; name: string; dept: string; type: string }> = {}
-    for (const emp of employees ?? []) {
+    for (const emp of employees) {
       const jh = Array.isArray(emp.job_history) ? emp.job_history[0] : emp.job_history
       empMap[emp.id] = {
         code: emp.employee_code,
@@ -467,12 +487,12 @@ export default async function reportsRoutes(fastify: FastifyInstance) {
 
     // Build statutory map
     const statMap: Record<string, any> = {}
-    for (const s of statutory ?? []) {
+    for (const s of statutory) {
       statMap[s.employee_id] = s
     }
 
     const rows = []
-    for (const emp of employees ?? []) {
+    for (const emp of employees) {
       if (!eligibleIds.has(emp.id)) continue
       const info = empMap[emp.id]
       const stat = statMap[emp.id] ?? {}

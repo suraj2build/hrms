@@ -19,6 +19,7 @@
 import { z } from 'zod'
 import type { FastifyInstance } from 'fastify'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { fetchAllRows } from '../../lib/supabase-paginate.js'
 
 async function resolveCallerEmployeeId(fastify: any, userId: string, tenantId: string): Promise<string | null> {
   const { data } = await fastify.supabase
@@ -73,20 +74,23 @@ export default async function talentRoutes(fastify: FastifyInstance) {
   // ── HR: list all roles ──────────────────────────────────────────────────────
   fastify.get('/roles', hrAuth, async (req: any, reply) => {
     const { is_open } = req.query as { is_open?: string }
-    let q = supabase
-      .from('talent_roles')
-      .select('id, title, department, location, description, skills_required, experience_min, is_open, posted_at, closes_at, created_at')
-      .eq('tenant_id', req.tenantId)
-      .order('posted_at', { ascending: false })
-      .limit(500)
-
-    if (is_open !== undefined) q = q.eq('is_open', is_open === 'true')
-
-    const { data, error } = await q
-    if (error) return reply.code(500).send({ error: error.message })
+    let data: any[]
+    try {
+      data = await fetchAllRows((from, to) => {
+        let q = supabase
+          .from('talent_roles')
+          .select('id, title, department, location, description, skills_required, experience_min, is_open, posted_at, closes_at, created_at')
+          .eq('tenant_id', req.tenantId)
+          .order('posted_at', { ascending: false })
+        if (is_open !== undefined) q = q.eq('is_open', is_open === 'true')
+        return q.range(from, to)
+      })
+    } catch (err: any) {
+      return reply.code(500).send({ error: err.message })
+    }
 
     // Attach interest counts
-    const ids = (data ?? []).map((r: any) => r.id)
+    const ids = data.map((r: any) => r.id)
     const countMap: Record<string, number> = {}
     if (ids.length > 0) {
       const { data: interests } = await supabase
@@ -98,7 +102,7 @@ export default async function talentRoutes(fastify: FastifyInstance) {
       ;(interests ?? []).forEach((i: any) => { countMap[i.role_id] = (countMap[i.role_id] ?? 0) + 1 })
     }
 
-    return reply.send({ data: (data ?? []).map((r: any) => ({ ...r, interest_count: countMap[r.id] ?? 0 })) })
+    return reply.send({ data: data.map((r: any) => ({ ...r, interest_count: countMap[r.id] ?? 0 })) })
   })
 
   // ── HR: post a role ─────────────────────────────────────────────────────────
@@ -154,19 +158,21 @@ export default async function talentRoutes(fastify: FastifyInstance) {
   // ── HR: view interests for a role ───────────────────────────────────────────
   fastify.get('/roles/:id/interests', hrAuth, async (req: any, reply) => {
     const { id } = req.params as { id: string }
-    const { data, error } = await supabase
-      .from('talent_interests')
-      .select(`
-        id, status, availability, cover_note, skills, created_at, reviewed_at, reviewer_notes,
-        employees!talent_interests_employee_id_fkey(id, first_name, last_name, employee_code, designation:designations(name), department:departments!department_id(name))
-      `)
-      .eq('tenant_id', req.tenantId)
-      .eq('role_id', id)
-      .order('created_at', { ascending: false })
-      .limit(500)
-
-    if (error) return reply.code(500).send({ error: error.message })
-    return reply.send({ data: data ?? [] })
+    let data: any[]
+    try {
+      data = await fetchAllRows((from, to) =>
+        supabase
+          .from('talent_interests')
+          .select(`id, status, availability, cover_note, skills, created_at, reviewed_at, reviewer_notes, employees!talent_interests_employee_id_fkey(id, first_name, last_name, employee_code, designation:designations(name), department:departments!department_id(name))`)
+          .eq('tenant_id', req.tenantId)
+          .eq('role_id', id)
+          .order('created_at', { ascending: false })
+          .range(from, to),
+      )
+    } catch (err: any) {
+      return reply.code(500).send({ error: err.message })
+    }
+    return reply.send({ data })
   })
 
   // ── HR: update interest status ───────────────────────────────────────────────
@@ -188,21 +194,26 @@ export default async function talentRoutes(fastify: FastifyInstance) {
 
   // ── ESS: browse open roles ───────────────────────────────────────────────────
   fastify.get('/browse', auth, async (req: any, reply) => {
-    const { data, error } = await supabase
-      .from('talent_roles')
-      .select('id, title, department, location, description, skills_required, experience_min, posted_at, closes_at')
-      .eq('tenant_id', req.tenantId)
-      .eq('is_open', true)
-      .order('posted_at', { ascending: false })
-      .limit(500)
-
-    if (error) return reply.code(500).send({ error: error.message })
+    let data: any[]
+    try {
+      data = await fetchAllRows((from, to) =>
+        supabase
+          .from('talent_roles')
+          .select('id, title, department, location, description, skills_required, experience_min, posted_at, closes_at')
+          .eq('tenant_id', req.tenantId)
+          .eq('is_open', true)
+          .order('posted_at', { ascending: false })
+          .range(from, to),
+      )
+    } catch (err: any) {
+      return reply.code(500).send({ error: err.message })
+    }
 
     // Attach whether the caller has already expressed interest
     const employeeId = await resolveCallerEmployeeId(fastify, req.userId, req.tenantId)
     const myInterestMap: Record<string, string> = {}
-    if (employeeId && (data ?? []).length > 0) {
-      const roleIds = (data ?? []).map((r: any) => r.id)
+    if (employeeId && data.length > 0) {
+      const roleIds = data.map((r: any) => r.id)
       const { data: myInts } = await supabase
         .from('talent_interests')
         .select('role_id, status')
@@ -213,7 +224,7 @@ export default async function talentRoutes(fastify: FastifyInstance) {
     }
 
     return reply.send({
-      data: (data ?? []).map((r: any) => ({
+      data: data.map((r: any) => ({
         ...r,
         my_status: myInterestMap[r.id] ?? null,
       })),

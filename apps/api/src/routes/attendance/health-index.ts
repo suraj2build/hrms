@@ -137,19 +137,21 @@ export default async function attendanceHealthIndexRoute(fastify: FastifyInstanc
 
     const effectiveMonth = parsed.data.period_month ?? currentYearMonth()
 
-    const { data, error } = await fastify.supabase
-      .from('attendance_health_scores')
-      .select('health_score, health_grade')
-      .eq('tenant_id', req.tenantId)
-      .eq('scope', 'employee')
-      .eq('period_month', effectiveMonth)
-
-    if (error) {
+    let rows: Array<{ health_score: number; health_grade: string }>
+    try {
+      rows = await fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('attendance_health_scores')
+          .select('health_score, health_grade')
+          .eq('tenant_id', req.tenantId)
+          .eq('scope', 'employee')
+          .eq('period_month', effectiveMonth)
+          .range(from, to),
+      ) as Array<{ health_score: number; health_grade: string }>
+    } catch (error) {
       req.log.error({ err: error }, 'attendance_health_scores summary failed')
       return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch health summary' })
     }
-
-    const rows = (data ?? []) as Array<{ health_score: number; health_grade: string }>
 
     const byGrade: Record<string, number> = { A: 0, B: 0, C: 0, D: 0, F: 0 }
     let scoreSum = 0

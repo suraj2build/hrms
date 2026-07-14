@@ -6,6 +6,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { fetchAllRows } from '../../lib/supabase-paginate.js'
 
 const ARREAR_TYPES = ['salary_revision', 'bonus_revision', 'component_change', 'correction', 'other'] as const
 
@@ -160,22 +161,29 @@ export default async function arrearsRoutes(fastify: FastifyInstance) {
       .select('payout_month, status')
       .eq('id', id).eq('tenant_id', req.tenantId).maybeSingle()
 
-    const { data: records, error } = await fastify.supabase
-      .from('arrear_records')
-      .select('*')
-      .eq('tenant_id', req.tenantId)
-      .eq('batch_id', id)
-      .order('period_month', { ascending: true }).limit(1000)
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    let records: any[]
+    try {
+      records = await fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('arrear_records')
+          .select('*')
+          .eq('tenant_id', req.tenantId)
+          .eq('batch_id', id)
+          .order('period_month', { ascending: true })
+          .range(from, to),
+      )
+    } catch (err: any) {
+      return reply.code(500).send({ error: 'QUERY_FAILED', message: err.message })
+    }
 
-    const empIds = [...new Set((records ?? []).map((r: any) => r.employee_id))]
+    const empIds = [...new Set(records.map((r: any) => r.employee_id))]
     const { data: emps } = empIds.length
       ? await fastify.supabase.from('employees').select('id, first_name, last_name, employee_code')
           .eq('tenant_id', req.tenantId).in('id', empIds)
       : { data: [] as any[] }
     const em = new Map((emps ?? []).map((e: any) => [e.id, e]))
 
-    const data = (records ?? []).map((r: any) => {
+    const data = records.map((r: any) => {
       const e = em.get(r.employee_id)
       return {
         ...r,

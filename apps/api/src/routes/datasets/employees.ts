@@ -14,6 +14,7 @@
 
 import type { FastifyInstance } from 'fastify'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { fetchAllRows } from '../../lib/supabase-paginate.js'
 
 // R5 — site/region/zone/site_type added so headcount can be disaggregated by the
 // retail geography dimensions (migration 248). Same KPI, new GROUP BY axis.
@@ -101,17 +102,21 @@ export default async function employeesDataset(fastify: FastifyInstance) {
     if (filterGender)  empQuery = empQuery.eq('employee_personal_info.gender', filterGender)
     if (filterSiteId)  empQuery = empQuery.eq('site_id', filterSiteId)
 
-    const { data: empData, error: empErr } = await empQuery
-
-    if (empErr) return reply.code(500).send({ error: 'DB_ERROR', message: empErr.message })
-
-    // ── New joiners in the date range ─────────────────────────────────────────
-    const { data: joinerData } = await fastify.supabase
-      .from('employees')
-      .select(EMP_SELECT)
-      .eq('tenant_id', tid)
-      .gte('joining_date', fromFirst)
-      .lte('joining_date', toLast)
+    let empData: any[]
+    try {
+      empData = await fetchAllRows((from, to) => (empQuery as any).range(from, to))
+    } catch (err: any) {
+      return reply.code(500).send({ error: 'DB_ERROR', message: err.message })
+    }
+    const joinerData = await fetchAllRows((from, to) =>
+      fastify.supabase
+        .from('employees')
+        .select(EMP_SELECT)
+        .eq('tenant_id', tid)
+        .gte('joining_date', fromFirst)
+        .lte('joining_date', toLast)
+        .range(from, to),
+    )
 
     // ── Group helpers ─────────────────────────────────────────────────────────
     function jh(emp: any) {
@@ -140,8 +145,8 @@ export default async function employeesDataset(fastify: FastifyInstance) {
       return true
     }
 
-    const employees = ((empData ?? []) as any[]).filter(siteFilter)
-    const joiners   = ((joinerData ?? []) as any[]).filter(siteFilter)
+    const employees = (empData as any[]).filter(siteFilter)
+    const joiners   = (joinerData as any[]).filter(siteFilter)
 
     function getGroupKey(emp: any): { key: string; label: string } {
       const h = jh(emp)

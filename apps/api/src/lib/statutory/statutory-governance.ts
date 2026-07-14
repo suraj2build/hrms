@@ -89,6 +89,13 @@ export interface EmployeeStatutoryParams {
   financialYear:   string
 }
 
+/** Pre-fetched tenant-level statutory config — identical for every employee in a run.
+ *  Pass to resolveEmployeeStatutoryParams to skip the epf_config / esi_config queries. */
+export interface StatutoryTenantCache {
+  epfConfigRow: any | null
+  esiConfigRow: any | null
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function monthToFY(month: string): string {
@@ -112,10 +119,11 @@ function buildDateGuardedQuery(q: any, month: string) {
 // ── Main resolver ─────────────────────────────────────────────────────────────
 
 export async function resolveEmployeeStatutoryParams(
-  supabase:    SupabaseClient,
-  tenantId:    string,
-  employeeId:  string,
-  month:       string,  // YYYY-MM
+  supabase:     SupabaseClient,
+  tenantId:     string,
+  employeeId:   string,
+  month:        string,  // YYYY-MM
+  tenantCache?: StatutoryTenantCache,
 ): Promise<EmployeeStatutoryParams> {
   const financialYear = monthToFY(month)
   const monthDate     = `${month}-01`
@@ -138,17 +146,21 @@ export async function resolveEmployeeStatutoryParams(
       .eq('tenant_id', tenantId)
       .maybeSingle(),
 
-    // EPF config — most recent version effective for this month
-    buildDateGuardedQuery(
-      supabase.from('epf_config').select('*').eq('tenant_id', tenantId),
-      month,
-    ),
+    // EPF config — skip DB when pre-fetched (same row for all employees)
+    tenantCache
+      ? Promise.resolve({ data: tenantCache.epfConfigRow, error: null })
+      : buildDateGuardedQuery(
+          supabase.from('epf_config').select('*').eq('tenant_id', tenantId),
+          month,
+        ),
 
-    // ESI config — most recent version effective for this month
-    buildDateGuardedQuery(
-      supabase.from('esi_config').select('*').eq('tenant_id', tenantId),
-      month,
-    ),
+    // ESI config — skip DB when pre-fetched (same row for all employees)
+    tenantCache
+      ? Promise.resolve({ data: tenantCache.esiConfigRow, error: null })
+      : buildDateGuardedQuery(
+          supabase.from('esi_config').select('*').eq('tenant_id', tenantId),
+          month,
+        ),
 
     // EPF eligibility override — use the LATEST override for this employee regardless
     // of when it was set. An HR admin setting "Actual (uncapped)" today must apply to

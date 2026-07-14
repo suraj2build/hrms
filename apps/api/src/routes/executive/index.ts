@@ -20,6 +20,7 @@ import type { FastifyInstance } from 'fastify'
 import { z }                    from 'zod'
 import { computeLifecycleRisks, summariseLifecycle } from '../../lib/lifecycle-expiry.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { fetchAllRows } from '../../lib/supabase-paginate.js'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -434,13 +435,15 @@ export default async function executiveRoutes(fastify: FastifyInstance) {
     let recruitment_active = false
     try {
       const since = daysAgo(180)   // rolling 6-month window on application date
-      const [appsRes, reqRes] = await Promise.all([
+      const apps = await fetchAllRows((from, to) =>
         fastify.supabase
           .from('applications')
           .select('status, created_at, updated_at, offer_date, offer_accepted')
           .eq('tenant_id', req.tenantId)
           .gte('created_at', `${since}T00:00:00`)
-          .limit(5000),
+          .range(from, to),
+      ).catch(() => [] as any[])
+      const [reqRes] = await Promise.all([
         fastify.supabase
           .from('job_requisitions')
           .select('id', { count: 'exact', head: true })
@@ -448,8 +451,7 @@ export default async function executiveRoutes(fastify: FastifyInstance) {
           .eq('status', 'open'),
       ])
 
-      const apps = (appsRes.data ?? []) as any[]
-      recruitment_active = !appsRes.error
+      recruitment_active = true
       const offerTimes: number[] = []
       const hireTimes: number[]  = []
       for (const a of apps) {
@@ -718,7 +720,18 @@ export default async function executiveRoutes(fastify: FastifyInstance) {
     const monthCount = parsed.data.months
     const oldestMonth = monthsAgo(monthCount)
 
-    const [payrollRunsRes, revisionImpactRes, deptSnapshotRes, mixSlipsRes, otTrendRes, variableMonthRes] = await Promise.all([
+    // P5.4 — current finalized slips for component-level payroll mix
+    const currentMonthSlips = await fetchAllRows((from, to) =>
+      fastify.supabase
+        .from('payroll_slips')
+        .select('component_breakdown, gross_pay')
+        .eq('tenant_id', req.tenantId)
+        .eq('month', currentMonth())
+        .in('status', ['finalized'])
+        .range(from, to),
+    ).catch(() => [] as any[])
+
+    const [payrollRunsRes, revisionImpactRes, deptSnapshotRes, otTrendRes, variableMonthRes] = await Promise.all([
       // Payroll runs for trend
       fastify.supabase
         .from('payroll_runs')
@@ -745,15 +758,6 @@ export default async function executiveRoutes(fastify: FastifyInstance) {
         .eq('month', currentMonth())
         .order('total_gross', { ascending: false })
         .limit(10),
-
-      // P5.4 — current finalized slips for component-level payroll mix
-      fastify.supabase
-        .from('payroll_slips')
-        .select('component_breakdown, gross_pay')
-        .eq('tenant_id', req.tenantId)
-        .eq('month', currentMonth())
-        .in('status', ['finalized'])
-        .limit(5000),
 
       // P5.6 — overtime cost trend across months (from dept snapshots)
       fastify.supabase
@@ -825,7 +829,7 @@ export default async function executiveRoutes(fastify: FastifyInstance) {
     let fixed_pay = 0
     let employee_deductions = 0
     let employer_statutory = 0
-    for (const slip of (mixSlipsRes.data ?? [])) {
+    for (const slip of currentMonthSlips) {
       const breakdown = Array.isArray((slip as any).component_breakdown) ? (slip as any).component_breakdown : []
       for (const c of breakdown) {
         const amt = Number(c.monthly_amount ?? 0)

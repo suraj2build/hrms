@@ -23,6 +23,7 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { fetchAllRows } from './supabase-paginate.js'
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -125,14 +126,15 @@ export async function scanAttendanceFreshness(
   const staleDateStr = staleDate.toISOString().slice(0, 10)
 
   // ── 1. Active employee list ────────────────────────────────────────────────
-  const { data: employees, error: empErr } = await supabase
-    .from('employees')
-    .select('id')
-    .eq('tenant_id', tenantId)
-    .eq('status', 'active')
-
-  if (empErr) throw new Error(`Employee query failed: ${empErr.message}`)
-  const empIds = (employees ?? []).map((e: any) => e.id as string)
+  const empRows = await fetchAllRows((from, to) =>
+    supabase
+      .from('employees')
+      .select('id')
+      .eq('tenant_id', tenantId)
+      .eq('status', 'active')
+      .range(from, to),
+  )
+  const empIds = empRows.map((e: any) => e.id as string)
   const totalActive = empIds.length
 
   // ── 2. Most recent attendance_daily per employee ───────────────────────────
@@ -141,19 +143,19 @@ export async function scanAttendanceFreshness(
   window90Start.setDate(window90Start.getDate() - 90)
   const window90 = window90Start.toISOString().slice(0, 10)
 
-  const { data: latestRows, error: latErr } = await supabase
-    .from('attendance_daily')
-    .select('employee_id, date')
-    .eq('tenant_id', tenantId)
-    .gte('date', window90)
-    .order('date', { ascending: false })
-    .limit(empIds.length * 3)  // at most 3 recent rows per employee
-
-  if (latErr) throw new Error(`attendance_daily query failed: ${latErr.message}`)
+  const latestRows = await fetchAllRows((from, to) =>
+    supabase
+      .from('attendance_daily')
+      .select('employee_id, date')
+      .eq('tenant_id', tenantId)
+      .gte('date', window90)
+      .order('date', { ascending: false })
+      .range(from, to),
+  )
 
   // Build map: employee_id → latest date
   const latestByEmp = new Map<string, string>()
-  for (const row of (latestRows ?? []) as any[]) {
+  for (const row of latestRows as any[]) {
     if (!latestByEmp.has(row.employee_id)) {
       latestByEmp.set(row.employee_id, row.date as string)
     }

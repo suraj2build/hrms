@@ -20,6 +20,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z }                    from 'zod'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { fetchAllRows } from '../../lib/supabase-paginate.js'
 import { EventType, MODULE } from '../../platform/events/index.js'
 import {
   computePayrollSlip,
@@ -31,8 +32,10 @@ import {
   type PayrollSlipResult,
 } from '../../lib/payroll-engine.js'
 import { resolveEmployeeStatutoryParams } from '../../lib/statutory/statutory-governance.js'
+import type { StatutoryTenantCache } from '../../lib/statutory/statutory-governance.js'
 import { applyStatutoryToSlip, applyTdsToSlip } from '../../lib/statutory-payroll.js'
-import { computeTaxWithDB } from '../../lib/statutory/tax-computation-engine.js'
+import { computeTaxWithDB, fetchTaxTableCache } from '../../lib/statutory/tax-computation-engine.js'
+import type { TaxTableCache } from '../../lib/statutory/tax-computation-engine.js'
 import { round2 as round2fn } from '../../lib/payroll-engine.js'
 
 /** Indian financial year (Apr–Mar) for a YYYY-MM month → e.g. '2026-27'. */
@@ -62,13 +65,24 @@ function remainingMonthsFromRun(month: string, fy: string): number {
 async function applyTdsForRun(
   supabase: any, tenantId: string, employeeId: string, month: string,
   slip: PayrollSlipResult,
+  ctx?: TenantPayrollCtx,
 ): Promise<PayrollSlipResult> {
-  const { data: s } = await supabase
-    .from('payroll_statutory_settings')
-    .select('tds_enabled, tds_default_regime')
-    .eq('tenant_id', tenantId)
-    .maybeSingle()
-  if (!s?.tds_enabled) return slip
+  // Use pre-fetched TDS settings when available — avoids per-employee statutory query
+  let tdsEnabled: boolean
+  let tdsDefaultRegime: string
+  if (ctx) {
+    tdsEnabled       = ctx.tdsEnabled
+    tdsDefaultRegime = ctx.tdsDefaultRegime
+  } else {
+    const { data: s } = await supabase
+      .from('payroll_statutory_settings')
+      .select('tds_enabled, tds_default_regime')
+      .eq('tenant_id', tenantId)
+      .maybeSingle()
+    tdsEnabled       = s?.tds_enabled       ?? false
+    tdsDefaultRegime = s?.tds_default_regime ?? 'new'
+  }
+  if (!tdsEnabled) return slip
 
   const fy = financialYearOf(month)
   const fyStart = parseInt(fy.split('-')[0], 10)
@@ -80,7 +94,7 @@ async function applyTdsForRun(
     .eq('tenant_id', tenantId).eq('employee_id', employeeId)
     .eq('financial_year', fy)
     .maybeSingle()
-  const regime = ((election?.regime ?? s.tds_default_regime) ?? 'new') as 'old' | 'new'
+  const regime = ((election?.regime ?? tdsDefaultRegime) ?? 'new') as 'old' | 'new'
 
   // Prior FY slips → YTD gross (for projection) and YTD TDS (for true-up).
   const { data: prior } = await supabase
@@ -141,7 +155,7 @@ async function applyTdsForRun(
     },
     alreadyDeducted,
     remainingMonths,
-  })
+  }, ctx?.taxTableCache)
   return applyTdsToSlip(slip, result.monthlyTDS)
 }
 
@@ -160,6 +174,7 @@ async function computeSlipWithStatutory(
   tenantId: string,
   args: Parameters<typeof computePayrollSlip>[0],
   month: string,
+  ctx?: TenantPayrollCtx,
 ): Promise<PayrollSlipResult> {
   let slipArgs = args
   let denomWarning: string | undefined
@@ -186,11 +201,11 @@ async function computeSlipWithStatutory(
     ? { ...base0, warning: [base0.warning, denomWarning].filter(Boolean).join(' ') }
     : base0
   if (!base.component_breakdown.length) return base
-  const params   = await resolveEmployeeStatutoryParams(supabase, tenantId, args.employeeId, month)
+  const params   = await resolveEmployeeStatutoryParams(supabase, tenantId, args.employeeId, month, ctx?.statutoryCache)
   const calMonth = Number(month.slice(5, 7))
   const withStat = applyStatutoryToSlip(base, params, calMonth).slip   // spread preserves base.warning
   // Inject TDS (income tax) if enabled — PF/ESI/PT engines don't cover it.
-  return applyTdsForRun(supabase, tenantId, args.employeeId, month, withStat)
+  return applyTdsForRun(supabase, tenantId, args.employeeId, month, withStat, ctx)
 }
 import {
   validatePayrollSlipPayload,
@@ -230,6 +245,20 @@ import { durableQueue } from '../../lib/durable-queue.js'
 import { serverError, notFound, forbidden, validationError, conflictError, ErrorCode } from '../../lib/api-errors.js'
 
 const monthRe = /^\d{4}-\d{2}$/
+
+/** Per-employee timeout for dry-run computation (ms). */
+const DRY_RUN_EMP_TIMEOUT_MS = 30_000
+
+/** Auto-enable summary_only when the tenant has more than this many employees. */
+const SUMMARY_ONLY_AUTO_THRESHOLD = 200
+
+/** Tenant-level config pre-fetched once per run to avoid per-employee N+1 queries. */
+type TenantPayrollCtx = {
+  tdsEnabled:       boolean
+  tdsDefaultRegime: 'old' | 'new'
+  taxTableCache:    TaxTableCache
+  statutoryCache:   StatutoryTenantCache
+}
 
 /**
  * checkFreezeGuard — shared helper for payroll write operations.
@@ -529,22 +558,24 @@ async function executePayrollRun(
   await supabase.from('payroll_runs').update({ status: 'processing' }).eq('id', runId)
 
   // Fetch all active employees
-  const { data: employees, error: empErr } = await supabase
-    .from('employees')
-    .select('id, first_name, last_name, employee_code')
-    .eq('tenant_id', tenantId)
-    .eq('status', 'active')
-    .order('employee_code')
-
-  if (empErr) {
+  let empList: Array<{ id: string; first_name: string; last_name: string; employee_code: string }>
+  try {
+    empList = await fetchAllRows((from, to) =>
+      supabase
+        .from('employees')
+        .select('id, first_name, last_name, employee_code')
+        .eq('tenant_id', tenantId)
+        .eq('status', 'active')
+        .order('employee_code')
+        .range(from, to),
+    ) as typeof empList
+  } catch (empErr: any) {
     log.error({ err: empErr, run_id: runId, month, tenant_id: tenantId }, 'payroll run job: failed to fetch employees')
     await supabase.from('payroll_runs')
-      .update({ status: 'failed', error_message: `Employee fetch failed: ${empErr.message}` })
+      .update({ status: 'failed', error_message: 'Failed to fetch employee list — check DB connectivity and retry' })
       .eq('id', runId)
     return
   }
-
-  const empList = (employees ?? []) as Array<{ id: string; first_name: string; last_name: string; employee_code: string }>
 
   // Update employee_count now that we know it
   await supabase.from('payroll_runs').update({ employee_count: empList.length }).eq('id', runId)
@@ -556,7 +587,7 @@ async function executePayrollRun(
   } catch (wdErr: any) {
     log.error({ err: wdErr, run_id: runId, month, tenant_id: tenantId }, 'payroll run job: holiday calendar query failed — run aborted')
     await supabase.from('payroll_runs')
-      .update({ status: 'failed', error_message: `Working-day count failed: ${wdErr?.message}` })
+      .update({ status: 'failed', error_message: 'Failed to compute working days — verify the holiday calendar and retry' })
       .eq('id', runId)
     return
   }
@@ -576,6 +607,49 @@ async function executePayrollRun(
   // the DELETE cannot affect another tenant's slips if runId is ever replayed
   // or reconstructed in a durable-queue edge case.
   await supabase.from('payroll_slips').delete().eq('run_id', runId).eq('tenant_id', tenantId)
+
+  // Pre-fetch tenant-level config once to eliminate per-employee N+1 DB queries
+  const fy        = financialYearOf(month)
+  const monthDate = `${month}-01`
+  let tenantCtx: TenantPayrollCtx | undefined
+  try {
+    const [tdsResult, taxCache, epfResult, esiResult] = await Promise.all([
+      supabase
+        .from('payroll_statutory_settings')
+        .select('tds_enabled, tds_default_regime')
+        .eq('tenant_id', tenantId)
+        .maybeSingle(),
+      fetchTaxTableCache(supabase, fy),
+      supabase
+        .from('epf_config').select('*').eq('tenant_id', tenantId)
+        .lte('effective_from', monthDate)
+        .or(`effective_to.is.null,effective_to.gte.${monthDate}`)
+        .order('effective_from', { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+      supabase
+        .from('esi_config').select('*').eq('tenant_id', tenantId)
+        .lte('effective_from', monthDate)
+        .or(`effective_to.is.null,effective_to.gte.${monthDate}`)
+        .order('effective_from', { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+    ])
+    if (tdsResult.error) log.warn({ err: tdsResult.error, tenant_id: tenantId }, 'payroll run: TDS settings query error — TDS may be disabled for this run')
+    if (epfResult.error)  log.warn({ err: epfResult.error,  tenant_id: tenantId }, 'payroll run: EPF config query error — per-employee fallback will apply')
+    if (esiResult.error)  log.warn({ err: esiResult.error,  tenant_id: tenantId }, 'payroll run: ESI config query error — per-employee fallback will apply')
+    tenantCtx = {
+      tdsEnabled:       tdsResult.data?.tds_enabled       ?? false,
+      tdsDefaultRegime: (tdsResult.data?.tds_default_regime ?? 'new') as 'old' | 'new',
+      taxTableCache:    taxCache,
+      statutoryCache:   { epfConfigRow: epfResult.data, esiConfigRow: esiResult.data },
+    }
+  } catch (ctxErr: any) {
+    log.warn(
+      { err: ctxErr, month, tenant_id: tenantId },
+      'payroll run: tenant config pre-fetch failed — falling back to per-employee queries',
+    )
+  }
 
   // ── Per-employee processing loop ──────────────────────────────────────────
   const succeededSlips: PayrollSlipResult[] = []
@@ -623,7 +697,7 @@ async function executePayrollRun(
         log.warn({ ...empCtx, warnings: compValidation.warnings }, 'payroll: compensation warnings (non-blocking)')
       }
 
-      const result   = await computeSlipWithStatutory(supabase, tenantId, { tenantId, employeeId: emp.id, month, compensation, attendance, total_working_days, advance_loan_deductions: advLoanDeductions }, month)
+      const result   = await computeSlipWithStatutory(supabase, tenantId, { tenantId, employeeId: emp.id, month, compensation, attendance, total_working_days, advance_loan_deductions: advLoanDeductions }, month, tenantCtx)
       const slipRow  = buildSlipRow(tenantId, runId, result, month)
       const slipValid = validatePayrollSlipPayload(slipRow, { employeeId: emp.id, month })
 
@@ -757,12 +831,18 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       notes:   z.string().max(500).optional(),
       /** Compute and validate all slips without writing to the DB. */
       dry_run: z.boolean().optional().default(false),
+      /** Return only summary fields (net_pay, gross_pay, status) per employee.
+       *  Auto-enabled when employee count exceeds SUMMARY_ONLY_AUTO_THRESHOLD. */
+      summary_only: z.boolean().optional().default(false),
+      /** Scope the dry run to a specific subset of employees (UUIDs).
+       *  Omit to run for all active employees. */
+      employee_ids: z.array(z.string().uuid()).min(1).max(500).optional(),
     })
     const parsed = schema.safeParse(req.body)
     if (!parsed.success) {
       return validationError(reply, 'VALIDATION_ERROR', parsed.error.issues[0]?.message ?? 'Validation failed')
     }
-    const { month, notes, dry_run } = parsed.data
+    const { month, notes, dry_run, summary_only, employee_ids } = parsed.data
     const tenantId = req.tenantId as string
 
     // ── Guard: block payroll runs for future months ───────────────────────────
@@ -862,17 +942,39 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
 
     // ── DRY RUN: compute + validate without any DB writes ───────────────────
     if (dry_run) {
-      // Fetch employees + working days synchronously (dry runs are fast)
-      const { data: dryEmployees, error: dryEmpErr } = await fastify.supabase
-        .from('employees')
-        .select('id, first_name, last_name, employee_code')
-        .eq('tenant_id', tenantId)
-        .eq('status', 'active')
-        .order('employee_code')
-      if (dryEmpErr) {
+      // Fetch employees — either the requested subset or all active employees
+      let empList: Array<{ id: string; first_name: string; last_name: string; employee_code: string }>
+      let filterWarning: string | undefined
+      try {
+        if (employee_ids && employee_ids.length > 0) {
+          // Targeted dry run: only the requested employees (validated against tenant + active)
+          const { data, error } = await fastify.supabase
+            .from('employees')
+            .select('id, first_name, last_name, employee_code')
+            .eq('tenant_id', tenantId)
+            .eq('status', 'active')
+            .in('id', employee_ids)
+            .order('employee_code')
+          if (error) throw error
+          empList = (data ?? []) as typeof empList
+          if (empList.length === 0) {
+            filterWarning = `All ${employee_ids.length} provided employee_ids were inactive or not found in this tenant`
+            req.log.warn({ employee_ids, tenant_id: tenantId }, `payroll dry run: ${filterWarning}`)
+          }
+        } else {
+          empList = await fetchAllRows((from, to) =>
+            fastify.supabase
+              .from('employees')
+              .select('id, first_name, last_name, employee_code')
+              .eq('tenant_id', tenantId)
+              .eq('status', 'active')
+              .order('employee_code')
+              .range(from, to),
+          ) as typeof empList
+        }
+      } catch (dryEmpErr: any) {
         return serverError(req, reply, dryEmpErr, ErrorCode.QUERY_FAILED, 'Failed to fetch employees')
       }
-      const empList = (dryEmployees ?? []) as Array<{ id: string; first_name: string; last_name: string; employee_code: string }>
       const [runYear, runMon] = month.split('-').map(Number)
       const runPeriodEnd      = new Date(runYear, runMon, 0).toISOString().slice(0, 10)
       let total_working_days: number
@@ -886,6 +988,49 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
         { event: 'payroll_dry_run_start', month, employee_count: empList.length, tenant_id: tenantId },
         'payroll dry run started',
       )
+
+      // ── Pre-fetch tenant-level config (eliminates ~14k redundant queries at 2k employees) ──
+      const fy = financialYearOf(month)
+      const monthDate = `${month}-01`
+      let tenantCtx: TenantPayrollCtx | undefined
+      try {
+        const [tdsResult, taxCache, epfResult, esiResult] = await Promise.all([
+          fastify.supabase
+            .from('payroll_statutory_settings')
+            .select('tds_enabled, tds_default_regime')
+            .eq('tenant_id', tenantId)
+            .maybeSingle(),
+          fetchTaxTableCache(fastify.supabase, fy),
+          fastify.supabase
+            .from('epf_config').select('*').eq('tenant_id', tenantId)
+            .lte('effective_from', monthDate)
+            .or(`effective_to.is.null,effective_to.gte.${monthDate}`)
+            .order('effective_from', { ascending: false })
+            .limit(1)
+            .maybeSingle(),
+          fastify.supabase
+            .from('esi_config').select('*').eq('tenant_id', tenantId)
+            .lte('effective_from', monthDate)
+            .or(`effective_to.is.null,effective_to.gte.${monthDate}`)
+            .order('effective_from', { ascending: false })
+            .limit(1)
+            .maybeSingle(),
+        ])
+        if (tdsResult.error) req.log.warn({ err: tdsResult.error, tenant_id: tenantId }, 'payroll dry run: TDS settings query error — TDS may be disabled for this run')
+        if (epfResult.error)  req.log.warn({ err: epfResult.error,  tenant_id: tenantId }, 'payroll dry run: EPF config query error — per-employee fallback will apply')
+        if (esiResult.error)  req.log.warn({ err: esiResult.error,  tenant_id: tenantId }, 'payroll dry run: ESI config query error — per-employee fallback will apply')
+        tenantCtx = {
+          tdsEnabled:       tdsResult.data?.tds_enabled       ?? false,
+          tdsDefaultRegime: (tdsResult.data?.tds_default_regime ?? 'new') as 'old' | 'new',
+          taxTableCache:    taxCache,
+          statutoryCache:   { epfConfigRow: epfResult.data, esiConfigRow: esiResult.data },
+        }
+      } catch (ctxErr: any) {
+        req.log.warn(
+          { err: ctxErr, month, tenant_id: tenantId },
+          'payroll dry run: tenant config pre-fetch failed — falling back to per-employee queries',
+        )
+      }
 
       type DryRunResult = {
         employee_id:              string
@@ -901,58 +1046,81 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       const dryResults: DryRunResult[] = []
 
       await runConcurrent(empList, async (emp) => {
-        try {
-          const [compensation, attendance] = await Promise.all([
-            fetchActiveCompensation(fastify.supabase, tenantId, emp.id, runPeriodEnd),
-            fetchAttendanceSummary(fastify.supabase, tenantId, emp.id, month),
-          ])
+        // Returns a result rather than pushing directly — this prevents a
+        // late-resolving promise from writing a second entry after the timeout
+        // has already recorded this employee as failed (double-push race).
+        const processEmployee = async (): Promise<DryRunResult> => {
+          try {
+            const [compensation, attendance] = await Promise.all([
+              fetchActiveCompensation(fastify.supabase, tenantId, emp.id, runPeriodEnd),
+              fetchAttendanceSummary(fastify.supabase, tenantId, emp.id, month),
+            ])
 
-          const compValidation = validateCompensation(
-            compensation, { employeeId: emp.id, month }, runPeriodEnd,
-          )
+            const compValidation = validateCompensation(
+              compensation, { employeeId: emp.id, month }, runPeriodEnd,
+            )
 
-          if (compValidation.blocking_errors.length > 0) {
-            dryResults.push({
+            if (compValidation.blocking_errors.length > 0) {
+              return {
+                employee_id:   emp.id,
+                employee_code: emp.employee_code,
+                status:        'failed',
+                failure_stage: 'compensation_validation',
+                error:         compValidation.blocking_errors[0],
+                validation_errors: compValidation.blocking_errors,
+              }
+            }
+
+            const advLoanDeductions = await fetchAdvanceLoanDeductions(
+              fastify.supabase, tenantId, emp.id, month,
+            )
+
+            const result  = await computeSlipWithStatutory(fastify.supabase, tenantId, {
+              tenantId, employeeId: emp.id, month, compensation, attendance, total_working_days,
+              advance_loan_deductions: advLoanDeductions,
+            }, month, tenantCtx)
+            const slipRow    = buildSlipRow(tenantId, 'dry-run', result, month)
+            const slipValid  = validatePayrollSlipPayload(slipRow, { employeeId: emp.id, month })
+
+            return {
+              employee_id:            emp.id,
+              employee_code:          emp.employee_code,
+              status:                 slipValid.valid ? 'ok' : 'failed',
+              result,
+              compensation_warnings:  compValidation.warnings.length > 0 ? compValidation.warnings : undefined,
+              validation_errors:      !slipValid.valid ? slipValid.errors : undefined,
+              failure_stage:          !slipValid.valid ? 'slip_validation' : undefined,
+              error:                  !slipValid.valid ? slipValid.errors[0] : undefined,
+            }
+          } catch (err: any) {
+            return {
               employee_id:   emp.id,
               employee_code: emp.employee_code,
               status:        'failed',
-              failure_stage: 'compensation_validation',
-              error:         compValidation.blocking_errors[0],
-              validation_errors: compValidation.blocking_errors,
-            })
-            return
+              failure_stage: 'data_fetch',
+              error:         err?.message ?? 'Unexpected error',
+            }
           }
-
-          const advLoanDeductions = await fetchAdvanceLoanDeductions(
-            fastify.supabase, tenantId, emp.id, month,
-          )
-
-          const result  = await computeSlipWithStatutory(fastify.supabase, tenantId, {
-            tenantId, employeeId: emp.id, month, compensation, attendance, total_working_days,
-            advance_loan_deductions: advLoanDeductions,
-          }, month)
-          const slipRow    = buildSlipRow(tenantId, 'dry-run', result, month)
-          const slipValid  = validatePayrollSlipPayload(slipRow, { employeeId: emp.id, month })
-
-          dryResults.push({
-            employee_id:            emp.id,
-            employee_code:          emp.employee_code,
-            status:                 slipValid.valid ? 'ok' : 'failed',
-            result,
-            compensation_warnings:  compValidation.warnings.length > 0 ? compValidation.warnings : undefined,
-            validation_errors:      !slipValid.valid ? slipValid.errors : undefined,
-            failure_stage:          !slipValid.valid ? 'slip_validation' : undefined,
-            error:                  !slipValid.valid ? slipValid.errors[0] : undefined,
-          })
-        } catch (err: any) {
-          dryResults.push({
-            employee_id:   emp.id,
-            employee_code: emp.employee_code,
-            status:        'failed',
-            failure_stage: 'data_fetch',
-            error:         err?.message ?? 'Unexpected error',
-          })
         }
+
+        // Race computation against a timeout. The timer resolves with a
+        // failed result; clearTimeout prevents a spurious late resolve when
+        // computation wins the race.
+        let timeoutHandle: ReturnType<typeof setTimeout>
+        const empResult = await Promise.race([
+          processEmployee(),
+          new Promise<DryRunResult>(resolve => {
+            timeoutHandle = setTimeout(() => resolve({
+              employee_id:   emp.id,
+              employee_code: emp.employee_code,
+              status:        'failed' as const,
+              failure_stage: 'data_fetch' as const,
+              error:         `Timed out after ${DRY_RUN_EMP_TIMEOUT_MS / 1000}s`,
+            }), DRY_RUN_EMP_TIMEOUT_MS)
+          }),
+        ])
+        clearTimeout(timeoutHandle!)
+        dryResults.push(empResult)
       })
 
       const okCount   = dryResults.filter(r => r.status === 'ok').length
@@ -963,6 +1131,9 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
         'payroll dry run complete',
       )
 
+      // Use summary_only when explicitly requested or when employee count is large
+      const useSummary = summary_only || empList.length > SUMMARY_ONLY_AUTO_THRESHOLD
+
       return reply.send({
         dry_run:           true,
         month,
@@ -970,7 +1141,20 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
         total_working_days,
         ok_count:          okCount,
         failed_count:      failCount,
-        results:           dryResults,
+        summary_only:      useSummary,
+        ...(filterWarning ? { warnings: [filterWarning] } : {}),
+        results:           useSummary
+          ? dryResults.map(r => ({
+              employee_id:   r.employee_id,
+              employee_code: r.employee_code,
+              status:        r.status,
+              net_pay:       r.result?.net_pay,
+              gross_pay:     r.result?.gross_pay,
+              total_deductions: r.result?.total_deductions,
+              error:         r.error,
+              failure_stage: r.failure_stage,
+            }))
+          : dryResults,
       })
     }
 
@@ -2042,21 +2226,15 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       .single()
     if (!run) return notFound(reply, 'NOT_FOUND', 'Run not found')
 
-    const EXPORT_LIMIT = 10_000
-    const { data: slips, error: slipsError } = await fastify.supabase
-      .from('payroll_slips')
-      .select(`
-        employee_id, month,
-        total_working_days, payable_days, lop_days, overtime_hours,
-        ctc_monthly, gross_pay, lop_amount, total_deductions, net_pay,
-        employees(first_name, last_name, employee_code)
-      `)
-      .eq('run_id', id)
-      .eq('tenant_id', req.tenantId)
-      .limit(EXPORT_LIMIT)
-
-    if (slipsError) return serverError(req, reply, slipsError, ErrorCode.QUERY_FAILED, 'Failed to export payroll slips')
-    if ((slips?.length ?? 0) >= EXPORT_LIMIT) {
+    const slips = await fetchAllRows((from, to) =>
+      fastify.supabase
+        .from('payroll_slips')
+        .select(`employee_id, month, total_working_days, payable_days, lop_days, overtime_hours, ctc_monthly, gross_pay, lop_amount, total_deductions, net_pay, employees(first_name, last_name, employee_code)`)
+        .eq('run_id', id)
+        .eq('tenant_id', req.tenantId)
+        .range(from, to),
+    )
+    if (slips.length > 10_000) {
       return reply.code(422).send({ error: 'EXPORT_TOO_LARGE', message: 'This payroll run exceeds the online export limit of 10,000 rows. Please contact support for a bulk export.' })
     }
 
@@ -2066,7 +2244,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       'CTC Monthly', 'Gross Pay', 'LOP Amount', 'Deductions', 'Net Pay',
     ].join(',')
 
-    const rows = (slips ?? []).map((r: any) => {
+    const rows = slips.map((r: any) => {
       const name = r.employees ? `${r.employees.first_name} ${r.employees.last_name}` : ''
       return [
         r.employees?.employee_code ?? '',
@@ -2115,20 +2293,15 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
 
     // Fetch current slips + previous run in parallel
     const VARIANCE_LIMIT = 10_000
-    const [
-      { data: currentSlips, error: currSlipsError },
-      { data: prevRun },
-    ] = await Promise.all([
-      fastify.supabase
-        .from('payroll_slips')
-        .select(`
-          employee_id, gross_pay, net_pay, lop_days, lop_amount,
-          payable_days, total_deductions,
-          employees(first_name, last_name, employee_code)
-        `)
-        .eq('run_id', id)
-        .eq('tenant_id', tenantId)
-        .limit(VARIANCE_LIMIT),
+    const [currentSlips, { data: prevRun }] = await Promise.all([
+      fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('payroll_slips')
+          .select(`employee_id, gross_pay, net_pay, lop_days, lop_amount, payable_days, total_deductions, employees(first_name, last_name, employee_code)`)
+          .eq('run_id', id)
+          .eq('tenant_id', tenantId)
+          .range(from, to),
+      ),
       fastify.supabase
         .from('payroll_runs')
         .select('id, month')
@@ -2139,13 +2312,12 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
         .maybeSingle(),
     ])
 
-    if (currSlipsError) return serverError(req, reply, currSlipsError, ErrorCode.QUERY_FAILED, 'Failed to fetch current slips for variance report')
-    if ((currentSlips?.length ?? 0) >= VARIANCE_LIMIT) {
+    if (currentSlips.length > VARIANCE_LIMIT) {
       return reply.code(422).send({ error: 'EXPORT_TOO_LARGE', message: 'This payroll run exceeds the variance report limit of 10,000 rows. Please contact support for a bulk export.' })
     }
 
-    const totalCurrGross = r2((currentSlips ?? []).reduce((s: number, r: any) => s + r.gross_pay, 0))
-    const totalCurrNet   = r2((currentSlips ?? []).reduce((s: number, r: any) => s + r.net_pay,   0))
+    const totalCurrGross = r2(currentSlips.reduce((s: number, r: any) => s + r.gross_pay, 0))
+    const totalCurrNet   = r2(currentSlips.reduce((s: number, r: any) => s + r.net_pay,   0))
 
     // No previous run — return current totals with no comparison
     if (!prevRun) {
@@ -2154,7 +2326,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
         previous_month: prevMonth,
         has_previous:   false,
         summary: {
-          total_employees:     (currentSlips ?? []).length,
+          total_employees:     currentSlips.length,
           employees_changed:   0,
           gross_change:        0,
           gross_change_pct:    0,
@@ -2170,19 +2342,19 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
     }
 
     // Fetch previous run slips
-    const { data: prevSlips, error: prevSlipsError } = await fastify.supabase
-      .from('payroll_slips')
-      .select('employee_id, gross_pay, net_pay, lop_days, lop_amount, payable_days, total_deductions')
-      .eq('run_id', prevRun.id)
-      .eq('tenant_id', tenantId)
-      .limit(VARIANCE_LIMIT)
-
-    if (prevSlipsError) return serverError(req, reply, prevSlipsError, ErrorCode.QUERY_FAILED, 'Failed to fetch previous slips for variance report')
-    if ((prevSlips?.length ?? 0) >= VARIANCE_LIMIT) {
+    const prevSlips = await fetchAllRows((from, to) =>
+      fastify.supabase
+        .from('payroll_slips')
+        .select('employee_id, gross_pay, net_pay, lop_days, lop_amount, payable_days, total_deductions')
+        .eq('run_id', prevRun.id)
+        .eq('tenant_id', tenantId)
+        .range(from, to),
+    )
+    if (prevSlips.length > VARIANCE_LIMIT) {
       return reply.code(422).send({ error: 'EXPORT_TOO_LARGE', message: 'The previous payroll run exceeds the variance report limit of 10,000 rows. Please contact support for a bulk export.' })
     }
 
-    const prevMap = new Map<string, any>((prevSlips ?? []).map((s: any) => [s.employee_id, s]))
+    const prevMap = new Map<string, any>(prevSlips.map((s: any) => [s.employee_id, s]))
 
     type EmpVariance = {
       employee_id:   string
@@ -2194,7 +2366,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       is_new:   boolean
     }
 
-    const employees: EmpVariance[] = (currentSlips ?? []).map((curr: any) => {
+    const employees: EmpVariance[] = currentSlips.map((curr: any) => {
       const prev = prevMap.get(curr.employee_id) ?? null
       const emp  = curr.employees as { first_name: string; last_name: string; employee_code: string } | null
       return {
@@ -2228,8 +2400,8 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
     // Largest absolute net-pay movers first
     employees.sort((a, b) => Math.abs(b.diff.net_pay) - Math.abs(a.diff.net_pay))
 
-    const totalPrevGross = r2((prevSlips ?? []).reduce((s: number, r: any) => s + r.gross_pay, 0))
-    const totalPrevNet   = r2((prevSlips ?? []).reduce((s: number, r: any) => s + r.net_pay,   0))
+    const totalPrevGross = r2(prevSlips.reduce((s: number, r: any) => s + r.gross_pay, 0))
+    const totalPrevNet   = r2(prevSlips.reduce((s: number, r: any) => s + r.net_pay,   0))
     const grossChange    = r2(totalCurrGross - totalPrevGross)
     const netChange      = r2(totalCurrNet   - totalPrevNet)
 
@@ -2238,7 +2410,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       previous_month: prevMonth,
       has_previous:   true,
       summary: {
-        total_employees:     (currentSlips ?? []).length,
+        total_employees:     currentSlips.length,
         employees_changed:   employees.filter(e => e.diff.net_pay !== 0 || e.diff.gross_pay !== 0).length,
         gross_change:        grossChange,
         gross_change_pct:    totalPrevGross > 0 ? r2((grossChange / totalPrevGross) * 100) : 0,
@@ -4120,22 +4292,23 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
     const parsed   = qSchema.safeParse(req.query)
     const months   = parsed.success ? parsed.data.months : 3
 
-    const [ledgersRes, payoutRes] = await Promise.all([
+    const [ledgersRes, payouts] = await Promise.all([
       fastify.supabase
         .from('payroll_financial_ledgers')
         .select('id, ledger_month, ledger_type, ledger_status, total_debit, total_credit')
         .eq('tenant_id', tenantId)
         .order('ledger_month', { ascending: false })
         .limit(months * 3),
-      fastify.supabase
-        .from('payroll_payout_reconciliation')
-        .select('expected_amount, paid_amount, payment_status')
-        .eq('tenant_id', tenantId)
-        .limit(2000),
+      fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('payroll_payout_reconciliation')
+          .select('expected_amount, paid_amount, payment_status')
+          .eq('tenant_id', tenantId)
+          .range(from, to),
+      ),
     ])
 
-    const ledgers  = (ledgersRes.data ?? []) as any[]
-    const payouts  = (payoutRes.data  ?? []) as any[]
+    const ledgers = (ledgersRes.data ?? []) as any[]
 
     const totalPayrollLiability = ledgers
       .filter(l => l.ledger_type === 'payroll' && l.ledger_status !== 'reversed')

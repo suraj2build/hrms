@@ -120,16 +120,14 @@ export default async function operationalHealthRoutes(fastify: FastifyInstance) 
         .from('attendance_reconciliation_issues')
         .select('severity', { count: 'exact', head: false })
         .eq('tenant_id', tenantId)
-        .eq('resolved', false)
-        .limit(2000),
+        .eq('resolved', false),
 
       // 3. Open leave reconciliation issues
       fastify.supabase
         .from('leave_reconciliation_issues')
         .select('severity', { count: 'exact', head: false })
         .eq('tenant_id', tenantId)
-        .eq('resolved', false)
-        .limit(2000),
+        .eq('resolved', false),
 
       // 4. Scheduler heartbeats
       fastify.supabase
@@ -185,8 +183,8 @@ export default async function operationalHealthRoutes(fastify: FastifyInstance) 
       ? (leaveOpenResult.value.data ?? []) as any[]
       : []
 
-    function severityCounts(issues: any[]) {
-      const c = { critical: 0, error: 0, warning: 0, info: 0, total: issues.length }
+    function severityCounts(issues: any[], realCount?: number) {
+      const c = { critical: 0, error: 0, warning: 0, info: 0, total: realCount ?? issues.length }
       for (const i of issues) {
         if (i.severity in c) (c as any)[i.severity]++
       }
@@ -194,8 +192,8 @@ export default async function operationalHealthRoutes(fastify: FastifyInstance) 
     }
 
     const reconciliation = {
-      attendance: severityCounts(attIssues),
-      leave:      severityCounts(leaveIssues),
+      attendance: severityCounts(attIssues, attendanceOpenResult.status === 'fulfilled' ? (attendanceOpenResult.value.count ?? attIssues.length) : attIssues.length),
+      leave:      severityCounts(leaveIssues, leaveOpenResult.status === 'fulfilled' ? (leaveOpenResult.value.count ?? leaveIssues.length) : leaveIssues.length),
     }
 
     // ── Build scheduler heartbeats section ────────────────────────────────────

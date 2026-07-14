@@ -28,6 +28,7 @@ import type { FastifyInstance } from 'fastify'
 import Anthropic from '@anthropic-ai/sdk'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { logAction } from '../../lib/audit-service.js'
+import { fetchAllRows } from '../../lib/supabase-paginate.js'
 
 /** Weighted readiness score (0–10 scale) from the 6 scorecard dimensions. */
 function computeWeightedScore(c: {
@@ -195,22 +196,24 @@ export default async function successionRoutes(fastify: FastifyInstance) {
     const tenantId = req.tenantId
     const { status = 'active' } = req.query as { status?: string }
 
-    const { data, error } = await supabase
-      .from('succession_plans')
-      .select(`
-        id, position_title, department, risk_level, status, notes, created_at,
-        employees!succession_plans_incumbent_id_fkey(id, first_name, last_name, employee_code)
-      `)
-      .eq('tenant_id', tenantId)
-      .eq('status', status)
-      .order('risk_level', { ascending: false })
-      .order('position_title')
-      .limit(500)
-
-    if (error) return reply.status(500).send({ error: error.message })
+    let data: any[]
+    try {
+      data = await fetchAllRows((from, to) =>
+        supabase
+          .from('succession_plans')
+          .select(`id, position_title, department, risk_level, status, notes, created_at, employees!succession_plans_incumbent_id_fkey(id, first_name, last_name, employee_code)`)
+          .eq('tenant_id', tenantId)
+          .eq('status', status)
+          .order('risk_level', { ascending: false })
+          .order('position_title')
+          .range(from, to),
+      )
+    } catch (err: any) {
+      return reply.status(500).send({ error: err.message })
+    }
 
     // Attach candidate counts
-    const planIds = (data ?? []).map(p => p.id)
+    const planIds = data.map(p => p.id)
     const countMap: Record<string, number> = {}
     if (planIds.length > 0) {
       const { data: counts } = await supabase
@@ -221,7 +224,7 @@ export default async function successionRoutes(fastify: FastifyInstance) {
       ;(counts ?? []).forEach(c => { countMap[c.plan_id] = (countMap[c.plan_id] ?? 0) + 1 })
     }
 
-    return reply.send({ data: (data ?? []).map(p => ({ ...p, candidate_count: countMap[p.id] ?? 0 })) })
+    return reply.send({ data: data.map(p => ({ ...p, candidate_count: countMap[p.id] ?? 0 })) })
   })
 
   // ── Get single plan with candidates ──────────────────────────────────────
@@ -686,20 +689,22 @@ export default async function successionRoutes(fastify: FastifyInstance) {
     const { sessionId } = req.params as { sessionId: string }
     const tenantId      = req.tenantId
 
-    const [sessionResult, changesResult] = await Promise.all([
+    const changesData = await fetchAllRows((from, to) =>
+      supabase.from('calibration_changes')
+        .select(`id, field_changed, old_value, new_value, notes, created_at, employee:employees!employee_id(first_name, last_name, employee_code)`)
+        .eq('session_id', sessionId).eq('tenant_id', tenantId)
+        .order('created_at', { ascending: false })
+        .range(from, to),
+    ).catch(() => [] as any[])
+
+    const [sessionResult] = await Promise.all([
       supabase.from('calibration_sessions')
         .select('id, title, status, created_at, participants, closed_at')
         .eq('id', sessionId).eq('tenant_id', tenantId).single(),
-      supabase.from('calibration_changes')
-        .select(`id, field_changed, old_value, new_value, notes, created_at,
-          employee:employees!employee_id(first_name, last_name, employee_code)`)
-        .eq('session_id', sessionId).eq('tenant_id', tenantId)
-        .order('created_at', { ascending: false })
-        .limit(500),
     ])
 
     if (sessionResult.error || !sessionResult.data) return reply.status(404).send({ error: 'Session not found' })
-    return reply.send({ data: { ...sessionResult.data, changes: changesResult.data ?? [] } })
+    return reply.send({ data: { ...sessionResult.data, changes: changesData } })
   })
 
   fastify.post('/calibration/:sessionId/changes', hrAuth, async (req: any, reply) => {

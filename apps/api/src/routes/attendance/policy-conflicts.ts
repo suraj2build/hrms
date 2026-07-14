@@ -7,6 +7,7 @@
  */
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
+import { fetchAllRows } from '../../lib/supabase-paginate.js'
 
 const dateRe  = /^\d{4}-\d{2}-\d{2}$/
 const monthRe = /^\d{4}-\d{2}$/
@@ -123,23 +124,21 @@ export default async function attendancePolicyConflictsRoute(fastify: FastifyIns
     const month = parsed.data.month ?? currentMonthStr()
     const { from, to } = monthDateRange(month)
 
-    const { data, error } = await fastify.supabase
-      .from('attendance_policy_conflict_log')
-      .select('conflict_type, severity:conflict_severity, payroll_impacting')
-      .eq('tenant_id', req.tenantId)
-      .gte('date', from)
-      .lte('date', to)
-
-    if (error) {
+    let rows: Array<{ conflict_type: string; severity: string; payroll_impacting: boolean }>
+    try {
+      rows = await fetchAllRows((rangeFrom, rangeTo) =>
+        fastify.supabase
+          .from('attendance_policy_conflict_log')
+          .select('conflict_type, severity:conflict_severity, payroll_impacting')
+          .eq('tenant_id', req.tenantId)
+          .gte('date', from)
+          .lte('date', to)
+          .range(rangeFrom, rangeTo),
+      ) as Array<{ conflict_type: string; severity: string; payroll_impacting: boolean }>
+    } catch (error) {
       req.log.error({ err: error }, 'policy_conflict summary query failed')
       return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch policy conflict summary' })
     }
-
-    const rows = (data ?? []) as Array<{
-      conflict_type:     string
-      severity:          string
-      payroll_impacting: boolean
-    }>
 
     const by_type: Record<string, number>     = {}
     const by_severity: Record<string, number> = {}

@@ -24,6 +24,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { fetchAllRows } from '../../lib/supabase-paginate.js'
 
 const querySchema = z.object({
   month: z.string().regex(/^\d{4}-\d{2}$/, 'month must be YYYY-MM'),
@@ -52,13 +53,11 @@ export default async function attendanceDebugRawRoute(fastify: FastifyInstance) 
       const [y, m]     = month.split('-').map(Number)
       const toDate     = new Date(y, m, 0).toISOString().slice(0, 10)
 
-      // ── Run all queries in parallel ──────────────────────────────────────────
+      // ── Run bounded queries in parallel ──────────────────────────────────────
       const [
         totalCountResult,
         sampleRowsResult,
         nullStatusResult,
-        activeEmployeesResult,
-        dailyEmployeeIdsResult,
       ] = await Promise.all([
         // Total row count for this tenant + month
         fastify.supabase
@@ -79,32 +78,46 @@ export default async function attendanceDebugRawRoute(fastify: FastifyInstance) 
           .order('employee_id', { ascending: true })
           .limit(100),
 
-        // Rows where status IS NULL — should be 0 (engine always writes a status)
+        // Count of rows where status IS NULL — should be 0 (engine always writes a status)
         fastify.supabase
           .from('attendance_daily')
-          .select('employee_id, date', { count: 'exact', head: false })
+          .select('id', { count: 'exact', head: true })
           .eq('tenant_id', tenantId)
           .gte('date', fromDate)
           .lte('date', toDate)
-          .is('status', null)
-          .limit(10),
-
-        // All active employee IDs for this tenant (from the employees table)
-        fastify.supabase
-          .from('employees')
-          .select('id, employee_code')
-          .eq('tenant_id', tenantId)
-          .eq('status', 'active')
-          .order('employee_code'),
-
-        // All distinct employee_ids present in attendance_daily for this period
-        fastify.supabase
-          .from('attendance_daily')
-          .select('employee_id')
-          .eq('tenant_id', tenantId)
-          .gte('date', fromDate)
-          .lte('date', toDate),
+          .is('status', null),
       ])
+
+      // All active employees and all distinct employee_ids in attendance_daily —
+      // use fetchAllRows to bypass the 1000-row PostgREST cap
+      type EmpRow = { id: string; employee_code: string }
+      let activeEmployees: EmpRow[]
+      let dailyRows: { employee_id: string }[]
+      try {
+        ;[activeEmployees, dailyRows] = await Promise.all([
+          fetchAllRows((from, to) =>
+            fastify.supabase
+              .from('employees')
+              .select('id, employee_code')
+              .eq('tenant_id', tenantId)
+              .eq('status', 'active')
+              .order('employee_code')
+              .range(from, to),
+          ),
+          fetchAllRows((from, to) =>
+            fastify.supabase
+              .from('attendance_daily')
+              .select('employee_id')
+              .eq('tenant_id', tenantId)
+              .gte('date', fromDate)
+              .lte('date', toDate)
+              .range(from, to),
+          ),
+        ]) as [EmpRow[], { employee_id: string }[]]
+      } catch (err) {
+        req.log.error({ err }, 'debug-raw: employee/daily-emp fetch failed')
+        return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch employee data' })
+      }
 
       // ── Build status distribution from sample rows ───────────────────────────
       // Note: this is from the first 100 rows only — use total_rows for full picture
@@ -121,12 +134,8 @@ export default async function attendanceDebugRawRoute(fastify: FastifyInstance) 
       }
 
       // ── Employee ID cross-check ──────────────────────────────────────────────
-      type EmpRow = { id: string; employee_code: string }
-      const activeEmployees = (activeEmployeesResult.data ?? []) as EmpRow[]
-      const activeEmpIds    = new Set(activeEmployees.map(e => e.id))
-
-      const dailyRows       = (dailyEmployeeIdsResult.data ?? []) as { employee_id: string }[]
-      const dailyEmpIds     = new Set(dailyRows.map(r => r.employee_id))
+      const activeEmpIds = new Set(activeEmployees.map(e => e.id))
+      const dailyEmpIds  = new Set(dailyRows.map(r => r.employee_id))
 
       // IDs in attendance_daily that are NOT in the active employees table
       const orphanDailyIds  = [...dailyEmpIds].filter(id => !activeEmpIds.has(id))
@@ -150,7 +159,7 @@ export default async function attendanceDebugRawRoute(fastify: FastifyInstance) 
         sample_size:              rows.length,
         status_distribution_sample: statusDist,
         source_distribution_sample: sourceDist,
-        null_status_rows:         (nullStatusResult.data ?? []).length,
+        null_status_rows:         nullStatusResult.count ?? 0,
         active_employees:         activeEmployees.length,
         employees_in_daily:       dailyEmpIds.size,
         orphan_daily_ids_count:   orphanDailyIds.length,
@@ -166,8 +175,8 @@ export default async function attendanceDebugRawRoute(fastify: FastifyInstance) 
 
         // ── Row counts ────────────────────────────────────────────────────────
         total_rows:         totalCountResult.count ?? 0,
-        null_status_count:  (nullStatusResult.data ?? []).length,
-        null_status_samples: nullStatusResult.data ?? [],
+        null_status_count:  nullStatusResult.count ?? 0,
+        null_status_samples: [],
 
         // ── Status distribution (from first 100 rows) ─────────────────────────
         // If total_rows > 100, this is a sample; exact distribution needs SQL.

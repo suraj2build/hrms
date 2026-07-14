@@ -19,6 +19,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z }                    from 'zod'
 import { HR_ADMIN_ROLES }       from '../../lib/rbac.js'
+import { fetchAllRows }         from '../../lib/supabase-paginate.js'
 const dateRe   = /^\d{4}-\d{2}-\d{2}$/
 const monthRe  = /^\d{4}-\d{2}$/
 
@@ -75,13 +76,16 @@ export default async function executiveIntelligenceRoutes(fastify: FastifyInstan
       (new Date(range.to).getTime() - new Date(range.from).getTime()) / 86_400_000,
     ) + 1
 
-    const [dailyRes, employeeRes, separationRes] = await Promise.all([
-      fastify.supabase
-        .from('attendance_daily')
-        .select('status')
-        .eq('tenant_id', req.tenantId)
-        .gte('date', range.from)
-        .lte('date', range.to),
+    const [rows, employeeRes, separationRes] = await Promise.all([
+      fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('attendance_daily')
+          .select('status')
+          .eq('tenant_id', req.tenantId)
+          .gte('date', range.from)
+          .lte('date', range.to)
+          .range(from, to),
+      ),
 
       fastify.supabase
         .from('employees')
@@ -97,12 +101,6 @@ export default async function executiveIntelligenceRoutes(fastify: FastifyInstan
         .lte('last_working_date', range.to),
     ])
 
-    if (dailyRes.error) {
-      req.log.error({ err: dailyRes.error }, 'workforce stability attendance query failed')
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch attendance data' })
-    }
-
-    const rows         = dailyRes.data ?? []
     const total        = rows.length
     const presentCount = rows.filter((r: any) => r.status === 'present' || r.status === 'late').length
     const absentCount  = rows.filter((r: any) => r.status === 'absent').length
@@ -595,20 +593,16 @@ export default async function executiveIntelligenceRoutes(fastify: FastifyInstan
     const oldest = monthBoundaries[0]?.from ?? defaultRange(monthCount * 30).from
     const newest = monthBoundaries[monthBoundaries.length - 1]?.to ?? defaultRange(0).to
 
-    const { data: rows, error } = await fastify.supabase
-      .from('attendance_daily')
-      .select('date, status')
-      .eq('tenant_id', req.tenantId)
-      .gte('date', oldest)
-      .lte('date', newest)
-      .in('status', ['present', 'absent', 'late', 'half_day', 'leave'])
-
-    if (error) {
-      req.log.error({ err: error }, 'reliability trends query failed')
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch attendance data' })
-    }
-
-    const allRows = rows ?? []
+    const allRows = await fetchAllRows((from, to) =>
+      fastify.supabase
+        .from('attendance_daily')
+        .select('date, status')
+        .eq('tenant_id', req.tenantId)
+        .gte('date', oldest)
+        .lte('date', newest)
+        .in('status', ['present', 'absent', 'late', 'half_day', 'leave'])
+        .range(from, to),
+    )
 
     const trends = monthBoundaries.map(({ month, from, to }) => {
       const monthRows = allRows.filter((r: any) => r.date >= from && r.date <= to)

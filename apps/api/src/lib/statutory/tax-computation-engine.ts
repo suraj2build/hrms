@@ -103,6 +103,15 @@ interface Slab {
   base: number
 }
 
+// ── Pre-fetch cache types (exported for callers doing batch pre-fetch) ─────────
+
+export interface TaxTableCache {
+  slabsOld:  Slab[]
+  slabsNew:  Slab[]
+  stdCfgOld: ItStandardConfig
+  stdCfgNew: ItStandardConfig
+}
+
 // ── Hardcoded fallback slabs ──────────────────────────────────────────────────
 
 const FALLBACK_OLD_SLABS: Slab[] = [
@@ -168,7 +177,7 @@ function compute87ARebate(
 
 // ── DB config interface ───────────────────────────────────────────────────────
 
-interface ItStandardConfig {
+export interface ItStandardConfig {
   standard_deduction: number
   rebate_87a_limit: number
   rebate_87a_amount: number
@@ -224,6 +233,21 @@ async function loadStdConfig(
   return data as ItStandardConfig
 }
 
+/** Pre-fetch all tax table rows for a financial year in a single round-trip.
+ *  Pass the result to computeTaxWithDB to skip per-employee DB calls. */
+export async function fetchTaxTableCache(
+  supabase: any,
+  financialYear: string,
+): Promise<TaxTableCache> {
+  const [slabsOld, slabsNew, stdCfgOld, stdCfgNew] = await Promise.all([
+    loadSlabs(supabase, financialYear, 'old'),
+    loadSlabs(supabase, financialYear, 'new'),
+    loadStdConfig(supabase, financialYear, 'old'),
+    loadStdConfig(supabase, financialYear, 'new'),
+  ])
+  return { slabsOld, slabsNew, stdCfgOld, stdCfgNew }
+}
+
 // ── Core single-regime computation ───────────────────────────────────────────
 
 interface RegimeResult {
@@ -256,15 +280,14 @@ async function computeSingleRegime(
   supabase: any,
   input: TaxComputationInput,
   regime: 'old' | 'new',
+  cache?: TaxTableCache,
 ): Promise<RegimeResult> {
   const { financialYear, deductions, alreadyDeducted, remainingMonths } = input
   const trace: Array<{ step: string; description: string; value: number }> = []
 
-  // Load DB config
-  const [slabs, stdCfg] = await Promise.all([
-    loadSlabs(supabase, financialYear, regime),
-    loadStdConfig(supabase, financialYear, regime),
-  ])
+  // Load DB config — use pre-fetched cache when available to avoid per-employee queries
+  const slabs  = cache ? (regime === 'old' ? cache.slabsOld  : cache.slabsNew)  : await loadSlabs(supabase, financialYear, regime)
+  const stdCfg = cache ? (regime === 'old' ? cache.stdCfgOld : cache.stdCfgNew) : await loadStdConfig(supabase, financialYear, regime)
 
   const stepNum = (() => { let n = 1; return () => n++ })()
 
@@ -351,7 +374,7 @@ async function computeSingleRegime(
   trace.push({ step: `${stepNum()}. Surcharge`, description: '10% (>50L) / 15% (>1Cr) / 25% (>2Cr)', value: surcharge })
 
   // ── Cess ─────────────────────────────────────────────────────────────────────
-  const cessRate = stdCfg.cess_rate || 0.04
+  const cessRate = stdCfg.cess_rate ?? 0.04
   const cess = Math.round((taxAfterRebate + surcharge) * cessRate * 100) / 100
   trace.push({ step: `${stepNum()}. Health & Education Cess`, description: `${(cessRate * 100).toFixed(0)}% on (tax + surcharge)`, value: cess })
 
@@ -437,13 +460,14 @@ function buildMonthlyBreakdown(
 export async function computeTaxWithDB(
   supabase: any,
   input: TaxComputationInput,
+  cache?: TaxTableCache,
 ): Promise<TaxComputationResult> {
   const { regime, financialYear, deductions } = input
 
   // Always compute both regimes for comparison
   const [chosenResult, otherResult] = await Promise.all([
-    computeSingleRegime(supabase, input, regime),
-    computeSingleRegime(supabase, { ...input, regime: regime === 'new' ? 'old' : 'new' }, regime === 'new' ? 'old' : 'new'),
+    computeSingleRegime(supabase, input, regime, cache),
+    computeSingleRegime(supabase, { ...input, regime: regime === 'new' ? 'old' : 'new' }, regime === 'new' ? 'old' : 'new', cache),
   ])
 
   const oldRegimeTax = regime === 'old' ? chosenResult.annualTaxLiability : otherResult.annualTaxLiability

@@ -26,6 +26,7 @@ import type { FastifyInstance } from 'fastify'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { logAction }                   from '../../lib/audit-service.js'
 import { notify }                      from '../../lib/notify.js'
+import { fetchAllRows }                from '../../lib/supabase-paginate.js'
 import { WhatsAppProvider }            from '../../lib/whatsapp-provider.js'
 
 // ── Body schemas ─────────────────────────────────────────────────────────────
@@ -167,19 +168,23 @@ export default async function policyRoutes(fastify: FastifyInstance) {
     const tenantId = req.tenantId
     const { category } = req.query as { category?: string }
 
-    let q = supabase
-      .from('hr_policies')
-      .select('id, title, category, description, status, requires_acknowledgement, effective_from, published_at, version')
-      .eq('tenant_id', tenantId)
-      .eq('status', 'published')
-      .order('category')
-      .order('title')
-      .limit(500)
-
-    if (category) q = q.eq('category', category)
-
-    const { data: policies, error } = await q
-    if (error) return reply.status(500).send({ error: error.message })
+    let policies: any[]
+    try {
+      policies = await fetchAllRows((from, to) => {
+        let q = supabase
+          .from('hr_policies')
+          .select('id, title, category, description, status, requires_acknowledgement, effective_from, published_at, version')
+          .eq('tenant_id', tenantId)
+          .eq('status', 'published')
+          .order('category')
+          .order('title')
+        if (category) q = q.eq('category', category)
+        return q.range(from, to)
+      })
+    } catch (err) {
+      req.log.error({ err }, 'hr_policies list query failed')
+      return reply.status(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch policies' })
+    }
 
     const employeeId = await getEmployeeId(req.userId)
     const ackedIds = new Set<string>()
@@ -193,7 +198,7 @@ export default async function policyRoutes(fastify: FastifyInstance) {
       acks?.forEach(a => ackedIds.add(a.policy_id))
     }
 
-    const result = (policies ?? []).map(p => ({
+    const result = policies.map(p => ({
       ...p,
       ack_status: !p.requires_acknowledgement
         ? 'not_required'
@@ -209,20 +214,24 @@ export default async function policyRoutes(fastify: FastifyInstance) {
     const tenantId = req.tenantId
     const { status } = req.query as { status?: string }
 
-    let q = supabase
-      .from('hr_policies')
-      .select('id, title, category, description, status, requires_acknowledgement, effective_from, published_at, version, created_at, is_mandatory')
-      .eq('tenant_id', tenantId)
-      .order('created_at', { ascending: false })
-      .limit(500)
-
-    if (status) q = q.eq('status', status)
-
-    const { data, error } = await q
-    if (error) return reply.status(500).send({ error: error.message })
+    let data: any[]
+    try {
+      data = await fetchAllRows((from, to) => {
+        let q = supabase
+          .from('hr_policies')
+          .select('id, title, category, description, status, requires_acknowledgement, effective_from, published_at, version, created_at, is_mandatory')
+          .eq('tenant_id', tenantId)
+          .order('created_at', { ascending: false })
+        if (status) q = q.eq('status', status)
+        return q.range(from, to)
+      })
+    } catch (err) {
+      req.log.error({ err }, 'hr_policies admin list query failed')
+      return reply.status(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch policies' })
+    }
 
     // Attach ack counts for published policies
-    const publishedIds = (data ?? []).filter(p => p.status === 'published').map(p => p.id)
+    const publishedIds = data.filter(p => p.status === 'published').map(p => p.id)
     const ackCounts: Record<string, number> = {}
     if (publishedIds.length > 0) {
       const { data: counts } = await supabase
@@ -235,7 +244,7 @@ export default async function policyRoutes(fastify: FastifyInstance) {
       })
     }
 
-    const result = (data ?? []).map(p => ({
+    const result = data.map(p => ({
       ...p,
       ack_count: ackCounts[p.id] ?? 0,
     }))

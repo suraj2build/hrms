@@ -25,6 +25,7 @@ import { z } from 'zod'
 import { notifyHrAdmins } from '../../lib/notify.js'
 import { logAction } from '../../lib/audit-service.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { fetchAllRows } from '../../lib/supabase-paginate.js'
 
 export default async function payrollAdjustmentsRoutes(fastify: FastifyInstance) {
   const auth      = { preHandler: [fastify.authenticate] }
@@ -39,14 +40,18 @@ export default async function payrollAdjustmentsRoutes(fastify: FastifyInstance)
   // ── GET /payroll/adjustments/summary ─────────────────────────────────────────
   // Register before /:id so static path wins
   fastify.get('/summary', adminAuth, async (req: any, reply) => {
-    const { data, error } = await fastify.supabase
-      .from('payroll_adjustments')
-      .select('status, locked_month, adjustment_type')
-      .eq('tenant_id', req.tenantId)
-
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
-
-    const rows = (data ?? []) as any[]
+    let rows: any[]
+    try {
+      rows = await fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('payroll_adjustments')
+          .select('status, locked_month, adjustment_type')
+          .eq('tenant_id', req.tenantId)
+          .range(from, to)
+      ) as any[]
+    } catch (err: any) {
+      return reply.code(500).send({ error: 'QUERY_FAILED', message: err.message })
+    }
     const byStatus: Record<string, number> = {}
     const byType:   Record<string, number> = {}
     const byMonth:  Record<string, number> = {}

@@ -185,7 +185,7 @@ export default async function workspaceStatsRoutes(fastify: FastifyInstance) {
       // missing_compliance: active employees without bank_statutory record
       fastify.supabase
         .from('employees')
-        .select(`id, employee_bank_statutory!left(id)`, { count: 'exact', head: false })
+        .select(`id, employee_bank_statutory!left(id)`, { count: 'exact', head: true })
         .eq('tenant_id', tenantId)
         .eq('status', 'active')
         .is('employee_bank_statutory.id', null),
@@ -193,7 +193,7 @@ export default async function workspaceStatsRoutes(fastify: FastifyInstance) {
       // missing_documents: active employees with zero documents uploaded
       fastify.supabase
         .from('employees')
-        .select('id, documents!left(id)')
+        .select('id, documents!left(id)', { count: 'exact', head: true })
         .eq('tenant_id', tenantId)
         .eq('status', 'active')
         .is('documents.id', null),
@@ -202,8 +202,8 @@ export default async function workspaceStatsRoutes(fastify: FastifyInstance) {
     return reply.send({
       active_employees:    activeResult.count   ?? 0,
       pending_activations: inactiveResult.count ?? 0,
-      missing_compliance:  (missingBankResult.data ?? []).length,
-      missing_documents:   (missingDocsResult.data ?? []).length,
+      missing_compliance:  missingBankResult.count ?? 0,
+      missing_documents:   missingDocsResult.count ?? 0,
     })
   })
 
@@ -274,7 +274,7 @@ export default async function workspaceStatsRoutes(fastify: FastifyInstance) {
       // Returns 0 when data is historical (correct — no one is absent "today")
       fastify.supabase
         .from('attendance_daily')
-        .select('employee_id')
+        .select('employee_id', { count: 'exact', head: true })
         .eq('tenant_id', tenantId)
         .eq('date', today)
         .in('status', ['absent', 'leave']),
@@ -290,7 +290,7 @@ export default async function workspaceStatsRoutes(fastify: FastifyInstance) {
       // payroll_continuity_gaps: active employees with no active compensation
       fastify.supabase
         .from('employees')
-        .select(`id, employee_compensations!left(id, is_active)`, { count: 'exact', head: false })
+        .select(`id, employee_compensations!left(id, is_active)`, { count: 'exact', head: true })
         .eq('tenant_id', tenantId)
         .eq('status', 'active')
         .is('employee_compensations.is_active', null),
@@ -313,11 +313,11 @@ export default async function workspaceStatsRoutes(fastify: FastifyInstance) {
       // Operational metrics (action queue, processing health)
       unresolved_anomalies:    anomaliesResult.count    ?? 0,
       pending_corrections:     correctionsResult.count  ?? 0,
-      staffing_pressure:       (staffingPressureResult.data ?? []).length,
+      staffing_pressure:       staffingPressureResult.count ?? 0,
       overnight_issues:        overnightResult.count    ?? 0,
       confidence_warnings:     confidenceResult.count   ?? 0,
       recompute_backlog:       recentRegResult.count    ?? 0,
-      payroll_continuity_gaps: (missingCompResult.data ?? []).length,
+      payroll_continuity_gaps: missingCompResult.count ?? 0,
       is_processing:           processorResult.data?.is_running ?? false,
       // Canonical attendance period — the ONLY source for all KPI widgets
       // Non-null unless there is a DB error.  is_historical=true when data is
