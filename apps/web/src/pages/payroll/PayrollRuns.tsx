@@ -35,6 +35,7 @@ import { api, ApiError } from '@/lib/api/client'
 import { useAuthStore }  from '@/stores/authStore'
 import { cn }            from '@/lib/utils'
 import { toast }         from 'sonner'
+import { EmployeeSelector } from '@/components/filters/EmployeeSelector'
 import {
   IntelligenceLoadingSkeleton,
   IntelligenceEmptyState,
@@ -107,6 +108,10 @@ interface PayrollRun {
   reopened_at:      string | null // when period was reopened
   reopened_by_name: string | null // who reopened the period
   reopen_reason:    string | null // mandatory audit reason for reopen
+  // ── Processing progress (migration 379) ───────────────────────────────────
+  total_employee_count:     number | null
+  processed_employee_count: number
+  started_processing_at:    string | null
 }
 
 interface PayrollSlip {
@@ -1067,18 +1072,122 @@ function FailureSummaryPanel({
   )
 }
 
+// ── EmployeeSelectorMulti ─────────────────────────────────────────────────────
+// Multi-select wrapper used by the scoped dry run dialog.
+
+function EmployeeSelectorMulti({
+  value,
+  onChange,
+}: {
+  value:    string[]
+  onChange: (v: string[]) => void
+}) {
+  return (
+    <EmployeeSelector
+      value={value}
+      onChange={(v) => onChange(Array.isArray(v) ? v : v ? [v] : [])}
+      multiple
+      placeholder="Search and select employees…"
+      className="w-full"
+    />
+  )
+}
+
+// ── ProcessingProgressBar ─────────────────────────────────────────────────────
+// Shows batch-level progress (groups of 500) while a run is computing.
+
+const BATCH_SIZE = 500
+
+function ProcessingProgressBar({ run }: { run: PayrollRun }) {
+  const total     = run.total_employee_count ?? run.employee_count ?? 0
+  const processed = run.processed_employee_count ?? 0
+  const pct       = total > 0 ? Math.min(100, Math.round((processed / total) * 100)) : 0
+  const numBatches = Math.max(1, Math.ceil(total / BATCH_SIZE))
+
+  // ETA: rate in employees/ms → remaining time in seconds
+  const startedAt = run.started_processing_at ? new Date(run.started_processing_at).getTime() : null
+  const elapsedMs = startedAt ? Date.now() - startedAt : null
+  const rate      = elapsedMs && processed > 0 ? processed / elapsedMs : null
+  const etaSec    = rate && total > processed ? Math.ceil((total - processed) / rate / 1000) : null
+
+  return (
+    <div className="space-y-1.5">
+      {/* Batch blocks — each block = up to 500 employees */}
+      <div className="flex gap-px h-1.5">
+        {Array.from({ length: numBatches }, (_, i) => {
+          const batchStart = i * BATCH_SIZE
+          const batchEnd   = Math.min((i + 1) * BATCH_SIZE, total)
+          const batchSize  = batchEnd - batchStart
+          const batchDone  = Math.max(0, Math.min(processed - batchStart, batchSize))
+          const batchPct   = batchSize > 0 ? (batchDone / batchSize) * 100 : 0
+          const complete   = batchDone >= batchSize
+          return (
+            <div
+              key={i}
+              title={`Batch ${i + 1}: ${batchDone}/${batchSize}`}
+              className={cn('rounded-full overflow-hidden', complete ? 'bg-success' : 'bg-muted')}
+              style={{ flex: batchSize }}
+            >
+              {!complete && (
+                <div
+                  className="h-full bg-primary/70 transition-[width] duration-500"
+                  style={{ width: `${batchPct}%` }}
+                />
+              )}
+            </div>
+          )
+        })}
+      </div>
+
+      {/* Stats row */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+          <Loader2 className="h-3 w-3 animate-spin text-primary flex-shrink-0" />
+          <span>
+            {total > 0
+              ? `${processed.toLocaleString()} / ${total.toLocaleString()} employees`
+              : 'Calculating pay…'}
+          </span>
+        </div>
+        <div className="flex items-center gap-2 text-[10px]">
+          {total > 0 && (
+            <span className="font-mono font-semibold text-foreground">{pct}%</span>
+          )}
+          {etaSec !== null && etaSec > 0 && (
+            <span className="text-muted-foreground">
+              ~{etaSec < 60 ? `${etaSec}s` : `${Math.ceil(etaSec / 60)}m`} left
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* Batch completion labels (only when >1 batch) */}
+      {numBatches > 1 && (
+        <div className="flex gap-px text-[9px] text-muted-foreground/70">
+          {Array.from({ length: numBatches }, (_, i) => {
+            const batchStart = i * BATCH_SIZE
+            const batchEnd   = Math.min((i + 1) * BATCH_SIZE, total)
+            const batchDone  = Math.max(0, Math.min(processed - batchStart, batchEnd - batchStart))
+            const complete   = batchDone >= (batchEnd - batchStart)
+            return (
+              <div key={i} style={{ flex: batchEnd - batchStart }} className="truncate text-center">
+                {complete ? '✓' : `B${i + 1}`}
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── RunLifecycleBar ───────────────────────────────────────────────────────────
 // Phase 2: Payroll lifecycle clarity — visual pipeline for each run card.
 // Maps the 4 backend statuses onto a 4-step governance pipeline.
 
 function RunLifecycleBar({ run }: { run: PayrollRun }) {
   if (run.status === 'processing') {
-    return (
-      <div className="flex items-center gap-1.5 text-[10px] text-warning">
-        <Loader2 className="h-3 w-3 animate-spin" />
-        Calculating pay…
-      </div>
-    )
+    return <ProcessingProgressBar run={run} />
   }
   if (run.status === 'failed') {
     return (
@@ -1440,19 +1549,23 @@ function RunCard({
   onViewVariance,
   onFreezeRequest,
   onReopenRequest,
+  onRerunRequest,
   finalizePending,
   freezePending,
   reopenPending,
+  rerunPending,
 }: {
   run:               PayrollRun
   onViewSlips:       (r: PayrollRun) => void
-  onFinalizeRequest: (r: PayrollRun) => void   // opens confirm dialog
+  onFinalizeRequest: (r: PayrollRun) => void
   onViewVariance:    (r: PayrollRun) => void
-  onFreezeRequest:   (r: PayrollRun) => void   // opens freeze dialog
-  onReopenRequest:   (r: PayrollRun) => void   // opens reopen dialog
+  onFreezeRequest:   (r: PayrollRun) => void
+  onReopenRequest:   (r: PayrollRun) => void
+  onRerunRequest:    (r: PayrollRun) => void
   finalizePending:   boolean
   freezePending:     boolean
   reopenPending:     boolean
+  rerunPending:      boolean
 }) {
   const navigate     = useNavigate()
   const heldCount    = run.held_count    ?? 0
@@ -1531,6 +1644,23 @@ function RunCard({
           <Eye className="h-3.5 w-3.5" />
           Slips
         </Button>
+
+        {/* Failed + partial_failed: Re-run button */}
+        {(run.status === 'failed' || run.status === 'partial_failed') && (
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-7 text-xs gap-1.5 flex-1 border-primary/40 text-primary hover:bg-primary/5"
+            disabled={rerunPending}
+            onClick={() => onRerunRequest(run)}
+          >
+            {rerunPending
+              ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              : <RefreshCw className="h-3.5 w-3.5" />
+            }
+            Re-run
+          </Button>
+        )}
 
         {/* Failed + partial_failed: Review Blockers (primary CTA for failed runs) */}
         {(run.status === 'failed' || run.status === 'partial_failed') && (
@@ -1947,7 +2077,36 @@ export function PayrollRuns() {
     ),
   })
 
-  // ── Runs list ───────────────────────────────────────────────────────────────
+  // ── Selected-employees dry run ───────────────────────────────────────────────
+  const [scopedDryRunOpen, setScopedDryRunOpen] = useState(false)
+  const [scopedEmpIds, setScopedEmpIds]         = useState<string[]>([])
+  const scopedDryRunMutation = useMutation({
+    mutationFn: (empIds: string[]) =>
+      api.post('/payroll/runs', { month: runMonth, dry_run: true, employee_ids: empIds }) as Promise<DryRunData>,
+    onSuccess: (data: DryRunData) => {
+      setScopedDryRunOpen(false)
+      setScopedEmpIds([])
+      setDryRunData(data)
+      setDryRunOpen(true)
+    },
+    onError: (e: unknown) => toast.error(
+      (e instanceof Error ? e.message : undefined) ?? 'Scoped dry run failed',
+    ),
+  })
+
+  // ── Re-run a failed/partial-failed run ──────────────────────────────────────
+  const rerunMutation = useMutation({
+    mutationFn: (month: string) => api.post('/payroll/runs', { month }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['payroll-runs'] })
+      toast.success('Payroll re-run triggered')
+    },
+    onError: (e: unknown) => toast.error(
+      (e instanceof Error ? e.message : undefined) ?? 'Re-run failed',
+    ),
+  })
+
+  // ── Runs list — auto-polls every 5 s while any run is processing ───────────
   const { data: runsData, isLoading: runsLoading, refetch: refetchRuns } = useQuery<{
     data: PayrollRun[]; total: number
   }>({
@@ -1955,6 +2114,10 @@ export function PayrollRuns() {
     queryFn:  () => api.get('/payroll/runs?limit=20&offset=0'),
     enabled:  isAdmin,
     staleTime: 30_000,
+    refetchInterval: (query) => {
+      const runs = (query.state.data as { data: PayrollRun[] } | undefined)?.data ?? []
+      return runs.some(r => r.status === 'processing') ? 5000 : false
+    },
   })
 
   const runs = runsData?.data ?? []
@@ -2197,10 +2360,74 @@ export function PayrollRuns() {
               </Button>
             </div>
 
+            <Button
+              variant="ghost"
+              size="sm"
+              className="w-full h-7 text-xs gap-1.5 text-muted-foreground hover:text-foreground"
+              disabled={scopedDryRunMutation.isPending}
+              onClick={() => { setScopedEmpIds([]); setScopedDryRunOpen(true) }}
+            >
+              <Users className="h-3.5 w-3.5" />
+              Run for Selected Employees…
+            </Button>
+
             <p className="text-[10px] text-muted-foreground">
               <strong>Dry Run</strong> simulates payroll without any DB writes — safe to run anytime.
               Re-running for the same month will replace the existing draft run. Finalized runs cannot be replaced.
             </p>
+
+            {/* ── Scoped Dry Run Dialog ─────────────────────────────────────── */}
+            <Dialog open={scopedDryRunOpen} onOpenChange={setScopedDryRunOpen}>
+              <DialogContent className="max-w-md">
+                <DialogHeader>
+                  <DialogTitle className="flex items-center gap-2 text-sm">
+                    <Users className="h-4 w-4 text-primary" />
+                    Dry Run — Selected Employees
+                  </DialogTitle>
+                </DialogHeader>
+                <div className="space-y-4">
+                  <div>
+                    <label className="text-xs font-medium text-muted-foreground block mb-1.5">
+                      Month: {fmtMonth(runMonth)}
+                    </label>
+                    <p className="text-[10px] text-muted-foreground">
+                      Search and select employees to include in this scoped dry run.
+                      Up to 500 employees can be selected.
+                    </p>
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-muted-foreground block mb-1.5">
+                      Employees ({scopedEmpIds.length} selected)
+                    </label>
+                    <EmployeeSelectorMulti
+                      value={scopedEmpIds}
+                      onChange={setScopedEmpIds}
+                    />
+                  </div>
+                  <div className="flex gap-2 pt-1">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="flex-1 h-8 text-xs"
+                      onClick={() => setScopedDryRunOpen(false)}
+                    >
+                      Cancel
+                    </Button>
+                    <Button
+                      size="sm"
+                      className="flex-1 h-8 text-xs gap-1.5"
+                      disabled={scopedEmpIds.length === 0 || scopedDryRunMutation.isPending}
+                      onClick={() => scopedDryRunMutation.mutate(scopedEmpIds)}
+                    >
+                      {scopedDryRunMutation.isPending
+                        ? <><Loader2 className="h-3.5 w-3.5 animate-spin" />Running…</>
+                        : <><Search className="h-3.5 w-3.5" />Run Dry Run</>
+                      }
+                    </Button>
+                  </div>
+                </div>
+              </DialogContent>
+            </Dialog>
 
             {/* ── Dry Run Results Dialog ─────────────────────────────────────── */}
             <Dialog open={dryRunOpen} onOpenChange={setDryRunOpen}>
@@ -2316,9 +2543,11 @@ export function PayrollRuns() {
                     onFinalizeRequest={(run) => { setRunError(''); setActiveFinalizeRun(run) }}
                     onFreezeRequest={(run) => setActiveFreezeRun(run)}
                     onReopenRequest={(run) => { setReopenReason(''); setActiveReopenRun(run) }}
+                    onRerunRequest={(run) => rerunMutation.mutate(run.month)}
                     finalizePending={finalizeMutation.isPending && finalizeMutation.variables === run.id}
                     freezePending={freezeMutation.isPending && freezeMutation.variables === run.id}
                     reopenPending={reopenMutation.isPending && reopenMutation.variables?.runId === run.id}
+                    rerunPending={rerunMutation.isPending && rerunMutation.variables === run.month}
                   />
                 ))}
               </div>

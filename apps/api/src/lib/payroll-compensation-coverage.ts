@@ -162,14 +162,18 @@ export async function buildCompensationCoverageAudit(
   const compByEmp = new Map<string, RawCompensation>(compList.map(c => [c.employee_id, c]))
 
   // ── 3. Pre-fetch salary component type map (avoids fragile PostgREST FK join) ─
+  // fetchAllRows is required — tenants with many salary templates can exceed 1000
   const salaryCompTypeMap = new Map<string, string>()
   {
-    const { data: scRows, error: scErr } = await supabase
-      .from('salary_components')
-      .select('id, component_type')
-      .eq('tenant_id', tenantId)
-    if (scErr) throw new Error(`Coverage audit: failed to fetch salary components — ${scErr.message}`)
-    for (const sc of (scRows ?? []) as RawSalaryComponent[]) {
+    const scRows = await fetchAllRows<RawSalaryComponent>((from, to) =>
+      supabase
+        .from('salary_components')
+        .select('id, component_type')
+        .eq('tenant_id', tenantId)
+        .order('id')
+        .range(from, to) as any,
+    )
+    for (const sc of scRows) {
       salaryCompTypeMap.set(sc.id, sc.component_type)
     }
   }

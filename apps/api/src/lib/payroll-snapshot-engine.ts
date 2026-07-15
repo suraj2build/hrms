@@ -26,6 +26,7 @@ import {
   round2,
   type PayrollSlipResult,
 } from './payroll-engine.js'
+import { fetchAllRows } from './supabase-paginate.js'
 
 // ── Version constants ─────────────────────────────────────────────────────────
 
@@ -592,22 +593,29 @@ export async function buildPayrollRunSnapshot(
   tenantId:  string,
   createdBy: string,
 ): Promise<{ snapshot_id: string; integrity_hash: string } | { error: string }> {
-  // Fetch all finalized slips for this run.
+  // Fetch all finalized slips for this run — paginated to avoid 1000-row ceiling.
   // total_working_days is included so the snapshot can replay correctly for
   // mid-month joiners — without it, replay falls back to payable_days + lop_days
   // which is wrong when the employee joined after the 1st of the month.
-  const { data: slips, error: slipsErr } = await supabase
-    .from('payroll_slips')
-    .select(`
-      employee_id, month, gross_pay, total_deductions, net_pay,
-      payable_days, lop_days, overtime_hours, total_working_days,
-      employees ( employee_code, profiles!profile_id ( full_name ) )
-    `)
-    .eq('run_id', runId)
-    .eq('tenant_id', tenantId)
-
-  if (slipsErr) return { error: `Failed to fetch slips: ${slipsErr.message}` }
-  if (!slips || slips.length === 0) return { error: 'No slips found for this run' }
+  let slips: any[]
+  try {
+    slips = await fetchAllRows((from, to) =>
+      supabase
+        .from('payroll_slips')
+        .select(`
+          employee_id, month, gross_pay, total_deductions, net_pay,
+          payable_days, lop_days, overtime_hours, total_working_days,
+          employees ( employee_code, profiles!profile_id ( full_name ) )
+        `)
+        .eq('run_id', runId)
+        .eq('tenant_id', tenantId)
+        .order('employee_id')
+        .range(from, to) as any,
+    )
+  } catch (slipsErr: any) {
+    return { error: `Failed to fetch slips: ${slipsErr.message}` }
+  }
+  if (slips.length === 0) return { error: 'No slips found for this run' }
 
   const month = (slips[0] as any).month as string
 

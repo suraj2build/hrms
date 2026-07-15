@@ -318,23 +318,29 @@ export class DurableJobQueue {
       return data.id
     }
 
-    // data is null: DO NOTHING fired — a pending/running job with this key exists.
-    // Fetch the existing active job's id so the caller gets a real, workable id.
+    // data is null: DO NOTHING fired — a job with this idempotency key already exists
+    // (pending, running, completed, or failed). Look it up regardless of status so the
+    // caller always gets a real persisted ID, not the phantom pre-insert UUID.
     if (opts.idempotencyKey) {
-      const { data: existing } = await this.supabase
+      const { data: existing, error: lookupErr } = await this.supabase
         .from('background_jobs')
-        .select('id')
+        .select('id, status')
         .eq('idempotency_key', opts.idempotencyKey)
-        .in('status', ['pending', 'running'])
+        .order('created_at', { ascending: false })
+        .limit(1)
         .maybeSingle()
+      if (lookupErr) throw new Error(`[durable-queue] idempotency lookup failed: ${lookupErr.message}`)
       if (existing?.id) {
-        this.log?.debug({ jobId: existing.id, jobType, idempotencyKey: opts.idempotencyKey }, '[durable-queue] idempotency hit — returning existing active job')
+        this.log?.debug(
+          { jobId: existing.id, jobStatus: existing.status, jobType, idempotencyKey: opts.idempotencyKey },
+          '[durable-queue] idempotency hit — returning existing job',
+        )
         return existing.id
       }
     }
 
-    // Fallback: return the generated id (job may have just completed between
-    // the upsert and the select — extremely rare race; caller should re-poll run status).
+    // Fallback: no idempotency key or lookup returned nothing (extremely rare race).
+    this.log?.warn({ jobId, jobType }, '[durable-queue] enqueue returned null with no matching job — using local UUID')
     return jobId
   }
 

@@ -84,7 +84,8 @@ async function applyTdsForRun(
       // Pre-fetch already failed; this per-employee fallback also failed.
       // Throw so the employee is marked as failed rather than silently emitting
       // a slip with zero TDS — an incorrect net_pay is worse than a known failure.
-      throw new Error(`TDS statutory settings unavailable: ${fallbackErr.message}`)
+      // Do NOT embed fallbackErr.message — raw DB errors must not leak to clients.
+      throw new Error('TDS statutory settings unavailable — contact support')
     }
     tdsEnabled       = s?.tds_enabled       ?? false
     tdsDefaultRegime = s?.tds_default_regime ?? 'new'
@@ -1297,27 +1298,37 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
         // late-resolving promise from writing a second entry after the timeout
         // has already recorded this employee as failed (double-push race).
         const processEmployee = async (): Promise<DryRunResult> => {
-          const computed = await computeOneEmployee(fastify.supabase, tenantId, emp, {
-            runId: 'dry-run', month, runPeriodEnd, total_working_days, tenantCtx,
-          })
+          try {
+            const computed = await computeOneEmployee(fastify.supabase, tenantId, emp, {
+              runId: 'dry-run', month, runPeriodEnd, total_working_days, tenantCtx,
+            })
 
-          if (!computed.ok) {
-            return {
-              employee_id:       emp.id,
-              employee_code:     emp.employee_code,
-              status:            'failed',
-              failure_stage:     computed.stage,
-              error:             computed.reason,
-              validation_errors: (computed.details?.errors ?? computed.details?.validation_errors) as string[] | undefined,
+            if (!computed.ok) {
+              return {
+                employee_id:       emp.id,
+                employee_code:     emp.employee_code,
+                status:            'failed',
+                failure_stage:     computed.stage,
+                error:             computed.reason,
+                validation_errors: (computed.details?.errors ?? computed.details?.validation_errors) as string[] | undefined,
+              }
             }
-          }
 
-          return {
-            employee_id:          emp.id,
-            employee_code:        emp.employee_code,
-            status:               'ok',
-            result:               computed.result,
-            compensation_warnings: computed.warnings.length > 0 ? computed.warnings : undefined,
+            return {
+              employee_id:          emp.id,
+              employee_code:        emp.employee_code,
+              status:               'ok',
+              result:               computed.result,
+              compensation_warnings: computed.warnings.length > 0 ? computed.warnings : undefined,
+            }
+          } catch (unexpectedErr: any) {
+            return {
+              employee_id:   emp.id,
+              employee_code: emp.employee_code,
+              status:        'failed',
+              failure_stage: 'unexpected' as const,
+              error:         unexpectedErr?.message ?? 'Unexpected error',
+            }
           }
         }
 
@@ -1453,7 +1464,12 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
 
     let qb = fastify.supabase
       .from('payroll_runs')
-      .select('id, month, status, employee_count, total_gross, total_deductions, total_net, total_lop_amount, error_message, failure_summary, created_at, finalized_at', { count: 'exact' })
+      .select(
+        'id, month, status, employee_count, total_gross, total_deductions, total_net, total_lop_amount, ' +
+        'error_message, failure_summary, created_at, finalized_at, ' +
+        'total_employee_count, processed_employee_count, started_processing_at',
+        { count: 'exact' },
+      )
       .eq('tenant_id', req.tenantId)
       .order('month', { ascending: false })
       .range(offset, offset + limit - 1)
@@ -1534,8 +1550,10 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
         .lte('date', to),
     ])
 
-    const compRows    = compResult.status === 'fulfilled' ? compResult.value as Array<{ employee_id: string }> : []
-    const attRows     = attResult.status === 'fulfilled'  ? attResult.value  as Array<{ employee_id: string }> : []
+    const compFailed   = compResult.status    === 'rejected'
+    const attFailed    = attResult.status     === 'rejected'
+    const compRows     = !compFailed ? compResult.value  as Array<{ employee_id: string }> : []
+    const attRows      = !attFailed  ? attResult.value   as Array<{ employee_id: string }> : []
     const anomalyCount = anomalyResult.status === 'fulfilled' && !(anomalyResult.value as any).error
       ? ((anomalyResult.value as any).count ?? 0) : 0
 
@@ -1566,6 +1584,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       no_attendance:   blockers.filter(b => b.type === 'no_attendance').length,
       open_anomalies:  anomalyCount ?? 0,
       blockers,
+      ...(compFailed || attFailed ? { data_partial: true } : {}),
     })
   })
 
@@ -5046,7 +5065,8 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', tenantId)
       .maybeSingle()
 
-    if (runErr || !run) return notFound(reply, 'NOT_FOUND', 'Run not found')
+    if (runErr) return serverError(req, reply, runErr, ErrorCode.QUERY_FAILED, 'Failed to fetch run')
+    if (!run)   return notFound(reply, 'NOT_FOUND', 'Run not found')
 
     const REPORTABLE = new Set(['draft', 'partial_failed', 'finalized'])
     if (!REPORTABLE.has((run as any).status)) {
@@ -5188,7 +5208,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       if (!empSnapErr && empSnap) employeeSnapshot = empSnap as Record<string, unknown>
     }
 
-    if (!slip && !employeeSnapshot) {
+    if (!slip && !employeeSnapshot && events.length === 0) {
       return notFound(reply, 'NOT_FOUND', 'No payroll record found for this employee in the given run')
     }
 

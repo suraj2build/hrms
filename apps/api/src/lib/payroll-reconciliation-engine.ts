@@ -3,6 +3,8 @@
 // reconciliation report that cross-checks run-level totals against slip sums,
 // verifies per-employee net-pay equations, and aggregates component breakdowns.
 
+import { round2 } from './payroll-engine.js'
+
 const TOLERANCE = 0.01  // ₹ — rounding tolerance for accumulated float arithmetic
 
 export interface ComponentAggregate {
@@ -80,8 +82,6 @@ export type RunForRecon = {
   total_net:        number | null
 }
 
-function r2(n: number): number { return Math.round(n * 100) / 100 }
-
 export function buildPayrollReconciliationReport(
   run:   RunForRecon,
   slips: SlipForRecon[],
@@ -98,8 +98,8 @@ export function buildPayrollReconciliationReport(
     slipTds        += s.tds_deducted
 
     // Per-employee net-pay equation: net = gross − deductions
-    const expectedNet = r2(s.gross_pay - s.total_deductions)
-    const variance    = r2(s.net_pay - expectedNet)
+    const expectedNet = round2(s.gross_pay - s.total_deductions)
+    const variance    = round2(s.net_pay - expectedNet)
     if (Math.abs(variance) > TOLERANCE) {
       empVariances.push({
         employee_id:            s.employee_id,
@@ -126,16 +126,16 @@ export function buildPayrollReconciliationReport(
         })
       }
       const agg = componentMap.get(comp.code)!
-      agg.total_amount   = r2(agg.total_amount + comp.monthly_amount)
+      agg.total_amount   = round2(agg.total_amount + comp.monthly_amount)
       agg.employee_count += 1
     }
   }
 
-  slipGross      = r2(slipGross)
-  slipDeductions = r2(slipDeductions)
-  slipNet        = r2(slipNet)
-  slipEmployer   = r2(slipEmployer)
-  slipTds        = r2(slipTds)
+  slipGross      = round2(slipGross)
+  slipDeductions = round2(slipDeductions)
+  slipNet        = round2(slipNet)
+  slipEmployer   = round2(slipEmployer)
+  slipTds        = round2(slipTds)
 
   const rg = run.total_gross      ?? 0
   const rd = run.total_deductions ?? 0
@@ -145,18 +145,18 @@ export function buildPayrollReconciliationReport(
     run_vs_slip_gross:      Math.abs(rg - slipGross)                              <= TOLERANCE,
     run_vs_slip_net:        Math.abs(rn - slipNet)                                <= TOLERANCE,
     run_vs_slip_deductions: Math.abs(rd - slipDeductions)                         <= TOLERANCE,
-    net_equation:           Math.abs(r2(slipGross - slipDeductions) - slipNet)    <= TOLERANCE,
+    net_equation:           Math.abs(round2(slipGross - slipDeductions) - slipNet)    <= TOLERANCE,
   }
 
   const issues: string[] = []
   if (!checks.run_vs_slip_gross)
-    issues.push(`Run total_gross ₹${rg} ≠ slip sum ₹${slipGross} (Δ ₹${r2(Math.abs(rg - slipGross))})`)
+    issues.push(`Run total_gross ₹${rg} ≠ slip sum ₹${slipGross} (Δ ₹${round2(Math.abs(rg - slipGross))})`)
   if (!checks.run_vs_slip_net)
-    issues.push(`Run total_net ₹${rn} ≠ slip sum ₹${slipNet} (Δ ₹${r2(Math.abs(rn - slipNet))})`)
+    issues.push(`Run total_net ₹${rn} ≠ slip sum ₹${slipNet} (Δ ₹${round2(Math.abs(rn - slipNet))})`)
   if (!checks.run_vs_slip_deductions)
-    issues.push(`Run total_deductions ₹${rd} ≠ slip sum ₹${slipDeductions} (Δ ₹${r2(Math.abs(rd - slipDeductions))})`)
+    issues.push(`Run total_deductions ₹${rd} ≠ slip sum ₹${slipDeductions} (Δ ₹${round2(Math.abs(rd - slipDeductions))})`)
   if (!checks.net_equation)
-    issues.push(`Net pay equation fails: gross ₹${slipGross} − deductions ₹${slipDeductions} = ₹${r2(slipGross - slipDeductions)}, not ₹${slipNet}`)
+    issues.push(`Net pay equation fails: gross ₹${slipGross} − deductions ₹${slipDeductions} = ₹${round2(slipGross - slipDeductions)}, not ₹${slipNet}`)
   if (empVariances.length > 0)
     issues.push(`${empVariances.length} employee(s) have net pay arithmetic imbalance`)
 
