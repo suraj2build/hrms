@@ -786,12 +786,15 @@ export default async function executiveRoutes(fastify: FastifyInstance) {
         .limit(10),
 
       // P5.4 — approved variable pay for the current month (the "variable" bucket)
-      fastify.supabase
-        .from('variable_payouts')
-        .select('amount, variable_payout_batches!inner(status, payout_month)')
-        .eq('tenant_id', req.tenantId)
-        .eq('variable_payout_batches.status', 'approved')
-        .eq('variable_payout_batches.payout_month', latestPayrollMonth),
+      fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('variable_payouts')
+          .select('amount, variable_payout_batches!inner(status, payout_month)')
+          .eq('tenant_id', req.tenantId)
+          .eq('variable_payout_batches.status', 'approved')
+          .eq('variable_payout_batches.payout_month', latestPayrollMonth)
+          .range(from, to),
+      ).catch(() => [] as any[]),
     ])
 
     // Monthly payroll cost trend
@@ -854,7 +857,7 @@ export default async function executiveRoutes(fastify: FastifyInstance) {
       }
     }
     const ot_cost_current = dept_cost_breakdown.reduce((s, d) => s + d.ot_cost, 0)
-    const variable_pay = (variableMonthRes.data ?? []).reduce((s, p: any) => s + Number(p.amount ?? 0), 0)
+    const variable_pay = (variableMonthRes ?? []).reduce((s: number, p: any) => s + Number(p.amount ?? 0), 0)
     // Fixed earnings already include OT inside gross; expose OT separately and net it
     // out of fixed so the four buckets don't double-count.
     const fixed_excl_ot = Math.max(0, Math.round(fixed_pay - ot_cost_current))

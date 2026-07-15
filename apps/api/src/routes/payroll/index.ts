@@ -768,6 +768,10 @@ async function executePayrollRun(
         // in DB but the run coordinator already treated this worker as timed out — delete
         // the orphaned row before returning so the slip count stays consistent.
         if (settled) {
+          await logRunEvent(supabase, log, {
+            tenant_id: tenantId, run_id: runId, event_type: 'slip_timeout_voided', employee_id: emp.id, month,
+            payload: { reason: 'timeout fired during logRunEvent — orphaned slip deleted to stay consistent with run totals' },
+          })
           const { error: deleteErr } = await supabase.from('payroll_slips')
             .delete()
             .eq('run_id', runId)
@@ -880,7 +884,7 @@ async function executePayrollRun(
 
   await logRunEvent(supabase, log, {
     tenant_id: tenantId, run_id: runId, event_type: 'run_completed', month,
-    payload: { succeeded: succeededSlips.length, failed: failedEmployees.length, total: empList.length, total_gross: totalGross, total_net: totalNet, run_status: runStatus },
+    payload: { succeeded: succeededSlips.length, failed: failedEmployees.length, total: empList.length, total_gross: totalGross, total_net: totalNet, total_variable_pay: totalVariablePay, run_status: runStatus },
   })
 
   if (failedEmployees.length > 0) {
@@ -1547,7 +1551,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       !(calendarExistsResult.value as any).error &&
       ((calendarExistsResult.value as any).count ?? 0) > 0
     const calendar_configured = workingDaysResult.status === 'fulfilled' && calendarHasRows
-    const working_days        = workingDaysResult.status === 'fulfilled' ? workingDaysResult.value : null
+    const working_days        = calendar_configured ? workingDaysResult.value : null
 
     // ── Statutory config ─────────────────────────────────────────────────────
     let tds_configured = false
@@ -1561,13 +1565,16 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
     }
 
     // ── Variable pay ─────────────────────────────────────────────────────────
-    let approved_batches    = 0
-    let variable_total      = 0
+    let approved_batches      = 0
+    let variable_total        = 0
+    let variablePayFetchFailed = false
     if (variablePayResult.status === 'fulfilled') {
       const vpRows = variablePayResult.value ?? []
       const batchIds = new Set(vpRows.map((r: any) => (r.variable_payout_batches as any)?.id))
       approved_batches = batchIds.size
       variable_total   = vpRows.reduce((s: number, r: any) => s + Number(r.amount ?? 0), 0)
+    } else if (variablePayResult.status === 'rejected') {
+      variablePayFetchFailed = true
     }
 
     // ── Existing run ─────────────────────────────────────────────────────────
@@ -1603,6 +1610,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
     if (!tds_configured) warnings.push('TDS settings not found — TDS will be skipped for all employees')
     if (!epf_configured) warnings.push('EPF config not found — EPF will be skipped (per-employee fallback)')
     if (!esi_configured) warnings.push('ESI config not found — ESI will be skipped (per-employee fallback)')
+    if (variablePayFetchFailed) warnings.push('Variable pay data could not be fetched — variable pay totals are unavailable for this preflight check')
 
     if ((coverage?.employees_future_dated ?? 0) > 0) {
       warnings.push(`${coverage!.employees_future_dated} employee(s) have future-dated compensation — previous active records will be used`)
@@ -1610,7 +1618,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
 
     if (approved_batches > 0) {
       warnings.push(
-        `${approved_batches} approved variable pay batch(es) (₹${Math.round(variable_total).toLocaleString()}) will be included in run totals`,
+        `${approved_batches} approved variable pay batch(es) (₹${Math.round(variable_total).toLocaleString()}) are approved for this month and will be disbursed separately — not included in run gross totals`,
       )
     }
 
