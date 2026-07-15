@@ -1162,6 +1162,27 @@ function ProcessingProgressBar({ run }: { run: PayrollRun }) {
   const rate      = elapsedMs && serverCount > 0 ? serverCount / elapsedMs : null
   const etaSec    = rate && total > serverCount ? Math.ceil((total - serverCount) / rate / 1000) : null
 
+  // Zombie check: if started > 10 min ago and processed_employee_count is still 0
+  // (or hasn't moved since total was set), the background job likely crashed.
+  const startedAt  = run.started_processing_at ? new Date(run.started_processing_at).getTime() : null
+  const elapsedMin = startedAt ? (Date.now() - startedAt) / 60_000 : 0
+  const isLikelyZombie = elapsedMin > 10 && serverCount === 0 && total > 0
+
+  if (isLikelyZombie) {
+    return (
+      <div className="flex items-start gap-2 p-2.5 rounded-md bg-warning/10 border border-warning/20 text-xs text-warning">
+        <AlertTriangle className="h-3.5 w-3.5 flex-shrink-0 mt-0.5" />
+        <div>
+          <p className="font-semibold">Run may be stuck</p>
+          <p className="text-[10px] text-muted-foreground mt-0.5">
+            Processing started {Math.floor(elapsedMin)} min ago but no progress has been recorded.
+            The server may have restarted — it will auto-recover on next deploy, or re-trigger the run.
+          </p>
+        </div>
+      </div>
+    )
+  }
+
   // total = 0 means the run just started and backend hasn't written the count yet
   if (total === 0) {
     return (

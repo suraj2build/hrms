@@ -1832,9 +1832,11 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
 
     if (error || !data) return notFound(reply, 'NOT_FOUND', 'Run not found')
 
-    // Zombie detection: a processing run with a stale heartbeat (> 5 min) is
+    // Zombie detection: a processing run with a stale heartbeat (> 2 min) is
     // likely stuck — the durable queue will recover it on next process restart.
-    const ZOMBIE_THRESHOLD_MS = 5 * 60 * 1000
+    // Threshold is 2 min (24× the 5 s heartbeat) to tolerate transient DB write
+    // delays without false-positiving on a healthy long-running run.
+    const ZOMBIE_THRESHOLD_MS = 2 * 60 * 1000
     let is_zombie = false
     if ((data as any).status === 'processing') {
       const hb = (data as any).last_heartbeat_at

@@ -167,7 +167,7 @@ function calcNextSchedule(attempt: number, baseMs: number, maxMs: number): Date 
 
 const POLL_INTERVAL_MS    = 5_000    // poll every 5 seconds
 const BATCH_SIZE          = 5        // claim up to 5 jobs per poll
-const STALE_THRESHOLD_MS  = 5 * 60 * 1_000  // 5 minutes — jobs running longer are considered crashed
+const STALE_THRESHOLD_MS  = 2 * 60 * 60 * 1_000  // 2 hours — payroll runs can legitimately take 30–60 min
 const RESULT_RETENTION_MS = 90 * 24 * 60 * 60 * 1_000  // 90 days
 
 // ── Retry storm detection ──────────────────────────────────────────────────────
