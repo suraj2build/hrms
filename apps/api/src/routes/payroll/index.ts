@@ -219,6 +219,99 @@ import {
   validatePayrollSlipPayload,
   validateCompensation,
 } from '../../lib/payroll-validator.js'
+
+// ── Shared per-employee computation (used by both live run and dry run) ──────
+//
+// Encapsulates all computation up to (but not including) the DB insert so that
+// the live path and the dry-run path share identical logic. Divergence between
+// the two used to be an invisible maintenance hazard — any bug fixed in one
+// would silently remain in the other.
+
+type EmployeeComputed =
+  | {
+      ok:      true
+      result:  PayrollSlipResult
+      slipRow: Record<string, unknown>
+      warnings: string[]
+    }
+  | {
+      ok:         false
+      stage:      FailedEmployee['failure_stage']
+      reason:     string
+      details?:   Record<string, unknown>
+      eventType:  string
+      eventPayload?: Record<string, unknown>
+    }
+
+async function computeOneEmployee(
+  supabase:  any,
+  tenantId:  string,
+  emp:       { id: string; employee_code: string },
+  opts: {
+    runId:             string
+    month:             string
+    runPeriodEnd:      string
+    total_working_days: number
+    tenantCtx?:        TenantPayrollCtx
+  },
+): Promise<EmployeeComputed> {
+  let compensation: Awaited<ReturnType<typeof fetchActiveCompensation>>
+  let attendance:   Awaited<ReturnType<typeof fetchAttendanceSummary>>
+
+  try {
+    ;[compensation, attendance] = await Promise.all([
+      fetchActiveCompensation(supabase, tenantId, emp.id, opts.runPeriodEnd),
+      fetchAttendanceSummary(supabase, tenantId, emp.id, opts.month),
+    ])
+  } catch (fetchErr: any) {
+    const reason = fetchErr?.message ?? 'Unknown data fetch error'
+    return { ok: false, stage: 'data_fetch', reason, details: { message: reason, stack: fetchErr?.stack }, eventType: 'data_fetch_failed' }
+  }
+
+  const advLoanDeductions = await fetchAdvanceLoanDeductions(supabase, tenantId, emp.id, opts.month)
+  const compValidation    = validateCompensation(compensation, { employeeId: emp.id, month: opts.month }, opts.runPeriodEnd)
+
+  if (compValidation.blocking_errors.length > 0) {
+    const reason = compValidation.blocking_errors[0]
+    return {
+      ok:           false,
+      stage:        'compensation_validation',
+      reason,
+      details:      { errors: compValidation.blocking_errors },
+      eventType:    compensation ? 'compensation_invalid' : 'compensation_missing',
+      eventPayload: { errors: compValidation.blocking_errors },
+    }
+  }
+
+  let result: PayrollSlipResult
+  try {
+    result = await computeSlipWithStatutory(supabase, tenantId, {
+      tenantId, employeeId: emp.id, month: opts.month,
+      compensation, attendance,
+      total_working_days:      opts.total_working_days,
+      advance_loan_deductions: advLoanDeductions,
+    }, opts.month, opts.tenantCtx)
+  } catch (compErr: any) {
+    const reason = compErr?.message ?? 'Computation error'
+    return { ok: false, stage: 'unexpected', reason, details: { message: reason, stack: compErr?.stack }, eventType: 'computation_failed' }
+  }
+
+  const slipRow  = buildSlipRow(tenantId, opts.runId, result, opts.month)
+  const slipValid = validatePayrollSlipPayload(slipRow, { employeeId: emp.id, month: opts.month })
+
+  if (!slipValid.valid) {
+    return {
+      ok:           false,
+      stage:        'slip_validation',
+      reason:       `Slip payload validation failed: ${slipValid.errors[0]}`,
+      details:      { validation_errors: slipValid.errors },
+      eventType:    'validation_failed',
+      eventPayload: { slipRow },
+    }
+  }
+
+  return { ok: true, result, slipRow, warnings: compValidation.warnings }
+}
 import {
   buildPayrollVisibilityState,
   buildEmployeePayslipView,
@@ -561,9 +654,12 @@ async function executePayrollRun(
 
   const [runYear, runMon] = month.split('-').map(Number)
   const runPeriodEnd      = new Date(runYear, runMon, 0).toISOString().slice(0, 10)
+  const processingStartedAt = new Date().toISOString()
 
-  // Mark run as processing
-  await supabase.from('payroll_runs').update({ status: 'processing' }).eq('id', runId)
+  // Mark run as processing; record start time for duration tracking
+  await supabase.from('payroll_runs')
+    .update({ status: 'processing', started_processing_at: processingStartedAt })
+    .eq('id', runId)
 
   // Fetch all active employees
   let empList: Array<{ id: string; first_name: string; last_name: string; employee_code: string }>
@@ -585,8 +681,10 @@ async function executePayrollRun(
     return
   }
 
-  // Update employee_count now that we know it
-  await supabase.from('payroll_runs').update({ employee_count: empList.length }).eq('id', runId)
+  // Record the total employee count; employee_count tracks succeeded count at end
+  await supabase.from('payroll_runs')
+    .update({ total_employee_count: empList.length })
+    .eq('id', runId)
 
   // Count working days — abort the run if this fails (LOP would be corrupted)
   let total_working_days: number
@@ -677,11 +775,12 @@ async function executePayrollRun(
   const succeededSlips: PayrollSlipResult[] = []
   const failedEmployees: FailedEmployee[]   = []
 
-  // Heartbeat: write last_heartbeat_at every 30 s so zombie-detection queries
-  // can tell the difference between a live run and a crashed-but-stuck run.
+  // Heartbeat: write progress every 30 s so zombie-detection queries can tell
+  // a live run from a crashed-but-stuck one, and frontends can show a progress bar.
   const heartbeatInterval = setInterval(() => {
+    const processed = succeededSlips.length + failedEmployees.length
     supabase.from('payroll_runs')
-      .update({ last_heartbeat_at: new Date().toISOString() })
+      .update({ last_heartbeat_at: new Date().toISOString(), processed_employee_count: processed })
       .eq('id', runId)
       .then(({ error: hbErr }: { error: any }) => {
         if (hbErr) log.warn({ err: hbErr, run_id: runId }, 'payroll: heartbeat write failed')
@@ -699,71 +798,45 @@ async function executePayrollRun(
 
     const processEmp = async (): Promise<void> => {
       try {
-        let compensation: Awaited<ReturnType<typeof fetchActiveCompensation>>
-        let attendance:   Awaited<ReturnType<typeof fetchAttendanceSummary>>
-        try {
-          ;[compensation, attendance] = await Promise.all([
-            fetchActiveCompensation(supabase, tenantId, emp.id, runPeriodEnd),
-            fetchAttendanceSummary(supabase, tenantId, emp.id, month),
-          ])
-        } catch (fetchErr: any) {
-          const reason = fetchErr?.message ?? 'Unknown data fetch error'
-          log.error({ ...empCtx, err: fetchErr, stage: 'data_fetch' }, 'payroll: data fetch failed — skipping employee')
+        // All computation (fetch, validate, compute, build row) is shared with
+        // the dry-run path via computeOneEmployee — no divergence between them.
+        const computed = await computeOneEmployee(supabase, tenantId, emp, {
+          runId, month, runPeriodEnd, total_working_days, tenantCtx,
+        })
+
+        if (!computed.ok) {
+          log.error({ ...empCtx, stage: computed.stage }, `payroll: employee failed — ${computed.eventType}`)
           if (settled) return
           await logRunEvent(supabase, log, {
-            tenant_id: tenantId, run_id: runId, event_type: 'data_fetch_failed',
-            employee_id: emp.id, month, error_details: { message: reason, stack: fetchErr?.stack },
-          })
-          if (!settled) { settled = true; failedEmployees.push({ employee_id: emp.id, employee_code: emp.employee_code, failure_stage: 'data_fetch', reason }) }
-          return
-        }
-
-        const advLoanDeductions = await fetchAdvanceLoanDeductions(supabase, tenantId, emp.id, month)
-        const compValidation    = validateCompensation(compensation, { employeeId: emp.id, month }, runPeriodEnd)
-
-        if (compValidation.blocking_errors.length > 0) {
-          const reason = compValidation.blocking_errors[0]
-          log.error({ ...empCtx, errors: compValidation.blocking_errors, stage: 'compensation_validation' }, 'payroll: compensation validation blocking error')
-          if (settled) return
-          await logRunEvent(supabase, log, {
-            tenant_id: tenantId, run_id: runId,
-            event_type: compensation ? 'compensation_invalid' : 'compensation_missing',
+            tenant_id: tenantId, run_id: runId, event_type: computed.eventType,
             employee_id: emp.id, month,
-            payload: { errors: compValidation.blocking_errors }, error_details: { message: reason },
+            ...(computed.eventPayload ? { payload: computed.eventPayload } : {}),
+            error_details: { message: computed.reason, ...(computed.details ?? {}) },
           })
-          if (!settled) { settled = true; failedEmployees.push({ employee_id: emp.id, employee_code: emp.employee_code, failure_stage: 'compensation_validation', reason, details: { errors: compValidation.blocking_errors } }) }
+          if (!settled) {
+            settled = true
+            failedEmployees.push({
+              employee_id: emp.id, employee_code: emp.employee_code,
+              failure_stage: computed.stage, reason: computed.reason,
+              ...(computed.details ? { details: computed.details } : {}),
+            })
+          }
           return
         }
 
-        if (compValidation.warnings.length > 0) {
-          log.warn({ ...empCtx, warnings: compValidation.warnings }, 'payroll: compensation warnings (non-blocking)')
+        if (computed.warnings.length > 0) {
+          log.warn({ ...empCtx, warnings: computed.warnings }, 'payroll: compensation warnings (non-blocking)')
         }
 
-        const result   = await computeSlipWithStatutory(supabase, tenantId, { tenantId, employeeId: emp.id, month, compensation, attendance, total_working_days, advance_loan_deductions: advLoanDeductions }, month, tenantCtx)
-        const slipRow  = buildSlipRow(tenantId, runId, result, month)
-        const slipValid = validatePayrollSlipPayload(slipRow, { employeeId: emp.id, month })
-
-        if (!slipValid.valid) {
-          log.error({ ...empCtx, validation_errors: slipValid.errors, stage: 'slip_validation' }, 'payroll: slip payload validation failed')
-          if (settled) return
-          await logRunEvent(supabase, log, {
-            tenant_id: tenantId, run_id: runId, event_type: 'validation_failed',
-            employee_id: emp.id, month, payload: slipRow, error_details: { validation_errors: slipValid.errors },
-          })
-          if (!settled) { settled = true; failedEmployees.push({ employee_id: emp.id, employee_code: emp.employee_code, failure_stage: 'slip_validation', reason: `Slip payload validation failed: ${slipValid.errors[0]}`, details: { validation_errors: slipValid.errors } }) }
-          return
-        }
-
-        // Guard: if timeout already fired and marked this employee as failed, abort
-        // before inserting to avoid a DB row that the run totals will never count.
+        // Guard before DB write: if timeout already fired, discard result
         if (settled) return
 
-        const { error: insertErr } = await supabase.from('payroll_slips').insert(slipRow)
+        const { error: insertErr } = await supabase.from('payroll_slips').insert(computed.slipRow)
         if (insertErr) {
           log.error({ ...empCtx, err: insertErr, stage: 'db_insert' }, 'payroll: DB insert failed for employee slip')
           await logRunEvent(supabase, log, {
             tenant_id: tenantId, run_id: runId, event_type: 'slip_insert_failed',
-            employee_id: emp.id, month, payload: slipRow,
+            employee_id: emp.id, month, payload: computed.slipRow,
             error_details: { message: insertErr.message, code: insertErr.code, details: insertErr.details, hint: insertErr.hint },
           })
           if (!settled) { settled = true; failedEmployees.push({ employee_id: emp.id, employee_code: emp.employee_code, failure_stage: 'db_insert', reason: insertErr.message, details: { code: insertErr.code, details: insertErr.details, hint: insertErr.hint } }) }
@@ -774,37 +847,28 @@ async function executePayrollRun(
         // delete the orphaned row so DB state stays consistent with the run totals.
         if (settled) {
           const { error: deleteErr } = await supabase.from('payroll_slips')
-            .delete()
-            .eq('run_id', runId)
-            .eq('tenant_id', tenantId)
-            .eq('employee_id', emp.id)
-            .eq('month', month)
+            .delete().eq('run_id', runId).eq('tenant_id', tenantId).eq('employee_id', emp.id).eq('month', month)
           if (deleteErr) log.warn({ err: deleteErr, run_id: runId, employee_id: emp.id }, 'payroll: compensating delete after timeout failed — orphaned slip may exist')
           return
         }
 
         await logRunEvent(supabase, log, {
           tenant_id: tenantId, run_id: runId, event_type: 'slip_computed', employee_id: emp.id, month,
-          payload: { gross_pay: result.gross_pay, net_pay: result.net_pay, lop_days: result.lop_days, payable_days: result.payable_days, total_deductions: result.total_deductions, has_warning: !!result.warning },
+          payload: { gross_pay: computed.result.gross_pay, net_pay: computed.result.net_pay, lop_days: computed.result.lop_days, payable_days: computed.result.payable_days, total_deductions: computed.result.total_deductions, has_warning: !!computed.result.warning },
         })
-        // Second window: if the timeout fired while logRunEvent was awaited, the slip is
-        // in DB but the run coordinator already treated this worker as timed out — delete
-        // the orphaned row before returning so the slip count stays consistent.
+        // Second window: if the timeout fired while logRunEvent was awaited, delete the
+        // orphaned slip so the count stays consistent with run totals.
         if (settled) {
           await logRunEvent(supabase, log, {
             tenant_id: tenantId, run_id: runId, event_type: 'slip_timeout_voided', employee_id: emp.id, month,
             payload: { reason: 'timeout fired during logRunEvent — orphaned slip deleted to stay consistent with run totals' },
           })
           const { error: deleteErr } = await supabase.from('payroll_slips')
-            .delete()
-            .eq('run_id', runId)
-            .eq('tenant_id', tenantId)
-            .eq('employee_id', emp.id)
-            .eq('month', month)
+            .delete().eq('run_id', runId).eq('tenant_id', tenantId).eq('employee_id', emp.id).eq('month', month)
           if (deleteErr) log.warn({ err: deleteErr, run_id: runId, employee_id: emp.id }, 'payroll: compensating delete after logRunEvent timeout failed — orphaned slip may exist')
           return
         }
-        if (!settled) { settled = true; succeededSlips.push(result) }
+        if (!settled) { settled = true; succeededSlips.push(computed.result) }
 
       } catch (unexpectedErr: any) {
         const reason = unexpectedErr?.message ?? 'Unexpected error during payroll computation'
@@ -885,14 +949,19 @@ async function executePayrollRun(
 
   const failureSummary = buildFailureSummary(failedEmployees, empList.length)
 
+  const runCompletedAt = new Date()
+  const durationMs    = runCompletedAt.getTime() - new Date(processingStartedAt).getTime()
+
   const runUpdatePayload: Record<string, unknown> = {
-    status:           runStatus,
-    employee_count:   succeededSlips.length,
-    total_gross:      round2(totalGross),
-    total_deductions: totalDeductions,
-    total_net:        totalNet,
-    total_lop_amount: totalLop,
-    failure_summary:  failureSummary,
+    status:                   runStatus,
+    employee_count:           succeededSlips.length,
+    total_gross:              round2(totalGross),
+    total_deductions:         totalDeductions,
+    total_net:                totalNet,
+    total_lop_amount:         totalLop,
+    failure_summary:          failureSummary,
+    run_duration_ms:          durationMs,
+    processed_employee_count: succeededSlips.length + failedEmployees.length,
   }
 
   if (runStatus === 'failed') {
@@ -910,7 +979,18 @@ async function executePayrollRun(
 
   await logRunEvent(supabase, log, {
     tenant_id: tenantId, run_id: runId, event_type: 'run_completed', month,
-    payload: { succeeded: succeededSlips.length, failed: failedEmployees.length, total: empList.length, total_gross: totalGross, total_net: totalNet, total_variable_pay: totalVariablePay, run_status: runStatus },
+    payload: {
+      succeeded:           succeededSlips.length,
+      failed:              failedEmployees.length,
+      total:               empList.length,
+      total_gross:         totalGross,
+      total_net:           totalNet,
+      total_variable_pay:  totalVariablePay,
+      run_status:          runStatus,
+      duration_ms:         durationMs,
+      avg_employee_ms:     empList.length > 0 ? Math.round(durationMs / empList.length) : 0,
+      total_employee_count: empList.length,
+    },
   })
 
   if (failedEmployees.length > 0) {
@@ -1200,56 +1280,27 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
         // late-resolving promise from writing a second entry after the timeout
         // has already recorded this employee as failed (double-push race).
         const processEmployee = async (): Promise<DryRunResult> => {
-          try {
-            const [compensation, attendance] = await Promise.all([
-              fetchActiveCompensation(fastify.supabase, tenantId, emp.id, runPeriodEnd),
-              fetchAttendanceSummary(fastify.supabase, tenantId, emp.id, month),
-            ])
+          const computed = await computeOneEmployee(fastify.supabase, tenantId, emp, {
+            runId: 'dry-run', month, runPeriodEnd, total_working_days, tenantCtx,
+          })
 
-            const compValidation = validateCompensation(
-              compensation, { employeeId: emp.id, month }, runPeriodEnd,
-            )
-
-            if (compValidation.blocking_errors.length > 0) {
-              return {
-                employee_id:   emp.id,
-                employee_code: emp.employee_code,
-                status:        'failed',
-                failure_stage: 'compensation_validation',
-                error:         compValidation.blocking_errors[0],
-                validation_errors: compValidation.blocking_errors,
-              }
-            }
-
-            const advLoanDeductions = await fetchAdvanceLoanDeductions(
-              fastify.supabase, tenantId, emp.id, month,
-            )
-
-            const result  = await computeSlipWithStatutory(fastify.supabase, tenantId, {
-              tenantId, employeeId: emp.id, month, compensation, attendance, total_working_days,
-              advance_loan_deductions: advLoanDeductions,
-            }, month, tenantCtx)
-            const slipRow    = buildSlipRow(tenantId, 'dry-run', result, month)
-            const slipValid  = validatePayrollSlipPayload(slipRow, { employeeId: emp.id, month })
-
+          if (!computed.ok) {
             return {
-              employee_id:            emp.id,
-              employee_code:          emp.employee_code,
-              status:                 slipValid.valid ? 'ok' : 'failed',
-              result,
-              compensation_warnings:  compValidation.warnings.length > 0 ? compValidation.warnings : undefined,
-              validation_errors:      !slipValid.valid ? slipValid.errors : undefined,
-              failure_stage:          !slipValid.valid ? 'slip_validation' : undefined,
-              error:                  !slipValid.valid ? slipValid.errors[0] : undefined,
+              employee_id:       emp.id,
+              employee_code:     emp.employee_code,
+              status:            'failed',
+              failure_stage:     computed.stage,
+              error:             computed.reason,
+              validation_errors: (computed.details?.errors ?? computed.details?.validation_errors) as string[] | undefined,
             }
-          } catch (err: any) {
-            return {
-              employee_id:   emp.id,
-              employee_code: emp.employee_code,
-              status:        'failed',
-              failure_stage: 'data_fetch',
-              error:         err?.message ?? 'Unexpected error',
-            }
+          }
+
+          return {
+            employee_id:          emp.id,
+            employee_code:        emp.employee_code,
+            status:               'ok',
+            result:               computed.result,
+            compensation_warnings: computed.warnings.length > 0 ? computed.warnings : undefined,
           }
         }
 
