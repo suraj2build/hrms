@@ -82,9 +82,9 @@ async function applyTdsForRun(
       .maybeSingle()
     if (fallbackErr) {
       // Pre-fetch already failed; this per-employee fallback also failed.
-      // Log and skip TDS rather than silently applying wrong settings.
-      console.warn(`[payroll][tds] per-employee fallback query failed for tenant ${tenantId}: ${fallbackErr.message} — skipping TDS for employee ${employeeId}`)
-      return slip
+      // Throw so the employee is marked as failed rather than silently emitting
+      // a slip with zero TDS — an incorrect net_pay is worse than a known failure.
+      throw new Error(`TDS statutory settings unavailable: ${fallbackErr.message}`)
     }
     tdsEnabled       = s?.tds_enabled       ?? false
     tdsDefaultRegime = s?.tds_default_regime ?? 'new'
@@ -614,7 +614,18 @@ async function executePayrollRun(
   // Both predicates are required: run_id scopes to this run, tenant_id ensures
   // the DELETE cannot affect another tenant's slips if runId is ever replayed
   // or reconstructed in a durable-queue edge case.
-  await supabase.from('payroll_slips').delete().eq('run_id', runId).eq('tenant_id', tenantId)
+  const { error: deleteSlipsErr } = await supabase
+    .from('payroll_slips')
+    .delete()
+    .eq('run_id', runId)
+    .eq('tenant_id', tenantId)
+  if (deleteSlipsErr) {
+    log.error({ err: deleteSlipsErr, run_id: runId, tenant_id: tenantId }, 'payroll: failed to clear existing slips — aborting to protect data integrity')
+    await supabase.from('payroll_runs')
+      .update({ status: 'failed', error_message: 'Failed to clear existing slips before recompute — data integrity risk, retry the run' })
+      .eq('id', runId)
+    return
+  }
 
   // Pre-fetch tenant-level config once to eliminate per-employee N+1 DB queries
   const fy        = financialYearOf(month)
@@ -666,6 +677,18 @@ async function executePayrollRun(
   const succeededSlips: PayrollSlipResult[] = []
   const failedEmployees: FailedEmployee[]   = []
 
+  // Heartbeat: write last_heartbeat_at every 30 s so zombie-detection queries
+  // can tell the difference between a live run and a crashed-but-stuck run.
+  const heartbeatInterval = setInterval(() => {
+    supabase.from('payroll_runs')
+      .update({ last_heartbeat_at: new Date().toISOString() })
+      .eq('id', runId)
+      .then(({ error: hbErr }: { error: any }) => {
+        if (hbErr) log.warn({ err: hbErr, run_id: runId }, 'payroll: heartbeat write failed')
+      })
+  }, 30_000)
+
+  try {
   await runConcurrent(empList, async (emp) => {
     const empCtx = { employee_id: emp.id, employee_code: emp.employee_code, month, run_id: runId }
 
@@ -824,6 +847,9 @@ async function executePayrollRun(
       clearTimeout(timeoutHandle!)
     }
   })
+  } finally {
+    clearInterval(heartbeatInterval)
+  }
 
   // ── Aggregate + finalise run row ──────────────────────────────────────────
   const totalGross      = round2(succeededSlips.reduce((s, r) => s + r.gross_pay,        0))
@@ -917,7 +943,16 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
   // the pattern of all other durable job handlers in apps/api/src/index.ts.
   durableQueue.register('payroll-run', async (payload, _job) => {
     const { tenantId, runId, month, initiatedBy } = payload as { tenantId: string; runId: string; month: string; initiatedBy?: string }
-    await executePayrollRun(fastify.supabase, fastify.log, { tenantId, runId, month, initiatedBy })
+    try {
+      await executePayrollRun(fastify.supabase, fastify.log, { tenantId, runId, month, initiatedBy })
+    } catch (handlerErr: any) {
+      // executePayrollRun never throws by design, but guard the job handler so an
+      // unexpected throw doesn't leave the payroll_run stuck in 'processing'.
+      fastify.log.error({ err: handlerErr, run_id: runId }, 'payroll-run handler: unexpected error from executePayrollRun')
+      await fastify.supabase.from('payroll_runs')
+        .update({ status: 'failed', error_message: `Payroll job handler crashed: ${handlerErr.message}` })
+        .eq('id', runId)
+    }
   })
 
   // ── POST /payroll/runs ───────────────────────────────────────────────────────
@@ -1387,36 +1422,41 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
     const from         = `${month}-01`
     const to           = new Date(year, mon, 0).toISOString().slice(0, 10)
 
-    // All active employees
-    const { data: employees, error: empErr } = await fastify.supabase
-      .from('employees')
-      .select('id, first_name, last_name, employee_code')
-      .eq('tenant_id', tenantId)
-      .eq('status', 'active')
-      .order('employee_code')
-    if (empErr) return serverError(req, reply, empErr, ErrorCode.QUERY_FAILED, 'Failed to fetch employees')
+    // All active employees — paginated to avoid PostgREST 1000-row ceiling
+    let empList: Array<{ id: string; first_name: string; last_name: string; employee_code: string }>
+    try {
+      empList = await fetchAllRows((fFrom, fTo) =>
+        fastify.supabase
+          .from('employees')
+          .select('id, first_name, last_name, employee_code')
+          .eq('tenant_id', tenantId)
+          .eq('status', 'active')
+          .order('employee_code')
+          .range(fFrom, fTo),
+      )
+    } catch (empErr: any) {
+      return serverError(req, reply, empErr, ErrorCode.QUERY_FAILED, 'Failed to fetch employees')
+    }
 
-    const empList = (employees ?? []) as Array<{
-      id: string; first_name: string; last_name: string; employee_code: string
-    }>
-
-    // Parallel checks: active compensations, attendance presence, open anomalies
-    const [
-      { data: compRows },
-      { data: attRows },
-      { count: anomalyCount },
-    ] = await Promise.all([
-      fastify.supabase
-        .from('employee_compensations')
-        .select('employee_id')
-        .eq('tenant_id', tenantId)
-        .eq('is_active', true),
-      fastify.supabase
-        .from('attendance_daily')
-        .select('employee_id')
-        .eq('tenant_id', tenantId)
-        .gte('date', from)
-        .lte('date', to),
+    // Parallel checks: compensations, attendance presence (both paginated), anomaly count
+    const [compResult, attResult, anomalyResult] = await Promise.allSettled([
+      fetchAllRows((fFrom, fTo) =>
+        fastify.supabase
+          .from('employee_compensations')
+          .select('employee_id')
+          .eq('tenant_id', tenantId)
+          .eq('is_active', true)
+          .range(fFrom, fTo),
+      ),
+      fetchAllRows((fFrom, fTo) =>
+        fastify.supabase
+          .from('attendance_daily')
+          .select('employee_id')
+          .eq('tenant_id', tenantId)
+          .gte('date', from)
+          .lte('date', to)
+          .range(fFrom, fTo),
+      ),
       fastify.supabase
         .from('attendance_anomalies')
         .select('id', { count: 'exact', head: true })
@@ -1426,8 +1466,13 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
         .lte('date', to),
     ])
 
-    const hasComp = new Set<string>((compRows ?? []).map((r: { employee_id: string }) => r.employee_id))
-    const hasAtt  = new Set<string>((attRows  ?? []).map((r: { employee_id: string }) => r.employee_id))
+    const compRows    = compResult.status === 'fulfilled' ? compResult.value as Array<{ employee_id: string }> : []
+    const attRows     = attResult.status === 'fulfilled'  ? attResult.value  as Array<{ employee_id: string }> : []
+    const anomalyCount = anomalyResult.status === 'fulfilled' && !(anomalyResult.value as any).error
+      ? ((anomalyResult.value as any).count ?? 0) : 0
+
+    const hasComp = new Set<string>(compRows.map((r) => r.employee_id))
+    const hasAtt  = new Set<string>(attRows.map((r)  => r.employee_id))
 
     type BlockerType = 'no_compensation' | 'no_attendance'
     type Blocker = { type: BlockerType; employee_id: string; employee_name: string; employee_code: string }
@@ -1697,7 +1742,19 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       .single()
 
     if (error || !data) return notFound(reply, 'NOT_FOUND', 'Run not found')
-    return reply.send({ data })
+
+    // Zombie detection: a processing run with a stale heartbeat (> 5 min) is
+    // likely stuck — the durable queue will recover it on next process restart.
+    const ZOMBIE_THRESHOLD_MS = 5 * 60 * 1000
+    let is_zombie = false
+    if ((data as any).status === 'processing') {
+      const hb = (data as any).last_heartbeat_at
+      if (!hb || Date.now() - new Date(hb).getTime() > ZOMBIE_THRESHOLD_MS) {
+        is_zombie = true
+      }
+    }
+
+    return reply.send({ data: { ...(data as any), is_zombie } })
   })
 
   // ── POST /payroll/runs/:id/finalize ──────────────────────────────────────────

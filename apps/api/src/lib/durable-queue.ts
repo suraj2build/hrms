@@ -300,11 +300,12 @@ export class DurableJobQueue {
       created_by:      opts.createdBy      ?? null,
     }
 
-    // ON CONFLICT on idempotency_key → DO NOTHING → return existing job id
+    // ON CONFLICT on idempotency_key (partial index: pending/running only) →
+    // DO NOTHING → return existing active job's id.
     const { data, error } = await this.supabase
       .from('background_jobs')
       .upsert(row, {
-        onConflict:     'idempotency_key',
+        onConflict:       'idempotency_key',
         ignoreDuplicates: true,
       })
       .select('id')
@@ -312,9 +313,29 @@ export class DurableJobQueue {
 
     if (error) throw new Error(`[durable-queue] enqueue failed: ${error.message}`)
 
-    const resolvedId = data?.id ?? jobId
-    this.log?.debug({ jobId: resolvedId, jobType, scheduledAt }, '[durable-queue] job enqueued')
-    return resolvedId
+    if (data?.id) {
+      this.log?.debug({ jobId: data.id, jobType, scheduledAt }, '[durable-queue] job enqueued')
+      return data.id
+    }
+
+    // data is null: DO NOTHING fired — a pending/running job with this key exists.
+    // Fetch the existing active job's id so the caller gets a real, workable id.
+    if (opts.idempotencyKey) {
+      const { data: existing } = await this.supabase
+        .from('background_jobs')
+        .select('id')
+        .eq('idempotency_key', opts.idempotencyKey)
+        .in('status', ['pending', 'running'])
+        .maybeSingle()
+      if (existing?.id) {
+        this.log?.debug({ jobId: existing.id, jobType, idempotencyKey: opts.idempotencyKey }, '[durable-queue] idempotency hit — returning existing active job')
+        return existing.id
+      }
+    }
+
+    // Fallback: return the generated id (job may have just completed between
+    // the upsert and the select — extremely rare race; caller should re-poll run status).
+    return jobId
   }
 
   // ── Polling ──────────────────────────────────────────────────────────────────
