@@ -84,9 +84,14 @@ interface RawCompensation {
 }
 
 interface RawComponent {
-  compensation_id:  string
-  component_type:   string
-  computed_monthly: number | null
+  compensation_id:    string
+  salary_component_id: string
+  computed_monthly:   number | null
+}
+
+interface RawSalaryComponent {
+  id:             string
+  component_type: string
 }
 
 // ── Core audit function ───────────────────────────────────────────────────────
@@ -94,7 +99,7 @@ interface RawComponent {
 /**
  * Build a full compensation coverage audit for the tenant.
  *
- * Runs three focused queries (employees, active compensations, components) and
+ * Runs four focused queries (employees, active compensations, salary component types, components) and
  * produces a structured audit result ready for the API response and UI card.
  *
  * @throws Error when any DB query fails — caller should catch and return 500.
@@ -156,7 +161,20 @@ export async function buildCompensationCoverageAudit(
 
   const compByEmp = new Map<string, RawCompensation>(compList.map(c => [c.employee_id, c]))
 
-  // ── 3. Fetch component stats for all found compensations (batched) ────────
+  // ── 3. Pre-fetch salary component type map (avoids fragile PostgREST FK join) ─
+  const salaryCompTypeMap = new Map<string, string>()
+  {
+    const { data: scRows, error: scErr } = await supabase
+      .from('salary_components')
+      .select('id, component_type')
+      .eq('tenant_id', tenantId)
+    if (scErr) throw new Error(`Coverage audit: failed to fetch salary components — ${scErr.message}`)
+    for (const sc of (scRows ?? []) as RawSalaryComponent[]) {
+      salaryCompTypeMap.set(sc.id, sc.component_type)
+    }
+  }
+
+  // ── 4. Fetch component stats for all found compensations (batched) ────────
   const componentCountByComp = new Map<string, number>()   // compensation_id → # rows
   const earningTotalByComp   = new Map<string, number>()   // compensation_id → sum computed_monthly of earnings
   const hasNaNByComp         = new Set<string>()           // compensation_ids with NaN/Infinity components
@@ -166,12 +184,12 @@ export async function buildCompensationCoverageAudit(
     for (let i = 0; i < compIds.length; i += CHUNK) {
       // fetchAllRows prevents silent truncation: 400 compensations × ~20 components
       // easily exceeds the PostgREST max-rows=1000 ceiling per request.
-      let components: any[]
+      let components: RawComponent[]
       try {
-        components = await fetchAllRows((from, to) =>
+        components = await fetchAllRows<RawComponent>((from, to) =>
           supabase
             .from('employee_compensation_components')
-            .select('compensation_id, computed_monthly, salary_components(component_type)')
+            .select('compensation_id, salary_component_id, computed_monthly')
             .in('compensation_id', compIds.slice(i, i + CHUNK))
             .order('compensation_id')
             .range(from, to) as any,
@@ -181,11 +199,11 @@ export async function buildCompensationCoverageAudit(
       }
 
       for (const cc of components) {
-        const cid = cc.compensation_id as string
+        const cid = cc.compensation_id
         componentCountByComp.set(cid, (componentCountByComp.get(cid) ?? 0) + 1)
 
         const amt  = Number(cc.computed_monthly)
-        const type = cc.salary_components?.component_type ?? ''
+        const type = salaryCompTypeMap.get(cc.salary_component_id) ?? ''
 
         if (!Number.isFinite(amt) || Number.isNaN(amt)) {
           hasNaNByComp.add(cid)
@@ -198,7 +216,7 @@ export async function buildCompensationCoverageAudit(
     }
   }
 
-  // ── 4. Analyse each employee ──────────────────────────────────────────────
+  // ── 5. Analyse each employee ──────────────────────────────────────────────
   const issues: CoverageIssue[] = []
 
   let withComp         = 0
