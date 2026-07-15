@@ -7,7 +7,7 @@
  * Access: hr_admin and super_admin only.
  */
 
-import React, { useState }                       from 'react'
+import React, { useState, useRef, useEffect }    from 'react'
 import { Link, useNavigate }                     from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
@@ -1094,89 +1094,290 @@ function EmployeeSelectorMulti({
 }
 
 // ── ProcessingProgressBar ─────────────────────────────────────────────────────
-// Shows batch-level progress (groups of 500) while a run is computing.
+// Full-card live progress display while a run is computing.
+// Shows batch-by-batch status, animated counter, and ETA.
 
 const BATCH_SIZE = 500
 
-function ProcessingProgressBar({ run }: { run: PayrollRun }) {
-  const total     = run.total_employee_count ?? run.employee_count ?? 0
-  const processed = run.processed_employee_count ?? 0
-  const pct       = total > 0 ? Math.min(100, Math.round((processed / total) * 100)) : 0
-  const numBatches = Math.max(1, Math.ceil(total / BATCH_SIZE))
+function fmtEta(sec: number): string {
+  if (sec < 60)  return `~${sec}s`
+  const m = Math.floor(sec / 60)
+  const s = sec % 60
+  return s > 0 ? `~${m}m ${s}s` : `~${m}m`
+}
 
-  // ETA: rate in employees/ms → remaining time in seconds
+function ProcessingProgressBar({ run }: { run: PayrollRun }) {
+  const total       = run.total_employee_count ?? run.employee_count ?? 0
+  const serverCount = run.processed_employee_count ?? 0
+
+  // Animated display counter — ticks smoothly from prev known value to new one
+  const displayRef  = useRef(serverCount)
+  const [display, setDisplay] = useState(serverCount)
+  const rafRef      = useRef<number | null>(null)
+
+  useEffect(() => {
+    const from = displayRef.current
+    const to   = serverCount
+    if (from === to) return
+
+    // Cancel any in-flight animation
+    if (rafRef.current !== null) cancelAnimationFrame(rafRef.current)
+
+    const STEP_MS = 40  // ~25fps feels natural for a counter
+    const steps   = Math.max(1, Math.abs(to - from))
+    const duration = Math.min(4500, steps * 15)  // 15ms/employee, cap 4.5 s
+    const startTs  = performance.now()
+
+    const tick = (now: number) => {
+      const progress = Math.min(1, (now - startTs) / duration)
+      const cur = Math.round(from + (to - from) * progress)
+      setDisplay(cur)
+      if (progress < 1) {
+        rafRef.current = requestAnimationFrame(tick)
+      } else {
+        displayRef.current = to
+        rafRef.current = null
+      }
+    }
+    rafRef.current = requestAnimationFrame(tick)
+    return () => { if (rafRef.current !== null) cancelAnimationFrame(rafRef.current) }
+  }, [serverCount])
+
+  const numBatches    = Math.max(1, Math.ceil(total / BATCH_SIZE))
+  const overallPct    = total > 0 ? Math.min(100, Math.round((display / total) * 100)) : 0
+
+  // Active batch = the batch that contains the displayed count
+  const activeBatchIdx = total > 0 ? Math.min(numBatches - 1, Math.floor(display / BATCH_SIZE)) : 0
+  const activeBatchStart = activeBatchIdx * BATCH_SIZE
+  const activeBatchEnd   = Math.min((activeBatchIdx + 1) * BATCH_SIZE, total)
+  const activeBatchSize  = activeBatchEnd - activeBatchStart
+  const activeBatchDone  = Math.max(0, display - activeBatchStart)
+  const activeBatchPct   = activeBatchSize > 0
+    ? Math.min(100, Math.round((activeBatchDone / activeBatchSize) * 100))
+    : 0
+
+  // ETA based on server-side count (not display)
   const startedAt = run.started_processing_at ? new Date(run.started_processing_at).getTime() : null
   const elapsedMs = startedAt ? Date.now() - startedAt : null
-  const rate      = elapsedMs && processed > 0 ? processed / elapsedMs : null
-  const etaSec    = rate && total > processed ? Math.ceil((total - processed) / rate / 1000) : null
+  const rate      = elapsedMs && serverCount > 0 ? serverCount / elapsedMs : null
+  const etaSec    = rate && total > serverCount ? Math.ceil((total - serverCount) / rate / 1000) : null
 
   return (
-    <div className="space-y-1.5">
-      {/* Batch blocks — each block = up to 500 employees */}
-      <div className="flex gap-px h-1.5">
-        {Array.from({ length: numBatches }, (_, i) => {
-          const batchStart = i * BATCH_SIZE
-          const batchEnd   = Math.min((i + 1) * BATCH_SIZE, total)
-          const batchSize  = batchEnd - batchStart
-          const batchDone  = Math.max(0, Math.min(processed - batchStart, batchSize))
-          const batchPct   = batchSize > 0 ? (batchDone / batchSize) * 100 : 0
-          const complete   = batchDone >= batchSize
-          return (
-            <div
-              key={i}
-              title={`Batch ${i + 1}: ${batchDone}/${batchSize}`}
-              className={cn('rounded-full overflow-hidden', complete ? 'bg-success' : 'bg-muted')}
-              style={{ flex: batchSize }}
-            >
-              {!complete && (
-                <div
-                  className="h-full bg-primary/70 transition-[width] duration-500"
-                  style={{ width: `${batchPct}%` }}
-                />
-              )}
-            </div>
-          )
-        })}
-      </div>
-
-      {/* Stats row */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
-          <Loader2 className="h-3 w-3 animate-spin text-primary flex-shrink-0" />
-          <span>
-            {total > 0
-              ? `${processed.toLocaleString()} / ${total.toLocaleString()} employees`
-              : 'Calculating pay…'}
-          </span>
-        </div>
-        <div className="flex items-center gap-2 text-[10px]">
-          {total > 0 && (
-            <span className="font-mono font-semibold text-foreground">{pct}%</span>
-          )}
-          {etaSec !== null && etaSec > 0 && (
-            <span className="text-muted-foreground">
-              ~{etaSec < 60 ? `${etaSec}s` : `${Math.ceil(etaSec / 60)}m`} left
-            </span>
-          )}
-        </div>
-      </div>
-
-      {/* Batch completion labels (only when >1 batch) */}
+    <div className="space-y-3">
+      {/* ── Batch status pills ─────────────────────────────────────────── */}
       {numBatches > 1 && (
-        <div className="flex gap-px text-[9px] text-muted-foreground/70">
+        <div className="flex flex-wrap gap-1.5">
           {Array.from({ length: numBatches }, (_, i) => {
-            const batchStart = i * BATCH_SIZE
-            const batchEnd   = Math.min((i + 1) * BATCH_SIZE, total)
-            const batchDone  = Math.max(0, Math.min(processed - batchStart, batchEnd - batchStart))
-            const complete   = batchDone >= (batchEnd - batchStart)
+            const bStart = i * BATCH_SIZE
+            const bEnd   = Math.min((i + 1) * BATCH_SIZE, total)
+            const bDone  = Math.max(0, Math.min(display - bStart, bEnd - bStart))
+            const isDone = bDone >= (bEnd - bStart)
+            const isActive = i === activeBatchIdx && !isDone
+
             return (
-              <div key={i} style={{ flex: batchEnd - batchStart }} className="truncate text-center">
-                {complete ? '✓' : `B${i + 1}`}
-              </div>
+              <span
+                key={i}
+                className={cn(
+                  'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium border transition-all',
+                  isDone
+                    ? 'bg-success/15 border-success/30 text-success'
+                    : isActive
+                    ? 'bg-primary/10 border-primary/40 text-primary'
+                    : 'bg-muted/50 border-border text-muted-foreground',
+                )}
+              >
+                {isDone
+                  ? <><CheckCircle2 className="h-2.5 w-2.5" /> B{i + 1} ✓</>
+                  : isActive
+                  ? <><Loader2 className="h-2.5 w-2.5 animate-spin" /> Batch {i + 1}</>
+                  : <>○ B{i + 1}</>
+                }
+              </span>
             )
           })}
         </div>
       )}
+
+      {/* ── Active batch progress bar ──────────────────────────────────── */}
+      <div className="space-y-1">
+        <div className="flex items-center justify-between text-xs">
+          <span className="font-medium text-foreground">
+            {numBatches > 1
+              ? `Batch ${activeBatchIdx + 1} of ${numBatches}`
+              : 'Processing employees'}
+          </span>
+          <span className="font-mono font-bold text-primary tabular-nums">
+            {activeBatchDone.toLocaleString()}
+            <span className="font-normal text-muted-foreground">
+              /{activeBatchSize.toLocaleString()}
+            </span>
+          </span>
+        </div>
+        <div className="h-2 rounded-full bg-muted overflow-hidden">
+          <div
+            className="h-full rounded-full bg-primary transition-[width] duration-300"
+            style={{ width: `${activeBatchPct}%` }}
+          />
+        </div>
+      </div>
+
+      {/* ── Overall progress ────────────────────────────────────────────── */}
+      {numBatches > 1 && (
+        <div className="space-y-1">
+          <div className="h-1 rounded-full bg-muted overflow-hidden">
+            <div
+              className="h-full rounded-full bg-primary/40 transition-[width] duration-300"
+              style={{ width: `${overallPct}%` }}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* ── Summary row ─────────────────────────────────────────────────── */}
+      <div className="flex items-center justify-between text-[10px]">
+        <div className="flex items-center gap-1.5 text-muted-foreground">
+          <Loader2 className="h-3 w-3 animate-spin text-primary flex-shrink-0" />
+          <span className="tabular-nums">
+            {total > 0
+              ? <><strong className="text-foreground font-mono">{display.toLocaleString()}</strong> / {total.toLocaleString()} employees</>
+              : 'Starting up…'
+            }
+          </span>
+        </div>
+        <div className="flex items-center gap-2 text-muted-foreground">
+          {total > 0 && (
+            <span className="font-mono font-semibold text-foreground">{overallPct}%</span>
+          )}
+          {etaSec !== null && etaSec > 0 && (
+            <span>{fmtEta(etaSec)} left</span>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── DryRunProgressView ───────────────────────────────────────────────────────
+// Simulated progress for dry run API calls (synchronous — no server feedback).
+// Uses elapsed time + estimated rate to animate the counter visually.
+// Caps at 93% so it never reaches 100% before the response arrives.
+
+function DryRunProgressView({ total }: { total: number | null }) {
+  const [display, setDisplay] = useState(0)
+  const rafRef = useRef<number | null>(null)
+
+  useEffect(() => {
+    if (!total) return
+    const startTs = performance.now()
+    const cap     = Math.floor(total * 0.93)
+    const rateMs  = 80  // ~80 ms per employee at ~10× concurrency
+
+    const tick = (now: number) => {
+      const cur = Math.min(cap, Math.floor((now - startTs) / rateMs))
+      setDisplay(cur)
+      if (cur < cap) rafRef.current = requestAnimationFrame(tick)
+    }
+    rafRef.current = requestAnimationFrame(tick)
+    return () => { if (rafRef.current !== null) cancelAnimationFrame(rafRef.current) }
+  }, [total])
+
+  // Indeterminate: full dry run where total count is unknown until API returns
+  if (!total) {
+    return (
+      <div className="space-y-3">
+        <div className="space-y-1">
+          <p className="text-xs font-medium text-foreground">Simulating payroll…</p>
+          <div className="h-2 rounded-full bg-primary/40 animate-pulse" />
+        </div>
+        <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+          <Loader2 className="h-3 w-3 animate-spin text-primary flex-shrink-0" />
+          <span>Processing all employees — no DB writes</span>
+        </div>
+      </div>
+    )
+  }
+
+  const numBatches     = Math.max(1, Math.ceil(total / BATCH_SIZE))
+  const overallPct     = Math.min(93, total > 0 ? Math.round((display / total) * 100) : 0)
+  const activeBatchIdx = Math.min(numBatches - 1, Math.floor(display / BATCH_SIZE))
+  const activeBatchStart = activeBatchIdx * BATCH_SIZE
+  const activeBatchEnd   = Math.min((activeBatchIdx + 1) * BATCH_SIZE, total)
+  const activeBatchSize  = activeBatchEnd - activeBatchStart
+  const activeBatchDone  = Math.max(0, display - activeBatchStart)
+  const activeBatchPct   = activeBatchSize > 0
+    ? Math.min(93, Math.round((activeBatchDone / activeBatchSize) * 100))
+    : 0
+
+  return (
+    <div className="space-y-3">
+      {/* Batch pills */}
+      {numBatches > 1 && (
+        <div className="flex flex-wrap gap-1.5">
+          {Array.from({ length: numBatches }, (_, i) => {
+            const bStart  = i * BATCH_SIZE
+            const bEnd    = Math.min((i + 1) * BATCH_SIZE, total)
+            const bDone   = Math.max(0, Math.min(display - bStart, bEnd - bStart))
+            const isDone   = bDone >= (bEnd - bStart)
+            const isActive = i === activeBatchIdx && !isDone
+            return (
+              <span key={i} className={cn(
+                'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium border transition-all',
+                isDone    ? 'bg-success/15 border-success/30 text-success'
+                : isActive ? 'bg-primary/10 border-primary/40 text-primary'
+                : 'bg-muted/50 border-border text-muted-foreground',
+              )}>
+                {isDone
+                  ? <><CheckCircle2 className="h-2.5 w-2.5" /> B{i + 1} ✓</>
+                  : isActive
+                  ? <><Loader2 className="h-2.5 w-2.5 animate-spin" /> Batch {i + 1}</>
+                  : <>○ B{i + 1}</>
+                }
+              </span>
+            )
+          })}
+        </div>
+      )}
+
+      {/* Active batch progress bar */}
+      <div className="space-y-1">
+        <div className="flex items-center justify-between text-xs">
+          <span className="font-medium text-foreground">
+            {numBatches > 1 ? `Batch ${activeBatchIdx + 1} of ${numBatches}` : 'Simulating employees'}
+          </span>
+          <span className="font-mono font-bold text-primary tabular-nums">
+            {activeBatchDone.toLocaleString()}
+            <span className="font-normal text-muted-foreground">/{activeBatchSize.toLocaleString()}</span>
+          </span>
+        </div>
+        <div className="h-2 rounded-full bg-muted overflow-hidden">
+          <div
+            className="h-full rounded-full bg-primary transition-[width] duration-150"
+            style={{ width: `${activeBatchPct}%` }}
+          />
+        </div>
+      </div>
+
+      {/* Overall thin bar */}
+      {numBatches > 1 && (
+        <div className="h-1 rounded-full bg-muted overflow-hidden">
+          <div
+            className="h-full rounded-full bg-primary/40 transition-[width] duration-150"
+            style={{ width: `${overallPct}%` }}
+          />
+        </div>
+      )}
+
+      {/* Summary row */}
+      <div className="flex items-center justify-between text-[10px]">
+        <div className="flex items-center gap-1.5 text-muted-foreground">
+          <Loader2 className="h-3 w-3 animate-spin text-primary flex-shrink-0" />
+          <span className="tabular-nums">
+            <strong className="text-foreground font-mono">{display.toLocaleString()}</strong>
+            {' '}/ {total.toLocaleString()} simulated · no DB writes
+          </span>
+        </div>
+        <span className="font-mono font-semibold text-foreground">{overallPct}%</span>
+      </div>
     </div>
   )
 }
@@ -1570,16 +1771,20 @@ function RunCard({
   const navigate     = useNavigate()
   const heldCount    = run.held_count    ?? 0
   const warningCount = run.warning_count ?? 0
+  const isProcessing = run.status === 'processing'
 
   return (
-    <div className="p-4 rounded-lg border border-border bg-card space-y-3">
+    <div className={cn(
+      'p-4 rounded-lg border bg-card space-y-3',
+      isProcessing ? 'border-primary/30 bg-primary/[0.02]' : 'border-border',
+    )}>
 
       {/* Header row: month + status badge + held/warning chips */}
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <h3 className="font-semibold text-sm">{fmtMonth(run.month)}</h3>
           <p className="text-xs text-muted-foreground mt-0.5">
-            {run.employee_count} employee{run.employee_count !== 1 ? 's' : ''}
+            {(run.total_employee_count ?? run.employee_count ?? 0).toLocaleString()} employee{(run.total_employee_count ?? run.employee_count ?? 0) !== 1 ? 's' : ''}
           </p>
         </div>
         <div className="flex items-center gap-1.5 flex-shrink-0 flex-wrap justify-end">
@@ -1599,24 +1804,53 @@ function RunCard({
         </div>
       </div>
 
-      {/* Lifecycle pipeline */}
-      <RunLifecycleBar run={run} />
+      {/* Processing: full live progress panel (replaces lifecycle bar + financials) */}
+      {isProcessing && <ProcessingProgressBar run={run} />}
 
-      {/* Financials */}
-      <div className="grid grid-cols-3 gap-2 text-center">
-        <div className="p-2 rounded-md bg-muted/40">
-          <p className="text-[10px] text-muted-foreground mb-0.5">Gross</p>
-          <p className="text-xs font-semibold text-foreground">{fmtCurrency(run.total_gross)}</p>
+      {/* Non-processing: lifecycle pipeline */}
+      {!isProcessing && <RunLifecycleBar run={run} />}
+
+      {/* Completion summary for draft/partial_failed/failed — show totals clearly */}
+      {(run.status === 'draft' || run.status === 'partial_failed' || run.status === 'failed') &&
+       (run.total_employee_count ?? 0) > 0 && (() => {
+        const total   = run.total_employee_count ?? 0
+        const success = run.employee_count ?? 0
+        const failed  = run.failure_summary?.total_failed ?? 0
+        return (
+          <div className="grid grid-cols-3 gap-1.5">
+            <div className="p-2 rounded-md bg-success/10 border border-success/20 text-center">
+              <p className="text-[9px] text-muted-foreground mb-0.5">Completed</p>
+              <p className="text-sm font-bold text-success tabular-nums">{success.toLocaleString()}</p>
+            </div>
+            <div className="p-2 rounded-md bg-destructive/10 border border-destructive/20 text-center">
+              <p className="text-[9px] text-muted-foreground mb-0.5">Failed</p>
+              <p className="text-sm font-bold text-destructive tabular-nums">{failed.toLocaleString()}</p>
+            </div>
+            <div className="p-2 rounded-md bg-muted/40 border border-border text-center">
+              <p className="text-[9px] text-muted-foreground mb-0.5">Total</p>
+              <p className="text-sm font-bold text-foreground tabular-nums">{total.toLocaleString()}</p>
+            </div>
+          </div>
+        )
+      })()}
+
+      {/* Financials — hidden while processing (all zeros), shown once complete */}
+      {!isProcessing && (
+        <div className="grid grid-cols-3 gap-2 text-center">
+          <div className="p-2 rounded-md bg-muted/40">
+            <p className="text-[10px] text-muted-foreground mb-0.5">Gross</p>
+            <p className="text-xs font-semibold text-foreground">{fmtCurrency(run.total_gross)}</p>
+          </div>
+          <div className="p-2 rounded-md bg-muted/40">
+            <p className="text-[10px] text-muted-foreground mb-0.5">Net Pay</p>
+            <p className="text-xs font-semibold text-success">{fmtCurrency(run.total_net)}</p>
+          </div>
+          <div className="p-2 rounded-md bg-muted/40">
+            <p className="text-[10px] text-muted-foreground mb-0.5">LOP</p>
+            <p className="text-xs font-semibold text-destructive">{fmtCurrency(run.total_lop_amount)}</p>
+          </div>
         </div>
-        <div className="p-2 rounded-md bg-muted/40">
-          <p className="text-[10px] text-muted-foreground mb-0.5">Net Pay</p>
-          <p className="text-xs font-semibold text-success">{fmtCurrency(run.total_net)}</p>
-        </div>
-        <div className="p-2 rounded-md bg-muted/40">
-          <p className="text-[10px] text-muted-foreground mb-0.5">LOP</p>
-          <p className="text-xs font-semibold text-destructive">{fmtCurrency(run.total_lop_amount)}</p>
-        </div>
-      </div>
+      )}
 
       {/* Structured failure breakdown — shown when failure_summary is available */}
       {run.failure_summary && (
@@ -2377,61 +2611,86 @@ export function PayrollRuns() {
             </p>
 
             {/* ── Scoped Dry Run Dialog ─────────────────────────────────────── */}
-            <Dialog open={scopedDryRunOpen} onOpenChange={setScopedDryRunOpen}>
-              <DialogContent className="max-w-md">
+            <Dialog open={scopedDryRunOpen} onOpenChange={scopedDryRunMutation.isPending ? undefined : setScopedDryRunOpen}>
+              <DialogContent className="max-w-md" onInteractOutside={scopedDryRunMutation.isPending ? (e) => e.preventDefault() : undefined}>
                 <DialogHeader>
                   <DialogTitle className="flex items-center gap-2 text-sm">
                     <Users className="h-4 w-4 text-primary" />
-                    Dry Run — Selected Employees
+                    {scopedDryRunMutation.isPending ? `Simulating — ${scopedEmpIds.length} Employees` : 'Dry Run — Selected Employees'}
                   </DialogTitle>
                 </DialogHeader>
-                <div className="space-y-4">
-                  <div>
-                    <label className="text-xs font-medium text-muted-foreground block mb-1.5">
-                      Month: {fmtMonth(runMonth)}
-                    </label>
-                    <p className="text-[10px] text-muted-foreground">
-                      Search and select employees to include in this scoped dry run.
-                      Up to 500 employees can be selected.
+
+                {scopedDryRunMutation.isPending ? (
+                  <div className="space-y-4 py-2">
+                    <DryRunProgressView total={scopedEmpIds.length} />
+                    <p className="text-[10px] text-muted-foreground text-center">
+                      Simulating payroll for {scopedEmpIds.length} employee{scopedEmpIds.length !== 1 ? 's' : ''} — no data will be written.
                     </p>
                   </div>
-                  <div>
-                    <label className="text-xs font-medium text-muted-foreground block mb-1.5">
-                      Employees ({scopedEmpIds.length} selected)
-                    </label>
-                    <EmployeeSelectorMulti
-                      value={scopedEmpIds}
-                      onChange={setScopedEmpIds}
-                    />
+                ) : (
+                  <div className="space-y-4">
+                    <div>
+                      <label className="text-xs font-medium text-muted-foreground block mb-1.5">
+                        Month: {fmtMonth(runMonth)}
+                      </label>
+                      <p className="text-[10px] text-muted-foreground">
+                        Search and select employees to include in this scoped dry run.
+                        Up to 500 employees can be selected.
+                      </p>
+                    </div>
+                    <div>
+                      <label className="text-xs font-medium text-muted-foreground block mb-1.5">
+                        Employees ({scopedEmpIds.length} selected)
+                      </label>
+                      <EmployeeSelectorMulti
+                        value={scopedEmpIds}
+                        onChange={setScopedEmpIds}
+                      />
+                    </div>
+                    <div className="flex gap-2 pt-1">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="flex-1 h-8 text-xs"
+                        onClick={() => setScopedDryRunOpen(false)}
+                      >
+                        Cancel
+                      </Button>
+                      <Button
+                        size="sm"
+                        className="flex-1 h-8 text-xs gap-1.5"
+                        disabled={scopedEmpIds.length === 0}
+                        onClick={() => scopedDryRunMutation.mutate(scopedEmpIds)}
+                      >
+                        <Search className="h-3.5 w-3.5" />Run Dry Run
+                      </Button>
+                    </div>
                   </div>
-                  <div className="flex gap-2 pt-1">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="flex-1 h-8 text-xs"
-                      onClick={() => setScopedDryRunOpen(false)}
-                    >
-                      Cancel
-                    </Button>
-                    <Button
-                      size="sm"
-                      className="flex-1 h-8 text-xs gap-1.5"
-                      disabled={scopedEmpIds.length === 0 || scopedDryRunMutation.isPending}
-                      onClick={() => scopedDryRunMutation.mutate(scopedEmpIds)}
-                    >
-                      {scopedDryRunMutation.isPending
-                        ? <><Loader2 className="h-3.5 w-3.5 animate-spin" />Running…</>
-                        : <><Search className="h-3.5 w-3.5" />Run Dry Run</>
-                      }
-                    </Button>
-                  </div>
+                )}
+              </DialogContent>
+            </Dialog>
+
+            {/* ── Full Dry Run Progress Dialog ───────────────────────────────── */}
+            <Dialog open={dryRunMutation.isPending} onOpenChange={() => {}}>
+              <DialogContent className="max-w-sm" onInteractOutside={(e) => e.preventDefault()}>
+                <DialogHeader>
+                  <DialogTitle className="flex items-center gap-2 text-sm">
+                    <Search className="h-4 w-4 text-primary" />
+                    Dry Run — {fmtMonth(runMonth)}
+                  </DialogTitle>
+                </DialogHeader>
+                <div className="space-y-4 py-2">
+                  <DryRunProgressView total={null} />
+                  <p className="text-[10px] text-muted-foreground text-center">
+                    Simulating payroll for all employees — no data will be written.
+                  </p>
                 </div>
               </DialogContent>
             </Dialog>
 
             {/* ── Dry Run Results Dialog ─────────────────────────────────────── */}
             <Dialog open={dryRunOpen} onOpenChange={setDryRunOpen}>
-              <DialogContent className="max-w-2xl">
+              <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
                 <DialogHeader>
                   <DialogTitle className="flex items-center gap-2 text-sm">
                     <Search className="h-4 w-4 text-primary" />
@@ -2440,19 +2699,37 @@ export function PayrollRuns() {
                 </DialogHeader>
                 {dryRunData && (
                   <div className="space-y-3">
-                    {/* Summary chips */}
-                    <div className="grid grid-cols-4 gap-2">
-                      {[
-                        { label: 'Employees',     value: dryRunData.employee_count,    color: 'text-foreground' },
-                        { label: 'Working Days',  value: dryRunData.total_working_days, color: 'text-foreground' },
-                        { label: 'Succeeded',     value: dryRunData.ok_count,           color: dryRunData.ok_count === dryRunData.employee_count ? 'text-success' : 'text-warning' },
-                        { label: 'Failed',        value: dryRunData.failed_count,       color: dryRunData.failed_count > 0 ? 'text-destructive' : 'text-success' },
-                      ].map(c => (
-                        <div key={c.label} className="rounded-md border border-border bg-muted/20 p-2.5 text-center">
-                          <p className="text-[10px] text-muted-foreground">{c.label}</p>
-                          <p className={cn('text-lg font-bold tabular-nums', c.color)}>{c.value}</p>
-                        </div>
-                      ))}
+                    {/* Batch completion pills — all green since done */}
+                    {Math.ceil(dryRunData.employee_count / BATCH_SIZE) > 1 && (
+                      <div className="flex flex-wrap gap-1.5">
+                        {Array.from({ length: Math.ceil(dryRunData.employee_count / BATCH_SIZE) }, (_, i) => (
+                          <span key={i} className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium border bg-success/15 border-success/30 text-success">
+                            <CheckCircle2 className="h-2.5 w-2.5" /> B{i + 1} ✓
+                          </span>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Completion summary — matches live run style */}
+                    <div className="grid grid-cols-3 gap-2">
+                      <div className="p-2.5 rounded-md bg-success/10 border border-success/20 text-center">
+                        <p className="text-[9px] text-muted-foreground mb-0.5">Succeeded</p>
+                        <p className={cn('text-lg font-bold tabular-nums', dryRunData.ok_count === dryRunData.employee_count ? 'text-success' : 'text-warning')}>
+                          {dryRunData.ok_count.toLocaleString()}
+                        </p>
+                      </div>
+                      <div className={cn('p-2.5 rounded-md text-center border', dryRunData.failed_count > 0 ? 'bg-destructive/10 border-destructive/20' : 'bg-muted/40 border-border')}>
+                        <p className="text-[9px] text-muted-foreground mb-0.5">Failed</p>
+                        <p className={cn('text-lg font-bold tabular-nums', dryRunData.failed_count > 0 ? 'text-destructive' : 'text-muted-foreground')}>
+                          {dryRunData.failed_count.toLocaleString()}
+                        </p>
+                      </div>
+                      <div className="p-2.5 rounded-md bg-muted/40 border border-border text-center">
+                        <p className="text-[9px] text-muted-foreground mb-0.5">Total · {dryRunData.total_working_days}d</p>
+                        <p className="text-lg font-bold tabular-nums text-foreground">
+                          {dryRunData.employee_count.toLocaleString()}
+                        </p>
+                      </div>
                     </div>
 
                     {/* Totals from succeeded employees */}
