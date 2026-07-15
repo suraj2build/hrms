@@ -2681,6 +2681,12 @@ export function PayrollRuns() {
             </Dialog>
 
             {/* ── Full Dry Run Progress Dialog ───────────────────────────────── */}
+            {(() => {
+              // Best estimate of employee count: use most recent run that has a known total
+              const knownTotal = runs
+                .map(r => r.total_employee_count ?? r.employee_count ?? 0)
+                .find(n => n > 0) ?? null
+              return (
             <Dialog open={dryRunMutation.isPending} onOpenChange={() => {}}>
               <DialogContent className="max-w-sm" onInteractOutside={(e) => e.preventDefault()}>
                 <DialogHeader>
@@ -2690,13 +2696,15 @@ export function PayrollRuns() {
                   </DialogTitle>
                 </DialogHeader>
                 <div className="space-y-4 py-2">
-                  <DryRunProgressView total={null} />
+                  <DryRunProgressView total={knownTotal} />
                   <p className="text-[10px] text-muted-foreground text-center">
                     Simulating payroll for all employees — no data will be written.
                   </p>
                 </div>
               </DialogContent>
             </Dialog>
+              )
+            })()}
 
             {/* ── Dry Run Results Dialog ─────────────────────────────────────── */}
             <Dialog open={dryRunOpen} onOpenChange={setDryRunOpen}>
