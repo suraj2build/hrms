@@ -724,7 +724,7 @@ export default async function executiveRoutes(fastify: FastifyInstance) {
     // Phase 1A — payroll runs + queries independent of latestPayrollMonth, all in parallel.
     // revisionImpactRes and otTrendRes use only oldestMonth so they don't need to wait
     // for the runs result — starting them in parallel saves one sequential round-trip.
-    const [payrollRunsRes, revisionImpactRes, otTrendRes] = await Promise.all([
+    const [payrollRunsRes, revisionImpactRes, otTrendRows] = await Promise.all([
       fastify.supabase
         .from('payroll_runs')
         .select('id, month, status, total_gross, total_net, employee_count')
@@ -743,12 +743,15 @@ export default async function executiveRoutes(fastify: FastifyInstance) {
         .order('effective_date', { ascending: true }),
 
       // independent of latestPayrollMonth — runs in parallel with Phase 1A
-      fastify.supabase
-        .from('payroll_dept_snapshots')
-        .select('month, total_ot_cost')
-        .eq('tenant_id', req.tenantId)
-        .gte('month', oldestMonth)
-        .order('month', { ascending: true }),
+      fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('payroll_dept_snapshots')
+          .select('month, total_ot_cost')
+          .eq('tenant_id', req.tenantId)
+          .gte('month', oldestMonth)
+          .order('month', { ascending: true })
+          .range(from, to),
+      ).catch(() => [] as any[]),
     ])
 
     if (payrollRunsRes.error) {
@@ -869,7 +872,7 @@ export default async function executiveRoutes(fastify: FastifyInstance) {
 
     // ── P5.6 — overtime cost trend (monthly, across the window) ────────────────
     const otByMonth = new Map<string, number>()
-    for (const r of (otTrendRes.data ?? [])) {
+    for (const r of (otTrendRows ?? [])) {
       const m = (r as any).month as string
       otByMonth.set(m, (otByMonth.get(m) ?? 0) + Number((r as any).total_ot_cost ?? 0))
     }

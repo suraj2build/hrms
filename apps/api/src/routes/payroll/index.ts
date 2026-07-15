@@ -95,12 +95,13 @@ async function applyTdsForRun(
   const fyStart = parseInt(fy.split('-')[0], 10)
 
   // Per-employee elected regime wins over the tenant default.
-  const { data: election } = await supabase
+  const { data: election, error: electionErr } = await supabase
     .from('tax_regime_elections')
     .select('regime')
     .eq('tenant_id', tenantId).eq('employee_id', employeeId)
     .eq('financial_year', fy)
     .maybeSingle()
+  if (electionErr) console.warn(`[payroll][tds] tax regime election query failed for employee ${employeeId} fy ${fy} — using tenant default: ${electionErr.message}`)
   const regime = ((election?.regime ?? tdsDefaultRegime) ?? 'new') as 'old' | 'new'
 
   // Prior FY slips → YTD gross (for projection) and YTD TDS (for true-up).
@@ -749,12 +750,13 @@ async function executePayrollRun(
         // Post-insert settled check: if the timeout fired while the INSERT was in-flight,
         // delete the orphaned row so DB state stays consistent with the run totals.
         if (settled) {
-          await supabase.from('payroll_slips')
+          const { error: deleteErr } = await supabase.from('payroll_slips')
             .delete()
             .eq('run_id', runId)
             .eq('tenant_id', tenantId)
             .eq('employee_id', emp.id)
             .eq('month', month)
+          if (deleteErr) log.warn({ err: deleteErr, run_id: runId, employee_id: emp.id }, 'payroll: compensating delete after timeout failed — orphaned slip may exist')
           return
         }
 
@@ -762,6 +764,19 @@ async function executePayrollRun(
           tenant_id: tenantId, run_id: runId, event_type: 'slip_computed', employee_id: emp.id, month,
           payload: { gross_pay: result.gross_pay, net_pay: result.net_pay, lop_days: result.lop_days, payable_days: result.payable_days, total_deductions: result.total_deductions, has_warning: !!result.warning },
         })
+        // Second window: if the timeout fired while logRunEvent was awaited, the slip is
+        // in DB but the run coordinator already treated this worker as timed out — delete
+        // the orphaned row before returning so the slip count stays consistent.
+        if (settled) {
+          const { error: deleteErr } = await supabase.from('payroll_slips')
+            .delete()
+            .eq('run_id', runId)
+            .eq('tenant_id', tenantId)
+            .eq('employee_id', emp.id)
+            .eq('month', month)
+          if (deleteErr) log.warn({ err: deleteErr, run_id: runId, employee_id: emp.id }, 'payroll: compensating delete after logRunEvent timeout failed — orphaned slip may exist')
+          return
+        }
         if (!settled) { settled = true; succeededSlips.push(result) }
 
       } catch (unexpectedErr: any) {
@@ -813,22 +828,22 @@ async function executePayrollRun(
   const totalLop        = round2(succeededSlips.reduce((s, r) => s + r.lop_amount,       0))
 
   // Variable payouts live outside the slip engine — fetch approved amounts for the
-  // month and include them in total_gross so run-level cost metrics are accurate.
+  // month and include them in run-level audit logs (but NOT total_gross, which must
+  // remain slip-only to preserve the total_gross - total_deductions = total_net invariant).
   let totalVariablePay = 0
   try {
-    const { data: vpRows, error: vpErr } = await supabase
-      .from('variable_payouts')
-      .select('amount, variable_payout_batches!inner(status, payout_month)')
-      .eq('tenant_id', tenantId)
-      .eq('variable_payout_batches.status', 'approved')
-      .eq('variable_payout_batches.payout_month', month)
-    if (vpErr) {
-      log.warn({ err: vpErr, run_id: runId, month }, 'payroll: variable pay query failed — total_gross will exclude variable pay')
-    } else {
-      totalVariablePay = round2((vpRows ?? []).reduce((s: number, p: any) => s + Number(p.amount ?? 0), 0))
-    }
+    const vpRows = await fetchAllRows((from, to) =>
+      supabase
+        .from('variable_payouts')
+        .select('amount, variable_payout_batches!inner(status, payout_month)')
+        .eq('tenant_id', tenantId)
+        .eq('variable_payout_batches.status', 'approved')
+        .eq('variable_payout_batches.payout_month', month)
+        .range(from, to),
+    )
+    totalVariablePay = round2(vpRows.reduce((s: number, p: any) => s + Number(p.amount ?? 0), 0))
   } catch (vpErr: any) {
-    log.warn({ err: vpErr, run_id: runId, month }, 'payroll: variable pay query threw — total_gross will exclude variable pay')
+    log.warn({ err: vpErr, run_id: runId, month }, 'payroll: variable pay query threw — variable pay total unavailable')
   }
 
   const runStatus: 'draft' | 'partial_failed' | 'failed' =
@@ -843,7 +858,7 @@ async function executePayrollRun(
   const runUpdatePayload: Record<string, unknown> = {
     status:           runStatus,
     employee_count:   succeededSlips.length,
-    total_gross:      round2(totalGross + totalVariablePay),
+    total_gross:      round2(totalGross),
     total_deductions: totalDeductions,
     total_net:        totalNet,
     total_lop_amount: totalLop,
@@ -1464,7 +1479,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
 
     // All checks fire in parallel — each is wrapped in Promise.allSettled so one
     // failure doesn't suppress the rest.
-    const [coverageResult, workingDaysResult, statutoryResult, variablePayResult, existingRunResult] =
+    const [coverageResult, workingDaysResult, statutoryResult, variablePayResult, existingRunResult, calendarExistsResult] =
       await Promise.allSettled([
         buildCompensationCoverageAudit(fastify.supabase, tenantId),
 
@@ -1496,12 +1511,15 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
             .maybeSingle(),
         ]),
 
-        fastify.supabase
-          .from('variable_payouts')
-          .select('amount, variable_payout_batches!inner(id, status, payout_month)')
-          .eq('tenant_id', tenantId)
-          .eq('variable_payout_batches.status', 'approved')
-          .eq('variable_payout_batches.payout_month', month),
+        fetchAllRows((from, to) =>
+          fastify.supabase
+            .from('variable_payouts')
+            .select('amount, variable_payout_batches!inner(id, status, payout_month)')
+            .eq('tenant_id', tenantId)
+            .eq('variable_payout_batches.status', 'approved')
+            .eq('variable_payout_batches.payout_month', month)
+            .range(from, to),
+        ),
 
         fastify.supabase
           .from('payroll_runs')
@@ -1509,14 +1527,27 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
           .eq('tenant_id', tenantId)
           .eq('month', month)
           .maybeSingle(),
+
+        fastify.supabase
+          .from('holiday_calendar')
+          .select('id', { count: 'exact', head: true })
+          .eq('tenant_id', tenantId)
+          .limit(1),
       ])
 
     // ── Coverage ─────────────────────────────────────────────────────────────
     const coverage = coverageResult.status === 'fulfilled' ? coverageResult.value : null
 
     // ── Calendar / working days ──────────────────────────────────────────────
-    const calendar_configured = workingDaysResult.status === 'fulfilled'
-    const working_days        = calendar_configured ? workingDaysResult.value : null
+    // calendar_configured requires BOTH a successful working-day computation AND at
+    // least one holiday_calendar row for this tenant — a tenant with zero rows gets
+    // a plausible-looking weekday count from countWorkingDaysInMonth (no error thrown)
+    // but has never actually configured their calendar.
+    const calendarHasRows = calendarExistsResult.status === 'fulfilled' &&
+      !(calendarExistsResult.value as any).error &&
+      ((calendarExistsResult.value as any).count ?? 0) > 0
+    const calendar_configured = workingDaysResult.status === 'fulfilled' && calendarHasRows
+    const working_days        = workingDaysResult.status === 'fulfilled' ? workingDaysResult.value : null
 
     // ── Statutory config ─────────────────────────────────────────────────────
     let tds_configured = false
@@ -1524,7 +1555,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
     let esi_configured = false
     if (statutoryResult.status === 'fulfilled') {
       const [tdsRes, epfRes, esiRes] = statutoryResult.value
-      tds_configured = !tdsRes.error && tdsRes.data !== null
+      tds_configured = !tdsRes.error && tdsRes.data !== null && tdsRes.data.tds_enabled === true
       epf_configured = !epfRes.error && epfRes.data !== null
       esi_configured = !esiRes.error && esiRes.data !== null
     }
@@ -1532,8 +1563,8 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
     // ── Variable pay ─────────────────────────────────────────────────────────
     let approved_batches    = 0
     let variable_total      = 0
-    if (variablePayResult.status === 'fulfilled' && !variablePayResult.value.error) {
-      const vpRows = variablePayResult.value.data ?? []
+    if (variablePayResult.status === 'fulfilled') {
+      const vpRows = variablePayResult.value ?? []
       const batchIds = new Set(vpRows.map((r: any) => (r.variable_payout_batches as any)?.id))
       approved_batches = batchIds.size
       variable_total   = vpRows.reduce((s: number, r: any) => s + Number(r.amount ?? 0), 0)
@@ -1584,7 +1615,11 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
     }
 
     if (existingRun && existingRun.status !== 'finalized') {
-      warnings.push(`An existing ${existingRun.status} run is present — triggering again will replace it`)
+      if (existingRun.status === 'queued' || existingRun.status === 'processing') {
+        warnings.push(`An existing ${existingRun.status} run is in progress — triggering again will be rejected with RUN_IN_PROGRESS until it completes or is cancelled`)
+      } else {
+        warnings.push(`An existing ${existingRun.status} run is present — triggering again will replace it`)
+      }
     }
 
     return reply.send({
@@ -3494,8 +3529,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
 
       return reply.send({ data: data ?? [], total: count ?? 0 })
     } catch (err: any) {
-      req.log.error({ err, tenant_id: req.tenantId }, 'payroll forensics failed')
-      return reply.code(500).send({ error: 'FORENSICS_FAILED', message: err?.message ?? 'Failed to fetch forensic events' })
+      return serverError(req, reply, err, ErrorCode.QUERY_FAILED, 'Failed to fetch forensic events')
     }
   })
 
