@@ -683,9 +683,10 @@ async function executePayrollRun(
     return
   }
 
-  // Record the total employee count; employee_count tracks succeeded count at end
+  // Record the total employee count and reset progress counter so the UI can
+  // immediately show batch pills and "0 / N employees" before work begins.
   await supabase.from('payroll_runs')
-    .update({ total_employee_count: empList.length })
+    .update({ total_employee_count: empList.length, processed_employee_count: 0 })
     .eq('id', runId)
 
   // Count working days — abort the run if this fails (LOP would be corrupted)
@@ -777,8 +778,9 @@ async function executePayrollRun(
   const succeededSlips: PayrollSlipResult[] = []
   const failedEmployees: FailedEmployee[]   = []
 
-  // Heartbeat: write progress every 30 s so zombie-detection queries can tell
-  // a live run from a crashed-but-stuck one, and frontends can show a progress bar.
+  // Heartbeat: write progress every 5 s so the frontend (which polls at 5 s)
+  // always sees an up-to-date count. Also updates last_heartbeat_at so zombie-
+  // detection can distinguish a live run from a crashed-but-stuck one.
   const heartbeatInterval = setInterval(() => {
     const processed = succeededSlips.length + failedEmployees.length
     supabase.from('payroll_runs')
@@ -787,7 +789,7 @@ async function executePayrollRun(
       .then(({ error: hbErr }: { error: any }) => {
         if (hbErr) log.warn({ err: hbErr, run_id: runId }, 'payroll: heartbeat write failed')
       })
-  }, 30_000)
+  }, 5_000)
 
   try {
   await runConcurrent(empList, async (emp) => {

@@ -1162,6 +1162,22 @@ function ProcessingProgressBar({ run }: { run: PayrollRun }) {
   const rate      = elapsedMs && serverCount > 0 ? serverCount / elapsedMs : null
   const etaSec    = rate && total > serverCount ? Math.ceil((total - serverCount) / rate / 1000) : null
 
+  // total = 0 means the run just started and backend hasn't written the count yet
+  if (total === 0) {
+    return (
+      <div className="space-y-3">
+        <div className="space-y-1">
+          <p className="text-xs font-medium text-foreground">Initialising payroll run…</p>
+          <div className="h-2 rounded-full bg-primary/40 animate-pulse" />
+        </div>
+        <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+          <Loader2 className="h-3 w-3 animate-spin text-primary flex-shrink-0" />
+          <span>Fetching employee list — first update in a moment</span>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="space-y-3">
       {/* ── Batch status pills ─────────────────────────────────────────── */}
@@ -1223,13 +1239,11 @@ function ProcessingProgressBar({ run }: { run: PayrollRun }) {
 
       {/* ── Overall progress ────────────────────────────────────────────── */}
       {numBatches > 1 && (
-        <div className="space-y-1">
-          <div className="h-1 rounded-full bg-muted overflow-hidden">
-            <div
-              className="h-full rounded-full bg-primary/40 transition-[width] duration-300"
-              style={{ width: `${overallPct}%` }}
-            />
-          </div>
+        <div className="h-1 rounded-full bg-muted overflow-hidden">
+          <div
+            className="h-full rounded-full bg-primary/40 transition-[width] duration-300"
+            style={{ width: `${overallPct}%` }}
+          />
         </div>
       )}
 
@@ -1238,16 +1252,12 @@ function ProcessingProgressBar({ run }: { run: PayrollRun }) {
         <div className="flex items-center gap-1.5 text-muted-foreground">
           <Loader2 className="h-3 w-3 animate-spin text-primary flex-shrink-0" />
           <span className="tabular-nums">
-            {total > 0
-              ? <><strong className="text-foreground font-mono">{display.toLocaleString()}</strong> / {total.toLocaleString()} employees</>
-              : 'Starting up…'
-            }
+            <strong className="text-foreground font-mono">{display.toLocaleString()}</strong>
+            {' '}/ {total.toLocaleString()} employees
           </span>
         </div>
         <div className="flex items-center gap-2 text-muted-foreground">
-          {total > 0 && (
-            <span className="font-mono font-semibold text-foreground">{overallPct}%</span>
-          )}
+          <span className="font-mono font-semibold text-foreground">{overallPct}%</span>
           {etaSec !== null && etaSec > 0 && (
             <span>{fmtEta(etaSec)} left</span>
           )}
