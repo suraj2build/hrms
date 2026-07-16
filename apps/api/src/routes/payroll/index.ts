@@ -1098,12 +1098,18 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       return validationError(reply, 'FUTURE_MONTH', `Cannot run payroll for a future month (${month}). Current month is ${currentYM}.`)
     }
 
+    const [runYear, runMon] = month.split('-').map(Number)
+    const periodEnd = new Date(runYear, runMon, 0).toISOString().slice(0, 10)
+
     // ── Pre-flight: compensation coverage audit ──────────────────────────────
     // For live runs only — dry runs bypass this check so operators can
     // simulate even when some employees are not yet set up.
     if (!dry_run) {
       try {
-        const coverage = await buildCompensationCoverageAudit(fastify.supabase, tenantId)
+        // Pass periodEnd so the audit uses the same effective_from gate as the engine.
+        // Without this, compensation uploaded after the period end (but before today)
+        // passes the preflight but fails at runtime — causing N-1 employees to silently fail.
+        const coverage = await buildCompensationCoverageAudit(fastify.supabase, tenantId, periodEnd)
 
         if (!coverage.ready_for_payroll) {
           const blockerDetails: string[] = []
@@ -1669,12 +1675,14 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
     const { month } = parsed.data
     const tenantId  = req.tenantId as string
     const monthDate = `${month}-01`
+    const [pfYear, pfMon] = month.split('-').map(Number)
+    const preflightPeriodEnd = new Date(pfYear, pfMon, 0).toISOString().slice(0, 10)
 
     // All checks fire in parallel — each is wrapped in Promise.allSettled so one
     // failure doesn't suppress the rest.
     const [coverageResult, workingDaysResult, statutoryResult, variablePayResult, existingRunResult, calendarExistsResult] =
       await Promise.allSettled([
-        buildCompensationCoverageAudit(fastify.supabase, tenantId),
+        buildCompensationCoverageAudit(fastify.supabase, tenantId, preflightPeriodEnd),
 
         countWorkingDaysInMonth(fastify.supabase, tenantId, month),
 

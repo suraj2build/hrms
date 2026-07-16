@@ -102,13 +102,20 @@ interface RawSalaryComponent {
  * Runs four focused queries (employees, active compensations, salary component types, components) and
  * produces a structured audit result ready for the API response and UI card.
  *
+ * @param periodEnd  Optional payroll period end date (YYYY-MM-DD). When supplied, only
+ *                   compensations with effective_from ≤ periodEnd are considered — matching
+ *                   the engine's own date filter so the pre-flight and the run agree.
+ *                   Omit for general coverage checks (falls back to today).
+ *
  * @throws Error when any DB query fails — caller should catch and return 500.
  */
 export async function buildCompensationCoverageAudit(
   supabase: SupabaseClient,
   tenantId: string,
+  periodEnd?: string,
 ): Promise<CompensationCoverageAudit> {
   const today = new Date().toISOString().slice(0, 10)
+  const effectiveCutoff = periodEnd ?? today
 
   // ── 1. Fetch all active employees (paginated — employees can exceed 1000 rows) ─
   const empList = await fetchAllRows<RawEmployee>((from, to) =>
@@ -151,6 +158,7 @@ export async function buildCompensationCoverageAudit(
       .select('id, employee_id, ctc_annual, ctc_monthly, effective_from')
       .eq('tenant_id', tenantId)
       .eq('is_active', true)
+      .lte('effective_from', effectiveCutoff)   // mirror engine's date gate
       .in('employee_id', empIds.slice(i, i + CHUNK))
 
     if (compErr) {
@@ -234,7 +242,7 @@ export async function buildCompensationCoverageAudit(
     const name = `${emp.first_name} ${emp.last_name}`.trim()
     const comp = compByEmp.get(emp.id)
 
-    // ── No compensation at all ──────────────────────────────────────────────
+    // ── No compensation at all (or not yet effective for this period) ────────
     if (!comp) {
       missingComp++
       issues.push({
@@ -242,7 +250,11 @@ export async function buildCompensationCoverageAudit(
         employee_code: emp.employee_code,
         employee_name: name,
         issue:         'missing_compensation',
-        detail:        'No active compensation record — employee cannot be included in payroll',
+        detail:        periodEnd
+          ? `No active compensation effective on or before ${periodEnd} — ` +
+            `compensation may exist but with a later effective_from date. ` +
+            `Update effective_from to ${periodEnd} or earlier.`
+          : 'No active compensation record — employee cannot be included in payroll',
         remediation:   `/admin/workforce/employees/${emp.id}?section=compensation&sub=compensation`,
       })
       continue
@@ -250,7 +262,12 @@ export async function buildCompensationCoverageAudit(
 
     withComp++
 
-    // ── Future-dated (warning, not hard blocker) ────────────────────────────
+    // ── Future-dated relative to today (warning, not hard blocker) ──────────
+    // NOTE: when periodEnd is supplied we already filtered by effective_from ≤ periodEnd,
+    // so comps that are too new for the payroll period never reach this branch —
+    // they are counted as missing_compensation (blocking) above.  This check only
+    // fires for general coverage views (no periodEnd) where the comp is upcoming
+    // but an older active record will be used by the engine.
     if (comp.effective_from > today) {
       futureDated++
       issues.push({
