@@ -20,7 +20,7 @@
  *   SEED_CLEAR              'true' → delete existing SE* seed data first
  */
 
-import { randomUUID } from 'node:crypto'
+import { randomUUID, createHash } from 'node:crypto'
 import { existsSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -86,6 +86,13 @@ async function del(table, qs) {
 }
 
 // ── Utilities ──────────────────────────────────────────────────────────────────
+// Deterministic UUID from a seed string — same seed → same UUID across runs.
+// Includes TID so different tenants never share static IDs.
+function deterministicUUID(seed) {
+  const h = createHash('sha256').update(`${TID}:${seed}`).digest('hex')
+  return `${h.slice(0,8)}-${h.slice(8,12)}-4${h.slice(13,16)}-${['8','9','a','b'][parseInt(h[16], 16) & 3]}${h.slice(17,20)}-${h.slice(20,32)}`
+}
+
 const pick    = arr      => arr[Math.floor(Math.random() * arr.length)]
 const randInt = (lo, hi) => lo + Math.floor(Math.random() * (hi - lo + 1))
 const between = (a, b)   => a + Math.random() * (b - a)
@@ -107,28 +114,28 @@ function levelCounts(total) {
 }
 
 const GRADES = [
-  { id: randomUUID(), code: 'SE-L1', name: 'Executive',      level_order: 1, ctc_min: 10000000, ctc_max: 30000000 },
-  { id: randomUUID(), code: 'SE-L2', name: 'Director/VP',    level_order: 2, ctc_min:  5000000, ctc_max: 10000000 },
-  { id: randomUUID(), code: 'SE-L3', name: 'Senior Manager', level_order: 3, ctc_min:  2500000, ctc_max:  5000000 },
-  { id: randomUUID(), code: 'SE-L4', name: 'Manager',        level_order: 4, ctc_min:  1200000, ctc_max:  2500000 },
-  { id: randomUUID(), code: 'SE-L5', name: 'Senior',         level_order: 5, ctc_min:   600000, ctc_max:  1200000 },
-  { id: randomUUID(), code: 'SE-L6', name: 'Associate',      level_order: 6, ctc_min:   300000, ctc_max:   600000 },
+  { id: deterministicUUID('grade-SE-L1'), code: 'SE-L1', name: 'Executive',      level_order: 1, ctc_min: 10000000, ctc_max: 30000000 },
+  { id: deterministicUUID('grade-SE-L2'), code: 'SE-L2', name: 'Director/VP',    level_order: 2, ctc_min:  5000000, ctc_max: 10000000 },
+  { id: deterministicUUID('grade-SE-L3'), code: 'SE-L3', name: 'Senior Manager', level_order: 3, ctc_min:  2500000, ctc_max:  5000000 },
+  { id: deterministicUUID('grade-SE-L4'), code: 'SE-L4', name: 'Manager',        level_order: 4, ctc_min:  1200000, ctc_max:  2500000 },
+  { id: deterministicUUID('grade-SE-L5'), code: 'SE-L5', name: 'Senior',         level_order: 5, ctc_min:   600000, ctc_max:  1200000 },
+  { id: deterministicUUID('grade-SE-L6'), code: 'SE-L6', name: 'Associate',      level_order: 6, ctc_min:   300000, ctc_max:   600000 },
 ]
 
 const DIVISIONS = [
-  { id: randomUUID(), code: 'SE-ENG', name: 'Engineering',       slug: 'se-engineering'    },
-  { id: randomUUID(), code: 'SE-HR',  name: 'Human Resources',   slug: 'se-human-resources'},
-  { id: randomUUID(), code: 'SE-FIN', name: 'Finance',           slug: 'se-finance'        },
-  { id: randomUUID(), code: 'SE-SAL', name: 'Sales & Marketing', slug: 'se-sales-marketing'},
-  { id: randomUUID(), code: 'SE-OPS', name: 'Operations',        slug: 'se-operations'     },
+  { id: deterministicUUID('dept-SE-ENG'), code: 'SE-ENG', name: 'Engineering',       slug: 'se-engineering'    },
+  { id: deterministicUUID('dept-SE-HR'),  code: 'SE-HR',  name: 'Human Resources',   slug: 'se-human-resources'},
+  { id: deterministicUUID('dept-SE-FIN'), code: 'SE-FIN', name: 'Finance',           slug: 'se-finance'        },
+  { id: deterministicUUID('dept-SE-SAL'), code: 'SE-SAL', name: 'Sales & Marketing', slug: 'se-sales-marketing'},
+  { id: deterministicUUID('dept-SE-OPS'), code: 'SE-OPS', name: 'Operations',        slug: 'se-operations'     },
 ]
 
 const WORK_LOCS = [
-  { id: randomUUID(), code: 'SE-MUM', name: 'Mumbai HQ',           city: 'Mumbai',    state: 'Maharashtra' },
-  { id: randomUUID(), code: 'SE-DEL', name: 'Delhi NCR Office',    city: 'Gurugram',  state: 'Haryana'     },
-  { id: randomUUID(), code: 'SE-BLR', name: 'Bengaluru Tech Park', city: 'Bengaluru', state: 'Karnataka'   },
-  { id: randomUUID(), code: 'SE-HYD', name: 'Hyderabad Centre',    city: 'Hyderabad', state: 'Telangana'   },
-  { id: randomUUID(), code: 'SE-CHN', name: 'Chennai Office',      city: 'Chennai',   state: 'Tamil Nadu'  },
+  { id: deterministicUUID('wl-SE-MUM'), code: 'SE-MUM', name: 'Mumbai HQ',           city: 'Mumbai',    state: 'Maharashtra' },
+  { id: deterministicUUID('wl-SE-DEL'), code: 'SE-DEL', name: 'Delhi NCR Office',    city: 'Gurugram',  state: 'Haryana'     },
+  { id: deterministicUUID('wl-SE-BLR'), code: 'SE-BLR', name: 'Bengaluru Tech Park', city: 'Bengaluru', state: 'Karnataka'   },
+  { id: deterministicUUID('wl-SE-HYD'), code: 'SE-HYD', name: 'Hyderabad Centre',    city: 'Hyderabad', state: 'Telangana'   },
+  { id: deterministicUUID('wl-SE-CHN'), code: 'SE-CHN', name: 'Chennai Office',      city: 'Chennai',   state: 'Tamil Nadu'  },
 ]
 
 const DESIG_BY_LEVEL = [
@@ -143,17 +150,17 @@ const DESIG_BY_LEVEL = [
 const EMP_TYPES = ['permanent','permanent','permanent','permanent','contract','probation']
 
 const LEAVE_TYPES = [
-  { id: randomUUID(), name: 'Casual Leave',  balance: 12 },
-  { id: randomUUID(), name: 'Sick Leave',    balance: 12 },
-  { id: randomUUID(), name: 'Earned Leave',  balance: 18 },
+  { id: deterministicUUID('leave-Casual Leave'),  name: 'Casual Leave',  balance: 12 },
+  { id: deterministicUUID('leave-Sick Leave'),    name: 'Sick Leave',    balance: 12 },
+  { id: deterministicUUID('leave-Earned Leave'),  name: 'Earned Leave',  balance: 18 },
 ]
 
 const COMP_IDS = {
-  BASIC:   randomUUID(),
-  HRA:     randomUUID(),
-  SPECIAL: randomUUID(),
-  PF_EE:   randomUUID(),
-  PF_ER:   randomUUID(),
+  BASIC:   deterministicUUID('comp-BASIC'),
+  HRA:     deterministicUUID('comp-HRA'),
+  SPECIAL: deterministicUUID('comp-SPECIAL'),
+  PF_EE:   deterministicUUID('comp-PF-EE'),
+  PF_ER:   deterministicUUID('comp-PF-ER'),
 }
 
 // ── EAC scenario mix ───────────────────────────────────────────────────────────
@@ -242,7 +249,7 @@ async function main() {
   })))
   const subDepts = DIVISIONS.flatMap(div =>
     ['North','South','East','West'].map(sfx => ({
-      id: randomUUID(), tenant_id: TID,
+      id: deterministicUUID(`subdept-${div.code}-${sfx}`), tenant_id: TID,
       code: `${div.code}-${sfx.slice(0,1)}`,
       name: `${div.name} ${sfx}`,
       slug: `${div.slug}-${sfx.toLowerCase()}`,
@@ -254,7 +261,7 @@ async function main() {
 
   const designations = DESIG_BY_LEVEL.flatMap((titles, li) =>
     titles.map(name => ({
-      id: randomUUID(), tenant_id: TID,
+      id: deterministicUUID(`desig-${name}`), tenant_id: TID,
       code: `L${li + 1}-${name.replace(/[^A-Za-z0-9]/g, '').slice(0, 10).toUpperCase()}`,
       name, level: `L${li + 1}`,
     }))
