@@ -228,8 +228,21 @@ psql(`
 
 ok('Schema fixes applied')
 
-// ── 7. Seed UAT / platform admin accounts ────────────────────────────────────
-step('Creating platform admin accounts')
+// ── 7. Seed UAT tenant + platform admin accounts ────────────────────────────
+step('Creating UAT tenant + platform admin accounts')
+
+// Ensure the UAT tenant row exists (profiles and work_locations FK into tenants)
+psql(`
+  INSERT INTO tenants (id, name, slug, plan, country, timezone, status, trial_ends_at, created_at)
+  VALUES (
+    'b0000000-0000-0000-0000-000000000001',
+    'CognixHR UAT', 'cognixhr-uat', 'enterprise', 'IN',
+    'Asia/Kolkata', 'active', now() + interval '3650 days', now()
+  )
+  ON CONFLICT (id) DO UPDATE
+    SET name = excluded.name, status = excluded.status, trial_ends_at = excluded.trial_ends_at;
+`)
+ok("UAT tenant 'b0000000-0000-0000-0000-000000000001' ready")
 
 // Generate bcrypt hash for CognixDemo!1 via Node.js
 const bcryptjs = await import('bcryptjs').then(m => m.default ?? m)
