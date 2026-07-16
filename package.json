@@ -19,6 +19,8 @@
     "local:studio": "open http://localhost:54323 || xdg-open http://localhost:54323"
   },
   "devDependencies": {
-    "concurrently": "^8.2.2"
+    "bcryptjs": "^3.0.3",
+    "concurrently": "^8.2.2",
+    "pg": "^8.22.0"
   }
 }
