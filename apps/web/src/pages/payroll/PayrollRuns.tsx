@@ -1297,8 +1297,11 @@ function DryRunProgressView({ total }: { total: number | null }) {
 
   useEffect(() => {
     if (!total) return
+    // Cap at 93% so the bar never falsely shows 100% while the mutation is pending.
+    // For ≤1 employee, floor(0.93) = 0, so skip animation — indeterminate branch below handles it.
+    const cap = Math.floor(total * 0.93)
+    if (cap === 0) return
     const startTs = performance.now()
-    const cap     = Math.floor(total * 0.93)
     const rateMs  = 80  // ~80 ms per employee at ~10× concurrency
 
     const tick = (now: number) => {
@@ -1310,8 +1313,8 @@ function DryRunProgressView({ total }: { total: number | null }) {
     return () => { if (rafRef.current !== null) cancelAnimationFrame(rafRef.current) }
   }, [total])
 
-  // Indeterminate: full dry run where total count is unknown until API returns
-  if (!total) {
+  // Indeterminate: total unknown, or too small to animate (≤1 employee)
+  if (!total || total <= 1) {
     return (
       <div className="space-y-3">
         <div className="space-y-1">
