@@ -1306,12 +1306,12 @@ function DryRunProgressView({ total }: { total: number | null }) {
 
   useEffect(() => {
     if (!total) return
-    // Cap at 93% so the bar never falsely shows 100% while the mutation is pending.
-    // For ≤1 employee, floor(0.93) = 0, so skip animation — indeterminate branch below handles it.
-    const cap = Math.floor(total * 0.93)
-    if (cap === 0) return
-    const startTs = performance.now()
+    // For small tenants (≤10 employees) the run finishes in under a second, so
+    // animate to the full count — false-100% window is imperceptible.
+    // For larger runs cap at 93% so the bar never falsely shows completion.
+    const cap     = total <= 10 ? total : Math.floor(total * 0.93)
     const rateMs  = 80  // ~80 ms per employee at ~10× concurrency
+    const startTs = performance.now()
 
     const tick = (now: number) => {
       const cur = Math.min(cap, Math.floor((now - startTs) / rateMs))
@@ -1322,8 +1322,8 @@ function DryRunProgressView({ total }: { total: number | null }) {
     return () => { if (rafRef.current !== null) cancelAnimationFrame(rafRef.current) }
   }, [total])
 
-  // Indeterminate: total unknown, or too small to animate (≤1 employee)
-  if (!total || total <= 1) {
+  // Indeterminate only when total is unknown (full dry run before any run history exists)
+  if (!total) {
     return (
       <div className="space-y-3">
         <div className="space-y-1">
@@ -1338,15 +1338,16 @@ function DryRunProgressView({ total }: { total: number | null }) {
     )
   }
 
-  const numBatches     = Math.max(1, Math.ceil(total / BATCH_SIZE))
-  const overallPct     = Math.min(93, total > 0 ? Math.round((display / total) * 100) : 0)
+  const cap        = total <= 10 ? total : Math.floor(total * 0.93)
+  const numBatches = Math.max(1, Math.ceil(total / BATCH_SIZE))
+  const overallPct = total > 0 ? Math.round((display / total) * 100) : 0
   const activeBatchIdx = Math.min(numBatches - 1, Math.floor(display / BATCH_SIZE))
   const activeBatchStart = activeBatchIdx * BATCH_SIZE
   const activeBatchEnd   = Math.min((activeBatchIdx + 1) * BATCH_SIZE, total)
   const activeBatchSize  = activeBatchEnd - activeBatchStart
   const activeBatchDone  = Math.max(0, display - activeBatchStart)
   const activeBatchPct   = activeBatchSize > 0
-    ? Math.min(93, Math.round((activeBatchDone / activeBatchSize) * 100))
+    ? Math.round((activeBatchDone / activeBatchSize) * 100)
     : 0
 
   return (
