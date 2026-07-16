@@ -1,3 +1,17 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# docker-compose.yml — Production / staging image build only.
+#
+# For LOCAL DEVELOPMENT, do NOT use this file.
+# Use the Supabase CLI instead:
+#
+#   npm run local:setup   ← first-time setup
+#   supabase start        ← start local DB stack
+#   npm run dev           ← start API (2001) + web (2000)
+#
+# This compose is for building and running the API container image against an
+# EXISTING Supabase project (cloud or self-hosted). It expects a root .env
+# with SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, and SUPABASE_JWT_SECRET.
+# ─────────────────────────────────────────────────────────────────────────────
 version: '3.9'
 
 services:
@@ -6,21 +20,21 @@ services:
       context: ./apps/api
       dockerfile: Dockerfile
     ports:
-      - '3001:3001'
+      - '2001:2001'
     environment:
-      - NODE_ENV=development
-      - PORT=3001
-      - SUPABASE_URL=${SUPABASE_URL}
-      - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY}
-      - SUPABASE_JWT_SECRET=${SUPABASE_JWT_SECRET}
-      - WEB_URL=http://localhost:3000
+      NODE_ENV: production
+      PORT: 2001
+      SUPABASE_URL: ${SUPABASE_URL}
+      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
+      SUPABASE_JWT_SECRET: ${SUPABASE_JWT_SECRET}
+      JWT_SECRET: ${SUPABASE_JWT_SECRET}
+      WEB_URL: ${WEB_URL:-http://localhost:2000}
+      APP_PUBLIC_URL: ${APP_PUBLIC_URL:-http://localhost:2000}
     env_file:
       - .env
-    volumes:
-      - ./apps/api/src:/app/src
     restart: unless-stopped
     healthcheck:
-      test: ['CMD', 'curl', '-f', 'http://localhost:3001/health']
+      test: ['CMD', 'curl', '-f', 'http://localhost:2001/health']
       interval: 30s
       timeout: 10s
       retries: 3

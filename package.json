@@ -11,7 +11,12 @@
     "lint": "npm run lint --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "db:check-drift": "node scripts/db/check-schema-drift.mjs",
-    "check:api-contract": "node scripts/check-api-contract.mjs"
+    "check:api-contract": "node scripts/check-api-contract.mjs",
+    "local:setup": "bash scripts/local-setup.sh",
+    "local:start": "supabase start && npm run dev",
+    "local:seed": "bash scripts/seed-local.sh",
+    "local:reset": "supabase db reset --no-seed",
+    "local:studio": "open http://localhost:54323 || xdg-open http://localhost:54323"
   },
   "devDependencies": {
     "concurrently": "^8.2.2"

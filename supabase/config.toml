@@ -1,0 +1,110 @@
+# Supabase local development configuration.
+# Reference: https://supabase.com/docs/guides/local-development/cli/config
+#
+# Run `supabase start` to boot the full local stack (PostgreSQL + PostgREST +
+# GoTrue auth + Studio + Inbucket). All services resolve to localhost.
+#
+# After booting, apply migrations with:
+#   supabase db reset
+# Then seed demo data with:
+#   ./scripts/seed-local.sh
+
+project_id = "hrms"
+
+# ── API / PostgREST ───────────────────────────────────────────────────────────
+[api]
+enabled = true
+port = 54321
+schemas = ["public", "graphql_public"]
+extra_search_path = ["public", "extensions"]
+# CRITICAL: must be >= fetchAllRows batchSize (500) in supabase-paginate.ts.
+# Cloud Supabase default is 1000. Setting this lower silently truncates any
+# fetchAllRows call (e.g. payroll returning 1 employee out of 2000+).
+max_rows = 1000
+
+[api.tls]
+enabled = false
+
+# ── Database ──────────────────────────────────────────────────────────────────
+[db]
+port = 54322
+shadow_port = 54320
+major_version = 15
+
+[db.pooler]
+enabled = false
+port = 54329
+pool_mode = "transaction"
+default_pool_size = 20
+max_client_conn = 100
+
+# ── Realtime ──────────────────────────────────────────────────────────────────
+[realtime]
+enabled = true
+max_header_length = 4096
+
+# ── Studio (web UI for DB, accessible at http://localhost:54323) ──────────────
+[studio]
+enabled = true
+port = 54323
+api_url = "http://127.0.0.1"
+
+# ── Inbucket (catches all outgoing emails locally) ───────────────────────────
+[inbucket]
+enabled = true
+port    = 54324
+smtp_port = 54325
+pop3_port = 54326
+
+# ── Storage ───────────────────────────────────────────────────────────────────
+[storage]
+enabled = true
+# Matches the 100 MB limit in migration 363_attendance_upload_storage.sql
+file_size_limit = "100MiB"
+
+[storage.image_transformation]
+enabled = false
+
+# ── Auth (GoTrue) ─────────────────────────────────────────────────────────────
+[auth]
+enabled = true
+# Must point at the local web app so GoTrue redirects land in the right place.
+site_url = "http://127.0.0.1:2000"
+additional_redirect_urls = ["http://127.0.0.1:2000", "http://localhost:2000"]
+jwt_expiry = 3600
+enable_refresh_token_rotation = true
+enable_manual_linking = false
+minimum_password_length = 8
+password_requirements = ""
+
+[auth.email]
+enable_signup = true
+double_confirm_changes = true
+# Disable email confirmation locally so test accounts work without inbox access.
+enable_confirmations = false
+secure_password_change = false
+max_frequency = "1s"
+otp_length = 6
+otp_expiry = 3600
+
+[auth.sms]
+enable_signup    = false
+enable_confirmations = false
+template = "Your code is {{ .Code }}"
+
+[auth.mfa]
+max_enrolled_factors = 10
+
+[auth.mfa.totp]
+enroll_enabled = true
+verify_enabled = true
+
+# ── Edge functions (not used — API runs on Railway/locally) ──────────────────
+[edge_runtime]
+enabled = false
+
+# ── Analytics (disabled locally) ─────────────────────────────────────────────
+[analytics]
+enabled = false
+port    = 54327
+backend = "postgres"
