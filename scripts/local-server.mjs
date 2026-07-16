@@ -210,13 +210,14 @@ async function handleRest(req, res, url) {
   const wantReturn = prefer.includes('return=representation') || prefer.includes('return=minimal') === false
   const rangeHdr   = req.headers['range'] ?? ''
 
+  const sp     = url.searchParams
+
   // Read limit/offset from URL query params first, then Range header overrides
   let offset = parseInt(sp.get('offset') ?? '0') || 0
   let limit  = parseInt(sp.get('limit')  ?? '1000') || 1000
   const rm = rangeHdr.match(/^(\d+)-(\d+)$/)
   if (rm) { offset = parseInt(rm[1]); limit = parseInt(rm[2]) - parseInt(rm[1]) + 1 }
 
-  const sp     = url.searchParams
   const selStr = parseSelectCols(sp.get('select') ?? '*')
   const ordStr = parseOrder(sp.get('order') ?? '')
 
