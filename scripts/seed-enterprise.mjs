@@ -217,7 +217,7 @@ async function main() {
     await del('leave_types',     `tenant_id=eq.${TID}&name=in.(Casual Leave,Sick Leave,Earned Leave)`)
     await del('salary_components', `tenant_id=eq.${TID}&code=like.SE-*`)
     await del('grades',          `tenant_id=eq.${TID}&code=like.SE-*`)
-    await del('designations',    `tenant_id=eq.${TID}&level=like.L*&name=like.*Engineer*`)
+    await del('designations',    `tenant_id=eq.${TID}&level=like.L*`)
     await del('departments',     `tenant_id=eq.${TID}&code=like.SE-*`)
     await del('work_locations',  `tenant_id=eq.${TID}&code=like.SE-*`)
     console.log('  Done\n')
