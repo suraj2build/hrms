@@ -1222,6 +1222,21 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       } catch (dryEmpErr: any) {
         return serverError(req, reply, dryEmpErr, ErrorCode.QUERY_FAILED, 'Failed to fetch employees')
       }
+
+      // Total employee count across all statuses — used to surface a warning when
+      // the active-employee subset is much smaller than the overall headcount.
+      // head:true returns only the Count header, not row data, so the 1000-row cap
+      // doesn't apply and this remains accurate at any scale.
+      let totalEmployeesInSystem = 0
+      try {
+        const { count } = await fastify.supabase
+          .from('employees')
+          .select('*', { count: 'exact', head: true })
+          .eq('tenant_id', tenantId)
+        totalEmployeesInSystem = count ?? 0
+      } catch {
+        // Non-fatal — omit the diagnostic field rather than failing the dry run
+      }
       const [runYear, runMon] = month.split('-').map(Number)
       const runPeriodEnd      = new Date(runYear, runMon, 0).toISOString().slice(0, 10)
       let total_working_days: number
@@ -1231,8 +1246,27 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
         return serverError(req, reply, wdErr, 'WORKING_DAYS_FETCH_FAILED', 'Failed to count working days')
       }
 
+      if (
+        totalEmployeesInSystem > 10 &&
+        empList.length < totalEmployeesInSystem * 0.1
+      ) {
+        req.log.warn(
+          {
+            event:                    'payroll_dry_run_low_active_ratio',
+            active_count:             empList.length,
+            total_in_system:          totalEmployeesInSystem,
+            tenant_id:                tenantId,
+            possible_causes:          [
+              'Most employees have status != active (check employees table)',
+              'pgrst.max_rows is set very low in Supabase project settings — run: SELECT current_setting(\'pgrst.max_rows\')',
+            ],
+          },
+          'payroll dry run: active employee count is very low relative to total headcount — possible data or PostgREST config issue',
+        )
+      }
+
       req.log.info(
-        { event: 'payroll_dry_run_start', month, employee_count: empList.length, tenant_id: tenantId },
+        { event: 'payroll_dry_run_start', month, employee_count: empList.length, total_employees_in_system: totalEmployeesInSystem, tenant_id: tenantId },
         'payroll dry run started',
       )
 
@@ -1366,15 +1400,36 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       // when the caller didn't pass the flag at all (undefined vs false).
       const useSummary = summary_only ?? (empList.length > SUMMARY_ONLY_AUTO_THRESHOLD)
 
+      // Build warnings array: filter warning first, then status-coverage warning if
+      // the active employee count is suspiciously low relative to total headcount.
+      const warnings: string[] = []
+      if (filterWarning) warnings.push(filterWarning)
+      if (
+        !employee_ids &&
+        totalEmployeesInSystem > 0 &&
+        empList.length < totalEmployeesInSystem &&
+        // Only warn when the gap is meaningful (active < 90% of total)
+        empList.length / totalEmployeesInSystem < 0.9
+      ) {
+        const excluded = totalEmployeesInSystem - empList.length
+        warnings.push(
+          `Only ${empList.length} of ${totalEmployeesInSystem} employees have status='active' ` +
+          `and will be processed. The remaining ${excluded} employees are excluded because their ` +
+          `status is 'inactive', 'on_notice', or 'separated'. ` +
+          `To include them in payroll, update their status in the Employees section.`,
+        )
+      }
+
       return reply.send({
-        dry_run:           true,
+        dry_run:                  true,
         month,
-        employee_count:    empList.length,
+        employee_count:           empList.length,
+        total_employees_in_system: totalEmployeesInSystem,
         total_working_days,
-        ok_count:          okCount,
-        failed_count:      failCount,
-        summary_only:      useSummary,
-        ...(filterWarning ? { warnings: [filterWarning] } : {}),
+        ok_count:                 okCount,
+        failed_count:             failCount,
+        summary_only:             useSummary,
+        ...(warnings.length > 0 ? { warnings } : {}),
         results:           useSummary
           ? dryResults.map(r => ({
               employee_id:   r.employee_id,

@@ -2345,13 +2345,15 @@ export function PayrollRuns() {
     validation_errors?: string[]
   }
   interface DryRunData {
-    dry_run:           boolean
-    month:             string
-    employee_count:    number
-    total_working_days: number
-    ok_count:          number
-    failed_count:      number
-    results:           DryRunEmployeeResult[]
+    dry_run:                   boolean
+    month:                     string
+    employee_count:            number
+    total_employees_in_system: number
+    total_working_days:        number
+    ok_count:                  number
+    failed_count:              number
+    warnings?:                 string[]
+    results:                   DryRunEmployeeResult[]
   }
   const [dryRunOpen, setDryRunOpen]     = useState(false)
   const [dryRunData, setDryRunData]     = useState<DryRunData | null>(null)
@@ -2763,6 +2765,18 @@ export function PayrollRuns() {
                 </DialogHeader>
                 {dryRunData && (
                   <div className="space-y-3">
+                    {/* Warnings from server — e.g. most employees are not 'active' */}
+                    {dryRunData.warnings && dryRunData.warnings.length > 0 && (
+                      <div className="space-y-1.5">
+                        {dryRunData.warnings.map((w, i) => (
+                          <div key={i} className="flex gap-2 rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-xs text-warning-foreground">
+                            <AlertTriangle className="h-3.5 w-3.5 flex-shrink-0 mt-0.5 text-warning" />
+                            <span>{w}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
                     {/* Batch completion pills — all green since done */}
                     {Math.ceil(dryRunData.employee_count / BATCH_SIZE) > 1 && (
                       <div className="flex flex-wrap gap-1.5">
@@ -2789,10 +2803,15 @@ export function PayrollRuns() {
                         </p>
                       </div>
                       <div className="p-2.5 rounded-md bg-muted/40 border border-border text-center">
-                        <p className="text-[9px] text-muted-foreground mb-0.5">Total · {dryRunData.total_working_days}d</p>
+                        <p className="text-[9px] text-muted-foreground mb-0.5">Active · {dryRunData.total_working_days}d</p>
                         <p className="text-lg font-bold tabular-nums text-foreground">
                           {dryRunData.employee_count.toLocaleString()}
                         </p>
+                        {dryRunData.total_employees_in_system > dryRunData.employee_count && (
+                          <p className="text-[9px] text-muted-foreground mt-0.5">
+                            of {dryRunData.total_employees_in_system.toLocaleString()} total
+                          </p>
+                        )}
                       </div>
                     </div>
 
