@@ -235,7 +235,7 @@ psql(`
   DECLARE
     v_user_id  UUID := 'a1000000-0000-0000-0000-000000000001';
     v_admin_id UUID := 'a2000000-0000-0000-0000-000000000001';
-    v_tenant   UUID := 'd0000000-0000-0000-0000-000000000001';
+    v_tenant   UUID := 'b0000000-0000-0000-0000-000000000001';
   BEGIN
     INSERT INTO auth.users (
       id, aud, role, email, encrypted_password,
@@ -258,13 +258,13 @@ psql(`
       SET name = excluded.name, email = excluded.email, role = excluded.role, is_active = excluded.is_active;
 
     INSERT INTO profiles (id, tenant_id, role, is_active, full_name, email)
-    VALUES (v_user_id, v_tenant, 'hr_admin', true, 'Suraj (UAT)', 'uatsuraj@gmail.com')
+    VALUES (v_user_id, v_tenant, 'super_admin', true, 'Suraj (UAT)', 'uatsuraj@gmail.com')
     ON CONFLICT (id) DO UPDATE
       SET tenant_id = excluded.tenant_id, role = excluded.role,
           is_active = excluded.is_active, full_name = excluded.full_name;
   END $$;
 `)
-ok('uatsuraj@gmail.com — platform owner + hr_admin on Demo tenant')
+ok('uatsuraj@gmail.com — platform owner + super_admin on UAT tenant')
 
 // ── 8. Seed demo data ─────────────────────────────────────────────────────────
 if (!SKIP_SEED) {

@@ -103,7 +103,9 @@ function parseFilter(col, spec, vals) {
   }
 
   const sqlOp = PG_OPS[op] ?? '='
-  vals.push(val)
+  // PostgREST uses * as wildcard in like/ilike; translate to SQL %
+  const sqlVal = (op === 'like' || op === 'ilike') ? val.replace(/\*/g, '%') : val
+  vals.push(sqlVal)
   return maybeNot(`${qi(col)} ${sqlOp} $${vals.length}`, negate)
 }
 
@@ -273,10 +275,15 @@ async function handleRest(req, res, url) {
     const valSets = rows.map(row =>
       '(' + cols.map(c => { allVals.push(row[c] ?? null); return `$${allVals.length}` }).join(', ') + ')'
     )
-    const onConflict = prefer.includes('merge-duplicates') ? 'ON CONFLICT DO NOTHING' : ''
-    const ins = `INSERT INTO ${qi(table)} (${colSQL}) VALUES ${valSets.join(',')} ${onConflict} RETURNING *`
+    const onConflict = (prefer.includes('merge-duplicates') || prefer.includes('ignore-duplicates')) ? 'ON CONFLICT DO NOTHING' : ''
+    const returning = prefer.includes('return=minimal') ? '' : 'RETURNING *'
+    const ins = `INSERT INTO ${qi(table)} (${colSQL}) VALUES ${valSets.join(',')} ${onConflict} ${returning}`
     const { rows: inserted } = await runSQL(ins, allVals)
-    send(res, 201, inserted)
+    if (prefer.includes('return=minimal')) {
+      send(res, 201, null)
+    } else {
+      send(res, 201, inserted)
+    }
     return
   }
 
