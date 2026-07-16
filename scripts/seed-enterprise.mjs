@@ -49,6 +49,20 @@ if (!BASE) die('SUPABASE_URL is required')
 if (!KEY)  die('SUPABASE_SERVICE_ROLE_KEY is required')
 if (!TID)  die('SEED_TENANT_ID is required')
 
+// ── Ensure UAT tenant row exists (FK target for all inserts) ───────────────────
+{
+  const DB_URL = process.env.DATABASE_URL ?? 'postgresql://hrms_local:hrms_dev_2024@127.0.0.1:5432/hrms'
+  const pg = await import('pg').then(m => m.default ?? m)
+  const pgPool = new pg.Pool({ connectionString: DB_URL, max: 1 })
+  await pgPool.query(`
+    INSERT INTO tenants (id, name, slug, plan, country, timezone, status, trial_ends_at, created_at)
+    VALUES ($1, 'CognixHR UAT', 'cognixhr-uat', 'enterprise', 'IN',
+            'Asia/Kolkata', 'active', now() + interval '3650 days', now())
+    ON CONFLICT (id) DO NOTHING
+  `, [TID])
+  await pgPool.end()
+}
+
 // ── REST helpers ───────────────────────────────────────────────────────────────
 const HDRS = { apikey: KEY, Authorization: `Bearer ${KEY}`, 'Content-Type': 'application/json' }
 
