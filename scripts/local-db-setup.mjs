@@ -223,7 +223,50 @@ psql(`
 
 ok('Schema fixes applied')
 
-// ── 7. Seed demo data ─────────────────────────────────────────────────────────
+// ── 7. Seed UAT / platform admin accounts ────────────────────────────────────
+step('Creating platform admin accounts')
+
+// Generate bcrypt hash for CognixDemo!1 via Node.js
+const bcryptjs = await import('bcryptjs').then(m => m.default ?? m)
+const uatHash = await bcryptjs.hash('CognixDemo!1', 10)
+
+psql(`
+  DO $$
+  DECLARE
+    v_user_id  UUID := 'a1000000-0000-0000-0000-000000000001';
+    v_admin_id UUID := 'a2000000-0000-0000-0000-000000000001';
+    v_tenant   UUID := 'd0000000-0000-0000-0000-000000000001';
+  BEGIN
+    INSERT INTO auth.users (
+      id, aud, role, email, encrypted_password,
+      email_confirmed_at, created_at, updated_at,
+      raw_app_meta_data, raw_user_meta_data
+    ) VALUES (
+      v_user_id, 'authenticated', 'authenticated',
+      'uatsuraj@gmail.com',
+      '${uatHash}',
+      now(), now(), now(),
+      '{"provider":"email","providers":["email"]}',
+      '{"full_name":"Suraj (UAT)"}'
+    )
+    ON CONFLICT (id) DO UPDATE
+      SET email = excluded.email, encrypted_password = excluded.encrypted_password, updated_at = now();
+
+    INSERT INTO platform_admins (id, user_id, name, email, role, is_active, created_at)
+    VALUES (v_admin_id, v_user_id, 'Suraj (UAT)', 'uatsuraj@gmail.com', 'owner', true, now())
+    ON CONFLICT (user_id) DO UPDATE
+      SET name = excluded.name, email = excluded.email, role = excluded.role, is_active = excluded.is_active;
+
+    INSERT INTO profiles (id, tenant_id, role, is_active, full_name, email)
+    VALUES (v_user_id, v_tenant, 'hr_admin', true, 'Suraj (UAT)', 'uatsuraj@gmail.com')
+    ON CONFLICT (id) DO UPDATE
+      SET tenant_id = excluded.tenant_id, role = excluded.role,
+          is_active = excluded.is_active, full_name = excluded.full_name;
+  END $$;
+`)
+ok('uatsuraj@gmail.com — platform owner + hr_admin on Demo tenant')
+
+// ── 8. Seed demo data ─────────────────────────────────────────────────────────
 if (!SKIP_SEED) {
   step('Seeding demo data')
 
