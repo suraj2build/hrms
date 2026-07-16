@@ -86,7 +86,7 @@ interface FailureSummary {
 interface PayrollRun {
   id:               string
   month:            string
-  status:           'draft' | 'partial_failed' | 'processing' | 'finalized' | 'failed' | 'frozen' | 'reopened'
+  status:           'queued' | 'draft' | 'partial_failed' | 'processing' | 'finalized' | 'failed' | 'frozen' | 'reopened'
   employee_count:   number
   total_gross:      number
   total_deductions: number
@@ -108,10 +108,11 @@ interface PayrollRun {
   reopened_at:      string | null // when period was reopened
   reopened_by_name: string | null // who reopened the period
   reopen_reason:    string | null // mandatory audit reason for reopen
-  // ── Processing progress (migration 379) ───────────────────────────────────
+  // ── Processing progress (migration 378/379) ──────────────────────────────
   total_employee_count:     number | null
   processed_employee_count: number
   started_processing_at:    string | null
+  last_heartbeat_at:        string | null
 }
 
 interface PayrollSlip {
@@ -272,17 +273,19 @@ function nextMonthStr(m: string): string {
 }
 
 const STATUS_BADGE: Record<string, BadgeProps['variant']> = {
+  queued:         'secondary',
   draft:          'secondary',
   partial_failed: 'warning',
   processing:     'warning',
   finalized:      'success',
   failed:         'destructive',
-  frozen:         'default',    // primary — immutably sealed
-  reopened:       'warning',    // orange — period unlocked, correction in progress
+  frozen:         'default',
+  reopened:       'warning',
 }
 
 /** Human-readable status labels */
 const STATUS_LABEL: Record<string, string> = {
+  queued:         'Queued',
   draft:          'Draft',
   partial_failed: 'Partial',
   processing:     'Processing',
@@ -1120,22 +1123,22 @@ function ProcessingProgressBar({ run }: { run: PayrollRun }) {
     const to   = serverCount
     if (from === to) return
 
-    // Cancel any in-flight animation
     if (rafRef.current !== null) cancelAnimationFrame(rafRef.current)
 
-    const STEP_MS = 40  // ~25fps feels natural for a counter
-    const steps   = Math.max(1, Math.abs(to - from))
-    const duration = Math.min(4500, steps * 15)  // 15ms/employee, cap 4.5 s
+    const steps    = Math.max(1, Math.abs(to - from))
+    const duration = Math.min(4500, steps * 15)  // 15 ms/employee, cap 4.5 s
     const startTs  = performance.now()
 
     const tick = (now: number) => {
       const progress = Math.min(1, (now - startTs) / duration)
       const cur = Math.round(from + (to - from) * progress)
+      // Keep ref in sync on every frame so a mid-animation poll starts from the
+      // current visual position, not the last completed target (prevents backward jumps).
+      displayRef.current = cur
       setDisplay(cur)
       if (progress < 1) {
         rafRef.current = requestAnimationFrame(tick)
       } else {
-        displayRef.current = to
         rafRef.current = null
       }
     }
@@ -1162,9 +1165,15 @@ function ProcessingProgressBar({ run }: { run: PayrollRun }) {
   const rate      = elapsedMs && serverCount > 0 ? serverCount / elapsedMs : null
   const etaSec    = rate && total > serverCount ? Math.ceil((total - serverCount) / rate / 1000) : null
 
-  // Zombie check: reuse startedAt from above
-  const elapsedMin = startedAt ? (Date.now() - startedAt) / 60_000 : 0
-  const isLikelyZombie = elapsedMin > 10 && serverCount === 0 && total > 0
+  // Zombie detection: prefer last_heartbeat_at (updated every 5 s by the server).
+  // A heartbeat older than 3 min means the job died without cleaning up.
+  // Fall back to elapsed-time heuristic when heartbeat has never been written.
+  const heartbeatAt  = run.last_heartbeat_at ? new Date(run.last_heartbeat_at).getTime() : null
+  const heartbeatAge = heartbeatAt ? (Date.now() - heartbeatAt) / 60_000 : null
+  const elapsedMin   = startedAt ? (Date.now() - startedAt) / 60_000 : 0
+  const isLikelyZombie = total > 0 && (
+    heartbeatAge !== null ? heartbeatAge > 3 : (elapsedMin > 10 && serverCount === 0)
+  )
 
   if (isLikelyZombie) {
     return (
@@ -1803,12 +1812,14 @@ function RunCard({
   const navigate     = useNavigate()
   const heldCount    = run.held_count    ?? 0
   const warningCount = run.warning_count ?? 0
+  const isQueued     = run.status === 'queued'
   const isProcessing = run.status === 'processing'
+  const isActive     = isQueued || isProcessing
 
   return (
     <div className={cn(
       'p-4 rounded-lg border bg-card space-y-3',
-      isProcessing ? 'border-primary/30 bg-primary/[0.02]' : 'border-border',
+      isActive ? 'border-primary/30 bg-primary/[0.02]' : 'border-border',
     )}>
 
       {/* Header row: month + status badge + held/warning chips */}
@@ -1836,11 +1847,22 @@ function RunCard({
         </div>
       </div>
 
-      {/* Processing: full live progress panel (replaces lifecycle bar + financials) */}
+      {/* Queued: waiting for the background worker to pick up the job */}
+      {isQueued && (
+        <div className="space-y-2">
+          <div className="h-2 rounded-full bg-primary/30 animate-pulse" />
+          <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+            <Loader2 className="h-3 w-3 animate-spin text-primary flex-shrink-0" />
+            <span>Queued — waiting for worker to start…</span>
+          </div>
+        </div>
+      )}
+
+      {/* Processing: full live progress panel */}
       {isProcessing && <ProcessingProgressBar run={run} />}
 
-      {/* Non-processing: lifecycle pipeline */}
-      {!isProcessing && <RunLifecycleBar run={run} />}
+      {/* All other statuses: lifecycle pipeline */}
+      {!isActive && <RunLifecycleBar run={run} />}
 
       {/* Completion summary for draft/partial_failed/failed — show totals clearly */}
       {(run.status === 'draft' || run.status === 'partial_failed' || run.status === 'failed') &&
@@ -2382,7 +2404,8 @@ export function PayrollRuns() {
     staleTime: 30_000,
     refetchInterval: (query) => {
       const runs = (query.state.data as { data: PayrollRun[] } | undefined)?.data ?? []
-      return runs.some(r => r.status === 'processing') ? 5000 : false
+      // Poll while any run is queued (waiting for worker) or actively processing
+      return runs.some(r => r.status === 'queued' || r.status === 'processing') ? 5000 : false
     },
   })
 

@@ -1469,7 +1469,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       .select(
         'id, month, status, employee_count, total_gross, total_deductions, total_net, total_lop_amount, ' +
         'error_message, failure_summary, created_at, finalized_at, ' +
-        'total_employee_count, processed_employee_count, started_processing_at',
+        'total_employee_count, processed_employee_count, started_processing_at, last_heartbeat_at',
         { count: 'exact' },
       )
       .eq('tenant_id', req.tenantId)
