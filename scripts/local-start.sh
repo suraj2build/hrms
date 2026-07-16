@@ -48,7 +48,17 @@ step "Cleaning up stale processes"
 pkill -f "local-server.mjs" 2>/dev/null || true
 pkill -f "apps/api"         2>/dev/null || true
 pkill -f "vite"             2>/dev/null || true
-sleep 0.5
+# Also kill by port (macOS lsof / Linux fuser) to handle any lingering process
+if command -v lsof >/dev/null 2>&1; then
+  lsof -ti:54321 2>/dev/null | xargs kill -9 2>/dev/null || true
+  lsof -ti:2001  2>/dev/null | xargs kill -9 2>/dev/null || true
+  lsof -ti:2000  2>/dev/null | xargs kill -9 2>/dev/null || true
+elif command -v fuser >/dev/null 2>&1; then
+  fuser -k 54321/tcp 2>/dev/null || true
+  fuser -k 2001/tcp  2>/dev/null || true
+  fuser -k 2000/tcp  2>/dev/null || true
+fi
+sleep 1
 ok "Ports cleared"
 
 # ── Start local-server (PostgREST + GoTrue) ───────────────────────────────────
