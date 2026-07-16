@@ -1162,9 +1162,7 @@ function ProcessingProgressBar({ run }: { run: PayrollRun }) {
   const rate      = elapsedMs && serverCount > 0 ? serverCount / elapsedMs : null
   const etaSec    = rate && total > serverCount ? Math.ceil((total - serverCount) / rate / 1000) : null
 
-  // Zombie check: if started > 10 min ago and processed_employee_count is still 0
-  // (or hasn't moved since total was set), the background job likely crashed.
-  const startedAt  = run.started_processing_at ? new Date(run.started_processing_at).getTime() : null
+  // Zombie check: reuse startedAt from above
   const elapsedMin = startedAt ? (Date.now() - startedAt) / 60_000 : 0
   const isLikelyZombie = elapsedMin > 10 && serverCount === 0 && total > 0
 
