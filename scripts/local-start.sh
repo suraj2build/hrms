@@ -31,13 +31,14 @@ echo -e "${N}"
 # ── Verify PostgreSQL ─────────────────────────────────────────────────────────
 step "Checking PostgreSQL"
 if ! pg_isready -q -h localhost -p 5432; then
-  fail "PostgreSQL not running on localhost:5432. Start it with: sudo pg_ctlcluster 16 main start"
+  START_CMD="brew services start postgresql@16"
+  [[ "$(uname)" != "Darwin" ]] && START_CMD="sudo pg_ctlcluster 16 main start"
+  fail "PostgreSQL not running on localhost:5432. Start it with: $START_CMD"
 fi
 ok "PostgreSQL is running"
 
 # ── Verify hrms database ──────────────────────────────────────────────────────
-if ! psql -U postgres -h localhost -d hrms -c "SELECT 1" >/dev/null 2>&1 && \
-   ! sudo -u postgres psql hrms -c "SELECT 1" >/dev/null 2>&1; then
+if ! PGPASSWORD=hrms_dev_2024 psql -U hrms_local -h 127.0.0.1 -d hrms -c "SELECT 1" >/dev/null 2>&1; then
   fail "Database 'hrms' not found. Run: node scripts/local-db-setup.mjs"
 fi
 ok "Database 'hrms' exists"
@@ -53,7 +54,7 @@ ok "Ports cleared"
 # ── Start local-server (PostgREST + GoTrue) ───────────────────────────────────
 step "Starting local-server (port 54321)"
 JWT_SECRET=local-dev-jwt-secret-hrms-cognixhr-2024-min32chars \
-DATABASE_URL=postgresql://postgres@localhost:5432/hrms \
+DATABASE_URL=postgresql://hrms_local:hrms_dev_2024@127.0.0.1:5432/hrms \
   node scripts/local-server.mjs > /tmp/local-server.log 2>&1 &
 PGRST_PID=$!
 
