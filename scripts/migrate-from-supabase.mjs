@@ -65,14 +65,14 @@ const dst = new pg.Pool({ connectionString: LOCAL_URL, max: 3 })
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-async function getColumns(client, schemaName, tableName) {
+async function getColumnDefs(client, schemaName, tableName) {
   const { rows } = await client.query(`
-    SELECT column_name
+    SELECT column_name, data_type, udt_name
     FROM information_schema.columns
     WHERE table_schema = $1 AND table_name = $2
     ORDER BY ordinal_position
   `, [schemaName, tableName])
-  return rows.map(r => r.column_name)
+  return rows  // [{ column_name, data_type, udt_name }, ...]
 }
 
 async function countRows(client, qualifiedTable) {
@@ -80,17 +80,35 @@ async function countRows(client, qualifiedTable) {
   return parseInt(rows[0].n)
 }
 
+// Coerce a value to what PostgreSQL expects for the given column type.
+// Key problem: pg reads jsonb arrays as JS arrays, but passes JS arrays back
+// as PostgreSQL array literals ({a,b,c}) which PostgreSQL rejects for json/jsonb columns.
+function coerce(value, col) {
+  if (value === null || value === undefined) return null
+  const t = col.data_type
+  const u = col.udt_name
+  // JSON / JSONB — always stringify objects and arrays so pg doesn't mangle them
+  if (t === 'json' || t === 'jsonb' || u === 'json' || u === 'jsonb') {
+    if (typeof value === 'object' && !(value instanceof Date) && !Buffer.isBuffer(value)) {
+      return JSON.stringify(value)
+    }
+  }
+  return value
+}
+
 async function copyTable(srcClient, dstClient, qualifiedTable, schemaName, tableName, label) {
   const total = await countRows(srcClient, qualifiedTable)
   if (total === 0) { warn(`${label}: 0 rows — skipping`); return 0 }
 
-  const cols = await getColumns(srcClient, schemaName, tableName)
-  if (!cols.length) { warn(`${label}: no columns found — skipping`); return 0 }
+  const colDefs = await getColumnDefs(srcClient, schemaName, tableName)
+  if (!colDefs.length) { warn(`${label}: no columns found — skipping`); return 0 }
+
+  const colNames = colDefs.map(c => c.column_name)
 
   // Truncate destination (FK checks are OFF at this point via session_replication_role)
   await dstClient.query(`TRUNCATE ${qualifiedTable} RESTART IDENTITY CASCADE`)
 
-  const colList = cols.map(c => `"${c}"`).join(', ')
+  const colList = colNames.map(c => `"${c}"`).join(', ')
   let copied = 0
 
   while (copied < total) {
@@ -100,10 +118,13 @@ async function copyTable(srcClient, dstClient, qualifiedTable, schemaName, table
     )
     if (!rows.length) break
 
-    // Build VALUES ($1,$2,...) for each row
+    // Build VALUES ($1,$2,...) with type-aware coercion
     const vals = []
     const rowParts = rows.map(row => {
-      const phs = cols.map(c => { vals.push(row[c] ?? null); return `$${vals.length}` })
+      const phs = colDefs.map(col => {
+        vals.push(coerce(row[col.column_name], col))
+        return `$${vals.length}`
+      })
       return `(${phs.join(', ')})`
     })
 
