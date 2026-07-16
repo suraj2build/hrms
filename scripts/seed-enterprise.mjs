@@ -21,6 +21,19 @@
  */
 
 import { randomUUID } from 'node:crypto'
+import { existsSync, readFileSync } from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+// ── Load .env.local-seed if present (avoids pasting keys in terminal) ──────────
+const __dir = path.dirname(fileURLToPath(import.meta.url))
+const dotEnvPath = path.resolve(__dir, '..', '.env.local-seed')
+if (existsSync(dotEnvPath)) {
+  for (const line of readFileSync(dotEnvPath, 'utf8').split('\n')) {
+    const m = line.match(/^([A-Z_][A-Z0-9_]*)=(.*)$/)
+    if (m && !process.env[m[1]]) process.env[m[1]] = m[2].trim()
+  }
+}
 
 // ── Config ─────────────────────────────────────────────────────────────────────
 const BASE    = (process.env.SUPABASE_URL ?? '').replace(/\/$/, '')

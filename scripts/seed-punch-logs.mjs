@@ -25,6 +25,19 @@
  */
 
 import { randomUUID } from 'node:crypto'
+import { existsSync, readFileSync } from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+// Load .env.local-seed if present
+const __dir = path.dirname(fileURLToPath(import.meta.url))
+const dotEnvPath = path.resolve(__dir, '..', '.env.local-seed')
+if (existsSync(dotEnvPath)) {
+  for (const line of readFileSync(dotEnvPath, 'utf8').split('\n')) {
+    const m = line.match(/^([A-Z_][A-Z0-9_]*)=(.*)$/)
+    if (m && !process.env[m[1]]) process.env[m[1]] = m[2].trim()
+  }
+}
 
 const DB_URL = process.env.DATABASE_URL ?? 'postgresql://hrms_local:hrms_dev_2024@127.0.0.1:5432/hrms'
 const TID    = process.env.SEED_TENANT_ID ?? 'b0000000-0000-0000-0000-000000000001'

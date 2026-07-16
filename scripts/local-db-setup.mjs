@@ -64,10 +64,12 @@ function psqlFile(file, db = PG_DB) {
 }
 
 function superPsql(sql, db = 'postgres') {
-  // Use peer auth as the postgres OS user for initial setup
-  const r = spawnSync('sudo', ['-u', 'postgres', 'psql', '-d', db, '-c', sql],
-    { encoding: 'utf8' })
-  return r
+  // On macOS (Homebrew): current user is already a PostgreSQL superuser — no sudo needed.
+  // On Linux: use peer auth as the postgres OS user.
+  if (process.platform === 'darwin') {
+    return spawnSync('psql', ['-d', db, '-c', sql], { encoding: 'utf8' })
+  }
+  return spawnSync('sudo', ['-u', 'postgres', 'psql', '-d', db, '-c', sql], { encoding: 'utf8' })
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -83,7 +85,10 @@ console.log(`${N}`)
 step('Checking PostgreSQL')
 const pgReady = spawnSync('pg_isready', ['-h', 'localhost', '-p', PG_PORT], { encoding: 'utf8' })
 if (pgReady.status !== 0) {
-  fail('PostgreSQL not running on localhost:5432. Start with:\n    sudo pg_ctlcluster 16 main start')
+  const startCmd = process.platform === 'darwin'
+    ? 'brew services start postgresql@16'
+    : 'sudo pg_ctlcluster 16 main start'
+  fail(`PostgreSQL not running on localhost:5432. Start with:\n    ${startCmd}`)
 }
 ok('PostgreSQL is running')
 
