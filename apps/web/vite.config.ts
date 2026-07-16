@@ -146,6 +146,8 @@ export default defineConfig(({ mode }) => ({
       '/security':        apiProxy(),
       '/workforce':       apiProxy(),
       '/fabric':          apiProxy(),
+      '/operational':     apiProxy(),
+      '/billing':         apiProxy(),
       '/health':          apiProxy(),
       '/ready':           apiProxy(),
       '/status':          apiProxy(),  // alias → GET /status on Fastify
