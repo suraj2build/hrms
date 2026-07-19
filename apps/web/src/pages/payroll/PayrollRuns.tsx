@@ -2347,6 +2347,8 @@ export function PayrollRuns() {
   interface DryRunData {
     dry_run:                      boolean
     scoped:                       boolean
+    fetch_method?:                'rpc' | 'range_fallback' | 'scoped_in'
+    api_commit?:                  string
     month:                        string
     tenant_id:                    string
     employee_count:               number
@@ -2733,10 +2735,12 @@ export function PayrollRuns() {
 
             {/* ── Full Dry Run Progress Dialog ───────────────────────────────── */}
             {(() => {
-              // Best estimate of employee count: use most recent run that has a known total
+              // Best estimate of employee count: use most recent run that has a known total.
+              // Totals ≤ 5 are ignored — they come from previously-broken runs and make the
+              // progress bar lie ("1/1 · 100%") while thousands of employees are processing.
               const knownTotal = runs
                 .map(r => r.total_employee_count ?? r.employee_count ?? 0)
-                .find(n => n > 0) ?? null
+                .find(n => n > 5) ?? null
               return (
             <Dialog open={dryRunMutation.isPending} onOpenChange={() => {}}>
               <DialogContent className="max-w-sm" onInteractOutside={(e) => e.preventDefault()}>
@@ -2844,11 +2848,15 @@ export function PayrollRuns() {
                           <div className="flex gap-2"><dt className="text-muted-foreground min-w-[180px]">Direct active count (HEAD):</dt><dd className="font-bold">{dryRunData.active_employees_in_system}</dd></div>
                           <div className="flex gap-2"><dt className="text-muted-foreground min-w-[180px]">Total all statuses (HEAD):</dt><dd className="font-bold">{dryRunData.total_employees_in_system}</dd></div>
                           <div className="flex gap-2"><dt className="text-muted-foreground min-w-[180px]">Tenant ID:</dt><dd className="break-all">{dryRunData.tenant_id}</dd></div>
+                          <div className="flex gap-2"><dt className="text-muted-foreground min-w-[180px]">Fetch method:</dt><dd className="font-bold">{dryRunData.fetch_method ?? 'unknown (old API)'}</dd></div>
+                          <div className="flex gap-2"><dt className="text-muted-foreground min-w-[180px]">API version:</dt><dd>{dryRunData.api_commit ?? 'unknown'}</dd></div>
                         </dl>
                         <p className="text-[10px] text-muted-foreground mt-2">
-                          {dryRunData.active_employees_in_system > dryRunData.employee_count
-                            ? `PostgREST max_rows is capping results. Go to: Supabase Dashboard → Project Settings → API → Max Rows → set to 1000`
-                            : `Direct count also low — check Railway logs for payroll_dry_run_critical_low_employee_count event`}
+                          {!dryRunData.fetch_method
+                            ? 'Fetch method missing — Railway is still running an OLD deployment. Wait for the deploy to finish and re-run.'
+                            : dryRunData.fetch_method === 'range_fallback'
+                              ? 'DB function get_active_employees_for_payroll is NOT installed — run migration 380 in the Supabase SQL Editor, then re-run.'
+                              : 'Fetched via DB function (rpc) yet the count is still low — check Railway logs for payroll_dry_run_critical_low_employee_count.'}
                         </p>
                       </div>
                     )}

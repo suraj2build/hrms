@@ -349,6 +349,40 @@ import { buildPayrollReconciliationReport } from '../../lib/payroll-reconciliati
 
 const monthRe = /^\d{4}-\d{2}$/
 
+/** Short SHA of the running deployment (Railway sets RAILWAY_GIT_COMMIT_SHA). */
+const API_COMMIT = (process.env.RAILWAY_GIT_COMMIT_SHA ?? process.env.GIT_COMMIT_SHA ?? 'unknown').slice(0, 7)
+
+type PayrollEmployee = { id: string; first_name: string; last_name: string; employee_code: string }
+
+/**
+ * Fetches every active employee for a tenant, preferring the
+ * get_active_employees_for_payroll DB function (single query, single JSON row —
+ * immune to PostgREST row caps and read-routing anomalies because RPC POSTs
+ * always hit the primary). Falls back to fetchAllRows over .range() when the
+ * function is not installed yet, so payroll never hard-fails on a missing
+ * migration. Returns the list plus which method produced it, for diagnostics.
+ */
+async function fetchActiveEmployees(
+  supabase: FastifyInstance['supabase'],
+  tenantId: string,
+): Promise<{ list: PayrollEmployee[]; method: 'rpc' | 'range_fallback' }> {
+  const { data, error } = await supabase
+    .rpc('get_active_employees_for_payroll', { p_tenant_id: tenantId })
+  if (!error) {
+    return { list: (Array.isArray(data) ? data : []) as PayrollEmployee[], method: 'rpc' }
+  }
+  const list = await fetchAllRows((from, to) =>
+    supabase
+      .from('employees')
+      .select('id, first_name, last_name, employee_code')
+      .eq('tenant_id', tenantId)
+      .eq('status', 'active')
+      .order('employee_code')
+      .range(from, to),
+  ) as PayrollEmployee[]
+  return { list, method: 'range_fallback' }
+}
+
 /** Per-employee timeout for dry-run computation (ms). */
 const DRY_RUN_EMP_TIMEOUT_MS = 30_000
 
@@ -663,13 +697,16 @@ async function executePayrollRun(
     .update({ status: 'processing', started_processing_at: processingStartedAt })
     .eq('id', runId)
 
-  // Fetch all active employees via DB function (bypasses PostgREST max_rows limit)
-  let empList: Array<{ id: string; first_name: string; last_name: string; employee_code: string }>
+  // Fetch all active employees via DB function (bypasses PostgREST row caps),
+  // with .range() pagination as the fallback when the function is missing.
+  let empList: PayrollEmployee[]
   try {
-    const { data: rpcData, error: rpcError } = await supabase
-      .rpc('get_active_employees_for_payroll', { p_tenant_id: tenantId })
-    if (rpcError) throw rpcError
-    empList = (Array.isArray(rpcData) ? rpcData : []) as typeof empList
+    const fetched = await fetchActiveEmployees(supabase, tenantId)
+    empList = fetched.list
+    log.info(
+      { event: 'payroll_run_employee_fetch', run_id: runId, method: fetched.method, count: fetched.list.length, api_commit: API_COMMIT },
+      'payroll run: employee list fetched',
+    )
   } catch (empErr: any) {
     log.error({ err: empErr, run_id: runId, month, tenant_id: tenantId }, 'payroll run job: failed to fetch employees')
     await supabase.from('payroll_runs')
@@ -1193,6 +1230,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       // Fetch employees — either the requested subset or all active employees
       let empList: Array<{ id: string; first_name: string; last_name: string; employee_code: string }>
       let filterWarning: string | undefined
+      let fetchMethod: 'rpc' | 'range_fallback' | 'scoped_in' = 'scoped_in'
       try {
         if (employee_ids && employee_ids.length > 0) {
           // Targeted dry run: only the requested employees (validated against tenant + active)
@@ -1210,14 +1248,9 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
             req.log.warn({ employee_ids, tenant_id: tenantId }, `payroll dry run: ${filterWarning}`)
           }
         } else {
-          // Use a DB function that returns all employees as a single JSON blob.
-          // This bypasses PostgREST's max_rows limit (which caps each .range()
-          // request to N rows, requiring thousands of round-trips at low limits).
-          // The function executes one SQL query server-side and returns 1 row.
-          const { data: rpcData, error: rpcError } = await fastify.supabase
-            .rpc('get_active_employees_for_payroll', { p_tenant_id: tenantId })
-          if (rpcError) throw rpcError
-          empList = (Array.isArray(rpcData) ? rpcData : []) as typeof empList
+          const fetched = await fetchActiveEmployees(fastify.supabase, tenantId)
+          empList = fetched.list
+          fetchMethod = fetched.method
         }
       } catch (dryEmpErr: any) {
         return serverError(req, reply, dryEmpErr, ErrorCode.QUERY_FAILED, 'Failed to fetch employees')
@@ -1295,7 +1328,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       }
 
       req.log.info(
-        { event: 'payroll_dry_run_start', month, employee_count: empList.length, total_employees_in_system: totalEmployeesInSystem, tenant_id: tenantId },
+        { event: 'payroll_dry_run_start', month, employee_count: empList.length, total_employees_in_system: totalEmployeesInSystem, tenant_id: tenantId, fetch_method: fetchMethod, api_commit: API_COMMIT },
         'payroll dry run started',
       )
 
@@ -1452,6 +1485,8 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       return reply.send({
         dry_run:                  true,
         scoped:                   !!(employee_ids && employee_ids.length > 0),
+        fetch_method:             fetchMethod,
+        api_commit:               API_COMMIT,
         month,
         tenant_id:                tenantId,
         employee_count:           empList.length,
