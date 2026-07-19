@@ -11,6 +11,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { fetchAllRows } from './supabase-paginate.js'
+import { fetchActiveEmployees } from './payroll-employees.js'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -117,16 +118,8 @@ export async function buildCompensationCoverageAudit(
   const today = new Date().toISOString().slice(0, 10)
   const effectiveCutoff = periodEnd ?? today
 
-  // ── 1. Fetch all active employees (paginated — employees can exceed 1000 rows) ─
-  const empList = await fetchAllRows<RawEmployee>((from, to) =>
-    supabase
-      .from('employees')
-      .select('id, employee_code, first_name, last_name')
-      .eq('tenant_id', tenantId)
-      .eq('status', 'active')
-      .order('employee_code')
-      .range(from, to) as any,
-  )
+  // ── 1. Fetch all active employees (RPC-first — immune to ranged-read caps) ─
+  const empList: RawEmployee[] = (await fetchActiveEmployees(supabase, tenantId)).list
   const total   = empList.length
 
   // Early-out: no active employees is a valid (trivially "ready") state

@@ -21,6 +21,7 @@ import type { FastifyInstance } from 'fastify'
 import { z }                    from 'zod'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
+import { fetchActiveEmployees, type PayrollEmployee } from '../../lib/payroll-employees.js'
 import { EventType, MODULE } from '../../platform/events/index.js'
 import {
   computePayrollSlip,
@@ -351,37 +352,6 @@ const monthRe = /^\d{4}-\d{2}$/
 
 /** Short SHA of the running deployment (Railway sets RAILWAY_GIT_COMMIT_SHA). */
 const API_COMMIT = (process.env.RAILWAY_GIT_COMMIT_SHA ?? process.env.GIT_COMMIT_SHA ?? 'unknown').slice(0, 7)
-
-type PayrollEmployee = { id: string; first_name: string; last_name: string; employee_code: string }
-
-/**
- * Fetches every active employee for a tenant, preferring the
- * get_active_employees_for_payroll DB function (single query, single JSON row —
- * immune to PostgREST row caps and read-routing anomalies because RPC POSTs
- * always hit the primary). Falls back to fetchAllRows over .range() when the
- * function is not installed yet, so payroll never hard-fails on a missing
- * migration. Returns the list plus which method produced it, for diagnostics.
- */
-async function fetchActiveEmployees(
-  supabase: FastifyInstance['supabase'],
-  tenantId: string,
-): Promise<{ list: PayrollEmployee[]; method: 'rpc' | 'range_fallback' }> {
-  const { data, error } = await supabase
-    .rpc('get_active_employees_for_payroll', { p_tenant_id: tenantId })
-  if (!error) {
-    return { list: (Array.isArray(data) ? data : []) as PayrollEmployee[], method: 'rpc' }
-  }
-  const list = await fetchAllRows((from, to) =>
-    supabase
-      .from('employees')
-      .select('id, first_name, last_name, employee_code')
-      .eq('tenant_id', tenantId)
-      .eq('status', 'active')
-      .order('employee_code')
-      .range(from, to),
-  ) as PayrollEmployee[]
-  return { list, method: 'range_fallback' }
-}
 
 /** Per-employee timeout for dry-run computation (ms). */
 const DRY_RUN_EMP_TIMEOUT_MS = 30_000
