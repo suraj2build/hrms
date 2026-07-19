@@ -1252,7 +1252,24 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
         return serverError(req, reply, wdErr, 'WORKING_DAYS_FETCH_FAILED', 'Failed to count working days')
       }
 
-      if (
+      // Critical guard: ≤1 employee is always wrong for a real tenant regardless of total_in_system.
+      // Fires in BOTH failure modes: wrong tenantId (totalEmployeesInSystem also = 1) AND
+      // PostgREST max_rows truncation (totalEmployeesInSystem = real count, empList.length = 1).
+      if (empList.length <= 1) {
+        req.log.error(
+          {
+            event:                   'payroll_dry_run_critical_low_employee_count',
+            active_count:            empList.length,
+            total_in_system:         totalEmployeesInSystem,
+            tenant_id:               tenantId,
+            user_id:                 req.userId,
+            diagnosis: totalEmployeesInSystem <= 1
+              ? 'WRONG_TENANT — profile.tenant_id points to a 1-employee tenant; check auth.users+profiles for this user'
+              : 'MAX_ROWS_TRUNCATION — PostgREST returned 1 row but total headcount is high; check pgrst.max_rows in Supabase API Settings',
+          },
+          'payroll dry run: critically low employee count — result is almost certainly incorrect',
+        )
+      } else if (
         totalEmployeesInSystem > 10 &&
         empList.length < totalEmployeesInSystem * 0.1
       ) {

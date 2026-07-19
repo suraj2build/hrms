@@ -65,6 +65,8 @@ export default async function reportsRoutes(fastify: FastifyInstance) {
 
     if (q.department_id) empQuery = empQuery.eq('job_history.department_id', q.department_id)
     if (q.employment_type) empQuery = empQuery.eq('job_history.employment_type', q.employment_type)
+    // ORDER BY is required for stable multi-page results with fetchAllRows
+    empQuery = empQuery.order('id')
 
     let employees: any[]
     try {

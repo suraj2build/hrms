@@ -2830,6 +2830,24 @@ export function PayrollRuns() {
                       )
                     })()}
 
+                    {/* CRITICAL: Suspiciously low employee count — prominent alert visible regardless of total_employees_in_system */}
+                    {dryRunData.employee_count <= 5 && (
+                      <div className="rounded-md border-2 border-destructive bg-destructive/10 px-4 py-3">
+                        <div className="flex items-center gap-2 font-semibold text-destructive text-sm mb-2">
+                          <AlertTriangle className="h-4 w-4 flex-shrink-0" />
+                          Only {dryRunData.employee_count} employee(s) processed — this is almost certainly wrong
+                        </div>
+                        <p className="text-xs text-muted-foreground mb-2">
+                          Expected thousands of employees. Share the details below with support.
+                        </p>
+                        <dl className="text-xs space-y-1 font-mono bg-muted/60 rounded px-3 py-2">
+                          <div className="flex gap-2"><dt className="text-muted-foreground min-w-[140px]">Employees processed:</dt><dd className="font-bold text-destructive">{dryRunData.employee_count}</dd></div>
+                          <div className="flex gap-2"><dt className="text-muted-foreground min-w-[140px]">Total in system:</dt><dd className="font-bold">{dryRunData.total_employees_in_system}</dd></div>
+                          <div className="flex gap-2"><dt className="text-muted-foreground min-w-[140px]">Tenant ID:</dt><dd className="break-all">{dryRunData.tenant_id}</dd></div>
+                        </dl>
+                      </div>
+                    )}
+
                     {/* Per-employee table */}
                     <div className="max-h-64 overflow-y-auto rounded-md border border-border">
                       <table className="w-full text-xs">
@@ -2875,8 +2893,8 @@ export function PayrollRuns() {
                     )}
                   </div>
                 )}
-                {dryRunData && (
-                  <p className="text-[9px] text-muted-foreground/60 text-right font-mono mt-1">
+                {dryRunData && dryRunData.employee_count > 5 && (
+                  <p className="text-[9px] text-muted-foreground/40 text-right font-mono mt-1">
                     tenant: {dryRunData.tenant_id}
                   </p>
                 )}
