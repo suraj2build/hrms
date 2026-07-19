@@ -12,6 +12,7 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { normalizeAttendanceStatus } from '../../lib/attendance-utils.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { fetchAllRows } from '../../lib/supabase-paginate.js'
 
 const MUSTER_ROW_LIMIT = 200_000
 
@@ -78,31 +79,27 @@ export default async function musterRoute(fastify: FastifyInstance) {
         }
       }
 
-      // Paginate both employees and attendance_daily in batches of 1000.
-      // PostgREST enforces max-rows=1000 as a hard server ceiling: even an explicit
-      // .limit(200_000) is silently capped at 1000.  Using .range() issues Range
-      // headers that page through the full result set.
-      const BATCH = 1000
-
-      const employees: EmpRow[] = []
-      let empFrom = 0
-      while (true) {
-        let q = fastify.supabase
-          .from('employees')
-          .select('id, first_name, last_name, employee_code, joining_date')
-          .eq('tenant_id', req.tenantId)
-          .eq('status', 'active')
-          .order('employee_code')
-          .range(empFrom, empFrom + BATCH - 1)
-        if (reportIdFilter) q = q.in('id', reportIdFilter)
-        const { data: page, error: empError } = await q
-        if (empError) {
-          req.log.error({ err: empError }, 'muster employees query failed')
-          return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch employees' })
-        }
-        employees.push(...((page ?? []) as EmpRow[]))
-        if (!page || page.length < BATCH) break
-        empFrom += BATCH
+      // Paginate both employees and attendance_daily via fetchAllRows, which is
+      // robust at ANY server-side max-rows value: it advances by the rows actually
+      // received and stops only on an empty page. (An inline copy of this loop
+      // previously stopped when a page came back shorter than the requested batch —
+      // silently truncating results whenever max-rows < batch size.)
+      let employees: EmpRow[]
+      try {
+        employees = await fetchAllRows<EmpRow>((from, to) => {
+          let q = fastify.supabase
+            .from('employees')
+            .select('id, first_name, last_name, employee_code, joining_date')
+            .eq('tenant_id', req.tenantId)
+            .eq('status', 'active')
+            .order('employee_code')
+            .range(from, to)
+          if (reportIdFilter) q = q.in('id', reportIdFilter)
+          return q as any
+        })
+      } catch (empError: any) {
+        req.log.error({ err: empError }, 'muster employees query failed')
+        return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch employees' })
       }
 
       if (employees.length === 0) {
@@ -110,23 +107,24 @@ export default async function musterRoute(fastify: FastifyInstance) {
       }
 
       type DailyRawRow = { date: string; status: string; muster_code: string | null; work_hours: number; late_minutes: number; employee_id: string }
-      const daily: DailyRawRow[] = []
-      let dailyFrom = 0
-      while (true) {
-        const { data: page, error: dailyError } = await fastify.supabase
-          .from('attendance_daily')
-          .select('employee_id, date, status, muster_code, work_hours, late_minutes')
-          .eq('tenant_id', req.tenantId)
-          .gte('date', fromDate)
-          .lte('date', toDate)
-          .range(dailyFrom, dailyFrom + BATCH - 1)
-        if (dailyError) {
-          req.log.error({ err: dailyError }, 'muster daily query failed')
-          return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch attendance records' })
-        }
-        daily.push(...((page ?? []) as DailyRawRow[]))
-        if (!page || page.length < BATCH) break
-        dailyFrom += BATCH
+      let daily: DailyRawRow[]
+      try {
+        // ORDER BY (employee_id, date) gives multi-page pagination a stable,
+        // unique sort key so pages never overlap or skip rows.
+        daily = await fetchAllRows<DailyRawRow>((from, to) =>
+          fastify.supabase
+            .from('attendance_daily')
+            .select('employee_id, date, status, muster_code, work_hours, late_minutes')
+            .eq('tenant_id', req.tenantId)
+            .gte('date', fromDate)
+            .lte('date', toDate)
+            .order('employee_id')
+            .order('date')
+            .range(from, to) as any,
+        )
+      } catch (dailyError: any) {
+        req.log.error({ err: dailyError }, 'muster daily query failed')
+        return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch attendance records' })
       }
 
       // Build a lookup: employeeId → date → daily row
