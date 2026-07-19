@@ -2345,16 +2345,17 @@ export function PayrollRuns() {
     validation_errors?: string[]
   }
   interface DryRunData {
-    dry_run:                   boolean
-    month:                     string
-    tenant_id:                 string
-    employee_count:            number
-    total_employees_in_system: number
-    total_working_days:        number
-    ok_count:                  number
-    failed_count:              number
-    warnings?:                 string[]
-    results:                   DryRunEmployeeResult[]
+    dry_run:                      boolean
+    month:                        string
+    tenant_id:                    string
+    employee_count:               number
+    active_employees_in_system:   number
+    total_employees_in_system:    number
+    total_working_days:           number
+    ok_count:                     number
+    failed_count:                 number
+    warnings?:                    string[]
+    results:                      DryRunEmployeeResult[]
   }
   const [dryRunOpen, setDryRunOpen]     = useState(false)
   const [dryRunData, setDryRunData]     = useState<DryRunData | null>(null)
@@ -2830,21 +2831,24 @@ export function PayrollRuns() {
                       )
                     })()}
 
-                    {/* CRITICAL: Suspiciously low employee count — prominent alert visible regardless of total_employees_in_system */}
+                    {/* CRITICAL: Suspiciously low employee count — shows all diagnostic counters */}
                     {dryRunData.employee_count <= 5 && (
                       <div className="rounded-md border-2 border-destructive bg-destructive/10 px-4 py-3">
                         <div className="flex items-center gap-2 font-semibold text-destructive text-sm mb-2">
                           <AlertTriangle className="h-4 w-4 flex-shrink-0" />
-                          Only {dryRunData.employee_count} employee(s) processed — this is almost certainly wrong
+                          Only {dryRunData.employee_count} employee(s) processed — this is wrong
                         </div>
-                        <p className="text-xs text-muted-foreground mb-2">
-                          Expected thousands of employees. Share the details below with support.
-                        </p>
                         <dl className="text-xs space-y-1 font-mono bg-muted/60 rounded px-3 py-2">
-                          <div className="flex gap-2"><dt className="text-muted-foreground min-w-[140px]">Employees processed:</dt><dd className="font-bold text-destructive">{dryRunData.employee_count}</dd></div>
-                          <div className="flex gap-2"><dt className="text-muted-foreground min-w-[140px]">Total in system:</dt><dd className="font-bold">{dryRunData.total_employees_in_system}</dd></div>
-                          <div className="flex gap-2"><dt className="text-muted-foreground min-w-[140px]">Tenant ID:</dt><dd className="break-all">{dryRunData.tenant_id}</dd></div>
+                          <div className="flex gap-2"><dt className="text-muted-foreground min-w-[180px]">Fetched by fetchAllRows:</dt><dd className="font-bold text-destructive">{dryRunData.employee_count}</dd></div>
+                          <div className="flex gap-2"><dt className="text-muted-foreground min-w-[180px]">Direct active count (HEAD):</dt><dd className="font-bold">{dryRunData.active_employees_in_system}</dd></div>
+                          <div className="flex gap-2"><dt className="text-muted-foreground min-w-[180px]">Total all statuses (HEAD):</dt><dd className="font-bold">{dryRunData.total_employees_in_system}</dd></div>
+                          <div className="flex gap-2"><dt className="text-muted-foreground min-w-[180px]">Tenant ID:</dt><dd className="break-all">{dryRunData.tenant_id}</dd></div>
                         </dl>
+                        <p className="text-[10px] text-muted-foreground mt-2">
+                          {dryRunData.active_employees_in_system > dryRunData.employee_count
+                            ? `PostgREST max_rows is capping results. Go to: Supabase Dashboard → Project Settings → API → Max Rows → set to 1000`
+                            : `Direct count also low — check Railway logs for payroll_dry_run_critical_low_employee_count event`}
+                        </p>
                       </div>
                     )}
 

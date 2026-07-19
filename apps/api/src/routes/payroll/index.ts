@@ -1234,12 +1234,21 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       // head:true returns only the Count header, not row data, so the 1000-row cap
       // doesn't apply and this remains accurate at any scale.
       let totalEmployeesInSystem = 0
+      let activeEmployeesInSystem = 0
       try {
-        const { count } = await fastify.supabase
-          .from('employees')
-          .select('*', { count: 'exact', head: true })
-          .eq('tenant_id', tenantId)
-        totalEmployeesInSystem = count ?? 0
+        const [totalRes, activeRes] = await Promise.all([
+          fastify.supabase
+            .from('employees')
+            .select('*', { count: 'exact', head: true })
+            .eq('tenant_id', tenantId),
+          fastify.supabase
+            .from('employees')
+            .select('*', { count: 'exact', head: true })
+            .eq('tenant_id', tenantId)
+            .eq('status', 'active'),
+        ])
+        totalEmployeesInSystem  = totalRes.count ?? 0
+        activeEmployeesInSystem = activeRes.count ?? 0
       } catch {
         // Non-fatal — omit the diagnostic field rather than failing the dry run
       }
@@ -1259,13 +1268,16 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
         req.log.error(
           {
             event:                   'payroll_dry_run_critical_low_employee_count',
-            active_count:            empList.length,
+            fetched_by_fetchAllRows: empList.length,
+            direct_active_count:     activeEmployeesInSystem,
             total_in_system:         totalEmployeesInSystem,
             tenant_id:               tenantId,
             user_id:                 req.userId,
-            diagnosis: totalEmployeesInSystem <= 1
-              ? 'WRONG_TENANT — profile.tenant_id points to a 1-employee tenant; check auth.users+profiles for this user'
-              : 'MAX_ROWS_TRUNCATION — PostgREST returned 1 row but total headcount is high; check pgrst.max_rows in Supabase API Settings',
+            // If fetched_by_fetchAllRows << direct_active_count → PostgREST max_rows is capping fetchAllRows
+            // If both are 1 → wrong tenant OR genuinely only 1 active employee
+            diagnosis: activeEmployeesInSystem > 1
+              ? `MAX_ROWS_TRUNCATION — PostgREST .range() capped by max_rows; direct HEAD count=${activeEmployeesInSystem}; check Supabase Dashboard → Project Settings → API → Max Rows`
+              : 'DATA or TENANT issue — direct active count is also ≤1; check employees table or tenant resolution',
           },
           'payroll dry run: critically low employee count — result is almost certainly incorrect',
         )
@@ -1448,6 +1460,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
         month,
         tenant_id:                tenantId,
         employee_count:           empList.length,
+        active_employees_in_system: activeEmployeesInSystem,
         total_employees_in_system: totalEmployeesInSystem,
         total_working_days,
         ok_count:                 okCount,
