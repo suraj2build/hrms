@@ -1429,6 +1429,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       return reply.send({
         dry_run:                  true,
         month,
+        tenant_id:                tenantId,
         employee_count:           empList.length,
         total_employees_in_system: totalEmployeesInSystem,
         total_working_days,

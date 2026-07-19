@@ -2347,6 +2347,7 @@ export function PayrollRuns() {
   interface DryRunData {
     dry_run:                   boolean
     month:                     string
+    tenant_id:                 string
     employee_count:            number
     total_employees_in_system: number
     total_working_days:        number
@@ -2873,6 +2874,11 @@ export function PayrollRuns() {
                       </div>
                     )}
                   </div>
+                )}
+                {dryRunData && (
+                  <p className="text-[9px] text-muted-foreground/60 text-right font-mono mt-1">
+                    tenant: {dryRunData.tenant_id}
+                  </p>
                 )}
               </DialogContent>
             </Dialog>

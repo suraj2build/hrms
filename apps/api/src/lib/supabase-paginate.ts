@@ -26,23 +26,25 @@
 
 /**
  * Fetches every row matching a query by issuing successive .range() requests
- * until a page shorter than batchSize is returned.
+ * until an empty page is returned.
+ *
+ * The loop advances by the number of rows ACTUALLY returned (not the requested
+ * batchSize) so it works correctly even when PostgREST's max-rows setting is
+ * lower than batchSize.  Previously the loop stopped when data.length < batchSize,
+ * which silently truncated results whenever max-rows < batchSize (e.g. max-rows
+ * set to 1 in the Supabase API Settings dashboard would return only 1 row and
+ * stop immediately, regardless of how many rows actually exist).
+ *
+ * Stopping condition: an empty page (0 rows).  This costs one extra round-trip
+ * at the end but is correct at any max-rows value.
  *
  * @param queryFn  A function that accepts (from, to) and returns the Supabase
  *                 query with .range(from, to) appended.  Keep all other filters,
  *                 selects, and orderings inside queryFn — only the range varies.
- * @param batchSize  Rows per request.  Must be STRICTLY LESS THAN the PostgREST
- *                   max-rows setting (Supabase cloud default: 1,000).  Using a
- *                   value less than max-rows guarantees the stopping condition
- *                   (data.length < batchSize) is never triggered by a server-side
- *                   cap masquerading as the last page.  Defaults to 500.
- *
- *                   WARNING: if max-rows is ever lowered below batchSize in the
- *                   Supabase project settings (or on a self-hosted PostgREST
- *                   instance), the first capped page will be shorter than batchSize
- *                   and the loop will stop early with no error — silent truncation.
- *                   Verify `SELECT current_setting('pgrst.max_rows')` is >= 1000
- *                   before changing either value.
+ * @param batchSize  Rows per request.  Should be <= the PostgREST max-rows
+ *                   setting (Supabase cloud default: 1,000) for efficient
+ *                   batching.  If max-rows < batchSize, the loop still returns
+ *                   all rows — just in smaller batches.  Defaults to 500.
  */
 export async function fetchAllRows<T>(
   queryFn: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: unknown }>,
@@ -53,9 +55,9 @@ export async function fetchAllRows<T>(
   while (true) {
     const { data, error } = await queryFn(from, from + batchSize - 1)
     if (error) throw error
-    rows.push(...(data ?? []))
-    if (!data || data.length < batchSize) break
-    from += batchSize
+    if (!data || data.length === 0) break
+    rows.push(...data)
+    from += data.length  // advance by actual rows received, not assumed batchSize
   }
   return rows
 }
