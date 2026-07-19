@@ -2346,6 +2346,7 @@ export function PayrollRuns() {
   }
   interface DryRunData {
     dry_run:                      boolean
+    scoped:                       boolean
     month:                        string
     tenant_id:                    string
     employee_count:               number
@@ -2831,8 +2832,8 @@ export function PayrollRuns() {
                       )
                     })()}
 
-                    {/* CRITICAL: Suspiciously low employee count — shows all diagnostic counters */}
-                    {dryRunData.employee_count <= 5 && (
+                    {/* CRITICAL: Suspiciously low employee count on a FULL run — scoped runs are excluded */}
+                    {!dryRunData.scoped && dryRunData.employee_count <= 5 && (
                       <div className="rounded-md border-2 border-destructive bg-destructive/10 px-4 py-3">
                         <div className="flex items-center gap-2 font-semibold text-destructive text-sm mb-2">
                           <AlertTriangle className="h-4 w-4 flex-shrink-0" />
@@ -2897,7 +2898,7 @@ export function PayrollRuns() {
                     )}
                   </div>
                 )}
-                {dryRunData && dryRunData.employee_count > 5 && (
+                {dryRunData && (dryRunData.scoped || dryRunData.employee_count > 5) && (
                   <p className="text-[9px] text-muted-foreground/40 text-right font-mono mt-1">
                     tenant: {dryRunData.tenant_id}
                   </p>

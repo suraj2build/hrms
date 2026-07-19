@@ -1457,6 +1457,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
 
       return reply.send({
         dry_run:                  true,
+        scoped:                   !!(employee_ids && employee_ids.length > 0),
         month,
         tenant_id:                tenantId,
         employee_count:           empList.length,
