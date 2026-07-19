@@ -1296,16 +1296,21 @@ function ProcessingProgressBar({ run }: { run: PayrollRun }) {
 }
 
 // ── DryRunProgressView ───────────────────────────────────────────────────────
-// Simulated progress for dry run API calls (synchronous — no server feedback).
-// Uses elapsed time + estimated rate to animate the counter visually.
-// Caps at 93% so it never reaches 100% before the response arrives.
+// Progress for dry run API calls. When `progress` is provided (batched full
+// dry run — real per-chunk feedback), renders actual done/total. Otherwise
+// falls back to simulated elapsed-time animation capped at 93%.
 
-function DryRunProgressView({ total }: { total: number | null }) {
-  const [display, setDisplay] = useState(0)
+function DryRunProgressView({ total: totalProp, progress }: {
+  total: number | null
+  progress?: { done: number; total: number } | null
+}) {
+  const total = progress ? progress.total : totalProp
+  const [animated, setAnimated] = useState(0)
+  const display = progress ? progress.done : animated
   const rafRef = useRef<number | null>(null)
 
   useEffect(() => {
-    if (!total) return
+    if (!total || progress) return
     // For small tenants (≤10 employees) the run finishes in under a second, so
     // animate to the full count — false-100% window is imperceptible.
     // For larger runs cap at 93% so the bar never falsely shows completion.
@@ -1315,12 +1320,12 @@ function DryRunProgressView({ total }: { total: number | null }) {
 
     const tick = (now: number) => {
       const cur = Math.min(cap, Math.floor((now - startTs) / rateMs))
-      setDisplay(cur)
+      setAnimated(cur)
       if (cur < cap) rafRef.current = requestAnimationFrame(tick)
     }
     rafRef.current = requestAnimationFrame(tick)
     return () => { if (rafRef.current !== null) cancelAnimationFrame(rafRef.current) }
-  }, [total])
+  }, [total, progress])
 
   // Indeterminate only when total is unknown (full dry run before any run history exists)
   if (!total) {
@@ -2362,15 +2367,72 @@ export function PayrollRuns() {
   }
   const [dryRunOpen, setDryRunOpen]     = useState(false)
   const [dryRunData, setDryRunData]     = useState<DryRunData | null>(null)
+  // Real progress for the batched full dry run: {done, total} employees computed so far.
+  const [dryRunProgress, setDryRunProgress] = useState<{ done: number; total: number } | null>(null)
+
+  /** Employees per scoped request. One request of ~200 computes in well under a
+   *  minute, so no single HTTP call can hit the platform timeout — unlike the
+   *  old single-request full dry run, which died at enterprise headcounts. */
+  const DRY_RUN_REQUEST_CHUNK = 200
+
+  type DryRunListResponse = {
+    employee_ids: string[]
+    employee_count: number
+    active_employees_in_system: number
+    total_employees_in_system: number
+    fetch_method?: DryRunData['fetch_method']
+    api_commit?: string
+    tenant_id: string
+    month: string
+  }
+
   const dryRunMutation = useMutation({
-    mutationFn: () => api.post('/payroll/runs', { month: runMonth, dry_run: true }) as Promise<DryRunData>,
+    mutationFn: async (): Promise<DryRunData> => {
+      // 1. Resolve the full employee list (fast, no compute)
+      const meta = await api.post('/payroll/runs', { month: runMonth, dry_run: true, list_only: true }) as DryRunListResponse
+      const ids = meta.employee_ids ?? []
+      setDryRunProgress({ done: 0, total: ids.length })
+
+      // 2. Compute in chunks — each request is small enough to never time out
+      const merged: DryRunData = {
+        dry_run: true,
+        scoped: false,
+        fetch_method: meta.fetch_method,
+        api_commit: meta.api_commit,
+        month: runMonth,
+        tenant_id: meta.tenant_id,
+        employee_count: ids.length,
+        active_employees_in_system: meta.active_employees_in_system,
+        total_employees_in_system: meta.total_employees_in_system,
+        total_working_days: 0,
+        ok_count: 0,
+        failed_count: 0,
+        warnings: undefined,
+        results: [],
+      }
+      for (let i = 0; i < ids.length; i += DRY_RUN_REQUEST_CHUNK) {
+        const chunk = ids.slice(i, i + DRY_RUN_REQUEST_CHUNK)
+        const batch = await api.post('/payroll/runs', {
+          month: runMonth, dry_run: true, employee_ids: chunk,
+        }) as DryRunData
+        merged.total_working_days = batch.total_working_days
+        merged.ok_count     += batch.ok_count
+        merged.failed_count += batch.failed_count
+        merged.results.push(...batch.results)
+        setDryRunProgress({ done: Math.min(i + chunk.length, ids.length), total: ids.length })
+      }
+      if (ids.length === 0) merged.total_working_days = 0
+      return merged
+    },
     onSuccess: (data: DryRunData) => {
+      setDryRunProgress(null)
       setDryRunData(data)
       setDryRunOpen(true)
     },
-    onError: (e: unknown) => toast.error(
-      (e instanceof Error ? e.message : undefined) ?? 'Dry run failed',
-    ),
+    onError: (e: unknown) => {
+      setDryRunProgress(null)
+      toast.error((e instanceof Error ? e.message : undefined) ?? 'Dry run failed')
+    },
   })
 
   // ── Selected-employees dry run ───────────────────────────────────────────────
@@ -2751,7 +2813,7 @@ export function PayrollRuns() {
                   </DialogTitle>
                 </DialogHeader>
                 <div className="space-y-4 py-2">
-                  <DryRunProgressView total={knownTotal} />
+                  <DryRunProgressView total={knownTotal} progress={dryRunProgress} />
                   <p className="text-[10px] text-muted-foreground text-center">
                     Simulating payroll for all employees — no data will be written.
                   </p>

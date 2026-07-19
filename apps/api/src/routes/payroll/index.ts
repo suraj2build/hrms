@@ -1113,21 +1113,60 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       /** Scope the dry run to a specific subset of employees (UUIDs).
        *  Omit to run for all active employees. */
       employee_ids: z.array(z.string().uuid()).min(1).max(500).optional(),
+      /** Dry run only: skip all computation and return just the active employee
+       *  id list + headcounts. The client uses this to drive batched dry runs
+       *  (one scoped request per chunk) so no single request runs long enough
+       *  to hit the platform HTTP timeout at enterprise headcounts. */
+      list_only: z.boolean().optional().default(false),
     }).refine(
       data => !data.employee_ids || data.dry_run === true,
       { message: 'employee_ids filter is only supported for dry runs (dry_run: true)', path: ['employee_ids'] },
+    ).refine(
+      data => !data.list_only || data.dry_run === true,
+      { message: 'list_only is only supported for dry runs (dry_run: true)', path: ['list_only'] },
     )
     const parsed = schema.safeParse(req.body)
     if (!parsed.success) {
       return validationError(reply, 'VALIDATION_ERROR', parsed.error.issues[0]?.message ?? 'Validation failed')
     }
-    const { month, notes, dry_run, summary_only, employee_ids } = parsed.data
+    const { month, notes, dry_run, summary_only, employee_ids, list_only } = parsed.data
     const tenantId = req.tenantId as string
 
     // ── Guard: block payroll runs for future months ───────────────────────────
     const currentYM = new Date().toISOString().slice(0, 7)
     if (month > currentYM) {
       return validationError(reply, 'FUTURE_MONTH', `Cannot run payroll for a future month (${month}). Current month is ${currentYM}.`)
+    }
+
+    // ── DRY RUN list_only: return the employee id list + counts, no compute ──
+    if (dry_run && list_only) {
+      try {
+        const [fetched, totalRes] = await Promise.all([
+          fetchActiveEmployees(fastify.supabase, tenantId),
+          fastify.supabase
+            .from('employees')
+            .select('*', { count: 'exact', head: true })
+            .eq('tenant_id', tenantId),
+        ])
+        req.log.info(
+          { event: 'payroll_dry_run_list', month, employee_count: fetched.list.length, fetch_method: fetched.method, tenant_id: tenantId, api_commit: API_COMMIT },
+          'payroll dry run: employee list resolved',
+        )
+        return reply.send({
+          dry_run:                    true,
+          list_only:                  true,
+          month,
+          tenant_id:                  tenantId,
+          fetch_method:               fetched.method,
+          api_commit:                 API_COMMIT,
+          employee_ids:               fetched.list.map(e => e.id),
+          employee_count:             fetched.list.length,
+          active_employees_in_system: fetched.list.length,
+          total_employees_in_system:  totalRes.count ?? 0,
+        })
+      } catch (listErr: any) {
+        return serverError(req, reply, listErr, ErrorCode.QUERY_FAILED, 'Failed to fetch employees')
+      }
     }
 
     const [runYear, runMon] = month.split('-').map(Number)
