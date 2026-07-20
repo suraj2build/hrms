@@ -528,6 +528,17 @@ interface FailureSummary {
   groups:          FailureSummaryGroup[]
 }
 
+/** Human-readable label for a FailedEmployee['failure_stage'] value — mirrors
+ *  the frontend's STAGE_LABEL (apps/web PayrollRuns.tsx) so exports and the UI agree. */
+const STAGE_LABEL: Record<string, string> = {
+  data_fetch:               'Data fetch',
+  compensation_validation:  'Compensation',
+  computation:              'Computation',
+  slip_validation:          'Slip validation',
+  db_insert:                'DB insert',
+  unexpected:               'Unexpected',
+}
+
 /**
  * Compute a structured failure summary from a list of FailedEmployee records.
  * Groups by (failure_stage, reason), sorts by count descending.
@@ -1105,6 +1116,13 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
        *  (one scoped request per chunk) so no single request runs long enough
        *  to hit the platform HTTP timeout at enterprise headcounts. */
       list_only: z.boolean().optional().default(false),
+      /** Live run only: proceed even when the compensation coverage pre-flight
+       *  finds employees with missing/zero/invalid compensation. Those specific
+       *  employees fail individually inside the per-employee loop (which already
+       *  validates compensation on its own) and land in failure_summary — the
+       *  rest of the tenant still runs. Without this flag, any blocker stops
+       *  the entire run before it starts. */
+      ignore_compensation_blockers: z.boolean().optional().default(false),
     }).refine(
       data => !data.employee_ids || data.dry_run === true,
       { message: 'employee_ids filter is only supported for dry runs (dry_run: true)', path: ['employee_ids'] },
@@ -1116,7 +1134,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
     if (!parsed.success) {
       return validationError(reply, 'VALIDATION_ERROR', parsed.error.issues[0]?.message ?? 'Validation failed')
     }
-    const { month, notes, dry_run, summary_only, employee_ids, list_only } = parsed.data
+    const { month, notes, dry_run, summary_only, employee_ids, list_only, ignore_compensation_blockers } = parsed.data
     const tenantId = req.tenantId as string
 
     // ── Guard: block payroll runs for future months ───────────────────────────
@@ -1169,7 +1187,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
         // passes the preflight but fails at runtime — causing N-1 employees to silently fail.
         const coverage = await buildCompensationCoverageAudit(fastify.supabase, tenantId, periodEnd)
 
-        if (!coverage.ready_for_payroll) {
+        if (!coverage.ready_for_payroll && !ignore_compensation_blockers) {
           const blockerDetails: string[] = []
           if (coverage.employees_missing_compensation > 0)
             blockerDetails.push(`${coverage.employees_missing_compensation} employee(s) missing compensation`)
@@ -1202,6 +1220,29 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
                       `Set up compensation for all active employees before running payroll.`,
             coverage,
           })
+        }
+
+        // Operator explicitly chose to proceed despite blockers — the affected
+        // employees will fail individually inside the per-employee loop (which
+        // re-validates compensation on its own) and land in failure_summary;
+        // everyone else still runs. Audit-logged since it's a deliberate override.
+        if (!coverage.ready_for_payroll && ignore_compensation_blockers) {
+          req.log.warn(
+            {
+              event:     'payroll_preflight_blockers_ignored',
+              month,
+              tenant_id: tenantId,
+              user_id:   req.userId,
+              coverage: {
+                total:   coverage.total_active_employees,
+                missing: coverage.employees_missing_compensation,
+                zero_ctc: coverage.employees_zero_ctc,
+                no_components: coverage.employees_with_no_components,
+                invalid: coverage.employees_with_invalid_components,
+              },
+            },
+            'payroll run: operator chose to ignore compensation coverage blockers and proceed',
+          )
         }
 
         // Future-dated warning (non-blocking) — surface to caller
@@ -2907,6 +2948,67 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
     const csv = [header, ...rows].join('\n')
     reply.header('Content-Type', 'text/csv')
     reply.header('Content-Disposition', `attachment; filename="payroll-${run.month}.csv"`)
+    return reply.send(csv)
+  })
+
+  // ── GET /payroll/runs/:id/export-errors ──────────────────────────────────────
+  // CSV of every employee who failed in this run, with the specific reason —
+  // built from payroll_runs.failure_summary (populated from the complete
+  // in-memory failedEmployees list during the run, so it's always complete —
+  // unlike payroll_run_events, which can silently drop rows that fail its
+  // event_type CHECK constraint).
+  fastify.get('/payroll/runs/:id/export-errors', hrAdminAuth, async (req: any, reply) => {
+    const { id } = req.params as { id: string }
+
+    const { data: run } = await fastify.supabase
+      .from('payroll_runs')
+      .select('month, failure_summary')
+      .eq('id', id)
+      .eq('tenant_id', req.tenantId)
+      .single()
+    if (!run) return notFound(reply, 'NOT_FOUND', 'Run not found')
+
+    const summary = run.failure_summary as FailureSummary | null
+    if (!summary || summary.groups.length === 0) {
+      return reply.code(422).send({ error: 'NO_FAILURES', message: 'This run has no recorded failures to export' })
+    }
+
+    // Flatten groups → one row per (employee_code, stage, reason)
+    const flatRows: Array<{ employee_code: string; stage: string; reason: string }> = []
+    for (const g of summary.groups) {
+      for (const code of g.employee_codes) {
+        flatRows.push({ employee_code: code, stage: g.failure_stage, reason: g.reason })
+      }
+    }
+
+    // Enrich with employee names — chunked .in() (employee_code values, not UUIDs,
+    // but chunked anyway since a large failed-run could still be thousands of codes).
+    const nameByCode = new Map<string, string>()
+    const codes = [...new Set(flatRows.map(r => r.employee_code))]
+    const CODE_CHUNK = 500
+    for (let i = 0; i < codes.length; i += CODE_CHUNK) {
+      const { data } = await fastify.supabase
+        .from('employees')
+        .select('employee_code, first_name, last_name')
+        .eq('tenant_id', req.tenantId)
+        .in('employee_code', codes.slice(i, i + CODE_CHUNK))
+      for (const e of (data ?? []) as any[]) {
+        nameByCode.set(e.employee_code, `${e.first_name} ${e.last_name}`.trim())
+      }
+    }
+
+    const csvField = (v: string) => `"${v.replace(/"/g, '""')}"`
+    const header = ['Employee Code', 'Employee Name', 'Failure Stage', 'Reason'].join(',')
+    const rows = flatRows.map(r => [
+      csvField(r.employee_code),
+      csvField(nameByCode.get(r.employee_code) ?? ''),
+      csvField(STAGE_LABEL[r.stage] ?? r.stage),
+      csvField(r.reason),
+    ].join(','))
+
+    const csv = [header, ...rows].join('\n')
+    reply.header('Content-Type', 'text/csv')
+    reply.header('Content-Disposition', `attachment; filename="payroll-${run.month}-errors.csv"`)
     return reply.send(csv)
   })
 

@@ -16,7 +16,7 @@ import {
   DollarSign, Users, TrendingDown, CheckCircle2,
   AlertCircle, RefreshCw, FileText, X,
   AlertTriangle, ChevronDown, ChevronUp, TrendingUp, BarChart2, Search,
-  Scale, XCircle, ShieldCheck, ExternalLink,
+  Scale, XCircle, ShieldCheck, ExternalLink, SkipForward,
 } from 'lucide-react'
 
 import { PageContainer } from '@/components/layout/PageContainer'
@@ -1012,13 +1012,39 @@ function truncateReason(reason: string, maxLen = 90): string {
 function FailureSummaryPanel({
   summary,
   totalEmployees,
+  runId,
+  month,
 }: {
   summary:        FailureSummary
   totalEmployees: number
+  runId:          string
+  month:          string
 }) {
-  const [expanded, setExpanded] = useState(false)
+  const [expanded, setExpanded]     = useState(false)
+  const [exporting, setExporting]   = useState(false)
 
   const hasMultipleGroups = summary.groups.length > 1
+
+  const handleExportErrors = async (e: React.MouseEvent) => {
+    e.stopPropagation()
+    setExporting(true)
+    try {
+      const response = await api.getRaw(`/payroll/runs/${runId}/export-errors`)
+      const blob = await response.blob()
+      const url  = URL.createObjectURL(blob)
+      const a    = document.createElement('a')
+      a.href     = url
+      a.download = `payroll-${month}-errors.csv`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+    } catch {
+      toast.error('Export failed — please try again')
+    } finally {
+      setExporting(false)
+    }
+  }
 
   return (
     <div className="rounded-md border border-destructive/30 bg-destructive/5 overflow-hidden text-xs">
@@ -1091,6 +1117,21 @@ function FailureSummaryPanel({
           ))}
         </div>
       )}
+
+      <div className="border-t border-destructive/20 px-2.5 py-1.5 flex justify-end">
+        <Button
+          size="sm" variant="ghost"
+          className="h-6 text-[10px] gap-1 text-destructive hover:bg-destructive/10 hover:text-destructive"
+          disabled={exporting}
+          onClick={handleExportErrors}
+        >
+          {exporting
+            ? <Loader2 className="h-3 w-3 animate-spin" />
+            : <Download className="h-3 w-3" />
+          }
+          Export Failed Employees (CSV)
+        </Button>
+      </div>
     </div>
   )
 }
@@ -1937,6 +1978,8 @@ function RunCard({
         <FailureSummaryPanel
           summary={run.failure_summary}
           totalEmployees={run.failure_summary.total_employees}
+          runId={run.id}
+          month={run.month}
         />
       )}
 
@@ -2506,8 +2549,15 @@ export function PayrollRuns() {
   const latestFinalized = runs.find(r => r.status === 'finalized')
 
   // ── Trigger run ─────────────────────────────────────────────────────────────
+  // Pass ignoreBlockers=true to proceed despite compensation coverage issues —
+  // those specific employees fail individually inside the run and land in the
+  // failure summary; everyone else still runs.
   const triggerMutation = useMutation({
-    mutationFn: () => api.post('/payroll/runs', { month: runMonth, notes: notes || undefined }),
+    mutationFn: (ignoreBlockers?: boolean) => api.post('/payroll/runs', {
+      month: runMonth,
+      notes: notes || undefined,
+      ...(ignoreBlockers ? { ignore_compensation_blockers: true } : {}),
+    }),
     onSuccess: () => {
       setNotes('')
       setRunError('')
@@ -2750,6 +2800,23 @@ export function PayrollRuns() {
                       </Link>
                     </div>
                   ))}
+                </div>
+                <div className="flex items-center justify-between gap-2 px-3 py-2 border-t border-destructive/20 bg-destructive/[0.03]">
+                  <p className="text-[10px] text-muted-foreground">
+                    These {coverageIssues.length} will fail and be skipped — everyone else still runs.
+                  </p>
+                  <Button
+                    size="sm" variant="outline"
+                    className="h-6 text-[10px] gap-1 flex-shrink-0 border-warning/40 text-warning hover:bg-warning/10"
+                    disabled={triggerMutation.isPending}
+                    onClick={() => triggerMutation.mutate(true)}
+                  >
+                    {triggerMutation.isPending
+                      ? <Loader2 className="h-3 w-3 animate-spin" />
+                      : <SkipForward className="h-3 w-3" />
+                    }
+                    Ignore &amp; Run Anyway
+                  </Button>
                 </div>
               </div>
             )}
