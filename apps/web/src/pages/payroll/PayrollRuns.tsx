@@ -16,7 +16,7 @@ import {
   DollarSign, Users, TrendingDown, CheckCircle2,
   AlertCircle, RefreshCw, FileText, X,
   AlertTriangle, ChevronDown, ChevronUp, TrendingUp, BarChart2, Search,
-  Scale, XCircle, ShieldCheck,
+  Scale, XCircle, ShieldCheck, ExternalLink,
 } from 'lucide-react'
 
 import { PageContainer } from '@/components/layout/PageContainer'
@@ -191,6 +191,26 @@ interface Blocker {
   employee_id:   string
   employee_name: string
   employee_code: string
+}
+
+// ── Compensation coverage blocker (pre-run) ────────────────────────────────────
+
+interface CoverageIssue {
+  employee_id:   string
+  employee_code: string
+  employee_name: string
+  issue:         'missing_compensation' | 'future_dated' | 'zero_ctc' | 'no_components' | 'invalid_components'
+  detail:        string
+  /** Route to the employee's compensation tab — where the operator fixes this. */
+  remediation:   string
+}
+
+const COVERAGE_ISSUE_LABEL: Record<CoverageIssue['issue'], string> = {
+  missing_compensation: 'No compensation',
+  future_dated:         'Future-dated',
+  zero_ctc:              'Zero CTC',
+  no_components:        'No components',
+  invalid_components:   'Invalid components',
 }
 
 interface BlockerReport {
@@ -2319,6 +2339,7 @@ export function PayrollRuns() {
   const [activeVarianceRun, setActiveVarianceRun]     = useState<PayrollRun | null>(null)
   const [activeFinalizeRun, setActiveFinalizeRun]     = useState<PayrollRun | null>(null)
   const [runError, setRunError]                       = useState('')
+  const [coverageIssues, setCoverageIssues]           = useState<CoverageIssue[]>([])
 
   // Phase 3: Freeze / Reopen state
   const [activeFreezeRun, setActiveFreezeRun]         = useState<PayrollRun | null>(null)
@@ -2490,10 +2511,20 @@ export function PayrollRuns() {
     onSuccess: () => {
       setNotes('')
       setRunError('')
+      setCoverageIssues([])
       qc.invalidateQueries({ queryKey: ['payroll-runs'] })
       toast.success('Payroll run triggered', { description: fmtMonth(runMonth) })
     },
-    onError: (e: unknown) => setRunError(e instanceof Error ? e.message : 'Failed to trigger payroll run'),
+    onError: (e: unknown) => {
+      if (e instanceof ApiError && e.error === 'COMPENSATION_COVERAGE_INSUFFICIENT') {
+        const issues = ((e.data?.coverage as { issues?: CoverageIssue[] } | undefined)?.issues) ?? []
+        setCoverageIssues(issues)
+        setRunError(issues.length > 0 ? '' : e.message)
+        return
+      }
+      setCoverageIssues([])
+      setRunError(e instanceof Error ? e.message : 'Failed to trigger payroll run')
+    },
   })
 
   // ── Finalize run ─────────────────────────────────────────────────────────────
@@ -2650,7 +2681,7 @@ export function PayrollRuns() {
               <label className="text-xs font-medium text-muted-foreground block mb-1">Month</label>
               <div className="flex items-center gap-1.5">
                 <Button size="icon" variant="ghost" className="h-8 w-8"
-                  onClick={() => setRunMonth(prevMonthStr(runMonth))}>
+                  onClick={() => { setRunMonth(prevMonthStr(runMonth)); setRunError(''); setCoverageIssues([]) }}>
                   <ChevronLeft className="h-4 w-4" />
                 </Button>
                 <div className="flex-1 text-center text-sm font-medium border border-border rounded-md py-1.5 px-3 bg-muted/30">
@@ -2658,7 +2689,7 @@ export function PayrollRuns() {
                 </div>
                 <Button size="icon" variant="ghost" className="h-8 w-8"
                   disabled={runMonth >= todayYM}
-                  onClick={() => setRunMonth(nextMonthStr(runMonth))}>
+                  onClick={() => { setRunMonth(nextMonthStr(runMonth)); setRunError(''); setCoverageIssues([]) }}>
                   <ChevronRight className="h-4 w-4" />
                 </Button>
               </div>
@@ -2686,7 +2717,44 @@ export function PayrollRuns() {
               <ReadinessCheck month={runMonth} />
             </div>
 
-            {runError && (
+            {coverageIssues.length > 0 && (
+              <div className="rounded-md border border-destructive/30 bg-destructive/5 overflow-hidden">
+                <div className="flex items-start gap-2 px-3 py-2 text-xs text-destructive border-b border-destructive/20">
+                  <AlertCircle className="h-3.5 w-3.5 flex-shrink-0 mt-0.5" />
+                  <span>
+                    Payroll blocked — {coverageIssues.length} employee{coverageIssues.length === 1 ? '' : 's'} need{coverageIssues.length === 1 ? 's' : ''} compensation fixed before this run.
+                  </span>
+                </div>
+                <div className="max-h-48 overflow-y-auto divide-y divide-border/40">
+                  {coverageIssues.map(issue => (
+                    <div key={`${issue.employee_id}-${issue.issue}`} className="flex items-center justify-between gap-2 px-3 py-1.5 text-xs">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-medium truncate">{issue.employee_name}</span>
+                          <span className="text-muted-foreground font-mono text-[10px] flex-shrink-0">#{issue.employee_code}</span>
+                        </div>
+                        <div className="flex items-center gap-1.5 mt-0.5">
+                          <Badge variant="destructive" className="rounded-full text-[9px] px-1.5 py-0">
+                            {COVERAGE_ISSUE_LABEL[issue.issue]}
+                          </Badge>
+                          <span className="text-[10px] text-muted-foreground truncate">{issue.detail}</span>
+                        </div>
+                      </div>
+                      <Link
+                        to={issue.remediation}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex-shrink-0 inline-flex items-center gap-1 text-[10px] font-medium text-primary hover:underline"
+                      >
+                        Fix <ExternalLink className="h-3 w-3" />
+                      </Link>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {runError && coverageIssues.length === 0 && (
               <div className="flex items-start gap-2 p-2 rounded-md bg-destructive/10 border border-destructive/20 text-xs text-destructive">
                 <AlertCircle className="h-3.5 w-3.5 flex-shrink-0 mt-0.5" />
                 {runError}

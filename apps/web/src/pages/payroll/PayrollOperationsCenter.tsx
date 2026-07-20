@@ -644,7 +644,7 @@ export function PayrollOperationsCenter() {
                     )}
                     <div className="flex justify-end pt-1">
                       <Button size="sm" variant="outline" className="h-6 text-[10px] gap-1"
-                        onClick={() => navigate('/admin/workforce/employees')}>
+                        onClick={() => navigate('/admin/employees')}>
                         <ArrowRight className="h-3 w-3" />Fix Compensation Issues
                       </Button>
                     </div>
@@ -758,7 +758,7 @@ export function PayrollOperationsCenter() {
                   (coverage?.employees_with_no_components   ?? 0) +
                   (coverage?.employees_with_invalid_components ?? 0)
                 }
-                href="/admin/workforce/employees"
+                href="/admin/employees"
               />
               <ReadinessCheck
                 label="No payroll run blockers"

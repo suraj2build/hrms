@@ -251,7 +251,7 @@ export async function buildCompensationCoverageAudit(
             `compensation may exist but with a later effective_from date. ` +
             `Update effective_from to ${periodEnd} or earlier.`
           : 'No active compensation record — employee cannot be included in payroll',
-        remediation:   `/admin/workforce/employees/${emp.id}?section=compensation&sub=compensation`,
+        remediation:   `/admin/employees/${emp.id}?tab=compensation`,
       })
       continue
     }
@@ -273,7 +273,7 @@ export async function buildCompensationCoverageAudit(
         issue:         'future_dated',
         detail:        `Compensation is future-dated (effective ${comp.effective_from}) — ` +
                        'payroll will use the previously active record if one exists',
-        remediation:   `/admin/workforce/employees/${emp.id}?section=compensation&sub=compensation`,
+        remediation:   `/admin/employees/${emp.id}?tab=compensation`,
       })
       // Future-dated is a warning — do not skip further checks on this record
     }
@@ -288,7 +288,7 @@ export async function buildCompensationCoverageAudit(
         employee_name: name,
         issue:         'zero_ctc',
         detail:        `Annual CTC is ${ctcA} — zero, negative, or invalid`,
-        remediation:   `/admin/workforce/employees/${emp.id}?section=compensation&sub=compensation`,
+        remediation:   `/admin/employees/${emp.id}?tab=compensation`,
       })
     }
 
@@ -305,7 +305,7 @@ export async function buildCompensationCoverageAudit(
         employee_name: name,
         issue:         'no_components',
         detail:        'No salary components configured — gross pay will be ₹0',
-        remediation:   `/admin/workforce/employees/${emp.id}?section=compensation&sub=compensation`,
+        remediation:   `/admin/employees/${emp.id}?tab=compensation`,
       })
     } else if (hasNaN) {
       // NaN component amounts are a hard blocker (payroll NaN propagation)
@@ -316,7 +316,7 @@ export async function buildCompensationCoverageAudit(
         employee_name: name,
         issue:         'invalid_components',
         detail:        'One or more components have NaN or Infinity computed amounts — fix the component formula',
-        remediation:   `/admin/workforce/employees/${emp.id}?section=compensation&sub=compensation`,
+        remediation:   `/admin/employees/${emp.id}?tab=compensation`,
       })
     } else if (earningTotal === 0 && ctcA > 0) {
       // Earning components all zero despite non-zero CTC is suspicious (likely misconfiguration)
@@ -329,7 +329,7 @@ export async function buildCompensationCoverageAudit(
         issue:         'invalid_components',
         detail:        `All earning components compute to ₹0/month despite CTC ₹${ctcA.toLocaleString('en-IN')} — ` +
                        'check component formula values (pct_of_ctc/pct_of_basic must be 0–100)',
-        remediation:   `/admin/workforce/employees/${emp.id}?section=compensation&sub=compensation`,
+        remediation:   `/admin/employees/${emp.id}?tab=compensation`,
       })
     }
   }

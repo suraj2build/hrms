@@ -236,7 +236,7 @@ const DEFAULT_RULES: Record<string, Omit<ValidationRuleInput, 'enabled'>> = {
     severity: 'critical',
     blocking: true,
     stage: 'data_fetch',
-    remediation_route: '/admin/workforce/employees',
+    remediation_route: '/admin/employees',
   },
   ATTENDANCE_EMPTY: {
     code: 'ATTENDANCE_EMPTY',
@@ -543,7 +543,7 @@ export function getBlockerResolutionActions(
       return [
         {
           label:       'Set Up Compensation',
-          href:        '/admin/workforce/employees',
+          href:        '/admin/employees',
           auto:        false,
           description: 'Navigate to the employee profile and use "Set Up Compensation" to assign CTC and components.',
         },
@@ -553,7 +553,7 @@ export function getBlockerResolutionActions(
       return [
         {
           label:       'Edit Compensation',
-          href:        '/admin/workforce/employees',
+          href:        '/admin/employees',
           auto:        false,
           description: 'Open the employee profile, click "Edit Compensation", and correct the CTC or component values.',
         },
@@ -569,7 +569,7 @@ export function getBlockerResolutionActions(
       return [
         {
           label:       'Add Bank Details',
-          href:        '/admin/workforce/employees',
+          href:        '/admin/employees',
           auto:        false,
           description: "Navigate to the employee's Bank & Statutory tab and add a verified bank account.",
         },
@@ -601,7 +601,7 @@ export function getBlockerResolutionActions(
         },
         {
           label:       'Edit Compensation',
-          href:        '/admin/workforce/employees',
+          href:        '/admin/employees',
           auto:        false,
           description: 'Open the employee profile and remove or reduce deduction components.',
         },
