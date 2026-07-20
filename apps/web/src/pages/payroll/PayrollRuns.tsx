@@ -2383,6 +2383,7 @@ export function PayrollRuns() {
   const [activeFinalizeRun, setActiveFinalizeRun]     = useState<PayrollRun | null>(null)
   const [runError, setRunError]                       = useState('')
   const [coverageIssues, setCoverageIssues]           = useState<CoverageIssue[]>([])
+  const [liveRunId, setLiveRunId]                     = useState<string | null>(null)
 
   // Phase 3: Freeze / Reopen state
   const [activeFreezeRun, setActiveFreezeRun]         = useState<PayrollRun | null>(null)
@@ -2557,11 +2558,12 @@ export function PayrollRuns() {
       month: runMonth,
       notes: notes || undefined,
       ...(ignoreBlockers ? { ignore_compensation_blockers: true } : {}),
-    }),
-    onSuccess: () => {
+    }) as Promise<{ run_id: string; status: string }>,
+    onSuccess: (data) => {
       setNotes('')
       setRunError('')
       setCoverageIssues([])
+      setLiveRunId(data?.run_id ?? null)
       qc.invalidateQueries({ queryKey: ['payroll-runs'] })
       toast.success('Payroll run triggered', { description: fmtMonth(runMonth) })
     },
@@ -2953,6 +2955,76 @@ export function PayrollRuns() {
                     Simulating payroll for all employees — no data will be written.
                   </p>
                 </div>
+              </DialogContent>
+            </Dialog>
+              )
+            })()}
+
+            {/* ── Live Run Progress Dialog — mirrors the Dry Run popup ─────────── */}
+            {(() => {
+              const liveRun = runs.find(r => r.id === liveRunId) ?? null
+              const isTerminal = liveRun && liveRun.status !== 'queued' && liveRun.status !== 'processing'
+              return (
+            <Dialog open={!!liveRunId} onOpenChange={(open) => { if (!open) setLiveRunId(null) }}>
+              <DialogContent className="max-w-sm">
+                <DialogHeader>
+                  <DialogTitle className="flex items-center gap-2 text-sm">
+                    <Play className="h-4 w-4 text-primary" />
+                    {isTerminal ? 'Payroll Run Complete' : 'Running Payroll'} — {fmtMonth(runMonth)}
+                  </DialogTitle>
+                </DialogHeader>
+
+                {!isTerminal && (
+                  <div className="space-y-4 py-2">
+                    {liveRun && liveRun.status === 'processing'
+                      ? <ProcessingProgressBar run={liveRun} />
+                      : (
+                        <div className="space-y-2">
+                          <div className="h-2 rounded-full bg-primary/30 animate-pulse" />
+                          <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+                            <Loader2 className="h-3 w-3 animate-spin text-primary flex-shrink-0" />
+                            <span>Queued — waiting for worker to start…</span>
+                          </div>
+                        </div>
+                      )
+                    }
+                    <p className="text-[10px] text-muted-foreground text-center">
+                      You can close this and keep working — the run continues in the background.
+                    </p>
+                  </div>
+                )}
+
+                {isTerminal && liveRun && (() => {
+                  const total   = liveRun.total_employee_count ?? liveRun.employee_count ?? 0
+                  const failed  = liveRun.failure_summary?.total_failed ?? 0
+                  const success = total - failed
+                  return (
+                    <div className="space-y-3 py-1">
+                      <div className="grid grid-cols-3 gap-1.5">
+                        <div className="p-2 rounded-md bg-success/10 border border-success/20 text-center">
+                          <p className="text-[9px] text-muted-foreground mb-0.5">Succeeded</p>
+                          <p className="text-sm font-bold text-success tabular-nums">{success.toLocaleString()}</p>
+                        </div>
+                        <div className="p-2 rounded-md bg-destructive/10 border border-destructive/20 text-center">
+                          <p className="text-[9px] text-muted-foreground mb-0.5">Failed</p>
+                          <p className="text-sm font-bold text-destructive tabular-nums">{failed.toLocaleString()}</p>
+                        </div>
+                        <div className="p-2 rounded-md bg-muted/40 border border-border text-center">
+                          <p className="text-[9px] text-muted-foreground mb-0.5">Total</p>
+                          <p className="text-sm font-bold text-foreground tabular-nums">{total.toLocaleString()}</p>
+                        </div>
+                      </div>
+                      {failed > 0 && (
+                        <p className="text-[10px] text-muted-foreground text-center">
+                          See the failure breakdown and export below in Run History.
+                        </p>
+                      )}
+                      <Button size="sm" className="w-full h-8 text-xs" onClick={() => setLiveRunId(null)}>
+                        Close
+                      </Button>
+                    </div>
+                  )
+                })()}
               </DialogContent>
             </Dialog>
               )
