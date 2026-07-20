@@ -880,7 +880,11 @@ export async function processAttendanceForDate(
 
   // ── 8. Mark matched raw logs as processed = true ───────────────────────────
   // Skipped-code logs stay processed = false — picked up on next run.
-  const CHUNK = 500
+  // CHUNK=100 keeps the .in() request URL under ~4 KB. 500 UUIDs builds a
+  // ~18.5 KB request line, which exceeds common server/proxy request-line
+  // limits (8-16 KB) — confirmed by the compensation-coverage audit failing
+  // the same way at 400 UUIDs (~14.8 KB) once it ran at real tenant scale.
+  const CHUNK = 100
   for (let i = 0; i < matchedRawIds.length; i += CHUNK) {
     const chunk = matchedRawIds.slice(i, i + CHUNK)
     const { error: markError } = await supabase
