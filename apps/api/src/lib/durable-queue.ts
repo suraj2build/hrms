@@ -284,62 +284,44 @@ export class DurableJobQueue {
 
     const jobId = randomUUID()
 
-    const row = {
-      id:              jobId,
-      job_type:        jobType,
-      payload,
-      status:          'pending',
-      attempt:         0,
-      max_retries:     opts.maxRetries   ?? 3,
-      retry_delay_ms:  opts.retryDelayMs ?? 1_000,
-      max_delay_ms:    opts.maxDelayMs   ?? 30_000,
-      timeout_ms:      opts.timeoutMs    ?? 120_000,
-      scheduled_at:    scheduledAt,
-      idempotency_key: opts.idempotencyKey ?? null,
-      tenant_id:       opts.tenantId       ?? null,
-      created_by:      opts.createdBy      ?? null,
-    }
-
-    // ON CONFLICT on idempotency_key (partial index: pending/running only) →
-    // DO NOTHING → return existing active job's id.
-    const { data, error } = await this.supabase
-      .from('background_jobs')
-      .upsert(row, {
-        onConflict:       'idempotency_key',
-        ignoreDuplicates: true,
-      })
-      .select('id')
-      .maybeSingle()
+    // background_jobs.idempotency_key is enforced by a PARTIAL unique index
+    // (pending/running rows only — migration 377, so a key can be re-enqueued
+    // once its previous job reaches a terminal state). Postgres requires an
+    // ON CONFLICT target to exactly match the arbiter index's WHERE predicate,
+    // which the PostgREST .upsert() shorthand cannot express — a bare
+    // `onConflict: 'idempotency_key'` throws "no unique or exclusion
+    // constraint matching the ON CONFLICT specification" against a partial
+    // index. Route the insert through a SECURITY DEFINER function instead,
+    // which issues the matching ON CONFLICT ... WHERE ... DO NOTHING clause
+    // directly in SQL and returns the existing active job's id on conflict.
+    const { data: returnedId, error } = await this.supabase.rpc('enqueue_background_job', {
+      p_id:              jobId,
+      p_job_type:        jobType,
+      p_payload:         payload,
+      p_max_retries:     opts.maxRetries   ?? 3,
+      p_retry_delay_ms:  opts.retryDelayMs ?? 1_000,
+      p_max_delay_ms:    opts.maxDelayMs   ?? 30_000,
+      p_timeout_ms:      opts.timeoutMs    ?? 120_000,
+      p_scheduled_at:    scheduledAt,
+      p_idempotency_key: opts.idempotencyKey ?? null,
+      p_tenant_id:       opts.tenantId       ?? null,
+      p_created_by:      opts.createdBy      ?? null,
+    })
 
     if (error) throw new Error(`[durable-queue] enqueue failed: ${error.message}`)
 
-    if (data?.id) {
-      this.log?.debug({ jobId: data.id, jobType, scheduledAt }, '[durable-queue] job enqueued')
-      return data.id
+    if (returnedId) {
+      const isNewJob = returnedId === jobId
+      this.log?.debug(
+        { jobId: returnedId, jobType, scheduledAt, idempotencyHit: !isNewJob },
+        isNewJob ? '[durable-queue] job enqueued' : '[durable-queue] idempotency hit — returning existing job',
+      )
+      return returnedId
     }
 
-    // data is null: DO NOTHING fired — a job with this idempotency key already exists
-    // (pending, running, completed, or failed). Look it up regardless of status so the
-    // caller always gets a real persisted ID, not the phantom pre-insert UUID.
-    if (opts.idempotencyKey) {
-      const { data: existing, error: lookupErr } = await this.supabase
-        .from('background_jobs')
-        .select('id, status')
-        .eq('idempotency_key', opts.idempotencyKey)
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle()
-      if (lookupErr) throw new Error(`[durable-queue] idempotency lookup failed: ${lookupErr.message}`)
-      if (existing?.id) {
-        this.log?.debug(
-          { jobId: existing.id, jobStatus: existing.status, jobType, idempotencyKey: opts.idempotencyKey },
-          '[durable-queue] idempotency hit — returning existing job',
-        )
-        return existing.id
-      }
-    }
-
-    // Fallback: no idempotency key or lookup returned nothing (extremely rare race).
+    // Fallback: no idempotency key was supplied and somehow nothing came back
+    // (should not happen — a fresh insert with no conflict target always
+    // returns its own id). Use the locally generated UUID defensively.
     this.log?.warn({ jobId, jobType }, '[durable-queue] enqueue returned null with no matching job — using local UUID')
     return jobId
   }
