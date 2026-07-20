@@ -818,24 +818,40 @@ export async function replayPayrollRun(
 
   const snapshotId = (manifest as any).id as string
 
-  // 2. Load employee snapshots
-  const { data: empSnaps, error: eErr } = await supabase
-    .from('payroll_employee_snapshots')
-    .select('*')
-    .eq('snapshot_id', snapshotId)
-    .eq('tenant_id', tenantId)
+  // 2. Load employee snapshots (paginated — one row per employee, can exceed max-rows)
+  let empSnaps: any[]
+  try {
+    empSnaps = await fetchAllRows((from, to) =>
+      supabase
+        .from('payroll_employee_snapshots')
+        .select('*')
+        .eq('snapshot_id', snapshotId)
+        .eq('tenant_id', tenantId)
+        .order('employee_id')
+        .range(from, to),
+    )
+  } catch (eErr: any) {
+    return { error: `Employee snapshot query failed: ${eErr.message}` }
+  }
+  if (empSnaps.length === 0) return { error: 'No employee snapshots found' }
 
-  if (eErr) return { error: `Employee snapshot query failed: ${eErr.message}` }
-  if (!empSnaps || empSnaps.length === 0) return { error: 'No employee snapshots found' }
+  // 3. Load original slips for comparison (paginated — one row per employee)
+  let originalSlips: any[]
+  try {
+    originalSlips = await fetchAllRows((from, to) =>
+      supabase
+        .from('payroll_slips')
+        .select('employee_id, gross_pay, total_deductions, net_pay, payable_days, lop_days')
+        .eq('run_id', runId)
+        .eq('tenant_id', tenantId)
+        .order('employee_id')
+        .range(from, to),
+    )
+  } catch {
+    originalSlips = []
+  }
 
-  // 3. Load original slips for comparison
-  const { data: originalSlips } = await supabase
-    .from('payroll_slips')
-    .select('employee_id, gross_pay, total_deductions, net_pay, payable_days, lop_days')
-    .eq('run_id', runId)
-    .eq('tenant_id', tenantId)
-
-  const slipMap = new Map<string, any>((originalSlips ?? []).map((s: any) => [s.employee_id, s]))
+  const slipMap = new Map<string, any>(originalSlips.map((s: any) => [s.employee_id, s]))
 
   // 4. Replay computation for every employee using ONLY snapshot data
   const diffs: ReplayVarianceEntry[] = []

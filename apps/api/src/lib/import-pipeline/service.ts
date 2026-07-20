@@ -359,6 +359,8 @@ export async function streamAllJobErrors(
   const all: ImportJobError[] = []
   let offset = 0
 
+  // Advance by rows actually received; stop only on an empty page. A short page
+  // is NOT end-of-data when the server's max-rows is below PAGE.
   while (true) {
     const { data, error } = await supabase
       .from('import_job_errors')
@@ -372,8 +374,7 @@ export async function streamAllJobErrors(
     if (!data || data.length === 0) break
 
     all.push(...(data as ImportJobError[]))
-    if (data.length < PAGE) break
-    offset += PAGE
+    offset += data.length
   }
 
   return all

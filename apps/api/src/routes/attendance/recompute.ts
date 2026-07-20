@@ -17,6 +17,7 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { recomputeRange }              from '../../lib/attendance-engine.js'
+import { fetchAllRows }                from '../../lib/supabase-paginate.js'
 import { assertRangeNotFinalized, PeriodLockedError } from '../../lib/period-lock.js'
 
 const dateRe = /^\d{4}-\d{2}-\d{2}$/
@@ -140,25 +141,25 @@ export default async function attendanceRecomputeRoute(fastify: FastifyInstance)
     // far exceeding Railway's HTTP timeout.  We return 202 immediately and let
     // setImmediate carry the work so the HTTP response is never held.
     //
-    // PostgREST caps results at max-rows (default 1000) — paginate to get ALL
-    // active employees regardless of tenant size.
-    const EMP_BATCH = 1000
-    const empIds: string[] = []
-    let empFrom = 0
-    while (true) {
-      const { data: page, error: empErr } = await fastify.supabase
-        .from('employees')
-        .select('id')
-        .eq('tenant_id', req.tenantId)
-        .eq('status', 'active')
-        .range(empFrom, empFrom + EMP_BATCH - 1)
-      if (empErr) {
-        req.log.error({ err: empErr }, 'failed to fetch employees for recompute')
-        return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch employees' })
-      }
-      empIds.push(...((page ?? []) as Array<{ id: string }>).map((e) => e.id))
-      if (!page || page.length < EMP_BATCH) break
-      empFrom += EMP_BATCH
+    // fetchAllRows is robust at any server-side max-rows value: it advances by
+    // the rows actually received and stops only on an empty page. (The previous
+    // inline loop stopped on a short page — silently truncating the employee
+    // list whenever max-rows < 1000, so recompute skipped most employees.)
+    let empIds: string[]
+    try {
+      const empRows = await fetchAllRows<{ id: string }>((from, to) =>
+        fastify.supabase
+          .from('employees')
+          .select('id')
+          .eq('tenant_id', req.tenantId)
+          .eq('status', 'active')
+          .order('id')
+          .range(from, to) as any,
+      )
+      empIds = empRows.map((e) => e.id)
+    } catch (empErr: any) {
+      req.log.error({ err: empErr }, 'failed to fetch employees for recompute')
+      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch employees' })
     }
 
     if (empIds.length === 0) {
