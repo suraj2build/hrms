@@ -140,8 +140,11 @@ export async function buildCompensationCoverageAudit(
   }
 
   // ── 2. Fetch active compensations for all employees (batched to avoid URL limit) ──
+  // CHUNK=100 keeps each .in() URL under ~4 KB. At 400 UUIDs the request line is
+  // ~15 KB, which exceeds common server/proxy header limits (8–16 KB) and only
+  // shows up at enterprise headcounts — smaller tenants never build a URL that big.
   const empIds = empList.map(e => e.id)
-  const CHUNK = 400
+  const CHUNK = 100
 
   const compList: RawCompensation[] = []
   for (let i = 0; i < empIds.length; i += CHUNK) {
