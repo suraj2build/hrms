@@ -1,6 +1,6 @@
 {
-  "generated": "2026-07-20T15:23:42.897Z",
-  "count": 268,
+  "generated": "2026-07-20T15:29:54.246Z",
+  "count": 267,
   "keys": [
     "apps/api/src/lib/ai/assistant-tools.ts:1080:attendance_daily",
     "apps/api/src/lib/ai/assistant-tools.ts:1114:employee_bank_statutory",
@@ -236,8 +236,7 @@
     "apps/api/src/routes/payroll/statutory/ptax.ts:472:payroll_slips",
     "apps/api/src/routes/payroll/statutory/ptax.ts:488:employee_compensations",
     "apps/api/src/routes/payroll/statutory/tax-governance.ts:195:employees",
-    "apps/api/src/routes/payroll/statutory/tds-bulk.ts:335:employees",
-    "apps/api/src/routes/payroll/statutory/tds-bulk.ts:375:payroll_slips",
+    "apps/api/src/routes/payroll/statutory/tds-bulk.ts:436:payroll_slips",
     "apps/api/src/routes/payroll/statutory/tds-plans.ts:203:payroll_slips",
     "apps/api/src/routes/payroll/statutory/tds-plans.ts:576:payroll_slips",
     "apps/api/src/routes/payroll/statutory/tds-plans.ts:687:payroll_slips",

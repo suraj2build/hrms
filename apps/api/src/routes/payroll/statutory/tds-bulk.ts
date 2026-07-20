@@ -21,6 +21,32 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { HR_ADMIN_ROLES } from '../../../lib/rbac.js'
+import { fetchAllRows } from '../../../lib/supabase-paginate.js'
+
+/** Rows per .in() call — keeps the request URL well under server/proxy
+ *  request-line limits. The request-body schemas here allow up to 500
+ *  UUIDs, which builds a ~18.5 KB request URL if sent in a single .in() —
+ *  confirmed to fail in production above ~400 UUIDs (~14.8 KB). */
+const BULK_ID_CHUNK = 100
+
+/**
+ * Runs an .in('id', chunk)-scoped update across all of `ids`, chunked to stay
+ * under request-line limits, and returns the ids that were actually updated
+ * (mirrors the shape each handler below already expects from a single call).
+ */
+async function chunkedUpdateByIds(
+  supabase: any,
+  ids: string[],
+  applyUpdate: (chunk: string[]) => PromiseLike<{ data: Array<{ id: string }> | null; error: unknown }>,
+): Promise<{ updatedIds: string[]; error: unknown }> {
+  const updatedIds: string[] = []
+  for (let i = 0; i < ids.length; i += BULK_ID_CHUNK) {
+    const { data, error } = await applyUpdate(ids.slice(i, i + BULK_ID_CHUNK))
+    if (error) return { updatedIds, error }
+    if (data) updatedIds.push(...data.map((r) => r.id))
+  }
+  return { updatedIds, error: null }
+}
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -96,23 +122,24 @@ export default async function tdsBulkRoutes(fastify: FastifyInstance) {
     const { proof_ids, notes } = parsed.data
     const now = new Date().toISOString()
 
-    const { data, error } = await fastify.supabase
-      .from('declaration_proofs')
-      .update({
-        document_state:     'verified',
-        is_verified:        true,
-        verified_by:        req.userId,
-        verified_at:        now,
-        verification_notes: notes ?? null,
-        updated_at:         now,
-      })
-      .in('id', proof_ids)
-      .eq('tenant_id', req.tenantId)
-      .select('id')
+    const { updatedIds, error } = await chunkedUpdateByIds(fastify.supabase, proof_ids, (chunk) =>
+      fastify.supabase
+        .from('declaration_proofs')
+        .update({
+          document_state:     'verified',
+          is_verified:        true,
+          verified_by:        req.userId,
+          verified_at:        now,
+          verification_notes: notes ?? null,
+          updated_at:         now,
+        })
+        .in('id', chunk)
+        .eq('tenant_id', req.tenantId)
+        .select('id'),
+    )
 
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: (error as Error).message })
 
-    const updatedIds = ((data ?? []) as any[]).map((r: any) => r.id as string)
     const failed = proof_ids.filter(id => !updatedIds.includes(id))
 
     await logBulkOperation(
@@ -143,21 +170,22 @@ export default async function tdsBulkRoutes(fastify: FastifyInstance) {
     const { proof_ids, rejection_reason } = parsed.data
     const now = new Date().toISOString()
 
-    const { data, error } = await fastify.supabase
-      .from('declaration_proofs')
-      .update({
-        document_state:   'rejected',
-        is_verified:      false,
-        rejection_reason,
-        updated_at:       now,
-      })
-      .in('id', proof_ids)
-      .eq('tenant_id', req.tenantId)
-      .select('id')
+    const { updatedIds, error } = await chunkedUpdateByIds(fastify.supabase, proof_ids, (chunk) =>
+      fastify.supabase
+        .from('declaration_proofs')
+        .update({
+          document_state:   'rejected',
+          is_verified:      false,
+          rejection_reason,
+          updated_at:       now,
+        })
+        .in('id', chunk)
+        .eq('tenant_id', req.tenantId)
+        .select('id'),
+    )
 
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: (error as Error).message })
 
-    const updatedIds = ((data ?? []) as any[]).map((r: any) => r.id as string)
     const failed = proof_ids.filter(id => !updatedIds.includes(id))
 
     await logBulkOperation(
@@ -188,20 +216,21 @@ export default async function tdsBulkRoutes(fastify: FastifyInstance) {
     const { proof_ids, revision_reason } = parsed.data
     const now = new Date().toISOString()
 
-    const { data, error } = await fastify.supabase
-      .from('declaration_proofs')
-      .update({
-        document_state:  'revision_requested',
-        revision_reason,
-        updated_at:      now,
-      })
-      .in('id', proof_ids)
-      .eq('tenant_id', req.tenantId)
-      .select('id')
+    const { updatedIds, error } = await chunkedUpdateByIds(fastify.supabase, proof_ids, (chunk) =>
+      fastify.supabase
+        .from('declaration_proofs')
+        .update({
+          document_state:  'revision_requested',
+          revision_reason,
+          updated_at:      now,
+        })
+        .in('id', chunk)
+        .eq('tenant_id', req.tenantId)
+        .select('id'),
+    )
 
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: (error as Error).message })
 
-    const updatedIds = ((data ?? []) as any[]).map((r: any) => r.id as string)
     const failed = proof_ids.filter(id => !updatedIds.includes(id))
 
     await logBulkOperation(
@@ -239,22 +268,23 @@ export default async function tdsBulkRoutes(fastify: FastifyInstance) {
     // Only lock declarations in approved or payroll_applied status
     const lockableStatuses = ['approved', 'payroll_applied']
 
-    const { data, error } = await fastify.supabase
-      .from('tax_declarations')
-      .update({
-        status:                   'locked',
-        payroll_locked_at:        now,
-        locked_by_payroll_run_id: null,
-        updated_at:               now,
-      })
-      .in('id', declaration_ids)
-      .in('status', lockableStatuses)
-      .eq('tenant_id', req.tenantId)
-      .select('id')
+    const { updatedIds, error } = await chunkedUpdateByIds(fastify.supabase, declaration_ids, (chunk) =>
+      fastify.supabase
+        .from('tax_declarations')
+        .update({
+          status:                   'locked',
+          payroll_locked_at:        now,
+          locked_by_payroll_run_id: null,
+          updated_at:               now,
+        })
+        .in('id', chunk)
+        .in('status', lockableStatuses)
+        .eq('tenant_id', req.tenantId)
+        .select('id'),
+    )
 
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: (error as Error).message })
 
-    const updatedIds = ((data ?? []) as any[]).map((r: any) => r.id as string)
     const skipped = declaration_ids.filter(id => !updatedIds.includes(id))
 
     await logBulkOperation(
@@ -330,36 +360,65 @@ export default async function tdsBulkRoutes(fastify: FastifyInstance) {
 
     const { financial_year, employee_ids } = parsed.data
 
-    // Fetch employees in scope
-    let empQ = fastify.supabase
-      .from('employees')
-      .select('id')
-      .eq('tenant_id', req.tenantId)
-
-    if (employee_ids && employee_ids.length > 0) {
-      empQ = empQ.in('id', employee_ids)
+    // Fetch employees in scope. When employee_ids is provided it's chunked
+    // (unbounded array from the caller — a single .in() over thousands of
+    // UUIDs would exceed request-line limits); when omitted, the full-tenant
+    // read is paginated the same way the rest of the payroll surface is.
+    let employees: Array<{ id: string }>
+    let empErr: unknown = null
+    try {
+      if (employee_ids && employee_ids.length > 0) {
+        const EMP_ID_CHUNK = 100
+        employees = []
+        for (let i = 0; i < employee_ids.length; i += EMP_ID_CHUNK) {
+          const { data, error } = await fastify.supabase
+            .from('employees')
+            .select('id')
+            .eq('tenant_id', req.tenantId)
+            .in('id', employee_ids.slice(i, i + EMP_ID_CHUNK))
+          if (error) throw error
+          if (data) employees.push(...data)
+        }
+      } else {
+        employees = await fetchAllRows((from, to) =>
+          fastify.supabase
+            .from('employees')
+            .select('id')
+            .eq('tenant_id', req.tenantId)
+            .order('id')
+            .range(from, to),
+        )
+      }
+    } catch (err) {
+      employees = []
+      empErr = err
     }
-
-    const { data: employees, error: empErr } = await empQ
-    if (empErr) return reply.code(500).send({ error: 'QUERY_FAILED', message: empErr.message })
+    if (empErr) return reply.code(500).send({ error: 'QUERY_FAILED', message: (empErr as Error).message })
     if (!employees || employees.length === 0) {
       return reply.send({ computed: 0, high_variance: 0 })
     }
 
     const empIds = (employees as any[]).map((e: any) => e.id as string)
 
-    // Fetch latest projected_tax from tds_declaration_snapshots per employee
-    const { data: snapshots } = await fastify.supabase
-      .from('tds_declaration_snapshots')
-      .select('employee_id, total_approved, created_at')
-      .in('employee_id', empIds)
-      .eq('tenant_id', req.tenantId)
-      .eq('financial_year', financial_year)
-      .order('created_at', { ascending: false })
+    // Fetch latest projected_tax from tds_declaration_snapshots per employee.
+    // Chunked: empIds can now be the tenant's full headcount (the fetch above
+    // is no longer silently capped), so a single .in() would exceed request-
+    // line limits at enterprise scale.
+    const snapshots: any[] = []
+    for (let i = 0; i < empIds.length; i += 100) {
+      const { data } = await fastify.supabase
+        .from('tds_declaration_snapshots')
+        .select('employee_id, total_approved, created_at')
+        .in('employee_id', empIds.slice(i, i + 100))
+        .eq('tenant_id', req.tenantId)
+        .eq('financial_year', financial_year)
+        .order('created_at', { ascending: false })
+      if (data) snapshots.push(...data)
+    }
 
     // Build map: employee_id -> latest snapshot
     const snapshotMap = new Map<string, number>()
-    for (const snap of (snapshots ?? []) as any[]) {
+    for (const snap of snapshots as any[]) {
       if (!snapshotMap.has(snap.employee_id)) {
         snapshotMap.set(snap.employee_id, snap.total_approved ?? 0)
       }
@@ -371,18 +430,22 @@ export default async function tdsBulkRoutes(fastify: FastifyInstance) {
     const fyStart = `${fyStartYear}-04-01`
     const fyEnd   = `${fyStartYear + 1}-03-31`
 
-    const { data: slips } = await fastify.supabase
-      .from('payroll_slips')
-      .select('employee_id, tds_deducted')
-      .in('employee_id', empIds)
-      .eq('tenant_id', req.tenantId)
-      // payroll_slips has no pay_date; its `month` is 'YYYY-MM' — scope to the FY months
-      .gte('month', fyStart.slice(0, 7))
-      .lte('month', fyEnd.slice(0, 7))
+    const slips: any[] = []
+    for (let i = 0; i < empIds.length; i += 100) {
+      const { data } = await fastify.supabase
+        .from('payroll_slips')
+        .select('employee_id, tds_deducted')
+        .in('employee_id', empIds.slice(i, i + 100))
+        .eq('tenant_id', req.tenantId)
+        // payroll_slips has no pay_date; its `month` is 'YYYY-MM' — scope to the FY months
+        .gte('month', fyStart.slice(0, 7))
+        .lte('month', fyEnd.slice(0, 7))
+      if (data) slips.push(...data)
+    }
 
     // Build map: employee_id -> sum actual TDS
     const actualTdsMap = new Map<string, number>()
-    for (const slip of (slips ?? []) as any[]) {
+    for (const slip of slips as any[]) {
       const prev = actualTdsMap.get(slip.employee_id) ?? 0
       actualTdsMap.set(slip.employee_id, prev + (slip.tds_deducted ?? 0))
     }
