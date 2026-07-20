@@ -28,6 +28,7 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { fetchAllRows } from './supabase-paginate.js'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -339,14 +340,25 @@ export async function runMonthlyAccrual(
   if (!policies?.length) return result
 
   // All active employees
-  const { data: employees, error: eErr } = await supabase
-    .from('employees')
-    .select('id, joining_date')
-    .eq('tenant_id', tenantId)
-    .eq('status', 'active')
+  let employees: Array<{ id: string; joining_date: string | null }>
+  let eErr: unknown = null
+  try {
+    employees = await fetchAllRows((from, to) =>
+      supabase
+        .from('employees')
+        .select('id, joining_date')
+        .eq('tenant_id', tenantId)
+        .eq('status', 'active')
+        .order('id')
+        .range(from, to),
+    )
+  } catch (err) {
+    employees = []
+    eErr = err
+  }
 
   if (eErr) {
-    result.errors.push(`Failed to fetch employees: ${eErr.message}`)
+    result.errors.push(`Failed to fetch employees: ${(eErr as Error).message}`)
     return result
   }
   if (!employees?.length) return result
@@ -424,14 +436,25 @@ export async function runYearlyCredit(
   }
   if (!policies?.length) return result
 
-  const { data: employees, error: eErr } = await supabase
-    .from('employees')
-    .select('id, joining_date')
-    .eq('tenant_id', tenantId)
-    .eq('status', 'active')
+  let employees: Array<{ id: string; joining_date: string | null }>
+  let eErr: unknown = null
+  try {
+    employees = await fetchAllRows((from, to) =>
+      supabase
+        .from('employees')
+        .select('id, joining_date')
+        .eq('tenant_id', tenantId)
+        .eq('status', 'active')
+        .order('id')
+        .range(from, to),
+    )
+  } catch (err) {
+    employees = []
+    eErr = err
+  }
 
   if (eErr) {
-    result.errors.push(`Failed to fetch employees: ${eErr.message}`)
+    result.errors.push(`Failed to fetch employees: ${(eErr as Error).message}`)
     return result
   }
   if (!employees?.length) return result
@@ -813,20 +836,30 @@ export async function runEngineMonthlyAccrual(
   }
 
   // ── Fetch all active employees in this tenant ──────────────────────────
-  const { data: employees, error: eErr } = await supabase
-    .from('employees')
-    .select('id, joining_date')
-    .eq('tenant_id', tenantId)
-    .eq('status',    'active')
+  let employees: Array<{ id: string; joining_date: string | null }>
+  let eErr: unknown = null
+  try {
+    employees = await fetchAllRows((from, to) =>
+      supabase
+        .from('employees')
+        .select('id, joining_date')
+        .eq('tenant_id', tenantId)
+        .eq('status',    'active')
+        .order('id')
+        .range(from, to),
+    )
+  } catch (err) {
+    employees = []
+    eErr = err
+  }
 
   if (eErr) {
-    result.errors.push(`Failed to fetch employees: ${eErr.message}`)
+    result.errors.push(`Failed to fetch employees: ${(eErr as Error).message}`)
     return result
   }
 
   const empMap = new Map<string, { joining_date: string | null }>(
-    ((employees ?? []) as Array<{ id: string; joining_date: string | null }>)
-      .map(e => [e.id, { joining_date: e.joining_date }]),
+    employees.map(e => [e.id, { joining_date: e.joining_date }]),
   )
 
   const asOfDate = new Date(`${effectiveAsOf}T12:00:00.000Z`)
@@ -1004,20 +1037,30 @@ export async function runEngineYearlyCredit(
     rulesByPolicy.set(rule.policy_id, existing)
   }
 
-  const { data: employees, error: eErr } = await supabase
-    .from('employees')
-    .select('id, joining_date')
-    .eq('tenant_id', tenantId)
-    .eq('status',    'active')
+  let employees: Array<{ id: string; joining_date: string | null }>
+  let eErr: unknown = null
+  try {
+    employees = await fetchAllRows((from, to) =>
+      supabase
+        .from('employees')
+        .select('id, joining_date')
+        .eq('tenant_id', tenantId)
+        .eq('status',    'active')
+        .order('id')
+        .range(from, to),
+    )
+  } catch (err) {
+    employees = []
+    eErr = err
+  }
 
   if (eErr) {
-    result.errors.push(`Failed to fetch employees: ${eErr.message}`)
+    result.errors.push(`Failed to fetch employees: ${(eErr as Error).message}`)
     return result
   }
 
   const empMap = new Map<string, { joining_date: string | null }>(
-    ((employees ?? []) as Array<{ id: string; joining_date: string | null }>)
-      .map(e => [e.id, { joining_date: e.joining_date }]),
+    employees.map(e => [e.id, { joining_date: e.joining_date }]),
   )
 
   const asOfDate = new Date(`${effectiveAsOf}T12:00:00.000Z`)

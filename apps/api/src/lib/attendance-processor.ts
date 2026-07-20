@@ -814,15 +814,20 @@ export async function processAttendanceForDate(
   // ── 6. Delete existing attendance_logs for matched employees this date ─────
   // Scoped per-employee so we don't clobber other employees' already-processed data.
   // (matchedEmpIds was declared in step 3.6 above — used here again for clarity.)
-  const { error: deleteError } = await supabase
-    .from('attendance_logs')
-    .delete()
-    .eq('tenant_id', tenantId)
-    .in('employee_id', matchedEmpIds)
-    .gte('check_in', dayStart)
-    .lte('check_in', dayEnd)
+  // Chunked: a single .in() with the full day's matched employees builds a
+  // request URL that exceeds server/proxy request-line limits at scale.
+  const EMP_ID_CHUNK = 100
+  for (let i = 0; i < matchedEmpIds.length; i += EMP_ID_CHUNK) {
+    const { error: deleteError } = await supabase
+      .from('attendance_logs')
+      .delete()
+      .eq('tenant_id', tenantId)
+      .in('employee_id', matchedEmpIds.slice(i, i + EMP_ID_CHUNK))
+      .gte('check_in', dayStart)
+      .lte('check_in', dayEnd)
 
-  if (deleteError) throw new Error(`Failed to clear old attendance_logs: ${deleteError.message}`)
+    if (deleteError) throw new Error(`Failed to clear old attendance_logs: ${deleteError.message}`)
+  }
 
   // Step 2: ON CONFLICT DO NOTHING on uq_attendance_logs_checkin
   // This prevents duplicates even if the delete above races with another insert.
@@ -834,18 +839,21 @@ export async function processAttendanceForDate(
 
   // ── 7. Upsert attendance_daily ────────────────────────────────────────────
   if (allDailyRows.length > 0) {
-    // Fetch pre-existing statuses so audit log can record before/after changes
-    const { data: existingDaily } = await supabase
-      .from('attendance_daily')
-      .select('employee_id, date, status')
-      .eq('tenant_id', tenantId)
-      .in('employee_id', matchedEmpIds)
-      .eq('date', date)
+    // Fetch pre-existing statuses so audit log can record before/after changes.
+    // Chunked for the same request-URL-length reason as step 6 above.
+    const existingDaily: Array<{ employee_id: string; date: string; status: string }> = []
+    for (let i = 0; i < matchedEmpIds.length; i += EMP_ID_CHUNK) {
+      const { data: dailyChunk } = await supabase
+        .from('attendance_daily')
+        .select('employee_id, date, status')
+        .eq('tenant_id', tenantId)
+        .in('employee_id', matchedEmpIds.slice(i, i + EMP_ID_CHUNK))
+        .eq('date', date)
+      if (dailyChunk) existingDaily.push(...dailyChunk)
+    }
 
     const existingStatusMap = new Map<string, string>(
-      (existingDaily ?? []).map((r: { employee_id: string; date: string; status: string }) =>
-        [`${r.employee_id}:${r.date}`, r.status]
-      )
+      existingDaily.map((r) => [`${r.employee_id}:${r.date}`, r.status])
     )
 
     const { error: dailyError } = await supabase

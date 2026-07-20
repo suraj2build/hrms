@@ -21,6 +21,7 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { fetchAllRows } from './supabase-paginate.js'
 import {
   type LeavePolicy,
   type BatchResult,
@@ -241,12 +242,15 @@ async function fetchActiveEmployees(
   supabase: SupabaseClient,
   tenantId: string,
 ): Promise<Array<{ id: string; joining_date: string }>> {
-  const { data } = await supabase
-    .from('employees')
-    .select('id, joining_date')
-    .eq('tenant_id', tenantId)
-    .eq('status', 'active')
-  return data ?? []
+  return fetchAllRows((from, to) =>
+    supabase
+      .from('employees')
+      .select('id, joining_date')
+      .eq('tenant_id', tenantId)
+      .eq('status', 'active')
+      .order('id')
+      .range(from, to),
+  )
 }
 
 function emptyResult(jobId: string, jobType: string, startedAt: number): JobResult {
@@ -1233,16 +1237,20 @@ export async function runLifecycleMonthlyAccrual(
   }
 
   // Fetch employees
-  const { data: employees } = await supabase
-    .from('employees')
-    .select('id, joining_date, employee_separation!employee_separation_employee_id_fkey(last_working_date)')
-    .eq('tenant_id', tenantId)
-    .in('status', ['active', 'inactive'])  // include recent separations for proration
+  const employees = await fetchAllRows<any>((from, to) =>
+    supabase
+      .from('employees')
+      .select('id, joining_date, employee_separation!employee_separation_employee_id_fkey(last_working_date)')
+      .eq('tenant_id', tenantId)
+      .in('status', ['active', 'inactive'])  // include recent separations for proration
+      .order('id')
+      .range(from, to),
+  )
 
-  for (const e of ((employees ?? []) as any[])) {
+  for (const e of employees) {
     e.separation_date = (e.employee_separation ?? [])[0]?.last_working_date ?? null
   }
-  const empMap = new Map(((employees ?? []) as any[]).map(e => [e.id, e]))
+  const empMap = new Map(employees.map(e => [e.id, e]))
 
   // Fetch tiers and freezes in parallel
   const allRuleIds = (rules ?? []).map((r: any) => r.id)

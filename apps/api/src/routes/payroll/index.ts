@@ -353,6 +353,23 @@ const monthRe = /^\d{4}-\d{2}$/
 /** Short SHA of the running deployment (Railway sets RAILWAY_GIT_COMMIT_SHA). */
 const API_COMMIT = (process.env.RAILWAY_GIT_COMMIT_SHA ?? process.env.GIT_COMMIT_SHA ?? 'unknown').slice(0, 7)
 
+/** Rows per .in() call — keeps the request URL well under server/proxy
+ *  request-line limits (confirmed to fail in production above ~400 UUIDs). */
+const ID_CHUNK = 100
+
+/** Runs `queryFn` once per chunk of `ids` and concatenates the results. */
+async function fetchChunked<T>(
+  ids: string[],
+  queryFn: (chunk: string[]) => PromiseLike<{ data: T[] | null }>,
+): Promise<T[]> {
+  const all: T[] = []
+  for (let i = 0; i < ids.length; i += ID_CHUNK) {
+    const { data } = await queryFn(ids.slice(i, i + ID_CHUNK))
+    if (data) all.push(...data)
+  }
+  return all
+}
+
 /** Per-employee timeout for dry-run computation (ms). */
 const DRY_RUN_EMP_TIMEOUT_MS = 30_000
 
@@ -2443,57 +2460,73 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
         })()
 
         // ── Advances: mark recovered, roll the rest forward ──────────────────────
+        // recoveredAdvanceIds / finalizedEmpIds can span the tenant's full
+        // headcount — chunk every .in() to stay under request-line limits.
         if (recoveredAdvanceIds.size > 0) {
-          await fastify.supabase
-            .from('advance_recovery_schedules')
-            .update({ status: 'recovered', payroll_run_id: id, recovered_at: now })
-            .eq('tenant_id', req.tenantId)
-            .eq('recovery_month', run.month)
-            .eq('status', 'pending')
-            .in('id', [...recoveredAdvanceIds])
+          const advanceIdChunks = [...recoveredAdvanceIds]
+          for (let i = 0; i < advanceIdChunks.length; i += ID_CHUNK) {
+            await fastify.supabase
+              .from('advance_recovery_schedules')
+              .update({ status: 'recovered', payroll_run_id: id, recovered_at: now })
+              .eq('tenant_id', req.tenantId)
+              .eq('recovery_month', run.month)
+              .eq('status', 'pending')
+              .in('id', advanceIdChunks.slice(i, i + ID_CHUNK))
+          }
         }
         {
           // advance_recovery_schedules has no employee_id → map employees to advance ids
-          const { data: advReqs } = await fastify.supabase
-            .from('advance_salary_requests').select('id')
-            .eq('tenant_id', req.tenantId).in('employee_id', finalizedEmpIds)
-          const advIdsForRoll = (advReqs ?? []).map((a: any) => a.id)
-          let q = fastify.supabase
-            .from('advance_recovery_schedules')
-            .update({ recovery_month: nextMonth })
-            .eq('tenant_id', req.tenantId)
-            .eq('recovery_month', run.month)
-            .eq('status', 'pending')
-            .in('advance_id', advIdsForRoll)
-          if (recoveredAdvanceIds.size > 0) q = q.not('id', 'in', `(${[...recoveredAdvanceIds].join(',')})`)
-          await q
+          const advReqs = await fetchChunked(finalizedEmpIds, (chunk) =>
+            fastify.supabase
+              .from('advance_salary_requests').select('id')
+              .eq('tenant_id', req.tenantId).in('employee_id', chunk),
+          )
+          const advIdsForRoll = advReqs.map((a: any) => a.id)
+          for (let i = 0; i < advIdsForRoll.length; i += ID_CHUNK) {
+            let q = fastify.supabase
+              .from('advance_recovery_schedules')
+              .update({ recovery_month: nextMonth })
+              .eq('tenant_id', req.tenantId)
+              .eq('recovery_month', run.month)
+              .eq('status', 'pending')
+              .in('advance_id', advIdsForRoll.slice(i, i + ID_CHUNK))
+            if (recoveredAdvanceIds.size > 0) q = q.not('id', 'in', `(${[...recoveredAdvanceIds].join(',')})`)
+            await q
+          }
         }
 
         // ── Loans: mark paid, roll the rest forward ──────────────────────────────
         if (recoveredLoanIds.size > 0) {
-          await fastify.supabase
-            .from('loan_schedules')
-            .update({ status: 'paid', payroll_run_id: id, paid_at: now })
-            .eq('tenant_id', req.tenantId)
-            .eq('due_month', run.month)
-            .eq('status', 'pending')
-            .in('id', [...recoveredLoanIds])
+          const loanIdChunks = [...recoveredLoanIds]
+          for (let i = 0; i < loanIdChunks.length; i += ID_CHUNK) {
+            await fastify.supabase
+              .from('loan_schedules')
+              .update({ status: 'paid', payroll_run_id: id, paid_at: now })
+              .eq('tenant_id', req.tenantId)
+              .eq('due_month', run.month)
+              .eq('status', 'pending')
+              .in('id', loanIdChunks.slice(i, i + ID_CHUNK))
+          }
         }
         {
           // loan_schedules has no employee_id → map employees to loan ids
-          const { data: loanRows2 } = await fastify.supabase
-            .from('employee_loans').select('id')
-            .eq('tenant_id', req.tenantId).in('employee_id', finalizedEmpIds)
-          const loanIdsForRoll = (loanRows2 ?? []).map((l: any) => l.id)
-          let q = fastify.supabase
-            .from('loan_schedules')
-            .update({ due_month: nextMonth })
-            .eq('tenant_id', req.tenantId)
-            .eq('due_month', run.month)
-            .eq('status', 'pending')
-            .in('loan_id', loanIdsForRoll)
-          if (recoveredLoanIds.size > 0) q = q.not('id', 'in', `(${[...recoveredLoanIds].join(',')})`)
-          await q
+          const loanRows2 = await fetchChunked(finalizedEmpIds, (chunk) =>
+            fastify.supabase
+              .from('employee_loans').select('id')
+              .eq('tenant_id', req.tenantId).in('employee_id', chunk),
+          )
+          const loanIdsForRoll = loanRows2.map((l: any) => l.id)
+          for (let i = 0; i < loanIdsForRoll.length; i += ID_CHUNK) {
+            let q = fastify.supabase
+              .from('loan_schedules')
+              .update({ due_month: nextMonth })
+              .eq('tenant_id', req.tenantId)
+              .eq('due_month', run.month)
+              .eq('status', 'pending')
+              .in('loan_id', loanIdsForRoll.slice(i, i + ID_CHUNK))
+            if (recoveredLoanIds.size > 0) q = q.not('id', 'in', `(${[...recoveredLoanIds].join(',')})`)
+            await q
+          }
         }
 
         // Advance status sweep: mark as 'recovering' or 'fully_recovered'

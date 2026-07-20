@@ -25,6 +25,7 @@ import { createHash }       from 'crypto'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { round2 }           from './payroll-engine.js'
 import { buildPayrollRunSnapshot } from './payroll-snapshot-engine.js'
+import { fetchAllRows }     from './supabase-paginate.js'
 import * as XLSX            from 'xlsx'
 
 // ── GL Account constants (system defaults, overridable per tenant) ────────────
@@ -588,23 +589,42 @@ export async function buildPayrollFinancialLedger(
     return { error: `Ledger already exists with status '${(existing as any).ledger_status}' — cannot regenerate`, code: 'LEDGER_EXISTS' }
   }
 
-  // 3. Load employee snapshots (source of truth)
-  const { data: empSnaps, error: eErr } = await supabase
-    .from('payroll_employee_snapshots')
-    .select('employee_id, employee_code, employee_name, gross_pay, deductions, net_pay, overtime_hours, compensation_snapshot')
-    .eq('snapshot_id', snapshotId)
-    .eq('tenant_id', tenantId)
+  // 3. Load employee snapshots (source of truth) — one row per employee in the
+  // run, so a large tenant can exceed the server's per-request row cap.
+  let empSnaps: any[]
+  let eErr: unknown = null
+  try {
+    empSnaps = await fetchAllRows((from, to) =>
+      supabase
+        .from('payroll_employee_snapshots')
+        .select('employee_id, employee_code, employee_name, gross_pay, deductions, net_pay, overtime_hours, compensation_snapshot')
+        .eq('snapshot_id', snapshotId)
+        .eq('tenant_id', tenantId)
+        .order('employee_id')
+        .range(from, to),
+    )
+  } catch (err) {
+    empSnaps = []
+    eErr = err
+  }
 
   if (eErr || !empSnaps || empSnaps.length === 0) {
     return { error: 'No employee snapshots found — cannot build ledger', code: 'SNAPSHOT_REQUIRED' }
   }
 
-  // 4. Load employee department/cost-center data (live OK — metadata, not financial)
+  // 4. Load employee department/cost-center data (live OK — metadata, not financial).
+  // Chunked: a single .in() with thousands of UUIDs builds a request URL that
+  // exceeds server/proxy request-line limits (confirmed in production at 400+ UUIDs).
   const empIds = (empSnaps as any[]).map(e => e.employee_id)
-  const { data: empMeta } = await supabase
-    .from('employees')
-    .select('id, job_history!job_history_employee_id_fkey(department_id, department_name, is_current)')
-    .in('id', empIds)
+  const empMeta: any[] = []
+  const EMP_META_CHUNK = 100
+  for (let i = 0; i < empIds.length; i += EMP_META_CHUNK) {
+    const { data: metaChunk } = await supabase
+      .from('employees')
+      .select('id, job_history!job_history_employee_id_fkey(department_id, department_name, is_current)')
+      .in('id', empIds.slice(i, i + EMP_META_CHUNK))
+    if (metaChunk) empMeta.push(...metaChunk)
+  }
 
   const deptMap = new Map<string, { department_id: string | null; department_name: string | null }>(
     ((empMeta ?? []) as any[]).map(e => {

@@ -18,6 +18,23 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { dayOfWeekToCondition } from './rotation-engine.js'
 
+/** Rows per .in() call — keeps the request URL well under server/proxy
+ *  request-line limits (confirmed to fail in production above ~400 UUIDs). */
+const ID_CHUNK = 100
+
+/** Runs `queryFn` once per chunk of `ids` and concatenates the results. */
+async function fetchChunked<T>(
+  ids: string[],
+  queryFn: (chunk: string[]) => PromiseLike<{ data: T[] | null }>,
+): Promise<T[]> {
+  const all: T[] = []
+  for (let i = 0; i < ids.length; i += ID_CHUNK) {
+    const { data } = await queryFn(ids.slice(i, i + ID_CHUNK))
+    if (data) all.push(...data)
+  }
+  return all
+}
+
 // ── Public types ───────────────────────────────────────────────────────────────
 
 export type ShiftResolutionSource =
@@ -187,15 +204,17 @@ export async function resolveShiftBatch(
   const result = new Map<string, ResolvedShift>()
 
   // ── Step 1: shift_roster overrides ───────────────────────────────────────
-  const { data: rosterRows } = await supabase
-    .from('shift_roster')
-    .select('employee_id, shift_id')
-    .eq('tenant_id', tenantId)
-    .eq('date', date)
-    .in('employee_id', employeeIds)
+  const rosterRows = await fetchChunked(employeeIds, (chunk) =>
+    supabase
+      .from('shift_roster')
+      .select('employee_id, shift_id')
+      .eq('tenant_id', tenantId)
+      .eq('date', date)
+      .in('employee_id', chunk),
+  )
 
   const rosterShiftIds = new Map<string, string>()
-  for (const r of (rosterRows ?? []) as { employee_id: string; shift_id: string }[]) {
+  for (const r of rosterRows as { employee_id: string; shift_id: string }[]) {
     rosterShiftIds.set(r.employee_id, r.shift_id)
   }
 
@@ -206,13 +225,15 @@ export async function resolveShiftBatch(
   const siteIdMap         = new Map<string, string>()
 
   if (unrosteredIds.length) {
-    const { data: empRows } = await supabase
-      .from('employees')
-      .select('id, site_id, rotation_policy_id, sites!employees_site_id_fkey(id, default_rotation_policy_id, default_shift_id)')
-      .eq('tenant_id', tenantId)
-      .in('id', unrosteredIds)
+    const empRows = await fetchChunked(unrosteredIds, (chunk) =>
+      supabase
+        .from('employees')
+        .select('id, site_id, rotation_policy_id, sites!employees_site_id_fkey(id, default_rotation_policy_id, default_shift_id)')
+        .eq('tenant_id', tenantId)
+        .in('id', chunk),
+    )
 
-    for (const e of (empRows ?? []) as any[]) {
+    for (const e of empRows as any[]) {
       const site = Array.isArray(e.sites) ? e.sites[0] : e.sites
       if (e.site_id) siteIdMap.set(e.id, e.site_id)
 

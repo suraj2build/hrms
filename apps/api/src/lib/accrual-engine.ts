@@ -10,6 +10,7 @@
  * - Expiry of carry-forward balances (run monthly against expiry date)
  */
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { fetchAllRows } from './supabase-paginate.js'
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -85,14 +86,25 @@ export async function runMonthlyAccrual(
   if (!monthlyRules.length) return result   // Nothing to do this month
 
   // ── Fetch all active employees for tenant ──────────────────────────────────
-  const { data: employees, error: empErr } = await supabase
-    .from('employees')
-    .select('id, joining_date')
-    .eq('tenant_id', tenantId)
-    .eq('status', 'active')
+  let employees: Array<{ id: string; joining_date: string }>
+  let empErr: unknown = null
+  try {
+    employees = await fetchAllRows((from, to) =>
+      supabase
+        .from('employees')
+        .select('id, joining_date')
+        .eq('tenant_id', tenantId)
+        .eq('status', 'active')
+        .order('id')
+        .range(from, to),
+    )
+  } catch (err) {
+    employees = []
+    empErr = err
+  }
 
   if (empErr || !employees?.length) {
-    result.errors.push(empErr?.message ?? 'No active employees found')
+    result.errors.push(empErr ? (empErr as Error).message : 'No active employees found')
     return result
   }
 
