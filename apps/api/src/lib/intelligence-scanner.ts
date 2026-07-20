@@ -39,6 +39,7 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { fetchAllRows }       from './supabase-paginate.js'
 import { eventBus }           from './event-bus.js'
 import { computeUpcoming }    from './compliance-calendar.js'
 import { computeLifecycleActionable, categoryLabel } from './lifecycle-expiry.js'
@@ -103,12 +104,17 @@ async function scanRepeatedLate(supabase: SupabaseClient, tenantId: string): Pro
   const from = lookbackFrom()
   const month = currentMonth()
 
-  const { data: rows } = await supabase
-    .from('attendance_daily')
-    .select('employee_id, late_minutes')
-    .eq('tenant_id', tenantId)
-    .eq('status', 'late')
-    .gte('date', from)
+  const rows = await fetchAllRows((f, t) =>
+    supabase
+      .from('attendance_daily')
+      .select('employee_id, late_minutes')
+      .eq('tenant_id', tenantId)
+      .eq('status', 'late')
+      .gte('date', from)
+      .order('employee_id')
+      .order('date')
+      .range(f, t),
+  )
 
   if (!rows?.length) return
 
@@ -154,11 +160,16 @@ async function scanBurnout(supabase: SupabaseClient, tenantId: string): Promise<
   const from  = lookbackFrom()
   const month = currentMonth()
 
-  const { data: rows } = await supabase
-    .from('attendance_daily')
-    .select('employee_id, overtime_minutes, worked_on_weekly_off')
-    .eq('tenant_id', tenantId)
-    .gte('date', from)
+  const rows = await fetchAllRows((f, t) =>
+    supabase
+      .from('attendance_daily')
+      .select('employee_id, overtime_minutes, worked_on_weekly_off')
+      .eq('tenant_id', tenantId)
+      .gte('date', from)
+      .order('employee_id')
+      .order('date')
+      .range(f, t),
+  )
 
   if (!rows?.length) return
 
@@ -210,11 +221,16 @@ async function scanStaffingShortages(supabase: SupabaseClient, tenantId: string)
   const recentFromStr = recentFrom.toISOString().slice(0, 10)
 
   // Fetch shift roster assignments grouped by date+shift
-  const { data: rosterRows } = await supabase
-    .from('shift_roster')
-    .select('date, shift_id, employee_id')
-    .eq('tenant_id', tenantId)
-    .gte('date', recentFromStr)
+  const rosterRows = await fetchAllRows((f, t) =>
+    supabase
+      .from('shift_roster')
+      .select('date, shift_id, employee_id')
+      .eq('tenant_id', tenantId)
+      .gte('date', recentFromStr)
+      .order('employee_id')
+      .order('date')
+      .range(f, t),
+  )
 
   if (!rosterRows?.length) return
 
@@ -228,15 +244,20 @@ async function scanStaffingShortages(supabase: SupabaseClient, tenantId: string)
   }
 
   // Fetch actual presence
-  const { data: presenceRows } = await supabase
-    .from('attendance_daily')
-    .select('date, employee_id, status')
-    .eq('tenant_id', tenantId)
-    .gte('date', recentFromStr)
-    .in('status', ['present', 'late'])
+  const presenceRows = await fetchAllRows((f, t) =>
+    supabase
+      .from('attendance_daily')
+      .select('date, employee_id, status')
+      .eq('tenant_id', tenantId)
+      .gte('date', recentFromStr)
+      .in('status', ['present', 'late'])
+      .order('employee_id')
+      .order('date')
+      .range(f, t),
+  )
 
   const present = new Map<string, Set<string>>()
-  for (const r of presenceRows ?? []) {
+  for (const r of presenceRows) {
     const empScheduled = [...scheduled.entries()]
       .find(([k, emps]) => k.startsWith(r.date) && emps.has(r.employee_id))
     if (!empScheduled) continue
@@ -286,21 +307,29 @@ async function scanPayrollBlockers(supabase: SupabaseClient, tenantId: string): 
   const month = currentMonth()
 
   // Get active employees without compensation records
-  const { data: employees } = await supabase
-    .from('employees')
-    .select('id')
-    .eq('tenant_id', tenantId)
-    .eq('status', 'active')
+  const employees = await fetchAllRows((f, t) =>
+    supabase
+      .from('employees')
+      .select('id')
+      .eq('tenant_id', tenantId)
+      .eq('status', 'active')
+      .order('id')
+      .range(f, t),
+  )
 
   if (!employees?.length) return
 
-  const { data: compensations } = await supabase
-    .from('employee_compensations')
-    .select('employee_id')
-    .eq('tenant_id', tenantId)
-    .eq('is_active', true)
+  const compensations = await fetchAllRows((f, t) =>
+    supabase
+      .from('employee_compensations')
+      .select('employee_id')
+      .eq('tenant_id', tenantId)
+      .eq('is_active', true)
+      .order('employee_id')
+      .range(f, t),
+  )
 
-  const compensatedIds = new Set((compensations ?? []).map((c: any) => c.employee_id))
+  const compensatedIds = new Set(compensations.map((c: any) => c.employee_id))
 
   // Check for pending corrections
   const { data: pendingCorrections } = await supabase
@@ -360,11 +389,16 @@ async function scanAttendanceRisk(supabase: SupabaseClient, tenantId: string): P
   const from  = lookbackFrom()
   const month = currentMonth()
 
-  const { data: rows } = await supabase
-    .from('attendance_daily')
-    .select('employee_id, status, late_minutes, work_hours')
-    .eq('tenant_id', tenantId)
-    .gte('date', from)
+  const rows = await fetchAllRows((f, t) =>
+    supabase
+      .from('attendance_daily')
+      .select('employee_id, status, late_minutes, work_hours')
+      .eq('tenant_id', tenantId)
+      .gte('date', from)
+      .order('employee_id')
+      .order('date')
+      .range(f, t),
+  )
 
   if (!rows?.length) return
 

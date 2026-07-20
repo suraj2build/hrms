@@ -15,6 +15,7 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { fetchAllRows } from './supabase-paginate.js'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -99,30 +100,46 @@ export async function computeIntelligence(
   const periodFrom = fromDate.toISOString().slice(0, 10)
 
   // ── Query 1: all anomalies in the window ─────────────────────────────────────
-  const { data: anomalies, error: aErr } = await supabase
-    .from('attendance_anomalies')
-    .select(`
-      id, date, type, severity, resolved,
-      employee_id,
-      employees!inner(id, first_name, last_name, employee_code)
-    `)
-    .eq('tenant_id', tenantId)
-    .gte('date', periodFrom)
-    .lte('date', periodTo)
-    .order('date', { ascending: true })
-
-  if (aErr) throw new Error(`intelligence: anomaly query failed — ${aErr.message}`)
+  // attendance_anomalies is a high-cardinality table at enterprise scale — paginate.
+  let anomalies: any[]
+  try {
+    anomalies = await fetchAllRows((from, to) =>
+      supabase
+        .from('attendance_anomalies')
+        .select(`
+          id, date, type, severity, resolved,
+          employee_id,
+          employees!inner(id, first_name, last_name, employee_code)
+        `)
+        .eq('tenant_id', tenantId)
+        .gte('date', periodFrom)
+        .lte('date', periodTo)
+        .order('date', { ascending: true })
+        .order('id', { ascending: true })
+        .range(from, to),
+    )
+  } catch (aErr: any) {
+    throw new Error(`intelligence: anomaly query failed — ${aErr.message}`)
+  }
 
   // ── Query 2: attendance_daily for absent-streak detection ───────────────────
-  const { data: dailyRows, error: dErr } = await supabase
-    .from('attendance_daily')
-    .select('employee_id, date, status')
-    .eq('tenant_id', tenantId)
-    .gte('date', periodFrom)
-    .lte('date', periodTo)
-    .eq('status', 'absent')
-
-  if (dErr) throw new Error(`intelligence: daily query failed — ${dErr.message}`)
+  let dailyRows: any[]
+  try {
+    dailyRows = await fetchAllRows((from, to) =>
+      supabase
+        .from('attendance_daily')
+        .select('employee_id, date, status')
+        .eq('tenant_id', tenantId)
+        .gte('date', periodFrom)
+        .lte('date', periodTo)
+        .eq('status', 'absent')
+        .order('employee_id')
+        .order('date')
+        .range(from, to),
+    )
+  } catch (dErr: any) {
+    throw new Error(`intelligence: daily query failed — ${dErr.message}`)
+  }
 
   // ── Query 3: total active employees ─────────────────────────────────────────
   const { count: totalEmps } = await supabase
