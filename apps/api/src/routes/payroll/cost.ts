@@ -15,6 +15,7 @@
 import type { FastifyInstance } from 'fastify'
 import { eventBus }            from '../../lib/event-bus.js'
 import { aggregateDeptCost, buildDeptSnapshots, SLIP_DEPT_SELECT } from '../../lib/payroll-dept-snapshot.js'
+import { fetchAllRows } from '../../lib/supabase-paginate.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 
 const monthRe = /^\d{4}-\d{2}$/
@@ -111,17 +112,22 @@ export default async function payrollCostRoute(fastify: FastifyInstance) {
 
     // Fetch per-employee slips with job_history for dept. Source is payroll_slips
     // (authoritative per-employee output); payroll_run_employees is never written.
-    const { data: slips } = await fastify.supabase
-      .from('payroll_slips')
-      .select(SLIP_DEPT_SELECT)
-      .eq('run_id', run.id)
-      .eq('tenant_id', req.tenantId)
+    // One row per employee in the run — paginate for large tenants.
+    const slips = await fetchAllRows((from, to) =>
+      fastify.supabase
+        .from('payroll_slips')
+        .select(SLIP_DEPT_SELECT)
+        .eq('run_id', run.id)
+        .eq('tenant_id', req.tenantId)
+        .order('employee_id')
+        .range(from, to),
+    )
 
     // Single source of truth: the SAME aggregation the finalize-time snapshot
     // uses (lib/payroll-dept-snapshot.aggregateDeptCost), so the live number and
     // the persisted snapshot can never disagree. Preserve the legacy API shape by
     // surfacing the no-dept bucket as 'unassigned' rather than null.
-    const departments = aggregateDeptCost((slips ?? []) as any[])
+    const departments = aggregateDeptCost(slips)
       .map(d => ({ ...d, department_id: d.department_id ?? 'unassigned' }))
 
     const totals = departments.reduce(

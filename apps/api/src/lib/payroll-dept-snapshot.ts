@@ -15,6 +15,8 @@
  * manager/team-payroll-cost.ts).
  */
 
+import { fetchAllRows } from './supabase-paginate.js'
+
 /**
  * The exact PostgREST select used to pull per-employee slips joined to the
  * employee's current department. Shared so every caller aggregates the same
@@ -117,15 +119,23 @@ export async function buildDeptSnapshots(args: {
   const { supabase, tenantId, month, runId } = args
 
   // Authoritative per-employee output, joined to the employee's current dept.
-  const { data: slips, error: slipErr } = await supabase
-    .from('payroll_slips')
-    .select(SLIP_DEPT_SELECT)
-    .eq('run_id', runId)
-    .eq('tenant_id', tenantId)
+  // One row per employee in the run — paginate for large tenants.
+  let slips: any[]
+  try {
+    slips = await fetchAllRows((from, to) =>
+      supabase
+        .from('payroll_slips')
+        .select(SLIP_DEPT_SELECT)
+        .eq('run_id', runId)
+        .eq('tenant_id', tenantId)
+        .order('employee_id')
+        .range(from, to),
+    )
+  } catch (slipErr: any) {
+    return { ok: false, rows: 0, error: slipErr.message }
+  }
 
-  if (slipErr) return { ok: false, rows: 0, error: slipErr.message }
-
-  const depts = aggregateDeptCost((slips ?? []) as any[])
+  const depts = aggregateDeptCost(slips)
 
   // Prior-month gross per department, for variance flags.
   const { data: priorSnaps } = await supabase

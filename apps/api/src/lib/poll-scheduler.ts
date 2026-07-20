@@ -13,6 +13,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { WhatsAppProvider }    from './whatsapp-provider.js'
 import { durableQueue }        from './durable-queue.js'
+import { fetchAllRows }        from './supabase-paginate.js'
 
 const POLL_INTERVAL_MS = 60 * 60 * 1_000  // 1 hour
 
@@ -102,23 +103,32 @@ async function sendPollToEmployees(
   pulseQuestionId:  string,
 ): Promise<void> {
   // Fetch all active employees with phone numbers
-  const { data: employees } = await supabase
-    .from('employees')
-    .select('id, first_name, phone')
-    .eq('tenant_id', tenantId)
-    .eq('status', 'active')
-    .not('phone', 'is', null)
+  const employees = await fetchAllRows((from, to) =>
+    supabase
+      .from('employees')
+      .select('id, first_name, phone')
+      .eq('tenant_id', tenantId)
+      .eq('status', 'active')
+      .not('phone', 'is', null)
+      .order('id')
+      .range(from, to),
+  )
 
   if (!employees?.length) return
 
-  // C5b: exclude employees who already received this question (retry safety)
-  const { data: alreadySent } = await supabase
-    .from('pulse_send_log')
-    .select('employee_id')
-    .eq('tenant_id', tenantId)
-    .eq('pulse_question_id', pulseQuestionId)
+  // C5b: exclude employees who already received this question (retry safety).
+  // pulse_send_log grows without bound (one row per employee per question ever sent).
+  const alreadySent = await fetchAllRows((from, to) =>
+    supabase
+      .from('pulse_send_log')
+      .select('employee_id')
+      .eq('tenant_id', tenantId)
+      .eq('pulse_question_id', pulseQuestionId)
+      .order('employee_id')
+      .range(from, to),
+  )
 
-  const sentSet = new Set((alreadySent ?? []).map((r: { employee_id: string }) => r.employee_id))
+  const sentSet = new Set(alreadySent.map((r: { employee_id: string }) => r.employee_id))
   const pending = (employees as { id: string; first_name: string; phone: string }[])
     .filter(e => !sentSet.has(e.id))
 

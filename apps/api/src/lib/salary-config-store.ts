@@ -24,6 +24,7 @@
 import { z } from 'zod'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { STANDARD_SALARY_COMPONENTS } from './standard-salary-components.js'
+import { fetchAllRows } from './supabase-paginate.js'
 
 // ── Schemas (the one true contract) ──────────────────────────────────────────────
 
@@ -214,15 +215,19 @@ export async function listStructures(
 
   if (shape === 'count') {
     // Fetch count of active employee compensations per structure
-    const { data: empRows } = await supabase
-      .from('employee_compensations')
-      .select('salary_structure_id')
-      .eq('tenant_id', tenantId)
-      .eq('is_active', true)
-      .not('salary_structure_id', 'is', null)
+    const empRows = await fetchAllRows((from, to) =>
+      supabase
+        .from('employee_compensations')
+        .select('salary_structure_id')
+        .eq('tenant_id', tenantId)
+        .eq('is_active', true)
+        .not('salary_structure_id', 'is', null)
+        .order('employee_id')
+        .range(from, to),
+    )
 
     const empCountMap: Record<string, number> = {}
-    for (const row of empRows ?? []) {
+    for (const row of empRows) {
       if (row.salary_structure_id)
         empCountMap[row.salary_structure_id] = (empCountMap[row.salary_structure_id] ?? 0) + 1
     }

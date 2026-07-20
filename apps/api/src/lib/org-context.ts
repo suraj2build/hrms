@@ -29,6 +29,25 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 
+/** Rows per .in() call — keeps the request URL well under server/proxy
+ *  request-line limits (confirmed to fail in production above ~400 UUIDs). */
+const ORG_CTX_ID_CHUNK = 100
+
+/** Runs `queryFn` once per chunk of `ids` and concatenates the results.
+ *  Safe for per-employee dedup logic downstream: each employee's rows
+ *  always land in a single chunk since chunking splits the input id list. */
+async function fetchChunked<T>(
+  ids: string[],
+  queryFn: (chunk: string[]) => PromiseLike<{ data: T[] | null }>,
+): Promise<T[]> {
+  const all: T[] = []
+  for (let i = 0; i < ids.length; i += ORG_CTX_ID_CHUNK) {
+    const { data } = await queryFn(ids.slice(i, i + ORG_CTX_ID_CHUNK))
+    if (data) all.push(...data)
+  }
+  return all
+}
+
 // ── Exported interfaces ───────────────────────────────────────────────────────
 
 /** Minimal applicability fields on a holiday row (no date needed for single-date checks). */
@@ -267,18 +286,20 @@ export async function resolveEmployeeOrgContextBatch(
   if (employeeIds.length === 0) return result
 
   // 1. Check history assignments effective on `date`
-  const { data: histRows } = await supabase
-    .from('employee_org_assignments')
-    .select('employee_id, site_id, roster_id')
-    .eq('tenant_id', tenantId)
-    .in('employee_id', employeeIds)
-    .lte('effective_from', date)
-    .or(`effective_to.is.null,effective_to.gte.${date}`)
-    .order('effective_from', { ascending: false })
+  const histRows = await fetchChunked(employeeIds, (chunk) =>
+    supabase
+      .from('employee_org_assignments')
+      .select('employee_id, site_id, roster_id')
+      .eq('tenant_id', tenantId)
+      .in('employee_id', chunk)
+      .lte('effective_from', date)
+      .or(`effective_to.is.null,effective_to.gte.${date}`)
+      .order('effective_from', { ascending: false }),
+  )
 
   // Keep only the most-recent effective row per employee
   const histMap = new Map<string, { site_id: string | null; roster_id: string | null }>()
-  for (const r of (histRows ?? []) as { employee_id: string; site_id: string | null; roster_id: string | null }[]) {
+  for (const r of histRows as { employee_id: string; site_id: string | null; roster_id: string | null }[]) {
     if (!histMap.has(r.employee_id)) histMap.set(r.employee_id, { site_id: r.site_id, roster_id: r.roster_id })
   }
 
@@ -287,12 +308,14 @@ export async function resolveEmployeeOrgContextBatch(
   const fallbackMap  = new Map<string, { site_id: string | null; roster_id: string | null }>()
 
   if (needFallback.length > 0) {
-    const { data: empRows } = await supabase
-      .from('employees')
-      .select('id, site_id, roster_id')
-      .eq('tenant_id', tenantId)
-      .in('id', needFallback)
-    for (const e of (empRows ?? []) as { id: string; site_id: string | null; roster_id: string | null }[]) {
+    const empRows = await fetchChunked(needFallback, (chunk) =>
+      supabase
+        .from('employees')
+        .select('id, site_id, roster_id')
+        .eq('tenant_id', tenantId)
+        .in('id', chunk),
+    )
+    for (const e of empRows as { id: string; site_id: string | null; roster_id: string | null }[]) {
       fallbackMap.set(e.id, { site_id: e.site_id ?? null, roster_id: e.roster_id ?? null })
     }
   }
@@ -304,15 +327,17 @@ export async function resolveEmployeeOrgContextBatch(
   }
 
   // 3. Work location from current job_history
-  const { data: jobRows } = await supabase
-    .from('job_history')
-    .select('employee_id, work_location_id')
-    .eq('tenant_id', tenantId)
-    .in('employee_id', employeeIds)
-    .eq('is_current', true)
+  const jobRows = await fetchChunked(employeeIds, (chunk) =>
+    supabase
+      .from('job_history')
+      .select('employee_id, work_location_id')
+      .eq('tenant_id', tenantId)
+      .in('employee_id', chunk)
+      .eq('is_current', true),
+  )
 
   const locMap = new Map<string, string | null>()
-  for (const j of (jobRows ?? []) as { employee_id: string; work_location_id: string | null }[]) {
+  for (const j of jobRows as { employee_id: string; work_location_id: string | null }[]) {
     locMap.set(j.employee_id, j.work_location_id ?? null)
   }
 
