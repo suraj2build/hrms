@@ -858,11 +858,14 @@ export async function validateSalaryUploadRows(
   }
 
   // 2. Check which employees already have an active compensation (fetch effective_from too)
+  // CHUNK=100 (not 500): employee_id is a UUID column — 500 UUIDs builds a
+  // ~18.5 KB request URL, which exceeds server/proxy request-line limits
+  // (confirmed in production at 400 UUIDs / ~14.8 KB).
   const resolvedIds = [...empCodeMap.values()]
   const existingCompMap = new Map<string, string>()  // employee_id → existing effective_from
   if (resolvedIds.length > 0) {
-    for (let i = 0; i < resolvedIds.length; i += 500) {
-      const chunk = resolvedIds.slice(i, i + 500)
+    for (let i = 0; i < resolvedIds.length; i += 100) {
+      const chunk = resolvedIds.slice(i, i + 100)
       const { data } = await supabase
         .from('employee_compensations')
         .select('employee_id, effective_from')
@@ -1022,10 +1025,11 @@ export async function importSalaryUpload(
       validRows.flatMap(vr => Object.keys((vr.normalizedData.components as Record<string, number>) ?? {}))
     ),
   ]
+  // CHUNK=100: id is a UUID column — see the note on the employee_id chunk above.
   const compTypeMap = new Map<string, string>()  // component_id → component_type
   if (allCompIds.length > 0) {
-    for (let i = 0; i < allCompIds.length; i += 500) {
-      const chunk = allCompIds.slice(i, i + 500)
+    for (let i = 0; i < allCompIds.length; i += 100) {
+      const chunk = allCompIds.slice(i, i + 100)
       const { data } = await supabase
         .from('salary_components')
         .select('id, component_type')

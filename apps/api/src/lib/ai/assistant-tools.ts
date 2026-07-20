@@ -12,6 +12,7 @@
  */
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { getDirectReportIds, isHrAdmin } from '../manager-scope.js'
+import { fetchAllRows } from '../supabase-paginate.js'
 import type { ToolDef } from './llm.js'
 import type { AssistantCaller } from './assistant-context.js'
 
@@ -732,10 +733,15 @@ async function listDepartments(ctx: ToolCtx): Promise<string> {
   if (list.length === 0) return 'No departments are configured.'
 
   // Active headcount per department from employees.department_id.
-  const { data: emps } = await ctx.supabase
-    .from('employees').select('department_id').eq('tenant_id', ctx.caller.tenantId).eq('status', 'active')
+  const emps = await fetchAllRows<any>((from, to) =>
+    ctx.supabase
+      .from('employees').select('department_id')
+      .eq('tenant_id', ctx.caller.tenantId).eq('status', 'active')
+      .order('id')
+      .range(from, to) as any,
+  )
   const counts = new Map<string, number>()
-  for (const e of (emps ?? []) as any[]) if (e.department_id) counts.set(e.department_id, (counts.get(e.department_id) ?? 0) + 1)
+  for (const e of emps) if (e.department_id) counts.set(e.department_id, (counts.get(e.department_id) ?? 0) + 1)
 
   const parts = list
     .map(d => ({ name: d.name, n: counts.get(d.id) ?? 0 }))

@@ -86,7 +86,9 @@ async function purgeTenantStorage(supabase: any, tenantId: string): Promise<numb
   while (stack.length > 0) {
     const prefix = stack.pop() as string
     let offset = 0
-    // Page through this folder level.
+    // Page through this folder level. Stop only on an empty page — a page
+    // shorter than the limit is not reliably "last page" for every backend,
+    // and always advance by the rows actually received.
     for (;;) {
       const { data: items, error } = await supabase.storage
         .from(BUCKET)
@@ -97,7 +99,6 @@ async function purgeTenantStorage(supabase: any, tenantId: string): Promise<numb
         if (item.id === null || item.id === undefined) stack.push(full)  // sub-folder
         else                                            filePaths.push(full) // file
       }
-      if (items.length < 100) break
       offset += items.length
     }
   }

@@ -16,6 +16,7 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { fetchAllRows } from './supabase-paginate.js'
 
 interface EmpRow {
   id: string
@@ -44,12 +45,16 @@ export async function ensureTodaysCelebrations(supabase: SupabaseClient, tenantI
     const d    = now.getDate()
     const year = now.getFullYear()
 
-    const { data: emps } = await supabase
-      .from('employees')
-      .select('id, first_name, last_name, dob, joining_date')
-      .eq('tenant_id', tenantId).eq('status', 'active')
-      .limit(2000)
-    const rows = (emps ?? []) as EmpRow[]
+    // .limit(2000) previously relied on the server never capping below 2000 —
+    // fetchAllRows is correct at any server-side row cap.
+    const rows = await fetchAllRows<EmpRow>((from, to) =>
+      supabase
+        .from('employees')
+        .select('id, first_name, last_name, dob, joining_date')
+        .eq('tenant_id', tenantId).eq('status', 'active')
+        .order('id')
+        .range(from, to) as any,
+    )
     if (!rows.length) return 0
 
     const birthdays = rows.filter((e) => e.dob && isAnniversaryToday(e.dob, m, d))
