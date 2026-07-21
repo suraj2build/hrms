@@ -1597,6 +1597,17 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
         status:     'queued',
         notes:      notes ?? null,
         created_by: req.userId,
+        // Re-triggering reuses this row (upsert keyed on tenant_id+month) — clear
+        // every field from a previous cycle so a fresh run never displays a prior
+        // run's stale error, failure breakdown, or completion stats/timestamps
+        // while it's actively processing.
+        error_message:            null,
+        failure_summary:          null,
+        finalized_at:             null,
+        started_processing_at:   null,
+        total_employee_count:    null,
+        processed_employee_count: 0,
+        run_duration_ms:         null,
       }, { onConflict: 'tenant_id,month' })
       .select('id')
       .single()
