@@ -1063,46 +1063,26 @@ export function ImportWorkspace() {
         )
         if (headerIdx === -1) { setParsedRows([]); return }
 
-        const headers    = raw[headerIdx].map((h) => normaliseKey(String(h)))
-        const rawHeaders = raw[headerIdx].map((h) => String(h ?? '').trim())
+        const headers = raw[headerIdx].map((h) => normaliseKey(String(h)))
         const dataRows = raw.slice(headerIdx + 1).filter(
           (row) => row.some((cell) => String(cell ?? '').trim() !== '') &&
                    !String(row[0] ?? '').trimStart().startsWith('#'),
         )
 
-        // For salary upload, component columns are keyed by 1-based Excel column
-        // position rather than the header name. The column header text becomes
-        // presentation-only — renaming, translating, or accidentally editing it
-        // does not affect resolution. Fixed columns (employee_code, etc.) keep
-        // their name-based keys since they are stable platform constants.
-        const SALARY_FIXED_HEADERS = new Set([
-          'employee_code', 'employee_name', 'effective_from', 'notes',
-        ])
-        const usePositionalKeys = selectedMaster === 'employee_salary_upload'
-
+        // Every column — salary upload included — is keyed by its normalized
+        // header name. The backend resolves salary component columns by
+        // matching this name against the tenant's active salary_components,
+        // not by column position: renaming a column to a real component name
+        // still resolves correctly regardless of where it sits in the file,
+        // and reordering/inserting/deleting columns can't misattribute a
+        // value to the wrong component, because there's no position for the
+        // file and the system to drift out of sync on.
         const rows: Record<string, string>[] = dataRows.map((row) => {
           const obj: Record<string, string> = {}
-          headers.forEach((h, i) => {
-            const key = usePositionalKeys && !SALARY_FIXED_HEADERS.has(h)
-              ? String(i + 1)   // 1-based Excel column position
-              : h
-            obj[key] = cellToString(row[i])
-          })
+          headers.forEach((h, i) => { obj[h] = cellToString(row[i]) })
           return obj
         })
         setParsedRows(rows)
-
-        // Send the ACTUAL header text found at each component column position,
-        // alongside the manifest, so the backend can catch a reordered/shuffled
-        // file (e.g. "Basic" and "Meal Allowance" swapped in Excel) — positional
-        // resolution alone can't detect that, since it never looks at header text.
-        if (usePositionalKeys) {
-          const actualHeaders: Record<string, string> = {}
-          headers.forEach((h, i) => {
-            if (!SALARY_FIXED_HEADERS.has(h)) actualHeaders[String(i + 1)] = rawHeaders[i]
-          })
-          setTemplateManifest(prev => ({ ...(prev ?? {}), actualHeaders: JSON.stringify(actualHeaders) }))
-        }
       }
       reader.readAsArrayBuffer(file)
     }

@@ -51,11 +51,6 @@ const manifestSchema = z.object({
   generatedAt:         z.string().optional(),
   signature:           z.string().optional(),
   components:          z.string().optional(),
-  // Actual header text found at each component column position in the
-  // uploaded file — cross-checked against `components[].name` (the manifest's
-  // recorded name for that position) to catch a reordered/shuffled file.
-  // JSON: { "4": "Basic", "5": "Meal Allowance", ... }
-  actualHeaders:       z.string().optional(),
 }).optional()
 
 const validateBodySchema = z.object({

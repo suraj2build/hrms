@@ -22,9 +22,6 @@ import ExcelJS                                from 'exceljs'
 import {
   resolveMetadata,
   validateReferenceIntegrity,
-  MetadataValidationError,
-  ReferenceIntegrityError,
-  WORKBOOK_ERROR_CODES,
   type WorkbookManifest,
   type MasterMapping,
   type ImportContext,
@@ -155,12 +152,9 @@ export interface SalaryManifest {
   generatorVersion?:    string
   generatedAt?:         string
   signature?:           string
-  components?:          string  // JSON array: [{position, id, code, name}]
-  // Actual header text found at each component column position in the
-  // uploaded file. JSON object: { "4": "Basic", "5": "Meal Allowance", ... }
-  // Cross-checked against components[].name to catch a reordered/shuffled file
-  // that positional resolution alone cannot detect.
-  actualHeaders?:       string
+  components?:          string  // JSON array: [{position, id, code, name}] — retained
+  // for the reference-integrity/stale-template checks; no longer used to
+  // resolve component columns (that's done by header name — see below).
 }
 
 // ── Extended validation result ────────────────────────────────────────────────
@@ -707,18 +701,12 @@ export async function validateSalaryUploadRows(
     }
   }
 
-  // Phase 3: component manifest is mandatory — salary upload requires the v2 XLSX
-  // template. v1 XLSX workbooks are rejected at resolveMetadata (Stage 1); CSV
-  // uploads have no manifest. Without manifest.components there is no positional
-  // mapping and we cannot safely process any component column.
-  if (!manifest?.components) {
-    throw new MetadataValidationError(
-      WORKBOOK_ERROR_CODES.MANIFEST_FIELD_MISSING,
-      'This file is missing the salary component manifest. ' +
-      'Please upload the XLSX template downloaded from CognixHR — ' +
-      'CSV and older template files are no longer accepted for salary data.',
-    )
-  }
+  // Note: the component manifest (manifest.components) is no longer required
+  // for column resolution — columns are matched by header NAME against the
+  // tenant's current active components (below), which works for any file
+  // (XLSX or CSV) regardless of whether it carries a manifest. The manifest,
+  // when present, still feeds the reference-integrity check above and the
+  // stale-template version warning below.
 
   // Current template version
   const currentTemplateVersion = computeTemplateVersion(activeComponents)
@@ -730,70 +718,71 @@ export async function validateSalaryUploadRows(
     compTypeById.set(c.id, c.component_type)
   }
 
-  // Build pure positional column map: 1-based Excel column position → entityId.
-  // The frontend emits component columns with their 1-based position as the key
-  // (e.g. "4" for column D). Column header text is never used for resolution —
-  // users can rename, translate, or reformat headers without affecting imports.
-  const manifestEntries = JSON.parse(manifest.components) as Array<{
-    position: number; id: string; code: string; name: string
-  }>
-  const manifestByPosition = new Map<number, string>()  // 1-based position → entityId
-  for (const m of manifestEntries) {
-    manifestByPosition.set(m.position, m.id)
+  // Build a normalized-name → component lookup from the tenant's CURRENT active
+  // components. Matching by header NAME (not position) means renaming a column
+  // to something that happens to match a real component resolves correctly no
+  // matter where it sits in the file, and reordering/inserting/deleting columns
+  // can never misattribute a value to the wrong component — there is no
+  // position for the file and the system to drift out of sync on.
+  const normName = (s: string) => s.trim().toLowerCase().replace(/\s+/g, ' ')
+  const compByName = new Map<string, ComponentMeta>()
+  for (const c of activeComponents) {
+    compByName.set(normName(c.name), c)
   }
 
-  // ── Column-shuffle guard ─────────────────────────────────────────────────
-  // Positional resolution trusts that "column D holds whatever the manifest
-  // recorded as position 4" — it never looks at header text, specifically so
-  // renaming/translating a header doesn't break the import. But that same
-  // design means an accidental reorder (drag a column in Excel, paste from
-  // another sheet, insert/delete a column) is invisible to positional
-  // resolution alone: the values silently land under the WRONG component,
-  // for every row, with no error. If the uploaded file's actual header text
-  // at a position doesn't match what the manifest recorded there, it's a
-  // strong signal the column layout has shifted — surface it as a hard,
-  // pre-flight error before processing a single row, rather than silently
-  // importing amounts under the wrong salary component.
-  if (manifest.actualHeaders) {
-    try {
-      const actual = JSON.parse(manifest.actualHeaders) as Record<string, string>
-      const norm = (s: string) => s.trim().toLowerCase().replace(/\s+/g, ' ')
-      const mismatches: Array<{ position: number; expected: string; found: string }> = []
-      for (const m of manifestEntries) {
-        const found = actual[String(m.position)]
-        if (found === undefined) continue  // frontend didn't report this position — skip
-        if (norm(found) !== norm(m.name)) {
-          mismatches.push({ position: m.position, expected: m.name, found })
-        }
-      }
-      if (mismatches.length > 0) {
-        const detail = mismatches
-          .map(m => `column ${m.position} (${String.fromCharCode(64 + m.position)}): expected "${m.expected}", found "${m.found}"`)
-          .join('; ')
-        throw new Error(
-          `This file's column layout doesn't match the template it was generated from — ${detail}. ` +
-          `This usually means a column was reordered, inserted, deleted, or pasted from another file. ` +
-          `Re-download a fresh template and re-enter the data without rearranging columns, or the ` +
-          `amounts risk being recorded against the wrong salary component.`,
-        )
-      }
-    } catch (err) {
-      if (err instanceof Error && err.message.startsWith("This file's column layout")) throw err
-      // Malformed actualHeaders JSON — non-fatal, same as malformed components above.
+  // Also fetch inactive components by name, so an unrecognized header gets a
+  // specific "this component is deactivated" error instead of a generic
+  // "unknown column" one when it matches something that used to exist.
+  const inactiveByName = new Map<string, string>()  // normalized name → original-case name
+  {
+    const { data: inactiveRows } = await supabase
+      .from('salary_components')
+      .select('name')
+      .eq('tenant_id', tenantId)
+      .eq('is_active', false)
+    for (const r of (inactiveRows ?? []) as Array<{ name: string }>) {
+      inactiveByName.set(normName(r.name), r.name)
     }
   }
 
   // Classify columns: fixed-name keys (employee_code etc.) are skipped;
-  // numeric-string keys are 1-based column positions resolved via the manifest.
+  // every other header must match an active component's name (case- and
+  // whitespace-insensitive). No match → hard error — a typo, a stale
+  // template referencing a renamed/deactivated component, or a column that
+  // was never a real component name are all treated as errors rather than
+  // silently importing nothing for that column.
   const firstRowKeys = rows.length > 0 ? Object.keys(rows[0]) : []
   const componentCols: Array<{ key: string; entityId: string }> = []
+  const unknownHeaders: string[] = []
+  const inactiveHeaders: string[] = []
   for (const key of firstRowKeys) {
     if (FIXED_KEYS.has(key)) continue
-    const pos = parseInt(key, 10)
-    if (Number.isInteger(pos) && pos > 0) {
-      const entityId = manifestByPosition.get(pos)
-      if (entityId) componentCols.push({ key, entityId })
+    const comp = compByName.get(normName(key))
+    if (comp) {
+      componentCols.push({ key, entityId: comp.id })
+    } else if (inactiveByName.has(normName(key))) {
+      inactiveHeaders.push(inactiveByName.get(normName(key))!)
+    } else {
+      unknownHeaders.push(key)
     }
+  }
+  if (unknownHeaders.length > 0 || inactiveHeaders.length > 0) {
+    const parts: string[] = []
+    if (unknownHeaders.length > 0) {
+      parts.push(
+        `${unknownHeaders.length} column(s) don't match any salary component: ` +
+        unknownHeaders.map(h => `"${h}"`).join(', ') +
+        `. Check for typos, or re-download a fresh template from Payroll → Salary Components.`,
+      )
+    }
+    if (inactiveHeaders.length > 0) {
+      parts.push(
+        `${inactiveHeaders.length} column(s) match a DEACTIVATED component: ` +
+        inactiveHeaders.map(h => `"${h}"`).join(', ') +
+        `. Reactivate the component in Payroll → Salary Components, or remove this column.`,
+      )
+    }
+    throw new Error(parts.join(' '))
   }
 
   const validatedRows: ValidatedRow[] = []
