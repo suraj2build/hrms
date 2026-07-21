@@ -1063,7 +1063,8 @@ export function ImportWorkspace() {
         )
         if (headerIdx === -1) { setParsedRows([]); return }
 
-        const headers = raw[headerIdx].map((h) => normaliseKey(String(h)))
+        const headers    = raw[headerIdx].map((h) => normaliseKey(String(h)))
+        const rawHeaders = raw[headerIdx].map((h) => String(h ?? '').trim())
         const dataRows = raw.slice(headerIdx + 1).filter(
           (row) => row.some((cell) => String(cell ?? '').trim() !== '') &&
                    !String(row[0] ?? '').trimStart().startsWith('#'),
@@ -1090,6 +1091,18 @@ export function ImportWorkspace() {
           return obj
         })
         setParsedRows(rows)
+
+        // Send the ACTUAL header text found at each component column position,
+        // alongside the manifest, so the backend can catch a reordered/shuffled
+        // file (e.g. "Basic" and "Meal Allowance" swapped in Excel) — positional
+        // resolution alone can't detect that, since it never looks at header text.
+        if (usePositionalKeys) {
+          const actualHeaders: Record<string, string> = {}
+          headers.forEach((h, i) => {
+            if (!SALARY_FIXED_HEADERS.has(h)) actualHeaders[String(i + 1)] = rawHeaders[i]
+          })
+          setTemplateManifest(prev => ({ ...(prev ?? {}), actualHeaders: JSON.stringify(actualHeaders) }))
+        }
       }
       reader.readAsArrayBuffer(file)
     }

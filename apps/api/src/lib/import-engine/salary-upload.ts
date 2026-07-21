@@ -156,6 +156,11 @@ export interface SalaryManifest {
   generatedAt?:         string
   signature?:           string
   components?:          string  // JSON array: [{position, id, code, name}]
+  // Actual header text found at each component column position in the
+  // uploaded file. JSON object: { "4": "Basic", "5": "Meal Allowance", ... }
+  // Cross-checked against components[].name to catch a reordered/shuffled file
+  // that positional resolution alone cannot detect.
+  actualHeaders?:       string
 }
 
 // ── Extended validation result ────────────────────────────────────────────────
@@ -735,6 +740,47 @@ export async function validateSalaryUploadRows(
   const manifestByPosition = new Map<number, string>()  // 1-based position → entityId
   for (const m of manifestEntries) {
     manifestByPosition.set(m.position, m.id)
+  }
+
+  // ── Column-shuffle guard ─────────────────────────────────────────────────
+  // Positional resolution trusts that "column D holds whatever the manifest
+  // recorded as position 4" — it never looks at header text, specifically so
+  // renaming/translating a header doesn't break the import. But that same
+  // design means an accidental reorder (drag a column in Excel, paste from
+  // another sheet, insert/delete a column) is invisible to positional
+  // resolution alone: the values silently land under the WRONG component,
+  // for every row, with no error. If the uploaded file's actual header text
+  // at a position doesn't match what the manifest recorded there, it's a
+  // strong signal the column layout has shifted — surface it as a hard,
+  // pre-flight error before processing a single row, rather than silently
+  // importing amounts under the wrong salary component.
+  if (manifest.actualHeaders) {
+    try {
+      const actual = JSON.parse(manifest.actualHeaders) as Record<string, string>
+      const norm = (s: string) => s.trim().toLowerCase().replace(/\s+/g, ' ')
+      const mismatches: Array<{ position: number; expected: string; found: string }> = []
+      for (const m of manifestEntries) {
+        const found = actual[String(m.position)]
+        if (found === undefined) continue  // frontend didn't report this position — skip
+        if (norm(found) !== norm(m.name)) {
+          mismatches.push({ position: m.position, expected: m.name, found })
+        }
+      }
+      if (mismatches.length > 0) {
+        const detail = mismatches
+          .map(m => `column ${m.position} (${String.fromCharCode(64 + m.position)}): expected "${m.expected}", found "${m.found}"`)
+          .join('; ')
+        throw new Error(
+          `This file's column layout doesn't match the template it was generated from — ${detail}. ` +
+          `This usually means a column was reordered, inserted, deleted, or pasted from another file. ` +
+          `Re-download a fresh template and re-enter the data without rearranging columns, or the ` +
+          `amounts risk being recorded against the wrong salary component.`,
+        )
+      }
+    } catch (err) {
+      if (err instanceof Error && err.message.startsWith("This file's column layout")) throw err
+      // Malformed actualHeaders JSON — non-fatal, same as malformed components above.
+    }
   }
 
   // Classify columns: fixed-name keys (employee_code etc.) are skipped;
