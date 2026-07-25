@@ -6,6 +6,7 @@ import {
   emitOnboardingSessionApproved,
   emitOnboardingSessionRejected,
 } from '../../lib/onboarding-orchestrator.js'
+import { checkIdempotency, storeIdempotency } from '../../lib/idempotency.js'
 
 // ─── Validation schemas ────────────────────────────────────────────────────
 
@@ -403,6 +404,20 @@ export default async function draftRoutes(fastify: FastifyInstance) {
     const exceptionPass   = parsed.success ? parsed.data.exception_pass   : false
     const exceptionReason = parsed.success ? parsed.data.exception_reason  : undefined
 
+    // Idempotency: this handler permanently creates an employees row (with a
+    // freshly-generated employee_code) and is only guarded against re-approval
+    // by draft.status, which isn't updated until the very end of the handler —
+    // a double-click or network-retried request racing before that update
+    // would create two employee records for the same candidate.
+    const iKey = (req.headers['idempotency-key'] as string | undefined)?.trim()
+    if (iKey) {
+      const cached = await checkIdempotency(fastify.supabase, req.tenantId, iKey, 'onboarding-draft-approve')
+      if (cached) {
+        reply.header('Idempotency-Replayed', 'true')
+        return reply.code(cached.status_code).send(cached.response)
+      }
+    }
+
     const { data: draft, error: draftError } = await fastify.supabase
       .from('draft_employee_profiles')
       .select('*')
@@ -611,13 +626,15 @@ export default async function draftRoutes(fastify: FastifyInstance) {
       correlationId: (req as any).correlationId,
     })
 
-    return reply.code(201).send({
+    const responseBody = {
       data: {
         employee_id: employeeId,
         employee_code: employeeCode,
         exception_pass: exceptionPass,
       },
-    })
+    }
+    if (iKey) await storeIdempotency(fastify.supabase, req.tenantId, iKey, 'onboarding-draft-approve', 201, responseBody)
+    return reply.code(201).send(responseBody)
   })
 
   // ── POST /onboarding/drafts/:id/reject ────────────────────────────────────

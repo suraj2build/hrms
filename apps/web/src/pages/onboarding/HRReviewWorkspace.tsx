@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { OnboardingReadiness } from '@/pages/intelligence/OnboardingReadiness'
 import { ReadinessCard }       from '@/components/onboarding/ReadinessCard'
@@ -959,14 +959,27 @@ export function HRReviewWorkspace() {
   const [exceptionDialogOpen, setExceptionDialogOpen] = useState(false)
   const [exceptionReason, setExceptionReason] = useState('')
 
+  // Sent as Idempotency-Key on approve, mirroring PayrollRuns.tsx's pattern.
+  // This permanently creates an employees row — a double-click or network
+  // retry must not create two employee records for the same candidate.
+  // Rotated only after a successful approve.
+  const approveIdempotencyKey = useRef(crypto.randomUUID())
+
   const { mutate: approveAndCreate, isPending: approving } = useMutation<{ data: { employee_id: string; employee_code: string; exception_pass?: boolean } }, Error, { exception_pass?: boolean; exception_reason?: string }>({
     mutationFn: (vars: { exception_pass?: boolean; exception_reason?: string }) =>
       api.post<{ data: { employee_id: string; employee_code: string; exception_pass?: boolean } }>(
         `/onboarding/drafts/${draftProfileId}/approve`,
         vars.exception_pass ? { exception_pass: true, exception_reason: vars.exception_reason } : {},
+        { headers: { 'Idempotency-Key': approveIdempotencyKey.current } },
       ),
     onSuccess: (resp) => {
+      approveIdempotencyKey.current = crypto.randomUUID()
       qc.invalidateQueries({ queryKey: ['onboarding-session', sessionId] })
+      // A new employee now exists (Employee List / Org Chart) and this
+      // session/draft should drop out of the HR onboarding queue's counts.
+      qc.invalidateQueries({ queryKey: ['employees'] })
+      qc.invalidateQueries({ queryKey: ['onboarding-sessions'] })
+      qc.invalidateQueries({ queryKey: ['onboarding-dashboard'] })
       const code = resp.data?.employee_code
       if (resp.data?.exception_pass) {
         toast.success('Employee created with exception', {
