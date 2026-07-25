@@ -25,6 +25,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z }                   from 'zod'
 import { HR_ADMIN_ROLES }      from '../../lib/rbac.js'
+import { fetchAllRows }        from '../../lib/supabase-paginate.js'
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 type MetricType = 'absent' | 'late' | 'ot' | 'pressure' | 'reliability' | 'leave'
@@ -119,30 +120,35 @@ export default async function workforceDrillRoutes(fastify: FastifyInstance) {
     // ── Step 1: Resolve employee set (with names + departments) ──────────────
     // We always join through employees → job_history to get department + code.
     // manager scope: only employees in their team (manager_id = req.employeeId)
-    let empQuery = fastify.supabase
-      .from('employees')
-      .select(`
-        id,
-        employee_code,
-        first_name,
-        last_name,
-        job_history!job_history_employee_id_fkey(
-          is_current,
-          departments(name),
-          manager_id
-        )
-      `)
-      .eq('tenant_id', req.tenantId)
-      .eq('status', 'active')
-      .eq('job_history.is_current', true)
+    // Paginated — an unbounded .select() truncates at PostgREST's 1,000-row
+    // ceiling for a large tenant, silently dropping employees from every
+    // drill-down metric below.
+    let empRows: any[] = []
+    try {
+      empRows = await fetchAllRows((from, to) => {
+        let q = fastify.supabase
+          .from('employees')
+          .select(`
+            id,
+            employee_code,
+            first_name,
+            last_name,
+            job_history!job_history_employee_id_fkey(
+              is_current,
+              departments(name),
+              manager_id
+            )
+          `)
+          .eq('tenant_id', req.tenantId)
+          .eq('status', 'active')
+          .eq('job_history.is_current', true)
 
-    if (isManager) {
-      empQuery = empQuery.eq('job_history.manager_id', req.employeeId)
-    }
+        if (isManager) q = q.eq('job_history.manager_id', req.employeeId)
 
-    const { data: empRows, error: empError } = await empQuery
-    if (empError) {
-      fastify.log.warn({ err: empError.message }, 'workforce-drill: employee join failed, falling back to simple query')
+        return q.range(from, to)
+      })
+    } catch (err) {
+      fastify.log.warn({ err: (err as Error)?.message }, 'workforce-drill: employee join failed, falling back to simple query')
     }
 
     // Build employee lookup map — id → { code, name, department }
@@ -181,21 +187,27 @@ export default async function workforceDrillRoutes(fastify: FastifyInstance) {
         ? ['late']
         : ['leave']
 
-      const { data: dailyRows, error } = await fastify.supabase
-        .from('attendance_daily')
-        .select('employee_id, date, status, work_hours, late_minutes')
-        .eq('tenant_id', req.tenantId)
-        .gte('date', range.from)
-        .lte('date', range.to)
-        .in('status', ['present', 'absent', 'late', 'half_day', 'leave'])
-
-      if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch attendance data' })
+      let dailyRows: any[]
+      try {
+        dailyRows = await fetchAllRows((from, to) =>
+          fastify.supabase
+            .from('attendance_daily')
+            .select('employee_id, date, status, work_hours, late_minutes')
+            .eq('tenant_id', req.tenantId)
+            .gte('date', range.from)
+            .lte('date', range.to)
+            .in('status', ['present', 'absent', 'late', 'half_day', 'leave'])
+            .range(from, to),
+        )
+      } catch {
+        return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch attendance data' })
+      }
 
       // Aggregate per employee
       type EmpStats = { targetDays: number; totalDays: number; dates: string[] }
       const empStats = new Map<string, EmpStats>()
 
-      for (const row of dailyRows ?? []) {
+      for (const row of dailyRows) {
         const s = empStats.get(row.employee_id) ?? { targetDays: 0, totalDays: 0, dates: [] }
         s.totalDays++
         if (targetStatus.includes(row.status)) {
@@ -256,20 +268,26 @@ export default async function workforceDrillRoutes(fastify: FastifyInstance) {
 
     // ── OT (overtime dependency) ──────────────────────────────────────────────
     if (metric === 'ot') {
-      const { data: otRows, error } = await fastify.supabase
-        .from('attendance_daily')
-        .select('employee_id, date, overtime_minutes, work_hours')
-        .eq('tenant_id', req.tenantId)
-        .gte('date', range.from)
-        .lte('date', range.to)
-        .gt('overtime_minutes', 0)
-
-      if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch OT data' })
+      let otRows: any[]
+      try {
+        otRows = await fetchAllRows((from, to) =>
+          fastify.supabase
+            .from('attendance_daily')
+            .select('employee_id, date, overtime_minutes, work_hours')
+            .eq('tenant_id', req.tenantId)
+            .gte('date', range.from)
+            .lte('date', range.to)
+            .gt('overtime_minutes', 0)
+            .range(from, to),
+        )
+      } catch {
+        return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch OT data' })
+      }
 
       type OtStats = { total_ot_minutes: number; ot_days: number }
       const empOtStats = new Map<string, OtStats>()
 
-      for (const row of otRows ?? []) {
+      for (const row of otRows) {
         const s = empOtStats.get(row.employee_id) ?? { total_ot_minutes: 0, ot_days: 0 }
         s.total_ot_minutes += row.overtime_minutes ?? 0
         s.ot_days++
@@ -310,33 +328,39 @@ export default async function workforceDrillRoutes(fastify: FastifyInstance) {
 
     // ── STAFFING PRESSURE (worked on weekly-off / holiday) ────────────────────
     if (metric === 'pressure') {
-      const [weeklyOffRes, holidayRes] = await Promise.all([
-        fastify.supabase
-          .from('attendance_daily')
-          .select('employee_id, date, work_hours')
-          .eq('tenant_id', req.tenantId)
-          .eq('worked_on_weekly_off', true)
-          .gte('date', range.from)
-          .lte('date', range.to),
-        fastify.supabase
-          .from('attendance_daily')
-          .select('employee_id, date, work_hours')
-          .eq('tenant_id', req.tenantId)
-          .eq('worked_on_holiday', true)
-          .gte('date', range.from)
-          .lte('date', range.to),
+      const [weeklyOffRows, holidayRows] = await Promise.all([
+        fetchAllRows((from, to) =>
+          fastify.supabase
+            .from('attendance_daily')
+            .select('employee_id, date, work_hours')
+            .eq('tenant_id', req.tenantId)
+            .eq('worked_on_weekly_off', true)
+            .gte('date', range.from)
+            .lte('date', range.to)
+            .range(from, to),
+        ),
+        fetchAllRows((from, to) =>
+          fastify.supabase
+            .from('attendance_daily')
+            .select('employee_id, date, work_hours')
+            .eq('tenant_id', req.tenantId)
+            .eq('worked_on_holiday', true)
+            .gte('date', range.from)
+            .lte('date', range.to)
+            .range(from, to),
+        ),
       ])
 
       type PressureStats = { weekly_off_days: number; holiday_days: number; total_hours: number }
       const pressureMap = new Map<string, PressureStats>()
 
-      for (const row of weeklyOffRes.data ?? []) {
+      for (const row of weeklyOffRows) {
         const s = pressureMap.get(row.employee_id) ?? { weekly_off_days: 0, holiday_days: 0, total_hours: 0 }
         s.weekly_off_days++
         s.total_hours += row.work_hours ?? 0
         pressureMap.set(row.employee_id, s)
       }
-      for (const row of holidayRes.data ?? []) {
+      for (const row of holidayRows) {
         const s = pressureMap.get(row.employee_id) ?? { weekly_off_days: 0, holiday_days: 0, total_hours: 0 }
         s.holiday_days++
         s.total_hours += row.work_hours ?? 0
@@ -376,15 +400,21 @@ export default async function workforceDrillRoutes(fastify: FastifyInstance) {
 
     // ── RELIABILITY SCORE ─────────────────────────────────────────────────────
     if (metric === 'reliability') {
-      const { data: rows, error } = await fastify.supabase
-        .from('attendance_daily')
-        .select('employee_id, status')
-        .eq('tenant_id', req.tenantId)
-        .gte('date', range.from)
-        .lte('date', range.to)
-        .in('status', ['present', 'absent', 'late', 'half_day', 'leave'])
-
-      if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch reliability data' })
+      let rows: any[]
+      try {
+        rows = await fetchAllRows((from, to) =>
+          fastify.supabase
+            .from('attendance_daily')
+            .select('employee_id, status')
+            .eq('tenant_id', req.tenantId)
+            .gte('date', range.from)
+            .lte('date', range.to)
+            .in('status', ['present', 'absent', 'late', 'half_day', 'leave'])
+            .range(from, to),
+        )
+      } catch {
+        return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch reliability data' })
+      }
 
       type RelStats = { present: number; absent: number; late: number; total: number }
       const relMap = new Map<string, RelStats>()

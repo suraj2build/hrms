@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { requireRole } from '../../lib/rbac.js'
+import { fetchAllRows } from '../../lib/supabase-paginate.js'
 
 export default async function analyticsRoutes(fastify: FastifyInstance) {
   const auth      = { preHandler: [fastify.authenticate] }
@@ -11,18 +12,25 @@ export default async function analyticsRoutes(fastify: FastifyInstance) {
     const now = new Date()
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString()
 
-    const [totalRes, activeRes, joinersRes, separationsRes, deptRes, typeRes] = await Promise.all([
+    // deptRows/typeRows are paginated — a plain row-returning .select() (no
+    // count:exact/head:true) truncates at PostgREST's 1,000-row ceiling for a
+    // large tenant, understating the department/employment-type breakdowns.
+    const [totalRes, activeRes, joinersRes, separationsRes, deptRows, typeRows] = await Promise.all([
       fastify.supabase.from('employees').select('id', { count: 'exact', head: true }).eq('tenant_id', tid),
       fastify.supabase.from('employees').select('id', { count: 'exact', head: true }).eq('tenant_id', tid).eq('status', 'active'),
       fastify.supabase.from('employees').select('id', { count: 'exact', head: true }).eq('tenant_id', tid).gte('joining_date', monthStart),
       fastify.supabase.from('employees').select('id', { count: 'exact', head: true }).eq('tenant_id', tid).eq('status', 'separated').gte('updated_at', monthStart),
-      fastify.supabase.from('employees').select('departments:department_id(name)').eq('tenant_id', tid).eq('status', 'active'),
-      fastify.supabase.from('employees').select('employment_type').eq('tenant_id', tid).eq('status', 'active'),
+      fetchAllRows((from, to) =>
+        fastify.supabase.from('employees').select('departments:department_id(name)').eq('tenant_id', tid).eq('status', 'active').range(from, to),
+      ),
+      fetchAllRows((from, to) =>
+        fastify.supabase.from('employees').select('employment_type').eq('tenant_id', tid).eq('status', 'active').range(from, to),
+      ),
     ])
 
     // Aggregate department breakdown
     const deptCounts: Record<string, number> = {}
-    for (const emp of deptRes.data ?? []) {
+    for (const emp of deptRows) {
       const name = (emp.departments as unknown as { name: string } | null)?.name ?? 'Unassigned'
       deptCounts[name] = (deptCounts[name] ?? 0) + 1
     }
@@ -33,7 +41,7 @@ export default async function analyticsRoutes(fastify: FastifyInstance) {
 
     // Aggregate employment type breakdown
     const typeCounts: Record<string, number> = {}
-    for (const emp of typeRes.data ?? []) {
+    for (const emp of typeRows) {
       typeCounts[emp.employment_type] = (typeCounts[emp.employment_type] ?? 0) + 1
     }
     const employment_type_breakdown = Object.entries(typeCounts).map(([type, count]) => ({ type, count }))

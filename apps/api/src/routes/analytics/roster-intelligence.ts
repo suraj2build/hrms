@@ -14,6 +14,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z }                   from 'zod'
 import { HR_ADMIN_ROLES }      from '../../lib/rbac.js'
+import { fetchAllRows }        from '../../lib/supabase-paginate.js'
 // ── Date helpers ──────────────────────────────────────────────────────────────
 
 const dateRe  = /^\d{4}-\d{2}-\d{2}$/
@@ -74,24 +75,33 @@ export default async function rosterIntelligenceRoutes(fastify: FastifyInstance)
     const dates = expandDateRange(from, to)
 
     // ── Fetch all data in parallel ─────────────────────────────────────────────
+    // shift_roster/employee_shifts/attendance_daily are paginated — over a
+    // multi-week range across the whole tenant these routinely exceed
+    // PostgREST's 1,000-row ceiling, silently understating coverage.
     const [
-      { data: rosterRows },
-      { data: standingRows },
+      rosterRows,
+      standingRows,
       { data: shifts },
-      { data: dailyRows },
+      dailyRows,
     ] = await Promise.all([
       // Roster overrides
-      fastify.supabase
-        .from('shift_roster')
-        .select('employee_id, date, shift_id')
-        .eq('tenant_id', req.tenantId)
-        .in('date', dates),
+      fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('shift_roster')
+          .select('employee_id, date, shift_id')
+          .eq('tenant_id', req.tenantId)
+          .in('date', dates)
+          .range(from, to),
+      ),
       // Standing assignments (is_current = true)
-      fastify.supabase
-        .from('employee_shifts')
-        .select('employee_id, shift_id')
-        .eq('tenant_id', req.tenantId)
-        .eq('is_current', true),
+      fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('employee_shifts')
+          .select('employee_id, shift_id')
+          .eq('tenant_id', req.tenantId)
+          .eq('is_current', true)
+          .range(from, to),
+      ),
       // All shifts
       fastify.supabase
         .from('shifts')
@@ -99,26 +109,29 @@ export default async function rosterIntelligenceRoutes(fastify: FastifyInstance)
         .eq('tenant_id', req.tenantId)
         .eq('is_active', true),
       // Attendance status
-      fastify.supabase
-        .from('attendance_daily')
-        .select('employee_id, date, status')
-        .eq('tenant_id', req.tenantId)
-        .in('date', dates)
-        .in('status', ['present', 'late']),
+      fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('attendance_daily')
+          .select('employee_id, date, status')
+          .eq('tenant_id', req.tenantId)
+          .in('date', dates)
+          .in('status', ['present', 'late'])
+          .range(from, to),
+      ),
     ])
 
     const shiftMap  = new Map((shifts ?? []).map((s: any) => [s.id, s]))
-    const standMap  = new Map((standingRows ?? []).map((r: any) => [r.employee_id, r.shift_id]))
+    const standMap  = new Map(standingRows.map((r: any) => [r.employee_id, r.shift_id]))
 
     // Override map: `${employee_id}:${date}` → shift_id
     const overrideMap = new Map<string, string>()
-    for (const r of rosterRows ?? []) {
+    for (const r of rosterRows) {
       overrideMap.set(`${r.employee_id}:${r.date}`, r.shift_id)
     }
 
     // Present set: `${employee_id}:${date}`
     const presentSet = new Set<string>(
-      (dailyRows ?? []).map((r: any) => `${r.employee_id}:${r.date}`)
+      dailyRows.map((r: any) => `${r.employee_id}:${r.date}`)
     )
 
     // Build: date × shift → { scheduled, present }
@@ -127,8 +140,8 @@ export default async function rosterIntelligenceRoutes(fastify: FastifyInstance)
 
     // Every employee that has any shift assignment (roster override OR standing)
     const allEmployeeIds = new Set([
-      ...(rosterRows ?? []).map((r: any) => r.employee_id),
-      ...(standingRows ?? []).map((r: any) => r.employee_id),
+      ...rosterRows.map((r: any) => r.employee_id),
+      ...standingRows.map((r: any) => r.employee_id),
     ])
 
     for (const date of dates) {
@@ -181,43 +194,53 @@ export default async function rosterIntelligenceRoutes(fastify: FastifyInstance)
     const { from, to } = monthBounds(monthStr)
     const dates = expandDateRange(from, to)
 
+    // Paginated for the same reason as /roster/coverage above.
     const [
-      { data: rosterRows },
-      { data: standingRows },
+      rosterRows,
+      standingRows,
       { data: shifts },
-      { data: dailyRows },
+      dailyRows,
     ] = await Promise.all([
-      fastify.supabase
-        .from('shift_roster')
-        .select('employee_id, date, shift_id')
-        .eq('tenant_id', req.tenantId)
-        .in('date', dates),
-      fastify.supabase
-        .from('employee_shifts')
-        .select('employee_id, shift_id')
-        .eq('tenant_id', req.tenantId)
-        .eq('is_current', true),
+      fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('shift_roster')
+          .select('employee_id, date, shift_id')
+          .eq('tenant_id', req.tenantId)
+          .in('date', dates)
+          .range(from, to),
+      ),
+      fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('employee_shifts')
+          .select('employee_id, shift_id')
+          .eq('tenant_id', req.tenantId)
+          .eq('is_current', true)
+          .range(from, to),
+      ),
       fastify.supabase
         .from('shifts')
         .select('id, name, code')
         .eq('tenant_id', req.tenantId)
         .eq('is_active', true),
-      fastify.supabase
-        .from('attendance_daily')
-        .select('employee_id, date, work_hours, status')
-        .eq('tenant_id', req.tenantId)
-        .in('date', dates)
-        .in('status', ['present', 'late', 'half_day']),
+      fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('attendance_daily')
+          .select('employee_id, date, work_hours, status')
+          .eq('tenant_id', req.tenantId)
+          .in('date', dates)
+          .in('status', ['present', 'late', 'half_day'])
+          .range(from, to),
+      ),
     ])
 
     const shiftMap   = new Map((shifts ?? []).map((s: any) => [s.id, s]))
-    const standMap   = new Map((standingRows ?? []).map((r: any) => [r.employee_id, r.shift_id]))
+    const standMap   = new Map(standingRows.map((r: any) => [r.employee_id, r.shift_id]))
     const overrideMap = new Map<string, string>()
-    for (const r of rosterRows ?? []) {
+    for (const r of rosterRows) {
       overrideMap.set(`${r.employee_id}:${r.date}`, r.shift_id)
     }
     const dailyMap = new Map<string, number>(
-      (dailyRows ?? []).map((r: any) => [`${r.employee_id}:${r.date}`, r.work_hours])
+      dailyRows.map((r: any) => [`${r.employee_id}:${r.date}`, r.work_hours])
     )
 
     // Accumulate: `${shift_id}:${weekday}` → { totalHours, count }
@@ -226,8 +249,8 @@ export default async function rosterIntelligenceRoutes(fastify: FastifyInstance)
     for (const date of dates) {
       const weekday = new Date(`${date}T12:00:00Z`).getUTCDay()  // 0=Sun…6=Sat
       for (const empId of new Set([
-        ...(rosterRows ?? []).map((r: any) => r.employee_id),
-        ...(standingRows ?? []).map((r: any) => r.employee_id),
+        ...rosterRows.map((r: any) => r.employee_id),
+        ...standingRows.map((r: any) => r.employee_id),
       ])) {
         const shiftId  = overrideMap.get(`${empId}:${date}`) ?? standMap.get(empId)
         const hours    = dailyMap.get(`${empId}:${date}`)
@@ -279,24 +302,32 @@ export default async function rosterIntelligenceRoutes(fastify: FastifyInstance)
     const monthStr = qs.data.month ?? `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
     const { from, to } = monthBounds(monthStr)
 
+    // Paginated — active employees and a month of attendance_daily across
+    // the tenant can both exceed PostgREST's 1,000-row ceiling.
     const [
-      { data: employees },
-      { data: dailyRows },
+      employees,
+      dailyRows,
     ] = await Promise.all([
-      fastify.supabase
-        .from('employees')
-        .select('id, employee_code, first_name, last_name')
-        .eq('tenant_id', req.tenantId)
-        .eq('status', 'active'),
-      fastify.supabase
-        .from('attendance_daily')
-        .select('employee_id, overtime_minutes, late_minutes, worked_on_weekly_off, worked_on_holiday, status')
-        .eq('tenant_id', req.tenantId)
-        .gte('date', from)
-        .lte('date', to),
+      fetchAllRows((from2, to2) =>
+        fastify.supabase
+          .from('employees')
+          .select('id, employee_code, first_name, last_name')
+          .eq('tenant_id', req.tenantId)
+          .eq('status', 'active')
+          .range(from2, to2),
+      ),
+      fetchAllRows((from2, to2) =>
+        fastify.supabase
+          .from('attendance_daily')
+          .select('employee_id, overtime_minutes, late_minutes, worked_on_weekly_off, worked_on_holiday, status')
+          .eq('tenant_id', req.tenantId)
+          .gte('date', from)
+          .lte('date', to)
+          .range(from2, to2),
+      ),
     ])
 
-    const empMap = new Map((employees ?? []).map((e: any) => [e.id, e]))
+    const empMap = new Map(employees.map((e: any) => [e.id, e]))
 
     // Aggregate per employee
     const agg = new Map<string, {
@@ -384,45 +415,55 @@ export default async function rosterIntelligenceRoutes(fastify: FastifyInstance)
     // Re-use coverage logic
     const dates = expandDateRange(from, to)
 
+    // Paginated for the same reason as /roster/coverage above.
     const [
-      { data: rosterRows },
-      { data: standingRows },
+      rosterRows,
+      standingRows,
       { data: shifts },
-      { data: dailyRows },
+      dailyRows,
     ] = await Promise.all([
-      fastify.supabase
-        .from('shift_roster')
-        .select('employee_id, date, shift_id')
-        .eq('tenant_id', req.tenantId)
-        .in('date', dates),
-      fastify.supabase
-        .from('employee_shifts')
-        .select('employee_id, shift_id')
-        .eq('tenant_id', req.tenantId)
-        .eq('is_current', true),
+      fetchAllRows((from2, to2) =>
+        fastify.supabase
+          .from('shift_roster')
+          .select('employee_id, date, shift_id')
+          .eq('tenant_id', req.tenantId)
+          .in('date', dates)
+          .range(from2, to2),
+      ),
+      fetchAllRows((from2, to2) =>
+        fastify.supabase
+          .from('employee_shifts')
+          .select('employee_id, shift_id')
+          .eq('tenant_id', req.tenantId)
+          .eq('is_current', true)
+          .range(from2, to2),
+      ),
       fastify.supabase
         .from('shifts')
         .select('id, name, code')
         .eq('tenant_id', req.tenantId)
         .eq('is_active', true),
-      fastify.supabase
-        .from('attendance_daily')
-        .select('employee_id, date, status')
-        .eq('tenant_id', req.tenantId)
-        .in('date', dates)
-        .in('status', ['present', 'late']),
+      fetchAllRows((from2, to2) =>
+        fastify.supabase
+          .from('attendance_daily')
+          .select('employee_id, date, status')
+          .eq('tenant_id', req.tenantId)
+          .in('date', dates)
+          .in('status', ['present', 'late'])
+          .range(from2, to2),
+      ),
     ])
 
     const shiftMap    = new Map((shifts ?? []).map((s: any) => [s.id, s]))
-    const standMap    = new Map((standingRows ?? []).map((r: any) => [r.employee_id, r.shift_id]))
+    const standMap    = new Map(standingRows.map((r: any) => [r.employee_id, r.shift_id]))
     const overrideMap = new Map<string, string>()
-    for (const r of rosterRows ?? []) overrideMap.set(`${r.employee_id}:${r.date}`, r.shift_id)
-    const presentSet  = new Set<string>((dailyRows ?? []).map((r: any) => `${r.employee_id}:${r.date}`))
+    for (const r of rosterRows) overrideMap.set(`${r.employee_id}:${r.date}`, r.shift_id)
+    const presentSet  = new Set<string>(dailyRows.map((r: any) => `${r.employee_id}:${r.date}`))
 
     const coverage = new Map<string, { scheduled: number; present: number }>()
     const allEmpIds = new Set([
-      ...(rosterRows ?? []).map((r: any) => r.employee_id),
-      ...(standingRows ?? []).map((r: any) => r.employee_id),
+      ...rosterRows.map((r: any) => r.employee_id),
+      ...standingRows.map((r: any) => r.employee_id),
     ])
 
     for (const date of dates) {
@@ -500,38 +541,47 @@ export default async function rosterIntelligenceRoutes(fastify: FastifyInstance)
     const monthStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
     const { from, to } = monthBounds(monthStr)
 
+    // Paginated for the same reason as /roster/coverage above.
     const [
-      { data: dailyRows },
-      { data: rosterRows },
-      { data: standingRows },
+      daily,
+      rosterRows,
+      standingRows,
     ] = await Promise.all([
-      fastify.supabase
-        .from('attendance_daily')
-        .select('employee_id, overtime_minutes, worked_on_weekly_off, worked_on_holiday')
-        .eq('tenant_id', req.tenantId)
-        .gte('date', from)
-        .lte('date', to),
-      fastify.supabase
-        .from('shift_roster')
-        .select('employee_id')
-        .eq('tenant_id', req.tenantId)
-        .gte('date', from)
-        .lte('date', to),
-      fastify.supabase
-        .from('employee_shifts')
-        .select('employee_id')
-        .eq('tenant_id', req.tenantId)
-        .eq('is_current', true),
+      fetchAllRows((from2, to2) =>
+        fastify.supabase
+          .from('attendance_daily')
+          .select('employee_id, overtime_minutes, worked_on_weekly_off, worked_on_holiday')
+          .eq('tenant_id', req.tenantId)
+          .gte('date', from)
+          .lte('date', to)
+          .range(from2, to2),
+      ),
+      fetchAllRows((from2, to2) =>
+        fastify.supabase
+          .from('shift_roster')
+          .select('employee_id')
+          .eq('tenant_id', req.tenantId)
+          .gte('date', from)
+          .lte('date', to)
+          .range(from2, to2),
+      ),
+      fetchAllRows((from2, to2) =>
+        fastify.supabase
+          .from('employee_shifts')
+          .select('employee_id')
+          .eq('tenant_id', req.tenantId)
+          .eq('is_current', true)
+          .range(from2, to2),
+      ),
     ])
 
-    const daily = dailyRows ?? []
     const totalOtMinutes     = daily.reduce((s: number, r: any) => s + (r.overtime_minutes ?? 0), 0)
     const weeklyOffWorked    = daily.filter((r: any) => r.worked_on_weekly_off).length
     const holidaysWorked     = daily.filter((r: any) => r.worked_on_holiday).length
 
     const rosterCoveredCount = new Set([
-      ...(rosterRows ?? []).map((r: any) => r.employee_id),
-      ...(standingRows ?? []).map((r: any) => r.employee_id),
+      ...rosterRows.map((r: any) => r.employee_id),
+      ...standingRows.map((r: any) => r.employee_id),
     ]).size
 
     return reply.send({

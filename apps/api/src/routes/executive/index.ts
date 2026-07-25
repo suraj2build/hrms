@@ -161,7 +161,7 @@ export default async function executiveRoutes(fastify: FastifyInstance) {
 
     const [
       activeEmpRes, joinersRes, exitsRes,
-      dailyRes, excOpenRes, incOpenRes,
+      daily, excOpenRes, incOpenRes,
       pendingRevRes, payrollRunRes,
     ] = await Promise.all([
       // Active headcount
@@ -187,13 +187,18 @@ export default async function executiveRoutes(fastify: FastifyInstance) {
         .gte('employee_separation.last_working_date', from30)
         .lte('employee_separation.last_working_date', to),
 
-      // Attendance last 30 days (for rate)
-      fastify.supabase
-        .from('attendance_daily')
-        .select('status')
-        .eq('tenant_id', req.tenantId)
-        .gte('date', from30)
-        .lte('date', to),
+      // Attendance last 30 days (for rate). Paginated — 30 days across the
+      // whole tenant can exceed PostgREST's 1,000-row ceiling for a large
+      // tenant, understating the attendance/absence rate.
+      fetchAllRows((from, to2) =>
+        fastify.supabase
+          .from('attendance_daily')
+          .select('status')
+          .eq('tenant_id', req.tenantId)
+          .gte('date', from30)
+          .lte('date', to)
+          .range(from, to2),
+      ),
 
       // Open exceptions
       fastify.supabase
@@ -234,7 +239,6 @@ export default async function executiveRoutes(fastify: FastifyInstance) {
     const open_incidents      = incOpenRes.count ?? 0
     const pending_revisions   = pendingRevRes.count ?? 0
 
-    const daily   = dailyRes.data ?? []
     const present = daily.filter((r: any) => r.status === 'present' || r.status === 'late').length
     const absent  = daily.filter((r: any) => r.status === 'absent').length
     const attendance_rate = safeRate(present, daily.length)
@@ -291,33 +295,45 @@ export default async function executiveRoutes(fastify: FastifyInstance) {
     const to     = today()
 
     const [
-      activeEmpRes, dailyRes, leaveRes,
+      employees, daily, leaveRows,
       pendingRevRes, approvedRevRes,
       trustHighRiskRes, trustVerifiedRes, trustTotalRes,
-      deptRes,
+      deptRows,
     ] = await Promise.all([
-      // Active headcount
-      fastify.supabase
-        .from('employees')
-        .select('id, employment_type, gender')
-        .eq('tenant_id', req.tenantId)
-        .eq('status', 'active'),
+      // Active headcount. Paginated — a row-returning .select() (no
+      // count:exact/head:true) truncates at PostgREST's 1,000-row ceiling
+      // for a large tenant, understating employee_count itself plus the
+      // employment-type/gender distributions below.
+      fetchAllRows((from, to2) =>
+        fastify.supabase
+          .from('employees')
+          .select('id, employment_type, gender')
+          .eq('tenant_id', req.tenantId)
+          .eq('status', 'active')
+          .range(from, to2),
+      ),
 
-      // Attendance last 30 days
-      fastify.supabase
-        .from('attendance_daily')
-        .select('status')
-        .eq('tenant_id', req.tenantId)
-        .gte('date', from30)
-        .lte('date', to),
+      // Attendance last 30 days. Paginated for the same reason.
+      fetchAllRows((from, to2) =>
+        fastify.supabase
+          .from('attendance_daily')
+          .select('status')
+          .eq('tenant_id', req.tenantId)
+          .gte('date', from30)
+          .lte('date', to)
+          .range(from, to2),
+      ),
 
-      // Leave requests last 30 days
-      fastify.supabase
-        .from('leave_requests')
-        .select('status, total_days:computed_days')
-        .eq('tenant_id', req.tenantId)
-        .gte('created_at', `${from30}T00:00:00`)
-        .lte('created_at', `${to}T23:59:59`),
+      // Leave requests last 30 days. Paginated for the same reason.
+      fetchAllRows((from, to2) =>
+        fastify.supabase
+          .from('leave_requests')
+          .select('status, total_days:computed_days')
+          .eq('tenant_id', req.tenantId)
+          .gte('created_at', `${from30}T00:00:00`)
+          .lte('created_at', `${to}T23:59:59`)
+          .range(from, to2),
+      ),
 
       // Pending revisions
       fastify.supabase
@@ -355,16 +371,18 @@ export default async function executiveRoutes(fastify: FastifyInstance) {
         .select('id', { count: 'exact', head: true })
         .eq('tenant_id', req.tenantId),
 
-      // Department distribution via job_history
-      fastify.supabase
-        .from('job_history')
-        .select('department_id, departments(id, name)')
-        .eq('tenant_id', req.tenantId)
-        .eq('is_current', true),
+      // Department distribution via job_history. Paginated for the same reason.
+      fetchAllRows((from, to2) =>
+        fastify.supabase
+          .from('job_history')
+          .select('department_id, departments(id, name)')
+          .eq('tenant_id', req.tenantId)
+          .eq('is_current', true)
+          .range(from, to2),
+      ),
     ])
 
     // Employment type distribution
-    const employees       = activeEmpRes.data ?? []
     const employee_count  = employees.length
 
     const typeMap = new Map<string, number>()
@@ -379,14 +397,12 @@ export default async function executiveRoutes(fastify: FastifyInstance) {
     const gender_distribution          = Object.fromEntries(genderMap)
 
     // Attendance
-    const daily       = dailyRes.data ?? []
     const present     = daily.filter((r: any) => r.status === 'present' || r.status === 'late').length
     const absent      = daily.filter((r: any) => r.status === 'absent').length
     const attendance_rate = safeRate(present, daily.length)
     const absence_rate    = safeRate(absent,  daily.length)
 
     // Leave
-    const leaveRows        = leaveRes.data ?? []
     const leave_applied    = leaveRows.length
     const leave_approved   = leaveRows.filter((r: any) => r.status === 'approved').length
     const leave_pending    = leaveRows.filter((r: any) => r.status === 'pending').length
@@ -412,7 +428,7 @@ export default async function executiveRoutes(fastify: FastifyInstance) {
 
     // Department distribution
     const deptMap2 = new Map<string, number>()
-    for (const jh of (deptRes.data ?? []) as any[]) {
+    for (const jh of deptRows as any[]) {
       const name = jh.departments?.name ?? 'Unassigned'
       deptMap2.set(name, (deptMap2.get(name) ?? 0) + 1)
     }
@@ -539,42 +555,57 @@ export default async function executiveRoutes(fastify: FastifyInstance) {
     }
     const monthCount = parsed.data.months
 
-    const [empRes, deptRes, separationRes, joinersRes] = await Promise.all([
+    // All four queries are paginated — row-returning .select() calls over the
+    // whole tenant's employee history routinely exceed PostgREST's 1,000-row
+    // ceiling, silently understating headcount, department/type/gender
+    // distributions, and the joiner/exit trend lines below.
+    const [empRows, deptRows, separationRows, joiners] = await Promise.all([
       // All active employees with joining date and type
-      fastify.supabase
-        .from('employees')
-        .select('id, joining_date, employment_type, status, gender, employee_separation!employee_separation_employee_id_fkey(last_working_date)')
-        .eq('tenant_id', req.tenantId)
-        .in('status', ['active', 'separated']),
+      fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('employees')
+          .select('id, joining_date, employment_type, status, gender, employee_separation!employee_separation_employee_id_fkey(last_working_date)')
+          .eq('tenant_id', req.tenantId)
+          .in('status', ['active', 'separated'])
+          .range(from, to),
+      ),
 
       // Current department assignments
-      fastify.supabase
-        .from('job_history')
-        .select('employee_id, department_id, departments(id, name)')
-        .eq('tenant_id', req.tenantId)
-        .eq('is_current', true),
+      fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('job_history')
+          .select('employee_id, department_id, departments(id, name)')
+          .eq('tenant_id', req.tenantId)
+          .eq('is_current', true)
+          .range(from, to),
+      ),
 
       // Recent separations for trend
-      fastify.supabase
-        .from('employees')
-        .select('id, employee_separation!inner(last_working_date)')
-        .eq('tenant_id', req.tenantId)
-        .eq('status', 'separated')
-        .gte('employee_separation.last_working_date', monthsAgo(monthCount + 1) + '-01'),
+      fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('employees')
+          .select('id, employee_separation!inner(last_working_date)')
+          .eq('tenant_id', req.tenantId)
+          .eq('status', 'separated')
+          .gte('employee_separation.last_working_date', monthsAgo(monthCount + 1) + '-01')
+          .range(from, to),
+      ),
 
       // Recent joiners for trend
-      fastify.supabase
-        .from('employees')
-        .select('id, joining_date')
-        .eq('tenant_id', req.tenantId)
-        .gte('joining_date', monthsAgo(monthCount + 1) + '-01'),
+      fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('employees')
+          .select('id, joining_date')
+          .eq('tenant_id', req.tenantId)
+          .gte('joining_date', monthsAgo(monthCount + 1) + '-01')
+          .range(from, to),
+      ),
     ])
 
     const _flattenSep = (e: any) => ({ ...e, separation_date: (e.employee_separation ?? [])[0]?.last_working_date ?? null })
-    const allEmp    = ((empRes.data ?? []) as any[]).map(_flattenSep)
+    const allEmp    = empRows.map(_flattenSep)
     const active    = allEmp.filter((e: any) => e.status === 'active')
-    const separated = ((separationRes.data ?? []) as any[]).map(_flattenSep)
-    const joiners   = joinersRes.data ?? []
+    const separated = separationRows.map(_flattenSep)
 
     // Build month boundaries
     const monthBoundaries: Array<{ month: string; from: string; to: string }> = []
@@ -596,7 +627,7 @@ export default async function executiveRoutes(fastify: FastifyInstance) {
     // Department distribution (current active only, via job_history)
     const deptCounts = new Map<string, number>()
     const deptByEmpId = new Map<string, string>()
-    for (const jh of (deptRes.data ?? []) as any[]) {
+    for (const jh of deptRows as any[]) {
       const name = jh.departments?.name ?? 'Unassigned'
       deptByEmpId.set(jh.employee_id, name)
     }
@@ -660,21 +691,29 @@ export default async function executiveRoutes(fastify: FastifyInstance) {
     }
     const { department, months: monthCount } = parsed.data
 
-    const [empRes, jhRes] = await Promise.all([
-      fastify.supabase
-        .from('employees')
-        .select('id, joining_date, status, employee_separation!employee_separation_employee_id_fkey(last_working_date)')
-        .eq('tenant_id', req.tenantId)
-        .in('status', ['active', 'separated']),
-      fastify.supabase
-        .from('job_history')
-        .select('employee_id, effective_from, departments(name)')
-        .eq('tenant_id', req.tenantId),
+    // Paginated — both can exceed PostgREST's 1,000-row ceiling for a large
+    // tenant, silently dropping employees/job history from the drill-down.
+    const [empRows, jhRows] = await Promise.all([
+      fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('employees')
+          .select('id, joining_date, status, employee_separation!employee_separation_employee_id_fkey(last_working_date)')
+          .eq('tenant_id', req.tenantId)
+          .in('status', ['active', 'separated'])
+          .range(from, to),
+      ),
+      fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('job_history')
+          .select('employee_id, effective_from, departments(name)')
+          .eq('tenant_id', req.tenantId)
+          .range(from, to),
+      ),
     ])
 
     // Resolve each employee's department = their latest job_history row.
     const latestJh = new Map<string, { eff: string; name: string }>()
-    for (const jh of (jhRes.data ?? []) as any[]) {
+    for (const jh of jhRows as any[]) {
       const name = (jh.departments as any)?.name ?? 'Unassigned'
       const eff  = jh.effective_from ?? ''
       const prev = latestJh.get(jh.employee_id)
@@ -683,7 +722,7 @@ export default async function executiveRoutes(fastify: FastifyInstance) {
     const deptOf = (empId: string) => latestJh.get(empId)?.name ?? 'Unassigned'
 
     const flatten = (e: any) => ({ ...e, separation_date: (e.employee_separation ?? [])[0]?.last_working_date ?? null })
-    const emp = ((empRes.data ?? []) as any[]).map(flatten).filter(e => deptOf(e.id) === department)
+    const emp = empRows.map(flatten).filter((e: any) => deptOf(e.id) === department)
     const activeInDept = emp.filter(e => e.status === 'active').length
 
     const monthBoundaries: Array<{ month: string; from: string; to: string }> = []
@@ -1329,14 +1368,21 @@ export default async function executiveRoutes(fastify: FastifyInstance) {
       boundaries.push({ month: m, from: monthStart(m), to: monthEnd(m) })
     }
 
-    const [attRes, payrollRunsRes, leaveRes, empJoinerRes, empExitRes] = await Promise.all([
+    // attendance_daily/leave_requests/employees are paginated — full-period
+    // fetches across the whole tenant routinely exceed PostgREST's 1,000-row
+    // ceiling, silently understating every trend line below. payroll_runs is
+    // bounded (one row per month) and left as-is.
+    const [attRows, payrollRunsRes, leaveRows, joinerRows, exitRowsRaw] = await Promise.all([
       // Attendance for full period
-      fastify.supabase
-        .from('attendance_daily')
-        .select('date, status')
-        .eq('tenant_id', req.tenantId)
-        .gte('date', oldestDate)
-        .lte('date', today()),
+      fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('attendance_daily')
+          .select('date, status')
+          .eq('tenant_id', req.tenantId)
+          .gte('date', oldestDate)
+          .lte('date', today())
+          .range(from, to),
+      ),
 
       // Payroll runs for period
       fastify.supabase
@@ -1348,33 +1394,39 @@ export default async function executiveRoutes(fastify: FastifyInstance) {
         .order('month', { ascending: true }),
 
       // Leave approvals for period
-      fastify.supabase
-        .from('leave_requests')
-        .select('created_at, status, total_days:computed_days')
-        .eq('tenant_id', req.tenantId)
-        .eq('status', 'approved')
-        .gte('created_at', `${oldestDate}T00:00:00`),
+      fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('leave_requests')
+          .select('created_at, status, total_days:computed_days')
+          .eq('tenant_id', req.tenantId)
+          .eq('status', 'approved')
+          .gte('created_at', `${oldestDate}T00:00:00`)
+          .range(from, to),
+      ),
 
       // Joiners per month
-      fastify.supabase
-        .from('employees')
-        .select('joining_date')
-        .eq('tenant_id', req.tenantId)
-        .gte('joining_date', oldestDate),
+      fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('employees')
+          .select('joining_date')
+          .eq('tenant_id', req.tenantId)
+          .gte('joining_date', oldestDate)
+          .range(from, to),
+      ),
 
       // Exits per month
-      fastify.supabase
-        .from('employees')
-        .select('id, employee_separation!inner(last_working_date)')
-        .eq('tenant_id', req.tenantId)
-        .gte('employee_separation.last_working_date', oldestDate),
+      fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('employees')
+          .select('id, employee_separation!inner(last_working_date)')
+          .eq('tenant_id', req.tenantId)
+          .gte('employee_separation.last_working_date', oldestDate)
+          .range(from, to),
+      ),
     ])
 
-    const attRows     = attRes.data ?? []
     const payrollRuns = payrollRunsRes.data ?? []
-    const leaveRows   = leaveRes.data ?? []
-    const joinerRows  = empJoinerRes.data ?? []
-    const exitRows    = ((empExitRes.data ?? []) as any[]).map((e: any) => ({ ...e, separation_date: (e.employee_separation ?? [])[0]?.last_working_date ?? null }))
+    const exitRows    = (exitRowsRaw as any[]).map((e: any) => ({ ...e, separation_date: (e.employee_separation ?? [])[0]?.last_working_date ?? null }))
 
     // Build a payroll run map by month
     const payrollByMonth = new Map<string, any>()
