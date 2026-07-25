@@ -242,6 +242,10 @@ export function AdminHelpdesk() {
 
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ['admin-helpdesk'] })
+    // The requesting employee's own ticket list/detail and their manager's
+    // team helpdesk view read the same tickets under separate keys.
+    qc.invalidateQueries({ queryKey: ['helpdesk', 'my'] })
+    qc.invalidateQueries({ queryKey: ['manager-team-helpdesk'] })
   }
 
   const assign = useMutation({
@@ -261,8 +265,10 @@ export function AdminHelpdesk() {
   const addComment = useMutation({
     mutationFn: ({ id, body, is_internal }: { id: string; body: string; is_internal: boolean }) =>
       api.post(`/helpdesk/tickets/${id}/comments`, { body, is_internal }),
-    onSuccess: () => {
+    onSuccess: (_data, vars) => {
       qc.invalidateQueries({ queryKey: ['admin-helpdesk', 'detail', openId] })
+      // Non-internal comments are visible on the employee's own ticket detail view.
+      qc.invalidateQueries({ queryKey: ['helpdesk', 'detail', vars.id] })
       invalidate()
       setReply('')
     },

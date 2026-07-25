@@ -134,6 +134,10 @@ export function EssHelpdesk() {
     mutationFn: (body: typeof defaultForm) => api.post('/helpdesk/tickets', body),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['helpdesk', 'my'] })
+      // The admin helpdesk queue and the manager's team view read the same
+      // tickets under separate keys.
+      qc.invalidateQueries({ queryKey: ['admin-helpdesk'] })
+      qc.invalidateQueries({ queryKey: ['manager-team-helpdesk'] })
       setCreateOpen(false)
       setForm(defaultForm)
       toast.success('Ticket raised — HR has been notified')
@@ -147,6 +151,8 @@ export function EssHelpdesk() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['helpdesk', 'detail', openTicketId] })
       qc.invalidateQueries({ queryKey: ['helpdesk', 'my'] })
+      // The admin console's CSAT stats/satisfaction report read the same rating.
+      qc.invalidateQueries({ queryKey: ['admin-helpdesk'] })
       setCsatRating(0)
       setCsatComment('')
       toast.success('Thank you for your feedback!')
@@ -157,9 +163,11 @@ export function EssHelpdesk() {
   const addComment = useMutation({
     mutationFn: ({ id, body }: { id: string; body: string }) =>
       api.post(`/helpdesk/tickets/${id}/comments`, { body }),
-    onSuccess: () => {
+    onSuccess: (_data, vars) => {
       qc.invalidateQueries({ queryKey: ['helpdesk', 'detail', openTicketId] })
       qc.invalidateQueries({ queryKey: ['helpdesk', 'my'] })
+      // The admin's ticket detail view reads the same comment thread.
+      qc.invalidateQueries({ queryKey: ['admin-helpdesk', 'detail', vars.id] })
       setReply('')
     },
     onError: (e: Error) => toast.error('Failed to send reply', { description: e.message }),
