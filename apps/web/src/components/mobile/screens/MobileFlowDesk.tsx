@@ -89,8 +89,17 @@ export function MobileFlowDesk({ base }: { base: string }) {
   const busyId = act.isPending ? (act.variables?.id ?? null) : null
   const onAct = (kind: ActKind, id: string, decision: Decision, reason?: string) => act.mutate({ kind, id, decision, reason })
 
+  // Canonical source is `leave_requests` (served by /leave/my-requests) — NOT
+  // the legacy `leave_applications` behind /attendance/leave/my, where
+  // submitted leave never appeared. leave_requests stores status UPPERCASE;
+  // normalized to lowercase since isPending() above does an exact comparison.
   const { data: leaveData } = useQuery<{ data: LeaveApp[] }>({
-    queryKey: ['mobile-flowdesk-leave'], queryFn: () => api.get('/attendance/leave/my'),
+    queryKey: ['mobile-flowdesk-leave', profile?.employee_id],
+    queryFn: async () => {
+      const res = await api.get('/leave/my-requests?limit=100') as { data: LeaveApp[] }
+      return { data: (res.data ?? []).map(r => ({ ...r, status: String(r.status ?? '').toLowerCase() })) }
+    },
+    enabled: !!profile?.employee_id,
   })
   const { data: corrData } = useQuery<{ data: CorrectionReq[] }>({
     queryKey: ['mobile-flowdesk-corrections'], queryFn: () => api.get('/attendance/corrections/my?limit=50'),

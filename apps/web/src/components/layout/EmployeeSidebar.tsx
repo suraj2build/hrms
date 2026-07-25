@@ -142,9 +142,17 @@ function useHasOnboarding(employeeId: string | null): boolean {
 }
 
 function usePendingCount(employeeId: string | null) {
+  // Canonical source is `leave_requests` (served by /leave/my-requests) — NOT
+  // the legacy `leave_applications` behind /attendance/leave/my, where
+  // submitted leave never appeared. leave_requests stores status UPPERCASE;
+  // normalized to lowercase since the pending() test above does an exact
+  // comparison against 'pending'.
   const { data: leaveData }   = useQuery<{ data: Array<{ status: string }> }>({
     queryKey: ['sb-leave', employeeId],
-    queryFn:  () => api.get('/attendance/leave/my'),
+    queryFn:  async () => {
+      const res = await api.get('/leave/my-requests?limit=100') as { data: Array<{ status: string }> }
+      return { data: (res.data ?? []).map(r => ({ ...r, status: String(r.status ?? '').toLowerCase() })) }
+    },
     enabled:  !!employeeId,
     staleTime: 60_000,
   })

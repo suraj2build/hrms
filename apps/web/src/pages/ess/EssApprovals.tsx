@@ -176,9 +176,17 @@ export function EssApprovals({ embedded = false }: { embedded?: boolean } = {}) 
   const employeeId   = profile?.employee_id ?? null
 
   // ── Leave applications ─────────────────────────────────────────────────────
+  // Canonical source is `leave_requests` (served by /leave/my-requests) — NOT
+  // the legacy `leave_applications` behind /attendance/leave/my, where
+  // submitted leave never appeared. leave_requests stores status UPPERCASE;
+  // normalized to lowercase since PENDING_LEAVE() below does an exact
+  // lowercase comparison.
   const { data: leaveData, isLoading: leaveLoading } = useQuery<{ data: LeaveApp[] }>({
-    queryKey: ['ess-approvals-leave'],
-    queryFn:  () => api.get('/attendance/leave/my'),
+    queryKey: ['ess-approvals-leave', employeeId],
+    queryFn:  async () => {
+      const res = await api.get('/leave/my-requests?limit=100') as { data: LeaveApp[] }
+      return { data: (res.data ?? []).map(r => ({ ...r, status: String(r.status ?? '').toLowerCase() })) }
+    },
     enabled:  !!employeeId,
     staleTime: 30_000,
   })

@@ -1000,10 +1000,37 @@ export function EssMyProfile({ employeeId: propEmployeeId }: { employeeId?: stri
       staleTime: 3 * 60_000,
     })
 
+  // Canonical source is `leave_requests` (served by /leave/my-requests) — NOT
+  // the legacy `leave_applications` behind /attendance/leave/my, where
+  // submitted leave never appeared. Field names/casing differ from this
+  // page's LeaveRequest shape (leave_types plural + rejection_reason +
+  // status UPPERCASE) so they're mapped here rather than at every read site.
   const { data: leaveData } =
     useQuery<{ data: LeaveRequest[] }>({
-      queryKey: ['ess-leave-my'],
-      queryFn:  () => api.get('/attendance/leave/my'),
+      queryKey: ['ess-leave-my', employeeId],
+      queryFn:  async () => {
+        const res = await api.get('/leave/my-requests?limit=100') as {
+          data: Array<{
+            id: string; status: string; from_date: string; to_date: string
+            computed_days?: number; calculated_days?: number
+            reason: string | null; created_at: string
+            rejection_reason?: string | null
+            leave_types?: { name: string } | null
+          }>
+        }
+        const rows: LeaveRequest[] = (res.data ?? []).map(r => ({
+          id:              r.id,
+          status:          String(r.status ?? '').toLowerCase(),
+          leave_type:      r.leave_types ?? null,
+          from_date:       r.from_date,
+          to_date:         r.to_date,
+          days_requested:  r.computed_days ?? r.calculated_days ?? 0,
+          reason:          r.reason,
+          created_at:      r.created_at,
+          rejected_reason: r.rejection_reason ?? null,
+        }))
+        return { data: rows }
+      },
       enabled:  !!employeeId,
       staleTime: 2 * 60_000,
     })

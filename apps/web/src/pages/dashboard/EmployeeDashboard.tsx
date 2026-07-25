@@ -1248,9 +1248,17 @@ export function EmployeeDashboard() {
     staleTime: 60_000,
   })
 
+  // Canonical source is `leave_requests` (served by /leave/my-requests) — NOT
+  // the legacy `leave_applications` behind /attendance/leave/my, where
+  // submitted leave never appeared (nothing writes to that table anymore).
+  // leave_requests stores status UPPERCASE; normalized to lowercase for the
+  // status-counter/badge logic below, which compares/displays lowercase.
   const { data: leaveResp } = useQuery<{ data: LeaveRequest[] }>({
-    queryKey:  ['leave-my-requests'],
-    queryFn:   () => api.get('/attendance/leave/my'),
+    queryKey:  ['leave-my-requests', employeeId],
+    queryFn:   async () => {
+      const res = await api.get('/leave/my-requests?limit=100') as { data: LeaveRequest[] }
+      return { data: (res.data ?? []).map(r => ({ ...r, status: String(r.status ?? '').toLowerCase() })) }
+    },
     enabled:   !!employeeId,
     staleTime: 60_000,
   })

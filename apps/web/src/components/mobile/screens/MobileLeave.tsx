@@ -37,9 +37,17 @@ export function MobileLeave({ base }: { base: string }) {
     queryFn: () => api.get(`/attendance/leave/balance/${employeeId}`),
     enabled: !!employeeId,
   })
+  // Canonical source is `leave_requests` (served by /leave/my-requests) — NOT
+  // the legacy `leave_applications` behind /attendance/leave/my, where
+  // submitted leave never appeared. leave_requests stores status UPPERCASE;
+  // normalized to lowercase to match STATUS_TONE's keys and h.status below.
   const { data: histData } = useQuery<{ data: LeaveApp[] }>({
-    queryKey: ['mobile-leave-history'],
-    queryFn: () => api.get('/attendance/leave/my'),
+    queryKey: ['mobile-leave-history', employeeId],
+    queryFn: async () => {
+      const res = await api.get('/leave/my-requests?limit=100') as { data: LeaveApp[] }
+      return { data: (res.data ?? []).map(r => ({ ...r, status: String(r.status ?? '').toLowerCase() as LeaveApp['status'] })) }
+    },
+    enabled: !!employeeId,
   })
 
   const balances = balData?.data ?? []

@@ -9,9 +9,16 @@ interface CorrectionReq { id: string; status: string; date?: string }
 const isPending = (s: string) => s === 'pending'
 
 export function MobileApprovals({ base: _base }: { base: string }) {
+  // Canonical source is `leave_requests` (served by /leave/my-requests) — NOT
+  // the legacy `leave_applications` behind /attendance/leave/my, where
+  // submitted leave never appeared. leave_requests stores status UPPERCASE;
+  // normalized to lowercase since isPending() above does an exact comparison.
   const { data: leaveData } = useQuery<{ data: LeaveApp[] }>({
     queryKey: ['mobile-approvals-leave'],
-    queryFn: () => api.get('/attendance/leave/my'),
+    queryFn: async () => {
+      const res = await api.get('/leave/my-requests?limit=100') as { data: LeaveApp[] }
+      return { data: (res.data ?? []).map(r => ({ ...r, status: String(r.status ?? '').toLowerCase() })) }
+    },
   })
   const { data: corrData } = useQuery<{ data: CorrectionReq[] }>({
     queryKey: ['mobile-approvals-corrections'],

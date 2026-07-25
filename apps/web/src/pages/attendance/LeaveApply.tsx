@@ -742,10 +742,19 @@ export function LeaveApply({ mode = 'page', onSuccess, onClose }: LeaveApplyProp
     retry:     false,
   })
 
-  // Existing leaves for calendar OL annotation
+  // Existing leaves for calendar OL annotation.
+  // Canonical source is `leave_requests` (served by /leave/my-requests) — NOT
+  // the legacy `leave_applications` behind /attendance/leave/my, where
+  // submitted leave never appeared (nothing writes to that table from this
+  // app anymore). leave_requests stores status UPPERCASE; normalized to
+  // lowercase since getCellInfo() below compares against 'approved'/'pending'.
   const { data: myLeavesData } = useQuery<{ data: { from_date: string; to_date: string; status: string }[] }>({
     queryKey: ['leave-apply-my-leaves', employeeId],
-    queryFn:  () => api.get('/attendance/leave/my'),
+    queryFn:  async () => {
+      const res = await api.get('/leave/my-requests?limit=100') as
+        { data: Array<{ from_date: string; to_date: string; status: string }> }
+      return { data: (res.data ?? []).map(r => ({ ...r, status: String(r.status ?? '').toLowerCase() })) }
+    },
     enabled:  !!employeeId,
     staleTime: 60_000,
   })
