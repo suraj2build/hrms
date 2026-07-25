@@ -89,6 +89,12 @@ function GiveDialog({ open, onOpenChange, badges, budget }: {
       qc.invalidateQueries({ queryKey: ['recognition-feed'] })
       qc.invalidateQueries({ queryKey: ['recognition-me'] })
       qc.invalidateQueries({ queryKey: ['ess-home'] })
+      // The leaderboard ranks by kudos received — giving one changes it.
+      qc.invalidateQueries({ queryKey: ['recognition-leaderboard'] })
+      // Same /recognition endpoint also feeds the mobile-preview screen.
+      qc.invalidateQueries({ queryKey: ['mobile-recognition-feed'] })
+      qc.invalidateQueries({ queryKey: ['mobile-recognition-me'] })
+      qc.invalidateQueries({ queryKey: ['mobile-recognition-leaderboard'] })
       toast.success('Recognition sent 🎉')
       reset(); onOpenChange(false)
     },

@@ -134,6 +134,11 @@ export function MobileRecognition({ base: _base }: { base: string }) {
         qc.invalidateQueries({ queryKey: ['mobile-recognition-feed'] })
         qc.invalidateQueries({ queryKey: ['mobile-recognition-me'] })
         qc.invalidateQueries({ queryKey: ['mobile-recognition-leaderboard'] })
+        // Same /recognition endpoint also feeds the desktop ESS recognition
+        // page's feed/leaderboard under separate keys.
+        qc.invalidateQueries({ queryKey: ['recognition-feed'] })
+        qc.invalidateQueries({ queryKey: ['recognition-me'] })
+        qc.invalidateQueries({ queryKey: ['recognition-leaderboard'] })
       }} />}
     </div>
   )
