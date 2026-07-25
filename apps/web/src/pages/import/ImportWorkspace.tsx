@@ -970,27 +970,35 @@ export function ImportWorkspace() {
   }
 
   /**
-   * Convert a parsed cell to a string. Excel stores dates as serial numbers;
-   * with cellDates:true SheetJS hands us JS Date objects, which we normalise to
-   * the YYYY-MM-DD the validator requires — otherwise an edited xlsx re-upload
-   * fails with "Invalid date format".
+   * Convert a raw XLSX cell object to a string. Deliberately does NOT use
+   * SheetJS's `cellDates: true` option — its internal numdate() converts a
+   * date serial to a JS Date by self-correcting for the runtime's UTC offset,
+   * comparing getTimezoneOffset() on a *reference* date (now) against the
+   * Excel epoch (1899-12-30). For zones whose historical offset near 1899
+   * differs from today's — Asia/Kolkata was UTC+5:53:20 pre-1941, not the
+   * modern +5:30 — that correction is off by several minutes, enough to cross
+   * the local-midnight boundary and silently roll the date back a day. This
+   * reproduces with TZ=Asia/Kolkata regardless of local vs UTC getters
+   * (verified directly against node_modules/xlsx), because the underlying
+   * Date instant is already wrong before either getter runs — this is the
+   * "uploaded 4/1, system recorded 3/31" bug reported against a prior fix
+   * that only swapped getter methods.
+   *
+   * XLSX.SSF.parse_date_code() reads the Excel serial with pure integer
+   * arithmetic — no Date object, no timezone involved — so it can't drift.
    */
-  function cellToString(cell: unknown): string {
-    if (cell instanceof Date && !isNaN(cell.getTime())) {
-      // SheetJS (cellDates: true) returns Excel date cells as Date objects
-      // anchored to UTC — e.g. an "April 1" cell becomes 2026-04-01T00:00:00Z,
-      // not local midnight. Reading it back with LOCAL getters (getFullYear/
-      // getMonth/getDate) re-interprets that UTC instant in the browser's own
-      // timezone, which silently shifts the date backward by a day for any
-      // negative-UTC-offset timezone (the classic "uploaded the right date,
-      // system recorded the day before" bug). UTC getters read the date SheetJS
-      // actually encoded, with no timezone-dependent shift.
-      const y = cell.getUTCFullYear()
-      const m = String(cell.getUTCMonth() + 1).padStart(2, '0')
-      const d = String(cell.getUTCDate()).padStart(2, '0')
-      return `${y}-${m}-${d}`
+  function cellToString(cell: XLSX.CellObject | undefined): string {
+    if (!cell) return ''
+    if (cell.t === 'n' && typeof cell.v === 'number' && cell.z && XLSX.SSF.is_date(cell.z)) {
+      const dc = XLSX.SSF.parse_date_code(cell.v)
+      if (dc) {
+        const y = dc.y
+        const m = String(dc.m).padStart(2, '0')
+        const d = String(dc.d).padStart(2, '0')
+        return `${y}-${m}-${d}`
+      }
     }
-    return String(cell ?? '')
+    return String(cell.v ?? cell.w ?? '')
   }
 
   function parseFile(file: File) {
@@ -1019,7 +1027,10 @@ export function ImportWorkspace() {
       reader.onload = (e) => {
         const data = e.target?.result
         if (!data || !(data instanceof ArrayBuffer)) return
-        const wb = XLSX.read(new Uint8Array(data), { type: 'array', cellDates: true })
+        // cellNF:true populates cell.z (the number-format string) on read — needed
+        // by cellToString to recognize date-formatted cells. Deliberately NOT
+        // cellDates:true — see cellToString for why that option is unsafe here.
+        const wb = XLSX.read(new Uint8Array(data), { type: 'array', cellNF: true })
 
         // Extract template version and import manifest from CognixHR_Metadata sheet.
         // Reads both v2 canonical keys (workbook_id, components, etc.) and v1
@@ -1062,8 +1073,19 @@ export function ImportWorkspace() {
         const dataSheetName = wb.SheetNames.find(n => KNOWN_DATA_SHEETS.has(n)) ?? wb.SheetNames[0]
         const ws = wb.Sheets[dataSheetName]
 
-        // Get raw array-of-arrays to skip # comment rows before building objects
-        const raw = XLSX.utils.sheet_to_json<string[]>(ws, { header: 1, defval: '' }) as string[][]
+        // Get raw array-of-arrays to skip # comment rows before building objects.
+        // Walk cells directly (not sheet_to_json, which would need cellDates:true
+        // and reintroduce the broken Date-object conversion) so cellToString sees
+        // the real cell object — see cellToString for why that matters for dates.
+        const range = XLSX.utils.decode_range(ws['!ref'] || 'A1')
+        const raw: string[][] = []
+        for (let r = range.s.r; r <= range.e.r; r++) {
+          const row: string[] = []
+          for (let c = range.s.c; c <= range.e.c; c++) {
+            row.push(cellToString(ws[XLSX.utils.encode_cell({ r, c })]))
+          }
+          raw.push(row)
+        }
 
         // Find the first non-comment row — that's the header
         const headerIdx = raw.findIndex(
@@ -1087,7 +1109,7 @@ export function ImportWorkspace() {
         // file and the system to drift out of sync on.
         const rows: Record<string, string>[] = dataRows.map((row) => {
           const obj: Record<string, string> = {}
-          headers.forEach((h, i) => { obj[h] = cellToString(row[i]) })
+          headers.forEach((h, i) => { obj[h] = row[i] ?? '' })
           return obj
         })
         setParsedRows(rows)
