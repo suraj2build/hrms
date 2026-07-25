@@ -15,6 +15,7 @@
 
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
+import { forbidden } from '../lib/api-errors.js'
 
 function slugify(name: string): string {
   return name
@@ -52,6 +53,38 @@ export default async function setupRoute(fastify: FastifyInstance) {
         error: 'USER_NOT_FOUND',
         message: 'Supabase user not found. Ensure sign-up completed before calling /setup.',
       })
+    }
+
+    // ── 1b. Anti-hijack guards ──────────────────────────────────────────────────
+    // This route is intentionally unauthenticated — Signup.tsx calls it
+    // immediately after supabase.auth.signUp(), and this app requires email
+    // confirmation before a session exists ("check your email to verify, then
+    // sign in" — see Signup.tsx step 3), so there is no JWT yet to check a
+    // Bearer token against. Without SOME signal tying the caller to the actual
+    // signup, anyone who learns another user's auth UID (leaked in a URL, log,
+    // screenshot, referral link, etc. — user_id is just a UUID accepted from
+    // the request body with no ownership check) could call /setup first with
+    // their own company_name, silently pre-provisioning that identity into an
+    // attacker-chosen tenant before the real signup's own /setup call runs —
+    // the idempotency check below would then hand the real user back the
+    // attacker's fabricated tenant instead of creating their own.
+    //
+    // Two checks that don't require a session:
+    //  (a) the auth account must have been created moments ago — narrows the
+    //      exploit window from "any UID ever leaked" to "an attacker actively
+    //      racing this specific signup in real time";
+    //  (b) full_name must match what Supabase captured in user_metadata at
+    //      signUp() time (Signup.tsx passes options.data.full_name) — an
+    //      attacker who only has a leaked UUID has no way to also know this.
+    const createdAtMs = new Date(user.created_at).getTime()
+    const ageMinutes   = Number.isFinite(createdAtMs) ? (Date.now() - createdAtMs) / 60_000 : Infinity
+    if (ageMinutes > 15) {
+      return forbidden(reply, 'SETUP_WINDOW_EXPIRED', 'This account was not created recently enough to complete setup. Please sign up again or contact support.')
+    }
+
+    const metadataFullName = (user.user_metadata as { full_name?: string } | null)?.full_name
+    if (metadataFullName && metadataFullName.trim().toLowerCase() !== full_name.trim().toLowerCase()) {
+      return forbidden(reply, 'SETUP_VERIFICATION_FAILED', 'Setup details do not match the account that was just created.')
     }
 
     // ── 2. Idempotency: check if profile already exists ────────────────────────
