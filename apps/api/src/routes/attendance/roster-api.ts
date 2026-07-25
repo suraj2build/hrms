@@ -262,6 +262,19 @@ export default async function rosterRoute(fastify: FastifyInstance) {
       return reply.code(404).send({ error: 'NOT_FOUND', message: 'Employee not found' })
     }
 
+    // Fresh audit finding: shift_id was never tenant-checked either — same
+    // cross-tenant IDOR shape as the employee_id check above.
+    const { data: shiftRow } = await fastify.supabase
+      .from('shifts')
+      .select('id')
+      .eq('id', shift_id)
+      .eq('tenant_id', req.tenantId)
+      .maybeSingle()
+
+    if (!shiftRow) {
+      return reply.code(404).send({ error: 'NOT_FOUND', message: 'Shift not found' })
+    }
+
     const { data, error } = await fastify.supabase
       .from('shift_roster')
       .upsert(
@@ -299,6 +312,33 @@ export default async function rosterRoute(fastify: FastifyInstance) {
     const dates = expandDateRange(from_date, to_date)
     if (dates.length > 31) {
       return reply.code(400).send({ error: 'RANGE_TOO_LARGE', message: 'Date range may not exceed 31 days' })
+    }
+
+    // Fresh audit finding (cross-tenant IDOR): unlike the single-assign
+    // endpoint above (which verifies the employee belongs to this tenant
+    // before writing shift_roster), this bulk endpoint wrote rows straight
+    // from the client-supplied employee_ids with no tenant check at all — a
+    // caller could pass a UUID belonging to another tenant's employee and
+    // create/overwrite roster rows for it under this tenant. Also validates
+    // shift_id, which neither endpoint checked.
+    const uniqueEmpIds = [...new Set(employee_ids)]
+    const { data: validEmps } = await fastify.supabase
+      .from('employees')
+      .select('id')
+      .eq('tenant_id', req.tenantId)
+      .in('id', uniqueEmpIds)
+    if ((validEmps?.length ?? 0) !== uniqueEmpIds.length) {
+      return reply.code(400).send({ error: 'INVALID_EMPLOYEES', message: 'One or more employees were not found in your organisation' })
+    }
+
+    const { data: shiftRow } = await fastify.supabase
+      .from('shifts')
+      .select('id')
+      .eq('id', shift_id)
+      .eq('tenant_id', req.tenantId)
+      .maybeSingle()
+    if (!shiftRow) {
+      return reply.code(404).send({ error: 'NOT_FOUND', message: 'Shift not found' })
     }
 
     const rows: { tenant_id: string; employee_id: string; date: string; shift_id: string }[] = []
