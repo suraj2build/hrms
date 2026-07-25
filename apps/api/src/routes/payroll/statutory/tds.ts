@@ -13,6 +13,8 @@ import { computeTDS } from '../../../lib/statutory/tds-engine.js'
 import { fetchFbpTaxableForEmployee } from '../../../lib/fbp-service.js'
 import { logAction } from '../../../lib/audit-service.js'
 import { HR_ADMIN_ROLES } from '../../../lib/rbac.js'
+import { fetchTenantTz } from '../../../lib/attendance-engine.js'
+import { getLocalDate } from '../../../lib/org-context.js'
 
 // DB enum values — must match migration 098_tds_foundation.sql CHECK constraint
 const DECLARATION_CATEGORIES = [
@@ -97,7 +99,16 @@ export async function checkDeclarationWindow(
 
   if (!open && !close) return null  // no window configured → unrestricted
 
-  const today = new Date().toISOString().substring(0, 10)
+  // Fresh audit finding: this used to compare the server's own UTC date
+  // directly against IST-configured window dates (`declaration_window_open`
+  // / `_close` are entered by an HR admin against the India calendar) — the
+  // same server-clock/tenant-clock mismatch class already fixed in
+  // absconding-engine.ts (ISSUE-154). A declaration made between 00:00 and
+  // 05:29 IST is still the PREVIOUS day in UTC, so a window that closes "on"
+  // a given IST date could reject a same-day-IST declaration as late (or
+  // accept a next-IST-day declaration as still in-window), by up to a day.
+  const tz    = await fetchTenantTz(fastify.supabase, tenantId)
+  const today = getLocalDate(new Date().toISOString(), tz)
   if (open && today < open) {
     return {
       code: 423,
