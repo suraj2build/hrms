@@ -59,4 +59,49 @@ describe('resolveLeaveDayFraction', () => {
       session: 'first_half', isPaid: true, existingStatus: 'late',
     })).toEqual({ status: 'present', day_fraction: 1.0, is_payable: true })
   })
+
+  // Regression coverage for ISSUE-139: 'hourly' previously fell through to the
+  // same flat 0.5 leavePortion as half-day sessions regardless of hoursRequested,
+  // silently over-crediting (paid) or fully zeroing (unpaid) the day.
+  describe('hourly session', () => {
+    it('2h paid leave on an 8h shift, no other work → 0.25 payable, half_day', () => {
+      expect(resolveLeaveDayFraction({
+        session: 'hourly', isPaid: true, hoursRequested: 2, stdShiftHours: 8,
+      })).toEqual({ status: 'half_day', day_fraction: 0.25, is_payable: true })
+    })
+
+    it('2h unpaid leave on an 8h shift, no other work → 0.0 (full LOP for that portion)', () => {
+      expect(resolveLeaveDayFraction({
+        session: 'hourly', isPaid: false, hoursRequested: 2, stdShiftHours: 8,
+      })).toEqual({ status: 'half_day', day_fraction: 0.0, is_payable: false })
+    })
+
+    it('2h paid leave + worked the rest of the day (present) → merges to 1.0, present', () => {
+      expect(resolveLeaveDayFraction({
+        session: 'hourly', isPaid: true, hoursRequested: 2, stdShiftHours: 8, existingStatus: 'present',
+      })).toEqual({ status: 'present', day_fraction: 1.0, is_payable: true })
+    })
+
+    it('2h UNPAID leave + worked the rest of the day → 0.75 payable (worked), 0.25 LOP', () => {
+      expect(resolveLeaveDayFraction({
+        session: 'hourly', isPaid: false, hoursRequested: 2, stdShiftHours: 8, existingStatus: 'present',
+      })).toEqual({ status: 'half_day', day_fraction: 0.75, is_payable: true })
+    })
+
+    it('full-shift-length hourly leave (8h of 8h) → 1.0 payable, present (not half_day)', () => {
+      expect(resolveLeaveDayFraction({
+        session: 'hourly', isPaid: true, hoursRequested: 8, stdShiftHours: 8,
+      })).toEqual({ status: 'present', day_fraction: 1.0, is_payable: true })
+    })
+
+    it('missing hoursRequested defaults to 0 hours (no leave credit) rather than a flat half-day', () => {
+      expect(resolveLeaveDayFraction({ session: 'hourly', isPaid: true }))
+        .toEqual({ status: 'half_day', day_fraction: 0.0, is_payable: false })
+    })
+
+    it('stdShiftHours defaults to 8 when not supplied', () => {
+      expect(resolveLeaveDayFraction({ session: 'hourly', isPaid: true, hoursRequested: 4 }))
+        .toEqual({ status: 'half_day', day_fraction: 0.5, is_payable: true })
+    })
+  })
 })

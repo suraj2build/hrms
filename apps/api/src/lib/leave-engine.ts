@@ -219,11 +219,13 @@ export interface LeaveDayResolution {
  * sessions and merging with any attendance already recorded for that date.
  *
  * Model (each day = 1.0):
- *   - leavePortion   = 0.5 for first_half/second_half, else 1.0
+ *   - leavePortion   = 0.5 for first_half/second_half; hoursRequested/stdShiftHours
+ *                      for hourly (clamped to [0,1]); else 1.0
  *   - leavePayable   = leavePortion when the leave type is paid, else 0
  *   - workedPortion  = the part of the day the employee actually worked, taken
  *                      from the existing attendance row (only meaningful for a
- *                      half-day leave, where the other half may be worked)
+ *                      fractional-day leave — half-day or hourly — where the
+ *                      rest of the day may be worked)
  *   - day_fraction   = min(1, leavePayable + workedPortion)
  *
  * Examples:
@@ -232,15 +234,27 @@ export interface LeaveDayResolution {
  *   half paid leave, worked other half   → 1.0 payable (status 'present')
  *   half paid leave, didn't work         → 0.5 payable, 0.5 LOP ('half_day')
  *   half unpaid leave, worked other half → 0.5 payable, 0.5 LOP ('half_day')
+ *   2h paid leave (8h shift), worked rest → 1.0 payable (status 'present')
+ *   2h paid leave (8h shift), didn't work → 0.25 payable, 0.75 LOP ('half_day')
  */
 export function resolveLeaveDayFraction(opts: {
   session:           LeaveSession
   isPaid:            boolean
   existingStatus?:   string | null
   existingFraction?: number | null
+  /** Only meaningful when session === 'hourly'. */
+  hoursRequested?:   number | null
+  /** Standard working hours in a full day, for hourly leavePortion. Default 8. */
+  stdShiftHours?:    number
 }): LeaveDayResolution {
-  const isHalf       = opts.session !== 'full_day'
-  const leavePortion = isHalf ? 0.5 : 1.0
+  const isHourly  = opts.session === 'hourly'
+  const isHalf    = opts.session === 'first_half' || opts.session === 'second_half'
+  const fractional = isHalf || isHourly
+
+  const stdShiftHours = opts.stdShiftHours && opts.stdShiftHours > 0 ? opts.stdShiftHours : 8
+  const leavePortion = isHourly
+    ? Math.max(0, Math.min(1, (opts.hoursRequested ?? 0) / stdShiftHours))
+    : (isHalf ? 0.5 : 1.0)
   const leavePayable = opts.isPaid ? leavePortion : 0
 
   let workedPortion = 0
@@ -251,10 +265,15 @@ export function resolveLeaveDayFraction(opts: {
     } else if (s === 'half_day') {
       workedPortion = Math.min(0.5, opts.existingFraction ?? 0.5)
     }
+  } else if (isHourly) {
+    const s = opts.existingStatus
+    if (s === 'present' || s === 'late') {
+      workedPortion = Math.max(0, 1 - leavePortion)
+    }
   }
 
   const day_fraction = Math.min(1.0, Math.round((leavePayable + workedPortion) * 100) / 100)
-  const status = !isHalf
+  const status = !fractional
     ? 'leave'
     : (day_fraction >= 1.0 ? 'present' : 'half_day')
 

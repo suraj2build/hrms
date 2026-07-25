@@ -57,7 +57,7 @@ import { resolveViaRotationPolicy }                    from './rotation-engine.j
 import { resolveShiftWithAttribution, toShiftMeta, type ResolvedShift } from './shift-resolution-engine.js'
 import { isShiftAttributionEnabled } from './attendance-flags.js'
 import { generateCompOffRequests }                     from './comp-off-service.js'
-import { resolveLeaveDayFraction }                      from './leave-engine.js'
+import { resolveLeaveDayFraction, type LeaveSession }    from './leave-engine.js'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -681,10 +681,16 @@ async function fetchApprovedLeave(
   tenantId:   string,
   employeeId: string,
   date:       string,
-): Promise<{ leave_type_id: string; is_paid: boolean; half_day: boolean } | null> {
+): Promise<{
+  leave_type_id:   string
+  is_paid:         boolean
+  half_day:        boolean
+  session:         LeaveSession | null
+  hours_requested: number | null
+} | null> {
   const { data } = await supabase
     .from('leave_requests')
-    .select('leave_type_id, half_day, leave_types(is_paid)')
+    .select('leave_type_id, half_day, session, hours_requested, leave_types(is_paid)')
     .eq('tenant_id', tenantId)
     .eq('employee_id', employeeId)
     .eq('status', 'APPROVED')
@@ -695,17 +701,21 @@ async function fetchApprovedLeave(
   if (!data) return null
 
   const row = data as unknown as {
-    leave_type_id: string
-    half_day:      boolean | null
-    leave_types:   { is_paid: boolean } | { is_paid: boolean }[] | null
+    leave_type_id:   string
+    half_day:        boolean | null
+    session:         LeaveSession | null
+    hours_requested: number | null
+    leave_types:     { is_paid: boolean } | { is_paid: boolean }[] | null
   }
 
   const lt = Array.isArray(row.leave_types) ? row.leave_types[0] : row.leave_types
 
   return {
-    leave_type_id: row.leave_type_id,
-    is_paid:       lt?.is_paid ?? false,
-    half_day:      row.half_day ?? false,
+    leave_type_id:   row.leave_type_id,
+    is_paid:         lt?.is_paid ?? false,
+    half_day:        row.half_day ?? false,
+    session:         row.session,
+    hours_requested: row.hours_requested,
   }
 }
 
@@ -896,17 +906,31 @@ export async function computeDay(
   // 3. Approved leave → LEAVE (session-aware). Only reached on actual working
   //    days now — rest days above already returned.
   if (approvedLeave) {
-    const { is_paid, half_day } = approvedLeave
-    // For a HALF-DAY leave, the other half of the day may have been worked.
-    // Treat the presence of punches as the worked half so the day merges to a
-    // full payable day (0.5 leave + 0.5 worked) instead of losing the worked
-    // half. For a full-day leave this is a no-op. resolveLeaveDayFraction also
-    // fixes unpaid half-day handling (0.5 unpaid leave alone → 0 payable).
+    const { is_paid, half_day, session: leaveSession, hours_requested } = approvedLeave
+    // session is the authoritative field (set on every row written since the
+    // duration-engine rollout); half_day is the legacy boolean, kept as a
+    // fallback for any older row where session was never backfilled.
+    const resolvedSession: LeaveSession = leaveSession ?? (half_day ? 'first_half' : 'full_day')
+    const isFractional = resolvedSession !== 'full_day'
+    // For a fractional (half-day or hourly) leave, the rest of the day may
+    // have been worked. Treat the presence of punches as the worked remainder
+    // so the day merges to a full payable day instead of losing the worked
+    // portion. For a full-day leave this is a no-op. resolveLeaveDayFraction
+    // also fixes unpaid-fractional-leave-alone handling (→ 0 payable for that
+    // portion). hoursRequested/stdShiftHours only affect the 'hourly' case —
+    // previously 'hourly' fell through to the same flat 0.5 as half-day,
+    // silently over-crediting (paid) or fully zeroing (unpaid) the day
+    // regardless of how many hours were actually requested.
     const resolved = resolveLeaveDayFraction({
-      session:        half_day ? 'first_half' : 'full_day',
+      session:        resolvedSession,
       isPaid:         is_paid,
-      existingStatus: half_day && punches.length > 0 ? 'present' : null,
+      existingStatus: isFractional && punches.length > 0 ? 'present' : null,
+      hoursRequested: hours_requested,
+      stdShiftHours:  shift ? shift.durationMin / 60 : 8,
     })
+    const reason = resolvedSession === 'hourly'
+      ? `Approved ${hours_requested ?? '?'}h leave on ${date}`
+      : (half_day ? `Approved half-day leave on ${date}` : `Approved leave on ${date}`)
     return {
       tenant_id, employee_id, date,
       status:               resolved.status,
@@ -919,7 +943,7 @@ export async function computeDay(
       worked_on_holiday:    false,
       computed_source:      'engine' as const,
       ...shiftAttribution,
-      reason:               half_day ? `Approved half-day leave on ${date}` : `Approved leave on ${date}`,
+      reason,
       meta:                 { punchesCount: punches.length, hasUnpunchedOut: false },
     }
   }
