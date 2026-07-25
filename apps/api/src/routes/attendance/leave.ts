@@ -28,6 +28,7 @@ import { eventBus }  from '../../lib/event-bus.js'
 import { writeLedgerEntry, dateToMonth } from '../../lib/ledger-writer.js'
 import { isLeaveLedgerShadowEnabled, recordShadowDrift } from '../../lib/leave-ledger-shadow.js'
 import { serverError, notFound, forbidden, validationError, conflictError, ErrorCode } from '../../lib/api-errors.js'
+import { fetchAllRows } from '../../lib/supabase-paginate.js'
 
 const dateRe = /^\d{4}-\d{2}-\d{2}$/
 
@@ -1041,13 +1042,25 @@ export default async function leaveRoute(fastify: FastifyInstance) {
     let teamEmployeeIds: string[] = []
 
     if (isHrAdmin) {
-      // HR admin: all active employees in tenant
-      const { data: allEmps } = await fastify.supabase
-        .from('employees')
-        .select('id')
-        .eq('tenant_id', tenantId)
-        .eq('status', 'active')
-      teamEmployeeIds = ((allEmps ?? []) as any[]).map(e => e.id)
+      // HR admin: all active employees in tenant. fetchAllRows() (not a
+      // plain query) — fresh audit finding: a >1,000-employee tenant would
+      // otherwise silently show balances for only the first 1,000 (in
+      // whatever order PostgREST returns them), the same Muster Roll bug
+      // class CLAUDE.md's Supabase pagination rule documents.
+      let allEmps: any[]
+      try {
+        allEmps = await fetchAllRows((from, to) =>
+          fastify.supabase
+            .from('employees')
+            .select('id')
+            .eq('tenant_id', tenantId)
+            .eq('status', 'active')
+            .range(from, to),
+        )
+      } catch (err: any) {
+        return serverError(req, reply, err, ErrorCode.QUERY_FAILED, 'Failed to fetch team balances')
+      }
+      teamEmployeeIds = allEmps.map((e: any) => e.id)
     } else {
       // Manager: use the canonical hierarchy (employees.manager_id / status)
       // that is the single source of truth established in P6.0a.
@@ -1636,19 +1649,36 @@ export default async function leaveRoute(fastify: FastifyInstance) {
   fastify.get('/attendance/leave/ledger-reconciliation', hrAdminAuth, async (req: any, reply) => {
     const year = Number((req.query as any)?.year) || new Date().getFullYear()
 
-    const [{ data: balances }, { data: ledger }] = await Promise.all([
-      fastify.supabase
-        .from('employee_leave_balance')
-        .select('employee_id, leave_type_id, balance')
-        .eq('tenant_id', req.tenantId)
-        .eq('year', year),
-      fastify.supabase
-        .from('leave_accrual_ledger')
-        .select('employee_id, leave_type_id, days')
-        .eq('tenant_id', req.tenantId)
-        .eq('year', year)
-        .eq('is_expired', false),
-    ])
+    // fetchAllRows() on both (not plain queries) — fresh audit finding: this
+    // is the tool HR uses to verify cache↔ledger drift before the
+    // ledger-as-authority cutover; a >1,000-row tenant (employee × leave-type
+    // combinations, easily exceeded at enterprise scale) would otherwise
+    // silently under-report discrepancies past PostgREST's max-rows ceiling,
+    // giving false confidence that the ledger and cache are in sync.
+    let balances: any[], ledger: any[]
+    try {
+      ;[balances, ledger] = await Promise.all([
+        fetchAllRows((from, to) =>
+          fastify.supabase
+            .from('employee_leave_balance')
+            .select('employee_id, leave_type_id, balance')
+            .eq('tenant_id', req.tenantId)
+            .eq('year', year)
+            .range(from, to),
+        ),
+        fetchAllRows((from, to) =>
+          fastify.supabase
+            .from('leave_accrual_ledger')
+            .select('employee_id, leave_type_id, days')
+            .eq('tenant_id', req.tenantId)
+            .eq('year', year)
+            .eq('is_expired', false)
+            .range(from, to),
+        ),
+      ])
+    } catch (err: any) {
+      return serverError(req, reply, err, ErrorCode.QUERY_FAILED, 'Failed to fetch ledger reconciliation data')
+    }
 
     // Σ ledger days per (employee, leave_type).
     const ledgerSum = new Map<string, number>()

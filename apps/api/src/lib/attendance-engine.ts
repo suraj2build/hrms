@@ -739,13 +739,21 @@ async function fetchHoliday(
   // days off — they must be explicitly availed via a leave/RH request. Payroll,
   // leave-request-service and roster-calendar already exclude is_optional=true;
   // this filter aligns the attendance engine so day_fraction does not diverge.
-  const { data: holidays } = await supabase
+  const { data: holidays, error } = await supabase
     .from('holiday_calendar')
     .select('name, is_optional, site_id, location_id, holiday_group_id')
     .eq('tenant_id', tenantId)
     .eq('date', date)
     .eq('is_optional', false)
 
+  // Fresh audit finding: previously discarded — a query error silently fell
+  // through to `if (!holidays?.length) return null`, treating a real holiday
+  // as a normal working day and computing it as ABSENT/LOP instead of a paid
+  // HOLIDAY. Throws, matching fetchApprovedLeave's established contract
+  // (ISSUE-151) in this same file/Promise.all.
+  if (error) {
+    throw new Error(`fetchHoliday: DB query failed — ${error.message}`)
+  }
   if (!holidays?.length) return null
 
   const hols = holidays as Array<{
