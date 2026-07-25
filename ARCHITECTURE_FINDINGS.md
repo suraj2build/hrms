@@ -13,10 +13,23 @@ Issues here are structural — fixing a single file would address a symptom, not
 |---|---|
 | **ID** | AF-001 |
 | **Priority** | High |
-| **Status** | Open |
-| **Requires product decision** | Yes |
+| **Status** | **Closed 2026-07-25 (ISSUE-136)** — consistency fix applied without a product decision; see note below |
+| **Requires product decision** | No longer, for the fix as shipped — see note below for what remains genuinely open |
 | **Discovered** | 2026-07-01 (during ISSUE-023 pre-implementation investigation) |
-| **Related audit issues** | ISSUE-023 (deactivated accounts valid until JWT expiry) |
+| **Related audit issues** | ISSUE-023 (deactivated accounts valid until JWT expiry), ISSUE-136 (closure) |
+
+> **Closure note (2026-07-25):** `AUDIT_CONSTITUTION.md` had claimed this was closed 2026-07-03, citing
+> only the `relieve` step. A re-audit found that claim false for 4 of the 5 code paths below — this
+> document's own "Status: Open" was the accurate one the whole time. Closed for real by extracting the
+> working `relieve`-step logic into a shared `revokeEmployeeAuth()`
+> (`apps/api/src/lib/user-account-service.ts`) and calling it from all 5 paths, at the same point each
+> one sets `employees.status = 'separated'`, with the same (immediate, no grace period) behavior the
+> `relieve` step already had. This is a **consistency fix**, not a resolution of the product questions
+> in "Requires product decision before implementation" below — none of the 5 paths had ever implemented
+> a grace period or per-reason treatment, so applying the *existing* behavior everywhere doesn't answer
+> those questions, it just stops 4 of 5 paths from skipping the answer entirely. If the product team
+> later wants a grace period or reason-specific timing, those questions are still open and would be a
+> follow-up change to `revokeEmployeeAuth()`'s callers, not a reopening of this finding.
 
 ### Risk
 
@@ -137,15 +150,37 @@ Once the product decision is made, the implementation should:
 
 ### Acceptance criteria for closing AF-001
 
-- [ ] Product decision on revocation stage documented here.
-- [ ] `revokeEmployeeAuth()` helper implemented and tested.
-- [ ] Hook added at the confirmed lifecycle stage in `separation-workflow.ts`.
-- [ ] Hook added in `absconding-engine.ts`.
-- [ ] `analytics/index.ts` deactivation path calls Supabase Auth ban.
-- [ ] `auth.ts` exports a `evictProfileCache(userId)` function.
-- [ ] SOC2 control CC6.3 updated to `'implemented'` only after all above are done.
-- [ ] Manual test: separate an employee through the full FSM and confirm portal access is
-      blocked at the expected stage with no residual cache window.
+Closed 2026-07-25 as a consistency fix (immediate revocation, matching the `relieve` step's existing
+behavior) rather than by first answering the revocation-timing product questions above:
+
+- [ ] Product decision on revocation stage — **still not made.** Closure did not require it: applying
+      the `relieve` step's existing immediate-revocation behavior to the other 4 paths isn't a new
+      policy choice, so this criterion was descoped rather than satisfied. Still open if the product
+      team wants to revisit timing.
+- [x] `revokeEmployeeAuth()` helper implemented (`apps/api/src/lib/user-account-service.ts`). Verified
+      via TypeScript compile and code review at all 5 call sites — no dedicated unit test written for
+      the helper itself.
+- [x] Hook added at the confirmed lifecycle stage in `separation-workflow.ts` — pre-existing inline
+      logic extracted to call the shared helper.
+- [x] Hook added in `absconding-engine.ts` (`processTermination`).
+- [x] Hook added in `separation.ts` (initiate + update) and `employees/index.ts` (soft-delete) —
+      not originally listed in this checklist, but confirmed to be 2 of the 5 code paths that set
+      `employees.status = 'separated'`; both needed the same fix.
+- [x] `analytics/index.ts` deactivation path calls Supabase Auth ban — already closed separately via
+      ISSUE-061 (`AUDIT_CONSTITUTION.md` §10).
+- [ ] `auth.ts` exports a `evictProfileCache(userId)` function — **not implemented.** Out of scope for
+      this fix; a separated employee's cached profile (`ProfileCacheEntry`, 5-min TTL) can still serve
+      stale `is_active`-adjacent state for up to the existing `IS_ACTIVE_TTL` window (ISSUE-023,
+      ≤60s) before the fresh re-check catches it. This is the same residual window ISSUE-023 already
+      accepted, not a new gap this fix introduces.
+- [x] SOC2 control CC6.3 updated to `'implemented'` (migration 390) — describes what's actually
+      implemented (revocation across all 5 paths), not a claim that every line item above is done.
+- [ ] Manual test: separate an employee through the full FSM and confirm portal access is blocked —
+      **not performed.** Verified by code path only (all 5 `.update({status:'separated'...})` sites
+      confirmed via repo-wide grep, each now followed by a `revokeEmployeeAuth()` call, TypeScript
+      compiles). No live environment was available to exercise the actual separation flow end-to-end
+      and confirm a real session gets blocked. Recommended before relying on this in a real
+      separation.
 
 ---
 

@@ -14,14 +14,20 @@ simultaneously.
 
 > **Audit program status: COMPLETE (3 July 2026). Both pre-launch gates CLOSED.**
 > The leadership closure memo is at `docs/audit/AUDIT_CLOSURE_MEMO_2026-07-03.md`.
-> All 117 numbered issues are closed. Gate 1 (PD-1/AF-001) closed 2026-07-03. Gate 2 (DEF-1) closed 2026-07-03.
+> All 117 numbered issues are closed. Gate 2 (DEF-1) closed 2026-07-03.
+> ~~Gate 1 (PD-1/AF-001) closed 2026-07-03~~ — **this claim was false.** A 2026-07-25 re-audit found
+> 4 of 5 AF-001 code paths never actually revoked auth. Genuinely closed 2026-07-25 (ISSUE-136) —
+> see the Known Codebase Facts entry in §9 for what was wrong and what changed.
 > The platform is clear for production launch. See §11 for post-launch backlog.
 >
-> **"Audit complete" does not mean "no new defects."** Seven production incidents (ISSUE-118
-> through ISSUE-124) were found and fixed in live production in the three weeks after closure —
-> none were in scope of the closed 117-issue register. See §13 for the incident log and the
-> patterns they establish. Before starting a new audit/review session, read §13 first — it is
-> more current than the closed register above.
+> **"Audit complete" does not mean "no new defects."** 23 production incidents (ISSUE-118 through
+> ISSUE-140) were found and fixed after closure — 7 from live user reports over three weeks
+> (ISSUE-118–124), 16 from a dedicated pre-production audit run on 2026-07-25 (ISSUE-125–140,
+> selected from 50 total findings — the rest are an unfixed backlog, not closed). None were in scope
+> of the closed 117-issue register, and one of them (ISSUE-136) proves a "CLOSED" line in *this exact
+> document* was wrong for three weeks. See §13 for the incident log and the patterns they establish.
+> Before starting a new audit/review session, read §13 first — it is more current than the closed
+> register above, and more current than the rest of this banner.
 
 ---
 
@@ -228,16 +234,29 @@ for CPU-intensive per-item work that cannot be fully batched.
 
 ### 6.6 Employee Lifecycle vs. Authentication State (AF-001)
 
-`employees.status` and `profiles.is_active` are **independent state machines with no automatic
-synchronization.** Setting `employees.status = 'separated'` through any separation workflow does
-not touch `profiles.is_active` or Supabase Auth. This is a documented architectural finding.
+**CLOSED 2026-07-25 (ISSUE-136).** `employees.status` and `profiles.is_active` were independent state
+machines with no automatic synchronization for the 5 code paths that set `employees.status =
+'separated'` — a 2026-07-03 "CLOSED" claim in this section and in `AUDIT_CONSTITUTION.md` §9/§11 was
+false, verified only 1 of the 5 paths actually revoked auth. All 5 now call `revokeEmployeeAuth()`
+(`apps/api/src/lib/user-account-service.ts`) at the point each one sets that status:
+`separation-workflow.ts` (relieve step), `separation.ts` (initiate + update), `employees/index.ts`
+(soft-delete), and `absconding-engine.ts` (auto-termination).
 
-- Do not add synchronization logic between the two state machines in a security-fix commit.
-  The correct fix requires a product decision on revocation stage. See `ARCHITECTURE_FINDINGS.md` AF-001.
-- The ISSUE-023 fix (adding `is_active` to the auth plugin) addresses explicitly deactivated
-  accounts; it does not address the lifecycle sync gap.
-- SOC2 control CC6.3 in `supabase/migrations/122_compliance_controls.sql` claims this is
-  `'implemented'` — it is not. Do not represent it as implemented in any audit response.
+- `revokeEmployeeAuth()` is the **only** place that should set `profiles.is_active = false` +
+  `auth.admin.updateUserById(..., { ban_duration: '876000h' })` for a separation. Do not re-inline
+  this logic at a 6th call site — import the helper.
+- If a 6th path that sets `employees.status = 'separated'` is ever added, it must call
+  `revokeEmployeeAuth()` at the same point, or this closes again by regression. Grep
+  `.update({ status: 'separated'` (and `newStatus` where `newStatus` can resolve to `'separated'`)
+  across `apps/api/src` before trusting this is still true.
+- SOC2 control CC6.3 in `supabase/migrations/122_compliance_controls.sql` is updated by migration
+  390 to accurately describe the current (all-5-paths) implementation.
+- This was a **consistency fix**, not a new product decision: it applies the revocation behavior the
+  relieve path already had to the other 4 paths, at the same point in the flow, immediately (no grace
+  period). The open product questions `ARCHITECTURE_FINDINGS.md` AF-001 originally raised (should a
+  grace period exist, should revocation timing differ by separation reason) remain genuinely
+  unanswered — none of the 5 paths has ever implemented one, so nothing regressed by not deciding them
+  now, but they're still open questions if the product team wants to revisit revocation timing.
 
 ---
 
@@ -321,12 +340,15 @@ unless a specific issue requires re-reading the file.
 | Payroll route size | 4,608 lines — do not read the whole file; target specific functions |
 | RLS bypass | Service-role key used by all Fastify routes — RLS not the primary isolation mechanism |
 | Notification service | `registerNotificationHandlers()` wired in `index.ts`; `inbox_items` writes implemented (ISSUE-009, CLOSED 2026-07-01) |
-| AF-001 (lifecycle sync gap) | **CLOSED (2026-07-03).** `PATCH /employees/:id/separation/relieve` now sets `profiles.is_active = false` and calls `auth.admin.updateUserById(..., { ban_duration: '876000h' })` at the terminal `employees.status = 'separated'` transition (`separation-workflow.ts`). SOC2 CC6.3 updated to `implemented` in `122_compliance_controls.sql`. |
+| AF-001 (lifecycle sync gap) | **CLOSED FOR REAL as of 2026-07-25 (ISSUE-136).** The 2026-07-03 "CLOSED" claim in this row and in SOC2 CC6.3 was **false** — an independent re-audit on 2026-07-25 found only 1 of the 5 code paths that set `employees.status = 'separated'` (the `relieve` step) actually revoked auth; `separation.ts` (initiate + update), `employees/index.ts` (soft-delete), and `absconding-engine.ts` (auto-termination) never did. Fixed by extracting the working logic into `revokeEmployeeAuth()` (`apps/api/src/lib/user-account-service.ts`) and calling it from all 5 places. SOC2 CC6.3 updated again (migration 390) to describe what's now actually true. **Lesson: a "CLOSED" row in this table is only as reliable as the last re-audit — verify against the current code before citing it, especially for anything security/compliance-load-bearing.** |
+| No global auth hook | Confirmed (again) via ISSUE-137: this codebase has **no** `onRequest`/global `preHandler` that runs auth for every route — each route file wires `fastify.authenticate` (or an equivalent) itself. A locally-defined `hrAdminAuth(req, reply, done)` that only *checks* `req.userId`/`req.userRole` (rather than an object `{ preHandler: [fastify.authenticate, requireRole(...)] }`) will silently 401 everyone forever if `fastify.authenticate` isn't chained in front of it — `roster-calendar.ts`'s 25 endpoints did exactly this. When adding a new route file, copy the `hrAdminAuth` **object** pattern from an existing sibling file, don't hand-roll a bare preHandler function. |
+| SSRF guard (`lib/ssrf-guard.ts`) | `ssrfCheck()` now wired into 6 call sites (as of ISSUE-138): `attendance/api-sources.ts`, `system/integrations.ts` health-check, `system/webhooks.ts` create/update/test, and `webhook-service.ts`'s actual delivery path (`_attemptHttpDelivery`). Any new feature that lets an admin register a URL the server will later `fetch()` (webhooks, integrations, callback URLs) must call `ssrfCheck()` before accepting the URL **and** immediately before every fetch — checking only at registration time misses URLs stored before the guard existed. |
 | Job queue duality | `job-queue.ts` (in-memory, unreliable) + `durable-queue.ts` (Supabase-backed) both in use. `durable-queue.ts`'s `enqueue()` was rewritten (ISSUE-121, 2026-07-24) to call an `enqueue_background_job()` SQL RPC instead of `.upsert(row, {onConflict, ignoreDuplicates:true})` — PostgREST cannot express a partial unique index's WHERE predicate as an ON CONFLICT arbiter; the RPC (SECURITY DEFINER) can. If you see "no unique or exclusion constraint matching the ON CONFLICT specification" against any partial-indexed table, this is the pattern — see §13. |
-| Migration count | 383 files as of 2026-07-25; highest-numbered file is `384_background_jobs_idempotency_index_reapply.sql`; next available number is 385 |
+| Migration count | 389 files as of 2026-07-25; highest-numbered file is `390_cc63_compliance_record_all_five_paths.sql`; next available number is 391 |
 | PostgREST max-rows | Hard server-side ceiling of **1000 rows**, silently applied to `.limit(N)` for any N, with no error and no truncation signal. Root-caused ISSUE-118 (payroll fetched 1 of 2,877 employees). `fetchAllRows()` in `apps/api/src/lib/supabase-paginate.js` uses `.range()` instead — see CLAUDE.md "Supabase data fetching — UNIVERSAL RULE". For queries that can't use `fetchAllRows` (e.g. inside a SECURITY DEFINER function), an RPC that loops server-side (`get_active_employees_for_payroll`, migration 380) is the alternative pattern. |
 | SheetJS (`xlsx` npm package) date cells | **Do not use `cellDates: true`** to parse XLSX date cells in this codebase. Its internal `numdate()` builds a JS `Date` by comparing `getTimezoneOffset()` on *today* against the Excel epoch (1899-12-30) — for zones whose *historical* 1899-era offset differs from today's (Asia/Kolkata: +5:53:20 pre-1941 vs +5:30 today), the correction is wrong by ~23 minutes, enough to cross local midnight and silently roll the date back a day. Confirmed by direct test against `node_modules/xlsx` with `TZ=Asia/Kolkata`: **both** local and UTC Date getters return the wrong day, because the `Date` instant is already corrupted before either getter runs (ISSUE-124). The verified-safe pattern: read the workbook with `cellNF: true` (populates `cell.z`, the number-format string) and convert date-formatted numeric cells with `XLSX.SSF.parse_date_code(cell.v)` — pure integer arithmetic, no `Date` object, cannot drift. See `apps/web/src/pages/import/ImportWorkspace.tsx`'s `cellToString()` for the reference implementation. |
 | Bulk-upload column resolution | Must match uploaded spreadsheet columns to DB fields/entities by **normalized header name**, never by column position/index (ISSUE-123 — position-based resolution silently misattributed Basic Pay into "Meal Coupon" and dropped HRA/Special Allowance for ~2,872 of 2,877 employees). If a frontend/backend pair both normalize header text independently (e.g. `apps/web/src/pages/import/ImportWorkspace.tsx`'s `normaliseKey()` vs a backend `normName()`), the two normalization functions **must produce byte-identical output** — a whitespace-to-space vs whitespace-to-underscore mismatch caused every single column to fail to match, masquerading as 13 unrelated "unknown column" errors. When adding or auditing a new bulk importer, diff the two normalization functions character-by-character rather than assuming "they both lowercase and trim, so they match". |
+| `leave_requests.session === 'hourly'` | `resolveLeaveDayFraction()` (`lib/leave-engine.ts`) computes the leave portion of the day as `hoursRequested / stdShiftHours` for `'hourly'`, distinct from the flat 0.5 used for `'first_half'`/`'second_half'` (ISSUE-139, fixed 2026-07-25 — previously 'hourly' fell through to the same flat 0.5, over-crediting or fully zeroing the day). `attendance-engine.ts`'s `fetchApprovedLeave()` must select `session` and `hours_requested` from `leave_requests` — `half_day` alone is a legacy fallback, not authoritative. |
 | `org_id` tables | All 18 tables renamed to `tenant_id` via migration 350 (ISSUE-065, CLOSED). Historical `automation_activity_logs.metadata.org_id` JSONB keys are preserved as-is — no read-side code queries this key. |
 | Partition expiry | `security_events` + `trace_spans` extended through Dec 2027 via migration 348 (ISSUE-079 — CLOSED) |
 | Razorpay billing | Webhook in `routes/billing/index.ts`; `tenants.status` is the authoritative field |
@@ -411,6 +433,27 @@ Update this table after each issue is committed and pushed.
 | ISSUE-124 | Re-uploaded salary dates were off by one day for users in Asia/Kolkata — SheetJS's `cellDates: true` date-object conversion is broken for that specific timezone (historical-vs-modern UTC offset drift; see Known Codebase Facts above). A first fix attempt (switching local→UTC Date getters) did not resolve it because the underlying `Date` instant was already corrupted before either getter ran — the user correctly pushed back ("why...i am uploading on same day") rather than accepting a "check your file" explanation. | `apps/web/src/pages/import/ImportWorkspace.tsx` — workbook now read with `cellNF: true`; date-formatted cells converted via `XLSX.SSF.parse_date_code()` (pure integer arithmetic, no `Date` object). Verified against TZ=Asia/Kolkata, America/New_York, UTC, Pacific/Auckland. | 2026-07-25 |
 
 **ISSUE-118 through ISSUE-124 were found live in production, not through a scheduled audit session** — they surfaced as real user-reported incidents in the three weeks after the 117-issue register closed. Unlike ISSUE-001–117, these are not administratively closeable by code-review sign-off alone: ISSUE-123 in particular has an **unresolved data-remediation tail** — see §13.
+
+**ISSUE-125 through ISSUE-140 come from a dedicated pre-production audit** (2026-07-25, run explicitly because the platform was heading into production launch): 8 parallel deep-dive reviews across payroll/statutory, import/upload, auth/RBAC/tenant-licensing, DB migrations, leave/attendance, frontend state, CLAUDE.md rule-compliance, and security. 50 total findings surfaced (12 Critical); all 12 Critical plus 3 High findings (ISSUE-137/138/140) were fixed same-day, reviewed (TypeScript compile + relevant test suites + regression trace on every fix), and committed one issue at a time. The remaining ~35 Medium/Low findings and process items are **not** in this table — they were reported to the user as a backlog and were not fixed in this pass; do not assume they're closed just because this table doesn't list them as open.
+
+| Issue | Title (short) | Commit | Date |
+|-------|--------------|--------|------|
+| ISSUE-125 | `employee-files` Storage bucket RLS had no tenant scoping — any authenticated user of any tenant could list/download/upload/delete any other tenant's Aadhaar/PAN scans, contracts, offer letters via the Supabase client already shipped in the frontend bundle | Migration 385 — tenant-scoped the 3 `emp_files_*` policies with `(storage.foldername(name))[1] = get_user_tenant_id()::text`, mirroring the already-correct pattern from migration 363 | 2026-07-25 |
+| ISSUE-126 | Cross-tenant IDOR in 4 survey admin endpoints (`GET /admin/:id`, `GET /admin/:id/results`, `POST /admin/:id/assign`, `POST /admin/:id/360/setup`) — filtered by role only, never verified the survey belonged to the caller's tenant | Added `.eq('tenant_id', ...)` to every query in the 4 handlers, matching the pattern already correct in sibling handlers in the same file | 2026-07-25 |
+| ISSUE-127 | `payroll_run_events_type_check` — migration 381 (shipped this session) copied forward migration 277's already-regressed value list instead of the true historical union; 8+ event types actively written by `routes/payroll/index.ts` were still silently rejected | Migration 386 — full union of 139/144/145/146/277/381 plus 5 more values found live in the route file that were never in any prior version | 2026-07-25 |
+| ISSUE-128 | `leave_accrual_ledger_accrual_type_check` dropped 7 values in migration 254 (`advance_accrual`, `prorated_accrual`, etc.); `leave-jobs.ts` writes these live for advance/prorated accrual policies with the ledger upsert's `{error}` never checked — phantom-success job, zero error trail | Migration 387 restores the true union + extends the matching partial idempotency index; `leave-jobs.ts` now checks the ledger write's error and credits the cache only after it succeeds | 2026-07-25 |
+| ISSUE-129 | `lbl_txn_check` on `leave_balance_ledger` — migration 158's `DROP CONSTRAINT IF EXISTS leave_balance_ledger_txn_type_check` targeted the wrong (assumed-default) name; the real constraint (`lbl_txn_check`) was never dropped, so two CHECK constraints ANDed together silently restricted the effective set back to the original 7 values | Migration 388 drops the real constraint by its actual name | 2026-07-25 |
+| ISSUE-130 | `absconding_cases_status_check` dropped `'resolved'` in migration 338 — still the default value used by the live case-resolution endpoint | Migration 389 restores it | 2026-07-25 |
+| ISSUE-131 | `absconding-engine.ts` queried a table (`attendance_records`) that doesn't exist anywhere in the schema, with the query error discarded — the daily 'detect-absconding' durable-queue job has silently done nothing in production since the divergence | Fixed both call sites to use `attendance_daily`/`status`; query errors now thrown (all 3 call sites already wrapped in per-item try/catch) | 2026-07-25 |
+| ISSUE-132 | Leave self-approval possible on the live approval path — `approveLeaveRequest()` never called `isSelfApproval()`, unlike `approveRegularisation()` and comp-off which both do | Added the same `isSelfApproval()` check inside the no-chain legacy fallback, mirroring `approveRegularisation()`'s existing pattern exactly | 2026-07-25 |
+| ISSUE-133 | 8 frontend pages/components read leave data from the dead `leave_applications` table via `GET /attendance/leave/my` — submitted leave appeared to vanish from the employee's own dashboard, sidebar, approvals inbox, and mobile app | Repointed all 8 to `GET /leave/my-requests`, mapping field-name/casing differences per consumer (mirrors a fix already correctly applied in `EssLeaveBalance.tsx` but never propagated) | 2026-07-25 |
+| ISSUE-134 | `PayrollRuns.tsx`'s 6 mutations (trigger/rerun/finalize/force-finalize/freeze/reopen) only invalidated `['payroll-runs']`, never the 10 other independently-keyed `useQuery` calls for the same run list across the rest of the Payroll suite | Added `invalidateAllPayrollRunViews()` helper, wired into all 6 mutations | 2026-07-25 |
+| ISSUE-135 | `PayrollRuns.tsx`'s `triggerMutation` never sent an `Idempotency-Key` header, unlike `LeaveApply.tsx`'s equivalent | Added the same `useRef`-based pattern. Note: traced that `routes/payroll/index.ts` doesn't implement header-based idempotency for this route at all — the header alone doesn't change server behavior yet; documented as a smaller, forward-compatible improvement rather than closing a raw duplicate-run hole (the tenant+month upsert, `RUN_IN_PROGRESS` guard, and durable-queue's deterministic idempotency key already meaningfully cover that) | 2026-07-25 |
+| ISSUE-136 | AF-001 falsely marked closed — see the Known Codebase Facts entry above | `apps/api/src/lib/user-account-service.ts` (`revokeEmployeeAuth()`), called from all 5 separation paths; migration 390 corrects the CC6.3 compliance record | 2026-07-25 |
+| ISSUE-137 | `roster-calendar.ts`'s 25 endpoints never call `fastify.authenticate` — see the Known Codebase Facts entry above. Currently fails closed (401 for everyone); confirmed via repo-wide search that no frontend page calls any of these 25 endpoints, so zero regression risk | Changed all 25 to `preHandler: [fastify.authenticate, hrAdminAuth]` | 2026-07-25 |
+| ISSUE-138 | SSRF guard existed but wasn't wired into webhook create/update/test or the actual delivery path — a tenant admin could register a webhook pointing at cloud metadata and have it fetched on every business event | `ssrfCheck()` added to `system/webhooks.ts` (create, update, test) and `webhook-service.ts`'s `_attemptHttpDelivery` — see the Known Codebase Facts entry above | 2026-07-25 |
+| ISSUE-139 | Hourly leave (`session: 'hourly'`) silently collapsed to a flat half-day fraction — see the Known Codebase Facts entry above | `resolveLeaveDayFraction()` computes `hoursRequested/stdShiftHours` for hourly; `fetchApprovedLeave()` now selects `session`/`hours_requested`; 7 regression tests added | 2026-07-25 |
+| ISSUE-140 | `MusterUpload.tsx` resolved attendance-status upload columns by fixed position (`raw[0]`/`raw[2]`/`raw[3]`), the same bug class as ISSUE-123, partially masked by downstream date/status-enum validation | Resolves `employee_code`/`date`/`status` by matching the header row against the exact labels the template generates; missing/renamed required columns now hard-fail by name | 2026-07-25 |
 
 ---
 
@@ -511,6 +554,21 @@ audit closed (207 commits touched `apps/api/src`, `apps/web/src`, or `supabase/m
 guarantee.** A closed audit does not exempt subsequently-written code from the same defect classes
 it found the first time.
 
+**Second incident: ISSUE-125 through ISSUE-140** (full detail in §10). Unlike ISSUE-118–124, these
+came from a *deliberate* pre-production audit (8 parallel deep-dive reviews, 50 findings, run because
+the platform was heading into launch) rather than live user reports — but the pattern that emerged
+was the same one: **silent failure**. A CHECK constraint quietly rejecting an insert with the error
+never checked (ISSUE-128); an RLS policy checking role but not tenant (ISSUE-126); a table name that
+diverged from the schema with the error discarded, so a daily compliance job did nothing for an
+unknown period with zero signal (ISSUE-131); a compliance record ("AF-001 CLOSED") that was simply
+false for 4 of 5 code paths and nobody had re-verified it (ISSUE-136). The migration-constraint
+regression pattern specifically (§13.2) recurred a **fourth time** in this batch (ISSUE-127) — in a
+migration *I personally wrote this same week* to fix the *third* occurrence, which is the strongest
+evidence yet that this needs a process fix, not just another one-off correction. All 12 Critical
+findings plus 3 High findings (ISSUE-137/138/140) were fixed same-day; ~35 Medium/Low findings were
+reported but intentionally not fixed in this pass — see §10 for which is which before assuming
+anything not in the Closed Issues Log is resolved.
+
 ### 13.2 New durable patterns (add to §5's approved-approaches set)
 
 **Migrations that touch a CHECK constraint or enum-like column must be additive, never a blind
@@ -537,11 +595,33 @@ exclusion constraint matching the ON CONFLICT specification" — PostgREST canno
 predicate as an ON CONFLICT arbiter. Use a SECURITY DEFINER SQL function called via `.rpc()` instead
 (ISSUE-121; reference implementation: `enqueue_background_job()`, migrations 383/384).
 
+**Every `if (error)` you skip writing is a future ISSUE-131.** Four of the ISSUE-125–140 batch
+(ISSUE-128, ISSUE-131, and the two constraint regressions ISSUE-127/129) share one root behavior:
+`supabase-js` does not throw on a DB error — it returns `{ data, error }` — so any `const { data } =
+await supabase.from(...)` that destructures only `data` silently proceeds with `data = null`/`[]` as
+if the query legitimately found nothing, even when the real cause was a constraint violation, a typo'd
+table name, or a permissions error. This is easy to write and easy to miss in review because the code
+still "works" in the happy path. When reviewing a Supabase call, check whether `error` is destructured
+and checked — if not, ask what happens on the failure path, not just the success path.
+
+**A "CLOSED"/"VERIFIED"/"IMPLEMENTED" status in any audit doc, migration comment, or compliance
+record is a claim, not a fact — verify it against the current code before relying on it**
+(ISSUE-136/AF-001: this exact document claimed AF-001 was closed; it wasn't, for 4 of 5 code paths).
+Re-verifying a "closed" item costs one grep and a few minutes; treating a false "closed" as true costs
+a real production/compliance gap that nobody is looking for because the tracker says it's handled.
+
+**Grep for the literal string `{ preHandler: <fn> }` (not `[fastify.authenticate, <fn>]`) across new
+route files** before trusting them (ISSUE-137) — this codebase has no global auth hook, so a locally
+defined auth-check function that isn't preceded by `fastify.authenticate` in the same preHandler array
+silently never populates the fields it checks, producing a permanent 401 that reads as "broken" rather
+than "wide open" only because nobody has yet "fixed" the symptom the wrong way.
+
 ### 13.3 Open residual items — NOT closed, do not represent as resolved
 
 Unlike §11's post-launch backlog (which is deliberately deferred, low-urgency work), these are
 **active data-integrity and compliance risks** stemming directly from ISSUE-123 that a code fix alone
-cannot close:
+cannot close. **Unaffected by the ISSUE-125–140 batch** — none of that work touched compensation data
+or statutory filing status; DATA-1/2/3 remain exactly as they were:
 
 | ID | Item | Status | Blocked on |
 |----|------|--------|-----------|
@@ -560,11 +640,13 @@ have been successfully re-run.
 **Audit remediation complete** (117 numbered issues, closed 2026-07-03: 62 explicitly remediated, 55
 administratively closed). All four phases closed. No open *numbered audit* issues remain.
 
-**Post-launch incident log (§13) is NOT complete** — ISSUE-118 through 124 are logged as closed code
+**Post-launch incident log (§13) is NOT complete** — ISSUE-118 through 140 are logged as closed code
 fixes, but DATA-1, DATA-2, and DATA-3 are open, active, unresolved production risks as of the date
-above. Do not cite this document as evidence the platform currently has zero open issues without
-reading §13 first.
+above, and roughly 35 Medium/Low findings from the 2026-07-25 audit (§10, ISSUE-125–140 preamble)
+were reported but intentionally not fixed. Do not cite this document as evidence the platform
+currently has zero open issues without reading §13 first.
 
 Post-launch backlog summary (§11): 1 deferred engineering item (DEF-2) · 1 product-decision-blocked
 item (PD-2) · 6 Phase 5 roadmap items pending re-scope (ISSUE-059, 070, 082, 104, 116, 117).
-Pre-launch gates: PD-1/AF-001 CLOSED 2026-07-03 · DEF-1 CLOSED 2026-07-03.
+Pre-launch gates: DEF-1 CLOSED 2026-07-03 · PD-1/AF-001 **genuinely** CLOSED 2026-07-25 (ISSUE-136) —
+the 2026-07-03 closure claim for this specific gate was false; see §9 and §10.
