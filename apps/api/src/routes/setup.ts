@@ -15,7 +15,7 @@
 
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
-import { forbidden } from '../lib/api-errors.js'
+import { forbidden, serverError, ErrorCode } from '../lib/api-errors.js'
 
 function slugify(name: string): string {
   return name
@@ -125,11 +125,11 @@ export default async function setupRoute(fastify: FastifyInstance) {
       .single()
 
     if (tenantErr || !tenant) {
-      fastify.log.error({ err: tenantErr }, 'setup: tenant insert failed')
-      return reply.code(500).send({
-        error: 'TENANT_CREATE_FAILED',
-        message: tenantErr?.message ?? 'Failed to create tenant',
-      })
+      // Fresh audit finding: this route is intentionally unauthenticated
+      // (called before email confirmation, no session exists yet) — forwarding
+      // a raw DB error message here reaches an anonymous caller, unlike every
+      // other 500 path in this codebase which is at least authenticated.
+      return serverError(req, reply, tenantErr, ErrorCode.INSERT_FAILED, 'Failed to create tenant')
     }
 
     // ── 4. Create profile ───────────────────────────────────────────────────────
@@ -148,11 +148,9 @@ export default async function setupRoute(fastify: FastifyInstance) {
     if (profileErr || !profile) {
       // Roll back tenant on profile failure (best-effort)
       await fastify.supabase.from('tenants').delete().eq('id', tenant.id)
-      fastify.log.error({ err: profileErr }, 'setup: profile insert failed')
-      return reply.code(500).send({
-        error: 'PROFILE_CREATE_FAILED',
-        message: profileErr?.message ?? 'Failed to create user profile',
-      })
+      // Fresh audit finding: same unauthenticated-route error-leak fix as
+      // the tenant insert above.
+      return serverError(req, reply, profileErr, ErrorCode.INSERT_FAILED, 'Failed to create user profile')
     }
 
     fastify.log.info({ user_id, tenant_id: tenant.id }, 'setup: new tenant + super_admin profile created')
