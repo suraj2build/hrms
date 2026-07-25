@@ -133,6 +133,7 @@ export function SalaryComponents() {
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ['salary-components-mgmt'] })
     qc.invalidateQueries({ queryKey: ['salary-components'] })  // also bust readiness cache
+    qc.invalidateQueries({ queryKey: ['salary-components-list'] })  // EmployeeProfile Setup Compensation dialog
   }
 
   const createMutation = useMutation({

@@ -125,6 +125,9 @@ export function SalaryStructures() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['salary-structures'] })
+      // EmployeeProfile's Setup Compensation dialog reads the same list under
+      // a separate key.
+      qc.invalidateQueries({ queryKey: ['salary-structures-list'] })
       setDlgOpen(false)
       toast.success(editItem ? 'Structure updated' : 'Structure created')
     },
@@ -138,6 +141,7 @@ export function SalaryStructures() {
     mutationFn: (id: string) => api.delete(`/masters/salary-structures/${id}`),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['salary-structures'] })
+      qc.invalidateQueries({ queryKey: ['salary-structures-list'] })
       toast.success('Structure deleted')
     },
     onError: (e: Error) => toast.error('Delete failed', { description: e.message }),
@@ -147,6 +151,7 @@ export function SalaryStructures() {
     mutationFn: (id: string) => api.put(`/masters/salary-structures/${id}`, { is_default: true }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['salary-structures'] })
+      qc.invalidateQueries({ queryKey: ['salary-structures-list'] })
       toast.success('Default structure updated')
     },
     onError: (e: Error) => toast.error('Failed to set default', { description: e.message }),
