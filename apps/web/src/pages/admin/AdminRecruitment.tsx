@@ -165,6 +165,9 @@ export function AdminRecruitment() {
 
   function invalidate() {
     qc.invalidateQueries({ queryKey: ['recruitment'] })
+    // ManagerRequisition.tsx reads the same requisitions under its own key —
+    // an admin approve/reject/delete here must show up there without reload.
+    qc.invalidateQueries({ queryKey: ['manager', 'requisitions'] })
   }
 
   async function runAction(endpoint: string, successMsg: string) {
