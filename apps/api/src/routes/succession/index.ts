@@ -266,6 +266,16 @@ export default async function successionRoutes(fastify: FastifyInstance) {
     if (!parsed.success) return reply.status(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message ?? 'Invalid request body' })
     const { position_title, department, incumbent_id, risk_level = 'medium', notes } = parsed.data
 
+    // Fresh audit finding (cross-tenant IDOR): incumbent_id was inserted
+    // with no tenant check, then echoed back unfiltered via GET /plans/:id's
+    // employees!succession_plans_incumbent_id_fkey join — leaking a foreign
+    // tenant's employee identity.
+    if (incumbent_id) {
+      const { data: incumbent } = await supabase
+        .from('employees').select('id').eq('id', incumbent_id).eq('tenant_id', tenantId).maybeSingle()
+      if (!incumbent) return reply.status(400).send({ error: 'VALIDATION_ERROR', message: 'Incumbent not found in your organisation' })
+    }
+
     const { data, error } = await supabase
       .from('succession_plans')
       .insert({ tenant_id: tenantId, position_title: position_title.trim(), department, incumbent_id: incumbent_id || null, risk_level, notes, created_by: req.userId })
@@ -290,6 +300,14 @@ export default async function successionRoutes(fastify: FastifyInstance) {
     const update: Record<string, unknown> = {}
     for (const k of allowed) { if (body[k] !== undefined) update[k] = body[k] }
     if (Object.keys(update).length === 0) return reply.status(400).send({ error: 'No fields to update' })
+
+    // Same cross-tenant IDOR guard as POST /plans above — incumbent_id can
+    // also be set via this update path.
+    if (update.incumbent_id) {
+      const { data: incumbent } = await supabase
+        .from('employees').select('id').eq('id', update.incumbent_id as string).eq('tenant_id', tenantId).maybeSingle()
+      if (!incumbent) return reply.status(400).send({ error: 'VALIDATION_ERROR', message: 'Incumbent not found in your organisation' })
+    }
 
     const { error } = await supabase.from('succession_plans').update(update).eq('tenant_id', tenantId).eq('id', id)
     if (error) return reply.status(500).send({ error: error.message })
@@ -316,6 +334,13 @@ export default async function successionRoutes(fastify: FastifyInstance) {
     const parsed = AddCandidateSchema.safeParse(req.body)
     if (!parsed.success) return reply.status(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message ?? 'Invalid request body' })
     const { employee_id, readiness_level = 'ready_3_5_years', readiness_score, strengths, gaps, development_plan, notes } = parsed.data
+
+    // Fresh audit finding (cross-tenant IDOR): employee_id was inserted
+    // with no tenant check, then echoed back unfiltered via GET /plans/:id's
+    // employees!succession_candidates_employee_id_fkey join.
+    const { data: candidateEmp } = await supabase
+      .from('employees').select('id').eq('id', employee_id).eq('tenant_id', tenantId).maybeSingle()
+    if (!candidateEmp) return reply.status(400).send({ error: 'VALIDATION_ERROR', message: 'Employee not found in your organisation' })
 
     const { data, error } = await supabase
       .from('succession_candidates')
