@@ -18,6 +18,12 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
+
+// absconding_cases.response_channel CHECK (migration 323) — the ground truth
+// for valid channel values. absconding_communications.channel has no CHECK
+// (free text), but constraining input here keeps both tables consistent.
+const RESPONSE_CHANNELS = ['email', 'whatsapp', 'in_person', 'letter', 'phone'] as const
 import {
   sendWarningLetter1,
   sendWarningLetter2,
@@ -196,14 +202,14 @@ export default async function abscondingRoutes(fastify: FastifyInstance) {
       direction: z.enum(['outbound', 'inbound', 'internal']),
       subject:   z.string().optional(),
       body:      z.string().min(1),
-      channel:   z.string().optional(),
+      channel:   z.enum(RESPONSE_CHANNELS).optional(),
     }).safeParse(req.body)
 
     if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION', message: parsed.error.issues[0].message })
 
     // If employee responded, record it on the case too
     if (parsed.data.comm_type === 'employee_response') {
-      await fastify.supabase
+      const { error: caseUpdateErr } = await fastify.supabase
         .from('absconding_cases')
         .update({
           employee_response:    parsed.data.body,
@@ -212,6 +218,10 @@ export default async function abscondingRoutes(fastify: FastifyInstance) {
         })
         .eq('id', req.params.caseId)
         .eq('tenant_id', req.tenantId)
+
+      if (caseUpdateErr) {
+        return serverError(req, reply, caseUpdateErr, ErrorCode.UPDATE_FAILED, 'Failed to record employee response on case')
+      }
     }
 
     const { data, error } = await fastify.supabase
