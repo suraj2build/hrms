@@ -18,6 +18,7 @@ import {
   ReferenceIntegrityError,
 } from '../../lib/enterprise-import/index.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { fetchAllRows }   from '../../lib/supabase-paginate.js'
 
 // ── Shared constants ──────────────────────────────────────────────────────────
 
@@ -397,15 +398,27 @@ export default async function importRoutes(fastify: FastifyInstance) {
       return reply.code(404).send({ error: 'NOT_FOUND', message: 'Import job not found' })
     }
 
-    // Aggregate error category counts from row-level data
-    const { data: rowSummary } = await fastify.supabase
-      .from('import_job_rows')
-      .select('status')
-      .eq('import_job_id', id)
+    // Aggregate error category counts from row-level data. Jobs commonly exceed
+    // 1,000 rows (default chunk size alone is 5,000) — an unpaginated .select()
+    // here is silently truncated by PostgREST's max-rows ceiling, undercounting
+    // every status bucket for any job larger than max-rows.
+    let rowSummary: Array<{ status: string }>
+    try {
+      rowSummary = await fetchAllRows<{ status: string }>((from, to) =>
+        fastify.supabase
+          .from('import_job_rows')
+          .select('status')
+          .eq('import_job_id', id)
+          .range(from, to),
+      )
+    } catch (err) {
+      fastify.log.error(err)
+      return reply.code(500).send({ error: 'DB_ERROR', message: 'Failed to load row status summary' })
+    }
 
     const statusCounts: Record<string, number> = {}
-    for (const r of rowSummary ?? []) {
-      const s = r.status as string
+    for (const r of rowSummary) {
+      const s = r.status
       statusCounts[s] = (statusCounts[s] ?? 0) + 1
     }
 
