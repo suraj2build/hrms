@@ -53,6 +53,37 @@ export default async function positionsRoutes(fastify: FastifyInstance) {
   const auth        = { preHandler: [fastify.authenticate] }
   const hrAdminAuth = { preHandler: [fastify.authenticate, requireRole(...HR_ADMIN_ROLES)] }
 
+  // Fresh audit finding (cross-tenant IDOR): designation_id/grade_id/
+  // department_id/work_location_id/cost_center_id/site_id were inserted/
+  // updated with zero tenant check, and POSITION_SELECT's unfiltered FK
+  // joins would then echo a foreign tenant's name straight back in the
+  // response. Mirrors the validateExpansionFks pattern in masters/sites.ts.
+  async function validatePositionFks(
+    data: Record<string, any>,
+    tenantId: string,
+  ): Promise<{ field: string; message: string } | null> {
+    const checks: Array<[string, string, string]> = [
+      ['designation_id',   'designations',   'Designation'],
+      ['grade_id',         'grades',         'Grade'],
+      ['department_id',    'departments',    'Department'],
+      ['work_location_id', 'work_locations', 'Work location'],
+      ['cost_center_id',   'cost_centers',   'Cost center'],
+      ['site_id',          'sites',          'Site'],
+    ]
+    for (const [field, table, label] of checks) {
+      const id = data[field]
+      if (!id) continue
+      const { data: row } = await fastify.supabase
+        .from(table)
+        .select('id')
+        .eq('id', id)
+        .eq('tenant_id', tenantId)
+        .maybeSingle()
+      if (!row) return { field, message: `${label} not found in your organisation` }
+    }
+    return null
+  }
+
   // Count current occupants (is_current job_history rows) per position id.
   async function fillCounts(tenantId: string, positionIds: string[]): Promise<Record<string, number>> {
     const out: Record<string, number> = {}
@@ -184,6 +215,9 @@ export default async function positionsRoutes(fastify: FastifyInstance) {
     if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION', message: parsed.error.errors[0]?.message })
     if (!req.tenantId)   return reply.code(403).send({ error: 'NO_TENANT', message: 'No tenant context' })
 
+    const fkErr = await validatePositionFks(parsed.data, req.tenantId)
+    if (fkErr) return reply.code(400).send({ error: 'INVALID_REFERENCE', message: fkErr.message, field: fkErr.field })
+
     const code = parsed.data.code?.trim() ||
       await generateUniqueCode(fastify.supabase, 'positions', req.tenantId, parsed.data.title)
 
@@ -208,6 +242,9 @@ export default async function positionsRoutes(fastify: FastifyInstance) {
     const { id } = req.params as { id: string }
     const parsed = positionSchema.partial().safeParse(req.body)
     if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION', message: parsed.error.errors[0]?.message })
+
+    const fkErr = await validatePositionFks(parsed.data, req.tenantId)
+    if (fkErr) return reply.code(400).send({ error: 'INVALID_REFERENCE', message: fkErr.message, field: fkErr.field })
 
     const patch: Record<string, any> = { ...parsed.data }
     // Abolishing stamps the date; un-abolishing clears it.

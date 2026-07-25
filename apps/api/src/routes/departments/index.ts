@@ -113,6 +113,16 @@ export default async function orgRoutes(fastify: FastifyInstance) {
       return reply.code(400).send({ error: 'VALIDATION', message: 'merge_to must be a valid UUID' })
     }
 
+    // Fresh audit finding (cross-tenant IDOR): merge_to was only format-
+    // validated, never checked against tenant_id, before being used to
+    // reassign live job_history/departments rows — an hr_admin could point
+    // their tenant's rows at another tenant's department UUID.
+    if (merge_to) {
+      const { data: mergeTarget } = await fastify.supabase
+        .from('departments').select('id').eq('id', merge_to).eq('tenant_id', tenantId).maybeSingle()
+      if (!mergeTarget) return reply.code(400).send({ error: 'VALIDATION', message: 'merge_to department not found in your organisation' })
+    }
+
     const [jobHistoryResult, childDeptsResult] = await Promise.all([
       fastify.supabase
         .from('job_history')
@@ -216,6 +226,15 @@ export default async function orgRoutes(fastify: FastifyInstance) {
       return reply.code(400).send({ error: 'VALIDATION', message: 'merge_to must be a valid UUID' })
     }
 
+    // Fresh audit finding (cross-tenant IDOR): merge_to was only format-
+    // validated, never checked against tenant_id — same gap as the
+    // departments DELETE handler above.
+    if (merge_to) {
+      const { data: mergeTarget } = await fastify.supabase
+        .from('designations').select('id').eq('id', merge_to).eq('tenant_id', tenantId).maybeSingle()
+      if (!mergeTarget) return reply.code(400).send({ error: 'VALIDATION', message: 'merge_to designation not found in your organisation' })
+    }
+
     const { count, error: countError } = await fastify.supabase
       .from('job_history')
       .select('*', { count: 'exact', head: true })
@@ -304,6 +323,15 @@ export default async function orgRoutes(fastify: FastifyInstance) {
 
     if (merge_to !== undefined && !uuidRegex.test(merge_to)) {
       return reply.code(400).send({ error: 'VALIDATION', message: 'merge_to must be a valid UUID' })
+    }
+
+    // Fresh audit finding (cross-tenant IDOR): merge_to was only format-
+    // validated, never checked against tenant_id — same gap as the
+    // departments DELETE handler above.
+    if (merge_to) {
+      const { data: mergeTarget } = await fastify.supabase
+        .from('grades').select('id').eq('id', merge_to).eq('tenant_id', tenantId).maybeSingle()
+      if (!mergeTarget) return reply.code(400).send({ error: 'VALIDATION', message: 'merge_to grade not found in your organisation' })
     }
 
     const { count, error: countError } = await fastify.supabase

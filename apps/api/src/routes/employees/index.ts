@@ -449,6 +449,30 @@ export default async function employeeRoutes(fastify: FastifyInstance) {
       return notFound(reply, 'EMPLOYEE_NOT_FOUND', 'Employee not found')
     }
 
+    // Fresh audit finding (cross-tenant IDOR): manager_id, reporting_manager_id,
+    // and work_location_id were written straight through with no tenant check —
+    // an hr_admin could set any of them to a UUID from another tenant. The
+    // properly-guarded PUT /employees/:id/manager endpoint validates manager_id
+    // (plus circular-reference), but this generic endpoint bypassed it entirely.
+    // Mirrors the validateExpansionFks pattern already established in
+    // masters/sites.ts.
+    const fkChecks: Array<[string, string, string]> = [
+      ['manager_id',           'employees',      'Manager'],
+      ['reporting_manager_id', 'employees',      'Reporting manager'],
+      ['work_location_id',     'work_locations', 'Work location'],
+    ]
+    for (const [field, table, label] of fkChecks) {
+      const fkId = (parsed.data as Record<string, unknown>)[field]
+      if (!fkId) continue
+      const { data: fkRow } = await fastify.supabase
+        .from(table)
+        .select('id')
+        .eq('id', fkId as string)
+        .eq('tenant_id', request.tenantId)
+        .maybeSingle()
+      if (!fkRow) return validationError(reply, 'INVALID_REFERENCE', `${label} not found in your organisation`)
+    }
+
     // Strip fields the caller must never overwrite
     const {
       id: _id,
