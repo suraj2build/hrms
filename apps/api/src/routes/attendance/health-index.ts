@@ -292,39 +292,55 @@ export default async function attendanceHealthIndexRoute(fastify: FastifyInstanc
         return reply.send({ computed: 0, period_month })
       }
 
-      // Batch-fetch all relevant data across employees
-      const [
-        { data: dailyRows },
-        { data: correctionRows },
-        { data: inferenceRows },
-      ] = await Promise.all([
-        // attendance_daily — for anomaly_rate + missing_punch_rate
-        fastify.supabase
-          .from('attendance_daily')
-          .select('employee_id, status, confidence_level, is_payable')
-          .eq('tenant_id', req.tenantId)
-          .in('employee_id', targetIds)
-          .gte('date', monthStart)
-          .lte('date', monthEnd),
-
-        // attendance_regularisation — for correction_rate
-        fastify.supabase
-          .from('attendance_regularisation')
-          .select('employee_id')
-          .eq('tenant_id', req.tenantId)
-          .in('employee_id', targetIds)
-          .gte('date', monthStart)
-          .lte('date', monthEnd),
-
-        // attendance_inference_log — for inference_rate
-        fastify.supabase
-          .from('attendance_inference_log')
-          .select('employee_id')
-          .eq('tenant_id', req.tenantId)
-          .in('employee_id', targetIds)
-          .gte('date', monthStart)
-          .lte('date', monthEnd),
-      ])
+      // Batch-fetch all relevant data across employees. fetchAllRows() (not
+      // plain queries) — fresh audit finding: when employee_ids is omitted
+      // (default path, targeting all active employees), targetIds can span
+      // thousands of employees × ~22 working days, easily exceeding
+      // PostgREST's 1,000-row ceiling. Employees whose rows fall past the
+      // cutoff got totalDays=0, so anomalyRate/missingPunchRate silently
+      // defaulted to 0 — a perfect/near-perfect health grade regardless of
+      // actual attendance, for most of the tenant at real scale.
+      let dailyRows: any[], correctionRows: any[], inferenceRows: any[]
+      try {
+        ;[dailyRows, correctionRows, inferenceRows] = await Promise.all([
+          // attendance_daily — for anomaly_rate + missing_punch_rate
+          fetchAllRows((from, to) =>
+            fastify.supabase
+              .from('attendance_daily')
+              .select('employee_id, status, confidence_level, is_payable')
+              .eq('tenant_id', req.tenantId)
+              .in('employee_id', targetIds)
+              .gte('date', monthStart)
+              .lte('date', monthEnd)
+              .range(from, to),
+          ),
+          // attendance_regularisation — for correction_rate
+          fetchAllRows((from, to) =>
+            fastify.supabase
+              .from('attendance_regularisation')
+              .select('employee_id')
+              .eq('tenant_id', req.tenantId)
+              .in('employee_id', targetIds)
+              .gte('date', monthStart)
+              .lte('date', monthEnd)
+              .range(from, to),
+          ),
+          // attendance_inference_log — for inference_rate
+          fetchAllRows((from, to) =>
+            fastify.supabase
+              .from('attendance_inference_log')
+              .select('employee_id')
+              .eq('tenant_id', req.tenantId)
+              .in('employee_id', targetIds)
+              .gte('date', monthStart)
+              .lte('date', monthEnd)
+              .range(from, to),
+          ),
+        ])
+      } catch (err: any) {
+        req.log.error({ err }, 'health-index batch fetch failed')
+        return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch attendance data for health compute' })
+      }
 
       // Aggregate per employee
       type DayRow = { employee_id: string; status: string; confidence_level: string | null }
