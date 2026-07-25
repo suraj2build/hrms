@@ -320,7 +320,13 @@ export default async function payrollAdjustmentsRoutes(fastify: FastifyInstance)
       return reply.code(409).send({ error: 'RUN_FINALIZED', message: 'Cannot apply to a finalized run' })
     }
 
-    const { data, error } = await fastify.supabase
+    // .eq('status','approved') + .eq('tenant_id', ...) + row-count check
+    // (fresh audit finding): previously had neither the tenant filter nor a
+    // status guard on this write — two concurrent apply calls for the same
+    // approved adjustment (e.g. against two different run_ids) could both
+    // pass the precheck above and both succeed, double-applying one
+    // adjustment across two payroll runs.
+    const { data: updatedRows, error } = await fastify.supabase
       .from('payroll_adjustments')
       .update({
         status:         'applied',
@@ -330,10 +336,13 @@ export default async function payrollAdjustmentsRoutes(fastify: FastifyInstance)
         notes:          parsed.data.notes ?? null,
       })
       .eq('id', id)
+      .eq('tenant_id', req.tenantId)
+      .eq('status', 'approved')
       .select()
-      .single()
 
     if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    if (!updatedRows?.length) return reply.code(409).send({ error: 'ALREADY_APPLIED', message: 'This adjustment was already applied by another request' })
+    const data = updatedRows[0]
 
     await logAction(fastify.supabase, {
       tenantId:    req.tenantId,

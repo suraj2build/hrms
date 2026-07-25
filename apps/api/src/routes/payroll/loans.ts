@@ -250,8 +250,12 @@ export default async function loansRoutes(fastify: FastifyInstance) {
     const loanData = loan as any
     const now = new Date().toISOString()
 
-    // Update loan to active
-    const { error: updateErr } = await fastify.supabase
+    // Update loan to active — .eq('status','approved') + row-count check
+    // (fresh audit finding): without this, two concurrent disburse calls on
+    // the same loan both pass the precheck above, both flip to active, and
+    // both generate+insert a full amortization schedule below — duplicate EMI
+    // schedules recovered from the employee's future payslips.
+    const { data: updatedLoan, error: updateErr } = await fastify.supabase
       .from('employee_loans')
       .update({
         status: 'active',
@@ -263,8 +267,11 @@ export default async function loansRoutes(fastify: FastifyInstance) {
       })
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
+      .eq('status', 'approved')
+      .select('id')
 
     if (updateErr) return reply.code(500).send({ error: 'UPDATE_FAILED', message: updateErr.message })
+    if (!updatedLoan?.length) return reply.code(409).send({ error: 'ALREADY_DISBURSED', message: 'This loan was already disbursed by another request' })
 
     // Generate amortization schedule
     const principal = loanData.principal_amount as number
@@ -471,7 +478,9 @@ export default async function loansRoutes(fastify: FastifyInstance) {
 
     if (payErr) return reply.code(500).send({ error: 'INSERT_FAILED', message: payErr.message })
 
-    // Update schedule if provided
+    // Update schedule if provided — guarded to 'pending' so a duplicate/racing
+    // record-payment call for the same installment can't re-stamp an
+    // already-paid schedule row.
     if (parsed.data.schedule_id) {
       await fastify.supabase
         .from('loan_schedules')
@@ -482,30 +491,25 @@ export default async function loansRoutes(fastify: FastifyInstance) {
         })
         .eq('id', parsed.data.schedule_id)
         .eq('tenant_id', req.tenantId)
+        .eq('status', 'pending')
     }
 
-    // Update loan outstanding balance
-    const { data: loanRow } = await fastify.supabase
-      .from('employee_loans')
-      .select('outstanding_balance')
-      .eq('id', parsed.data.loan_id)
-      .eq('tenant_id', req.tenantId)
-      .single()
-
-    if (loanRow) {
-      const currentOutstanding = (loanRow as any).outstanding_balance ?? 0
-      const newOutstanding = Math.max(0, Math.round((currentOutstanding - parsed.data.principal_paid) * 100) / 100)
-      const newStatus = newOutstanding <= 0 ? 'completed' : 'active'
-
-      await fastify.supabase
-        .from('employee_loans')
-        .update({
-          outstanding_balance: newOutstanding,
-          status: newStatus,
-          updated_at: now,
-        })
-        .eq('id', parsed.data.loan_id)
-        .eq('tenant_id', req.tenantId)
+    // Update loan outstanding balance atomically (fresh audit finding): this
+    // was previously a plain read-then-write — SELECT outstanding_balance,
+    // compute the new value in application code, UPDATE — a classic
+    // lost-update race. Two concurrent (or accidentally duplicate)
+    // record-payment calls for the same loan both read the same
+    // outstanding_balance and the second write silently overwrote the
+    // first's deduction, even though two loan_payments audit rows exist.
+    // record_loan_payment_atomic() (migration 396) does the read-modify-write
+    // in one UPDATE statement instead.
+    const { error: balErr } = await fastify.supabase.rpc('record_loan_payment_atomic', {
+      p_tenant_id:      req.tenantId,
+      p_loan_id:        parsed.data.loan_id,
+      p_principal_paid: parsed.data.principal_paid,
+    })
+    if (balErr) {
+      req.log.error({ err: balErr, loan_id: parsed.data.loan_id }, 'record-payment: failed to update loan outstanding_balance — payment row was inserted but balance was NOT updated')
     }
 
     return reply.code(201).send({ data: payment })
