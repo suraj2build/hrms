@@ -601,7 +601,7 @@ async function syncAnomalies(
  * Fetch the IANA timezone string for a tenant.
  * Falls back to 'UTC' if the row or column is missing.
  */
-async function fetchTenantTz(supabase: SupabaseClient, tenantId: string): Promise<string> {
+export async function fetchTenantTz(supabase: SupabaseClient, tenantId: string): Promise<string> {
   const { data } = await supabase
     .from('tenants')
     .select('timezone')

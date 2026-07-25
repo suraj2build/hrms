@@ -18,6 +18,8 @@ import { notify } from './notify.js'
 import { logAction } from './audit-service.js'
 import { generateLetterPDF, uploadPDF } from './pdf-generator.js'
 import { revokeEmployeeAuth } from './user-account-service.js'
+import { fetchTenantTz } from './attendance-engine.js'
+import { getLocalDate } from './org-context.js'
 
 // Days from first_ua_date that trigger each escalation.
 const THRESHOLDS = { flag: 3, second_escalation: 5, wl1: 7, wl2: 14, termination: 21 } as const
@@ -32,23 +34,55 @@ export interface ScanResult {
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
+//
+// ISSUE-154: every date computation here used to run on the server's own
+// clock/timezone (`new Date()` + local getters/setters like `.getDate()` /
+// `.setHours()`), not the tenant's. Escalation is a day-count state machine
+// (flag at 3, WL1 at 7, WL2 at 14, termination at 21) driving an eventual
+// TERMINATION — a severe, hard-to-reverse HR action — so a day-boundary
+// misalignment between the server's clock and the tenant's actual calendar
+// (e.g. a UTC server vs. an Asia/Kolkata tenant, a 5.5h offset) could flag,
+// escalate, or terminate up to a day earlier/later than the tenant's own
+// calendar says, and out of step with attendance_daily's `date` column, which
+// IS already tenant-local (via attendance-engine.ts's shift-aware resolution).
+//
+// Fixed by: (1) resolving "today" via the tenant's IANA timezone
+// (fetchTenantTz + getLocalDate, the same helpers attendance-engine.ts uses),
+// computed ONCE per scanAndEscalate() call and threaded through; (2) doing all
+// day-count arithmetic on the resulting YYYY-MM-DD strings with explicit
+// UTC-anchored Date methods (getUTCDate/setUTCDate), never local
+// getDate/setDate/setHours, so the arithmetic itself can't drift with
+// whatever timezone the Node process happens to be running in.
 
-function daysSince(dateStr: string): number {
-  const from = new Date(dateStr)
-  const now  = new Date()
-  from.setHours(0, 0, 0, 0)
-  now.setHours(0, 0, 0, 0)
-  return Math.max(0, Math.round((now.getTime() - from.getTime()) / 86_400_000))
-}
-
-function todayISO(): string {
-  return new Date().toISOString().slice(0, 10)
-}
-
-function responseDeadlineISO(days = 7): string {
-  const d = new Date()
-  d.setDate(d.getDate() + days)
+/** Add `days` (may be negative) to a YYYY-MM-DD date string. UTC-anchored —
+ *  correct regardless of the server process's own timezone. Exported for
+ *  unit testing; not otherwise used outside this module. */
+export function addDaysToDateStr(dateStr: string, days: number): string {
+  const d = new Date(`${dateStr}T00:00:00.000Z`)
+  d.setUTCDate(d.getUTCDate() + days)
   return d.toISOString().slice(0, 10)
+}
+
+/** Whole days between two YYYY-MM-DD date strings (never negative). Exported
+ *  for unit testing; not otherwise used outside this module. */
+export function daysBetweenDateStrs(fromStr: string, toStr: string): number {
+  const from = new Date(`${fromStr}T00:00:00.000Z`).getTime()
+  const to   = new Date(`${toStr}T00:00:00.000Z`).getTime()
+  return Math.max(0, Math.round((to - from) / 86_400_000))
+}
+
+/** Tenant-local "today" as YYYY-MM-DD — never the server's own clock/TZ. */
+async function todayISO(supabase: SupabaseClient, tenantId: string): Promise<string> {
+  const tz = await fetchTenantTz(supabase, tenantId)
+  return getLocalDate(new Date().toISOString(), tz)
+}
+
+function daysSince(dateStr: string, todayStr: string): number {
+  return daysBetweenDateStrs(dateStr, todayStr)
+}
+
+function responseDeadlineISO(todayStr: string, days = 7): string {
+  return addDaysToDateStr(todayStr, days)
 }
 
 function buildRefNumber(tenantId: string, caseId: string): string {
@@ -69,6 +103,7 @@ async function getConsecutiveUaDays(
   tenantId: string,
   employeeId: string,
   fromDate: string,
+  todayStr: string,
 ): Promise<number> {
   const { data, error } = await supabase
     .from('attendance_daily')
@@ -76,21 +111,18 @@ async function getConsecutiveUaDays(
     .eq('tenant_id', tenantId)
     .eq('employee_id', employeeId)
     .gte('date', fromDate)
-    .lte('date', todayISO())
+    .lte('date', todayStr)
     .order('date', { ascending: false })
 
   if (error) throw new Error(`getConsecutiveUaDays query failed: ${error.message}`)
   if (!data?.length) return 0
 
   let count = 0
-  const today = new Date(todayISO())
 
   for (const rec of data as { date: string; status: string }[]) {
-    const expected = new Date(today)
-    expected.setDate(today.getDate() - count)
-    const recDate = new Date(rec.date)
+    const expected = addDaysToDateStr(todayStr, -count)
     // Allow weekends to not break the streak (optional — check if same diff)
-    if (recDate.toISOString().slice(0, 10) !== expected.toISOString().slice(0, 10)) break
+    if (String(rec.date).slice(0, 10) !== expected) break
     if (rec.status === 'absent') {
       count++
     } else {
@@ -235,7 +267,8 @@ export async function openCase(
 
   if (existing) return (existing as { id: string }).id
 
-  const uaDays = await getConsecutiveUaDays(supabase, tenantId, employeeId, firstUaDate)
+  const todayStr = await todayISO(supabase, tenantId)
+  const uaDays = await getConsecutiveUaDays(supabase, tenantId, employeeId, firstUaDate, todayStr)
 
   const { data, error } = await supabase
     .from('absconding_cases')
@@ -244,7 +277,7 @@ export async function openCase(
       employee_id:   employeeId,
       status:        'flagged',
       first_ua_date: firstUaDate,
-      last_ua_date:  todayISO(),
+      last_ua_date:  todayStr,
       ua_days_count: uaDays,
       created_by:    createdBy,
     })
@@ -300,10 +333,11 @@ export async function updateUaCount(
   if (!c) return
   const { employee_id, first_ua_date } = c as { employee_id: string; first_ua_date: string }
 
-  const uaDays = await getConsecutiveUaDays(supabase, tenantId, employee_id, first_ua_date)
+  const todayStr = await todayISO(supabase, tenantId)
+  const uaDays = await getConsecutiveUaDays(supabase, tenantId, employee_id, first_ua_date, todayStr)
   await supabase
     .from('absconding_cases')
-    .update({ ua_days_count: uaDays, last_ua_date: todayISO() })
+    .update({ ua_days_count: uaDays, last_ua_date: todayStr })
     .eq('id', caseId)
     .eq('tenant_id', tenantId)
 }
@@ -325,8 +359,9 @@ export async function sendWarningLetter1(
   const cas = c as { id: string; employee_id: string; first_ua_date: string; ua_days_count: number; status: string }
   if (!['flagged', 'second_escalation'].includes(cas.status)) throw new Error(`Cannot send WL1 in status: ${cas.status}`)
 
+  const todayStr    = await todayISO(supabase, tenantId)
   const refNumber   = buildRefNumber(tenantId, caseId)
-  const deadline    = responseDeadlineISO(7)
+  const deadline    = responseDeadlineISO(todayStr, 7)
   const mergeFields = await getLetterMergeFields(supabase, tenantId, cas.employee_id)
 
   // Generate PDF
@@ -344,7 +379,7 @@ export async function sendWarningLetter1(
         ref_number:        refNumber,
       },
     })
-    pdfUrl = await uploadPDF(pdfBuffer, `absconding/${caseId}/wl1-${todayISO()}.pdf`, supabase)
+    pdfUrl = await uploadPDF(pdfBuffer, `absconding/${caseId}/wl1-${todayStr}.pdf`, supabase)
   } catch (_) { /* non-blocking */ }
 
   // Insert a letter record via the letters table (existing pattern)
@@ -421,8 +456,9 @@ export async function sendWarningLetter2(
   const cas = c as { id: string; employee_id: string; first_ua_date: string; ua_days_count: number; status: string }
   if (!['wl1_sent'].includes(cas.status)) throw new Error(`Cannot send WL2 in status: ${cas.status}`)
 
+  const todayStr    = await todayISO(supabase, tenantId)
   const refNumber   = buildRefNumber(tenantId, caseId) + '-WL2'
-  const deadline    = responseDeadlineISO(7)
+  const deadline    = responseDeadlineISO(todayStr, 7)
   const mergeFields = await getLetterMergeFields(supabase, tenantId, cas.employee_id)
 
   let pdfUrl: string | null = null
@@ -439,7 +475,7 @@ export async function sendWarningLetter2(
         ref_number:        refNumber,
       },
     })
-    pdfUrl = await uploadPDF(pdfBuffer, `absconding/${caseId}/wl2-${todayISO()}.pdf`, supabase)
+    pdfUrl = await uploadPDF(pdfBuffer, `absconding/${caseId}/wl2-${todayStr}.pdf`, supabase)
   } catch (_) { /* non-blocking */ }
 
   const { data: letter } = await supabase
@@ -601,6 +637,7 @@ export async function processTermination(
   }
 
   // Approval — generate termination letter + create separation record
+  const todayStr    = await todayISO(supabase, tenantId)
   const refNumber   = buildRefNumber(tenantId, caseId) + '-TERM'
   const mergeFields = await getLetterMergeFields(supabase, tenantId, cas.employee_id)
 
@@ -617,7 +654,7 @@ export async function processTermination(
         ref_number:       refNumber,
       },
     })
-    pdfUrl = await uploadPDF(pdfBuffer, `absconding/${caseId}/termination-${todayISO()}.pdf`, supabase)
+    pdfUrl = await uploadPDF(pdfBuffer, `absconding/${caseId}/termination-${todayStr}.pdf`, supabase)
   } catch (_) { /* non-blocking */ }
 
   const { data: letter } = await supabase
@@ -783,19 +820,19 @@ export async function scanAndEscalate(
   tenantId:  string,
 ): Promise<ScanResult> {
   const result: ScanResult = { tenant_id: tenantId, cases_opened: 0, cases_wl1: 0, cases_wl2: 0, cases_term: 0, errors: [] }
+  const todayStr = await todayISO(supabase, tenantId)
 
   // 1. Find employees with ≥1 consecutive UA day — early alert at 1-2, flag at 3+
   try {
-    const windowStart = new Date()
-    windowStart.setDate(windowStart.getDate() - THRESHOLDS.termination - 1)
+    const windowStart = addDaysToDateStr(todayStr, -(THRESHOLDS.termination + 1))
 
     const { data: uaEmployees, error: uaErr } = await supabase
       .from('attendance_daily')
       .select('employee_id')
       .eq('tenant_id', tenantId)
       .eq('status', 'absent')
-      .lte('date', todayISO())
-      .gte('date', windowStart.toISOString().slice(0, 10))
+      .lte('date', todayStr)
+      .gte('date', windowStart)
     if (uaErr) throw new Error(`UA candidate scan failed: ${uaErr.message}`)
 
     const candidateIds = [...new Set(((uaEmployees ?? []) as { employee_id: string }[]).map(r => r.employee_id))]
@@ -811,11 +848,10 @@ export async function scanAndEscalate(
     for (const empId of candidateIds) {
       if (openCaseEmployees.has(empId)) continue
       try {
-        const uaDays = await getConsecutiveUaDays(supabase, tenantId, empId, windowStart.toISOString().slice(0, 10))
+        const uaDays = await getConsecutiveUaDays(supabase, tenantId, empId, windowStart, todayStr)
         if (uaDays >= THRESHOLDS.flag) {
-          const firstUa = new Date()
-          firstUa.setDate(firstUa.getDate() - uaDays + 1)
-          const opened = await openCase(supabase, tenantId, empId, firstUa.toISOString().slice(0, 10))
+          const firstUaDate = addDaysToDateStr(todayStr, -(uaDays - 1))
+          const opened = await openCase(supabase, tenantId, empId, firstUaDate)
           if (opened) result.cases_opened++
         } else if (uaDays >= 1) {
           // Early UA alert (1-2 days) — notify HR but don't open case
@@ -840,7 +876,7 @@ export async function scanAndEscalate(
     for (const c of (openCases ?? []) as { id: string; status: string; first_ua_date: string; ua_days_count: number; employee_id: string }[]) {
       try {
         await updateUaCount(supabase, c.id, tenantId)
-        const days = daysSince(c.first_ua_date)
+        const days = daysSince(c.first_ua_date, todayStr)
 
         if (c.status === 'flagged' && days >= THRESHOLDS.second_escalation) {
           await escalateSecond(supabase, c.id, tenantId)
