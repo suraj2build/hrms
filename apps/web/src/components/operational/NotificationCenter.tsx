@@ -231,7 +231,14 @@ export function NotificationCenter({ open, onClose }: NotificationCenterProps) {
   // ── Queries ───────────────────────────────────────────────────────────────
 
   const { data: rawNotifications, isLoading } = useQuery<Notification[]>({
-    queryKey:  ['notifications'],
+    // Distinct from NotificationBell's ['notifications'] key: that query caches
+    // a { data, unread_count } object, this one caches a mapped Notification[]
+    // array. Sharing a key made whichever component last fetched clobber the
+    // other's cached shape — NotificationBell would read an array where it
+    // expected an object (silently zeroing the badge), and this component's
+    // mutations below call .map()/.filter() directly on the cached value,
+    // which throws when that value is the bell's object instead of an array.
+    queryKey:  ['notifications', 'panel'],
     queryFn:   () =>
       // Backend rows are { id, title, body, link, is_read, created_at, event_id }.
       // Map them onto the component's model so the unread badge, timestamps and
@@ -263,9 +270,12 @@ export function NotificationCenter({ open, onClose }: NotificationCenterProps) {
     mutationFn: (id: string) =>
       api.post<void>(`/notifications/${id}/read`),
     onSuccess: (_data, id) => {
-      queryClient.setQueryData<Notification[]>(['notifications'], prev =>
+      queryClient.setQueryData<Notification[]>(['notifications', 'panel'], prev =>
         (prev ?? []).map(n => n.id === id ? { ...n, read: true } : n),
       )
+      // NotificationBell reads the same /notifications data (badge count) under
+      // its own key — refetch it so the unread badge stays in sync.
+      queryClient.invalidateQueries({ queryKey: ['notifications'], exact: true })
     },
     onError: (e: Error) => toast.error('Failed to mark notification as read', { description: e.message }),
   })
@@ -273,9 +283,10 @@ export function NotificationCenter({ open, onClose }: NotificationCenterProps) {
   const markAllMutation = useMutation({
     mutationFn: () => api.post<void>('/notifications/read-all'),
     onSuccess: () => {
-      queryClient.setQueryData<Notification[]>(['notifications'], prev =>
+      queryClient.setQueryData<Notification[]>(['notifications', 'panel'], prev =>
         (prev ?? []).map(n => ({ ...n, read: true })),
       )
+      queryClient.invalidateQueries({ queryKey: ['notifications'], exact: true })
     },
     onError: (e: Error) => toast.error('Failed to mark all notifications as read', { description: e.message }),
   })
@@ -283,9 +294,10 @@ export function NotificationCenter({ open, onClose }: NotificationCenterProps) {
   const deleteMutation = useMutation({
     mutationFn: (id: string) => api.delete<void>(`/notifications/${id}`),
     onSuccess: (_data, id) => {
-      queryClient.setQueryData<Notification[]>(['notifications'], prev =>
+      queryClient.setQueryData<Notification[]>(['notifications', 'panel'], prev =>
         (prev ?? []).filter(n => n.id !== id),
       )
+      queryClient.invalidateQueries({ queryKey: ['notifications'], exact: true })
     },
     onError: (e: Error) => toast.error('Failed to delete notification', { description: e.message }),
   })
