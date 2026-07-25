@@ -213,6 +213,12 @@ export async function approveLeaveRequest(
   // gate.kind === 'finalize' — run the legacy approver check only when the per-level
   // gate did not already authorize this actor (i.e. the no-chain legacy path).
   if (!gate.authorized) {
+    if (await isSelfApproval(supabase, tenantId, ctx.approverId, req.employee_id)) {
+      return {
+        ok:    false,
+        error: { type: 'FORBIDDEN', message: 'You cannot approve your own leave request.' },
+      }
+    }
     const authResult = await validateApprover(supabase, ctx, req.employee_id)
     if (!authResult.ok) return authResult
   }
