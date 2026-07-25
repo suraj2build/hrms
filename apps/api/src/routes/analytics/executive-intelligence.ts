@@ -211,39 +211,49 @@ export default async function executiveIntelligenceRoutes(fastify: FastifyInstan
       ? { from: parsed.data.from, to: parsed.data.to }
       : defaultRange(30)
 
-    const [otRes, lopRes, empRes] = await Promise.all([
-      fastify.supabase
-        .from('attendance_daily')
-        .select('employee_id, overtime_minutes')
-        .eq('tenant_id', req.tenantId)
-        .gte('date', range.from)
-        .lte('date', range.to)
-        .gt('overtime_minutes', 0),
+    // otRows/allRows are paginated — a date-range attendance_daily fetch
+    // across the whole tenant can exceed PostgREST's 1,000-row ceiling,
+    // understating OT hours and (worse) the total_records denominator below.
+    let otRows: any[]
+    let allRows: any[]
+    let lopRes: { count: number | null }
+    try {
+      ;[otRows, lopRes, allRows] = await Promise.all([
+        fetchAllRows((from, to) =>
+          fastify.supabase
+            .from('attendance_daily')
+            .select('employee_id, overtime_minutes')
+            .eq('tenant_id', req.tenantId)
+            .gte('date', range.from)
+            .lte('date', range.to)
+            .gt('overtime_minutes', 0)
+            .range(from, to),
+        ),
 
-      fastify.supabase
-        .from('attendance_daily')
-        .select('id', { count: 'exact', head: true })
-        .eq('tenant_id', req.tenantId)
-        .gte('date', range.from)
-        .lte('date', range.to)
-        .eq('status', 'absent')
-        .eq('is_payable', false),
+        fastify.supabase
+          .from('attendance_daily')
+          .select('id', { count: 'exact', head: true })
+          .eq('tenant_id', req.tenantId)
+          .gte('date', range.from)
+          .lte('date', range.to)
+          .eq('status', 'absent')
+          .eq('is_payable', false),
 
-      fastify.supabase
-        .from('attendance_daily')
-        .select('employee_id')
-        .eq('tenant_id', req.tenantId)
-        .gte('date', range.from)
-        .lte('date', range.to),
-    ])
-
-    if (otRes.error) {
-      req.log.error({ err: otRes.error }, 'payroll volatility OT query failed')
+        fetchAllRows((from, to) =>
+          fastify.supabase
+            .from('attendance_daily')
+            .select('employee_id')
+            .eq('tenant_id', req.tenantId)
+            .gte('date', range.from)
+            .lte('date', range.to)
+            .range(from, to),
+        ),
+      ])
+    } catch (err) {
+      req.log.error({ err }, 'payroll volatility OT query failed')
       return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch OT data' })
     }
 
-    const otRows      = otRes.data ?? []
-    const allRows     = empRes.data ?? []
     const lop_count   = lopRes.count ?? 0
     const total_records = allRows.length
 
@@ -496,28 +506,34 @@ export default async function executiveIntelligenceRoutes(fastify: FastifyInstan
     nextMonth.setMonth(nextMonth.getMonth() + 1)
     const to = new Date(nextMonth.getTime() - 86_400_000).toISOString().slice(0, 10)
 
-    const [hintsRes, overloadRes] = await Promise.all([
+    // Paginated — a month's rows across the whole tenant can exceed
+    // PostgREST's 1,000-row ceiling, silently understating both burnout
+    // hints and sustained-overload detection.
+    const [hints, overloadRows] = await Promise.all([
       // Workforce optimization hints for burnout-related types
-      fastify.supabase
-        .from('workforce_optimization_hints')
-        .select('hint_type, severity, employee_id')
-        .eq('tenant_id', req.tenantId)
-        .in('hint_type', ['consecutive_shift_overload', 'ot_concentration'])
-        .gte('created_at', from)
-        .lte('created_at', to),
+      fetchAllRows((from2, to2) =>
+        fastify.supabase
+          .from('workforce_optimization_hints')
+          .select('hint_type, severity, employee_id')
+          .eq('tenant_id', req.tenantId)
+          .in('hint_type', ['consecutive_shift_overload', 'ot_concentration'])
+          .gte('created_at', from)
+          .lte('created_at', to)
+          .range(from2, to2),
+      ),
 
       // Employees with sustained overload: work_hours > 9 on 5+ days in period
-      fastify.supabase
-        .from('attendance_daily')
-        .select('employee_id, work_hours')
-        .eq('tenant_id', req.tenantId)
-        .gte('date', from)
-        .lte('date', to)
-        .gt('work_hours', 9),
+      fetchAllRows((from2, to2) =>
+        fastify.supabase
+          .from('attendance_daily')
+          .select('employee_id, work_hours')
+          .eq('tenant_id', req.tenantId)
+          .gte('date', from)
+          .lte('date', to)
+          .gt('work_hours', 9)
+          .range(from2, to2),
+      ),
     ])
-
-    const hints         = hintsRes.data  ?? []
-    const overloadRows  = overloadRes.data ?? []
 
     // Count overload days per employee
     const overloadDaysMap = new Map<string, number>()
@@ -639,26 +655,35 @@ export default async function executiveIntelligenceRoutes(fastify: FastifyInstan
     const now          = new Date()
     const from30Dt     = `${from30}T00:00:00`
 
+    // attendance_daily/workforce_staffing_snapshots/workforce_optimization_hints
+    // are paginated — date-range fetches across the whole tenant can exceed
+    // PostgREST's 1,000-row ceiling, silently understating attendance rate,
+    // OT hours, LOP, total_records (used as a denominator), and burnout
+    // detection. The count:exact+head:true queries are unaffected by the
+    // row cap and left as plain Supabase responses.
     const [
-      dailyRes,
+      dailyRows,
       employeeRes,
       separationRes,
-      snapshotRes,
-      otRes,
+      snapshots,
+      otRows,
       lopRes,
-      allDailyRes,
+      allRows,
       excTotalRes,
       excBreachedRes,
-      hintsRes,
-      overloadRes,
+      hints,
+      overloadRows,
     ] = await Promise.all([
       // Workforce stability
-      fastify.supabase
-        .from('attendance_daily')
-        .select('status, employee_id')
-        .eq('tenant_id', req.tenantId)
-        .gte('date', from30)
-        .lte('date', to30),
+      fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('attendance_daily')
+          .select('status, employee_id')
+          .eq('tenant_id', req.tenantId)
+          .gte('date', from30)
+          .lte('date', to30)
+          .range(from, to),
+      ),
 
       fastify.supabase
         .from('employees')
@@ -674,21 +699,27 @@ export default async function executiveIntelligenceRoutes(fastify: FastifyInstan
         .lte('last_working_date', to30),
 
       // Staffing sustainability
-      fastify.supabase
-        .from('workforce_staffing_snapshots')
-        .select('coverage_ratio, staffing_pressure')
-        .eq('tenant_id', req.tenantId)
-        .gte('snapshot_date', `${period}-01`)
-        .lte('snapshot_date', to30),
+      fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('workforce_staffing_snapshots')
+          .select('coverage_ratio, staffing_pressure')
+          .eq('tenant_id', req.tenantId)
+          .gte('snapshot_date', `${period}-01`)
+          .lte('snapshot_date', to30)
+          .range(from, to),
+      ),
 
       // Payroll volatility OT
-      fastify.supabase
-        .from('attendance_daily')
-        .select('employee_id, overtime_minutes')
-        .eq('tenant_id', req.tenantId)
-        .gte('date', from30)
-        .lte('date', to30)
-        .gt('overtime_minutes', 0),
+      fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('attendance_daily')
+          .select('employee_id, overtime_minutes')
+          .eq('tenant_id', req.tenantId)
+          .gte('date', from30)
+          .lte('date', to30)
+          .gt('overtime_minutes', 0)
+          .range(from, to),
+      ),
 
       // LOP
       fastify.supabase
@@ -701,12 +732,15 @@ export default async function executiveIntelligenceRoutes(fastify: FastifyInstan
         .eq('is_payable', false),
 
       // All daily for period (for total records)
-      fastify.supabase
-        .from('attendance_daily')
-        .select('employee_id')
-        .eq('tenant_id', req.tenantId)
-        .gte('date', from30)
-        .lte('date', to30),
+      fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('attendance_daily')
+          .select('employee_id')
+          .eq('tenant_id', req.tenantId)
+          .gte('date', from30)
+          .lte('date', to30)
+          .range(from, to),
+      ),
 
       // Exception SLA
       fastify.supabase
@@ -723,25 +757,30 @@ export default async function executiveIntelligenceRoutes(fastify: FastifyInstan
         .gte('created_at', from30Dt),
 
       // Burnout hints
-      fastify.supabase
-        .from('workforce_optimization_hints')
-        .select('employee_id, severity')
-        .eq('tenant_id', req.tenantId)
-        .in('hint_type', ['consecutive_shift_overload', 'ot_concentration'])
-        .gte('created_at', `${period}-01`),
+      fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('workforce_optimization_hints')
+          .select('employee_id, severity')
+          .eq('tenant_id', req.tenantId)
+          .in('hint_type', ['consecutive_shift_overload', 'ot_concentration'])
+          .gte('created_at', `${period}-01`)
+          .range(from, to),
+      ),
 
       // Sustained overload
-      fastify.supabase
-        .from('attendance_daily')
-        .select('employee_id')
-        .eq('tenant_id', req.tenantId)
-        .gte('date', `${period}-01`)
-        .lte('date', to30)
-        .gt('work_hours', 9),
+      fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('attendance_daily')
+          .select('employee_id')
+          .eq('tenant_id', req.tenantId)
+          .gte('date', `${period}-01`)
+          .lte('date', to30)
+          .gt('work_hours', 9)
+          .range(from, to),
+      ),
     ])
 
     // ── Workforce stability ──
-    const dailyRows   = dailyRes.data ?? []
     const totalDaily  = dailyRows.length
     const presentCount = dailyRows.filter((r: any) => r.status === 'present' || r.status === 'late').length
     const absentCount  = dailyRows.filter((r: any) => r.status === 'absent').length
@@ -761,7 +800,6 @@ export default async function executiveIntelligenceRoutes(fastify: FastifyInstan
     }
 
     // ── Staffing sustainability ──
-    const snapshots = snapshotRes.data ?? []
     const snapCount = snapshots.length
     const avg_coverage = snapCount > 0
       ? parseFloat((snapshots.reduce((s: number, r: any) => s + (r.coverage_ratio ?? 0), 0) / snapCount).toFixed(3))
@@ -772,8 +810,6 @@ export default async function executiveIntelligenceRoutes(fastify: FastifyInstan
     const staffing_sustainability = { avg_coverage, understaffed_days, critical_days }
 
     // ── Payroll volatility ──
-    const otRows    = otRes.data ?? []
-    const allRows   = allDailyRes.data ?? []
     const lop_count = lopRes.count ?? 0
     const total_records = allRows.length
     const uniqueEmps = new Set(allRows.map((r: any) => r.employee_id)).size
@@ -799,11 +835,8 @@ export default async function executiveIntelligenceRoutes(fastify: FastifyInstan
     }
 
     // ── Burnout exposure ──
-    const hints         = hintsRes.data    ?? []
-    const overloadRows2 = overloadRes.data ?? []
-
     const overloadDaysMap = new Map<string, number>()
-    for (const row of overloadRows2) {
+    for (const row of overloadRows) {
       overloadDaysMap.set(row.employee_id, (overloadDaysMap.get(row.employee_id) ?? 0) + 1)
     }
     const hintEmpIds    = new Set(hints.map((h: any) => h.employee_id).filter(Boolean))

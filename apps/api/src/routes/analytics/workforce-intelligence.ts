@@ -246,29 +246,36 @@ export default async function workforceIntelligenceRoutes(fastify: FastifyInstan
 
     const year = parseInt((req.query as any).year ?? new Date().getFullYear().toString())
 
-    const [typesRes, appsRes, balanceRes] = await Promise.all([
+    // leave_requests/employee_leave_balance are paginated — a full year
+    // across the whole tenant can exceed PostgREST's 1,000-row ceiling,
+    // silently understating days-taken and balance totals in the report.
+    const [typesRes, apps, balances] = await Promise.all([
       fastify.supabase
         .from('leave_types')
         .select('id, name, is_paid, is_active')
         .eq('tenant_id', req.tenantId)
         .eq('is_active', true),
-      fastify.supabase
-        .from('leave_requests')
-        .select('leave_type_id, from_date, to_date, status')
-        .eq('tenant_id', req.tenantId)
-        .eq('status', 'APPROVED')
-        .gte('from_date', `${year}-01-01`)
-        .lte('to_date',   `${year}-12-31`),
-      fastify.supabase
-        .from('employee_leave_balance')
-        .select('leave_type_id, balance')
-        .eq('tenant_id', req.tenantId)
-        .eq('year', year),
+      fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('leave_requests')
+          .select('leave_type_id, from_date, to_date, status')
+          .eq('tenant_id', req.tenantId)
+          .eq('status', 'APPROVED')
+          .gte('from_date', `${year}-01-01`)
+          .lte('to_date',   `${year}-12-31`)
+          .range(from, to),
+      ),
+      fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('employee_leave_balance')
+          .select('leave_type_id, balance')
+          .eq('tenant_id', req.tenantId)
+          .eq('year', year)
+          .range(from, to),
+      ),
     ])
 
     const types   = typesRes.data   ?? []
-    const apps    = appsRes.data    ?? []
-    const balances = balanceRes.data ?? []
 
     // Calculate days taken per leave type
     const daysTakenMap = new Map<string, number>()
