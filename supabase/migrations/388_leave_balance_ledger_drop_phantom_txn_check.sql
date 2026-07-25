@@ -1,0 +1,29 @@
+-- ============================================================
+-- 388_leave_balance_ledger_drop_phantom_txn_check.sql
+--
+-- FIX (CRITICAL, ISSUE-129): migration 158 tried to replace the
+-- txn_type CHECK constraint on leave_balance_ledger, but assumed
+-- Postgres's default auto-generated name
+-- (`leave_balance_ledger_txn_type_check`). The constraint was
+-- actually created with an EXPLICIT name, `lbl_txn_check`
+-- (072_leave_accrual_encashment.sql:63) — so 158's
+-- `DROP CONSTRAINT IF EXISTS leave_balance_ledger_txn_type_check`
+-- was a silent no-op (it caught its own "may not exist" exception
+-- and moved on) and the original 7-value constraint was never
+-- actually removed.
+--
+-- The table has carried TWO CHECK constraints on txn_type ever
+-- since: the original `lbl_txn_check` (7 values) and the new
+-- `leave_balance_ledger_txn_type_check` (12 values, a superset of
+-- the 7). Postgres ANDs multiple CHECK constraints together, so the
+-- effective allowed set has been the INTERSECTION — still only the
+-- original 7 values. The 5 "new enterprise types" 158's own comment
+-- claims to add (event_grant, reversal, payroll_adjustment,
+-- correction, lop_recovery) have been unreachable since 158 shipped.
+--
+-- This migration drops the real old constraint by its actual name.
+-- leave_balance_ledger_txn_type_check (already a correct superset)
+-- is left untouched — no rewrite needed now that it's the only one.
+-- ============================================================
+
+ALTER TABLE leave_balance_ledger DROP CONSTRAINT IF EXISTS lbl_txn_check;
