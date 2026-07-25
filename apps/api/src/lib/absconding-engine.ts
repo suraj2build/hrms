@@ -20,6 +20,7 @@ import { generateLetterPDF, uploadPDF } from './pdf-generator.js'
 import { revokeEmployeeAuth } from './user-account-service.js'
 import { fetchTenantTz } from './attendance-engine.js'
 import { getLocalDate } from './org-context.js'
+import { fetchAllRows } from './supabase-paginate.js'
 
 // Days from first_ua_date that trigger each escalation.
 const THRESHOLDS = { flag: 3, second_escalation: 5, wl1: 7, wl2: 14, termination: 21 } as const
@@ -826,16 +827,27 @@ export async function scanAndEscalate(
   try {
     const windowStart = addDaysToDateStr(todayStr, -(THRESHOLDS.termination + 1))
 
-    const { data: uaEmployees, error: uaErr } = await supabase
-      .from('attendance_daily')
-      .select('employee_id')
-      .eq('tenant_id', tenantId)
-      .eq('status', 'absent')
-      .lte('date', todayStr)
-      .gte('date', windowStart)
-    if (uaErr) throw new Error(`UA candidate scan failed: ${uaErr.message}`)
+    // fetchAllRows() (not a plain query) — fresh audit finding: this is
+    // attendance_daily ROWS (one per employee per absent day in a ~22-day
+    // window), not employees, so a tenant with enough absences can exceed
+    // PostgREST's 1,000-row ceiling. Employees whose absent-day rows fall
+    // past the cutoff never get evaluated for getConsecutiveUaDays that
+    // scan, so a genuinely-qualifying employee could simply not get an
+    // absconding case opened/escalated that day (self-heals on a later run
+    // once other absences roll off the window, but still a real miss in a
+    // compliance-sensitive path).
+    const uaEmployees = await fetchAllRows((from, to) =>
+      supabase
+        .from('attendance_daily')
+        .select('employee_id')
+        .eq('tenant_id', tenantId)
+        .eq('status', 'absent')
+        .lte('date', todayStr)
+        .gte('date', windowStart)
+        .range(from, to),
+    )
 
-    const candidateIds = [...new Set(((uaEmployees ?? []) as { employee_id: string }[]).map(r => r.employee_id))]
+    const candidateIds = [...new Set(uaEmployees.map((r: any) => r.employee_id as string))]
 
     // Track employees with already-open cases (skip them)
     const { data: existingCases } = await supabase
