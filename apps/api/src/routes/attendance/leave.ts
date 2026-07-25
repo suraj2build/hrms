@@ -225,6 +225,29 @@ export default async function leaveRoute(fastify: FastifyInstance) {
       req.log.warn({ err: e }, 'leave apply: working-days precompute failed (non-fatal — display only)')
     }
 
+    // Overlap check — prevent duplicate/overlapping pending or approved applications.
+    // Mirrors the canonical leave_requests overlap guard (leave-request-service.ts) —
+    // this legacy leave_applications table had none, so an employee could submit the
+    // same date range any number of times. (ISSUE-145)
+    // Overlap condition: existing.from_date <= new.to_date AND existing.to_date >= new.from_date
+    const { data: overlapping } = await fastify.supabase
+      .from('leave_applications')
+      .select('id')
+      .eq('tenant_id', req.tenantId)
+      .eq('employee_id', profile.employee_id)
+      .in('status', ['pending', 'approved'])
+      .lte('from_date', to_date)
+      .gte('to_date', from_date)
+      .limit(1)
+      .maybeSingle()
+
+    if (overlapping) {
+      return reply.code(409).send({
+        error:   'CONFLICT',
+        message: 'You already have a leave application that overlaps with this date range',
+      })
+    }
+
     const { data, error } = await fastify.supabase
       .from('leave_applications')
       .insert({
