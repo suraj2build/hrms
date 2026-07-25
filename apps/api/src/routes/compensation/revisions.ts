@@ -206,6 +206,22 @@ export default async function compensationRevisionsRoute(fastify: FastifyInstanc
       }
     }
 
+    // Fresh audit finding (cross-tenant IDOR): new_salary_structure_id was
+    // accepted with no tenant check, then written straight through to
+    // compensation_revisions and — on approve, below — permanently into
+    // employee_compensations.salary_structure_id. GET /compensation/
+    // revisions/:id also joins salary_structures(id,name,code) unfiltered,
+    // so a foreign structure's name/code would be echoed back too.
+    if (d.new_salary_structure_id) {
+      const { data: structure } = await fastify.supabase
+        .from('salary_structures')
+        .select('id')
+        .eq('id', d.new_salary_structure_id)
+        .eq('tenant_id', req.tenantId)
+        .maybeSingle()
+      if (!structure) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: 'Salary structure not found in your organisation' })
+    }
+
     // Fetch current active compensation for before snapshot
     const { data: currentComp } = await fastify.supabase
       .from('employee_compensations')
