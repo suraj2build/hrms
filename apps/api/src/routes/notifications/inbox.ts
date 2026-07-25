@@ -7,23 +7,35 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { serverError, notFound, forbidden, validationError, ErrorCode } from '../../lib/api-errors.js'
 
+// Must mirror inbox_items.item_type's CHECK constraint (107_operational_inbox.sql).
 const ITEM_TYPES = [
-  'action_required',
-  'info',
-  'alert',
-  'reminder',
   'approval_request',
-  'system',
+  'payroll_blocker',
+  'incident_alert',
+  'escalation',
+  'sla_breach',
+  'compliance_alert',
+  'reimbursement_action',
+  'declaration_review',
+  'advance_action',
+  'loan_action',
+  'validation_error',
+  'general',
 ] as const
 
-const INBOX_SEVERITIES = ['info', 'warning', 'error', 'success'] as const
+// Must mirror inbox_items.severity's CHECK constraint (107 + 399_inbox_items_severity_add_success.sql).
+const INBOX_SEVERITIES = ['info', 'warning', 'error', 'critical', 'success'] as const
 
+// Must mirror escalation_rules.trigger_type's CHECK constraint (107_operational_inbox.sql).
 const TRIGGER_TYPES = [
-  'time_based',
-  'event_based',
-  'threshold_breach',
-  'manual',
+  'sla_breach',
+  'approval_pending',
+  'incident_open',
+  'reimbursement_delay',
+  'validation_blocked',
+  'payroll_freeze',
 ] as const
 
 export default async function notificationInboxRoutes(fastify: FastifyInstance) {
@@ -31,7 +43,7 @@ export default async function notificationInboxRoutes(fastify: FastifyInstance) 
 
   function requireHrAdmin(req: any, reply: any, done: () => void) {
     if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
-      reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
+      forbidden(reply, 'FORBIDDEN', 'HR admin access required')
       return
     }
     done()
@@ -49,7 +61,7 @@ export default async function notificationInboxRoutes(fastify: FastifyInstance) 
 
     const parsed = querySchema.safeParse(req.query)
     if (!parsed.success) {
-      return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+      return validationError(reply, ErrorCode.VALIDATION_ERROR, parsed.error.issues[0]?.message)
     }
 
     const { status, item_type, entity_type, limit, offset } = parsed.data
@@ -69,7 +81,7 @@ export default async function notificationInboxRoutes(fastify: FastifyInstance) 
     if (entity_type) q = q.eq('entity_type', entity_type)
 
     const { data, error, count } = await q
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch inbox items')
 
     return reply.send({ data: data ?? [], total: count ?? 0 })
   })
@@ -83,7 +95,7 @@ export default async function notificationInboxRoutes(fastify: FastifyInstance) 
       .eq('tenant_id', req.tenantId)
       .eq('status', 'unread')
 
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch unread count')
     return reply.send({ count: count ?? 0 })
   })
 
@@ -106,7 +118,19 @@ export default async function notificationInboxRoutes(fastify: FastifyInstance) 
 
     const parsed = schema.safeParse(req.body)
     if (!parsed.success) {
-      return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+      return validationError(reply, ErrorCode.VALIDATION_ERROR, parsed.error.issues[0]?.message)
+    }
+
+    // Cross-tenant IDOR guard: recipient_id is only FK'd to profiles(id), not
+    // scoped to the caller's tenant, so it must be checked explicitly.
+    const { data: recipient } = await fastify.supabase
+      .from('profiles')
+      .select('id')
+      .eq('id', parsed.data.recipient_id)
+      .eq('tenant_id', req.tenantId)
+      .maybeSingle()
+    if (!recipient) {
+      return notFound(reply, 'RECIPIENT_NOT_FOUND', 'Recipient was not found in your organisation')
     }
 
     const { data, error } = await fastify.supabase
@@ -120,7 +144,7 @@ export default async function notificationInboxRoutes(fastify: FastifyInstance) 
       .select()
       .single()
 
-    if (error) return reply.code(500).send({ error: 'INSERT_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create inbox item')
     return reply.code(201).send({ data })
   })
 
@@ -136,7 +160,7 @@ export default async function notificationInboxRoutes(fastify: FastifyInstance) 
       .eq('recipient_id', req.userId)
       .eq('tenant_id', req.tenantId)
 
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to mark inbox item as read')
     return reply.send({ message: 'Marked as read' })
   })
 
@@ -152,7 +176,7 @@ export default async function notificationInboxRoutes(fastify: FastifyInstance) 
       .eq('recipient_id', req.userId)
       .eq('tenant_id', req.tenantId)
 
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to action inbox item')
     return reply.send({ message: 'Actioned' })
   })
 
@@ -168,7 +192,7 @@ export default async function notificationInboxRoutes(fastify: FastifyInstance) 
       .eq('recipient_id', req.userId)
       .eq('tenant_id', req.tenantId)
 
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to dismiss inbox item')
     return reply.send({ message: 'Dismissed' })
   })
 
@@ -182,7 +206,7 @@ export default async function notificationInboxRoutes(fastify: FastifyInstance) 
 
     const parsed = schema.safeParse(req.body)
     if (!parsed.success) {
-      return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+      return validationError(reply, ErrorCode.VALIDATION_ERROR, parsed.error.issues[0]?.message)
     }
 
     const now = new Date().toISOString()
@@ -198,7 +222,7 @@ export default async function notificationInboxRoutes(fastify: FastifyInstance) 
       .eq('recipient_id', req.userId)
       .eq('tenant_id', req.tenantId)
 
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to snooze inbox item')
     return reply.send({ message: 'Snoozed' })
   })
 
@@ -213,7 +237,7 @@ export default async function notificationInboxRoutes(fastify: FastifyInstance) 
       .eq('tenant_id', req.tenantId)
       .eq('status', 'unread')
 
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to mark inbox items as read')
     return reply.send({ updated_count: count ?? 0 })
   })
 
@@ -224,7 +248,7 @@ export default async function notificationInboxRoutes(fastify: FastifyInstance) 
       .select('*')
       .eq('tenant_id', req.tenantId)
 
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch escalation rules')
     return reply.send({ data: data ?? [] })
   })
 
@@ -240,7 +264,7 @@ export default async function notificationInboxRoutes(fastify: FastifyInstance) 
 
     const parsed = schema.safeParse(req.body)
     if (!parsed.success) {
-      return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+      return validationError(reply, ErrorCode.VALIDATION_ERROR, parsed.error.issues[0]?.message)
     }
 
     const { data, error } = await fastify.supabase
@@ -252,7 +276,7 @@ export default async function notificationInboxRoutes(fastify: FastifyInstance) 
       .select()
       .single()
 
-    if (error) return reply.code(500).send({ error: 'INSERT_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create escalation rule')
     return reply.code(201).send({ data })
   })
 
@@ -264,7 +288,7 @@ export default async function notificationInboxRoutes(fastify: FastifyInstance) 
 
     const parsed = querySchema.safeParse(req.query)
     if (!parsed.success) {
-      return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+      return validationError(reply, ErrorCode.VALIDATION_ERROR, parsed.error.issues[0]?.message)
     }
 
     let q = fastify.supabase
@@ -275,7 +299,7 @@ export default async function notificationInboxRoutes(fastify: FastifyInstance) 
     if (parsed.data.inbox_item_id) q = q.eq('inbox_item_id', parsed.data.inbox_item_id)
 
     const { data, error } = await q
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch escalations')
     return reply.send({ data: data ?? [] })
   })
 }
