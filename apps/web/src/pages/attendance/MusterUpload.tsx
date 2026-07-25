@@ -98,6 +98,10 @@ function fmtDateTime(iso: string) {
   return `${String(d.getDate()).padStart(2,'0')}-${M[d.getMonth()]}-${d.getFullYear()} ${hr}:${mn}`
 }
 
+function normaliseHeader(h: unknown): string {
+  return String(h ?? '').trim().toLowerCase()
+}
+
 /** Parse the uploaded Excel file and return valid muster rows. */
 function parseExcel(file: File): Promise<{ rows: ParsedRow[]; parseErrors: string[] }> {
   return new Promise((resolve) => {
@@ -115,15 +119,47 @@ function parseExcel(file: File): Promise<{ rows: ParsedRow[]; parseErrors: strin
 
         const rawRows = XLSX.utils.sheet_to_json<unknown[]>(ws, { header: 1, defval: '' })
 
+        if (rawRows.length === 0) {
+          resolve({ rows: [], parseErrors: ['File is empty'] })
+          return
+        }
+
+        // Resolve columns by HEADER NAME, not fixed position. The template
+        // (routes/attendance/muster-upload.ts) writes
+        // ['Employee Code', 'Employee Name', 'Date', 'Status (P / A / HLF)'] —
+        // reordering, inserting, or deleting a column while editing the file
+        // must not silently misattribute a value to the wrong field. This is
+        // the exact bug class that corrupted salary upload data this week;
+        // the header row is the only safe source of truth for column
+        // position, never a hardcoded index.
+        const headerRow  = rawRows[0].map(normaliseHeader)
+        const empCodeIdx = headerRow.findIndex(h => h === 'employee code')
+        const dateIdx    = headerRow.findIndex(h => h === 'date')
+        const statusIdx  = headerRow.findIndex(h => h.startsWith('status'))
+
+        const missing: string[] = []
+        if (empCodeIdx === -1) missing.push('Employee Code')
+        if (dateIdx    === -1) missing.push('Date')
+        if (statusIdx  === -1) missing.push('Status')
+        if (missing.length > 0) {
+          resolve({
+            rows: [],
+            parseErrors: [
+              `Missing required column(s): ${missing.join(', ')}. Re-download a fresh template — don't rename or reorder the header row.`,
+            ],
+          })
+          return
+        }
+
         const parseErrors: string[] = []
         const rows: ParsedRow[]     = []
 
         // Row 0 is the header — skip it
         for (let i = 1; i < rawRows.length; i++) {
           const raw = rawRows[i]
-          const empCode = String(raw[0] ?? '').trim()
-          const dateVal = String(raw[2] ?? '').trim()
-          const status  = String(raw[3] ?? '').trim().toUpperCase()
+          const empCode = String(raw[empCodeIdx] ?? '').trim()
+          const dateVal = String(raw[dateIdx] ?? '').trim()
+          const status  = String(raw[statusIdx] ?? '').trim().toUpperCase()
 
           // Skip blank status rows — they mean "no change"
           if (!status) continue
@@ -146,7 +182,7 @@ function parseExcel(file: File): Promise<{ rows: ParsedRow[]; parseErrors: strin
           }
 
           if (!VALID_STATUSES.has(status)) {
-            parseErrors.push(`Row ${i + 1} (${empCode}): invalid status "${String(raw[3])}" — use P, A, or HLF`)
+            parseErrors.push(`Row ${i + 1} (${empCode}): invalid status "${String(raw[statusIdx])}" — use P, A, or HLF`)
             continue
           }
 
