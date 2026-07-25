@@ -347,19 +347,31 @@ export default async function opsDashboardRoutes(fastify: FastifyInstance) {
     })
 
     // 2. No active employee has two active compensations
-    const { data: multiCompRows } = await fastify.supabase
+    // ISSUE (fresh audit): `.limit(5)` capped the reported count the same way
+    // check #1 above did (already fixed) — and the RPC's error was discarded
+    // entirely, so if it errored (e.g. not installed on an older DB — see
+    // migration 395) this always silently reported 'pass'. Distinguish "we
+    // checked and it's clean" from "we couldn't check" instead of collapsing
+    // both into the same green status.
+    const { data: multiCompRows, error: multiCompErr } = await fastify.supabase
       .rpc('check_duplicate_active_compensations', { p_tenant_id: tenantId })
-      .limit(5)
-    // If RPC doesn't exist, skip gracefully
-    const multiCompIssues = (multiCompRows ?? []) as any[]
-    results.push({
-      check:   'single_active_compensation_per_employee',
-      status:  multiCompIssues.length === 0 ? 'pass' : 'fail',
-      message: multiCompIssues.length === 0
-        ? 'Each active employee has at most one active compensation'
-        : `${multiCompIssues.length} employee(s) have multiple active compensations`,
-      detail: multiCompIssues.length > 0 ? multiCompIssues : undefined,
-    })
+    if (multiCompErr) {
+      results.push({
+        check:   'single_active_compensation_per_employee',
+        status:  'warn',
+        message: `Could not run duplicate-compensation check: ${multiCompErr.message}`,
+      })
+    } else {
+      const multiCompIssues = (multiCompRows ?? []) as any[]
+      results.push({
+        check:   'single_active_compensation_per_employee',
+        status:  multiCompIssues.length === 0 ? 'pass' : 'fail',
+        message: multiCompIssues.length === 0
+          ? 'Each active employee has at most one active compensation'
+          : `${multiCompIssues.length} employee(s) have multiple active compensations`,
+        detail: multiCompIssues.length > 0 ? multiCompIssues.slice(0, 5) : undefined,
+      })
+    }
 
     // 3. Snapshot integrity — check for recent runs with snapshots
     const { data: recentRuns } = await fastify.supabase
