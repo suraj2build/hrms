@@ -583,6 +583,31 @@ export async function approveRegularisation(
     }
   }
 
+  // Period-lock recheck (ISSUE-144). Submission time already blocks new requests
+  // once a period is locked (attendance/regularisation.ts POST handler), but a
+  // request can sit pending for days — if HR locks the period (or payroll runs
+  // and advances it to PAYROLL_PROCESSING/PAYROLL_FINALIZED) before this request
+  // is approved, approving it here would still insert punch logs and recompute
+  // attendance_daily for a period that's supposed to be closed, silently
+  // invalidating figures HR already locked or a payroll run already used.
+  const { data: periodLock } = await supabase
+    .from('attendance_period_locks')
+    .select('state')
+    .eq('tenant_id', tenantId)
+    .eq('period_month', regRow.date.slice(0, 7))
+    .maybeSingle()
+
+  if (periodLock && periodLock.state !== 'OPEN') {
+    return {
+      ok:    false,
+      error: {
+        type:    'CONFLICT',
+        message: `Cannot approve — the pay period for ${regRow.date} is ${periodLock.state}. ` +
+          'Reopen the period before approving this request.',
+      },
+    }
+  }
+
   // Multi-level gate (engages only when a regularisation chain is configured).
   // No chain => { finalize, authorized:false } and we run the legacy self-approval
   // + validateApprover guards below, exactly as before.
