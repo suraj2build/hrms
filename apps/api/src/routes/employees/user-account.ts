@@ -21,6 +21,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 
 
@@ -389,8 +390,7 @@ export default async function userAccountRoutes(fastify: FastifyInstance) {
       password: parsed.data.new_password,
     })
     if (pwErr) {
-      fastify.log.error({ err: pwErr, employeeId: id }, 'user-account: password reset failed')
-      return reply.code(500).send({ error: 'AUTH_ERROR', message: pwErr.message })
+      return serverError(req, reply, pwErr, ErrorCode.UPDATE_FAILED, 'Failed to reset password')
     }
 
     fastify.log.info({ employeeId: id, profileId: profile.id }, 'user-account: password reset by admin')
