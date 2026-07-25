@@ -324,20 +324,25 @@ export default async function opsDashboardRoutes(fastify: FastifyInstance) {
     }> = []
 
     // 1. All finalized slips have net_pay > 0
-    const { data: zeroNetSlips } = await fastify.supabase
+    // ISSUE-153: `.limit(5)` was also capping the reported count — with 200
+    // affected slips this said "5 finalized slip(s)", silently undercounting by
+    // 40x. `count: 'exact'` returns the true total (pre-limit) alongside the
+    // capped `data`, which stays as a 5-row sample for `detail`.
+    const { data: zeroNetSlips, count: zeroNetCount } = await fastify.supabase
       .from('payroll_slips')
-      .select('id, employee_id, month')
+      .select('id, employee_id, month', { count: 'exact' })
       .eq('tenant_id', tenantId)
       .eq('status', 'finalized')
       .lte('net_pay', 0)
       .limit(5)
 
+    const zeroNetTotal = zeroNetCount ?? (zeroNetSlips ?? []).length
     results.push({
       check:   'finalized_slips_net_pay_positive',
-      status:  (zeroNetSlips ?? []).length === 0 ? 'pass' : 'warn',
-      message: (zeroNetSlips ?? []).length === 0
+      status:  zeroNetTotal === 0 ? 'pass' : 'warn',
+      message: zeroNetTotal === 0
         ? 'All finalized slips have net_pay > 0'
-        : `${(zeroNetSlips ?? []).length} finalized slip(s) have net_pay ≤ 0`,
+        : `${zeroNetTotal} finalized slip(s) have net_pay ≤ 0`,
       detail: zeroNetSlips,
     })
 
