@@ -67,18 +67,16 @@ export default async function bulkOpsRoutes(fastify: FastifyInstance) {
       })
     }
 
-    // Batch update
-    const updateRows = approvable.map((d: any) => ({
-      id:              d.id,
-      status:          'approved',
-      approved_by:     req.userId,
-      approved_at:     now,
-      approved_amount: approved_amount ?? d.declared_amount,
-      reviewer_notes:  notes ?? null,
-    }))
-
-    // Supabase doesn't have a native batch update-by-id; do it row-by-row in parallel
-    await Promise.all(
+    // Supabase doesn't have a native batch update-by-id; do it row-by-row in
+    // parallel. Each update is guarded on the status seen in the pre-update
+    // SELECT and asks for the row back via .select('id') — a concurrent
+    // change to the same declaration (another admin approving/rejecting it
+    // between the SELECT and this UPDATE) makes the guard match zero rows
+    // instead of silently overwriting it. The response count is built from
+    // these actual write results, not from the pre-update SELECT length —
+    // previously approved_count was `approvable.length`, so a lost race
+    // (or an update-level error) was reported as a success with no trace.
+    const results = await Promise.all(
       approvable.map((d: any) =>
         fastify.supabase
           .from('tax_declarations')
@@ -89,12 +87,25 @@ export default async function bulkOpsRoutes(fastify: FastifyInstance) {
             approved_amount: approved_amount ?? d.declared_amount,
           })
           .eq('id', d.id)
-          .eq('tenant_id', req.tenantId),
+          .eq('tenant_id', req.tenantId)
+          .eq('status', d.status)
+          .select('id'),
       ),
     )
 
-    // Audit log entry per declaration
-    const auditRows = approvable.map((d: any) => ({
+    const actuallyApproved = approvable.filter((_d: any, i: number) => {
+      const r = results[i]
+      return !r.error && r.data && r.data.length > 0
+    })
+    const lostRace = approvable
+      .filter((_d: any, i: number) => {
+        const r = results[i]
+        return r.error || !r.data || r.data.length === 0
+      })
+      .map((d: any) => d.id as string)
+
+    // Audit log entry per declaration actually approved
+    const auditRows = actuallyApproved.map((d: any) => ({
       tenant_id:      req.tenantId,
       declaration_id: d.id,
       changed_by:     req.userId,
@@ -102,12 +113,12 @@ export default async function bulkOpsRoutes(fastify: FastifyInstance) {
       to_status:      'approved',
       notes:          `Bulk approval: ${reason}`,
     }))
-    await fastify.supabase.from('tds_declaration_audit_log').insert(auditRows)
+    if (auditRows.length > 0) await fastify.supabase.from('tds_declaration_audit_log').insert(auditRows)
 
     return reply.send({
-      approved_count: approvable.length,
-      skipped_count:  skipped.length,
-      skipped_ids:    skipped,
+      approved_count: actuallyApproved.length,
+      skipped_count:  skipped.length + lostRace.length,
+      skipped_ids:    [...skipped, ...lostRace],
       reason,
     })
   })
@@ -138,23 +149,43 @@ export default async function bulkOpsRoutes(fastify: FastifyInstance) {
     const rejectable = (decls ?? []) as any[]
     const skipped    = declaration_ids.filter(id => !rejectable.find((d: any) => d.id === id))
 
-    await Promise.all(
+    // Guarded on the pre-update status + counted from the write results —
+    // see the matching comment in /tds-approve above for why.
+    const results = await Promise.all(
       rejectable.map((d: any) =>
         fastify.supabase
           .from('tax_declarations')
           .update({ status: 'rejected', rejection_reason: `${reason}${notes ? ' — ' + notes : ''}`, reviewed_by: req.userId, reviewed_at: now })
           .eq('id', d.id)
-          .eq('tenant_id', req.tenantId),
+          .eq('tenant_id', req.tenantId)
+          .eq('status', d.status)
+          .select('id'),
       ),
     )
 
-    const auditRows = rejectable.map((d: any) => ({
+    const actuallyRejected = rejectable.filter((_d: any, i: number) => {
+      const r = results[i]
+      return !r.error && r.data && r.data.length > 0
+    })
+    const lostRace = rejectable
+      .filter((_d: any, i: number) => {
+        const r = results[i]
+        return r.error || !r.data || r.data.length === 0
+      })
+      .map((d: any) => d.id as string)
+
+    const auditRows = actuallyRejected.map((d: any) => ({
       tenant_id: req.tenantId, declaration_id: d.id, changed_by: req.userId,
       from_status: d.status, to_status: 'rejected', notes: `Bulk rejection: ${reason}`,
     }))
     if (auditRows.length > 0) await fastify.supabase.from('tds_declaration_audit_log').insert(auditRows)
 
-    return reply.send({ rejected_count: rejectable.length, skipped_count: skipped.length, skipped_ids: skipped, reason })
+    return reply.send({
+      rejected_count: actuallyRejected.length,
+      skipped_count:  skipped.length + lostRace.length,
+      skipped_ids:    [...skipped, ...lostRace],
+      reason,
+    })
   })
 
   // ── POST /payroll/bulk/proof-verify ───────────────────────────────────────────
@@ -182,17 +213,36 @@ export default async function bulkOpsRoutes(fastify: FastifyInstance) {
     const verifiable = (proofs ?? []) as any[]
     const skipped    = proof_ids.filter(id => !verifiable.find((p: any) => p.id === id))
 
-    await Promise.all(
+    // Guarded on the pre-update document_state + counted from the write
+    // results — see the matching comment in /tds-approve above for why.
+    const results = await Promise.all(
       verifiable.map((p: any) =>
         fastify.supabase
           .from('declaration_proofs')
           .update({ document_state: 'verified', verified_by: req.userId, verified_at: now, verification_notes: notes ?? null })
           .eq('id', p.id)
-          .eq('tenant_id', req.tenantId),
+          .eq('tenant_id', req.tenantId)
+          .eq('document_state', p.document_state)
+          .select('id'),
       ),
     )
 
-    return reply.send({ verified_count: verifiable.length, skipped_count: skipped.length, skipped_ids: skipped })
+    const actuallyVerified = verifiable.filter((_p: any, i: number) => {
+      const r = results[i]
+      return !r.error && r.data && r.data.length > 0
+    })
+    const lostRace = verifiable
+      .filter((_p: any, i: number) => {
+        const r = results[i]
+        return r.error || !r.data || r.data.length === 0
+      })
+      .map((p: any) => p.id as string)
+
+    return reply.send({
+      verified_count: actuallyVerified.length,
+      skipped_count:  skipped.length + lostRace.length,
+      skipped_ids:    [...skipped, ...lostRace],
+    })
   })
 
   // ── POST /payroll/bulk/leave-approve ──────────────────────────────────────────
