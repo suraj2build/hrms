@@ -766,6 +766,20 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
     const parsed = schema.safeParse(req.body)
     if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
 
+    // stage_id is a raw UUID from the request body — verify it belongs to this
+    // tenant before writing it, or a Tenant-A caller who obtains a Tenant-B
+    // stage UUID (leaked in an email template, log, or webhook payload) could
+    // point their own tenant's application at it. (fresh audit finding)
+    if (parsed.data.stage_id) {
+      const { data: stage } = await fastify.supabase
+        .from('recruitment_pipeline_stages')
+        .select('id')
+        .eq('id', parsed.data.stage_id)
+        .eq('tenant_id', req.tenantId)
+        .maybeSingle()
+      if (!stage) return reply.code(400).send({ error: 'INVALID_STAGE', message: 'Pipeline stage not found for this tenant' })
+    }
+
     const { data, error } = await fastify.supabase
       .from('applications')
       .insert({ ...parsed.data, tenant_id: req.tenantId, status: 'applied' })
@@ -810,6 +824,18 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
 
     if (!existing) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Application not found' })
 
+    // stage_id is a raw UUID from the request body — verify it belongs to this
+    // tenant before writing it (fresh audit finding — same gap as POST /applications).
+    // Also fetches stage_type here so the fire-and-forget email block below
+    // doesn't need its own unscoped re-query.
+    const { data: targetStage } = await fastify.supabase
+      .from('recruitment_pipeline_stages')
+      .select('id, stage_type')
+      .eq('id', parsed.data.stage_id)
+      .eq('tenant_id', req.tenantId)
+      .maybeSingle()
+    if (!targetStage) return reply.code(400).send({ error: 'INVALID_STAGE', message: 'Pipeline stage not found for this tenant' })
+
     const updatePayload: any = { stage_id: parsed.data.stage_id }
     if (parsed.data.status) updatePayload.status = parsed.data.status
 
@@ -837,12 +863,7 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
     // Stage-change emails: shortlisted (screening) or offer extended (offer)
     void (async () => {
       try {
-        const { data: stage } = await fastify.supabase
-          .from('recruitment_pipeline_stages')
-          .select('stage_type')
-          .eq('id', parsed.data.stage_id)
-          .single()
-        const stageType = (stage as any)?.stage_type
+        const stageType = (targetStage as any)?.stage_type
         if (stageType !== 'screening' && stageType !== 'offer') return
         const ctx = await getAppEmailCtx(fastify.supabase, req.tenantId, id)
         if (!ctx?.candidateEmail) return
