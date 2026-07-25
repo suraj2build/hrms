@@ -688,7 +688,7 @@ async function fetchApprovedLeave(
   session:         LeaveSession | null
   hours_requested: number | null
 } | null> {
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from('leave_requests')
     .select('leave_type_id, half_day, session, hours_requested, leave_types(is_paid)')
     .eq('tenant_id', tenantId)
@@ -698,6 +698,16 @@ async function fetchApprovedLeave(
     .gte('to_date', date)
     .maybeSingle()
 
+  // ISSUE-151: previously discarded — a query error (including .maybeSingle()'s
+  // own "multiple rows returned" error when overlapping approved leave requests
+  // exist for the same date, a real data-integrity edge case despite the
+  // application-layer overlap guard) silently fell through to `if (!data) return
+  // null`, treating the employee as having no approved leave and letting the day
+  // compute as absent/LOP instead of paid leave. Throws, matching the sibling
+  // fetchPunches()'s established contract in this same file/Promise.all.
+  if (error) {
+    throw new Error(`fetchApprovedLeave: DB query failed — ${error.message}`)
+  }
   if (!data) return null
 
   const row = data as unknown as {
