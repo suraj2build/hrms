@@ -107,7 +107,15 @@ export function ManagerTeamLifecycle() {
   const clearanceMut = useMutation({
     mutationFn: (p: { employeeId: string; clearanceId: string; status: 'cleared' | 'rejected' }) =>
       api.patch(`/employees/${p.employeeId}/separation-clearances/${p.clearanceId}`, { status: p.status }),
-    onSuccess: (_d, p) => { toast.success(`Manager clearance ${p.status}`); invalidate() },
+    onSuccess: (_d, p) => {
+      toast.success(`Manager clearance ${p.status}`)
+      invalidate()
+      // Same separation_clearances row is also read by the HR Separation
+      // Workflow queue, the HR profile tab, and the employee's own ESS view.
+      qc.invalidateQueries({ queryKey: ['separations'] })
+      qc.invalidateQueries({ queryKey: ['separation', p.employeeId] })
+      qc.invalidateQueries({ queryKey: ['ess-me-separation', p.employeeId] })
+    },
     onError:   (e: unknown) => toast.error(e instanceof Error ? e.message : 'Failed to update clearance'),
   })
 

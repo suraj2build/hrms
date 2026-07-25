@@ -200,6 +200,7 @@ function LifecycleActions({ row }: { row: SeparationRow }) {
     qc.invalidateQueries({ queryKey: ['separations'] })
     qc.invalidateQueries({ queryKey: ['separation', row.employee_id] })
     qc.invalidateQueries({ queryKey: ['ess-me-separation', row.employee_id] })
+    qc.invalidateQueries({ queryKey: ['manager-team-lifecycle'] })
   }
 
   const approveMut = useMutation({
@@ -301,6 +302,9 @@ function ClearancePanel({ row, onClose: _onClose }: { row: SeparationRow; onClos
       qc.invalidateQueries({ queryKey: ['separations'] })
       qc.invalidateQueries({ queryKey: ['separation', row.employee_id] })
       qc.invalidateQueries({ queryKey: ['ess-me-separation', row.employee_id] })
+      // ManagerTeamLifecycle.tsx surfaces the same clearance rows to the
+      // employee's manager under its own key.
+      qc.invalidateQueries({ queryKey: ['manager-team-lifecycle'] })
       toast.success('Clearance status updated')
     },
     onError: (e: Error) => toast.error('Failed', { description: e.message }),
@@ -411,11 +415,12 @@ function FnFSection({ row }: { row: SeparationRow }) {
     (form.last_payroll_amount + form.leave_encashment_amount + form.gratuity_amount + form.other_additions)
     - (form.notice_period_deduction + form.other_deductions)
 
-  // See ActionButtons' invalidate() above for why both extra keys are needed.
+  // See ActionButtons' invalidate() above for why the extra keys are needed.
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ['separations'] })
     qc.invalidateQueries({ queryKey: ['separation', row.employee_id] })
     qc.invalidateQueries({ queryKey: ['ess-me-separation', row.employee_id] })
+    qc.invalidateQueries({ queryKey: ['manager-team-lifecycle'] })
   }
 
   const saveMutation = useMutation({
