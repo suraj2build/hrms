@@ -239,13 +239,20 @@ async function fetchPayrollRegisterRows(
   }>()
 
   if (employeeIds.length > 0) {
-    const { data: bankRows } = await supabase
-      .from('employee_bank_statutory')
-      .select('employee_id, bank_name, account_number, ifsc_code, branch_name, account_type')
-      .eq('tenant_id', tenantId)
-      .in('employee_id', employeeIds)
+    // Chunked — a payroll run's employee count can exceed both the request-line
+    // limit for a single .in() call and PostgREST's 1,000-row response ceiling.
+    const ID_CHUNK = 200
+    const bankRows: unknown[] = []
+    for (let i = 0; i < employeeIds.length; i += ID_CHUNK) {
+      const { data } = await supabase
+        .from('employee_bank_statutory')
+        .select('employee_id, bank_name, account_number, ifsc_code, branch_name, account_type')
+        .eq('tenant_id', tenantId)
+        .in('employee_id', employeeIds.slice(i, i + ID_CHUNK))
+      if (data) bankRows.push(...data)
+    }
 
-    for (const b of (bankRows ?? []) as Array<{
+    for (const b of bankRows as Array<{
       employee_id:    string
       bank_name:      string | null; account_number: string | null
       ifsc_code:      string | null; branch_name:    string | null
@@ -356,21 +363,25 @@ async function fetchComparisonRows(
   const toDate      = new Date(year, mon, 0).toISOString().slice(0, 10)
 
   // ── 1. Active employees (optionally filtered by department) ───────────────
-  let empQuery = supabase
-    .from('employees')
-    .select(`
-      id, first_name, last_name, employee_code,
-      job_history!job_history_employee_id_fkey(department_id, is_current, departments(name))
-    `)
-    .eq('tenant_id', tenantId)
-    .eq('status', 'active')
-    .eq('job_history.is_current', true)
-    .order('employee_code')
-
-  if (department_id) empQuery = empQuery.eq('job_history.department_id', department_id)
-
-  const { data: employees, error: empErr } = await empQuery
-  if (empErr) {
+  // Paginated — an unbounded .select() truncates at PostgREST's 1,000-row
+  // ceiling for a large tenant, silently dropping employees from the report.
+  let employees: any[]
+  try {
+    employees = await fetchAllRows((from, to) => {
+      let q = supabase
+        .from('employees')
+        .select(`
+          id, first_name, last_name, employee_code,
+          job_history!job_history_employee_id_fkey(department_id, is_current, departments(name))
+        `)
+        .eq('tenant_id', tenantId)
+        .eq('status', 'active')
+        .eq('job_history.is_current', true)
+        .order('employee_code')
+      if (department_id) q = q.eq('job_history.department_id', department_id)
+      return q.range(from, to)
+    })
+  } catch (empErr) {
     logger?.error({ err: empErr }, 'comparison: employee query failed')
     return { rows: [], runRow: null, error: 'Failed to fetch employees' }
   }
@@ -378,12 +389,17 @@ async function fetchComparisonRows(
   // ── 2. Attendance aggregates for the month ────────────────────────────────
   // null day_fraction → legacy/unprocessed row → treat as 1.0 (present)
   // so we do not create phantom LOP.  This mirrors payroll-engine.ts.
-  const { data: attRows } = await supabase
-    .from('attendance_daily')
-    .select('employee_id, day_fraction, updated_at:date')
-    .eq('tenant_id', tenantId)
-    .gte('date', fromDate)
-    .lte('date', toDate)
+  // Paginated — a month of attendance_daily across the tenant can exceed
+  // the 1,000-row ceiling.
+  const attRows = await fetchAllRows((from, to) =>
+    supabase
+      .from('attendance_daily')
+      .select('employee_id, day_fraction, updated_at:date')
+      .eq('tenant_id', tenantId)
+      .gte('date', fromDate)
+      .lte('date', toDate)
+      .range(from, to),
+  )
 
   type AttAgg = { payable: number; lop: number; lastUpdate: string }
   const attMap = new Map<string, AttAgg>()
@@ -415,13 +431,17 @@ async function fetchComparisonRows(
   const slipMap = new Map<string, SlipAgg>()
 
   if (runRow?.id) {
-    const { data: slips } = await supabase
-      .from('payroll_slips')
-      .select('employee_id, payable_days, lop_days')
-      .eq('run_id', runRow.id)
-      .eq('tenant_id', tenantId)
+    // Paginated — a run's payroll_slips can exceed 1,000 rows for a large tenant.
+    const slips = await fetchAllRows((from, to) =>
+      supabase
+        .from('payroll_slips')
+        .select('employee_id, payable_days, lop_days')
+        .eq('run_id', runRow.id)
+        .eq('tenant_id', tenantId)
+        .range(from, to),
+    )
 
-    for (const s of (slips ?? []) as Array<{
+    for (const s of slips as Array<{
       employee_id: string; payable_days: number; lop_days: number
     }>) {
       slipMap.set(s.employee_id, {
@@ -433,32 +453,45 @@ async function fetchComparisonRows(
 
   // ── 4. Pending anomalies per employee in the month ────────────────────────
   // Defensive: if the table has a different schema/status enum, default to 0.
+  // Paginated for the same reason as the queries above.
   const anomalyMap = new Map<string, number>()
-  const { data: anomalies, error: anomalyErr } = await supabase
-    .from('attendance_anomalies')
-    .select('employee_id')
-    .eq('tenant_id', tenantId)
-    .eq('resolved', false)
-    .gte('date', fromDate)
-    .lte('date', toDate)
-
-  if (anomalyErr) logger?.warn({ err: anomalyErr }, 'comparison: anomaly query failed — defaulting to 0')
-  for (const a of (anomalyErr ? [] : (anomalies ?? [])) as Array<{ employee_id: string }>) {
+  let anomalies: Array<{ employee_id: string }> = []
+  try {
+    anomalies = await fetchAllRows((from, to) =>
+      supabase
+        .from('attendance_anomalies')
+        .select('employee_id')
+        .eq('tenant_id', tenantId)
+        .eq('resolved', false)
+        .gte('date', fromDate)
+        .lte('date', toDate)
+        .range(from, to),
+    )
+  } catch (anomalyErr) {
+    logger?.warn({ err: anomalyErr }, 'comparison: anomaly query failed — defaulting to 0')
+  }
+  for (const a of anomalies) {
     anomalyMap.set(a.employee_id, (anomalyMap.get(a.employee_id) ?? 0) + 1)
   }
 
   // ── 5. Pending leave requests overlapping the month ───────────────────────
   const leaveMap = new Map<string, number>()
-  const { data: leaves, error: leaveErr } = await supabase
-    .from('leave_requests')
-    .select('employee_id')
-    .eq('tenant_id', tenantId)
-    .eq('status', 'PENDING')
-    .lte('from_date', toDate)   // leave starts on or before month end
-    .gte('to_date', fromDate)   // leave ends on or after month start
-
-  if (leaveErr) logger?.warn({ err: leaveErr }, 'comparison: leave query failed — defaulting to 0')
-  for (const l of (leaveErr ? [] : (leaves ?? [])) as Array<{ employee_id: string }>) {
+  let leaves: Array<{ employee_id: string }> = []
+  try {
+    leaves = await fetchAllRows((from, to) =>
+      supabase
+        .from('leave_requests')
+        .select('employee_id')
+        .eq('tenant_id', tenantId)
+        .eq('status', 'PENDING')
+        .lte('from_date', toDate)   // leave starts on or before month end
+        .gte('to_date', fromDate)   // leave ends on or after month start
+        .range(from, to),
+    )
+  } catch (leaveErr) {
+    logger?.warn({ err: leaveErr }, 'comparison: leave query failed — defaulting to 0')
+  }
+  for (const l of leaves) {
     leaveMap.set(l.employee_id, (leaveMap.get(l.employee_id) ?? 0) + 1)
   }
 
@@ -1020,34 +1053,40 @@ export default async function reportExportRoutes(fastify: FastifyInstance) {
     const tenantId = req.tenantId as string
 
     // ── Fetch leave requests ───────────────────────────────────────────────────
-    let lrQuery = fastify.supabase
-      .from('leave_requests')
-      .select(`
-        id, from_date, to_date, computed_days, half_day, session, hours_requested,
-        reason, status, created_at,
-        leave_types(id, name, is_paid),
-        employees!inner(
-          id, first_name, last_name, employee_code,
-          job_history!job_history_employee_id_fkey(department_id, is_current, departments(name))
-        )
-      `)
-      .eq('tenant_id', tenantId)
-      .gte('from_date', from)
-      .lte('to_date', to)
-      .order('from_date', { ascending: true })
-      .order('employees(employee_code)', { ascending: true })
+    // Paginated — an export whose whole purpose is completeness would silently
+    // drop rows past PostgREST's 1,000-row ceiling for a wide date range/tenant.
+    let requests: any[]
+    try {
+      requests = await fetchAllRows((rangeFrom, rangeTo) => {
+        let q = fastify.supabase
+          .from('leave_requests')
+          .select(`
+            id, from_date, to_date, computed_days, half_day, session, hours_requested,
+            reason, status, created_at,
+            leave_types(id, name, is_paid),
+            employees!inner(
+              id, first_name, last_name, employee_code,
+              job_history!job_history_employee_id_fkey(department_id, is_current, departments(name))
+            )
+          `)
+          .eq('tenant_id', tenantId)
+          .gte('from_date', from)
+          .lte('to_date', to)
+          .order('from_date', { ascending: true })
+          .order('employees(employee_code)', { ascending: true })
 
-    if (status !== 'ALL')  lrQuery = lrQuery.eq('status', status)
-    if (leave_type_id)     lrQuery = lrQuery.eq('leave_type_id', leave_type_id)
+        if (status !== 'ALL')  q = q.eq('status', status)
+        if (leave_type_id)     q = q.eq('leave_type_id', leave_type_id)
 
-    const { data: requests, error: lrErr } = await lrQuery
-    if (lrErr) {
+        return q.range(rangeFrom, rangeTo)
+      })
+    } catch (lrErr) {
       req.log.error({ err: lrErr }, 'leave-register export: query failed')
       return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch leave requests' })
     }
 
     // Apply department filter (post-fetch — can't easily push to Supabase with nested join)
-    let filtered = (requests ?? []) as any[]
+    let filtered = requests as any[]
     if (department_id) {
       filtered = filtered.filter((r: any) => {
         const jh = Array.isArray(r.employees?.job_history) ? r.employees.job_history[0] : r.employees?.job_history
