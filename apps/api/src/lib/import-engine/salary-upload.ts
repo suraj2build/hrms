@@ -724,7 +724,16 @@ export async function validateSalaryUploadRows(
   // matter where it sits in the file, and reordering/inserting/deleting columns
   // can never misattribute a value to the wrong component — there is no
   // position for the file and the system to drift out of sync on.
-  const normName = (s: string) => s.trim().toLowerCase().replace(/\s+/g, ' ')
+  //
+  // MUST exactly mirror the frontend's normaliseKey() (ImportWorkspace.tsx),
+  // which is what actually produces the row keys this function receives:
+  // strip a trailing " *" marker, trim, lowercase, then collapse whitespace
+  // to a SINGLE UNDERSCORE (not a space) — "Meal Coupon" arrives as
+  // "meal_coupon", not "meal coupon". Using a different normalization here
+  // (e.g. collapsing to a space) makes every column fail to match, which is
+  // exactly what happened when this used `replace(/\s+/g, ' ')` instead.
+  const normName = (s: string) =>
+    s.replace(/\s*\*\s*$/, '').trim().toLowerCase().replace(/\s+/g, '_')
   const compByName = new Map<string, ComponentMeta>()
   for (const c of activeComponents) {
     compByName.set(normName(c.name), c)
