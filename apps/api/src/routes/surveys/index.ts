@@ -2,6 +2,7 @@ import { z } from 'zod'
 import type { FastifyInstance } from 'fastify'
 import Anthropic from '@anthropic-ai/sdk'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { fetchAllRows } from '../../lib/supabase-paginate.js'
 
 // ── Sentiment helpers ──────────────────────────────────────────────────────────
 
@@ -441,12 +442,18 @@ export default async function surveyRoutes(fastify: FastifyInstance) {
     let empIds = employee_ids ?? []
 
     if (assign_all) {
-      const { data: emps } = await supabase
-        .from('employees')
-        .select('id')
-        .eq('tenant_id', tenantId)
-        .eq('status', 'active')
-      empIds = (emps ?? []).map(e => e.id)
+      // Paginated — an unbounded .select() truncates at PostgREST's 1,000-row
+      // ceiling, so "assign to all" would silently only reach the first 1,000
+      // active employees for a larger tenant with no error or indication.
+      const emps = await fetchAllRows<{ id: string }>((from, to) =>
+        supabase
+          .from('employees')
+          .select('id')
+          .eq('tenant_id', tenantId)
+          .eq('status', 'active')
+          .range(from, to),
+      )
+      empIds = emps.map(e => e.id)
     }
 
     if (!empIds.length) return reply.status(400).send({ error: 'No employees to assign' })
