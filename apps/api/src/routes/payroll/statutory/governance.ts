@@ -30,6 +30,7 @@ import { z } from 'zod'
 import { resolveEmployeeStatutoryParams } from '../../../lib/statutory/statutory-governance.js'
 import { logAction } from '../../../lib/audit-service.js'
 import { HR_ADMIN_ROLES } from '../../../lib/rbac.js'
+import { serverError, ErrorCode } from '../../../lib/api-errors.js'
 
 // ── Helper ─────────────────────────────────────────────────────────────────────
 
@@ -96,7 +97,7 @@ export default async function governanceRoutes(fastify: FastifyInstance) {
       .select()
       .single()
 
-    if (error) return reply.code(500).send({ error: 'UPSERT_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to save statutory settings')
 
     await logAction(fastify.supabase, {
       tenantId:    req.tenantId,
@@ -139,7 +140,7 @@ export default async function governanceRoutes(fastify: FastifyInstance) {
     if (parsed.data.active_only === 'true') q = q.eq('is_active', true)
 
     const { data, error } = await q
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch registrations')
     return reply.send({ data: data ?? [] })
   })
 
@@ -171,7 +172,7 @@ export default async function governanceRoutes(fastify: FastifyInstance) {
       if (error.code === '23505') {
         return reply.code(409).send({ error: 'DUPLICATE_REGISTRATION', message: 'A registration with these parameters already exists' })
       }
-      return reply.code(500).send({ error: 'INSERT_FAILED', message: error.message })
+      return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create registration')
     }
 
     await logAction(fastify.supabase, {
@@ -211,7 +212,7 @@ export default async function governanceRoutes(fastify: FastifyInstance) {
       .select()
       .single()
 
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update registration')
     if (!data) return reply.code(404).send({ error: 'NOT_FOUND' })
     await logAction(fastify.supabase, {
       tenantId:    req.tenantId,
@@ -235,7 +236,7 @@ export default async function governanceRoutes(fastify: FastifyInstance) {
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
 
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to deactivate registration')
     await logAction(fastify.supabase, {
       tenantId:    req.tenantId,
       tableName:   'statutory_registrations',
@@ -278,7 +279,7 @@ export default async function governanceRoutes(fastify: FastifyInstance) {
     }
 
     const { data, error } = await q
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch overrides')
     return reply.send({ data: data ?? [] })
   })
 
@@ -308,7 +309,7 @@ export default async function governanceRoutes(fastify: FastifyInstance) {
       .select()
       .single()
 
-    if (error) return reply.code(500).send({ error: 'INSERT_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create override')
 
     // Append to statutory audit log
     await fastify.supabase
@@ -371,7 +372,7 @@ export default async function governanceRoutes(fastify: FastifyInstance) {
       .select()
       .single()
 
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update override')
 
     // Append audit log
     await fastify.supabase
@@ -412,7 +413,7 @@ export default async function governanceRoutes(fastify: FastifyInstance) {
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
 
-    if (error) return reply.code(500).send({ error: 'DELETE_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.DELETE_FAILED, 'Failed to delete override')
     await logAction(fastify.supabase, {
       tenantId:    req.tenantId,
       tableName:   'employee_statutory_overrides',
@@ -456,7 +457,7 @@ export default async function governanceRoutes(fastify: FastifyInstance) {
     if (parsed.data.to)          q = q.lte('changed_at', parsed.data.to)
 
     const { data, error, count } = await q
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch audit log')
     return reply.send({ data: data ?? [], total: count ?? 0 })
   })
 
@@ -482,9 +483,8 @@ export default async function governanceRoutes(fastify: FastifyInstance) {
         month,
       )
       return reply.send({ data: params })
-    } catch (err: any) {
-      fastify.log.error({ err, employeeId, month }, 'statutory resolve failed')
-      return reply.code(500).send({ error: 'RESOLVE_FAILED', message: err.message ?? 'Unknown error' })
+    } catch (err) {
+      return serverError(req, reply, err, ErrorCode.QUERY_FAILED, 'Failed to resolve statutory parameters')
     }
   })
 }

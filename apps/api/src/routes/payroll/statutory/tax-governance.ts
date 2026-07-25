@@ -16,6 +16,7 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { logAction } from '../../../lib/audit-service.js'
 import { HR_ADMIN_ROLES } from '../../../lib/rbac.js'
+import { serverError, ErrorCode } from '../../../lib/api-errors.js'
 
 // ── Admin guard ───────────────────────────────────────────────────────────────
 
@@ -53,7 +54,7 @@ export default async function taxGovernanceRoute(fastify: FastifyInstance) {
       .eq('financial_year', fy)
       .maybeSingle()
 
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch governance settings')
     return reply.send({ data: data ?? null, financial_year: fy })
   })
 
@@ -90,7 +91,7 @@ export default async function taxGovernanceRoute(fastify: FastifyInstance) {
       .select()
       .single()
 
-    if (error) return reply.code(500).send({ error: 'UPSERT_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to save governance settings')
     await logAction(fastify.supabase, {
       tenantId:    req.tenantId,
       tableName:   'tds_governance_settings',
@@ -257,7 +258,7 @@ export default async function taxGovernanceRoute(fastify: FastifyInstance) {
       .eq('tenant_id', req.tenantId)
       .order('display_order', { ascending: true })
 
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch tenant components')
     return reply.send({ data: data ?? [] })
   })
 
@@ -276,7 +277,7 @@ export default async function taxGovernanceRoute(fastify: FastifyInstance) {
       .is('tenant_id', null)   // system component only
       .maybeSingle()
 
-    if (origErr) return reply.code(500).send({ error: 'QUERY_FAILED', message: origErr.message })
+    if (origErr) return serverError(req, reply, origErr, ErrorCode.QUERY_FAILED, 'Failed to fetch system component')
     if (!original) {
       return reply.code(404).send({ error: 'NOT_FOUND', message: 'System component not found (only system components can be overridden)' })
     }
@@ -320,7 +321,7 @@ export default async function taxGovernanceRoute(fastify: FastifyInstance) {
       .select()
       .single()
 
-    if (upsertErr) return reply.code(500).send({ error: 'UPSERT_FAILED', message: upsertErr.message })
+    if (upsertErr) return serverError(req, reply, upsertErr, ErrorCode.UPDATE_FAILED, 'Failed to override component')
 
     return reply.send({
       data: result,
