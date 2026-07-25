@@ -1374,18 +1374,28 @@ export default async function leaveRoute(fastify: FastifyInstance) {
     }
     const year = parsed.data.year ?? new Date().getFullYear()
 
-    // Resolve codes/names → ids once for the tenant.
-    const [empRes, ltRes] = await Promise.all([
-      fastify.supabase.from('employees').select('id, employee_code').eq('tenant_id', req.tenantId),
-      fastify.supabase.from('leave_types').select('id, name').eq('tenant_id', req.tenantId),
-    ])
-    if (empRes.error || ltRes.error) {
-      return serverError(req, reply, empRes.error ?? ltRes.error, ErrorCode.LOOKUP_FAILED, 'Failed to load employees / leave types')
+    // Resolve codes/names → ids once for the tenant. employees can exceed
+    // PostgREST's 1,000-row max-rows ceiling, which a plain .select() hits
+    // silently — rows past 1,000 would report as "Unknown employee" even
+    // though they're valid, purely due to truncation.
+    let empRows: Array<{ id: string; employee_code: string }>
+    let ltRows: Array<{ id: string; name: string }>
+    try {
+      ;[empRows, ltRows] = await Promise.all([
+        fetchAllRows<{ id: string; employee_code: string }>((from, to) =>
+          fastify.supabase.from('employees').select('id, employee_code').eq('tenant_id', req.tenantId).range(from, to),
+        ),
+        fetchAllRows<{ id: string; name: string }>((from, to) =>
+          fastify.supabase.from('leave_types').select('id, name').eq('tenant_id', req.tenantId).range(from, to),
+        ),
+      ])
+    } catch (err) {
+      return serverError(req, reply, err, ErrorCode.LOOKUP_FAILED, 'Failed to load employees / leave types')
     }
-    const empByCode = new Map((empRes.data ?? []).map((e: any) => [String(e.employee_code).toLowerCase(), e.id as string]))
-    const empIds    = new Set((empRes.data ?? []).map((e: any) => e.id as string))
-    const ltByName  = new Map((ltRes.data ?? []).map((l: any) => [String(l.name).toLowerCase(), l.id as string]))
-    const ltIds     = new Set((ltRes.data ?? []).map((l: any) => l.id as string))
+    const empByCode = new Map(empRows.map((e) => [String(e.employee_code).toLowerCase(), e.id]))
+    const empIds    = new Set(empRows.map((e) => e.id))
+    const ltByName  = new Map(ltRows.map((l) => [String(l.name).toLowerCase(), l.id]))
+    const ltIds     = new Set(ltRows.map((l) => l.id))
 
     const results: Array<{ row: number; ok: boolean; message?: string }> = []
     let succeeded = 0
