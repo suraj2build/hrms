@@ -221,8 +221,17 @@ function resolveSubmission(body: SubmissionBody) {
   }
 }
 
+// 'education' is a legitimate upload-url document_type (the candidate-declared
+// education certificate flow — see uploadEducationCert() in PreJoinPortal.tsx)
+// but it is NEVER registered into pre_joinee_documents; those entries are
+// submitted as part of the `education` JSONB array on the final submission
+// instead. So it must NOT be in REGISTERED_DOC_TYPES below.
 const DOC_TYPES = ['cv', 'pan', 'aadhaar', 'cheque', 'photo', 'education'] as const
 const MANDATORY_DOCS = ['cv', 'pan', 'aadhaar', 'cheque', 'photo'] as const
+
+// pre_joinee_documents.document_type CHECK constraint (migration 208) — the
+// ground truth for what can actually be inserted into that table.
+const REGISTERED_DOC_TYPES = ['cv', 'pan', 'aadhaar', 'cheque', 'photo', 'other'] as const
 
 const uploadUrlSchema = z.object({
   document_type: z.enum(DOC_TYPES),
@@ -230,7 +239,7 @@ const uploadUrlSchema = z.object({
 })
 
 const registerDocSchema = z.object({
-  document_type: z.enum(DOC_TYPES),
+  document_type: z.enum(REGISTERED_DOC_TYPES),
   file_name:     z.string().min(1, 'file_name is required'),
   storage_path:  z.string().min(1, 'storage_path is required'),
   mime_type:     z.string().optional(),
