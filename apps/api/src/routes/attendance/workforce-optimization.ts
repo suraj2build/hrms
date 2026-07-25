@@ -243,22 +243,31 @@ export default async function workforceOptimizationRoute(fastify: FastifyInstanc
 
     const { from, to } = parsed.data
 
-    const { data, error } = await fastify.supabase
-      .from('attendance_daily')
-      .select(
-        `
-          employee_id, date, status,
-          employees!inner(id, first_name, last_name, employee_code)
-        `,
+    // fetchAllRows() (not a plain query) — fresh audit finding: no
+    // employee_id filter here at all, so this scans the WHOLE tenant's
+    // attendance_daily for the period. Easily exceeds PostgREST's 1,000-row
+    // ceiling at real scale, silently truncating which employees get
+    // evaluated for consecutive-shift violations.
+    let data: any[]
+    try {
+      data = await fetchAllRows((rangeFrom, rangeTo) =>
+        fastify.supabase
+          .from('attendance_daily')
+          .select(
+            `
+              employee_id, date, status,
+              employees!inner(id, first_name, last_name, employee_code)
+            `,
+          )
+          .eq('tenant_id', req.tenantId)
+          .in('status', ['present', 'late'])
+          .gte('date', from)
+          .lte('date', to)
+          .order('employee_id')
+          .order('date')
+          .range(rangeFrom, rangeTo),
       )
-      .eq('tenant_id', req.tenantId)
-      .in('status', ['present', 'late'])
-      .gte('date', from)
-      .lte('date', to)
-      .order('employee_id')
-      .order('date')
-
-    if (error) {
+    } catch (error) {
       req.log.error({ err: error }, 'attendance_daily consecutive-shifts fetch failed')
       return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch attendance records' })
     }
@@ -323,24 +332,31 @@ export default async function workforceOptimizationRoute(fastify: FastifyInstanc
 
     const { from, to } = parsed.data
 
-    // Fetch attendance records with roster/shift metadata
-    const { data, error } = await fastify.supabase
-      .from('attendance_daily')
-      .select(
-        `
-          employee_id, date, shift_start_time, shift_end_time,
-          employees!inner(id, first_name, last_name, employee_code),
-          shifts:expected_shift_id(id, name)
-        `,
+    // Fetch attendance records with roster/shift metadata. fetchAllRows()
+    // (not a plain query) — fresh audit finding: no employee_id filter, so
+    // this scans the whole tenant's attendance_daily for the period —
+    // easily exceeds the 1,000-row ceiling at real scale.
+    let data: any[]
+    try {
+      data = await fetchAllRows((rangeFrom, rangeTo) =>
+        fastify.supabase
+          .from('attendance_daily')
+          .select(
+            `
+              employee_id, date, shift_start_time, shift_end_time,
+              employees!inner(id, first_name, last_name, employee_code),
+              shifts:expected_shift_id(id, name)
+            `,
+          )
+          .eq('tenant_id', req.tenantId)
+          .in('status', ['present', 'late', 'half_day'])
+          .gte('date', from)
+          .lte('date', to)
+          .order('employee_id')
+          .order('date')
+          .range(rangeFrom, rangeTo),
       )
-      .eq('tenant_id', req.tenantId)
-      .in('status', ['present', 'late', 'half_day'])
-      .gte('date', from)
-      .lte('date', to)
-      .order('employee_id')
-      .order('date')
-
-    if (error) {
+    } catch (error) {
       req.log.warn({ err: error }, 'attendance_daily rest-gaps fetch failed — returning empty')
       return reply.send({ gaps: [] })
     }
@@ -429,21 +445,30 @@ export default async function workforceOptimizationRoute(fastify: FastifyInstanc
 
     const { from, to } = parsed.data
 
-    const { data, error } = await fastify.supabase
-      .from('attendance_daily')
-      .select(
-        `
-          employee_id, overtime_minutes,
-          employees!inner(id, first_name, last_name, employee_code, department_id,
-            departments(name))
-        `,
+    // fetchAllRows() (not a plain query) — fresh audit finding: no
+    // employee_id filter, scans the whole tenant's attendance_daily for the
+    // period — easily exceeds the 1,000-row ceiling, silently understating
+    // OT concentration for a subset of employees with no truncation signal.
+    let data: any[]
+    try {
+      data = await fetchAllRows((rangeFrom, rangeTo) =>
+        fastify.supabase
+          .from('attendance_daily')
+          .select(
+            `
+              employee_id, overtime_minutes,
+              employees!inner(id, first_name, last_name, employee_code, department_id,
+                departments(name))
+            `,
+          )
+          .eq('tenant_id', req.tenantId)
+          .gt('overtime_minutes', 0)
+          .gte('date', from)
+          .lte('date', to)
+          .order('employee_id')
+          .range(rangeFrom, rangeTo),
       )
-      .eq('tenant_id', req.tenantId)
-      .gt('overtime_minutes', 0)
-      .gte('date', from)
-      .lte('date', to)
-
-    if (error) {
+    } catch (error) {
       req.log.warn({ err: error }, 'attendance_daily ot-distribution fetch failed — returning empty')
       return reply.send({ team_avg_ot_hours: 0, max_ot_hours: 0, concentration_index: 0, employees: [] })
     }
@@ -582,22 +607,29 @@ export default async function workforceOptimizationRoute(fastify: FastifyInstanc
 
     const { from, to } = parsed.data
 
-    const { data, error } = await fastify.supabase
-      .from('attendance_daily')
-      .select(
-        `
-          employee_id, date, work_hours,
-          employees!inner(id, first_name, last_name, employee_code)
-        `,
+    // fetchAllRows() (not a plain query) — fresh audit finding: no
+    // employee_id filter, scans the whole tenant's attendance_daily for the
+    // period — easily exceeds the 1,000-row ceiling at real scale.
+    let data: any[]
+    try {
+      data = await fetchAllRows((rangeFrom, rangeTo) =>
+        fastify.supabase
+          .from('attendance_daily')
+          .select(
+            `
+              employee_id, date, work_hours,
+              employees!inner(id, first_name, last_name, employee_code)
+            `,
+          )
+          .eq('tenant_id', req.tenantId)
+          .gt('work_hours', OVERLOAD_THRESHOLD_HOURS)
+          .gte('date', from)
+          .lte('date', to)
+          .order('employee_id')
+          .order('date')
+          .range(rangeFrom, rangeTo),
       )
-      .eq('tenant_id', req.tenantId)
-      .gt('work_hours', OVERLOAD_THRESHOLD_HOURS)
-      .gte('date', from)
-      .lte('date', to)
-      .order('employee_id')
-      .order('date')
-
-    if (error) {
+    } catch (error) {
       req.log.warn({ err: error }, 'attendance_daily shift-overload fetch failed — returning empty')
       return reply.send({ employees: [] })
     }
@@ -816,28 +848,36 @@ export default async function workforceOptimizationRoute(fastify: FastifyInstanc
     const employeeIds = employees.map((e) => e.id)
 
     // ── Step 2: Fetch attendance_daily for the period ───────────────────────
-    const { data: dailyRows, error: dailyErr } = await fastify.supabase
-      .from('attendance_daily')
-      .select(
-        `
-          employee_id, date, status, overtime_minutes, work_hours,
-          shift_start_time, shift_end_time, shift_is_night_shift
-        `,
+    // fetchAllRows() (not a plain query) — fresh audit finding: employeeIds
+    // can span the tenant's full active headcount, so this easily exceeds
+    // the 1,000-row ceiling at real scale, silently dropping the tail of
+    // employees from OT/night-shift/rest-gap hint generation.
+    let dailyRows: any[]
+    try {
+      dailyRows = await fetchAllRows((rangeFrom, rangeTo) =>
+        fastify.supabase
+          .from('attendance_daily')
+          .select(
+            `
+              employee_id, date, status, overtime_minutes, work_hours,
+              shift_start_time, shift_end_time, shift_is_night_shift
+            `,
+          )
+          .eq('tenant_id', req.tenantId)
+          .in('employee_id', employeeIds)
+          .in('status', ['present', 'late', 'half_day'])
+          .gte('date', from)
+          .lte('date', to)
+          .order('employee_id')
+          .order('date')
+          .range(rangeFrom, rangeTo),
       )
-      .eq('tenant_id', req.tenantId)
-      .in('employee_id', employeeIds)
-      .in('status', ['present', 'late', 'half_day'])
-      .gte('date', from)
-      .lte('date', to)
-      .order('employee_id')
-      .order('date')
-
-    if (dailyErr) {
+    } catch (dailyErr) {
       req.log.error({ err: dailyErr }, 'attendance_daily fetch for compute failed')
       return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch attendance data' })
     }
 
-    const daily = ((dailyRows ?? []) as any[])
+    const daily = dailyRows as any[]
 
     // ── Step 3: Aggregate per employee ─────────────────────────────────────
     interface EmpMetrics {
