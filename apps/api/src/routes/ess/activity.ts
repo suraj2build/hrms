@@ -15,6 +15,7 @@
  */
 
 import type { FastifyInstance } from 'fastify'
+import { fetchAllRows } from '../../lib/supabase-paginate.js'
 
 type ActivityType = 'attendance' | 'leave' | 'payroll' | 'recognition' | 'birthday' | 'announcement'
 
@@ -91,10 +92,15 @@ export default async function essActivityRoutes(fastify: FastifyInstance) {
         .eq('tenant_id', tenantId).eq('status', 'active').eq('type', 'announcement')
         .gte('created_at', since).order('created_at', { ascending: false }).limit(3)
         .then(r => (r.data ?? []) as any[]), [] as any[]),
-      safe(fastify.supabase.from('employees')
-        .select('id, first_name, last_name, dob')
-        .eq('tenant_id', tenantId).eq('status', 'active').not('dob', 'is', null).limit(500)
-        .then(r => (r.data ?? []) as any[]), [] as any[]),
+      // Needs the FULL active roster with a dob set, not a sample — a fixed
+      // .limit(500) silently hid every colleague past that cutoff from
+      // peer-birthday detection for a tenant with a larger headcount.
+      safe(fetchAllRows((from, to) =>
+        fastify.supabase.from('employees')
+          .select('id, first_name, last_name, dob')
+          .eq('tenant_id', tenantId).eq('status', 'active').not('dob', 'is', null)
+          .range(from, to),
+      ), [] as any[]),
     ])
 
     const events: ActivityEvent[] = []

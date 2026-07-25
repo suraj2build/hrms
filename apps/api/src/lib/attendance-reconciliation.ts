@@ -127,17 +127,22 @@ async function checkOrphanRawLogs(
 ): Promise<ReconciliationIssue[]> {
   const cutoff = hoursAgo(STALE_RAW_HOURS)
 
-  const { data, error } = await supabase
-    .from('attendance_raw_logs')
-    .select('id, employee_code, timestamp, direction, device_id')
-    .eq('tenant_id', tenantId)
-    .eq('processed', false)
-    .gte('timestamp', `${scanFrom}T00:00:00Z`)
-    .lte('timestamp', `${scanTo}T23:59:59Z`)
-    .lt('timestamp', cutoff)
-    .limit(500)
+  // This scanner exists to find every current backlog item, not a sample —
+  // a fixed .limit(500) would silently hide the rest of a real backlog (e.g.
+  // after a processor outage) from both the issue log and whoever is fixing it.
+  const data = await fetchAllRows((from, to) =>
+    supabase
+      .from('attendance_raw_logs')
+      .select('id, employee_code, timestamp, direction, device_id')
+      .eq('tenant_id', tenantId)
+      .eq('processed', false)
+      .gte('timestamp', `${scanFrom}T00:00:00Z`)
+      .lte('timestamp', `${scanTo}T23:59:59Z`)
+      .lt('timestamp', cutoff)
+      .range(from, to),
+  ).catch(() => [])
 
-  if (error || !data?.length) return []
+  if (!data.length) return []
 
   return data.map((row: any) => {
     const ageHours = Math.round((Date.now() - new Date(row.timestamp).getTime()) / 3_600_000)
@@ -172,17 +177,21 @@ async function checkIncompleteSessions(
 ): Promise<ReconciliationIssue[]> {
   const cutoff = hoursAgo(INCOMPLETE_SESSION_HOURS)
 
-  const { data, error } = await supabase
-    .from('attendance_logs')
-    .select('id, employee_id, check_in, check_out')
-    .eq('tenant_id', tenantId)
-    .eq('is_complete', false)
-    .gte('check_in', `${scanFrom}T00:00:00Z`)
-    .lte('check_in', `${scanTo}T23:59:59Z`)
-    .lt('check_in', cutoff)
-    .limit(500)
+  // Same reasoning as checkOrphanRawLogs above — this must catch every open
+  // session, not just the first 500.
+  const data = await fetchAllRows((from, to) =>
+    supabase
+      .from('attendance_logs')
+      .select('id, employee_id, check_in, check_out')
+      .eq('tenant_id', tenantId)
+      .eq('is_complete', false)
+      .gte('check_in', `${scanFrom}T00:00:00Z`)
+      .lte('check_in', `${scanTo}T23:59:59Z`)
+      .lt('check_in', cutoff)
+      .range(from, to),
+  ).catch(() => [])
 
-  if (error || !data?.length) return []
+  if (!data.length) return []
 
   return data.map((row: any) => {
     const hoursOpen = Math.round((Date.now() - new Date(row.check_in).getTime()) / 3_600_000)
@@ -464,17 +473,22 @@ async function checkMissingRawSource(
   scanFrom:  string,
   scanTo:    string,
 ): Promise<ReconciliationIssue[]> {
-  // Only check rows where computed_source = 'engine' — leave/manual sources are expected
-  const { data: dailyRows, error: dErr } = await supabase
-    .from('attendance_daily')
-    .select('employee_id, date, computed_source')
-    .eq('tenant_id', tenantId)
-    .eq('computed_source', 'engine')
-    .gte('date', scanFrom)
-    .lte('date', scanTo)
-    .limit(1000)
+  // Only check rows where computed_source = 'engine' — leave/manual sources are expected.
+  // Paginated — a fixed .limit(1000) silently missed engine-computed rows
+  // past the cap for a large tenant/date range, the same CLAUDE.md-documented
+  // attendance_daily truncation class fixed elsewhere in this codebase.
+  const dailyRows = await fetchAllRows((from, to) =>
+    supabase
+      .from('attendance_daily')
+      .select('employee_id, date, computed_source')
+      .eq('tenant_id', tenantId)
+      .eq('computed_source', 'engine')
+      .gte('date', scanFrom)
+      .lte('date', scanTo)
+      .range(from, to),
+  ).catch(() => [])
 
-  if (dErr || !dailyRows?.length) return []
+  if (!dailyRows.length) return []
 
   // Get all employees with at least one raw log in the range
   const rawRows = await fetchAllRows((from, to) =>

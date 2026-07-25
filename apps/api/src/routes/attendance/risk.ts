@@ -12,6 +12,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { fetchAllRows } from '../../lib/supabase-paginate.js'
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
 
@@ -292,18 +293,24 @@ export default async function attendanceRiskRoute(fastify: FastifyInstance) {
     // Resolve employee list
     let targetIds: string[] = employee_ids ?? []
     if (targetIds.length === 0) {
-      const { data: activeEmps, error: empErr } = await fastify.supabase
-        .from('employees')
-        .select('id')
-        .eq('tenant_id', req.tenantId)
-        .eq('status', 'active')
-        .limit(500)
-
-      if (empErr) {
+      // "Compute for all" must mean all — a fixed .limit(500) silently
+      // skipped recomputing risk profiles for every active employee past
+      // that cutoff on a tenant with a larger headcount, with no error.
+      let activeEmps: Array<{ id: string }>
+      try {
+        activeEmps = await fetchAllRows((from, to) =>
+          fastify.supabase
+            .from('employees')
+            .select('id')
+            .eq('tenant_id', req.tenantId)
+            .eq('status', 'active')
+            .range(from, to),
+        )
+      } catch (empErr) {
         req.log.error({ err: empErr }, 'employee fetch for risk compute failed')
         return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch active employees' })
       }
-      targetIds = ((activeEmps ?? []) as any[]).map((e) => e.id)
+      targetIds = activeEmps.map((e) => e.id)
     }
 
     if (targetIds.length === 0) {

@@ -24,6 +24,7 @@ import type { FastifyInstance } from 'fastify'
 import { ensureTodaysCelebrations } from '../../lib/community-celebrations.js'
 import { getDirectReportIds } from '../../lib/manager-scope.js'
 import { MANAGER_ROLES } from '../../lib/rbac.js'
+import { fetchAllRows } from '../../lib/supabase-paginate.js'
 
 // Run the (idempotent, write-heavy) celebration generation at most once per tenant
 // per day per instance, and OFF the GET response critical path — it was previously
@@ -185,12 +186,18 @@ export default async function essHomeRoutes(fastify: FastifyInstance) {
             .eq('employee_id', employeeId).eq('tenant_id', tenantId).eq('status', 'pending')
         : Promise.resolve({ count: 0 }),
 
-      // 11. Active colleagues (for birthday + anniversary computation)
-      fastify.supabase.from('employees')
-        .select('id, first_name, last_name, dob, joining_date')
-        .eq('tenant_id', tenantId).eq('status', 'active')
-        .not('id', 'eq', employeeId ?? FAKE_EMP_ID)
-        .limit(500),
+      // 11. Active colleagues (for birthday + anniversary computation).
+      // Needs the FULL active roster, not a sample — a fixed .limit(500)
+      // silently hid every colleague past that cutoff from birthday/
+      // anniversary detection for a tenant with a larger headcount, so
+      // some employees' celebrations would never appear to anyone.
+      fetchAllRows((from, to) =>
+        fastify.supabase.from('employees')
+          .select('id, first_name, last_name, dob, joining_date')
+          .eq('tenant_id', tenantId).eq('status', 'active')
+          .not('id', 'eq', employeeId ?? FAKE_EMP_ID)
+          .range(from, to),
+      ).then((data) => ({ data })),
 
       // 12. Most recent approved leave that ended yesterday → "welcome back"
       employeeId
