@@ -36,3 +36,14 @@ export function requireRole(...roles: string[]) {
 
 /** Convenience constant for the two HR admin roles used throughout. */
 export const HR_ADMIN_ROLES = ['super_admin', 'hr_admin'] as const
+
+/**
+ * Convenience constant for "manager or above" access checks — the two HR admin
+ * roles plus 'manager'. Canonicalizes what was previously ~14 independently
+ * duplicated inline literals across the codebase (some ordered
+ * ['super_admin', 'hr_admin', 'manager'], others ['manager', 'hr_admin',
+ * 'super_admin'], a few built as [...HR_ADMIN_ROLES, 'manager']) — a role
+ * added or removed from this tier previously required updating every call site
+ * individually, with no guarantee they'd all be found. (ISSUE-148)
+ */
+export const MANAGER_ROLES = [...HR_ADMIN_ROLES, 'manager'] as const

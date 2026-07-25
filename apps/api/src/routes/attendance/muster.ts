@@ -11,7 +11,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { normalizeAttendanceStatus } from '../../lib/attendance-utils.js'
-import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { HR_ADMIN_ROLES, MANAGER_ROLES } from '../../lib/rbac.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
 
 const MUSTER_ROW_LIMIT = 200_000
@@ -229,7 +229,7 @@ export default async function musterRoute(fastify: FastifyInstance) {
     '/attendance/muster/latest-month',
     { preHandler: [fastify.authenticate] },
     async (req, reply) => {
-      if (!['super_admin', 'hr_admin', 'manager'].includes(req.userRole)) {
+      if (!(MANAGER_ROLES as readonly string[]).includes(req.userRole)) {
         return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin or manager access required' })
       }
 

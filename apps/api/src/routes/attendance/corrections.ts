@@ -35,9 +35,9 @@ import { eventBus }                     from '../../lib/event-bus.js'
 import { orchestrateWorkforceEvent }    from '../../lib/workforce-orchestrator.js'
 import { isMonthLocked, monthOf }       from '../../lib/period-lock.js'
 
-import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { HR_ADMIN_ROLES, MANAGER_ROLES } from '../../lib/rbac.js'
 const dateRe      = /^\d{4}-\d{2}-\d{2}$/
-const ALLOW_ROLES = [...HR_ADMIN_ROLES, 'manager']
+const ALLOW_ROLES = MANAGER_ROLES
 
 // All valid statuses — kept in one place so Zod enums stay in sync
 type CorrectionStatus = 'pending' | 'processing' | 'applied' | 'failed' | 'rejected'

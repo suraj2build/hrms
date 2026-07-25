@@ -17,7 +17,7 @@
 
 import type { FastifyInstance } from 'fastify'
 import { z }                    from 'zod'
-import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { HR_ADMIN_ROLES, MANAGER_ROLES } from '../../lib/rbac.js'
 
 const OUT_OF_OFFICE_STATUSES = new Set(['leave', 'holiday', 'weekly_off', 'comp_off', 'rest_day', 'off'])
 
@@ -25,7 +25,7 @@ export default async function whoIsInRoute(fastify: FastifyInstance) {
   // hr_admin, super_admin → tenant-wide view
   // manager              → scoped to direct reports only
   const auth = { preHandler: [fastify.authenticate, (req: any, reply: any, done: () => void) => {
-    if (!['super_admin', 'hr_admin', 'manager'].includes(req.userRole)) {
+    if (!MANAGER_ROLES.includes(req.userRole)) {
       reply.code(403).send({ error: 'FORBIDDEN', message: 'Manager or HR admin access required' })
       return
     }

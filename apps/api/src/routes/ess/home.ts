@@ -23,6 +23,7 @@
 import type { FastifyInstance } from 'fastify'
 import { ensureTodaysCelebrations } from '../../lib/community-celebrations.js'
 import { getDirectReportIds } from '../../lib/manager-scope.js'
+import { MANAGER_ROLES } from '../../lib/rbac.js'
 
 // Run the (idempotent, write-heavy) celebration generation at most once per tenant
 // per day per instance, and OFF the GET response critical path — it was previously
@@ -76,7 +77,7 @@ export default async function essHomeRoutes(fastify: FastifyInstance) {
 
     const employeeId = (profileRow as any)?.employee_id as string | null
     const role       = (profileRow as any)?.role as string | null
-    const isManager  = ['manager', 'hr_admin', 'super_admin'].includes(role ?? '')
+    const isManager  = (MANAGER_ROLES as readonly string[]).includes(role ?? '')
 
     const today       = todayISO()
     const in60Days    = offsetISO(60)

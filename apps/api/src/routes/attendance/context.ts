@@ -8,13 +8,14 @@
  * Requires hr_admin, super_admin, or manager.
  */
 import type { FastifyInstance } from 'fastify'
+import { MANAGER_ROLES } from '../../lib/rbac.js'
 
 export default async function attendanceContextRoutes(fastify: FastifyInstance) {
   const auth = {
     preHandler: [
       fastify.authenticate,
       (req: any, reply: any, done: () => void) => {
-        if (!['super_admin', 'hr_admin', 'manager'].includes(req.userRole)) {
+        if (!MANAGER_ROLES.includes(req.userRole)) {
           reply.code(403).send({ error: 'FORBIDDEN', message: 'Manager or HR admin required' })
           return
         }

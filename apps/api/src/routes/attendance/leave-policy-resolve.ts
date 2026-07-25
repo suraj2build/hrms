@@ -26,6 +26,7 @@ import {
   resolveEffectivePolicyForEmployee,
   resolveEffectivePolicyRule,
 } from '../../lib/leave-policy-service.js'
+import { MANAGER_ROLES } from '../../lib/rbac.js'
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
 
@@ -45,7 +46,7 @@ export default async function leavePolicyResolveRoute(fastify: FastifyInstance) 
     const includeDebug = (req.query as any).debug === 'true'
 
     // Non-admins may only resolve their own policy
-    if (!['super_admin', 'hr_admin', 'manager'].includes(req.userRole)) {
+    if (!MANAGER_ROLES.includes(req.userRole)) {
       const { data: profile } = await fastify.supabase
         .from('profiles')
         .select('employee_id')
@@ -108,7 +109,7 @@ export default async function leavePolicyResolveRoute(fastify: FastifyInstance) 
       rawAsOf && DATE_RE.test(rawAsOf) ? rawAsOf : undefined
 
     // Non-admins may only resolve their own policy
-    if (!['super_admin', 'hr_admin', 'manager'].includes(req.userRole)) {
+    if (!MANAGER_ROLES.includes(req.userRole)) {
       const { data: profile } = await fastify.supabase
         .from('profiles')
         .select('employee_id')

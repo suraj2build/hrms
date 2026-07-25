@@ -14,7 +14,7 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { randomUUID } from 'crypto'
 import { logAction }    from '../../lib/audit-service.js'
-import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { HR_ADMIN_ROLES, MANAGER_ROLES } from '../../lib/rbac.js'
 import { notifyHrAdmins } from '../../lib/notify.js'
 import { isOfferSignoffEnabled } from '../../lib/payroll-flags.js'
 import {
@@ -148,7 +148,7 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
   }
   // Managers may RAISE requisitions (they land in 'draft' / pending HR approval);
   // HR admins still own the approve/hold/cancel workflow.
-  const MANAGER_CREATE_ROLES = [...HR_ADMIN_ROLES, 'manager']
+  const MANAGER_CREATE_ROLES = MANAGER_ROLES
   const managerOrHrAuth = {
     preHandler: [
       fastify.authenticate,

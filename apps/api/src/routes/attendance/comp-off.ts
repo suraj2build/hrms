@@ -40,6 +40,7 @@ import {
 import { assertRangeOpen, isMonthLocked, monthOf, PeriodLockedError } from '../../lib/period-lock.js'
 import { isSelfApproval } from '../../lib/approval-guards.js'
 import { gateApprove, gateReject } from '../../lib/approval-orchestrator.js'
+import { MANAGER_ROLES } from '../../lib/rbac.js'
 
 const generateSchema = z.object({
   employee_id:   z.string().uuid().optional(),   // omit = all active employees
@@ -61,7 +62,7 @@ export default async function compOffRoute(fastify: FastifyInstance) {
     preHandler: [
       fastify.authenticate,
       async (req: any, reply: any) => {
-        if (!['super_admin', 'hr_admin', 'manager'].includes(req.userRole)) {
+        if (!MANAGER_ROLES.includes(req.userRole)) {
           return reply.code(403).send({ error: 'FORBIDDEN', message: 'Manager or HR admin access required' })
         }
       },

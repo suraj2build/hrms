@@ -17,6 +17,7 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { MANAGER_ROLES } from './rbac.js'
 
 // ── Shared types ───────────────────────────────────────────────────────────────
 
@@ -161,7 +162,7 @@ export async function processWorkflowAction(
     .eq('tenant_id', tenantId)
     .maybeSingle()
   const actorRole = (actor as { role?: string } | null)?.role
-  if (!actorRole || !['manager', 'hr_admin', 'super_admin'].includes(actorRole)) {
+  if (!actorRole || !(MANAGER_ROLES as readonly string[]).includes(actorRole)) {
     return { ok: false, error: { type: 'FORBIDDEN', message: 'You are not authorised to approve this request' } }
   }
 

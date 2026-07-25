@@ -20,8 +20,8 @@ import {
   getChainForEntity,
 }                               from '../../lib/workflow-service.js'
 
-import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
-const ALLOW_ROLES = [...HR_ADMIN_ROLES, 'manager']
+import { HR_ADMIN_ROLES, MANAGER_ROLES } from '../../lib/rbac.js'
+const ALLOW_ROLES = MANAGER_ROLES
 
 // Workflow types the engine drives (must match the 053 enum + migrations 313/314).
 const WORKFLOW_TYPES = ['leave', 'correction', 'regularisation', 'overtime', 'comp_off', 'reimbursement', 'loan', 'advance'] as const

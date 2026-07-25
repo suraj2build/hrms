@@ -19,6 +19,7 @@
 
 import type { FastifyInstance } from 'fastify'
 import { getDirectReportIds } from '../../lib/manager-scope.js'
+import { MANAGER_ROLES } from '../../lib/rbac.js'
 
 type Severity = 'info' | 'warning' | 'critical'
 type Intent   = 'needs_you' | 'can_wait' | 'waiting' | 'info_only'
@@ -69,7 +70,7 @@ export default async function essSignalsRoutes(fastify: FastifyInstance) {
 
     const employeeId = (profileRow as any)?.employee_id as string | null
     const role       = (profileRow as any)?.role as string | null
-    const isManager  = ['manager', 'hr_admin', 'super_admin'].includes(role ?? '')
+    const isManager  = (MANAGER_ROLES as readonly string[]).includes(role ?? '')
     const isAdmin    = ['hr_admin', 'super_admin'].includes(role ?? '')
 
     const today    = todayISO()
