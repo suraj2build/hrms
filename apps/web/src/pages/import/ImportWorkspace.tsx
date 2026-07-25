@@ -227,7 +227,10 @@ interface FlatJobRow {
 // ─── Session Persistence ──────────────────────────────────────────────────────
 
 // Sensitive master types whose row data must not be written to localStorage
-const SENSITIVE_IMPORT_TYPES: MasterType[] = ['employee_compensation', 'compensation_revisions', 'employee_bank_details', 'employee_salary_upload']
+// 'employees' carries pan_number/uan_number (ISSUE-150) — was missing here, so a
+// browser refresh mid-import left every parsed employee's PAN/UAN sitting
+// unencrypted in localStorage under the session-resume snapshot.
+const SENSITIVE_IMPORT_TYPES: MasterType[] = ['employees', 'employee_compensation', 'compensation_revisions', 'employee_bank_details', 'employee_salary_upload']
 // Max rows to persist — very large files are re-uploaded after refresh
 const SESSION_ROW_LIMIT = 5_000
 const SESSION_TTL_MS    = 24 * 60 * 60 * 1000  // 24 h
