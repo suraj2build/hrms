@@ -57,6 +57,46 @@ function remainingMonthsFromRun(month: string, fy: string): number {
 }
 
 /**
+ * Fresh audit finding: payroll_runs.total_gross / total_deductions /
+ * total_net / total_lop_amount are set ONCE, right after the initial slip
+ * insertion (see the "Aggregate + finalise run row" block below), by
+ * summing the in-memory succeededSlips array. Nothing ever resyncs them
+ * afterwards — but three separate flows mutate the underlying
+ * payroll_slips rows for a run after that point: the finalize endpoint's
+ * stale-attendance recompute (updates gross_pay/total_deductions/net_pay/
+ * lop_amount on existing slips), the retry-failed endpoint (inserts brand
+ * new slip rows for employees who had none), and the rollback endpoint
+ * (deletes every slip for the run, leaving the totals as phantom values
+ * for a run with zero slips). Each of those call sites now calls this
+ * helper to recompute totals from the CURRENT payroll_slips rows instead
+ * of leaving payroll_runs' cached totals silently stale.
+ *
+ * fetchAllRows() (not a plain query) — a run can have >1,000 slips at
+ * enterprise scale.
+ */
+async function resyncRunTotals(supabase: any, tenantId: string, runId: string): Promise<void> {
+  const slips = await fetchAllRows((from, to) =>
+    supabase
+      .from('payroll_slips')
+      .select('gross_pay, total_deductions, net_pay, lop_amount')
+      .eq('tenant_id', tenantId)
+      .eq('run_id', runId)
+      .range(from, to),
+  )
+
+  const totals = {
+    total_gross:      round2(slips.reduce((s: number, r: any) => s + (r.gross_pay        ?? 0), 0)),
+    total_deductions: round2(slips.reduce((s: number, r: any) => s + (r.total_deductions ?? 0), 0)),
+    total_net:        round2(slips.reduce((s: number, r: any) => s + (r.net_pay          ?? 0), 0)),
+    total_lop_amount: round2(slips.reduce((s: number, r: any) => s + (r.lop_amount       ?? 0), 0)),
+    employee_count:   slips.length,
+  }
+
+  const { error } = await supabase.from('payroll_runs').update(totals).eq('id', runId).eq('tenant_id', tenantId)
+  if (error) throw error
+}
+
+/**
  * Compute this month's TDS for an employee and inject it into the slip — IF TDS
  * is enabled in payroll_statutory_settings. Routes through the same DB-driven
  * tax engine the IT statement uses (computeTaxWithDB), so it correctly handles
@@ -2485,6 +2525,18 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       return serverError(req, reply, slipFinalizeErr, 'SLIP_FINALIZE_FAILED', 'Failed to finalize payroll slips — the run remains in draft. Retry finalization.')
     }
 
+    // Resync run-level totals from the just-finalized slips. Non-fatal: the
+    // stale-attendance recompute above (if it ran) can change gross_pay/
+    // total_deductions/net_pay/lop_amount on individual slips, and the
+    // run-level totals set at run creation would otherwise go stale —
+    // never blocking finalization over this, since slips are already
+    // correctly finalized and the resync is safe to retry.
+    try {
+      await resyncRunTotals(fastify.supabase, tenantId, id)
+    } catch (resyncErr: any) {
+      req.log.warn({ err: resyncErr, run_id: id }, 'payroll finalize: run-totals resync failed (non-fatal)')
+    }
+
     // ── Mark advance recovery schedules and loan EMIs as paid ─────────────────
     // Non-fatal: failures here must never block finalization.
     try {
@@ -3571,6 +3623,16 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       .update({ status: newRunStatus })
       .eq('id', id)
 
+    // Resync run-level totals: succeededRetry inserted brand-new slip rows
+    // for previously-failed employees, so the totals computed at run
+    // creation are missing every retried employee's pay. Non-fatal — the
+    // run status update above already succeeded and this is safe to retry.
+    try {
+      await resyncRunTotals(fastify.supabase, tenantId, id)
+    } catch (resyncErr: any) {
+      req.log.warn({ err: resyncErr, run_id: id }, 'payroll retry-failed: run-totals resync failed (non-fatal)')
+    }
+
     await logRunEvent(fastify.supabase, req.log, {
       tenant_id:  tenantId, run_id: id,
       event_type: 'payroll_retry_triggered',
@@ -3887,6 +3949,18 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
     const { error: slipDelErr } = await fastify.supabase
       .from('payroll_slips').delete().eq('run_id', id).eq('tenant_id', tenantId)
     if (slipDelErr) return serverError(req, reply, slipDelErr, ErrorCode.DELETE_FAILED, 'Run reset to draft but slip deletion failed')
+
+    // Resync run-level totals: every slip was just deleted, so
+    // total_gross/total_deductions/total_net/total_lop_amount (set at run
+    // creation) are now phantom values for a run with zero slips — without
+    // this, a rolled-back run keeps displaying its pre-rollback totals on
+    // any dashboard reading payroll_runs directly. Non-fatal: the rollback
+    // itself already succeeded above.
+    try {
+      await resyncRunTotals(fastify.supabase, tenantId, id)
+    } catch (resyncErr: any) {
+      req.log.warn({ err: resyncErr, run_id: id }, 'payroll rollback: run-totals resync failed (non-fatal)')
+    }
 
     // If the month was frozen, also lift the freeze so the period is actually
     // runnable again — otherwise the freeze guard blocks the re-run and the
