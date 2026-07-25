@@ -41,6 +41,7 @@ import { assertRangeOpen, isMonthLocked, monthOf, PeriodLockedError } from '../.
 import { isSelfApproval } from '../../lib/approval-guards.js'
 import { gateApprove, gateReject } from '../../lib/approval-orchestrator.js'
 import { MANAGER_ROLES } from '../../lib/rbac.js'
+import { conflictError } from '../../lib/api-errors.js'
 
 const generateSchema = z.object({
   employee_id:   z.string().uuid().optional(),   // omit = all active employees
@@ -398,7 +399,13 @@ export default async function compOffRoute(fastify: FastifyInstance) {
     }
 
     // ── Mark request as approved ─────────────────────────────────────────
-    const { error: updateErr } = await fastify.supabase
+    // .eq('status','pending') + row-count check (fresh audit finding): without
+    // this, a concurrent approve+reject race on the same request (both pass
+    // the pending-precheck above, one finalizes first) let the loser silently
+    // overwrite the final status — worst case, reject wins the status write
+    // but approve already credited the balance above, so the request shows
+    // 'rejected' while the employee's comp-off balance was still credited.
+    const { data: updatedRows, error: updateErr } = await fastify.supabase
       .from('comp_off_requests')
       .update({
         status:      'approved',
@@ -408,9 +415,52 @@ export default async function compOffRoute(fastify: FastifyInstance) {
       })
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
+      .eq('status', 'pending')
+      .select('id')
 
     if (updateErr) {
       return reply.code(500).send({ error: 'UPDATE_FAILED', message: updateErr.message })
+    }
+
+    if (!updatedRows?.length) {
+      // Lost the race — roll back the credit already given above (ledger row
+      // + cached balance) so the balance doesn't stay permanently over.
+      // checked_deduct_leave_balance rejects if the employee already spent
+      // the credit in the tiny window between our credit and this rollback;
+      // that failure is logged loudly rather than silently swallowed, since
+      // it means the balance is left over-credited and needs manual review.
+      if ((co as any).leave_type_id) {
+        const creditYear = new Date((co as any).worked_date + 'T12:00:00Z').getFullYear()
+        const { error: revLedgerErr } = await fastify.supabase
+          .from('leave_accrual_ledger')
+          .upsert({
+            tenant_id:         req.tenantId,
+            employee_id:       (co as any).employee_id,
+            leave_type_id:     (co as any).leave_type_id,
+            accrual_type:      'reversal',
+            days:              Number((co as any).days_to_credit),
+            year:              creditYear,
+            accrued_on:        new Date().toISOString().slice(0, 10),
+            is_expired:        false,
+            notes:             `Reversal — lost race on concurrent approval/rejection of comp-off ${id}`,
+            source_request_id: id,
+          }, { onConflict: 'tenant_id,accrual_type,source_request_id', ignoreDuplicates: true })
+        if (revLedgerErr) {
+          req.log.error({ err: revLedgerErr, id }, 'comp-off approve: race-rollback ledger write failed — balance may be over-credited')
+        }
+
+        const { data: deducted, error: revCreditErr } = await fastify.supabase.rpc('checked_deduct_leave_balance', {
+          p_tenant_id:     req.tenantId,
+          p_employee_id:   (co as any).employee_id,
+          p_leave_type_id: (co as any).leave_type_id,
+          p_days:          Number((co as any).days_to_credit),
+          p_year:          creditYear,
+        })
+        if (revCreditErr || !deducted) {
+          req.log.error({ err: revCreditErr, id, deducted }, 'comp-off approve: race-rollback balance deduction failed — balance is over-credited, needs manual review')
+        }
+      }
+      return conflictError(reply, 'ALREADY_ACTIONED', 'This request was already actioned by another request')
     }
 
     await logAction(fastify.supabase, {
@@ -479,7 +529,11 @@ export default async function compOffRoute(fastify: FastifyInstance) {
 
     const now = new Date().toISOString()
 
-    const { error: updateErr } = await fastify.supabase
+    // .eq('status','pending') + row-count check (fresh audit finding, same
+    // race class as the approve handler above): without this, a concurrent
+    // approve+reject race could let reject silently overwrite an already-
+    // approved (and already balance-credited) request.
+    const { data: updatedRows, error: updateErr } = await fastify.supabase
       .from('comp_off_requests')
       .update({
         status:      'rejected',
@@ -489,9 +543,15 @@ export default async function compOffRoute(fastify: FastifyInstance) {
       })
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
+      .eq('status', 'pending')
+      .select('id')
 
     if (updateErr) {
       return reply.code(500).send({ error: 'UPDATE_FAILED', message: updateErr.message })
+    }
+
+    if (!updatedRows?.length) {
+      return conflictError(reply, 'ALREADY_ACTIONED', 'This request was already actioned by another request')
     }
 
     await logAction(fastify.supabase, {

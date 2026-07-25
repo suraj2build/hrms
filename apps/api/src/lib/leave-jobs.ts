@@ -633,16 +633,24 @@ export async function coExpiryJob(
   const errors: string[]   = []
 
   try {
-    // Fetch all ledger entries due for expiry today
-    const { data: expiredRows, error: fetchErr } = await supabase
-      .from('leave_accrual_ledger')
-      .select('id, employee_id, leave_type_id, year, days')
-      .eq('tenant_id', tenantId)
-      .eq('is_expired', false)
-      .lte('expires_on', asOfStr)
-      .gt('days', 0)   // only positive credit grants can expire
-
-    if (fetchErr) throw new Error(fetchErr.message)
+    // Fetch all ledger entries due for expiry today. fetchAllRows() (not a
+    // plain query) — fresh audit finding: a tenant with enough accrual
+    // history can have >1,000 expiry-eligible rows on a given day; a plain
+    // .select() would silently drop rows past PostgREST's max-rows ceiling,
+    // leaving those employees' expired credit permanently un-reclaimed with
+    // no error anywhere (this job is retried daily, but the un-expired rows
+    // never surface again unless they happen to fall within the next day's
+    // arbitrary-order 1,000-row window).
+    const expiredRows = await fetchAllRows((from, to) =>
+      supabase
+        .from('leave_accrual_ledger')
+        .select('id, employee_id, leave_type_id, year, days')
+        .eq('tenant_id', tenantId)
+        .eq('is_expired', false)
+        .lte('expires_on', asOfStr)
+        .gt('days', 0)   // only positive credit grants can expire
+        .range(from, to),
+    )
 
     if (!expiredRows?.length) {
       await completeJobLog(supabase, jobId, 'completed', { employees_processed: 0, total_days_credited: 0, skipped: 0 }, startedAt)
