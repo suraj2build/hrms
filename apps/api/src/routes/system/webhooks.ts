@@ -16,6 +16,7 @@
 
 import type { FastifyInstance } from 'fastify'
 import { z }                    from 'zod'
+import { ssrfCheck }            from '../../lib/ssrf-guard.js'
 
 // ── Validation schemas ────────────────────────────────────────────────────────
 
@@ -142,6 +143,11 @@ export default async function webhooksRoutes(fastify: FastifyInstance) {
       description, max_retries, timeout_seconds,
     } = parsed.data
 
+    const ssrfBlockReason = ssrfCheck(url)
+    if (ssrfBlockReason) {
+      return reply.code(422).send({ error: 'INVALID_URL', message: ssrfBlockReason })
+    }
+
     const { data, error } = await fastify.supabase
       .from('webhooks')
       .insert({
@@ -186,6 +192,13 @@ export default async function webhooksRoutes(fastify: FastifyInstance) {
 
     if (Object.keys(parsed.data).length === 0) {
       return reply.code(400).send({ error: 'VALIDATION_ERROR', message: 'No fields provided for update' })
+    }
+
+    if (parsed.data.url) {
+      const ssrfBlockReason = ssrfCheck(parsed.data.url)
+      if (ssrfBlockReason) {
+        return reply.code(422).send({ error: 'INVALID_URL', message: ssrfBlockReason })
+      }
     }
 
     const { data, error } = await fastify.supabase
@@ -251,16 +264,15 @@ export default async function webhooksRoutes(fastify: FastifyInstance) {
       return reply.code(404).send({ error: 'NOT_FOUND', message: 'Webhook not found' })
     }
 
-    // Validate the URL before attempting delivery
-    let parsedUrl: URL
-    try {
-      parsedUrl = new URL(webhook.url)
-    } catch {
-      return reply.code(422).send({ error: 'INVALID_URL', message: 'Webhook URL is not a valid URL' })
-    }
-
-    if (!['http:', 'https:'].includes(parsedUrl.protocol)) {
-      return reply.code(422).send({ error: 'INVALID_URL', message: 'Webhook URL must use http or https' })
+    // Validate the URL before attempting delivery — this previously checked
+    // only that the URL parses and uses http/https, not that it points
+    // somewhere safe to fetch. A webhook stored before the SSRF guard existed
+    // (or one that slips past create/update validation some other way) could
+    // otherwise have the server fetch cloud metadata or an internal service
+    // on every test click.
+    const ssrfBlockReason = ssrfCheck(webhook.url)
+    if (ssrfBlockReason) {
+      return reply.code(422).send({ error: 'INVALID_URL', message: ssrfBlockReason })
     }
 
     const testPayload = {

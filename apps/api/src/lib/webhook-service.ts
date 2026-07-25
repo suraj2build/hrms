@@ -17,6 +17,7 @@
 
 import { createHmac }    from 'crypto'
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { ssrfCheck } from './ssrf-guard.js'
 
 // ── Internal types ─────────────────────────────────────────────────────────────
 
@@ -300,6 +301,20 @@ export class WebhookService {
     webhook:    WebhookRow,
     body:       Record<string, unknown>,
   ): Promise<{ success: boolean; http_status?: number; duration_ms: number; error?: string }> {
+    // SSRF guard — webhook.url is an admin-registered destination the server
+    // fetches on every business event with no further action needed once
+    // registered. Re-checked here (not just at create/update time) so a URL
+    // that resolved to a public host when the guard was added elsewhere in
+    // the codebase, or was stored before this check existed, still can't
+    // reach cloud metadata / internal services from this delivery path.
+    const blockReason = ssrfCheck(webhook.url)
+    if (blockReason) {
+      console.error('[WebhookService] blocked delivery to disallowed URL', {
+        webhookId: webhook.id, deliveryId, tenantId, url: webhook.url, reason: blockReason,
+      })
+      return { success: false, duration_ms: 0, error: `Blocked: ${blockReason}` }
+    }
+
     const bodyStr       = JSON.stringify(body)
     const timeoutMs     = (webhook.timeout_seconds ?? 30) * 1000
     const controller    = new AbortController()
