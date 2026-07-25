@@ -234,16 +234,26 @@ export default async function helpdeskRoutes(fastify: FastifyInstance) {
     const ticketId     = (data as any).id
     const ticketNumber = (data as any).ticket_number ?? ticketId.slice(0, 8).toUpperCase()
 
-    // Auto-acknowledgement system comment
+    // Auto-acknowledgement system comment. Fresh audit finding:
+    // author_role: 'system' is not in helpdesk_ticket_comments' CHECK
+    // constraint (only 'employee'/'hr' are allowed) — this insert has
+    // always failed the CHECK, and its error was never checked, so this
+    // acknowledgement comment has never actually been created. 'hr' is the
+    // established convention this codebase already uses for other
+    // automated/system-generated comments in this table (see the merge-note
+    // insert further down) — the ticket-merge one renders correctly as "HR
+    // Team" in both EssHelpdesk.tsx and AdminHelpdesk.tsx, which only
+    // special-case author_role === 'hr'.
     const ackComment = `Your query has been received. Ticket ${ticketNumber} is assigned to our ${aiResult.suggested_team} team. Expected response within ${sla.response_hours}h, resolution within ${sla.resolution_hours}h.`
-    await fastify.supabase.from('helpdesk_ticket_comments').insert({
+    const { error: ackErr } = await fastify.supabase.from('helpdesk_ticket_comments').insert({
       tenant_id:   req.tenantId,
       ticket_id:   ticketId,
       author_id:   req.userId,
-      author_role: 'system',
+      author_role: 'hr',
       body:        ackComment,
       is_internal: false,
     })
+    if (ackErr) req.log.warn({ err: ackErr, ticket_id: ticketId }, 'helpdesk: auto-acknowledgement comment insert failed')
 
     // WhatsApp auto-acknowledgement (best-effort — never block ticket creation success)
     const { data: empWithPhone } = await fastify.supabase
