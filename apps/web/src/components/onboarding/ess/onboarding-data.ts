@@ -78,6 +78,13 @@ export interface OnboardingNotification {
   action_route: string | null
   action_label: string | null
   created_at:   string
+  // item_type is a closed domain-category enum with no onboarding-specific
+  // value — "needs the employee's action" is carried here instead.
+  metadata?:    { action_required?: boolean; [key: string]: unknown }
+}
+
+export function isActionRequired(n: OnboardingNotification): boolean {
+  return n.metadata?.action_required === true
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

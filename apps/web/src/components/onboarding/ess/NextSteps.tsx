@@ -14,7 +14,7 @@ import {
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 import {
-  isEmployeeActionable, isTaskDone, docLabel, useToggleTask,
+  isEmployeeActionable, isTaskDone, docLabel, useToggleTask, isActionRequired,
   type ChecklistTask, type OnboardingStatusDoc, type OnboardingNotification,
 } from './onboarding-data'
 
@@ -70,7 +70,7 @@ export function NextSteps({
 
     // 3. Action-required inbox items with a navigation target.
     notifications
-      .filter(n => n.status === 'unread' && n.item_type === 'action_required' && n.action_route)
+      .filter(n => n.status === 'unread' && isActionRequired(n) && n.action_route)
       .slice(0, 3)
       .forEach(n => out.push({
         key: `notif-${n.id}`, kind: 'notification', priority: 2,

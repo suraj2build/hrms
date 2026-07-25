@@ -11,7 +11,7 @@ import { useNavigate } from 'react-router-dom'
 import { BellOff, Loader2, ChevronRight, CheckCircle2, AlertTriangle, Info } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import {
-  useOnboardingNotifications, useMarkNotificationRead, isUnread,
+  useOnboardingNotifications, useMarkNotificationRead, isUnread, isActionRequired,
   type OnboardingNotification,
 } from './onboarding-data'
 
@@ -27,11 +27,11 @@ function fmtRelative(iso: string): string {
   return new Date(iso).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })
 }
 
-function ItemIcon({ severity, itemType }: { severity: string; itemType: string }) {
+function ItemIcon({ severity, actionRequired }: { severity: string; actionRequired: boolean }) {
   const cls = 'mt-0.5 h-4 w-4 shrink-0'
-  if (itemType === 'action_required') return <AlertTriangle className={cn(cls, 'text-warning')} />
-  if (severity === 'success')         return <CheckCircle2 className={cn(cls, 'text-success')} />
-  if (severity === 'warning')         return <AlertTriangle className={cn(cls, 'text-warning')} />
+  if (actionRequired)         return <AlertTriangle className={cn(cls, 'text-warning')} />
+  if (severity === 'success') return <CheckCircle2 className={cn(cls, 'text-success')} />
+  if (severity === 'warning') return <AlertTriangle className={cn(cls, 'text-warning')} />
   return <Info className={cn(cls, 'text-[#2E6FE6]')} />
 }
 
@@ -46,7 +46,7 @@ export function Updates({ limit = 12 }: { limit?: number }) {
     return all
       .slice()
       .sort((a, b) => {
-        const r = Number(a.item_type === 'action_required') - Number(b.item_type === 'action_required')
+        const r = Number(isActionRequired(a)) - Number(isActionRequired(b))
         if (r !== 0) return -r
         return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
       })
@@ -95,7 +95,7 @@ export function Updates({ limit = 12 }: { limit?: number }) {
             'mt-2 h-2 w-2 shrink-0 rounded-full',
             isUnread(n) ? 'bg-[#2E6FE6]' : 'bg-transparent',
           )} />
-          <ItemIcon severity={n.severity} itemType={n.item_type} />
+          <ItemIcon severity={n.severity} actionRequired={isActionRequired(n)} />
           <div className="min-w-0 flex-1">
             <p className={cn(
               'text-sm leading-tight',

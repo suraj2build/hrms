@@ -250,18 +250,22 @@ export function emitPreJoineeJoiningCompleted(opts: {
 // and are handled via the email invite flow (email-service.ts / PreJoinPortal).
 
 interface OnboardingInboxOpts {
-  supabase:      SupabaseClient
-  tenantId:      string
-  employeeId:    string             // used to look up recipient profile UUID
-  entityType:    string             // 'onboarding_session' | 'onboarding_document' | 'onboarding_checklist'
-  entityId:      string
-  itemType:      'action_required' | 'info' | 'reminder'
-  severity:      'info' | 'warning' | 'success'
-  title:         string
-  summary:       string
-  source:        string             // 'Onboarding Engine' | 'Document Management' | 'Checklist Engine'
-  actionRoute?:  string
-  actionLabel?:  string
+  supabase:        SupabaseClient
+  tenantId:        string
+  employeeId:      string             // used to look up recipient profile UUID
+  entityType:      string             // 'onboarding_session' | 'onboarding_document' | 'onboarding_checklist'
+  entityId:        string
+  // inbox_items.item_type is a closed domain-category enum (approval_request,
+  // payroll_blocker, ...) with no onboarding-specific value — always 'general'.
+  // "Does this need the employee's action" is a UI concern, tracked separately
+  // via actionRequired/metadata rather than overloading item_type for it.
+  severity:        'info' | 'warning' | 'success' | 'critical'
+  actionRequired?: boolean
+  title:           string
+  summary:         string
+  source:          string             // 'Onboarding Engine' | 'Document Management' | 'Checklist Engine'
+  actionRoute?:    string
+  actionLabel?:    string
 }
 
 /** Insert a structured onboarding inbox item for the employee.
@@ -278,10 +282,10 @@ async function dispatchOnboardingInboxItem(opts: OnboardingInboxOpts): Promise<v
 
     if (!profile?.id) return  // employee not yet linked to a profile — skip silently
 
-    await opts.supabase.from('inbox_items').insert({
+    const { error } = await opts.supabase.from('inbox_items').insert({
       tenant_id:    opts.tenantId,
       recipient_id: profile.id,
-      item_type:    opts.itemType,
+      item_type:    'general',
       severity:     opts.severity,
       title:        opts.title,
       summary:      opts.summary,
@@ -291,10 +295,12 @@ async function dispatchOnboardingInboxItem(opts: OnboardingInboxOpts): Promise<v
       action_label: opts.actionLabel ?? 'View onboarding',
       status:       'unread',
       metadata: {
-        category: 'onboarding',
-        source:   opts.source,
+        category:        'onboarding',
+        source:          opts.source,
+        action_required: opts.actionRequired ?? false,
       },
     })
+    if (error) logWarn('inbox_dispatch_insert_failed', opts.entityId, error)
   } catch (err) {
     logWarn('inbox_dispatch_failed', opts.entityId, err)
   }
@@ -311,7 +317,7 @@ interface TrustAdminInboxOpts {
   tenantId:    string
   entityType:  string
   entityId:    string
-  severity:    'info' | 'warning' | 'success' | 'critical'
+  severity:    'warning' | 'critical'
   title:       string
   summary:     string
   actionRoute: string
@@ -359,7 +365,7 @@ async function dispatchTrustAdminInboxItem(opts: TrustAdminInboxOpts): Promise<v
     const rows = admins.map((a: any) => ({
       tenant_id:    opts.tenantId,
       recipient_id: a.id,
-      item_type:    'action_required',
+      item_type:    'general',
       severity:     opts.severity,
       title:        opts.title,
       summary:      opts.summary,
@@ -369,12 +375,14 @@ async function dispatchTrustAdminInboxItem(opts: TrustAdminInboxOpts): Promise<v
       action_label: 'Review trust',
       status:       'unread',
       metadata: {
-        category: 'compliance',
-        source:   'Trust Intelligence',
+        category:        'compliance',
+        source:          'Trust Intelligence',
+        action_required: true,
       },
     }))
 
-    await opts.supabase.from('inbox_items').insert(rows)
+    const { error } = await opts.supabase.from('inbox_items').insert(rows)
+    if (error) logWarn('trust_admin_inbox_insert_failed', opts.entityId, error)
   } catch (err) {
     logWarn('trust_admin_inbox_failed', opts.entityId, err)
   }
@@ -435,7 +443,7 @@ export function registerOnboardingHandlers(supabase: SupabaseClient): void {
     await dispatchOnboardingInboxItem({
       supabase, tenantId, employeeId,
       entityType: 'onboarding_document', entityId: documentId,
-      itemType: 'info', severity: 'success',
+      severity: 'success',
       title: 'Document verified',
       summary: `Your ${documentType ?? 'document'} has been reviewed and verified.`,
       source: 'Document Management',
@@ -450,7 +458,7 @@ export function registerOnboardingHandlers(supabase: SupabaseClient): void {
     await dispatchOnboardingInboxItem({
       supabase, tenantId, employeeId,
       entityType: 'onboarding_document', entityId: documentId,
-      itemType: 'action_required', severity: 'warning',
+      severity: 'warning', actionRequired: true,
       title: 'Document needs attention',
       summary: `Your ${documentType ?? 'document'} was rejected${reason ? `: ${reason}` : ''}. Your HR team will advise next steps.`,
       source: 'Document Management',
@@ -463,7 +471,7 @@ export function registerOnboardingHandlers(supabase: SupabaseClient): void {
     await dispatchOnboardingInboxItem({
       supabase, tenantId, employeeId,
       entityType: 'onboarding_checklist', entityId: checklistId,
-      itemType: 'info', severity: 'success',
+      severity: 'success',
       title: 'Onboarding checklist complete',
       summary: 'All mandatory onboarding tasks are done. Great work!',
       source: 'Checklist Engine',
@@ -476,7 +484,7 @@ export function registerOnboardingHandlers(supabase: SupabaseClient): void {
     await dispatchOnboardingInboxItem({
       supabase, tenantId, employeeId,
       entityType: 'onboarding_session', entityId: sessionId,
-      itemType: 'info', severity: 'success',
+      severity: 'success',
       title: 'Joining finalised',
       summary: `Welcome to the team${employeeCode ? ` (${employeeCode})` : ''}. Your onboarding is complete.`,
       source: 'Onboarding Engine',
@@ -704,7 +712,7 @@ export function registerOnboardingHandlers(supabase: SupabaseClient): void {
       await dispatchOnboardingInboxItem({
         supabase, tenantId, employeeId,
         entityType: 'onboarding_checklist', entityId: checklist.id,
-        itemType: 'action_required', severity: 'info',
+        severity: 'info', actionRequired: true,
         title: 'Your onboarding checklist is ready',
         summary: 'Your personalised onboarding checklist has been set up. Complete your tasks to get fully set up.',
         source: 'Checklist Engine',
