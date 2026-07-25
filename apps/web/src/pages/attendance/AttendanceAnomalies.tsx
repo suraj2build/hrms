@@ -151,6 +151,11 @@ export default function AttendanceAnomalies() {
         description: `${r} stale anomal${r === 1 ? 'y' : 'ies'} auto-resolved against current attendance.`,
       })
       qc.invalidateQueries({ queryKey: ['anomaly-summary'] })
+      // The global operational banner (shown across the app shell) reads the
+      // same /attendance/anomalies/summary endpoint under its own key —
+      // without this it keeps showing the pre-reconcile open count for up
+      // to its 120s staleTime window.
+      qc.invalidateQueries({ queryKey: ['op-banner-anomaly-summary'] })
     },
     onError: (e) => toast.error('Reconcile failed', { description: e.message }),
   })
