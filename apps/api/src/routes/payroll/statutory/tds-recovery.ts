@@ -294,20 +294,34 @@ export default async function tdsRecoveryRoutes(fastify: FastifyInstance) {
 
       const { employee_id, financial_year, payroll_period } = parsed.data
 
-      // ── Step 1: Active tax declaration ────────────────────────────────────────
+      // ── Step 1: Active tax declaration plan ───────────────────────────────────
+      // Fresh audit finding: this previously queried `tax_declarations` — a
+      // per-category line-item table (one row per 80C/80D/HRA/etc. claim, see
+      // migration 098) that has NO projected_tax column at all. The actual
+      // annual tax projection lives on `tax_declaration_plans` (migration 169),
+      // populated when a plan is submitted (tds-plans.ts sets is_primary=true +
+      // projected_tax together). Confirmed by the status filter itself:
+      // 'locked' isn't even a valid tax_declarations.status value (its CHECK
+      // constraint only allows declared/submitted/under_review/approved/
+      // rejected/revision_requested) but IS valid for tax_declaration_plans —
+      // the query was always filtering the wrong table. Net effect:
+      // declaration?.projected_tax was always undefined, so every
+      // tds_monthly_recovery row this endpoint wrote computed to ₹0 regardless
+      // of the employee's actual liability.
       const { data: declarationRow, error: declErr } = await fastify.supabase
-        .from('tax_declarations')
-        .select('id')
+        .from('tax_declaration_plans')
+        .select('id, projected_tax')
         .eq('tenant_id', req.tenantId)
         .eq('employee_id', employee_id)
         .eq('financial_year', financial_year)
+        .eq('is_primary', true)
         .in('status', ['submitted', 'locked'])
         .order('created_at', { ascending: false })
         .limit(1)
         .maybeSingle()
 
       if (declErr) {
-        req.log.error({ err: declErr }, 'tds-recovery: failed to fetch tax_declaration')
+        req.log.error({ err: declErr }, 'tds-recovery: failed to fetch tax_declaration_plans')
         return reply.code(500).send({ error: 'QUERY_FAILED', message: declErr.message })
       }
 
