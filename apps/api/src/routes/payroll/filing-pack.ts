@@ -684,62 +684,78 @@ export default async function filingPackRoutes(fastify: FastifyInstance) {
     }
     const { month, format } = parsed.data
 
-    const [epfRes, esiRes, ptaxRes, tdsRes, epfReg, esiReg, ptaxRegs] = await Promise.all([
-      fastify.supabase
-        .from('epf_contributions')
-        .select('employee_contribution, voluntary_pf, employer_pf, employer_eps, edli_contribution, pf_wages')
-        .eq('tenant_id', req.tenantId)
-        .eq('contribution_month', month),
+    // fetchAllRows() on the 4 contribution/slip queries (not plain
+    // .select()s): these feed a SUM across every row for the month — a
+    // >1,000-row tenant would otherwise get a silently understated
+    // consolidated challan with no truncation signal. The registration
+    // lookups stay plain queries — bounded by statutory type / state count,
+    // never row-per-employee.
+    let epfRows: any[], esiRows: any[], ptaxRows: any[], tdsRows: any[]
+    let epfReg: any, esiReg: any, ptaxRegs: any
+    try {
+      ;[epfRows, esiRows, ptaxRows, tdsRows, epfReg, esiReg, ptaxRegs] = await Promise.all([
+        fetchAllRows((from, to) =>
+          fastify.supabase
+            .from('epf_contributions')
+            .select('employee_contribution, voluntary_pf, employer_pf, employer_eps, edli_contribution, pf_wages')
+            .eq('tenant_id', req.tenantId)
+            .eq('contribution_month', month)
+            .range(from, to),
+        ),
+        fetchAllRows((from, to) =>
+          fastify.supabase
+            .from('esi_contributions')
+            .select('employee_contribution, employer_contribution, total_contribution')
+            .eq('tenant_id', req.tenantId)
+            .eq('contribution_month', month)
+            .range(from, to),
+        ),
+        fetchAllRows((from, to) =>
+          fastify.supabase
+            .from('ptax_contributions')
+            .select('ptax_amount, state_code')
+            .eq('tenant_id', req.tenantId)
+            .eq('contribution_month', month)
+            .range(from, to),
+        ),
+        fetchAllRows((from, to) =>
+          fastify.supabase
+            .from('payroll_slips')
+            .select('tds_deducted')
+            .eq('tenant_id', req.tenantId)
+            .eq('month', month)
+            .eq('status', 'finalized')
+            .range(from, to),
+        ),
 
-      fastify.supabase
-        .from('esi_contributions')
-        .select('employee_contribution, employer_contribution, total_contribution')
-        .eq('tenant_id', req.tenantId)
-        .eq('contribution_month', month),
+        fastify.supabase
+          .from('statutory_registrations')
+          .select('registration_number')
+          .eq('tenant_id', req.tenantId)
+          .eq('statutory_type', 'epf')
+          .eq('is_active', true)
+          .limit(1)
+          .maybeSingle(),
 
-      fastify.supabase
-        .from('ptax_contributions')
-        .select('ptax_amount, state_code')
-        .eq('tenant_id', req.tenantId)
-        .eq('contribution_month', month),
+        fastify.supabase
+          .from('statutory_registrations')
+          .select('registration_number')
+          .eq('tenant_id', req.tenantId)
+          .eq('statutory_type', 'esi')
+          .eq('is_active', true)
+          .limit(1)
+          .maybeSingle(),
 
-      fastify.supabase
-        .from('payroll_slips')
-        .select('tds_deducted')
-        .eq('tenant_id', req.tenantId)
-        .eq('month', month)
-        .eq('status', 'finalized'),
-
-      fastify.supabase
-        .from('statutory_registrations')
-        .select('registration_number')
-        .eq('tenant_id', req.tenantId)
-        .eq('statutory_type', 'epf')
-        .eq('is_active', true)
-        .limit(1)
-        .maybeSingle(),
-
-      fastify.supabase
-        .from('statutory_registrations')
-        .select('registration_number')
-        .eq('tenant_id', req.tenantId)
-        .eq('statutory_type', 'esi')
-        .eq('is_active', true)
-        .limit(1)
-        .maybeSingle(),
-
-      fastify.supabase
-        .from('statutory_registrations')
-        .select('state_code, registration_number')
-        .eq('tenant_id', req.tenantId)
-        .eq('statutory_type', 'ptax')
-        .eq('is_active', true),
-    ])
-
-    const epfRows  = (epfRes.data  ?? []) as any[]
-    const esiRows  = (esiRes.data  ?? []) as any[]
-    const ptaxRows = (ptaxRes.data ?? []) as any[]
-    const tdsRows  = (tdsRes.data  ?? []) as any[]
+        fastify.supabase
+          .from('statutory_registrations')
+          .select('state_code, registration_number')
+          .eq('tenant_id', req.tenantId)
+          .eq('statutory_type', 'ptax')
+          .eq('is_active', true),
+      ])
+    } catch (err: any) {
+      return reply.code(500).send({ error: 'QUERY_FAILED', message: err?.message ?? 'Failed to fetch challan data' })
+    }
 
     const ptaxRegMap = new Map<string, string>()
     for (const r of (ptaxRegs.data ?? []) as any[]) ptaxRegMap.set(r.state_code, r.registration_number)

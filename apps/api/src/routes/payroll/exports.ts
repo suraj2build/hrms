@@ -24,6 +24,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { fetchAllRows } from '../../lib/supabase-paginate.js'
 
 function toCSV(headers: string[], rows: Record<string, unknown>[]): string {
   const escape = (v: unknown): string => {
@@ -66,24 +67,30 @@ export default async function payrollExportsRoutes(fastify: FastifyInstance) {
     }
     const { month, site_id, employee_id, format } = parsed.data
 
-    let q = fastify.supabase
-      .from('epf_contributions')
-      .select(`
-        employee_id, contribution_month,
-        pf_wages, employee_contribution, voluntary_pf,
-        employer_pf, employer_eps, edli_contribution, is_capped,
-        employees(employee_code, first_name, last_name, site_id)
-      `)
-      .eq('tenant_id', req.tenantId)
-      .eq('contribution_month', month)
-      .order('employees(employee_code)', { ascending: true })
+    // fetchAllRows() (not a plain query): a tenant with >1,000 EPF
+    // contribution rows for a month would otherwise have its ECR export
+    // silently truncated at 1,000 employees — a compliance filing gap.
+    let rows: any[]
+    try {
+      rows = await fetchAllRows((from, to) => {
+        let q = fastify.supabase
+          .from('epf_contributions')
+          .select(`
+            employee_id, contribution_month,
+            pf_wages, employee_contribution, voluntary_pf,
+            employer_pf, employer_eps, edli_contribution, is_capped,
+            employees(employee_code, first_name, last_name, site_id)
+          `)
+          .eq('tenant_id', req.tenantId)
+          .eq('contribution_month', month)
+          .order('employees(employee_code)', { ascending: true })
 
-    if (employee_id) q = q.eq('employee_id', employee_id)
-
-    const { data, error } = await q
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
-
-    let rows = (data ?? []) as any[]
+        if (employee_id) q = q.eq('employee_id', employee_id)
+        return q.range(from, to)
+      })
+    } catch (err: any) {
+      return reply.code(500).send({ error: 'QUERY_FAILED', message: err?.message ?? 'Failed to fetch EPF contributions' })
+    }
     if (site_id) rows = rows.filter(r => r.employees?.site_id === site_id)
 
     // Also fetch UANs from epf_eligibility_overrides
@@ -137,22 +144,28 @@ export default async function payrollExportsRoutes(fastify: FastifyInstance) {
     }
     const { month, site_id, employee_id, format } = parsed.data
 
-    let q = fastify.supabase
-      .from('esi_contributions')
-      .select(`
-        employee_id, contribution_month,
-        esi_wages, is_eligible, employee_contribution, employer_contribution, total_contribution,
-        employees(employee_code, first_name, last_name, site_id)
-      `)
-      .eq('tenant_id', req.tenantId)
-      .eq('contribution_month', month)
+    // fetchAllRows() (not a plain query): a tenant with >1,000 ESI
+    // contribution rows for a month would otherwise have its export
+    // silently truncated at 1,000 employees — a compliance filing gap.
+    let rows: any[]
+    try {
+      rows = await fetchAllRows((from, to) => {
+        let q = fastify.supabase
+          .from('esi_contributions')
+          .select(`
+            employee_id, contribution_month,
+            esi_wages, is_eligible, employee_contribution, employer_contribution, total_contribution,
+            employees(employee_code, first_name, last_name, site_id)
+          `)
+          .eq('tenant_id', req.tenantId)
+          .eq('contribution_month', month)
 
-    if (employee_id) q = q.eq('employee_id', employee_id)
-
-    const { data, error } = await q
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
-
-    let rows = (data ?? []) as any[]
+        if (employee_id) q = q.eq('employee_id', employee_id)
+        return q.range(from, to)
+      })
+    } catch (err: any) {
+      return reply.code(500).send({ error: 'QUERY_FAILED', message: err?.message ?? 'Failed to fetch ESI contributions' })
+    }
     if (site_id) rows = rows.filter(r => r.employees?.site_id === site_id)
 
     // Fetch ESI registration for tenant
@@ -204,23 +217,29 @@ export default async function payrollExportsRoutes(fastify: FastifyInstance) {
     }
     const { month, state_code, employee_id, format } = parsed.data
 
-    let q = fastify.supabase
-      .from('ptax_contributions')
-      .select(`
-        employee_id, contribution_month, state_code, financial_year,
-        gross_salary, ptax_amount,
-        employees(employee_code, first_name, last_name)
-      `)
-      .eq('tenant_id', req.tenantId)
-      .eq('contribution_month', month)
+    // fetchAllRows() (not a plain query): a tenant with >1,000 PTax
+    // contribution rows for a month would otherwise have its export
+    // silently truncated at 1,000 employees — a compliance filing gap.
+    let rows: any[]
+    try {
+      rows = await fetchAllRows((from, to) => {
+        let q = fastify.supabase
+          .from('ptax_contributions')
+          .select(`
+            employee_id, contribution_month, state_code, financial_year,
+            gross_salary, ptax_amount,
+            employees(employee_code, first_name, last_name)
+          `)
+          .eq('tenant_id', req.tenantId)
+          .eq('contribution_month', month)
 
-    if (state_code)  q = q.eq('state_code', state_code)
-    if (employee_id) q = q.eq('employee_id', employee_id)
-
-    const { data, error } = await q
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
-
-    const rows = (data ?? []) as any[]
+        if (state_code)  q = q.eq('state_code', state_code)
+        if (employee_id) q = q.eq('employee_id', employee_id)
+        return q.range(from, to)
+      })
+    } catch (err: any) {
+      return reply.code(500).send({ error: 'QUERY_FAILED', message: err?.message ?? 'Failed to fetch PTax contributions' })
+    }
 
     // Fetch PTax registrations per state
     const states = [...new Set(rows.map(r => r.state_code).filter(Boolean))]
@@ -275,23 +294,29 @@ export default async function payrollExportsRoutes(fastify: FastifyInstance) {
     }
     const { month, state_code, employee_id, format } = parsed.data
 
-    let q = fastify.supabase
-      .from('lwf_contributions')
-      .select(`
-        employee_id, contribution_month, state_code,
-        gross_salary, employee_contribution, employer_contribution, is_eligible,
-        employees(employee_code, first_name, last_name)
-      `)
-      .eq('tenant_id', req.tenantId)
-      .eq('contribution_month', month)
+    // fetchAllRows() (not a plain query): a tenant with >1,000 LWF
+    // contribution rows for a month would otherwise have its export
+    // silently truncated at 1,000 employees — a compliance filing gap.
+    let rows: any[]
+    try {
+      rows = await fetchAllRows((from, to) => {
+        let q = fastify.supabase
+          .from('lwf_contributions')
+          .select(`
+            employee_id, contribution_month, state_code,
+            gross_salary, employee_contribution, employer_contribution, is_eligible,
+            employees(employee_code, first_name, last_name)
+          `)
+          .eq('tenant_id', req.tenantId)
+          .eq('contribution_month', month)
 
-    if (state_code)  q = q.eq('state_code', state_code)
-    if (employee_id) q = q.eq('employee_id', employee_id)
-
-    const { data, error } = await q
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
-
-    const rows = (data ?? []) as any[]
+        if (state_code)  q = q.eq('state_code', state_code)
+        if (employee_id) q = q.eq('employee_id', employee_id)
+        return q.range(from, to)
+      })
+    } catch (err: any) {
+      return reply.code(500).send({ error: 'QUERY_FAILED', message: err?.message ?? 'Failed to fetch LWF contributions' })
+    }
 
     // Resolve LWF registration number per state from lwf_state_settings
     const states = [...new Set(rows.map(r => r.state_code).filter(Boolean))]
@@ -343,28 +368,38 @@ export default async function payrollExportsRoutes(fastify: FastifyInstance) {
     }
     const { financial_year, employee_id, format } = parsed.data
 
-    // Read from tds_declaration_snapshots (immutable) — NOT from live tax_declarations
-    let q = fastify.supabase
-      .from('tds_declaration_snapshots')
-      .select(`
-        employee_id, financial_year, snapshot_at,
-        total_declared, total_approved,
-        declaration_items,
-        employees(employee_code, first_name, last_name)
-      `)
-      .eq('tenant_id', req.tenantId)
-      .eq('financial_year', financial_year)
-      .order('employee_id', { ascending: true })
-      .order('snapshot_at', { ascending: false })
+    // Read from tds_declaration_snapshots (immutable) — NOT from live
+    // tax_declarations. fetchAllRows() (not a plain query): this table keeps
+    // one row per employee PER SNAPSHOT (dedup happens below in application
+    // code), so a tenant with >1,000 employees can easily exceed 1,000 rows
+    // for a single financial year — a plain query would silently drop
+    // employees from the annual TDS export.
+    let allSnapshots: any[]
+    try {
+      allSnapshots = await fetchAllRows((from, to) => {
+        let q = fastify.supabase
+          .from('tds_declaration_snapshots')
+          .select(`
+            employee_id, financial_year, snapshot_at,
+            total_declared, total_approved,
+            declaration_items,
+            employees(employee_code, first_name, last_name)
+          `)
+          .eq('tenant_id', req.tenantId)
+          .eq('financial_year', financial_year)
+          .order('employee_id', { ascending: true })
+          .order('snapshot_at', { ascending: false })
 
-    if (employee_id) q = q.eq('employee_id', employee_id)
-
-    const { data, error } = await q
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+        if (employee_id) q = q.eq('employee_id', employee_id)
+        return q.range(from, to)
+      })
+    } catch (err: any) {
+      return reply.code(500).send({ error: 'QUERY_FAILED', message: err?.message ?? 'Failed to fetch TDS declaration snapshots' })
+    }
 
     // Dedupe: keep latest snapshot per employee
     const seen = new Map<string, any>()
-    for (const r of (data ?? []) as any[]) {
+    for (const r of allSnapshots) {
       if (!seen.has(r.employee_id)) seen.set(r.employee_id, r)
     }
 
@@ -398,29 +433,41 @@ export default async function payrollExportsRoutes(fastify: FastifyInstance) {
     }
     const { month, format } = parsed.data
 
-    const [epfResult, esiResult, ptaxResult] = await Promise.all([
-      fastify.supabase
-        .from('epf_contributions')
-        .select('employee_contribution, employer_pf, employer_eps, edli_contribution, voluntary_pf')
-        .eq('tenant_id', req.tenantId)
-        .eq('contribution_month', month),
-
-      fastify.supabase
-        .from('esi_contributions')
-        .select('employee_contribution, employer_contribution, total_contribution')
-        .eq('tenant_id', req.tenantId)
-        .eq('contribution_month', month),
-
-      fastify.supabase
-        .from('ptax_contributions')
-        .select('ptax_amount, state_code')
-        .eq('tenant_id', req.tenantId)
-        .eq('contribution_month', month),
-    ])
-
-    const epfRows  = (epfResult.data  ?? []) as any[]
-    const esiRows  = (esiResult.data  ?? []) as any[]
-    const ptaxRows = (ptaxResult.data ?? []) as any[]
+    // fetchAllRows() on all three (not plain .select()s): these feed a SUM
+    // across every contribution row for the month — a >1,000-row tenant
+    // would otherwise get a silently understated challan total with no
+    // truncation signal.
+    let epfRows: any[], esiRows: any[], ptaxRows: any[]
+    try {
+      ;[epfRows, esiRows, ptaxRows] = await Promise.all([
+        fetchAllRows((from, to) =>
+          fastify.supabase
+            .from('epf_contributions')
+            .select('employee_contribution, employer_pf, employer_eps, edli_contribution, voluntary_pf')
+            .eq('tenant_id', req.tenantId)
+            .eq('contribution_month', month)
+            .range(from, to),
+        ),
+        fetchAllRows((from, to) =>
+          fastify.supabase
+            .from('esi_contributions')
+            .select('employee_contribution, employer_contribution, total_contribution')
+            .eq('tenant_id', req.tenantId)
+            .eq('contribution_month', month)
+            .range(from, to),
+        ),
+        fetchAllRows((from, to) =>
+          fastify.supabase
+            .from('ptax_contributions')
+            .select('ptax_amount, state_code')
+            .eq('tenant_id', req.tenantId)
+            .eq('contribution_month', month)
+            .range(from, to),
+        ),
+      ])
+    } catch (err: any) {
+      return reply.code(500).send({ error: 'QUERY_FAILED', message: err?.message ?? 'Failed to fetch contribution totals' })
+    }
 
     const r2 = (n: number) => Math.round(n * 100) / 100
 
@@ -498,54 +545,58 @@ export default async function payrollExportsRoutes(fastify: FastifyInstance) {
     }
     const { month, employee_id, format } = parsed.data
 
-    const [slipResult, epfResult, esiResult, ptaxResult] = await Promise.all([
-      // Payroll slips — gross/net + component breakdown
-      (() => {
-        let q = fastify.supabase
-          .from('payroll_slips')
-          .select('employee_id, gross_pay, net_pay, total_deductions, component_breakdown, employees(employee_code, first_name, last_name)')
-          .eq('tenant_id', req.tenantId)
-          .eq('month', month)
-          .eq('status', 'finalized')
-        if (employee_id) q = q.eq('employee_id', employee_id)
-        return q
-      })(),
+    // fetchAllRows() on all four (not plain queries): reconciliation must see
+    // every finalized slip and every contribution row for the month — a
+    // >1,000-row tenant would otherwise silently reconcile only a subset,
+    // reporting false matches for employees that were never compared.
+    let slips: any[], epfRows: any[], esiRows: any[], ptaxRows: any[]
+    try {
+      ;[slips, epfRows, esiRows, ptaxRows] = await Promise.all([
+        fetchAllRows((from, to) => {
+          let q = fastify.supabase
+            .from('payroll_slips')
+            .select('employee_id, gross_pay, net_pay, total_deductions, component_breakdown, employees(employee_code, first_name, last_name)')
+            .eq('tenant_id', req.tenantId)
+            .eq('month', month)
+            .eq('status', 'finalized')
+          if (employee_id) q = q.eq('employee_id', employee_id)
+          return q.range(from, to)
+        }),
+        fetchAllRows((from, to) => {
+          let q = fastify.supabase
+            .from('epf_contributions')
+            .select('employee_id, employee_contribution, employer_pf, employer_eps, edli_contribution')
+            .eq('tenant_id', req.tenantId)
+            .eq('contribution_month', month)
+          if (employee_id) q = q.eq('employee_id', employee_id)
+          return q.range(from, to)
+        }),
+        fetchAllRows((from, to) => {
+          let q = fastify.supabase
+            .from('esi_contributions')
+            .select('employee_id, employee_contribution, employer_contribution')
+            .eq('tenant_id', req.tenantId)
+            .eq('contribution_month', month)
+          if (employee_id) q = q.eq('employee_id', employee_id)
+          return q.range(from, to)
+        }),
+        fetchAllRows((from, to) => {
+          let q = fastify.supabase
+            .from('ptax_contributions')
+            .select('employee_id, ptax_amount')
+            .eq('tenant_id', req.tenantId)
+            .eq('contribution_month', month)
+          if (employee_id) q = q.eq('employee_id', employee_id)
+          return q.range(from, to)
+        }),
+      ])
+    } catch (err: any) {
+      return reply.code(500).send({ error: 'QUERY_FAILED', message: err?.message ?? 'Failed to fetch reconciliation data' })
+    }
 
-      (() => {
-        let q = fastify.supabase
-          .from('epf_contributions')
-          .select('employee_id, employee_contribution, employer_pf, employer_eps, edli_contribution')
-          .eq('tenant_id', req.tenantId)
-          .eq('contribution_month', month)
-        if (employee_id) q = q.eq('employee_id', employee_id)
-        return q
-      })(),
-
-      (() => {
-        let q = fastify.supabase
-          .from('esi_contributions')
-          .select('employee_id, employee_contribution, employer_contribution')
-          .eq('tenant_id', req.tenantId)
-          .eq('contribution_month', month)
-        if (employee_id) q = q.eq('employee_id', employee_id)
-        return q
-      })(),
-
-      (() => {
-        let q = fastify.supabase
-          .from('ptax_contributions')
-          .select('employee_id, ptax_amount')
-          .eq('tenant_id', req.tenantId)
-          .eq('contribution_month', month)
-        if (employee_id) q = q.eq('employee_id', employee_id)
-        return q
-      })(),
-    ])
-
-    const slips    = (slipResult.data  ?? []) as any[]
-    const epfMap   = new Map((epfResult.data  ?? []).map((r: any) => [r.employee_id, r]))
-    const esiMap   = new Map((esiResult.data  ?? []).map((r: any) => [r.employee_id, r]))
-    const ptaxMap  = new Map((ptaxResult.data ?? []).map((r: any) => [r.employee_id, r]))
+    const epfMap   = new Map(epfRows.map((r: any) => [r.employee_id, r]))
+    const esiMap   = new Map(esiRows.map((r: any) => [r.employee_id, r]))
+    const ptaxMap  = new Map(ptaxRows.map((r: any) => [r.employee_id, r]))
 
     const r2 = (n: number) => Math.round(n * 100) / 100
 
