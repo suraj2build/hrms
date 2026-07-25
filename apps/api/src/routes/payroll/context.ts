@@ -10,6 +10,7 @@
  */
 import type { FastifyInstance } from 'fastify'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { fetchAllRows } from '../../lib/supabase-paginate.js'
 
 const monthRe = /^\d{4}-\d{2}$/
 
@@ -24,22 +25,31 @@ export default async function payrollContextRoutes(fastify: FastifyInstance) {
     }
 
     try {
-      // Employees missing an active compensation record block payroll processing
-      const [empsRes, compsRes] = await Promise.all([
-        fastify.supabase
-          .from('employees')
-          .select('id, first_name, last_name')
-          .eq('tenant_id', req.tenantId)
-          .eq('status', 'active'),
-        fastify.supabase
-          .from('employee_compensations')
-          .select('employee_id')
-          .eq('tenant_id', req.tenantId)
-          .eq('is_active', true),
+      // Employees missing an active compensation record block payroll processing.
+      // Both fetches paginated — an unbounded .select() would silently truncate
+      // at PostgREST's 1,000-row ceiling for a large tenant, either hiding real
+      // blockers past row 1,000 or falsely flagging employees whose comp record
+      // just happened to fall outside the truncated compensations set.
+      const [emps, compsData] = await Promise.all([
+        fetchAllRows<{ id: string; first_name: string; last_name: string }>((from, to) =>
+          fastify.supabase
+            .from('employees')
+            .select('id, first_name, last_name')
+            .eq('tenant_id', req.tenantId)
+            .eq('status', 'active')
+            .range(from, to),
+        ),
+        fetchAllRows<{ employee_id: string }>((from, to) =>
+          fastify.supabase
+            .from('employee_compensations')
+            .select('employee_id')
+            .eq('tenant_id', req.tenantId)
+            .eq('is_active', true)
+            .range(from, to),
+        ),
       ])
 
-      const emps = (empsRes.data ?? []) as any[]
-      const compSet = new Set(((compsRes.data ?? []) as any[]).map((c: any) => c.employee_id))
+      const compSet = new Set(compsData.map((c) => c.employee_id))
 
       const blockers = emps
         .filter((e: any) => !compSet.has(e.id))

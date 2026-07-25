@@ -6,6 +6,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { fetchAllRows } from '../../lib/supabase-paginate.js'
 
 const RULE_CATEGORIES = [
   'employee_data',
@@ -159,42 +160,53 @@ export default async function validationRoutes(fastify: FastifyInstance) {
 
     const validationRunId = (runRow as any).id as string
 
-    // Fetch active rules and active employees in parallel
+    // Fetch active rules and active employees in parallel. employees,
+    // employee_compensations, and employee_bank_statutory are all paginated —
+    // this validation run gates whether payroll can be finalized
+    // (is_payroll_blocked below), so a silently-truncated employee list would
+    // mean employees beyond PostgREST's 1,000-row ceiling are never checked
+    // for missing compensation/bank details, or an incomplete comp/bank set
+    // would falsely flag employees who actually have records past row 1,000.
     const [
       { data: rules },
-      { data: employees },
+      employeeList,
+      compensations,
+      bankRecords,
     ] = await Promise.all([
       fastify.supabase
         .from('payroll_validation_rules')
         .select('*')
         .eq('tenant_id', req.tenantId)
         .eq('is_active', true),
-      fastify.supabase
-        .from('employees')
-        .select('id, first_name, last_name, employee_code')
-        .eq('tenant_id', req.tenantId)
-        .eq('status', 'active'),
+      fetchAllRows<{ id: string; first_name: string; last_name: string; employee_code: string }>((from, to) =>
+        fastify.supabase
+          .from('employees')
+          .select('id, first_name, last_name, employee_code')
+          .eq('tenant_id', req.tenantId)
+          .eq('status', 'active')
+          .range(from, to),
+      ),
+      fetchAllRows<{ employee_id: string }>((from, to) =>
+        fastify.supabase
+          .from('employee_compensations')
+          .select('employee_id')
+          .eq('tenant_id', req.tenantId)
+          .eq('is_active', true)
+          .range(from, to),
+      ),
+      fetchAllRows<{ employee_id: string }>((from, to) =>
+        fastify.supabase
+          .from('employee_bank_statutory')
+          .select('employee_id')
+          .eq('tenant_id', req.tenantId)
+          .range(from, to),
+      ),
     ])
 
-    const employeeList = (employees ?? []) as Array<{ id: string; first_name: string; last_name: string; employee_code: string }>
     const ruleList = (rules ?? []) as any[]
 
-    // Check MISSING_COMPENSATION: employees with no active employee_compensations
-    const { data: compensations } = await fastify.supabase
-      .from('employee_compensations')
-      .select('employee_id')
-      .eq('tenant_id', req.tenantId)
-      .eq('is_active', true)
-
-    const hasComp = new Set<string>((compensations ?? []).map((c: any) => c.employee_id))
-
-    // Check MISSING_BANK: employees with no bank_statutory record
-    const { data: bankRecords } = await fastify.supabase
-      .from('employee_bank_statutory')
-      .select('employee_id')
-      .eq('tenant_id', req.tenantId)
-
-    const hasBank = new Set<string>((bankRecords ?? []).map((b: any) => b.employee_id))
+    const hasComp = new Set<string>(compensations.map((c) => c.employee_id))
+    const hasBank = new Set<string>(bankRecords.map((b) => b.employee_id))
 
     // Find built-in rule codes
     const missingCompRule = ruleList.find(r => r.rule_code === 'MISSING_COMPENSATION')
