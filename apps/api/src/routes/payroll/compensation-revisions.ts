@@ -8,15 +8,20 @@ import { z } from 'zod'
 import { logAction } from '../../lib/audit-service.js'
 import { EventType, MODULE } from '../../platform/events/index.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
-import { serverError, ErrorCode } from '../../lib/api-errors.js'
+import { serverError, notFound, forbidden, validationError, conflictError, ErrorCode } from '../../lib/api-errors.js'
 import { checkIdempotency, storeIdempotency } from '../../lib/idempotency.js'
+
+// compensation_revisions.revision_type CHECK constraint (migration 078) — the
+// ground truth for valid revision types. The frontend's REVISION_TYPES union
+// (CompensationRevisions.tsx) already matches this exactly.
+const REVISION_TYPES = ['increment', 'promotion', 'revision', 'correction', 'restructure', 'retro'] as const
 
 export default async function compensationRevisionsRoutes(fastify: FastifyInstance) {
   const auth = { preHandler: [fastify.authenticate] }
 
   function requireHrAdmin(req: any, reply: any, done: () => void) {
     if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
-      reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
+      forbidden(reply, 'FORBIDDEN', 'HR admin access required')
       return
     }
     done()
@@ -35,7 +40,7 @@ export default async function compensationRevisionsRoutes(fastify: FastifyInstan
 
     const parsed = querySchema.safeParse(req.query)
     if (!parsed.success) {
-      return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+      return validationError(reply, ErrorCode.VALIDATION_ERROR, parsed.error.issues[0]?.message)
     }
 
     const { limit, offset } = parsed.data
@@ -53,7 +58,7 @@ export default async function compensationRevisionsRoutes(fastify: FastifyInstan
     if (parsed.data.to_date) q = q.lte('effective_date', parsed.data.to_date)
 
     const { data, error, count } = await q
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch compensation revisions')
     return reply.send({ data: data ?? [], total: count ?? 0, limit, offset })
   })
 
@@ -68,7 +73,7 @@ export default async function compensationRevisionsRoutes(fastify: FastifyInstan
       .eq('tenant_id', req.tenantId)
       .single()
 
-    if (error || !data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Revision not found' })
+    if (error || !data) return notFound(reply, 'NOT_FOUND', 'Revision not found')
     return reply.send({ data })
   })
 
@@ -76,7 +81,7 @@ export default async function compensationRevisionsRoutes(fastify: FastifyInstan
   fastify.post('/', { preHandler: [fastify.authenticate, requireHrAdmin] }, async (req: any, reply) => {
     const schema = z.object({
       employee_id:      z.string().uuid(),
-      revision_type:    z.string(),
+      revision_type:    z.enum(REVISION_TYPES),
       reason:           z.string().min(1),
       effective_date:   z.string(),
       new_ctc_annual:   z.number().positive(),
@@ -86,7 +91,7 @@ export default async function compensationRevisionsRoutes(fastify: FastifyInstan
 
     const parsed = schema.safeParse(req.body)
     if (!parsed.success) {
-      return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+      return validationError(reply, ErrorCode.VALIDATION_ERROR, parsed.error.issues[0]?.message)
     }
 
     // Idempotency: prevents a double-submit (network retry, double-click) from
@@ -111,7 +116,7 @@ export default async function compensationRevisionsRoutes(fastify: FastifyInstan
       .select()
       .single()
 
-    if (error) return reply.code(500).send({ error: 'INSERT_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create compensation revision')
     // Fire-and-forget — never await, never blocks
     fastify.eventPublisher.publish({
       event_type:  EventType.COMPENSATION_REVISION_CREATED,
@@ -141,12 +146,12 @@ export default async function compensationRevisionsRoutes(fastify: FastifyInstan
       .single()
 
     if (fetchErr || !revision) {
-      return reply.code(404).send({ error: 'NOT_FOUND', message: 'Revision not found' })
+      return notFound(reply, 'NOT_FOUND', 'Revision not found')
     }
 
     const rev = revision as any
     if (rev.status !== 'pending') {
-      return reply.code(409).send({ error: 'INVALID_STATUS', message: `Cannot approve revision with status '${rev.status}'` })
+      return conflictError(reply, 'INVALID_STATUS', `Cannot approve revision with status '${rev.status}'`)
     }
 
     const now = new Date().toISOString()
@@ -163,7 +168,7 @@ export default async function compensationRevisionsRoutes(fastify: FastifyInstan
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
 
-    if (updateErr) return reply.code(500).send({ error: 'UPDATE_FAILED', message: updateErr.message })
+    if (updateErr) return serverError(req, reply, updateErr, ErrorCode.UPDATE_FAILED, 'Failed to update revision status')
 
     // ── Fetch current active compensation + components BEFORE creating snapshots ──
     // This allows accurate gross/net computation from real component breakdown
@@ -377,7 +382,7 @@ export default async function compensationRevisionsRoutes(fastify: FastifyInstan
 
     const parsed = schema.safeParse(req.body)
     if (!parsed.success) {
-      return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+      return validationError(reply, ErrorCode.VALIDATION_ERROR, parsed.error.issues[0]?.message)
     }
 
     // Fetch revision to enforce status guard and get employee_id for audit
@@ -389,13 +394,10 @@ export default async function compensationRevisionsRoutes(fastify: FastifyInstan
       .single()
 
     if (fetchErr || !revision) {
-      return reply.code(404).send({ error: 'NOT_FOUND', message: 'Revision not found' })
+      return notFound(reply, 'NOT_FOUND', 'Revision not found')
     }
     if ((revision as any).status !== 'pending') {
-      return reply.code(409).send({
-        error:   'INVALID_STATUS',
-        message: `Cannot reject revision with status '${(revision as any).status}'`,
-      })
+      return conflictError(reply, 'INVALID_STATUS', `Cannot reject revision with status '${(revision as any).status}'`)
     }
 
     const { error } = await fastify.supabase
@@ -408,7 +410,7 @@ export default async function compensationRevisionsRoutes(fastify: FastifyInstan
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
 
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to reject revision')
 
     await logAction(fastify.supabase, {
       tenantId:    req.tenantId,
@@ -452,10 +454,7 @@ export default async function compensationRevisionsRoutes(fastify: FastifyInstan
         .single()
 
       if (callerProfile?.employee_id !== employeeId) {
-        return reply.code(403).send({
-          error:   'FORBIDDEN',
-          message: 'You can only view your own compensation revision history',
-        })
+        return forbidden(reply, 'FORBIDDEN', 'You can only view your own compensation revision history')
       }
     }
 
@@ -465,7 +464,7 @@ export default async function compensationRevisionsRoutes(fastify: FastifyInstan
     })
     const pg = paginationSchema.safeParse(req.query)
     if (!pg.success) {
-      return reply.code(400).send({ error: 'VALIDATION_ERROR', message: pg.error.issues[0]?.message })
+      return validationError(reply, ErrorCode.VALIDATION_ERROR, pg.error.issues[0]?.message)
     }
     const { limit, offset } = pg.data
 
@@ -477,7 +476,7 @@ export default async function compensationRevisionsRoutes(fastify: FastifyInstan
       .order('effective_date', { ascending: false })
       .range(offset, offset + limit - 1)
 
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch compensation revision history')
     return reply.send({ data: data ?? [], total: count ?? 0, limit, offset })
   })
 
@@ -491,7 +490,7 @@ export default async function compensationRevisionsRoutes(fastify: FastifyInstan
     })
     const pg = paginationSchema.safeParse(req.query)
     if (!pg.success) {
-      return reply.code(400).send({ error: 'VALIDATION_ERROR', message: pg.error.issues[0]?.message })
+      return validationError(reply, ErrorCode.VALIDATION_ERROR, pg.error.issues[0]?.message)
     }
     const { limit, offset } = pg.data
 
@@ -505,7 +504,7 @@ export default async function compensationRevisionsRoutes(fastify: FastifyInstan
       .order('snapshot_date', { ascending: false })
       .range(offset, offset + limit - 1)
 
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch compensation snapshots')
     return reply.send({ data: data ?? [], total: count ?? 0, limit, offset })
   })
 }
