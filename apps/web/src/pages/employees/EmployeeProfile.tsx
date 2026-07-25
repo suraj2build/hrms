@@ -784,6 +784,12 @@ export function EmployeeProfile() {
     notes:            '',
   })
 
+  // Sent as Idempotency-Key on submit, mirroring PayrollRuns.tsx's pattern.
+  // Rotated only after a successful submit, so a failed-then-retried click
+  // (or network retry) reuses the same key instead of creating a duplicate
+  // pending revision.
+  const revisionIdempotencyKey = useRef(crypto.randomUUID())
+
   const pendingRevisions = useMemo(
     () => (payrollRevisionsData?.data ?? []).filter(
       (r: RevisionRow) => !['approved', 'rejected', 'withdrawn'].includes(r.status ?? '')
@@ -800,11 +806,12 @@ export function EmployeeProfile() {
       new_ctc_annual:    Number(revisionForm.new_ctc_annual),
       before_ctc_annual: comp?.ctc_annual ?? undefined,
       notes:             revisionForm.notes || undefined,
-    }),
+    }, { headers: { 'Idempotency-Key': revisionIdempotencyKey.current } }),
     onSuccess: () => {
       toast.success('Revision initiated — pending approval')
       setRevisionOpen(false)
       setRevisionForm({ revision_type: 'increment', effective_date: today, reason: '', new_ctc_annual: '', notes: '' })
+      revisionIdempotencyKey.current = crypto.randomUUID()
       refetchRevisions()
       // Same compensation_revisions row is also read by the admin Comp
       // Revisions queue and the manager compensation view under separate keys.

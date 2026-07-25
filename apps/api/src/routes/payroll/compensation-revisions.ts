@@ -9,6 +9,7 @@ import { logAction } from '../../lib/audit-service.js'
 import { EventType, MODULE } from '../../platform/events/index.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { serverError, ErrorCode } from '../../lib/api-errors.js'
+import { checkIdempotency, storeIdempotency } from '../../lib/idempotency.js'
 
 export default async function compensationRevisionsRoutes(fastify: FastifyInstance) {
   const auth = { preHandler: [fastify.authenticate] }
@@ -88,6 +89,17 @@ export default async function compensationRevisionsRoutes(fastify: FastifyInstan
       return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
     }
 
+    // Idempotency: prevents a double-submit (network retry, double-click) from
+    // creating two pending revisions for the same employee.
+    const iKey = (req.headers['idempotency-key'] as string | undefined)?.trim()
+    if (iKey) {
+      const cached = await checkIdempotency(fastify.supabase, req.tenantId, iKey, 'compensation-revision-create')
+      if (cached) {
+        reply.header('Idempotency-Replayed', 'true')
+        return reply.code(cached.status_code).send(cached.response)
+      }
+    }
+
     const { data, error } = await fastify.supabase
       .from('compensation_revisions')
       .insert({
@@ -112,7 +124,9 @@ export default async function compensationRevisionsRoutes(fastify: FastifyInstan
       payload:     { employee_id: parsed.data.employee_id, new_ctc_annual: parsed.data.new_ctc_annual, revision_type: parsed.data.revision_type },
       correlation_id: req.correlationId ?? undefined,
     })
-    return reply.code(201).send({ data })
+    const responseBody = { data }
+    if (iKey) await storeIdempotency(fastify.supabase, req.tenantId, iKey, 'compensation-revision-create', 201, responseBody)
+    return reply.code(201).send(responseBody)
   })
 
   // ── POST /payroll/revisions/:id/approve ──────────────────────────────────────
