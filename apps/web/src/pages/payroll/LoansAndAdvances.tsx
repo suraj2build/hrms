@@ -10,7 +10,7 @@
  *   Recovery Calendar — month-by-month deduction preview
  */
 
-import { useState, useMemo }                        from 'react'
+import { useState, useMemo, useRef }                from 'react'
 import { useQuery, useMutation, useQueryClient }    from '@tanstack/react-query'
 import {
   Loader2, Plus, RefreshCw, CheckCircle2, XCircle,
@@ -193,6 +193,10 @@ function ApproveAdvanceDialog({
     }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['advances'] })
+      // The employee's own ESS view and the manager's approval queue read
+      // the same record under separate keys.
+      qc.invalidateQueries({ queryKey: ['ess-advances'] })
+      qc.invalidateQueries({ queryKey: ['manager-loan-pending'] })
       onClose()
       toast.success('Advance approved', {
         description: `${fmtINR(Number(approvedAmount))} over ${recoveryMonths} months`,
@@ -267,6 +271,8 @@ function RejectDialog({
     ),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: [type === 'advance' ? 'advances' : 'loans'] })
+      qc.invalidateQueries({ queryKey: [type === 'advance' ? 'ess-advances' : 'ess-loans'] })
+      qc.invalidateQueries({ queryKey: ['manager-loan-pending'] })
       onClose()
       setReason('')
       toast.success(`${type === 'advance' ? 'Advance' : 'Loan'} request rejected`)
@@ -310,14 +316,25 @@ function DisburseAdvanceDialog({
   const qc = useQueryClient()
   const [disbursedDate, setDisbursedDate] = useState('')
   const [disbursedAmount, setDisbursedAmount] = useState('')
+  // Sent as Idempotency-Key on disburse — real money moves here. The backend
+  // already guards against a double-disburse with an atomic status check, but
+  // a network-retried request would still surface a scary "failed" error for
+  // a disbursement that actually went through; this makes the retry replay
+  // the original success response instead.
+  const idempotencyKey = useRef(crypto.randomUUID())
 
   const mutation = useMutation({
     mutationFn: () => api.post(`/payroll/advances/${advance!.id}/disburse`, {
       disbursed_date: disbursedDate,
       disbursed_amount: Number(disbursedAmount),
-    }),
+    }, { headers: { 'Idempotency-Key': idempotencyKey.current } }),
     onSuccess: () => {
+      idempotencyKey.current = crypto.randomUUID()
       qc.invalidateQueries({ queryKey: ['advances'] })
+      // The employee's own ESS view and the manager's approval queue read
+      // the same record under separate keys.
+      qc.invalidateQueries({ queryKey: ['ess-advances'] })
+      qc.invalidateQueries({ queryKey: ['manager-loan-pending'] })
       onClose()
       toast.success('Advance disbursed')
     },
@@ -381,6 +398,8 @@ function NewAdvanceDialog({ open, onClose }: { open: boolean; onClose: () => voi
     }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['advances'] })
+      qc.invalidateQueries({ queryKey: ['ess-advances'] })
+      qc.invalidateQueries({ queryKey: ['manager-loan-pending'] })
       onClose()
       setEmployeeId(''); setAmount(''); setPurpose(''); setRecoveryMonths('3')
       toast.success('Advance request created')
@@ -470,6 +489,8 @@ function NewLoanDialog({ open, onClose }: { open: boolean; onClose: () => void }
     }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['loans'] })
+      qc.invalidateQueries({ queryKey: ['ess-loans'] })
+      qc.invalidateQueries({ queryKey: ['manager-loan-pending'] })
       onClose()
       setEmployeeId(''); setPrincipal(''); setRate(''); setTenure(''); setPurpose('')
       toast.success('Loan request created')
@@ -566,15 +587,21 @@ function DisburseLoanDialog({
   const [disbursedDate, setDisbursedDate] = useState('')
   const [disbursedAmount, setDisbursedAmount] = useState('')
   const [firstEmiMonth, setFirstEmiMonth] = useState(currentMonth())
+  // See DisburseAdvanceDialog above for why this exists despite the backend's
+  // own atomic status guard.
+  const idempotencyKey = useRef(crypto.randomUUID())
 
   const mutation = useMutation({
     mutationFn: () => api.post(`/payroll/loans/${loan!.id}/disburse`, {
       disbursed_date: disbursedDate,
       disbursed_amount: Number(disbursedAmount),
       first_emi_month: firstEmiMonth,
-    }),
+    }, { headers: { 'Idempotency-Key': idempotencyKey.current } }),
     onSuccess: () => {
+      idempotencyKey.current = crypto.randomUUID()
       qc.invalidateQueries({ queryKey: ['loans'] })
+      qc.invalidateQueries({ queryKey: ['ess-loans'] })
+      qc.invalidateQueries({ queryKey: ['manager-loan-pending'] })
       onClose()
       toast.success('Loan disbursed', { description: `EMI starts from ${firstEmiMonth}` })
     },
@@ -640,6 +667,7 @@ function ForecloseDialog({
     }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['loans'] })
+      qc.invalidateQueries({ queryKey: ['ess-loans'] })
       onClose()
       toast.success('Loan foreclosed')
     },
@@ -842,6 +870,7 @@ function AdvancesTab({ isAdmin }: { isAdmin: boolean }) {
         pause ? { pause_reason: 'Paused by HR admin' } : {}),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['advances'] })
+      qc.invalidateQueries({ queryKey: ['ess-advances'] })
       toast.success('Recovery status updated')
     },
     onError: (e: Error) => toast.error('Update failed', { description: e.message }),
@@ -1047,6 +1076,8 @@ function ApproveLoanDialog({ open, loan, onClose }: { open: boolean; loan: Emplo
     mutationFn: () => api.post(`/payroll/loans/${loan!.id}/approve`, {}),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['loans'] })
+      qc.invalidateQueries({ queryKey: ['ess-loans'] })
+      qc.invalidateQueries({ queryKey: ['manager-loan-pending'] })
       onClose()
       toast.success('Loan approved')
     },
@@ -1109,6 +1140,7 @@ function LoansTab({ isAdmin }: { isAdmin: boolean }) {
         pause ? { pause_reason: 'Paused by HR admin' } : {}),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['loans'] })
+      qc.invalidateQueries({ queryKey: ['ess-loans'] })
       toast.success('EMI status updated')
     },
     onError: (e: Error) => toast.error('Update failed', { description: e.message }),

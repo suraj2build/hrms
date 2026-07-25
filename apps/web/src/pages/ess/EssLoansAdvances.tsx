@@ -168,6 +168,8 @@ function NewAdvanceForm({ onClose }: { onClose: () => void }) {
     }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['ess-advances'] })
+      qc.invalidateQueries({ queryKey: ['manager-loan-pending'] })
+      qc.invalidateQueries({ queryKey: ['advances'] })
       onClose()
     },
   })
@@ -243,6 +245,8 @@ function NewLoanForm({ onClose }: { onClose: () => void }) {
     }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['ess-loans'] })
+      qc.invalidateQueries({ queryKey: ['manager-loan-pending'] })
+      qc.invalidateQueries({ queryKey: ['loans'] })
       onClose()
     },
   })

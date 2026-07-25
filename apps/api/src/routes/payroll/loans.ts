@@ -7,6 +7,7 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { gateApprove, gateReject } from '../../lib/approval-orchestrator.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { checkIdempotency, storeIdempotency } from '../../lib/idempotency.js'
 
 const LOAN_TYPES = ['personal', 'housing', 'vehicle', 'education', 'emergency', 'other'] as const
 const PAYMENT_TYPES = ['emi', 'prepayment', 'foreclosure', 'adjustment'] as const
@@ -231,6 +232,19 @@ export default async function loansRoutes(fastify: FastifyInstance) {
       return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
     }
 
+    // Idempotency: the .eq('status','approved') guard below already blocks a
+    // genuine double-disburse (real money), but a network-retried request
+    // would see the first call's success as a confusing "already disbursed"
+    // 409 — replay the original response instead.
+    const iKey = (req.headers['idempotency-key'] as string | undefined)?.trim()
+    if (iKey) {
+      const cached = await checkIdempotency(fastify.supabase, req.tenantId, iKey, 'loan-disburse')
+      if (cached) {
+        reply.header('Idempotency-Replayed', 'true')
+        return reply.code(cached.status_code).send(cached.response)
+      }
+    }
+
     // Fetch loan details
     const { data: loan, error: fetchErr } = await fastify.supabase
       .from('employee_loans')
@@ -316,7 +330,9 @@ export default async function loansRoutes(fastify: FastifyInstance) {
       }
     }
 
-    return reply.send({ message: 'Loan disbursed', loan_id: id, schedules_created: schedules.length })
+    const responseBody = { message: 'Loan disbursed', loan_id: id, schedules_created: schedules.length }
+    if (iKey) await storeIdempotency(fastify.supabase, req.tenantId, iKey, 'loan-disburse', 200, responseBody)
+    return reply.send(responseBody)
   })
 
   // ── GET /payroll/loans/:id/schedule ──────────────────────────────────────────

@@ -8,6 +8,7 @@ import { z } from 'zod'
 import { logAction } from '../../lib/audit-service.js'
 import { gateApprove, gateReject } from '../../lib/approval-orchestrator.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { checkIdempotency, storeIdempotency } from '../../lib/idempotency.js'
 
 const RECOVERY_TYPES = ['payroll_deduction', 'manual_payment', 'adjustment'] as const
 
@@ -283,6 +284,19 @@ export default async function advancesRoutes(fastify: FastifyInstance) {
       return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
     }
 
+    // Idempotency: the .eq('status','approved') guard below already blocks a
+    // genuine double-disburse (real money), but a network-retried request
+    // would see the first call's success as a confusing "already disbursed"
+    // 409 — replay the original response instead.
+    const iKey = (req.headers['idempotency-key'] as string | undefined)?.trim()
+    if (iKey) {
+      const cached = await checkIdempotency(fastify.supabase, req.tenantId, iKey, 'advance-disburse')
+      if (cached) {
+        reply.header('Idempotency-Replayed', 'true')
+        return reply.code(cached.status_code).send(cached.response)
+      }
+    }
+
     const { data: disbursed, error } = await fastify.supabase
       .from('advance_salary_requests')
       .update({
@@ -338,7 +352,9 @@ export default async function advancesRoutes(fastify: FastifyInstance) {
       newData:     { status: 'disbursed', disbursed_amount: parsed.data.disbursed_amount, disbursed_date: parsed.data.disbursed_date },
     })
 
-    return reply.send({ message: 'Advance disbursed', schedules_created: schedules.length })
+    const responseBody = { message: 'Advance disbursed', schedules_created: schedules.length }
+    if (iKey) await storeIdempotency(fastify.supabase, req.tenantId, iKey, 'advance-disburse', 200, responseBody)
+    return reply.send(responseBody)
   })
 
   // ── GET /payroll/advances/:id/schedule ───────────────────────────────────────

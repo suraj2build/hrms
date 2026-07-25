@@ -85,6 +85,12 @@ export function ManagerLoanApprovals({ embedded = false }: { embedded?: boolean 
   function invalidate() {
     qc.invalidateQueries({ queryKey: ['manager-loan-pending'] })
     qc.invalidateQueries({ queryKey: ['manager-pending-approvals-count'] })
+    // The employee's own ESS view and the HR admin console read the same
+    // records under separate keys.
+    qc.invalidateQueries({ queryKey: ['ess-advances'] })
+    qc.invalidateQueries({ queryKey: ['ess-loans'] })
+    qc.invalidateQueries({ queryKey: ['advances'] })
+    qc.invalidateQueries({ queryKey: ['loans'] })
   }
 
   const approve = useMutation({
