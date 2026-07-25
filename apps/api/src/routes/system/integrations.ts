@@ -17,19 +17,29 @@ import type { FastifyInstance } from 'fastify'
 import { z }                    from 'zod'
 import { ssrfCheck }            from '../../lib/ssrf-guard.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { serverError, notFound, forbidden, validationError, ErrorCode } from '../../lib/api-errors.js'
 
 // ── Validation schemas ────────────────────────────────────────────────────────
 
+// Must mirror integration_registry's CHECK constraints (091_webhooks.sql).
+const INTEGRATION_TYPES = [
+  'payroll_export', 'biometric', 'erp', 'hris_external',
+  'notification_gateway', 'document_storage', 'identity_provider',
+  'time_tracking', 'custom_api', 'other',
+] as const
+
+const AUTH_TYPES = ['api_key', 'oauth2', 'basic', 'hmac', 'none'] as const
+
 const listQuerySchema = z.object({
-  status:           z.enum(['active', 'inactive', 'error', 'unknown']).optional(),
+  status:           z.enum(['active', 'inactive', 'error', 'maintenance']).optional(),
   integration_type: z.string().optional(),
 })
 
 const createBodySchema = z.object({
   name:             z.string().min(1).max(255),
-  integration_type: z.string().min(1).max(100),
+  integration_type: z.enum(INTEGRATION_TYPES),
   endpoint_url:     z.string().url({ message: 'endpoint_url must be a valid URL' }).optional(),
-  auth_type:        z.enum(['none', 'api_key', 'oauth2', 'basic', 'bearer']).optional(),
+  auth_type:        z.enum(AUTH_TYPES).optional(),
   config:           z.record(z.unknown()).optional(),
   description:      z.string().optional(),
 })
@@ -56,10 +66,7 @@ export default async function integrationsRoutes(fastify: FastifyInstance) {
   fastify.get('/system/integrations', auth, async (req: any, reply) => {
     const parsed = listQuerySchema.safeParse(req.query)
     if (!parsed.success) {
-      return reply.code(400).send({
-        error:   'VALIDATION_ERROR',
-        message: parsed.error.issues[0]?.message,
-      })
+      return validationError(reply, ErrorCode.VALIDATION_ERROR, parsed.error.issues[0]?.message)
     }
 
     const { status, integration_type } = parsed.data
@@ -75,10 +82,7 @@ export default async function integrationsRoutes(fastify: FastifyInstance) {
 
     const { data, error, count } = await q
 
-    if (error) {
-      req.log.error({ err: error }, 'integrations list query failed')
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch integrations' })
-    }
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch integrations')
 
     return reply.send({ data: data ?? [], total: count ?? 0 })
   })
@@ -95,7 +99,7 @@ export default async function integrationsRoutes(fastify: FastifyInstance) {
       .single()
 
     if (integrationError || !integration) {
-      return reply.code(404).send({ error: 'NOT_FOUND', message: 'Integration not found' })
+      return notFound(reply, 'NOT_FOUND', 'Integration not found')
     }
 
     const { data: auditLog, error: auditError } = await fastify.supabase
@@ -120,15 +124,12 @@ export default async function integrationsRoutes(fastify: FastifyInstance) {
   // ── POST /system/integrations ─────────────────────────────────────────────
   fastify.post('/system/integrations', auth, async (req: any, reply) => {
     if (!isAdmin(req.userRole)) {
-      return reply.code(403).send({ error: 'FORBIDDEN', message: 'Admin access required' })
+      return forbidden(reply, 'FORBIDDEN', 'Admin access required')
     }
 
     const parsed = createBodySchema.safeParse(req.body)
     if (!parsed.success) {
-      return reply.code(400).send({
-        error:   'VALIDATION_ERROR',
-        message: parsed.error.issues[0]?.message,
-      })
+      return validationError(reply, ErrorCode.VALIDATION_ERROR, parsed.error.issues[0]?.message)
     }
 
     const { name, integration_type, endpoint_url, auth_type, config, description } = parsed.data
@@ -150,10 +151,7 @@ export default async function integrationsRoutes(fastify: FastifyInstance) {
       .select()
       .single()
 
-    if (error) {
-      req.log.error({ err: error }, 'integration insert failed')
-      return reply.code(500).send({ error: 'INSERT_FAILED', message: 'Failed to create integration' })
-    }
+    if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create integration')
 
     // Audit log entry
     await fastify.supabase
@@ -174,21 +172,18 @@ export default async function integrationsRoutes(fastify: FastifyInstance) {
   // ── PUT /system/integrations/:id ──────────────────────────────────────────
   fastify.put('/system/integrations/:id', auth, async (req: any, reply) => {
     if (!isAdmin(req.userRole)) {
-      return reply.code(403).send({ error: 'FORBIDDEN', message: 'Admin access required' })
+      return forbidden(reply, 'FORBIDDEN', 'Admin access required')
     }
 
     const { id } = req.params as { id: string }
 
     const parsed = updateBodySchema.safeParse(req.body)
     if (!parsed.success) {
-      return reply.code(400).send({
-        error:   'VALIDATION_ERROR',
-        message: parsed.error.issues[0]?.message,
-      })
+      return validationError(reply, ErrorCode.VALIDATION_ERROR, parsed.error.issues[0]?.message)
     }
 
     if (Object.keys(parsed.data).length === 0) {
-      return reply.code(400).send({ error: 'VALIDATION_ERROR', message: 'No fields provided for update' })
+      return validationError(reply, ErrorCode.VALIDATION_ERROR, 'No fields provided for update')
     }
 
     const { data, error } = await fastify.supabase
@@ -199,13 +194,10 @@ export default async function integrationsRoutes(fastify: FastifyInstance) {
       .select()
       .single()
 
-    if (error) {
-      req.log.error({ err: error }, 'integration update failed')
-      return reply.code(500).send({ error: 'UPDATE_FAILED', message: 'Failed to update integration' })
-    }
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update integration')
 
     if (!data) {
-      return reply.code(404).send({ error: 'NOT_FOUND', message: 'Integration not found' })
+      return notFound(reply, 'NOT_FOUND', 'Integration not found')
     }
 
     // Audit log entry
@@ -227,7 +219,7 @@ export default async function integrationsRoutes(fastify: FastifyInstance) {
   // ── DELETE /system/integrations/:id ──────────────────────────────────────
   fastify.delete('/system/integrations/:id', auth, async (req: any, reply) => {
     if (!isAdmin(req.userRole)) {
-      return reply.code(403).send({ error: 'FORBIDDEN', message: 'Admin access required' })
+      return forbidden(reply, 'FORBIDDEN', 'Admin access required')
     }
 
     const { id } = req.params as { id: string }
@@ -241,7 +233,7 @@ export default async function integrationsRoutes(fastify: FastifyInstance) {
       .single()
 
     if (error || !data) {
-      return reply.code(404).send({ error: 'NOT_FOUND', message: 'Integration not found' })
+      return notFound(reply, 'NOT_FOUND', 'Integration not found')
     }
 
     // Audit log entry
@@ -266,10 +258,7 @@ export default async function integrationsRoutes(fastify: FastifyInstance) {
 
     const parsed = auditQuerySchema.safeParse(req.query)
     if (!parsed.success) {
-      return reply.code(400).send({
-        error:   'VALIDATION_ERROR',
-        message: parsed.error.issues[0]?.message,
-      })
+      return validationError(reply, ErrorCode.VALIDATION_ERROR, parsed.error.issues[0]?.message)
     }
 
     const { limit, offset } = parsed.data
@@ -283,7 +272,7 @@ export default async function integrationsRoutes(fastify: FastifyInstance) {
       .single()
 
     if (!integration) {
-      return reply.code(404).send({ error: 'NOT_FOUND', message: 'Integration not found' })
+      return notFound(reply, 'NOT_FOUND', 'Integration not found')
     }
 
     const { data, error, count } = await fastify.supabase
@@ -293,10 +282,7 @@ export default async function integrationsRoutes(fastify: FastifyInstance) {
       .order('created_at', { ascending: false })
       .range(offset, offset + limit - 1)
 
-    if (error) {
-      req.log.error({ err: error }, 'integration audit log query failed')
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch audit log' })
-    }
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch audit log')
 
     return reply.send({ data: data ?? [], total: count ?? 0, limit, offset })
   })
@@ -306,7 +292,7 @@ export default async function integrationsRoutes(fastify: FastifyInstance) {
     // Probes the stored endpoint (outbound fetch) and mutates registry stats —
     // admin-only like every other mutation in this file.
     if (!isAdmin(req.userRole)) {
-      return reply.code(403).send({ error: 'FORBIDDEN', message: 'Admin access required' })
+      return forbidden(reply, 'FORBIDDEN', 'Admin access required')
     }
     const { id } = req.params as { id: string }
 
@@ -318,7 +304,7 @@ export default async function integrationsRoutes(fastify: FastifyInstance) {
       .single()
 
     if (fetchError || !integration) {
-      return reply.code(404).send({ error: 'NOT_FOUND', message: 'Integration not found' })
+      return notFound(reply, 'NOT_FOUND', 'Integration not found')
     }
 
     let health_status: 'healthy' | 'degraded' | 'unhealthy' | 'unknown' = 'unknown'
