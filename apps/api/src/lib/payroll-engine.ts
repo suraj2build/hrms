@@ -106,6 +106,13 @@ export interface PayrollSlipResult {
   deferred_recovery_ids:  string[]
   /** Human-readable warning when compensation is missing */
   warning?:              string
+  /** Amount by which uncapped deductions exceeded gross_pay this month, i.e. what
+   *  net_pay would have gone negative by. 0 (or absent, for slips reconstructed
+   *  from historical DB rows that predate this field) means deductions fit within
+   *  gross pay. Populated by finalizeDeductionsAndNet() (ISSUE-143) so that
+   *  `gross_pay - total_deductions = net_pay` always holds — total_deductions is
+   *  capped at gross_pay rather than left uncapped while net_pay clamps at 0. */
+  deduction_shortfall?:  number
 }
 
 // ── Core computation ───────────────────────────────────────────────────────────
@@ -140,6 +147,7 @@ export function computePayrollSlip(input: PayrollSlipInput): PayrollSlipResult {
       lop_amount:            0,
       total_deductions:      0,
       net_pay:               0,
+      deduction_shortfall:   0,
       employer_contributions:0,
       component_breakdown:   [],
       recovered_recovery_ids: [],
@@ -220,8 +228,12 @@ export function computePayrollSlip(input: PayrollSlipInput): PayrollSlipResult {
       '(exceeded available net pay for the month).'
     : undefined
 
-  const total_deductions = round2(deduction_total_base + lop_amount + al_total)
-  const net_pay          = round2(Math.max(0, gross_pay - total_deductions))
+  const uncappedDeductions = round2(deduction_total_base + lop_amount + al_total)
+  const { total_deductions, net_pay, deduction_shortfall } = finalizeDeductionsAndNet(gross_pay, uncappedDeductions)
+  const shortfallWarning = deduction_shortfall > 0
+    ? `Deductions (${uncappedDeductions}) exceed gross pay (${gross_pay}) by ${deduction_shortfall} — ` +
+      'total_deductions and net_pay have been capped; the shortfall is not recovered automatically. Review this slip.'
+    : undefined
 
   return {
     employeeId,
@@ -235,18 +247,43 @@ export function computePayrollSlip(input: PayrollSlipInput): PayrollSlipResult {
     lop_amount,
     total_deductions,
     net_pay,
+    deduction_shortfall,
     employer_contributions,
     component_breakdown: [...components, ...al_components],
     recovered_recovery_ids: recoveredAL.map(d => d.schedule_id),
     deferred_recovery_ids:  deferredAL.map(d => d.schedule_id),
-    // Propagate no-attendance + zero-working-days + recovery-deferral warnings.
-    warning: [noAttendanceWarning, zeroDenomWarning, deferralWarning].filter(Boolean).join(' ') || undefined,
+    // Propagate no-attendance + zero-working-days + recovery-deferral + shortfall warnings.
+    warning: [noAttendanceWarning, zeroDenomWarning, deferralWarning, shortfallWarning].filter(Boolean).join(' ') || undefined,
   }
 }
 
 /** Round to 2 decimal places. Exported so callers can use the same rounding. */
 export function round2(n: number): number {
   return Math.round(n * 100) / 100
+}
+
+/**
+ * Cap total_deductions at gross_pay so `gross_pay - total_deductions = net_pay`
+ * always holds (ISSUE-143). Previously net_pay alone was clamped at 0 while
+ * total_deductions stayed uncapped — e.g. gross 20,000 / deductions 25,000 stored
+ * total_deductions=25,000 and net_pay=0, silently breaking the invariant
+ * routes/payroll/index.ts documents as load-bearing for GL/reporting
+ * reconciliation (total_gross - total_deductions = total_net). The excess is
+ * surfaced as deduction_shortfall instead of being absorbed invisibly.
+ *
+ * Shared by computePayrollSlip (payroll-engine.ts) and applyStatutoryToSlip /
+ * applyTdsToSlip (statutory-payroll.ts) — the same clamp-without-capping bug
+ * existed independently in all three; fixing it in one place only prevents the
+ * three from drifting again.
+ */
+export function finalizeDeductionsAndNet(
+  grossPay: number,
+  uncappedDeductions: number,
+): { total_deductions: number; net_pay: number; deduction_shortfall: number } {
+  const total_deductions   = round2(Math.min(uncappedDeductions, grossPay))
+  const net_pay             = round2(grossPay - total_deductions)
+  const deduction_shortfall = round2(Math.max(0, uncappedDeductions - grossPay))
+  return { total_deductions, net_pay, deduction_shortfall }
 }
 
 // ── buildPayrollSlipPreview ─────────────────────────────────────────────────────

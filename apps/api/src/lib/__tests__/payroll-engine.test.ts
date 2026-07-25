@@ -29,6 +29,7 @@ import { describe, it, expect, vi } from 'vitest'
 import {
   fetchAttendanceSummary,
   computePayrollSlip,
+  finalizeDeductionsAndNet,
   type PayrollSlipInput,
 } from '../payroll-engine.js'
 
@@ -283,5 +284,48 @@ describe('computePayrollSlip — lop_amount and net_pay', () => {
 
     expect(result.lop_amount).toBe(13500)
     expect(result.net_pay).toBe(90_000 - 13500)  // = 76500
+  })
+})
+
+// ── Section 3: ISSUE-143 — gross_pay - total_deductions = net_pay invariant ──
+
+describe('finalizeDeductionsAndNet — deduction cap invariant (ISSUE-143)', () => {
+  it('deductions within gross pay: total_deductions unchanged, no shortfall', () => {
+    const r = finalizeDeductionsAndNet(60_000, 10_000)
+    expect(r.total_deductions).toBe(10_000)
+    expect(r.net_pay).toBe(50_000)
+    expect(r.deduction_shortfall).toBe(0)
+    expect(r.net_pay).toBe(60_000 - r.total_deductions)
+  })
+
+  it('deductions exceeding gross pay: total_deductions capped at gross_pay, excess surfaced as shortfall', () => {
+    const r = finalizeDeductionsAndNet(20_000, 25_000)
+    expect(r.total_deductions).toBe(20_000)
+    expect(r.net_pay).toBe(0)
+    expect(r.deduction_shortfall).toBe(5_000)
+    // The invariant routes/payroll/index.ts relies on for GL/reporting reconciliation:
+    expect(r.net_pay).toBe(20_000 - r.total_deductions)
+  })
+
+  it('zero gross pay with any deductions: total_deductions and net_pay both 0', () => {
+    const r = finalizeDeductionsAndNet(0, 5_000)
+    expect(r.total_deductions).toBe(0)
+    expect(r.net_pay).toBe(0)
+    expect(r.deduction_shortfall).toBe(5_000)
+  })
+})
+
+describe('computePayrollSlip — LOP exceeding gross pay caps total_deductions (ISSUE-143)', () => {
+  it('lop_days far exceeding total_working_days: net_pay never negative, invariant holds, shortfall warned', () => {
+    // 25 lop_days on a 22-working-day month → lop_amount = (25/22) × 60000 = 68,181.82 > gross_pay
+    const result = computePayrollSlip(slipInput(25, 0, 60_000, 22))
+
+    expect(result.gross_pay).toBe(60_000)
+    expect(result.total_deductions).toBe(60_000)     // capped at gross_pay, not the uncapped 68,181.82
+    expect(result.net_pay).toBe(0)
+    expect(result.deduction_shortfall).toBeCloseTo(8181.82, 1)
+    // The invariant: gross_pay - total_deductions = net_pay, always.
+    expect(result.gross_pay - result.total_deductions).toBe(result.net_pay)
+    expect(result.warning ?? '').toMatch(/exceed gross pay/i)
   })
 })

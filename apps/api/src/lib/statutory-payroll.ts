@@ -24,7 +24,7 @@ import { computeESI } from './statutory/esi-engine.js'
 import { computePTax } from './statutory/ptax-engine.js'
 import { computeLWF } from './statutory/lwf-engine.js'
 import type { EmployeeStatutoryParams } from './statutory/statutory-governance.js'
-import { round2 } from './payroll-engine.js'
+import { round2, finalizeDeductionsAndNet } from './payroll-engine.js'
 import type { PayrollSlipResult, PayrollComponentSnapshot } from './payroll-engine.js'
 
 /** Codes of statutory lines that the engines own and therefore replace.
@@ -63,9 +63,9 @@ export function applyTdsToSlip(slip: PayrollSlipResult, monthlyTDS: number): Pay
   const deductionBase = round2(
     breakdown.filter(c => c.component_type === 'deduction').reduce((s, c) => s + c.monthly_amount, 0),
   )
-  const total_deductions = round2(deductionBase + slip.lop_amount)
-  const net_pay = round2(Math.max(0, slip.gross_pay - total_deductions))
-  return { ...slip, component_breakdown: breakdown, total_deductions, net_pay }
+  const { total_deductions, net_pay, deduction_shortfall } =
+    finalizeDeductionsAndNet(slip.gross_pay, round2(deductionBase + slip.lop_amount))
+  return { ...slip, component_breakdown: breakdown, total_deductions, net_pay, deduction_shortfall }
 }
 
 function mkLine(
@@ -201,8 +201,8 @@ export function applyStatutoryToSlip(
     breakdown.filter(c => c.component_type === 'employer_contribution')
              .reduce((s, c) => s + c.monthly_amount, 0),
   )
-  const total_deductions = round2(deductionBase + slip.lop_amount)
-  const net_pay = round2(Math.max(0, slip.gross_pay - total_deductions))
+  const { total_deductions, net_pay, deduction_shortfall } =
+    finalizeDeductionsAndNet(slip.gross_pay, round2(deductionBase + slip.lop_amount))
 
   return {
     slip: {
@@ -211,6 +211,7 @@ export function applyStatutoryToSlip(
       total_deductions,
       employer_contributions,
       net_pay,
+      deduction_shortfall,
     },
     trace: {
       epf: {
