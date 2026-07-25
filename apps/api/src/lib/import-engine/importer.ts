@@ -1277,7 +1277,14 @@ export async function createImportJob(
     .select('id')
     .single()
 
-  if (error || !data) throw new Error(`Failed to create import job: ${error?.message ?? 'unknown'}`)
+  if (error || !data) {
+    // Preserve the Postgres error code (23505 = unique_violation) so callers
+    // can detect the idx_import_jobs_one_active_per_master_type race guard
+    // firing, distinct from any other insert failure.
+    const wrapped = new Error(`Failed to create import job: ${error?.message ?? 'unknown'}`) as Error & { code?: string }
+    if (error && 'code' in error) wrapped.code = (error as { code?: string }).code
+    throw wrapped
+  }
   return data.id as string
 }
 

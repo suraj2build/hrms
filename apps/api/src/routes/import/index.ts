@@ -31,6 +31,13 @@ const SEEDED_MASTER_TYPES: Record<string, string> = {
 
 const IMPORT_MODES = ['create_only', 'update_only', 'upsert', 'validate_only'] as const
 
+// Postgres unique_violation on idx_import_jobs_one_active_per_master_type —
+// the DB-level backstop for the SELECT-then-INSERT concurrency guard below.
+// A losing concurrent request lands here instead of the earlier SELECT check.
+function isActiveImportRaceViolation(err: unknown): boolean {
+  return typeof err === 'object' && err !== null && (err as { code?: string }).code === '23505'
+}
+
 // ── Zod schemas ───────────────────────────────────────────────────────────────
 
 // Manifest sent back by the frontend on validate/run (all string values from CSV/XLSX).
@@ -284,6 +291,12 @@ export default async function importRoutes(fastify: FastifyInstance) {
           rows.length,
         )
       } catch (err) {
+        if (isActiveImportRaceViolation(err)) {
+          return reply.code(409).send({
+            error:   'IMPORT_ALREADY_RUNNING',
+            message: `A ${masterType} import is already in progress. Wait for it to complete or cancel it before starting a new one.`,
+          })
+        }
         fastify.log.error(err)
         return reply.code(500).send({
           error:   'IMPORT_ERROR',
@@ -313,6 +326,12 @@ export default async function importRoutes(fastify: FastifyInstance) {
         rows.length,
       )
     } catch (err) {
+      if (isActiveImportRaceViolation(err)) {
+        return reply.code(409).send({
+          error:   'IMPORT_ALREADY_RUNNING',
+          message: `A ${masterType} import is already in progress. Wait for it to complete or cancel it before starting a new one.`,
+        })
+      }
       fastify.log.error(err)
       return reply.code(500).send({
         error:   'IMPORT_ERROR',
