@@ -6,6 +6,7 @@ import { EventType, MODULE } from '../../platform/events/index.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
 import { serverError, notFound, forbidden, validationError, conflictError, ErrorCode } from '../../lib/api-errors.js'
 import { revokeEmployeeAuth } from '../../lib/user-account-service.js'
+import { sanitizeOrFilterTerm } from '../../lib/postgrest-filter.js'
 
 // NOTE: After migration 016 (lean employees), the following columns were removed
 // from the employees table and relocated to dedicated sub-tables:
@@ -56,7 +57,7 @@ export default async function employeeRoutes(fastify: FastifyInstance) {
       .limit(limit)
 
     if (trimmed) {
-      const term = `%${trimmed}%`
+      const term = `%${sanitizeOrFilterTerm(trimmed)}%`
       query = query.or(`first_name.ilike.${term},last_name.ilike.${term},employee_code.ilike.${term},email.ilike.${term}`)
     }
 
@@ -233,7 +234,7 @@ export default async function employeeRoutes(fastify: FastifyInstance) {
       query = query.eq('status', status)
     }
     if (search?.trim()) {
-      const term = `%${search.trim()}%`
+      const term = `%${sanitizeOrFilterTerm(search.trim())}%`
       query = query.or(`first_name.ilike.${term},last_name.ilike.${term},employee_code.ilike.${term},email.ilike.${term}`)
     }
     if (restrictIds) query = query.in('id', restrictIds)

@@ -13,6 +13,7 @@ import { z } from 'zod'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { logAction } from '../../lib/audit-service.js'
 import { eventBus } from '../../lib/event-bus.js'
+import { sanitizeOrFilterTerm } from '../../lib/postgrest-filter.js'
 import { resolveCallerEmployeeId } from '../../lib/manager-scope.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
 
@@ -71,7 +72,7 @@ export default async function assetsRoutes(fastify: FastifyInstance) {
         if (status)      q = q.eq('status', status)
         if (category_id) q = q.eq('category_id', category_id)
         if (search) {
-          const s = `%${search}%`
+          const s = `%${sanitizeOrFilterTerm(search)}%`
           q = q.or(`asset_code.ilike.${s},name.ilike.${s},serial_number.ilike.${s}`)
         }
         return q.range(from, to)

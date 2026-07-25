@@ -17,6 +17,7 @@ import { logAction }    from '../../lib/audit-service.js'
 import { HR_ADMIN_ROLES, MANAGER_ROLES } from '../../lib/rbac.js'
 import { notifyHrAdmins } from '../../lib/notify.js'
 import { isOfferSignoffEnabled } from '../../lib/payroll-flags.js'
+import { sanitizeOrFilterTerm } from '../../lib/postgrest-filter.js'
 import {
   sendEmail,
   applicationReceivedEmail,
@@ -645,7 +646,10 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
       .order('created_at', { ascending: false })
 
     if (parsed.data.source) q = q.eq('source', parsed.data.source)
-    if (parsed.data.search) q = q.or(`first_name.ilike.%${parsed.data.search}%,last_name.ilike.%${parsed.data.search}%,email.ilike.%${parsed.data.search}%`)
+    if (parsed.data.search) {
+      const term = `%${sanitizeOrFilterTerm(parsed.data.search)}%`
+      q = q.or(`first_name.ilike.${term},last_name.ilike.${term},email.ilike.${term}`)
+    }
 
     q = q.range(parsed.data.offset, parsed.data.offset + parsed.data.limit - 1)
 

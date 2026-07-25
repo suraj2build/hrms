@@ -38,6 +38,7 @@ import { applyStatutoryToSlip, applyTdsToSlip } from '../../lib/statutory-payrol
 import { computeTaxWithDB, fetchTaxTableCache } from '../../lib/statutory/tax-computation-engine.js'
 import type { TaxTableCache } from '../../lib/statutory/tax-computation-engine.js'
 import { round2 as round2fn } from '../../lib/payroll-engine.js'
+import { sanitizeOrFilterTerm } from '../../lib/postgrest-filter.js'
 
 /** Indian financial year (Apr–Mar) for a YYYY-MM month → e.g. '2026-27'. */
 function financialYearOf(month: string): string {
@@ -1690,7 +1691,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       .range(offset, offset + limit - 1)
 
     if (q && q.trim()) {
-      const term = `%${q.trim()}%`
+      const term = `%${sanitizeOrFilterTerm(q.trim())}%`
       // month is stored as YYYY-MM — ilike match covers partial month strings.
       // notes is the freetext field supplied at run creation.
       qb = qb.or(`month.ilike.${term},notes.ilike.${term}`)
