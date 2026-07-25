@@ -16,11 +16,17 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { serverError, notFound, forbidden, validationError, conflictError, ErrorCode } from '../../lib/api-errors.js'
 
 // ── Schemas ───────────────────────────────────────────────────────────────────
 
+// Must mirror operational_incidents.status's CHECK constraint (090_operational_incidents.sql).
+const INCIDENT_STATUSES = [
+  'open', 'investigating', 'escalated', 'mitigating', 'resolved', 'closed', 'false_positive',
+] as const
+
 const listQuerySchema = z.object({
-  status:        z.enum(['open', 'in_progress', 'escalated', 'resolved', 'closed']).optional(),
+  status:        z.enum(INCIDENT_STATUSES).optional(),
   severity:      z.enum(['low', 'medium', 'high', 'critical']).optional(),
   incident_type: z.string().optional(),
   from:          z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
@@ -106,10 +112,7 @@ export default async function incidentsRoute(fastify: FastifyInstance) {
   fastify.get('/system/incidents', auth, async (req: any, reply) => {
     const parsed = listQuerySchema.safeParse(req.query)
     if (!parsed.success) {
-      return reply.code(400).send({
-        error:   'VALIDATION_ERROR',
-        message: parsed.error.issues[0]?.message,
-      })
+      return validationError(reply, ErrorCode.VALIDATION_ERROR, parsed.error.issues[0]?.message)
     }
 
     const { status, severity, incident_type, from, to, limit, offset } = parsed.data
@@ -142,8 +145,7 @@ export default async function incidentsRoute(fastify: FastifyInstance) {
     const { data, error, count } = await q
 
     if (error) {
-      req.log.error({ err: error }, 'incidents list query failed')
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch incidents' })
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch incidents')
     }
 
     const rows = (data ?? []).map((r: any) => ({
@@ -188,8 +190,7 @@ export default async function incidentsRoute(fastify: FastifyInstance) {
       .eq('tenant_id', tenantId)
 
     if (error) {
-      req.log.error({ err: error }, 'incidents summary query failed')
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch incident summary' })
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch incident summary')
     }
 
     const rows = data ?? []
@@ -275,7 +276,7 @@ export default async function incidentsRoute(fastify: FastifyInstance) {
       .single()
 
     if (incidentError || !incident) {
-      return reply.code(404).send({ error: 'NOT_FOUND', message: 'Incident not found' })
+      return notFound(reply, 'NOT_FOUND', 'Incident not found')
     }
 
     // Fetch timeline events
@@ -292,8 +293,7 @@ export default async function incidentsRoute(fastify: FastifyInstance) {
       .order('created_at', { ascending: true })
 
     if (timelineError) {
-      req.log.error({ err: timelineError }, 'incident timeline query failed')
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch timeline' })
+      return serverError(req, reply, timelineError, ErrorCode.QUERY_FAILED, 'Failed to fetch timeline')
     }
 
     // Fetch escalations
@@ -310,8 +310,7 @@ export default async function incidentsRoute(fastify: FastifyInstance) {
       .order('escalated_at', { ascending: true })
 
     if (escalationsError) {
-      req.log.error({ err: escalationsError }, 'incident escalations query failed')
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch escalations' })
+      return serverError(req, reply, escalationsError, ErrorCode.QUERY_FAILED, 'Failed to fetch escalations')
     }
 
     // Fetch comments
@@ -328,8 +327,7 @@ export default async function incidentsRoute(fastify: FastifyInstance) {
       .order('created_at', { ascending: true })
 
     if (commentsError) {
-      req.log.error({ err: commentsError }, 'incident comments query failed')
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch comments' })
+      return serverError(req, reply, commentsError, ErrorCode.QUERY_FAILED, 'Failed to fetch comments')
     }
 
     const incidentData = {
@@ -396,15 +394,12 @@ export default async function incidentsRoute(fastify: FastifyInstance) {
   // ── POST /system/incidents ────────────────────────────────────────────────
   fastify.post('/system/incidents', auth, async (req: any, reply) => {
     if (!isAdmin(req.userRole)) {
-      return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
+      return forbidden(reply, 'FORBIDDEN', 'HR admin access required')
     }
 
     const parsed = createBodySchema.safeParse(req.body)
     if (!parsed.success) {
-      return reply.code(400).send({
-        error:   'VALIDATION_ERROR',
-        message: parsed.error.issues[0]?.message,
-      })
+      return validationError(reply, ErrorCode.VALIDATION_ERROR, parsed.error.issues[0]?.message)
     }
 
     const body = parsed.data
@@ -436,8 +431,7 @@ export default async function incidentsRoute(fastify: FastifyInstance) {
       .single()
 
     if (insertError || !incident) {
-      req.log.error({ err: insertError }, 'incident insert failed')
-      return reply.code(500).send({ error: 'INSERT_FAILED', message: 'Failed to create incident' })
+      return serverError(req, reply, insertError, ErrorCode.INSERT_FAILED, 'Failed to create incident')
     }
 
     const timelineErr = await addTimelineEvent(
@@ -460,17 +454,14 @@ export default async function incidentsRoute(fastify: FastifyInstance) {
   // ── PUT /system/incidents/:id ─────────────────────────────────────────────
   fastify.put('/system/incidents/:id', auth, async (req: any, reply) => {
     if (!isAdmin(req.userRole)) {
-      return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
+      return forbidden(reply, 'FORBIDDEN', 'HR admin access required')
     }
 
     const { id } = req.params as { id: string }
 
     const parsed = updateBodySchema.safeParse(req.body)
     if (!parsed.success) {
-      return reply.code(400).send({
-        error:   'VALIDATION_ERROR',
-        message: parsed.error.issues[0]?.message,
-      })
+      return validationError(reply, ErrorCode.VALIDATION_ERROR, parsed.error.issues[0]?.message)
     }
 
     const body = parsed.data
@@ -484,7 +475,7 @@ export default async function incidentsRoute(fastify: FastifyInstance) {
       .single()
 
     if (fetchError || !existing) {
-      return reply.code(404).send({ error: 'NOT_FOUND', message: 'Incident not found' })
+      return notFound(reply, 'NOT_FOUND', 'Incident not found')
     }
 
     const updatePayload: Record<string, unknown> = { updated_at: new Date().toISOString() }
@@ -503,8 +494,7 @@ export default async function incidentsRoute(fastify: FastifyInstance) {
       .single()
 
     if (updateError || !updated) {
-      req.log.error({ err: updateError }, 'incident update failed')
-      return reply.code(500).send({ error: 'UPDATE_FAILED', message: 'Failed to update incident' })
+      return serverError(req, reply, updateError, ErrorCode.UPDATE_FAILED, 'Failed to update incident')
     }
 
     // Add timeline events for each meaningful change
@@ -554,17 +544,14 @@ export default async function incidentsRoute(fastify: FastifyInstance) {
   // ── POST /system/incidents/:id/escalate ───────────────────────────────────
   fastify.post('/system/incidents/:id/escalate', auth, async (req: any, reply) => {
     if (!isAdmin(req.userRole)) {
-      return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
+      return forbidden(reply, 'FORBIDDEN', 'HR admin access required')
     }
 
     const { id } = req.params as { id: string }
 
     const parsed = escalateBodySchema.safeParse(req.body)
     if (!parsed.success) {
-      return reply.code(400).send({
-        error:   'VALIDATION_ERROR',
-        message: parsed.error.issues[0]?.message,
-      })
+      return validationError(reply, ErrorCode.VALIDATION_ERROR, parsed.error.issues[0]?.message)
     }
 
     const { escalate_to, reason } = parsed.data
@@ -578,7 +565,7 @@ export default async function incidentsRoute(fastify: FastifyInstance) {
       .single()
 
     if (fetchError || !existing) {
-      return reply.code(404).send({ error: 'NOT_FOUND', message: 'Incident not found' })
+      return notFound(reply, 'NOT_FOUND', 'Incident not found')
     }
 
     // Insert escalation record
@@ -596,8 +583,7 @@ export default async function incidentsRoute(fastify: FastifyInstance) {
       .single()
 
     if (escalationError || !escalation) {
-      req.log.error({ err: escalationError }, 'incident escalation insert failed')
-      return reply.code(500).send({ error: 'INSERT_FAILED', message: 'Failed to create escalation' })
+      return serverError(req, reply, escalationError, ErrorCode.INSERT_FAILED, 'Failed to create escalation')
     }
 
     // Update incident status to escalated
@@ -608,8 +594,7 @@ export default async function incidentsRoute(fastify: FastifyInstance) {
       .eq('tenant_id', req.tenantId)
 
     if (updateError) {
-      req.log.error({ err: updateError }, 'incident status update to escalated failed')
-      return reply.code(500).send({ error: 'UPDATE_FAILED', message: 'Failed to update incident status' })
+      return serverError(req, reply, updateError, ErrorCode.UPDATE_FAILED, 'Failed to update incident status')
     }
 
     const timelineErr = await addTimelineEvent(
@@ -629,17 +614,14 @@ export default async function incidentsRoute(fastify: FastifyInstance) {
   // ── POST /system/incidents/:id/resolve ────────────────────────────────────
   fastify.post('/system/incidents/:id/resolve', auth, async (req: any, reply) => {
     if (!isAdmin(req.userRole)) {
-      return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
+      return forbidden(reply, 'FORBIDDEN', 'HR admin access required')
     }
 
     const { id } = req.params as { id: string }
 
     const parsed = resolveBodySchema.safeParse(req.body)
     if (!parsed.success) {
-      return reply.code(400).send({
-        error:   'VALIDATION_ERROR',
-        message: parsed.error.issues[0]?.message,
-      })
+      return validationError(reply, ErrorCode.VALIDATION_ERROR, parsed.error.issues[0]?.message)
     }
 
     const { resolution_note } = parsed.data
@@ -653,11 +635,11 @@ export default async function incidentsRoute(fastify: FastifyInstance) {
       .single()
 
     if (fetchError || !existing) {
-      return reply.code(404).send({ error: 'NOT_FOUND', message: 'Incident not found' })
+      return notFound(reply, 'NOT_FOUND', 'Incident not found')
     }
 
     if ((existing as any).status === 'resolved') {
-      return reply.code(409).send({ error: 'ALREADY_RESOLVED', message: 'Incident is already resolved' })
+      return conflictError(reply, 'ALREADY_RESOLVED', 'Incident is already resolved')
     }
 
     const resolvedAt = new Date().toISOString()
@@ -677,8 +659,7 @@ export default async function incidentsRoute(fastify: FastifyInstance) {
       .single()
 
     if (updateError || !updated) {
-      req.log.error({ err: updateError }, 'incident resolve update failed')
-      return reply.code(500).send({ error: 'UPDATE_FAILED', message: 'Failed to resolve incident' })
+      return serverError(req, reply, updateError, ErrorCode.UPDATE_FAILED, 'Failed to resolve incident')
     }
 
     const timelineErr = await addTimelineEvent(
@@ -699,16 +680,13 @@ export default async function incidentsRoute(fastify: FastifyInstance) {
   fastify.post('/system/incidents/:id/comments', auth, async (req: any, reply) => {
     // Incident management is an admin console — match the rest of this file.
     if (!isAdmin(req.userRole)) {
-      return reply.code(403).send({ error: 'FORBIDDEN', message: 'Admin access required' })
+      return forbidden(reply, 'FORBIDDEN', 'Admin access required')
     }
     const { id } = req.params as { id: string }
 
     const parsed = commentBodySchema.safeParse(req.body)
     if (!parsed.success) {
-      return reply.code(400).send({
-        error:   'VALIDATION_ERROR',
-        message: parsed.error.issues[0]?.message,
-      })
+      return validationError(reply, ErrorCode.VALIDATION_ERROR, parsed.error.issues[0]?.message)
     }
 
     const { content, is_internal } = parsed.data
@@ -722,7 +700,7 @@ export default async function incidentsRoute(fastify: FastifyInstance) {
       .single()
 
     if (fetchError || !existing) {
-      return reply.code(404).send({ error: 'NOT_FOUND', message: 'Incident not found' })
+      return notFound(reply, 'NOT_FOUND', 'Incident not found')
     }
 
     const { data: comment, error: insertError } = await fastify.supabase
@@ -739,8 +717,7 @@ export default async function incidentsRoute(fastify: FastifyInstance) {
       .single()
 
     if (insertError || !comment) {
-      req.log.error({ err: insertError }, 'incident comment insert failed')
-      return reply.code(500).send({ error: 'INSERT_FAILED', message: 'Failed to add comment' })
+      return serverError(req, reply, insertError, ErrorCode.INSERT_FAILED, 'Failed to add comment')
     }
 
     const timelineErr = await addTimelineEvent(
