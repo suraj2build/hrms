@@ -190,6 +190,44 @@ export default async function fullCreateRoute(fastify: FastifyInstance) {
       }
     }
 
+    // Fresh audit finding (cross-tenant IDOR): department_id/designation_id/
+    // grade_id/work_location_id/cost_center_id/shift_id/manager_id were
+    // passed straight through to create_employee_with_job with no tenant
+    // check — the RPC's own department/designation/grade LEFT JOINs (used
+    // to build the response) have no tenant_id filter either, so a foreign
+    // tenant's department/designation/grade name was echoed directly back
+    // in this endpoint's 201 response. Same validation pattern as the
+    // site_id/roster_id checks above.
+    const fkChecks: Array<[string | undefined, string, string]> = [
+      [b.department_id,    'departments',    'department_id'],
+      [b.designation_id,   'designations',   'designation_id'],
+      [b.grade_id,         'grades',         'grade_id'],
+      [b.work_location_id, 'work_locations', 'work_location_id'],
+      [b.cost_center_id,   'cost_centers',   'cost_center_id'],
+      [b.shift_id,         'shifts',         'shift_id'],
+      [b.manager_id,       'employees',      'manager_id'],
+    ]
+    for (const [value, table, field] of fkChecks) {
+      if (!value) continue
+      const { data: row } = await fastify.supabase
+        .from(table)
+        .select('id')
+        .eq('id', value)
+        .eq('tenant_id', tenantId)
+        .maybeSingle()
+      if (!row) {
+        logExit(
+          { outcome: 'validation_error', validation_field: field },
+          `POST /employees/full-create — ${field} not found for tenant`,
+        )
+        return reply.code(400).send({
+          error:   'VALIDATION',
+          message: `${field.replace(/_id$/, '').replace(/_/g, ' ')} not found in your organisation`,
+          field,
+        })
+      }
+    }
+
     // ── 3. Atomic creation via PG function ──────────────────────────────────
     const { data: rpcData, error: rpcError } = await fastify.supabase
       .rpc('create_employee_with_job', {
