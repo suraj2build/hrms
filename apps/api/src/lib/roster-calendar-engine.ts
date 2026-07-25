@@ -363,7 +363,14 @@ async function _fetchHoliday(
     ? q.or(`holiday_group_id.is.null,holiday_group_id.eq.${groupId}`)
     : q.is('holiday_group_id', null)
 
-  const { data } = await q.limit(1).maybeSingle()
+  const { data, error } = await q.limit(1).maybeSingle()
+  // Fresh audit finding: previously discarded — a query error silently fell
+  // through to "not a holiday", inflating working-day counts and leave-day
+  // charges for that date. Throws, matching attendance-engine.ts's
+  // fetchHoliday's established contract for the same bug class.
+  if (error) {
+    throw new Error(`_fetchHoliday: DB query failed — ${error.message}`)
+  }
   return data ?? null
 }
 
@@ -724,7 +731,15 @@ export async function buildEmployeeRosterCalendar(
     ? holidayQ.or(`holiday_group_id.is.null,holiday_group_id.eq.${ctx.holiday_group_id}`)
     : holidayQ.is('holiday_group_id', null)
 
-  const { data: holidays } = await holidayQ
+  const { data: holidays, error: holidayErr } = await holidayQ
+  // Fresh audit finding: same unchecked-error bug as _fetchHoliday above —
+  // this pre-fetch feeds countRosterWorkingDays (payroll working-days count)
+  // and leave-request-service.ts's working-day exclusion logic, so a
+  // silently empty holiday map here inflates working-day counts and
+  // leave-day charges for the whole month, not just one date.
+  if (holidayErr) {
+    throw new Error(`buildEmployeeRosterCalendar: holiday query failed — ${holidayErr.message}`)
+  }
   const holidayMap = new Map(
     (holidays ?? []).map(h => [h.date as string, { name: h.name as string, is_optional: h.is_optional as boolean }])
   )
