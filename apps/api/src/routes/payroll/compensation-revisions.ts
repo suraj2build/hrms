@@ -8,6 +8,7 @@ import { z } from 'zod'
 import { logAction } from '../../lib/audit-service.js'
 import { EventType, MODULE } from '../../platform/events/index.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 export default async function compensationRevisionsRoutes(fastify: FastifyInstance) {
   const auth = { preHandler: [fastify.authenticate] }
@@ -232,6 +233,26 @@ export default async function compensationRevisionsRoutes(fastify: FastifyInstan
       req.log.warn({ err: snapErr }, 'Failed to create compensation snapshots')
     }
 
+    // ── Supersede the prior active compensation ───────────────────────────────
+    // Only one active compensation per employee is allowed (uidx_comp_one_active,
+    // migration 014). Deactivate the current active record before inserting the
+    // new one — mirrors the established pattern in employees/compensation.ts.
+    // Without this, the insert below hits a 23505 unique-violation for any
+    // employee who already has active compensation (i.e. virtually every real
+    // revision), which was previously only req.log.warn'd and swallowed: HR saw
+    // "Revision approved" while the employee's pay never actually changed.
+    if (currentComp) {
+      const { error: supersedeErr } = await fastify.supabase
+        .from('employee_compensations')
+        .update({ is_active: false })
+        .eq('tenant_id', req.tenantId)
+        .eq('employee_id', rev.employee_id)
+        .eq('is_active', true)
+      if (supersedeErr) {
+        return serverError(req, reply, supersedeErr, ErrorCode.UPDATE_FAILED, 'Revision status set to approved, but failed to supersede prior compensation. Compensation was NOT changed — contact support before retrying.')
+      }
+    }
+
     // ── Create the payroll-effective employee_compensations record ────────────
     const { data: newComp, error: compInsertErr } = await fastify.supabase
       .from('employee_compensations')
@@ -250,7 +271,11 @@ export default async function compensationRevisionsRoutes(fastify: FastifyInstan
       .single()
 
     if (compInsertErr) {
-      req.log.warn({ err: compInsertErr }, 'Failed to create employee_compensations on revision approval')
+      // Previously silently warned + returned success — HR would see "Revision
+      // approved" with the employee's compensation never actually updated.
+      // Surface it: the revision row is already 'approved', but the underlying
+      // compensation change did not happen and needs manual follow-up.
+      return serverError(req, reply, compInsertErr, ErrorCode.INSERT_FAILED, 'Revision status set to approved, but failed to create the new compensation record. Compensation was NOT changed — contact support before retrying.')
     } else if (newComp) {
       // Copy and proportionally scale components from the previous active compensation.
       // prevComponents already fetched above — reuse to avoid duplicate DB round-trip.
