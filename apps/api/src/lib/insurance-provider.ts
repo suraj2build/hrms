@@ -70,13 +70,21 @@ export class InsuranceProvider {
   async syncUnenrolment(employeeId: string, planId: string): Promise<void> {
     const payload = { employee_id: employeeId, plan_id: planId }
 
-    await this.supabase.from('insurance_outbox').insert({
+    // Fresh audit finding: 'unenrolment_sync' is not in insurance_outbox's
+    // event_type CHECK constraint (only 'enrolment_sync', 'dependent_update',
+    // 'unenrolment' are allowed) — this insert has always failed the CHECK,
+    // and its error was never checked, so no unenrolment has ever actually
+    // been logged to the outbox (the real-world unenrolment API call below
+    // still fires regardless, since it doesn't depend on this insert
+    // succeeding — only the audit trail was silently missing).
+    const { error: insertErr } = await this.supabase.from('insurance_outbox').insert({
       tenant_id:     this.tenantId,
       provider_name: process.env.INSURANCE_PROVIDER_NAME ?? 'GMC',
-      event_type:    'unenrolment_sync',
+      event_type:    'unenrolment',
       payload,
       status:        'pending',
     })
+    if (insertErr) console.error('[insurance-provider] outbox insert failed:', insertErr)
 
     const apiKey = process.env.INSURANCE_API_KEY
     const apiUrl = process.env.INSURANCE_API_URL
@@ -95,7 +103,7 @@ export class InsuranceProvider {
         .from('insurance_outbox')
         .select('id')
         .eq('tenant_id', this.tenantId)
-        .eq('event_type', 'unenrolment_sync')
+        .eq('event_type', 'unenrolment')
         .order('created_at', { ascending: false })
         .limit(1)
         .maybeSingle()
