@@ -123,12 +123,28 @@ function parseCsvPreview(text: string): CsvPreviewState {
   const dataLines = lines.slice(1)   // skip header
   const rows: CsvPreviewRow[] = []
 
+  // Resolve column positions from the header row instead of assuming a
+  // fixed employee_code,date,shift_code order — a CSV built by hand or
+  // exported from another tool can list them in any order, and parsing
+  // by position alone silently swaps values into the wrong fields.
+  const header = (lines[0] ?? '').split(',').map((h) => h.trim().toLowerCase())
+  const idx = {
+    employee_code: header.indexOf('employee_code'),
+    date:          header.indexOf('date'),
+    shift_code:    header.indexOf('shift_code'),
+  }
+  const headerValid = idx.employee_code !== -1 && idx.date !== -1 && idx.shift_code !== -1
+
   dataLines.slice(0, 20).forEach((l, i) => {
     const parts = l.split(',').map((s) => s.trim())
-    const [employee_code = '', date = '', shift_code = ''] = parts
+    const employee_code = headerValid ? (parts[idx.employee_code] ?? '') : ''
+    const date          = headerValid ? (parts[idx.date]          ?? '') : ''
+    const shift_code    = headerValid ? (parts[idx.shift_code]    ?? '') : ''
 
     let error: string | undefined
-    if (!employee_code || !date || !shift_code) {
+    if (!headerValid) {
+      error = 'Header row must include employee_code, date, shift_code columns'
+    } else if (!employee_code || !date || !shift_code) {
       error = 'Missing required columns'
     } else if (!DATE_RE.test(date)) {
       error = `Invalid date format — expected YYYY-MM-DD`

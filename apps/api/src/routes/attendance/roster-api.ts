@@ -457,11 +457,32 @@ export default async function rosterRoute(fastify: FastifyInstance) {
       return reply.code(400).send({ error: 'EMPTY_CSV', message: 'CSV must have a header row and at least one data row' })
     }
 
-    // Skip header; parse data rows
+    // Resolve column positions from the header row instead of assuming a
+    // fixed employee_code,date,shift_code order — a hand-built or exported
+    // CSV can list them in any order, and parsing by position alone
+    // silently swaps values into the wrong fields with no error signal.
+    const header = lines[0].split(',').map((h) => h.trim().toLowerCase())
+    const colIdx = {
+      employee_code: header.indexOf('employee_code'),
+      date:          header.indexOf('date'),
+      shift_code:    header.indexOf('shift_code'),
+    }
+    if (colIdx.employee_code === -1 || colIdx.date === -1 || colIdx.shift_code === -1) {
+      return reply.code(400).send({
+        error:   'INVALID_HEADER',
+        message: 'CSV header row must include employee_code, date, shift_code columns',
+      })
+    }
+
     const dataLines = lines.slice(1)
     const parsedRows = dataLines.map((l, idx) => {
-      const [employee_code, date, shift_code] = l.split(',').map((s) => s.trim())
-      return { line: idx + 1, employee_code, date, shift_code }
+      const parts = l.split(',').map((s) => s.trim())
+      return {
+        line:          idx + 1,
+        employee_code: parts[colIdx.employee_code] ?? '',
+        date:          parts[colIdx.date]          ?? '',
+        shift_code:    parts[colIdx.shift_code]    ?? '',
+      }
     })
 
     // Batch-resolve codes to IDs (fetch once)
