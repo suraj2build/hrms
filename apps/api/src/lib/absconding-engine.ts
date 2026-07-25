@@ -57,34 +57,40 @@ function buildRefNumber(tenantId: string, caseId: string): string {
 }
 
 // Counts consecutive UA (unauthorised absence) days ending today.
-// Uses attendance_records where final_status = 'A' (absent/UA) or similar.
+// attendance_daily is the single table every other attendance read/write path
+// in this codebase uses (status column, lowercase values) — a prior version
+// of this function queried a table named attendance_records, which does not
+// exist anywhere in the schema, silently returning 0 with the query error
+// discarded. Confirmed this ran daily in production (registered as the
+// 'detect-absconding' durable-queue job) and did nothing since the divergence.
 async function getConsecutiveUaDays(
   supabase: SupabaseClient,
   tenantId: string,
   employeeId: string,
   fromDate: string,
 ): Promise<number> {
-  const { data } = await supabase
-    .from('attendance_records')
-    .select('date, final_status')
+  const { data, error } = await supabase
+    .from('attendance_daily')
+    .select('date, status')
     .eq('tenant_id', tenantId)
     .eq('employee_id', employeeId)
     .gte('date', fromDate)
     .lte('date', todayISO())
     .order('date', { ascending: false })
 
+  if (error) throw new Error(`getConsecutiveUaDays query failed: ${error.message}`)
   if (!data?.length) return 0
 
   let count = 0
   const today = new Date(todayISO())
 
-  for (const rec of data as { date: string; final_status: string }[]) {
+  for (const rec of data as { date: string; status: string }[]) {
     const expected = new Date(today)
     expected.setDate(today.getDate() - count)
     const recDate = new Date(rec.date)
     // Allow weekends to not break the streak (optional — check if same diff)
     if (recDate.toISOString().slice(0, 10) !== expected.toISOString().slice(0, 10)) break
-    if (['A', 'UA', 'absent'].includes(rec.final_status ?? '')) {
+    if (rec.status === 'absent') {
       count++
     } else {
       break
@@ -778,13 +784,14 @@ export async function scanAndEscalate(
     const windowStart = new Date()
     windowStart.setDate(windowStart.getDate() - THRESHOLDS.termination - 1)
 
-    const { data: uaEmployees } = await supabase
-      .from('attendance_records')
+    const { data: uaEmployees, error: uaErr } = await supabase
+      .from('attendance_daily')
       .select('employee_id')
       .eq('tenant_id', tenantId)
-      .in('final_status', ['A', 'UA', 'absent'])
+      .eq('status', 'absent')
       .lte('date', todayISO())
       .gte('date', windowStart.toISOString().slice(0, 10))
+    if (uaErr) throw new Error(`UA candidate scan failed: ${uaErr.message}`)
 
     const candidateIds = [...new Set(((uaEmployees ?? []) as { employee_id: string }[]).map(r => r.employee_id))]
 
