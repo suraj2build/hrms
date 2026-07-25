@@ -338,7 +338,12 @@ export async function creditAccrualLedger(
       cycle_key:                 opts.cycleKey,
       notes:                     opts.notes ?? null,
       consumption_eligible_from: opts.consumptionEligibleFrom ?? null,
-      release_trigger:           opts.releaseTrigger ?? 'auto',
+      // 'auto' is not a valid leave_accrual_ledger.release_trigger value (CHECK
+      // constraint, migration 159: immediate/cycle_completion/payroll_lock/
+      // attendance_confirmation/manual_release) — every insert without an
+      // explicit releaseTrigger would fail. 'immediate' matches the documented
+      // default meaning of consumptionEligibleFrom being unset.
+      release_trigger:           opts.releaseTrigger ?? 'immediate',
       is_expired:                false,
     })
     .select('id')

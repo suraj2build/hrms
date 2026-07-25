@@ -1376,7 +1376,7 @@ export async function runLifecycleMonthlyAccrual(
             // Lifecycle metadata columns (added in migration 159)
             accrual_earning_basis:     lifecycle.accrual_earning_basis,
             consumption_eligible_from: lifecycle.consumption_eligible_from ?? null,
-            release_trigger:           lifecycle.release_trigger === 'immediate' ? 'immediate' : lifecycle.release_trigger,
+            release_trigger:           lifecycle.release_trigger,
             cycle_period:              lifecycle.cycle_period,
             service_years_at_accrual:  lifecycle.service_years_at_accrual,
             tier_id:                   lifecycle.applied_tier?.id ?? null,

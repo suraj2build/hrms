@@ -23,6 +23,10 @@
 export type AccrualEarningBasis  = 'advance' | 'earned' | 'prorated'
 export type CreditTiming         = 'cycle_start' | 'cycle_end'
 export type ConsumptionTiming    = 'immediate' | 'after_cycle_completion' | 'after_payroll_lock' | 'after_attendance_confirmation'
+/** leave_accrual_ledger.release_trigger CHECK constraint vocabulary (migration 159) — deliberately
+ *  distinct from ConsumptionTiming's 'after_X'-prefixed values; use consumptionTimingToReleaseTrigger()
+ *  to convert before writing to the ledger. */
+export type ReleaseTrigger       = 'immediate' | 'cycle_completion' | 'payroll_lock' | 'attendance_confirmation' | 'manual_release'
 export type RecoveryMode         = 'none' | 'prorate' | 'full_recovery' | 'lop_deduction'
 export type JoiningHandling      = 'full' | 'prorate' | 'next_cycle'
 export type SeparationHandling   = 'full' | 'prorate' | 'none'
@@ -127,7 +131,7 @@ export interface AccrualLifecycleResult {
   /** When the credit becomes consumable (null = immediate) */
   consumption_eligible_from: string | null
   /** The release trigger that must fire before the credit is consumable */
-  release_trigger:           ConsumptionTiming
+  release_trigger:           ReleaseTrigger
   /** Approximate service tenure in years at accrual date */
   service_years_at_accrual:  number
   /** Cycle period string (e.g. '2025-06' for monthly, '2025' for yearly) */
@@ -635,7 +639,7 @@ export function evaluateAccrualLifecycle(
     accrual_earning_basis:     earningBasis,
     applied_tier:              appliedTier,
     consumption_eligible_from: consumptionEligibleFrom,
-    release_trigger:           consumptionTiming,
+    release_trigger:           consumptionTimingToReleaseTrigger(consumptionTiming),
     service_years_at_accrual:  serviceYears,
     cycle_period:              cyclePeriod,
     explain,
@@ -662,6 +666,18 @@ function skip(
     service_years_at_accrual:  serviceYears,
     cycle_period:              cyclePeriod,
     explain,
+  }
+}
+
+/** Maps the engine's internal ConsumptionTiming vocabulary to the
+ *  leave_accrual_ledger.release_trigger CHECK constraint's bare-name vocabulary. */
+function consumptionTimingToReleaseTrigger(timing: ConsumptionTiming): ReleaseTrigger {
+  switch (timing) {
+    case 'after_cycle_completion':       return 'cycle_completion'
+    case 'after_payroll_lock':           return 'payroll_lock'
+    case 'after_attendance_confirmation': return 'attendance_confirmation'
+    case 'immediate':
+    default:                              return 'immediate'
   }
 }
 
