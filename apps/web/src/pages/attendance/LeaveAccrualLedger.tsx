@@ -14,7 +14,7 @@
  */
 
 import { useState }                                      from 'react'
-import { useQuery }                                      from '@tanstack/react-query'
+import { useQuery, keepPreviousData }                    from '@tanstack/react-query'
 import {
   BookOpen,
   AlertTriangle,
@@ -281,6 +281,7 @@ export function LeaveAccrualLedger() {
     queryFn:  () => api.get(`/attendance/leave/ledger/${targetEmpId}?${params}`),
     enabled:  !!targetEmpId,
     staleTime: 30_000,
+    placeholderData: keepPreviousData, // ISSUE-155 — keep rows visible during page transitions
   })
 
   const rows  = data?.data  ?? []

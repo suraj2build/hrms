@@ -6,7 +6,7 @@
  */
 
 import { useState }    from 'react'
-import { useQuery }    from '@tanstack/react-query'
+import { useQuery, keepPreviousData } from '@tanstack/react-query'
 import { Button }      from '@/components/ui/button'
 import { importsApi }  from '@/lib/api/imports'
 
@@ -23,6 +23,7 @@ export function ImportJobErrors({ jobId }: Props) {
   const { data, isLoading } = useQuery({
     queryKey: ['import-job-errors', jobId, offset],
     queryFn:  () => importsApi.listErrors(jobId, { limit: PAGE_SIZE, offset }),
+    placeholderData: keepPreviousData, // ISSUE-155 — keep rows visible during page transitions
   })
 
   const errors = data?.errors ?? []

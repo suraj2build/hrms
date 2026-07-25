@@ -10,7 +10,7 @@
  */
 
 import { useMemo, useState }                    from 'react'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query'
 import { toast }                                from 'sonner'
 import {
   CalendarDays, AlertTriangle,
@@ -479,6 +479,7 @@ export function EssLeaveBalance() {
       queryFn:   () => api.get(`/attendance/leave/ledger/${employeeId}?${ledgerParams}`),
       enabled:   !!employeeId && tab === 'ledger',
       staleTime: 30_000,
+      placeholderData: keepPreviousData, // ISSUE-155 — keep rows visible during page transitions
     })
 
   const { data: compOffData, isLoading: compOffLoading, isError: compOffError } = useQuery<{ data: CompOffRequest[] }>({

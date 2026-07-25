@@ -5,7 +5,7 @@
  */
 
 import { useState }           from 'react'
-import { useQuery }           from '@tanstack/react-query'
+import { useQuery, keepPreviousData } from '@tanstack/react-query'
 import { useNavigate }        from 'react-router-dom'
 import { Badge }              from '@/components/ui/badge'
 import { Button }             from '@/components/ui/button'
@@ -42,6 +42,7 @@ export default function ImportHistory() {
   const { data, isLoading } = useQuery({
     queryKey: ['import-jobs', offset],
     queryFn:  () => importsApi.list({ limit: PAGE_SIZE, offset }),
+    placeholderData: keepPreviousData, // ISSUE-155 — keep rows visible during page transitions
   })
 
   const jobs  = data?.jobs  ?? []

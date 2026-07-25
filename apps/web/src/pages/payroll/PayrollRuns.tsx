@@ -9,7 +9,7 @@
 
 import React, { useState, useRef, useEffect }    from 'react'
 import { Link, useNavigate }                     from 'react-router-dom'
-import { useQuery, useMutation, useQueryClient, type QueryClient } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient, keepPreviousData, type QueryClient } from '@tanstack/react-query'
 import {
   ChevronLeft, ChevronRight, Play, Lock,
   ShieldAlert, Download, Eye, Loader2,
@@ -842,6 +842,7 @@ function SlipsPanel({
     queryKey: ['payroll-slips', run.id, offset, search],
     queryFn:  () => api.get(`/payroll/runs/${run.id}/slips?limit=${LIMIT}&offset=${offset}${search ? `&search=${encodeURIComponent(search)}` : ''}`),
     staleTime: 30_000,
+    placeholderData: keepPreviousData, // ISSUE-155 — keep the current page's rows visible during the next page's fetch instead of flashing to a loading state
   })
 
   const slips  = data?.data  ?? []
