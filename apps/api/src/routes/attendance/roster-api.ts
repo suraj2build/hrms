@@ -26,6 +26,7 @@ import { eventService } from '../../lib/event-service.js'
 import { recomputeRange } from '../../lib/attendance-engine.js'
 import { resolveRotationCondition, dayOfWeekToCondition } from '../../lib/rotation-engine.js'
 import { computeWeeklyOffStatus } from '../../lib/roster-calendar-engine.js'
+import { fetchAllRows } from '../../lib/supabase-paginate.js'
 
 const dateRe  = /^\d{4}-\d{2}-\d{2}$/
 const monthRe = /^\d{4}-\d{2}$/
@@ -91,20 +92,29 @@ export default async function rosterRoute(fastify: FastifyInstance) {
     const fromDate = `${month}-01`
     const toDate   = new Date(y, m, 0).toISOString().slice(0, 10)
 
-    // Batch-fetch everything needed for the roster grid in parallel
-    const [
-      { data: employees, error: empError },
-      { data: shifts,    error: shiftError },
-      { data: roster,    error: rosterError },
-      { data: standing,  error: standingError },
-      { data: jobRows,   error: jobError },
-    ] = await Promise.all([
+    // Batch-fetch everything needed for the roster grid in parallel.
+    // employees is paginated — an unbounded .select() truncates at
+    // PostgREST's 1,000-row ceiling for a large tenant, silently dropping
+    // employees from the roster grid.
+    let empError: unknown = null
+    const employeesPromise = fetchAllRows((from, to) =>
       fastify.supabase
         .from('employees')
         .select('id, first_name, last_name, employee_code, rotation_policy_id, roster_id, sites(default_rotation_policy_id, default_roster_id)')
         .eq('tenant_id', req.tenantId)
         .eq('status', 'active')
-        .order('employee_code'),
+        .order('employee_code')
+        .range(from, to),
+    ).catch((err) => { empError = err; return [] })
+
+    const [
+      employees,
+      { data: shifts,    error: shiftError },
+      { data: roster,    error: rosterError },
+      { data: standing,  error: standingError },
+      { data: jobRows,   error: jobError },
+    ] = await Promise.all([
+      employeesPromise,
 
       fastify.supabase
         .from('shifts')
@@ -485,13 +495,19 @@ export default async function rosterRoute(fastify: FastifyInstance) {
       }
     })
 
-    // Batch-resolve codes to IDs (fetch once)
-    const [{ data: emps }, { data: shifts }] = await Promise.all([
-      fastify.supabase
-        .from('employees')
-        .select('id, employee_code')
-        .eq('tenant_id', req.tenantId)
-        .eq('status', 'active'),
+    // Batch-resolve codes to IDs (fetch once). employees is paginated — an
+    // unbounded .select() truncates at PostgREST's 1,000-row ceiling for a
+    // large tenant, causing valid employee codes past that cutoff to be
+    // misreported as "Unknown employee_code".
+    const [emps, { data: shifts }] = await Promise.all([
+      fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('employees')
+          .select('id, employee_code')
+          .eq('tenant_id', req.tenantId)
+          .eq('status', 'active')
+          .range(from, to),
+      ),
       fastify.supabase
         .from('shifts')
         .select('id, code')
@@ -499,7 +515,7 @@ export default async function rosterRoute(fastify: FastifyInstance) {
         .eq('is_active', true),
     ])
 
-    const empMap   = new Map((emps   ?? []).map((e: any) => [e.employee_code as string, e.id as string]))
+    const empMap   = new Map(emps.map((e: any) => [e.employee_code as string, e.id as string]))
     const shiftMap = new Map((shifts ?? []).map((s: any) => [s.code as string,          s.id as string]))
 
     const rows:   Array<{ tenant_id: string; employee_id: string; date: string; shift_id: string }> = []
