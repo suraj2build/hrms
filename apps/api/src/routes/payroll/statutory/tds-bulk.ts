@@ -48,6 +48,16 @@ async function chunkedUpdateByIds(
   return { updatedIds, error: null }
 }
 
+// Source document_states a proof must be in for each bulk transition below.
+// declaration_proofs_document_state_check (migration 177) allows 9 states —
+// without this guard the bulk endpoints matched proofs purely by id, so a
+// proof already 'verified', 'rejected', 'superseded', 'payroll_locked', or
+// 'archived' could be silently forced back into 'verified'/'rejected'/
+// 'revision_requested', overwriting a terminal or payroll-locked state.
+const VERIFIABLE_STATES  = ['uploaded', 'under_review']
+const REJECTABLE_STATES  = ['uploaded', 'under_review']
+const REVISABLE_STATES   = ['uploaded', 'under_review']
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function currentFinancialYear(): string {
@@ -135,6 +145,7 @@ export default async function tdsBulkRoutes(fastify: FastifyInstance) {
         })
         .in('id', chunk)
         .eq('tenant_id', req.tenantId)
+        .in('document_state', VERIFIABLE_STATES)
         .select('id'),
     )
 
@@ -181,6 +192,7 @@ export default async function tdsBulkRoutes(fastify: FastifyInstance) {
         })
         .in('id', chunk)
         .eq('tenant_id', req.tenantId)
+        .in('document_state', REJECTABLE_STATES)
         .select('id'),
     )
 
@@ -226,6 +238,7 @@ export default async function tdsBulkRoutes(fastify: FastifyInstance) {
         })
         .in('id', chunk)
         .eq('tenant_id', req.tenantId)
+        .in('document_state', REVISABLE_STATES)
         .select('id'),
     )
 
