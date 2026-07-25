@@ -8,17 +8,24 @@ import { z } from 'zod'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
 
+// payroll_validation_rules.category CHECK constraint (migration 105) — the
+// ground truth for valid categories.
 const RULE_CATEGORIES = [
-  'employee_data',
-  'compensation',
-  'attendance',
-  'statutory',
+  'data_completeness',
+  'calculation_integrity',
+  'compliance',
   'bank_details',
-  'tax',
-  'other',
+  'variance',
+  'statutory',
 ] as const
 
-const RULE_SEVERITIES = ['error', 'warning', 'info'] as const
+// payroll_validation_rules.severity CHECK constraint (migration 143 —
+// superseded 105's original 'error'/'warning'/'info' with 'critical'/
+// 'warning'/'info'). payroll_validation_results.severity has no CHECK of
+// its own but is always populated from a rule's severity, so it must use
+// the same vocabulary or the errorCount/unresolvedErrors comparisons below
+// silently never match.
+const RULE_SEVERITIES = ['critical', 'warning', 'info'] as const
 
 const RECONCILIATION_TYPES = [
   'bank_vs_payroll',
@@ -223,7 +230,7 @@ export default async function validationRoutes(fastify: FastifyInstance) {
           validation_run_id: validationRunId,
           rule_id: missingCompRule.id,
           employee_id: emp.id,
-          severity: missingCompRule.severity ?? 'error',
+          severity: missingCompRule.severity ?? 'critical',
           message: `Employee ${emp.employee_code} has no active compensation`,
           auto_resolved: false,
         })
@@ -236,7 +243,7 @@ export default async function validationRoutes(fastify: FastifyInstance) {
           validation_run_id: validationRunId,
           rule_id: missingBankRule.id,
           employee_id: emp.id,
-          severity: missingBankRule.severity ?? 'error',
+          severity: missingBankRule.severity ?? 'critical',
           message: `Employee ${emp.employee_code} has no bank/statutory details`,
           auto_resolved: false,
         })
@@ -263,7 +270,7 @@ export default async function validationRoutes(fastify: FastifyInstance) {
         .insert(validationResults)
     }
 
-    const errorCount = validationResults.filter(r => r.severity === 'error').length
+    const errorCount = validationResults.filter(r => r.severity === 'critical').length
     const warningCount = validationResults.filter(r => r.severity === 'warning').length
     const isPayrollBlocked = errorCount > 0
     const durationMs = Date.now() - startTime
@@ -376,7 +383,7 @@ export default async function validationRoutes(fastify: FastifyInstance) {
       .select('id', { count: 'exact', head: true })
       .eq('validation_run_id', id)
       .eq('tenant_id', req.tenantId)
-      .eq('severity', 'error')
+      .eq('severity', 'critical')
       .eq('auto_resolved', false)
 
     if ((unresolvedErrors ?? 0) === 0) {
