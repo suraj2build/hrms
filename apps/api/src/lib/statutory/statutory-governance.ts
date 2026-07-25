@@ -221,6 +221,32 @@ export async function resolveEmployeeStatutoryParams(
       .maybeSingle(),
   ])
 
+  // Fresh audit finding: every one of these 7 results used to be destructured
+  // as `.data` only, with `.error` silently discarded — a genuine DB error
+  // (connection drop, permission issue, etc.) was indistinguishable from
+  // "no override/config configured" and collapsed to the same default
+  // (e.g. EPF/ESI applicable with no exemption, no PT/LWF state resolved).
+  // For a per-employee, per-payroll-run resolver, that means a transient DB
+  // hiccup could silently apply or skip a statutory deduction instead of
+  // failing the employee's slip computation loudly. Both call sites already
+  // wrap this function in try/catch (routes/payroll/index.ts's
+  // computeSlipWithStatutory → 'computation_failed' row status;
+  // routes/payroll/statutory/governance.ts's /resolve → 500), so throwing
+  // here surfaces the failure instead of masking it.
+  for (const [label, result] of [
+    ['employee/site lookup', empResult],
+    ['EPF config', epfConfigResult],
+    ['ESI config', esiConfigResult],
+    ['EPF eligibility override', epfOverrideResult],
+    ['ESI exemption override', esiOverrideResult],
+    ['PTax exemption override', ptaxOverrideResult],
+    ['ESI continuation timeline', esiContinuationResult],
+  ] as const) {
+    if ((result as any).error) {
+      throw new Error(`resolveEmployeeStatutoryParams: failed to fetch ${label}: ${(result as any).error.message}`)
+    }
+  }
+
   const emp      = empResult.data as any
   const siteId   = emp?.site_id ?? null
   const stateCode = (emp?.sites as any)?.state_code ?? null
@@ -304,6 +330,12 @@ export async function resolveEmployeeStatutoryParams(
       .eq('employee_id', employeeId).eq('tenant_id', tenantId)
       .order('effective_from', { ascending: false }).limit(1).maybeSingle(),
   ])
+  if ((ptaxStateRow as any)?.error) {
+    throw new Error(`resolveEmployeeStatutoryParams: failed to fetch PT state override: ${(ptaxStateRow as any).error.message}`)
+  }
+  if ((lwfStateRowEarly as any)?.error) {
+    throw new Error(`resolveEmployeeStatutoryParams: failed to fetch LWF state override: ${(lwfStateRowEarly as any).error.message}`)
+  }
   const ptManual  = (ptaxStateRow as any)?.data?.state_code     ?? null
   const lwfManual = (lwfStateRowEarly as any)?.data?.state_code ?? null
 
@@ -316,13 +348,15 @@ export async function resolveEmployeeStatutoryParams(
   // error and silently yield 0 slabs, skipping PT entirely.
   let ptaxSlabs: PTaxSlab[] = []
   if (resolvedState) {
-    const { data: slabRows } = await supabase
+    const { data: slabRows, error: slabErr } = await supabase
       .from('ptax_slabs')
       .select('*')
       .eq('tenant_id', tenantId)
       .eq('state_code', resolvedState)
       .eq('financial_year', financialYear)
       .eq('is_active', true)
+
+    if (slabErr) throw new Error(`resolveEmployeeStatutoryParams: failed to fetch PTax slabs: ${slabErr.message}`)
 
     ptaxSlabs = ((slabRows ?? []) as any[]).map(r => ({
       monthlyIncomeFrom: Number(r.monthly_income_from),
@@ -348,7 +382,7 @@ export async function resolveEmployeeStatutoryParams(
   const regTypes: Array<'epf' | 'esi' | 'ptax'> = ['epf', 'esi', 'ptax']
   const registrations: StatutoryRegistrations = { epf: null, esi: null, ptax: null }
 
-  const { data: regRows } = await supabase
+  const { data: regRows, error: regErr } = await supabase
     .from('statutory_registrations')
     .select('statutory_type, registration_number, site_id')
     .eq('tenant_id', tenantId)
@@ -357,6 +391,8 @@ export async function resolveEmployeeStatutoryParams(
     .or('effective_to.is.null,effective_to.gte.' + monthDate)
     .in('statutory_type', regTypes)
     .or(siteId ? `site_id.eq.${siteId},site_id.is.null` : 'site_id.is.null')
+
+  if (regErr) throw new Error(`resolveEmployeeStatutoryParams: failed to fetch statutory registrations: ${regErr.message}`)
 
   // Prefer site-specific registration over tenant-level (site_id NOT NULL wins)
   for (const type of regTypes) {
@@ -376,7 +412,7 @@ export async function resolveEmployeeStatutoryParams(
   // Fetch LWF state settings for the resolved state.
   let lwfApplicability: LWFApplicability = { isApplicable: false, isExempt: false, config: null }
   if (lwfState) {
-    const { data: lwfRow } = await supabase
+    const { data: lwfRow, error: lwfErr } = await supabase
       .from('lwf_state_settings')
       .select('*')
       .eq('tenant_id', tenantId)
@@ -385,8 +421,10 @@ export async function resolveEmployeeStatutoryParams(
       .eq('is_active', true)
       .maybeSingle()
 
+    if (lwfErr) throw new Error(`resolveEmployeeStatutoryParams: failed to fetch LWF state settings: ${lwfErr.message}`)
+
     // LWF exemption override (employee_statutory_overrides, type='lwf').
-    const { data: lwfExemptRow } = await supabase
+    const { data: lwfExemptRow, error: lwfExemptErr } = await supabase
       .from('employee_statutory_overrides')
       .select('is_exempt, exemption_reason')
       .eq('employee_id', employeeId)
@@ -396,6 +434,8 @@ export async function resolveEmployeeStatutoryParams(
       .order('effective_from', { ascending: false })
       .limit(1)
       .maybeSingle()
+
+    if (lwfExemptErr) throw new Error(`resolveEmployeeStatutoryParams: failed to fetch LWF exemption override: ${lwfExemptErr.message}`)
 
     const isExempt = !!(lwfExemptRow as any)
     const lwfCfg = lwfRow as any
