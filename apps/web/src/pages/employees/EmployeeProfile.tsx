@@ -59,6 +59,19 @@ const MANDATORY_DOC_TYPES = [
   'Educational Certificate', 'Experience Letter',
 ]
 
+// documents.doc_type CHECK constraint (migration 005) — the ground truth for
+// valid document types. Matches the list in pages/documents/Documents.tsx.
+const DOC_TYPE_OPTIONS: { value: string; label: string }[] = [
+  { value: 'aadhaar',           label: 'Aadhaar Card' },
+  { value: 'pan',                label: 'PAN Card' },
+  { value: 'offer_letter',       label: 'Offer Letter' },
+  { value: 'contract',           label: 'Employment Contract' },
+  { value: 'certificate',        label: 'Certificate / Degree' },
+  { value: 'relieving_letter',   label: 'Relieving Letter' },
+  { value: 'experience_letter',  label: 'Experience Letter' },
+  { value: 'other',              label: 'Other' },
+]
+
 interface FullProfile {
   employee: {
     id: string; first_name: string; last_name: string; email: string; phone: string | null
@@ -4741,7 +4754,15 @@ export function EmployeeProfile() {
           <DialogHeader><DialogTitle>Document Details</DialogTitle></DialogHeader>
           <div className="space-y-3">
             <div><Label className="text-xs">Document Name</Label><Input className="mt-1 h-8 text-xs" value={docMeta?.name??''} onChange={e=>setDocMeta((p)=>({doc_type:p?.doc_type??'',name:e.target.value}))}/></div>
-            <div><Label className="text-xs">Document Type</Label><Input className="mt-1 h-8 text-xs" placeholder="e.g. Offer Letter, ID Proof" value={docMeta?.doc_type??''} onChange={e=>setDocMeta((p)=>({name:p?.name??'',doc_type:e.target.value}))}/></div>
+            <div>
+              <Label className="text-xs">Document Type</Label>
+              <Select value={docMeta?.doc_type||undefined} onValueChange={v=>setDocMeta(p=>({name:p?.name??'',doc_type:v}))}>
+                <SelectTrigger className="mt-1 h-8 text-xs"><SelectValue placeholder="Select a document type" /></SelectTrigger>
+                <SelectContent>
+                  {DOC_TYPE_OPTIONS.map(t => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
           </div>
           <DialogFooter>
             <Button variant="outline" size="sm" onClick={()=>{setDocMetaOpen(false);setDocFile(null)}}>Cancel</Button>
