@@ -395,7 +395,57 @@ export async function processEncashment(
     return { ok: false, message: 'This leave type does not allow encashment' }
   }
 
-  // Validate current balance
+  // Atomic check-and-deduct (previously: a plain read of `balance`, then a
+  // separate upsert writing `balance - req.days` — a classic read-then-write
+  // race. Two concurrent approve calls for the SAME request both read the
+  // same balance and both deducted, double-debiting the employee for one
+  // encashment. checked_deduct_leave_balance() does the check and the
+  // deduction in one UPDATE ... WHERE balance >= p_days, so only one of two
+  // concurrent calls can ever succeed — the other gets `deducted: false`.
+  const { data: deducted, error: deductErr } = await supabase.rpc('checked_deduct_leave_balance', {
+    p_tenant_id:     tenantId,
+    p_employee_id:   req.employee_id,
+    p_leave_type_id: req.leave_type_id,
+    p_days:          req.days,
+    p_year:          req.year,
+  })
+  if (deductErr) return { ok: false, message: `Failed to deduct balance: ${deductErr.message}` }
+  if (!deducted) return { ok: false, message: `Insufficient balance for ${req.days} day(s) encashment` }
+
+  // Status update — conditioned on still 'pending' and checked for affected
+  // rows. Previously this had no status guard, no tenant_id filter, and its
+  // error was never checked, so it could silently no-op while the balance
+  // above had already been (and stayed) deducted.
+  const { data: updatedRows, error: statusErr } = await supabase
+    .from('leave_encashment_requests')
+    .update({
+      status:      'approved',
+      approved_by: approverId,
+      approved_at: new Date().toISOString(),
+    })
+    .eq('id', encashmentId)
+    .eq('tenant_id', tenantId)
+    .eq('status', 'pending')
+    .select('id')
+
+  if (statusErr) {
+    return { ok: false, message: `Balance deducted but failed to update request status: ${statusErr.message}` }
+  }
+  if (!updatedRows?.length) {
+    // Lost the race on the status update — roll back the deduction we just made.
+    await supabase.rpc('credit_leave_balance', {
+      p_tenant_id:     tenantId,
+      p_employee_id:   req.employee_id,
+      p_leave_type_id: req.leave_type_id,
+      p_days:          req.days,
+      p_year:          req.year,
+    })
+    return { ok: false, message: 'Request was already actioned by another request' }
+  }
+
+  // Fresh read for the explainability log field only — employee_leave_balance
+  // (mutated atomically above) and leave_accrual_ledger below remain the
+  // sources of truth; balance_after here is informational.
   const { data: balRow } = await supabase
     .from('employee_leave_balance')
     .select('balance')
@@ -405,18 +455,6 @@ export async function processEncashment(
     .eq('year', req.year)
     .maybeSingle()
 
-  const currentBalance = Number(balRow?.balance ?? 0)
-  if (currentBalance < req.days) {
-    return { ok: false, message: `Insufficient balance. Available: ${currentBalance}, Requested: ${req.days}` }
-  }
-
-  // Deduct balance
-  const newBalance = parseFloat((currentBalance - req.days).toFixed(2))
-  await supabase.from('employee_leave_balance').upsert(
-    { tenant_id: tenantId, employee_id: req.employee_id, leave_type_id: req.leave_type_id, year: req.year, balance: newBalance, updated_at: new Date().toISOString() },
-    { onConflict: 'tenant_id,employee_id,leave_type_id,year' },
-  )
-
   // Write explainability ledger entry (leave_balance_ledger — audit trail).
   await supabase.from('leave_balance_ledger').insert({
     tenant_id:       tenantId,
@@ -425,7 +463,7 @@ export async function processEncashment(
     year:            req.year,
     txn_type:        'encashment',
     delta:           -req.days,
-    balance_after:   newBalance,
+    balance_after:   Number(balRow?.balance ?? 0),
     encashment_id:   encashmentId,
     notes:           `Leave encashment approved — ${req.days} days`,
     created_by:      approverId,
@@ -447,13 +485,6 @@ export async function processEncashment(
       notes:             `Leave encashment approved — ${req.days} days`,
       source_request_id: encashmentId,
     }, { onConflict: 'tenant_id,accrual_type,source_request_id', ignoreDuplicates: true })
-
-  // Update request status
-  await supabase.from('leave_encashment_requests').update({
-    status:      'approved',
-    approved_by: approverId,
-    approved_at: new Date().toISOString(),
-  }).eq('id', encashmentId)
 
   return { ok: true, message: `Encashment approved — ${req.days} days deducted` }
 }

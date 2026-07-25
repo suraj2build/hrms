@@ -433,8 +433,18 @@ export default async function leaveRoute(fastify: FastifyInstance) {
       }
     }
 
-    // Approve
-    const { error: updateError } = await fastify.supabase
+    // Approve — conditioned on status still being 'pending'. The atomic RPC
+    // above only guards the BALANCE against a double-deduction (it fails if
+    // insufficient balance remains); it does nothing to stop two concurrent
+    // approve requests for the SAME application from both passing the
+    // status !== 'pending' check above and both reaching this UPDATE. Without
+    // the .eq('status','pending') guard + affected-row check here, both
+    // requests would deduct balance (succeeding as long as it covers 2x the
+    // days) and both would write status='approved' — a real double-deduction
+    // with the ledger (deduped by source_request_id below) showing only one
+    // entry while the cached balance is short by 2x. Race-losing request
+    // rolls back its own deduction and returns a conflict instead.
+    const { data: updatedRows, error: updateError } = await fastify.supabase
       .from('leave_applications')
       .update({
         status:       'approved',
@@ -444,9 +454,51 @@ export default async function leaveRoute(fastify: FastifyInstance) {
       })
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
+      .eq('status', 'pending')
+      .select('id')
 
     if (updateError) {
       return serverError(req, reply, updateError, ErrorCode.UPDATE_FAILED, 'Failed to approve application')
+    }
+
+    if (!updatedRows?.length) {
+      // Lost the race — another request already actioned this application
+      // between our initial fetch and this UPDATE. Roll back the balance
+      // deduction we already made above (paid leave only) so the cache
+      // doesn't stay permanently short. Mirrors the cancel handler's
+      // reversal pattern (credit_leave_balance + a deduped 'reversal' ledger
+      // row keyed by source_request_id) further down in this file.
+      if (lt?.is_paid && paidYear !== null) {
+        const { error: ledgerErr } = await fastify.supabase
+          .from('leave_accrual_ledger')
+          .upsert({
+            tenant_id:         app.tenant_id,
+            employee_id:       app.employee_id,
+            leave_type_id:     app.leave_type_id,
+            year:              paidYear,
+            accrual_type:      'reversal',
+            days:              workingDays.computed_days,
+            accrued_on:        new Date().toISOString().slice(0, 10),
+            is_expired:        false,
+            notes:             `Reversal — lost race on concurrent approval of application ${id}`,
+            source_request_id: id,
+          }, { onConflict: 'tenant_id,accrual_type,source_request_id', ignoreDuplicates: true })
+        if (ledgerErr) {
+          req.log.error({ err: ledgerErr, id }, 'leave approve: race-rollback ledger write failed — balance may be double-deducted')
+        }
+
+        const { error: creditErr } = await fastify.supabase.rpc('credit_leave_balance', {
+          p_tenant_id:     app.tenant_id,
+          p_employee_id:   app.employee_id,
+          p_leave_type_id: app.leave_type_id,
+          p_days:          workingDays.computed_days,
+          p_year:          paidYear,
+        })
+        if (creditErr) {
+          req.log.error({ err: creditErr, id }, 'leave approve: race-rollback credit_leave_balance failed — balance may be double-deducted')
+        }
+      }
+      return conflictError(reply, 'ALREADY_ACTIONED', 'This application was already actioned by another request')
     }
 
     // Apply leave days to attendance_daily — ONLY on roster working dates.
