@@ -143,6 +143,9 @@ function AwaitingMe({ isHrAdmin }: { isHrAdmin: boolean }) {
       qc.invalidateQueries({ queryKey: ['flowdesk-pending'] })
       qc.invalidateQueries({ queryKey: ['flowdesk-compoff'] })
       qc.invalidateQueries({ queryKey: ['flowdesk-reimb'] })
+      // The Context Rail's pending-approvals badge reads kpis.pending_approvals
+      // from this same shared key (EssHome / Arrival / MobileEssShell all use it).
+      qc.invalidateQueries({ queryKey: ['ess-home'] })
     },
     onError: (e: Error) => toast.error('Action failed', { description: e.message }),
   })
