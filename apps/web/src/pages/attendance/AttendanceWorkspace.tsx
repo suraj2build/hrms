@@ -843,13 +843,22 @@ function TabApprovals() {
 
   const approve = useMutation({
     mutationFn: (id: string) => api.post(`/attendance/regularisation/${id}/approve`, {}),
-    onSuccess: () => { toast.success('Request approved.'); qc.invalidateQueries({ queryKey: ['att-workspace-approvals'] }) },
+    onSuccess: () => {
+      toast.success('Request approved.')
+      qc.invalidateQueries({ queryKey: ['att-workspace-approvals'] })
+      // The employee's own ESS approvals tracker reads the same record.
+      qc.invalidateQueries({ queryKey: ['ess-approvals-corrections'] })
+    },
     onError: () => toast.error('Failed to approve.'),
   })
 
   const reject = useMutation({
     mutationFn: (id: string) => api.post(`/attendance/regularisation/${id}/reject`, {}),
-    onSuccess: () => { toast.success('Request rejected.'); qc.invalidateQueries({ queryKey: ['att-workspace-approvals'] }) },
+    onSuccess: () => {
+      toast.success('Request rejected.')
+      qc.invalidateQueries({ queryKey: ['att-workspace-approvals'] })
+      qc.invalidateQueries({ queryKey: ['ess-approvals-corrections'] })
+    },
     onError: () => toast.error('Failed to reject.'),
   })
 

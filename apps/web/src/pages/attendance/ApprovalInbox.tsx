@@ -246,6 +246,8 @@ function LeaveRequestsTable({
       queryClient.invalidateQueries({ queryKey: ['notifications', 'inbox'] })
       // Invalidate leave balance — approved leave reduces available balance
       queryClient.invalidateQueries({ queryKey: ['leave-balance'] })
+      // The employee's own ESS approvals tracker reads the same record.
+      queryClient.invalidateQueries({ queryKey: ['ess-approvals-leave'] })
       onRefresh()
     },
     onError: (err: unknown) => {
@@ -267,6 +269,7 @@ function LeaveRequestsTable({
       queryClient.invalidateQueries({ queryKey: ['approvals-pending'] })
       // Invalidate notification inbox — rejection generates an employee notification
       queryClient.invalidateQueries({ queryKey: ['notifications', 'inbox'] })
+      queryClient.invalidateQueries({ queryKey: ['ess-approvals-leave'] })
       onRefresh()
     },
     onError: (err: unknown) => {
@@ -487,6 +490,8 @@ function RegularisationTable({
       queryClient.invalidateQueries({ queryKey: ['attendance-ops-stats'] })
       // Invalidate notification inbox — attendance correction approval generates employee notification
       queryClient.invalidateQueries({ queryKey: ['notifications', 'inbox'] })
+      // The employee's own ESS approvals tracker reads the same record.
+      queryClient.invalidateQueries({ queryKey: ['ess-approvals-corrections'] })
       onRefresh()
     },
     onError: (err: unknown) => {
@@ -509,6 +514,7 @@ function RegularisationTable({
       queryClient.invalidateQueries({ queryKey: ['attendance-ops-stats'] })
       // Invalidate notification inbox — rejection generates employee notification
       queryClient.invalidateQueries({ queryKey: ['notifications', 'inbox'] })
+      queryClient.invalidateQueries({ queryKey: ['ess-approvals-corrections'] })
       onRefresh()
     },
     onError: (err: unknown) => {

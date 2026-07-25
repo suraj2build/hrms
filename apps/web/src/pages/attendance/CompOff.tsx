@@ -121,7 +121,13 @@ export function CompOff() {
   const leaveTypes = (leaveTypesData?.data ?? []).filter((lt) => lt.is_active)
 
   // ── Mutations ──────────────────────────────────────────────────────────────
-  const invalidate = () => qc.invalidateQueries({ queryKey: ['comp-off'] })
+  const invalidate = () => {
+    qc.invalidateQueries({ queryKey: ['comp-off'] })
+    // The employee's own ESS approvals tracker and the manager's team comp-off
+    // view read the same records under separate keys.
+    qc.invalidateQueries({ queryKey: ['ess-approvals-compoff'] })
+    qc.invalidateQueries({ queryKey: ['manager-team-compoff'] })
+  }
 
   const approveMutation = useMutation({
     mutationFn: ({ id, notes }: { id: string; notes?: string }) =>

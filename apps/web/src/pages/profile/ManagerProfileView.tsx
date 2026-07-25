@@ -276,6 +276,10 @@ export function ManagerProfileView({ employeeId }: { employeeId: string }) {
 
   function invalidate() {
     qc.invalidateQueries({ queryKey: ['mgr-approvals-pending'] })
+    // The employee's own ESS approvals tracker reads the same leave/
+    // regularisation records under separate keys.
+    qc.invalidateQueries({ queryKey: ['ess-approvals-leave'] })
+    qc.invalidateQueries({ queryKey: ['ess-approvals-corrections'] })
   }
 
   const approveLeaveMutation = useMutation({

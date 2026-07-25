@@ -18,7 +18,7 @@
 
 import { useState, useEffect, useMemo, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useQuery, useMutation } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   LayoutDashboard, Clock, Timer, CalendarX, CalendarOff,
   ClipboardCheck, ShieldAlert, CheckCircle2, AlertTriangle,
@@ -922,6 +922,7 @@ function PendingApprovalsTab({
   setSelectedIds: React.Dispatch<React.SetStateAction<Set<string>>>
   onOpenProfile: (id: string, name: string) => void
 }) {
+  const qc = useQueryClient()
   const { data: regResp, isLoading: regLoading } = useQuery({
     queryKey: ['daily-ops-regs'],
     queryFn: () =>
@@ -952,14 +953,24 @@ function PendingApprovalsTab({
   const approveMutation = useMutation({
     mutationFn: ({ id, kind }: { id: string; kind: 'regularisation' | 'correction' }) =>
       api.post<void>(`/attendance/${kind === 'regularisation' ? 'regularisation' : 'corrections'}/${id}/approve`, {}),
-    onSuccess: () => toast.success('Approved'),
+    onSuccess: () => {
+      toast.success('Approved')
+      qc.invalidateQueries({ queryKey: ['daily-ops-regs'] })
+      qc.invalidateQueries({ queryKey: ['daily-ops-corrections'] })
+      // The employee's own ESS approvals tracker reads the same records.
+      qc.invalidateQueries({ queryKey: ['ess-approvals-corrections'] })
+    },
     onError:   () => toast.error('Approval failed'),
   })
 
   const rejectMutation = useMutation({
     mutationFn: (id: string) =>
       api.post<void>(`/attendance/regularisation/${id}/reject`, {}),
-    onSuccess: () => toast.success('Rejected'),
+    onSuccess: () => {
+      toast.success('Rejected')
+      qc.invalidateQueries({ queryKey: ['daily-ops-regs'] })
+      qc.invalidateQueries({ queryKey: ['ess-approvals-corrections'] })
+    },
     onError:   () => toast.error('Rejection failed'),
   })
 

@@ -127,6 +127,8 @@ export default function ManagerRegularisationQueue() {
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ['reg-queue'] })
     qc.invalidateQueries({ queryKey: ['reg-pending'] })
+    // The employee's own ESS approvals tracker reads the same records.
+    qc.invalidateQueries({ queryKey: ['ess-approvals-corrections'] })
   }
 
   const bulkApproveMutation = useMutation({

@@ -192,9 +192,26 @@ export function EssApprovals({ embedded = false }: { embedded?: boolean } = {}) 
   })
 
   // ── Corrections ────────────────────────────────────────────────────────────
+  // Reads /attendance/regularisation/my — the live correction-request table.
+  // attendance_corrections (the old /attendance/corrections/my endpoint) has
+  // had no writer anywhere in the app since regularisation replaced it —
+  // this tab always showed empty/stale data reading from a dead table.
   const { data: corrData, isLoading: corrLoading } = useQuery<{ data: CorrectionReq[] }>({
     queryKey: ['ess-approvals-corrections'],
-    queryFn:  () => api.get('/attendance/corrections/my?limit=50'),
+    queryFn:  async () => {
+      const res = await api.get<{ data: any[] }>('/attendance/regularisation/my?limit=50')
+      return {
+        data: (res.data ?? []).map((r) => ({
+          id:            r.id,
+          date:          r.date,
+          status:        r.status,
+          reason:        r.reason,
+          corrected_in:  r.requested_check_in  ?? null,
+          corrected_out: r.requested_check_out ?? null,
+          created_at:    r.created_at,
+        })),
+      }
+    },
     enabled:  !!employeeId,
     staleTime: 30_000,
   })

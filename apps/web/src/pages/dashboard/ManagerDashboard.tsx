@@ -1090,6 +1090,10 @@ export function ManagerDashboardPage() {
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ['manager-dashboard'] })
     qc.invalidateQueries({ queryKey: ['approvals-pending'] })
+    // The employee's own ESS approvals tracker reads the same leave/
+    // regularisation records under separate keys.
+    qc.invalidateQueries({ queryKey: ['ess-approvals-leave'] })
+    qc.invalidateQueries({ queryKey: ['ess-approvals-corrections'] })
   }
 
   const { mutate: approveLeave, variables: approvingLeaveId } = useMutation({

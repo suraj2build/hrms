@@ -564,6 +564,7 @@ export function EmployeeResolutionWorkspace({
   employeeId,
   queueItem,
 }: EmployeeResolutionWorkspaceProps) {
+  const queryClient = useQueryClient()
   const [activeTab, setActiveTab] = useState<TabId>('summary')
   const [explainOpen, setExplainOpen] = useState(false)
 
@@ -573,13 +574,24 @@ export function EmployeeResolutionWorkspace({
 
   const approveMutation = useMutation({
     mutationFn: () => api.post(`/attendance/regularisation/${queueItem?.id}/approve`, {}),
-    onSuccess:  () => { toast.success('Approved'); onClose() },
+    onSuccess:  () => {
+      toast.success('Approved')
+      queryClient.invalidateQueries({ queryKey: ['emp-attendance-queue', employeeId] })
+      // The employee's own ESS approvals tracker reads the same record.
+      queryClient.invalidateQueries({ queryKey: ['ess-approvals-corrections'] })
+      onClose()
+    },
     onError:    () => toast.error('Failed to approve'),
   })
 
   const rejectMutation = useMutation({
     mutationFn: () => api.post(`/attendance/regularisation/${queueItem?.id}/reject`, {}),
-    onSuccess:  () => { toast.success('Rejected'); onClose() },
+    onSuccess:  () => {
+      toast.success('Rejected')
+      queryClient.invalidateQueries({ queryKey: ['emp-attendance-queue', employeeId] })
+      queryClient.invalidateQueries({ queryKey: ['ess-approvals-corrections'] })
+      onClose()
+    },
     onError:    () => toast.error('Failed to reject'),
   })
 

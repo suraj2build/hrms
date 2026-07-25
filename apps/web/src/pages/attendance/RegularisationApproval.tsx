@@ -395,6 +395,8 @@ export function RegularisationApproval() {
       const count = selectedIds.size
       queryClient.invalidateQueries({ queryKey: ['regularisation-pending'] })
       queryClient.invalidateQueries({ queryKey: ['attendance-ops-stats'] })
+      // The employees' own ESS approvals tracker reads these same records.
+      queryClient.invalidateQueries({ queryKey: ['ess-approvals-corrections'] })
       setSelectedIds(new Set())
       setBulkConfirmOpen(false)   // L2: close dialog after success so loading state is visible
       toast.success(`${count} request${count !== 1 ? 's' : ''} approved`, {
@@ -416,6 +418,7 @@ export function RegularisationApproval() {
       const count = selectedIds.size
       queryClient.invalidateQueries({ queryKey: ['regularisation-pending'] })
       queryClient.invalidateQueries({ queryKey: ['attendance-ops-stats'] })
+      queryClient.invalidateQueries({ queryKey: ['ess-approvals-corrections'] })
       setSelectedIds(new Set())
       setBulkRejectOpen(false)
       setBulkRejectReason('')

@@ -114,7 +114,14 @@ export function ManagerTeamCompOff({ embedded = false }: { embedded?: boolean })
 
   const approveMut = useMutation({
     mutationFn: (id: string) => api.post(`/attendance/comp-off/${id}/approve`, {}),
-    onSuccess:  () => { toast.success('Comp-off approved'); qc.invalidateQueries({ queryKey: ['manager-team-compoff'] }) },
+    onSuccess:  () => {
+      toast.success('Comp-off approved')
+      qc.invalidateQueries({ queryKey: ['manager-team-compoff'] })
+      // The employee's own ESS approvals tracker and the admin CompOff view
+      // read the same records under separate keys.
+      qc.invalidateQueries({ queryKey: ['ess-approvals-compoff'] })
+      qc.invalidateQueries({ queryKey: ['comp-off'] })
+    },
     onError:    (e: Error) => {
       if (e instanceof ApiError && e.error === 'PERIOD_LOCKED') {
         toast.error('Period locked', { description: 'This request belongs to a locked attendance period and can no longer be modified.' })
@@ -126,7 +133,12 @@ export function ManagerTeamCompOff({ embedded = false }: { embedded?: boolean })
 
   const rejectMut = useMutation({
     mutationFn: (id: string) => api.post(`/attendance/comp-off/${id}/reject`, {}),
-    onSuccess:  () => { toast.success('Comp-off rejected'); qc.invalidateQueries({ queryKey: ['manager-team-compoff'] }) },
+    onSuccess:  () => {
+      toast.success('Comp-off rejected')
+      qc.invalidateQueries({ queryKey: ['manager-team-compoff'] })
+      qc.invalidateQueries({ queryKey: ['ess-approvals-compoff'] })
+      qc.invalidateQueries({ queryKey: ['comp-off'] })
+    },
     onError:    () => toast.error('Failed to reject'),
   })
 
