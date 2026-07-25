@@ -837,6 +837,23 @@ export async function carryForwardJob(
           )
           if (alreadyCarried) { skipped++; continue }
 
+          // ISSUE-156: the cap can forfeit balance with no record of it
+          // anywhere — write a debit ledger entry against fromYear so the gap
+          // between the employee's actual balance and what carried over is
+          // auditable instead of silently vanishing. Naturally idempotent:
+          // this only runs when the existingCF check above found no prior
+          // carry_forward entry for toYear, so a job re-run never reaches here
+          // for an employee/policy pair already processed.
+          const forfeitedDays = parseFloat((fromBalance - carryDays).toFixed(2))
+          if (forfeitedDays > 0) {
+            await writeLedgerEntry(
+              supabase, tenantId, emp.id, policy.leave_type_id, fromYear,
+              'forfeiture', -forfeitedDays, cfDate, null,
+              `Forfeited at year-end carry-forward cap (max ${policy.carry_forward_max_days} day(s)): ` +
+              `${forfeitedDays} of ${fromBalance} day(s) from ${fromYear} balance did not carry over`,
+            )
+          }
+
           // Credit toYear balance
           await creditEmployeeDays(
             supabase, tenantId, emp.id, policy.leave_type_id,
