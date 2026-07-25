@@ -24,15 +24,26 @@ declare module 'fastify' {
 }
 
 interface AdminCacheEntry {
-  adminId:   string
-  role:      string
-  userId:    string
-  expiresAt: number
+  adminId:           string
+  role:              string
+  userId:            string
+  isActive:          boolean
+  isActiveCheckedAt: number  // timestamp of last DB-fresh is_active check
+  expiresAt:         number
 }
 
 // In-memory cache: userId → admin record (5-min TTL)
 const adminCache = new Map<string, AdminCacheEntry>()
 const CACHE_TTL  = 5 * 60 * 1000
+
+// Re-verify is_active from DB this often even on cache hits — bounds the
+// deactivation → block window to well under CACHE_TTL. Fresh audit finding:
+// role/adminId are stable for the full CACHE_TTL, but is_active can flip at
+// any moment (owner deactivates/removes an admin) — same pattern as
+// plugins/auth.ts's IS_ACTIVE_TTL (ISSUE-023), applied here because a
+// platform admin's access (tenant suspend/delete, admin provisioning,
+// password resets) is higher-privilege than a tenant user's.
+const IS_ACTIVE_TTL = 60 * 1000
 
 function verifySupabaseJwt(token: string, secret: string): { sub: string } | null {
   try {
@@ -89,6 +100,21 @@ const ownerAuthPlugin: FastifyPluginAsync = async (fastify) => {
       // Check in-memory cache first
       const cached = adminCache.get(userId)
       if (cached && cached.expiresAt > Date.now()) {
+        let isActive = cached.isActive
+        if (cached.isActiveCheckedAt + IS_ACTIVE_TTL < Date.now()) {
+          const { data: freshAdmin } = await fastify.supabase
+            .from('platform_admins')
+            .select('is_active')
+            .eq('user_id', userId)
+            .single()
+          isActive = (freshAdmin as any)?.is_active ?? false
+          cached.isActive          = isActive
+          cached.isActiveCheckedAt = Date.now()
+        }
+        if (!isActive) {
+          adminCache.delete(userId)
+          return reply.code(403).send({ error: 'FORBIDDEN', message: 'Platform admin account is inactive' })
+        }
         request.platformAdminId     = cached.adminId
         request.platformAdminRole   = cached.role
         request.platformAdminUserId = cached.userId
@@ -113,10 +139,12 @@ const ownerAuthPlugin: FastifyPluginAsync = async (fastify) => {
 
       // Populate cache
       adminCache.set(userId, {
-        adminId:   admin.id,
-        role:      admin.role,
+        adminId:           admin.id,
+        role:              admin.role,
         userId,
-        expiresAt: Date.now() + CACHE_TTL,
+        isActive:          true,
+        isActiveCheckedAt: Date.now(),
+        expiresAt:         Date.now() + CACHE_TTL,
       })
 
       request.platformAdminId     = admin.id
