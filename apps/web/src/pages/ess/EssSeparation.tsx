@@ -402,7 +402,14 @@ export function EssSeparation() {
         <SeparationTracking sep={data.data} clearances={data.clearances} ff={data.ff} />
       ) : (
         <div className="space-y-4">
-          <ResignationForm onSubmitted={() => qc.invalidateQueries({ queryKey: ['ess-me-separation', employeeId] })} />
+          <ResignationForm onSubmitted={() => {
+            qc.invalidateQueries({ queryKey: ['ess-me-separation', employeeId] })
+            // Same record is also read by the HR Separation Workflow queue and
+            // the employee's HR-facing profile tab under separate keys — HR
+            // should see a new resignation appear without a manual refresh.
+            qc.invalidateQueries({ queryKey: ['separations'] })
+            qc.invalidateQueries({ queryKey: ['separation', employeeId] })
+          }} />
           <AssetObligations />
           <div className="flex items-start gap-2 text-xs text-muted-foreground bg-muted/30 border border-border rounded-lg px-3 py-2.5">
             <Info className="h-3.5 w-3.5 mt-0.5 flex-shrink-0 text-info" />

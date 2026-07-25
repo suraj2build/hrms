@@ -193,7 +193,14 @@ function LifecycleActions({ row }: { row: SeparationRow }) {
   const clearanceDone = clearanceCount(row.clearances) === (row.clearances.length || CLEARANCE_DEPTS.length)
   const fnfPaid = row.fnf?.status === 'paid'
 
-  const invalidate = () => qc.invalidateQueries({ queryKey: ['separations'] })
+  // EmployeeProfile's separation tab (['separation', employeeId]) and the
+  // employee's own ESS separation view (['ess-me-separation', employeeId])
+  // read the same underlying record under separate keys.
+  const invalidate = () => {
+    qc.invalidateQueries({ queryKey: ['separations'] })
+    qc.invalidateQueries({ queryKey: ['separation', row.employee_id] })
+    qc.invalidateQueries({ queryKey: ['ess-me-separation', row.employee_id] })
+  }
 
   const approveMut = useMutation({
     mutationFn: (decision: 'approved' | 'rejected') =>
@@ -292,6 +299,8 @@ function ClearancePanel({ row, onClose: _onClose }: { row: SeparationRow; onClos
       api.patch(`/employees/${row.employee_id}/separation-clearances/${deptId}`, { status: action, remarks }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['separations'] })
+      qc.invalidateQueries({ queryKey: ['separation', row.employee_id] })
+      qc.invalidateQueries({ queryKey: ['ess-me-separation', row.employee_id] })
       toast.success('Clearance status updated')
     },
     onError: (e: Error) => toast.error('Failed', { description: e.message }),
@@ -402,10 +411,17 @@ function FnFSection({ row }: { row: SeparationRow }) {
     (form.last_payroll_amount + form.leave_encashment_amount + form.gratuity_amount + form.other_additions)
     - (form.notice_period_deduction + form.other_deductions)
 
+  // See ActionButtons' invalidate() above for why both extra keys are needed.
+  const invalidate = () => {
+    qc.invalidateQueries({ queryKey: ['separations'] })
+    qc.invalidateQueries({ queryKey: ['separation', row.employee_id] })
+    qc.invalidateQueries({ queryKey: ['ess-me-separation', row.employee_id] })
+  }
+
   const saveMutation = useMutation({
     mutationFn: () => api.post(`/employees/${row.employee_id}/separation-ff`, form),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['separations'] })
+      invalidate()
       toast.success('F&F settlement saved')
       setEditOpen(false)
     },
@@ -415,19 +431,19 @@ function FnFSection({ row }: { row: SeparationRow }) {
   const noticeMutation = useMutation({
     mutationFn: (body: { notice_period_days_override: number | null; notice_waived: boolean }) =>
       api.put(`/employees/${row.employee_id}/separation`, body),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['separations'] }); toast.success('Notice settings saved — re-run Auto-calculate to apply') },
+    onSuccess: () => { invalidate(); toast.success('Notice settings saved — re-run Auto-calculate to apply') },
     onError: (e: Error) => toast.error('Failed', { description: e.message }),
   })
 
   const approveMutation = useMutation({
     mutationFn: () => api.patch(`/employees/${row.employee_id}/separation-ff/approve`, {}),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['separations'] }); toast.success('F&F approved') },
+    onSuccess: () => { invalidate(); toast.success('F&F approved') },
     onError: (e: Error) => toast.error('Failed', { description: e.message }),
   })
 
   const paidMutation = useMutation({
     mutationFn: () => api.patch(`/employees/${row.employee_id}/separation-ff/mark-paid`, {}),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['separations'] }); toast.success('F&F marked as paid') },
+    onSuccess: () => { invalidate(); toast.success('F&F marked as paid') },
     onError: (e: Error) => toast.error('Failed', { description: e.message }),
   })
 
@@ -446,7 +462,7 @@ function FnFSection({ row }: { row: SeparationRow }) {
           description: `Gratuity ${b.gratuity_eligible ? `(${b.gratuity_years} yrs service)` : '(not eligible)'} · ${b.leave_encashment_days} encashable leave days`,
         })
       }
-      qc.invalidateQueries({ queryKey: ['separations'] })
+      invalidate()
     },
     onError: (e: unknown) => toast.error('Auto-calculate failed', { description: (e instanceof Error ? e.message : undefined) ?? 'Check separation dates and last payroll' }),
   })

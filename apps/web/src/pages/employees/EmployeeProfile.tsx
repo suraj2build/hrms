@@ -1587,6 +1587,10 @@ export function EmployeeProfile() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['separation', id] })
       qc.invalidateQueries({ queryKey: ['employee-full', id] })
+      // Same separation record is also read by the admin Separation Workflow
+      // queue (['separations']) and the employee's own ESS view.
+      qc.invalidateQueries({ queryKey: ['separations'] })
+      qc.invalidateQueries({ queryKey: ['ess-me-separation', id] })
       setSepDlgOpen(false)
       toast.success('Separation initiated')
     },
@@ -1603,6 +1607,8 @@ export function EmployeeProfile() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['separation', id] })
       qc.invalidateQueries({ queryKey: ['employee-full', id] })
+      qc.invalidateQueries({ queryKey: ['separations'] })
+      qc.invalidateQueries({ queryKey: ['ess-me-separation', id] })
       setSepDlgOpen(false)
       toast.success('Separation record updated')
     },
