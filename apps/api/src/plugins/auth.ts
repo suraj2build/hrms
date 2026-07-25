@@ -32,6 +32,22 @@ const CACHE_TTL       = 5 * 60 * 1000
 // during which a deactivated account can still make authenticated requests.
 const IS_ACTIVE_TTL   = 60 * 1000
 
+/**
+ * Per CLAUDE.md's tenant-licensing contract: a suspended/expired/cancelled
+ * tenant (or a trial past trial_ends_at) blocks writes. Pure function shared
+ * by both the cache-hit and cache-miss paths below so the two can't drift —
+ * ISSUE-141 was exactly that: the cache-hit path never called this logic at
+ * all, so a tenant suspended mid-session could write for up to CACHE_TTL
+ * (5 min) after suspension, violating the "reads fresh, never from the
+ * profile cache" contract CLAUDE.md documents.
+ */
+function isTenantBlocked(tenant: { status: string; trial_ends_at: string | null }): { blocked: boolean; trialExpired: boolean } {
+  const trialExpired = tenant.status === 'trial' && tenant.trial_ends_at != null &&
+    new Date(tenant.trial_ends_at).getTime() < Date.now()
+  const blocked = ['suspended', 'expired', 'cancelled'].includes(tenant.status) || trialExpired
+  return { blocked, trialExpired }
+}
+
 function verifySupabaseJwt(token: string, secret: string): { sub: string } | null {
   try {
     const parts = token.split('.')
@@ -110,6 +126,32 @@ const authPlugin: FastifyPluginAsync = async (fastify) => {
         request.tenantId   = cached.tenantId
         request.userRole   = cached.role
         request.employeeId = cached.employeeId
+
+        // Subscription / trial gate (ISSUE-141) — same contract as the
+        // cache-miss path below: read tenants.status/trial_ends_at fresh on
+        // every write, never from the profile cache. Reads stay open
+        // regardless (unaffected, same as the miss path) so a lapsed tenant
+        // can still reach the billing page.
+        const hitMethod = request.method
+        const hitIsWrite = hitMethod === 'POST' || hitMethod === 'PUT' || hitMethod === 'PATCH' || hitMethod === 'DELETE'
+        if (hitIsWrite && !request.url.startsWith('/billing') && !request.url.startsWith('/support')) {
+          const { data: freshTenant } = await fastify.supabase
+            .from('tenants')
+            .select('status, trial_ends_at')
+            .eq('id', cached.tenantId)
+            .single()
+          if (freshTenant) {
+            const { blocked, trialExpired } = isTenantBlocked(freshTenant)
+            if (blocked) {
+              return reply.code(402).send({
+                error: 'SUBSCRIPTION_REQUIRED',
+                message: trialExpired
+                  ? 'Your free trial has ended. Please subscribe to continue.'
+                  : `Your workspace is ${freshTenant.status}. Please update your subscription to continue.`,
+              })
+            }
+          }
+        }
         return
       }
 
@@ -180,9 +222,7 @@ const authPlugin: FastifyPluginAsync = async (fastify) => {
         // Reuse the tenant row already fetched above — saves a second round-trip
         // on write requests that hit this (cache-miss) path.
         if (tenant) {
-          const trialExpired = tenant.status === 'trial' && tenant.trial_ends_at != null &&
-            new Date(tenant.trial_ends_at).getTime() < Date.now()
-          const blocked = ['suspended', 'expired', 'cancelled'].includes(tenant.status) || trialExpired
+          const { blocked, trialExpired } = isTenantBlocked(tenant)
           if (blocked) {
             return reply.code(402).send({
               error: 'SUBSCRIPTION_REQUIRED',
