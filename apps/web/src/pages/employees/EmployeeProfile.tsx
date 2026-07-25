@@ -818,6 +818,7 @@ export function EmployeeProfile() {
       qc.invalidateQueries({ queryKey: ['comp-revisions'] })
       qc.invalidateQueries({ queryKey: ['manager-team-comp'] })
       qc.invalidateQueries({ queryKey: ['manager-comp-history'] })
+      qc.invalidateQueries({ queryKey: ['emp-compensation'] })
     },
     onError: (e: Error) => toast.error('Failed to initiate revision', { description: e.message }),
   })
@@ -832,6 +833,7 @@ export function EmployeeProfile() {
       qc.invalidateQueries({ queryKey: ['comp-revisions'] })
       qc.invalidateQueries({ queryKey: ['manager-team-comp'] })
       qc.invalidateQueries({ queryKey: ['manager-comp-history'] })
+      qc.invalidateQueries({ queryKey: ['emp-compensation'] })
     },
     onError: (e: Error) => toast.error('Failed to approve revision', { description: e.message }),
   })
@@ -847,6 +849,7 @@ export function EmployeeProfile() {
       qc.invalidateQueries({ queryKey: ['comp-revisions'] })
       qc.invalidateQueries({ queryKey: ['manager-team-comp'] })
       qc.invalidateQueries({ queryKey: ['manager-comp-history'] })
+      qc.invalidateQueries({ queryKey: ['emp-compensation'] })
     },
     onError: (e: Error) => toast.error('Failed to reject revision', { description: e.message }),
   })
@@ -915,6 +918,7 @@ export function EmployeeProfile() {
       // for ctc_annual under a separate cache key.
       qc.invalidateQueries({ queryKey: ['manager-team-comp'] })
       qc.invalidateQueries({ queryKey: ['manager-comp-history'] })
+      qc.invalidateQueries({ queryKey: ['emp-compensation'] })
     },
     onError: (e: unknown) => toast.error('Delete failed', { description: e instanceof Error ? e.message : undefined }),
   })
@@ -941,6 +945,7 @@ export function EmployeeProfile() {
       qc.invalidateQueries({ queryKey: ['compensation-history', id] })
       qc.invalidateQueries({ queryKey: ['manager-team-comp'] })
       qc.invalidateQueries({ queryKey: ['manager-comp-history'] })
+      qc.invalidateQueries({ queryKey: ['emp-compensation'] })
     },
     onError: (e: Error) => toast.error('Failed to configure compensation', { description: e.message }),
   })

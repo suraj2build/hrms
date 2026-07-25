@@ -388,6 +388,7 @@ export function CompensationRevisions() {
     qc.invalidateQueries({ queryKey: ['employee-full'] })
     qc.invalidateQueries({ queryKey: ['manager-team-comp'] })
     qc.invalidateQueries({ queryKey: ['manager-comp-history'] })
+    qc.invalidateQueries({ queryKey: ['emp-compensation'] })
   }
 
   const approveMut = useMutation({

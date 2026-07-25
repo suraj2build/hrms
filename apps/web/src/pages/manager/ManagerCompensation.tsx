@@ -115,6 +115,7 @@ function RecommendDialog({ member, onClose }: { member: TeamComp; onClose: () =>
       // Revisions queue and the employee's own profile under separate keys.
       qc.invalidateQueries({ queryKey: ['comp-revisions'] })
       qc.invalidateQueries({ queryKey: ['payroll-revisions', member.employee_id] })
+      qc.invalidateQueries({ queryKey: ['emp-compensation', member.employee_id] })
       toast.success('Recommendation submitted to HR for approval')
       onClose()
     },
