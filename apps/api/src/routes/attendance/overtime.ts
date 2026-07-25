@@ -33,6 +33,7 @@ import { isSelfApproval } from '../../lib/approval-guards.js'
 import { logAction } from '../../lib/audit-service.js'
 import { gateApprove, gateReject } from '../../lib/approval-orchestrator.js'
 import { HR_ADMIN_ROLES, MANAGER_ROLES } from '../../lib/rbac.js'
+import { fetchAllRows } from '../../lib/supabase-paginate.js'
 
 const dateRe = /^\d{4}-\d{2}-\d{2}$/
 
@@ -298,16 +299,25 @@ export default async function overtimeRoutes(fastify: FastifyInstance) {
     }
     const { month } = parsed.data
 
-    const { data: daily, error } = await fastify.supabase
-      .from('attendance_daily')
-      .select('employee_id, overtime_minutes, ot_approved_minutes')
-      .eq('tenant_id', req.tenantId)
-      .gte('date', `${month}-01`)
-      .lte('date', `${month}-31`)
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    // A month of attendance_daily across the whole tenant can exceed
+    // PostgREST's 1,000-row max-rows ceiling — paginate.
+    let daily: Array<{ employee_id: string; overtime_minutes: number | null; ot_approved_minutes: number | null }>
+    try {
+      daily = await fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('attendance_daily')
+          .select('employee_id, overtime_minutes, ot_approved_minutes')
+          .eq('tenant_id', req.tenantId)
+          .gte('date', `${month}-01`)
+          .lte('date', `${month}-31`)
+          .range(from, to),
+      )
+    } catch (err) {
+      return reply.code(500).send({ error: 'QUERY_FAILED', message: err instanceof Error ? err.message : 'Failed to fetch attendance' })
+    }
 
     const agg = new Map<string, { ot: number; approved: number }>()
-    for (const r of (daily ?? []) as any[]) {
+    for (const r of daily as any[]) {
       const cur = agg.get(r.employee_id) ?? { ot: 0, approved: 0 }
       cur.ot       += r.overtime_minutes ?? 0
       cur.approved += r.ot_approved_minutes ?? 0

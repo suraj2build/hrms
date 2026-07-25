@@ -26,6 +26,7 @@
  */
 import type { FastifyInstance } from 'fastify'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { fetchAllRows } from '../../lib/supabase-paginate.js'
 
 /** Escape a CSV cell value: wrap in quotes if it contains commas, quotes, or newlines */
 function csvCell(value: string | number | null | undefined): string {
@@ -70,29 +71,41 @@ export default async function runExportRoute(fastify: FastifyInstance) {
       const dayEnd   = `${date}T23:59:59.999Z`
 
       // ── 2. Fetch attendance_daily for that date ───────────────────────────────
-      const { data: daily, error: dailyError } = await fastify.supabase
-        .from('attendance_daily')
-        .select('employee_id, date, work_hours, status')
-        .eq('tenant_id', tenantId)
-        .eq('date', date)
-        .order('employee_id', { ascending: true })
-
-      if (dailyError) {
+      // A single day's rows (one per employee) still exceeds PostgREST's
+      // 1,000-row max-rows ceiling for a large tenant — paginate.
+      let daily: Array<{ employee_id: string; date: string; work_hours: number; status: string }>
+      try {
+        daily = await fetchAllRows((from, to) =>
+          fastify.supabase
+            .from('attendance_daily')
+            .select('employee_id, date, work_hours, status')
+            .eq('tenant_id', tenantId)
+            .eq('date', date)
+            .order('employee_id', { ascending: true })
+            .range(from, to),
+        )
+      } catch (dailyError) {
         req.log.error({ err: dailyError, module: 'attendance', route: 'run-export' }, 'daily query failed')
         return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Could not fetch daily records' })
       }
 
       // ── 3. Fetch attendance_logs for that date ────────────────────────────────
       // We want the first check_in and last check_out per employee for the day.
-      const { data: logs, error: logsError } = await fastify.supabase
-        .from('attendance_logs')
-        .select('employee_id, check_in, check_out')
-        .eq('tenant_id', tenantId)
-        .gte('check_in', dayStart)
-        .lte('check_in', dayEnd)
-        .order('check_in', { ascending: true })
-
-      if (logsError) {
+      // Multiple punches per employee per day can exceed 1,000 rows even faster
+      // than attendance_daily — paginate this too.
+      let logs: Array<{ employee_id: string; check_in: string | null; check_out: string | null }>
+      try {
+        logs = await fetchAllRows((from, to) =>
+          fastify.supabase
+            .from('attendance_logs')
+            .select('employee_id, check_in, check_out')
+            .eq('tenant_id', tenantId)
+            .gte('check_in', dayStart)
+            .lte('check_in', dayEnd)
+            .order('check_in', { ascending: true })
+            .range(from, to),
+        )
+      } catch (logsError) {
         req.log.error({ err: logsError, module: 'attendance', route: 'run-export' }, 'logs query failed')
         return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Could not fetch log entries' })
       }
