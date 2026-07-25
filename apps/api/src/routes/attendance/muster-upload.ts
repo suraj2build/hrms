@@ -251,6 +251,9 @@ export default async function musterUploadRoutes(fastify: FastifyInstance) {
 
     const errors:  UploadError[] = []
     const toUpsert: DailyRow[]   = []
+    // Parallel to toUpsert (same index) — row number/employee_code for
+    // reporting which specific rows failed if their upsert chunk fails.
+    const toUpsertMeta: Array<{ row: number; employee_code: string; date: string }> = []
 
     for (let i = 0; i < rows.length; i++) {
       const row    = rows[i]
@@ -284,13 +287,15 @@ export default async function musterUploadRoutes(fastify: FastifyInstance) {
         source:           'muster',
         muster_upload_id: uploadId,
       })
+      toUpsertMeta.push({ row: rowNum, employee_code: row.employee_code, date: row.date })
     }
 
     // ── Batch upsert ──────────────────────────────────────────────────────────
     let upsertFailCount = 0
 
     for (let i = 0; i < toUpsert.length; i += UPSERT_CHUNK) {
-      const chunk = toUpsert.slice(i, i + UPSERT_CHUNK)
+      const chunk     = toUpsert.slice(i, i + UPSERT_CHUNK)
+      const chunkMeta = toUpsertMeta.slice(i, i + UPSERT_CHUNK)
       const { error: upsertErr } = await fastify.supabase
         .from('attendance_daily')
         .upsert(chunk, { onConflict: 'tenant_id,employee_id,date', ignoreDuplicates: false })
@@ -298,11 +303,28 @@ export default async function musterUploadRoutes(fastify: FastifyInstance) {
       if (upsertErr) {
         fastify.log.error({ upsertErr, chunk_start: i }, 'muster-upload: upsert chunk failed')
         upsertFailCount += chunk.length
+        // Previously a chunk failure only incremented a bare count — the
+        // admin-facing error report (and CSV/UI) had zero detail on which
+        // rows failed or why, undistinguishable from a fully successful
+        // upload except for a mismatched success_count. Record one entry
+        // per affected row so they're visible the same way validation
+        // failures already are.
+        for (const meta of chunkMeta) {
+          errors.push({
+            row:           meta.row,
+            employee_code: meta.employee_code,
+            date:          meta.date,
+            reason:        'Database write failed for this row — contact support if this persists',
+          })
+        }
       }
     }
 
     const successCount = toUpsert.length - upsertFailCount
-    const errorCount   = errors.length + upsertFailCount
+    // errors already includes one entry per failed-chunk row (pushed above),
+    // so it alone is the full error count — adding upsertFailCount again
+    // would double-count every chunk-failure row.
+    const errorCount   = errors.length
 
     // ── Update audit record ───────────────────────────────────────────────────
     await fastify.supabase
