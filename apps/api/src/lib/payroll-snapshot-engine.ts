@@ -336,6 +336,21 @@ async function buildStatutorySnapshot(
       .maybeSingle(),
   ])
 
+  // Fresh audit finding: every query in this function used to be destructured
+  // as `.data` only, with `.error` silently discarded. Unlike a live-read
+  // path, this feeds payroll_run_snapshots / payroll_employee_snapshots —
+  // WRITE-ONCE, immutable audit records. A transient DB error here used to
+  // collapse to the same defaults as "not configured" (PF/ESI/PT disabled,
+  // no PT state, no TDS declarations), silently baking a wrong statutory
+  // config into a record that can never be corrected after the fact. The
+  // caller (buildEmployeePayrollSnapshot) already wraps this in try/catch
+  // and buildPayrollRunSnapshot already excludes any employee whose snapshot
+  // build throws from the run snapshot rather than writing bad data — so
+  // throwing here routes through error handling that already exists.
+  if (settingsResult.error)  throw new Error(`buildStatutorySnapshot: failed to fetch payroll_statutory_settings: ${settingsResult.error.message}`)
+  if (epfConfigResult.error) throw new Error(`buildStatutorySnapshot: failed to fetch epf_config: ${epfConfigResult.error.message}`)
+  if (esiConfigResult.error) throw new Error(`buildStatutorySnapshot: failed to fetch esi_config: ${esiConfigResult.error.message}`)
+
   const settings  = settingsResult.data  as any
   const epfConfig = epfConfigResult.data as any
   const esiConfig = esiConfigResult.data as any
@@ -347,7 +362,7 @@ async function buildStatutorySnapshot(
 
   if (employeeId && settings?.pt_enabled) {
     // Check manual state override first
-    const { data: manualState } = await supabase
+    const { data: manualState, error: manualStateErr } = await supabase
       .from('ptax_state_config')
       .select('state_code')
       .eq('tenant_id', tenantId)
@@ -358,26 +373,31 @@ async function buildStatutorySnapshot(
       .limit(1)
       .maybeSingle()
 
+    if (manualStateErr) throw new Error(`buildStatutorySnapshot: failed to fetch PT state override: ${manualStateErr.message}`)
+
     if ((manualState as any)?.state_code) {
       ptaxState = (manualState as any).state_code
     } else {
       // Auto-derive from employee → site → state_code
-      const { data: empSite } = await supabase
+      const { data: empSite, error: empSiteErr } = await supabase
         .from('employees')
         .select('sites(state_code)')
         .eq('id', employeeId)
         .maybeSingle()
+      if (empSiteErr) throw new Error(`buildStatutorySnapshot: failed to fetch employee site: ${empSiteErr.message}`)
       ptaxState = (empSite as any)?.sites?.state_code ?? null
     }
 
     if (ptaxState && financialYear) {
-      const { data: slabRows } = await supabase
+      const { data: slabRows, error: slabErr } = await supabase
         .from('ptax_slabs')
         .select('monthly_income_from, monthly_income_to, monthly_ptax')
         .eq('tenant_id', tenantId)
         .eq('state_code', ptaxState)
         .eq('financial_year', financialYear)
         .eq('is_active', true)
+
+      if (slabErr) throw new Error(`buildStatutorySnapshot: failed to fetch PTax slabs: ${slabErr.message}`)
 
       ptaxSlabs = ((slabRows ?? []) as any[]).map(r => ({
         from:   r.monthly_income_from,
@@ -399,7 +419,7 @@ async function buildStatutorySnapshot(
 
   if (employeeId && financialYear && settings?.tds_enabled) {
     // Prefer latest immutable snapshot over live table
-    const { data: latestSnap } = await supabase
+    const { data: latestSnap, error: latestSnapErr } = await supabase
       .from('tds_declaration_snapshots')
       .select('declaration_items, total_approved')
       .eq('tenant_id', tenantId)
@@ -408,6 +428,8 @@ async function buildStatutorySnapshot(
       .order('snapshot_at', { ascending: false })
       .limit(1)
       .maybeSingle()
+
+    if (latestSnapErr) throw new Error(`buildStatutorySnapshot: failed to fetch TDS declaration snapshot: ${latestSnapErr.message}`)
 
     if (latestSnap && Array.isArray((latestSnap as any).declaration_items)) {
       // Use immutable snapshot
@@ -421,13 +443,15 @@ async function buildStatutorySnapshot(
       totalApproved = (latestSnap as any).total_approved ?? 0
     } else {
       // Fallback: live approved declarations (not recommended for finalized payroll)
-      const { data: liveDels } = await supabase
+      const { data: liveDels, error: liveDelsErr } = await supabase
         .from('tax_declarations')
         .select('id, declaration_category, section, description, approved_amount')
         .eq('tenant_id', tenantId)
         .eq('employee_id', employeeId)
         .eq('financial_year', financialYear)
         .eq('status', 'approved')
+
+      if (liveDelsErr) throw new Error(`buildStatutorySnapshot: failed to fetch live tax declarations: ${liveDelsErr.message}`)
 
       approvedDecls = ((liveDels ?? []) as any[]).map((d: any) => ({
         declaration_id:       d.id,
