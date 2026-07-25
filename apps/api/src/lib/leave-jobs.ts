@@ -1332,13 +1332,11 @@ export async function runLifecycleMonthlyAccrual(
           .maybeSingle()
         if (existingLedger) { result.skipped++; continue }
 
-        await creditEmployeeDays(
-          supabase, tenantId, assignment.employee_id, rule.leave_type_id,
-          lifecycle.days_to_credit, year, rule.max_accrual_balance,
-        )
-
-        // Write lifecycle-enriched ledger entry
-        await supabase.from('leave_accrual_ledger').upsert(
+        // Write lifecycle-enriched ledger entry FIRST — the ledger is the
+        // authority (see comment above); only credit the cache once the
+        // ledger write is confirmed, so a rejected/failed ledger insert
+        // can never leave the cache credited with no ledger row to match it.
+        const { error: ledgerErr } = await supabase.from('leave_accrual_ledger').upsert(
           {
             tenant_id:                 tenantId,
             employee_id:               assignment.employee_id,
@@ -1362,6 +1360,18 @@ export async function runLifecycleMonthlyAccrual(
             onConflict:       'tenant_id,employee_id,leave_type_id,year,accrual_type,accrued_on',
             ignoreDuplicates: true,
           },
+        )
+        // supabase-js does not throw on a DB error (e.g. a CHECK-constraint
+        // violation) — it returns { error }, which the surrounding try/catch
+        // would never see if left unchecked. Without this check the job would
+        // report employees_processed++ as if it fully succeeded even though
+        // no ledger row (and, previously, no cache credit either) was written
+        // — a phantom-success job result with no error signal anywhere.
+        if (ledgerErr) throw new Error(`ledger upsert failed: ${ledgerErr.message}`)
+
+        await creditEmployeeDays(
+          supabase, tenantId, assignment.employee_id, rule.leave_type_id,
+          lifecycle.days_to_credit, year, rule.max_accrual_balance,
         )
 
         result.employees_processed++
