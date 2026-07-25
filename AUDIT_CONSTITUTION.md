@@ -16,6 +16,12 @@ simultaneously.
 > The leadership closure memo is at `docs/audit/AUDIT_CLOSURE_MEMO_2026-07-03.md`.
 > All 117 numbered issues are closed. Gate 1 (PD-1/AF-001) closed 2026-07-03. Gate 2 (DEF-1) closed 2026-07-03.
 > The platform is clear for production launch. See §11 for post-launch backlog.
+>
+> **"Audit complete" does not mean "no new defects."** Seven production incidents (ISSUE-118
+> through ISSUE-124) were found and fixed in live production in the three weeks after closure —
+> none were in scope of the closed 117-issue register. See §13 for the incident log and the
+> patterns they establish. Before starting a new audit/review session, read §13 first — it is
+> more current than the closed register above.
 
 ---
 
@@ -316,8 +322,11 @@ unless a specific issue requires re-reading the file.
 | RLS bypass | Service-role key used by all Fastify routes — RLS not the primary isolation mechanism |
 | Notification service | `registerNotificationHandlers()` wired in `index.ts`; `inbox_items` writes implemented (ISSUE-009, CLOSED 2026-07-01) |
 | AF-001 (lifecycle sync gap) | **CLOSED (2026-07-03).** `PATCH /employees/:id/separation/relieve` now sets `profiles.is_active = false` and calls `auth.admin.updateUserById(..., { ban_duration: '876000h' })` at the terminal `employees.status = 'separated'` transition (`separation-workflow.ts`). SOC2 CC6.3 updated to `implemented` in `122_compliance_controls.sql`. |
-| Job queue duality | `job-queue.ts` (in-memory, unreliable) + `durable-queue.ts` (Supabase-backed) both in use |
-| Migration count | 350 as of 2026-07-03; next available number is 351 |
+| Job queue duality | `job-queue.ts` (in-memory, unreliable) + `durable-queue.ts` (Supabase-backed) both in use. `durable-queue.ts`'s `enqueue()` was rewritten (ISSUE-121, 2026-07-24) to call an `enqueue_background_job()` SQL RPC instead of `.upsert(row, {onConflict, ignoreDuplicates:true})` — PostgREST cannot express a partial unique index's WHERE predicate as an ON CONFLICT arbiter; the RPC (SECURITY DEFINER) can. If you see "no unique or exclusion constraint matching the ON CONFLICT specification" against any partial-indexed table, this is the pattern — see §13. |
+| Migration count | 383 files as of 2026-07-25; highest-numbered file is `384_background_jobs_idempotency_index_reapply.sql`; next available number is 385 |
+| PostgREST max-rows | Hard server-side ceiling of **1000 rows**, silently applied to `.limit(N)` for any N, with no error and no truncation signal. Root-caused ISSUE-118 (payroll fetched 1 of 2,877 employees). `fetchAllRows()` in `apps/api/src/lib/supabase-paginate.js` uses `.range()` instead — see CLAUDE.md "Supabase data fetching — UNIVERSAL RULE". For queries that can't use `fetchAllRows` (e.g. inside a SECURITY DEFINER function), an RPC that loops server-side (`get_active_employees_for_payroll`, migration 380) is the alternative pattern. |
+| SheetJS (`xlsx` npm package) date cells | **Do not use `cellDates: true`** to parse XLSX date cells in this codebase. Its internal `numdate()` builds a JS `Date` by comparing `getTimezoneOffset()` on *today* against the Excel epoch (1899-12-30) — for zones whose *historical* 1899-era offset differs from today's (Asia/Kolkata: +5:53:20 pre-1941 vs +5:30 today), the correction is wrong by ~23 minutes, enough to cross local midnight and silently roll the date back a day. Confirmed by direct test against `node_modules/xlsx` with `TZ=Asia/Kolkata`: **both** local and UTC Date getters return the wrong day, because the `Date` instant is already corrupted before either getter runs (ISSUE-124). The verified-safe pattern: read the workbook with `cellNF: true` (populates `cell.z`, the number-format string) and convert date-formatted numeric cells with `XLSX.SSF.parse_date_code(cell.v)` — pure integer arithmetic, no `Date` object, cannot drift. See `apps/web/src/pages/import/ImportWorkspace.tsx`'s `cellToString()` for the reference implementation. |
+| Bulk-upload column resolution | Must match uploaded spreadsheet columns to DB fields/entities by **normalized header name**, never by column position/index (ISSUE-123 — position-based resolution silently misattributed Basic Pay into "Meal Coupon" and dropped HRA/Special Allowance for ~2,872 of 2,877 employees). If a frontend/backend pair both normalize header text independently (e.g. `apps/web/src/pages/import/ImportWorkspace.tsx`'s `normaliseKey()` vs a backend `normName()`), the two normalization functions **must produce byte-identical output** — a whitespace-to-space vs whitespace-to-underscore mismatch caused every single column to fail to match, masquerading as 13 unrelated "unknown column" errors. When adding or auditing a new bulk importer, diff the two normalization functions character-by-character rather than assuming "they both lowercase and trim, so they match". |
 | `org_id` tables | All 18 tables renamed to `tenant_id` via migration 350 (ISSUE-065, CLOSED). Historical `automation_activity_logs.metadata.org_id` JSONB keys are preserved as-is — no read-side code queries this key. |
 | Partition expiry | `security_events` + `trace_spans` extended through Dec 2027 via migration 348 (ISSUE-079 — CLOSED) |
 | Razorpay billing | Webhook in `routes/billing/index.ts`; `tenants.status` is the authoritative field |
@@ -393,6 +402,15 @@ Update this table after each issue is committed and pushed.
 | HIGH untracked: ISSUE-014, 017, 027, 029, 034, 037, 038, 039 (8 issues) | Administratively closed — original issue descriptions were not preserved in a durable artifact (the 17-agent audit report was never written to disk). No independently recoverable remediation scope remains. These items are removed from the active register and treated as superseded by the completed Phase 1–4 program or accepted as post-GA residual debt. | — | 2026-07-03 |
 | MEDIUM untracked: ISSUE-051–053, 060, 062–064, 071–078, 080–081, 084–087 (21 issues) | Administratively closed — same as above. Phase 4 MEDIUM issues that were explicitly assigned are all closed. The remaining MEDIUM items have no preserved scope and are treated as post-GA residual debt. | — | 2026-07-03 |
 | LOW untracked: ISSUE-089, 091–103, 105–110, 112–115 (26 issues) | Administratively closed — same as above. Only operationally-impactful LOW issues (ISSUE-090, ISSUE-111) were explicitly remediated. Remaining LOW items are accepted as post-GA residual risk. | — | 2026-07-03 |
+| ISSUE-118 | Payroll dry-run/live-run processed 1 of 2,877 employees — PostgREST's undocumented 1000-row `max-rows` ceiling silently overrides any `.limit(N)`, even `.limit(200_000)`, with no error signal | `get_active_employees_for_payroll` RPC (migration 380) bypasses PostgREST pagination for the employee-fetch query | 2026-07-24 |
+| ISSUE-119 | `payroll_run_events_type_check` CHECK constraint regressed by a later migration's DROP+ADD, silently dropping the `'computation_failed'` value an earlier migration had added | Migration 381 — restores the value additively | 2026-07-24 |
+| ISSUE-120 | `payroll_runs_status_check` CHECK constraint regressed the same way — missing `'frozen'`/`'reopened'` | Migration 382 — restores both values | 2026-07-24 |
+| ISSUE-121 | Durable queue `enqueue()` failed for every idempotency-keyed job with "no unique or exclusion constraint matching the ON CONFLICT specification" — PostgREST's `.upsert(..., {onConflict})` cannot express a partial unique index's WHERE predicate as an arbiter | `enqueue_background_job()` SECURITY DEFINER SQL function (migrations 383, 384) called via `.rpc()` instead of `.upsert()` | 2026-07-24 |
+| ISSUE-122 | Live payroll-run progress card showed stale error/finalize data from a run's previous attempt when re-triggered | Payroll-run trigger upsert now explicitly resets `error_message`, `failure_summary`, `finalized_at`, `started_processing_at`, `total_employee_count`, `processed_employee_count`, `run_duration_ms` to their initial values on every re-trigger | 2026-07-24 |
+| ISSUE-123 | **Salary bulk-upload column resolution was by fixed column POSITION (via a hidden metadata-sheet manifest), not header name** — silently misattributed Basic Pay values into "Meal Coupon" and dropped HRA/Special Allowance entirely for ~2,872 of ~2,877 employees. This fed directly into PF wage calculation (PF is computed only on components flagged `affects_pf`, which is only Basic Salary), silently underpaying/skipping PF for affected employees for at least one payroll cycle. User directive: "ALL UPLOAD SHOULD MATCH WITH THE HEADER AND NOT THE POSITION." | `apps/api/src/lib/import-engine/salary-upload.ts` redesigned to match uploaded headers against `salary_components.name` by normalized name; unmatched headers now hard-error by name (typo/deactivated-component) instead of silently importing nothing. A frontend/backend header-normalization mismatch introduced during this fix (space vs underscore whitespace collapse) was caught and fixed same-day — see the Known Codebase Facts entry above. | 2026-07-24/25 |
+| ISSUE-124 | Re-uploaded salary dates were off by one day for users in Asia/Kolkata — SheetJS's `cellDates: true` date-object conversion is broken for that specific timezone (historical-vs-modern UTC offset drift; see Known Codebase Facts above). A first fix attempt (switching local→UTC Date getters) did not resolve it because the underlying `Date` instant was already corrupted before either getter ran — the user correctly pushed back ("why...i am uploading on same day") rather than accepting a "check your file" explanation. | `apps/web/src/pages/import/ImportWorkspace.tsx` — workbook now read with `cellNF: true`; date-formatted cells converted via `XLSX.SSF.parse_date_code()` (pure integer arithmetic, no `Date` object). Verified against TZ=Asia/Kolkata, America/New_York, UTC, Pacific/Auckland. | 2026-07-25 |
+
+**ISSUE-118 through ISSUE-124 were found live in production, not through a scheduled audit session** — they surfaced as real user-reported incidents in the three weeks after the 117-issue register closed. Unlike ISSUE-001–117, these are not administratively closeable by code-review sign-off alone: ISSUE-123 in particular has an **unresolved data-remediation tail** — see §13.
 
 ---
 
@@ -469,10 +487,83 @@ were not preserved in a durable artifact; all six require re-scoping before work
 
 ---
 
-*Last updated: 2026-07-03.*
+## 13. Post-Launch Production Incident Log (2026-07 — ongoing)
 
-**Audit remediation complete.** 117 numbered issues closed (62 explicitly remediated, 55 administratively
-closed). All four phases closed. No open numbered audit remediation issues remain.
+The 117-issue register (§2–§11) was produced by scheduled audit sessions and is closed. This
+section tracks defects found the other way: **live user-reported production incidents**, discovered
+after audit closure, in the normal course of operating the platform. It is a standing section —
+append to it, do not close it. If you are starting a new audit/review session, read this section
+**before** §2; it reflects the current state of the codebase more accurately than the closed register.
+
+### 13.1 Incidents this covers
+
+ISSUE-118 through ISSUE-124 (full detail in §10's Closed Issues Log). Summary: a payroll pagination
+bug that silently processed 1 employee instead of 2,877; two CHECK-constraint regressions where a
+later migration's DROP+ADD silently dropped values an earlier migration had added; a durable-queue
+`ON CONFLICT`/partial-index mismatch; a stale-data-leak bug in the live payroll-run progress UI; a
+severe silent data-corruption bug in salary bulk-upload (position-based column resolution); and a
+SheetJS timezone bug corrupting uploaded dates for Asia/Kolkata users.
+
+**Why this matters for audit methodology:** none of these seven were CRITICAL/HIGH findings missed
+by the original 17-agent audit — they are defects in code that was *written or modified after* the
+audit closed (207 commits touched `apps/api/src`, `apps/web/src`, or `supabase/migrations` between
+2026-07-03 and 2026-07-25). **"Audit complete" describes a point-in-time register, not a permanent
+guarantee.** A closed audit does not exempt subsequently-written code from the same defect classes
+it found the first time.
+
+### 13.2 New durable patterns (add to §5's approved-approaches set)
+
+**Migrations that touch a CHECK constraint or enum-like column must be additive, never a blind
+DROP+ADD replacement.** Before writing `ALTER TABLE ... DROP CONSTRAINT x, ADD CONSTRAINT x CHECK
+(col IN (...))`, grep the full migration history for every prior version of that constraint (or that
+column's checks under a different constraint name) and take the **union** of all values that have
+ever been valid, not just the values the current feature needs. This exact mistake shipped three
+times this session alone (ISSUE-119, ISSUE-120, and the durable-queue index in ISSUE-121).
+
+**Bulk-upload column resolution must be by header name, never by position** (ISSUE-123). See the
+Known Codebase Facts entry in §9. This is now also a CLAUDE.md rule ("ALL UPLOAD SHOULD MATCH WITH
+THE HEADER AND NOT THE POSITION" — explicit user directive, treat as binding as the employee-picker
+rule in §6.4).
+
+**Never parse XLSX date cells with SheetJS's `cellDates: true`** (ISSUE-124). See the Known Codebase
+Facts entry in §9 for the mechanism and the correct `cellNF: true` + `XLSX.SSF.parse_date_code()`
+pattern. If a user reports an uploaded date is off by exactly one day and they insist their source
+file is correct, suspect this class of bug immediately rather than a data-entry error — verify by
+testing the actual parsing code with `TZ=Asia/Kolkata` before concluding it's user error.
+
+**Any `.upsert(row, {onConflict: 'col', ignoreDuplicates: true})` against a table with a *partial*
+unique index** (`CREATE UNIQUE INDEX ... WHERE <predicate>`) will fail at runtime with "no unique or
+exclusion constraint matching the ON CONFLICT specification" — PostgREST cannot express the partial
+predicate as an ON CONFLICT arbiter. Use a SECURITY DEFINER SQL function called via `.rpc()` instead
+(ISSUE-121; reference implementation: `enqueue_background_job()`, migrations 383/384).
+
+### 13.3 Open residual items — NOT closed, do not represent as resolved
+
+Unlike §11's post-launch backlog (which is deliberately deferred, low-urgency work), these are
+**active data-integrity and compliance risks** stemming directly from ISSUE-123 that a code fix alone
+cannot close:
+
+| ID | Item | Status | Blocked on |
+|----|------|--------|-----------|
+| DATA-1 | Historical `employee_compensation_components` rows for ~2,872 employees still contain the ISSUE-123 corruption (Basic Pay misattributed to "Meal Coupon"; HRA and Special Allowance absent) as of 2026-07-25. The corruption pattern is **non-uniform** across employees (e.g. Conveyance Allowance values range ₹86–₹29,601) — an automated "swap the values back" repair script was explicitly considered and rejected as too risky. | OPEN | Remediation is via clean re-upload only, through the now-fixed header-matching + date-parsing system (ISSUE-123/124 fixes). User is actively re-uploading corrected data as of this writing. |
+| DATA-2 | Whether PF/ESI/PT statutory government filings for the affected payroll period(s) were already remitted using the corrupted (near-zero PF) figures is **unconfirmed**. PF is computed only on `affects_pf`-flagged components (Basic Salary only); with Basic silently zeroed by ISSUE-123, PF was likely underpaid/skipped for ~2,872 employees for at least one cycle. | OPEN — urgent | Requires the user/compliance team to check filing status against the actual remittance dates for the affected month(s). |
+| DATA-3 | The payroll run(s) computed against corrupted compensation data need to be rolled back and re-run once DATA-1 is resolved. Recommended sequence: dry-run first to verify corrected Gross/Net/PF/ESI numbers before committing to a real re-run finalization. | OPEN — blocked on DATA-1 | Cannot start until the corrected re-upload (DATA-1) is confirmed complete and spot-checked. |
+
+**Do not close DATA-1/2/3 by code-review sign-off.** They close only when the user confirms the
+re-upload is complete and verified, the filing question is answered, and the affected payroll run(s)
+have been successfully re-run.
+
+---
+
+*Last updated: 2026-07-25.*
+
+**Audit remediation complete** (117 numbered issues, closed 2026-07-03: 62 explicitly remediated, 55
+administratively closed). All four phases closed. No open *numbered audit* issues remain.
+
+**Post-launch incident log (§13) is NOT complete** — ISSUE-118 through 124 are logged as closed code
+fixes, but DATA-1, DATA-2, and DATA-3 are open, active, unresolved production risks as of the date
+above. Do not cite this document as evidence the platform currently has zero open issues without
+reading §13 first.
 
 Post-launch backlog summary (§11): 1 deferred engineering item (DEF-2) · 1 product-decision-blocked
 item (PD-2) · 6 Phase 5 roadmap items pending re-scope (ISSUE-059, 070, 082, 104, 116, 117).
