@@ -806,6 +806,11 @@ export function EmployeeProfile() {
       setRevisionOpen(false)
       setRevisionForm({ revision_type: 'increment', effective_date: today, reason: '', new_ctc_annual: '', notes: '' })
       refetchRevisions()
+      // Same compensation_revisions row is also read by the admin Comp
+      // Revisions queue and the manager compensation view under separate keys.
+      qc.invalidateQueries({ queryKey: ['comp-revisions'] })
+      qc.invalidateQueries({ queryKey: ['manager-team-comp'] })
+      qc.invalidateQueries({ queryKey: ['manager-comp-history'] })
     },
     onError: (e: Error) => toast.error('Failed to initiate revision', { description: e.message }),
   })
@@ -817,6 +822,9 @@ export function EmployeeProfile() {
       refetchRevisions()
       refetchCompHistory()
       qc.invalidateQueries({ queryKey: ['employee-full', id] })
+      qc.invalidateQueries({ queryKey: ['comp-revisions'] })
+      qc.invalidateQueries({ queryKey: ['manager-team-comp'] })
+      qc.invalidateQueries({ queryKey: ['manager-comp-history'] })
     },
     onError: (e: Error) => toast.error('Failed to approve revision', { description: e.message }),
   })
@@ -829,6 +837,9 @@ export function EmployeeProfile() {
       setRejectTarget(null)
       setRejectReason('')
       refetchRevisions()
+      qc.invalidateQueries({ queryKey: ['comp-revisions'] })
+      qc.invalidateQueries({ queryKey: ['manager-team-comp'] })
+      qc.invalidateQueries({ queryKey: ['manager-comp-history'] })
     },
     onError: (e: Error) => toast.error('Failed to reject revision', { description: e.message }),
   })
@@ -893,6 +904,10 @@ export function EmployeeProfile() {
       toast.success('Compensation record deleted')
       qc.invalidateQueries({ queryKey: ['employee-full', id] })
       qc.invalidateQueries({ queryKey: ['compensation-history', id] })
+      // The manager's team view reads this same employee_compensations row
+      // for ctc_annual under a separate cache key.
+      qc.invalidateQueries({ queryKey: ['manager-team-comp'] })
+      qc.invalidateQueries({ queryKey: ['manager-comp-history'] })
     },
     onError: (e: unknown) => toast.error('Delete failed', { description: e instanceof Error ? e.message : undefined }),
   })
@@ -917,6 +932,8 @@ export function EmployeeProfile() {
       setSetupCompForm({ salary_structure_id: '', ctc_annual: '', effective_from: today, components: [{ salary_component_id: '', calculation_type: 'fixed', value: '' }] })
       qc.invalidateQueries({ queryKey: ['employee-full', id] })
       qc.invalidateQueries({ queryKey: ['compensation-history', id] })
+      qc.invalidateQueries({ queryKey: ['manager-team-comp'] })
+      qc.invalidateQueries({ queryKey: ['manager-comp-history'] })
     },
     onError: (e: Error) => toast.error('Failed to configure compensation', { description: e.message }),
   })

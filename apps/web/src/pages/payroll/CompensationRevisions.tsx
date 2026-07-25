@@ -376,7 +376,19 @@ export function CompensationRevisions() {
 
   // ── Mutations ────────────────────────────────────────────────────────────
 
-  const invalidate = () => qc.invalidateQueries({ queryKey: ['comp-revisions'] })
+  // compensation_revisions is also read by EmployeeProfile (payroll-revisions,
+  // compensation-history, employee-full) and ManagerCompensation
+  // (manager-team-comp, manager-comp-history) under entirely separate cache
+  // keys — invalidate all of them so an approve/reject/withdraw here doesn't
+  // leave those other views showing a stale pending revision.
+  const invalidate = () => {
+    qc.invalidateQueries({ queryKey: ['comp-revisions'] })
+    qc.invalidateQueries({ queryKey: ['payroll-revisions'] })
+    qc.invalidateQueries({ queryKey: ['compensation-history'] })
+    qc.invalidateQueries({ queryKey: ['employee-full'] })
+    qc.invalidateQueries({ queryKey: ['manager-team-comp'] })
+    qc.invalidateQueries({ queryKey: ['manager-comp-history'] })
+  }
 
   const approveMut = useMutation({
     mutationFn: (id: string) => api.post(`/compensation/revisions/${id}/approve`, {}),
