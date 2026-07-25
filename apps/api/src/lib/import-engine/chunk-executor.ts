@@ -192,12 +192,33 @@ export async function executeInChunks({
   processChunk,
 }: ExecuteInChunksOptions): Promise<ExecuteInChunksResult> {
 
-  // 1. Write validation errors (once per run — on resume they already exist)
-  if (invalidRows.length > 0) {
+  // 1. Fetch live chunk statuses up front (to detect already-completed chunks
+  //    on resume — crash recovery, or an explicit retry replaying this same
+  //    jobId). Doing this BEFORE writing validation errors lets step 2 below
+  //    skip re-writing them on a resumed run. Non-fatal — import_job_chunks
+  //    table may not exist in older DB schemas.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let liveChunksRaw: any[] = []
+  try {
+    const res = await supabase
+      .from('import_job_chunks')
+      .select('chunk_no, id, status, success_count, failure_count, attempt')
+      .eq('import_job_id', jobId)
+      .order('chunk_no', { ascending: true })
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    liveChunksRaw = (res.data as any[]) ?? []
+  } catch { /* table may not exist */ }
+
+  const isResumedRun = liveChunksRaw.some((row) => row.status === 'completed')
+
+  // 2. Write validation errors (once per job — a resumed run already wrote
+  //    these on its first pass; re-writing them here would duplicate every
+  //    validation-error row in import_job_errors on each resume/retry).
+  if (invalidRows.length > 0 && !isResumedRun) {
     await writeImportErrors(supabase, tenantId, jobId, invalidRows, 'validation')
   }
 
-  // 2. Nothing eligible to process
+  // 3. Nothing eligible to process
   if (eligibleRows.length === 0) {
     return {
       created: 0,
@@ -207,14 +228,14 @@ export async function executeInChunks({
     }
   }
 
-  // 3. Split into chunks
+  // 4. Split into chunks
   const chunks: ValidatedRow[][] = []
   for (let i = 0; i < eligibleRows.length; i += chunkSize) {
     chunks.push(eligibleRows.slice(i, i + chunkSize))
   }
   const totalChunks = chunks.length
 
-  // 4. Upsert chunk records (fire-and-forget — table may not exist in older DB schemas)
+  // 5. Upsert chunk records (fire-and-forget — table may not exist in older DB schemas)
   const chunkRecords = chunks.map((ch, idx) => {
     const chunkNo  = idx + 1
     const startRow = ch[0].rowNumber
@@ -236,20 +257,6 @@ export async function executeInChunks({
     .upsert(chunkRecords, { onConflict: 'import_job_id,chunk_no', ignoreDuplicates: true })
     .then(() => {}, () => {})
 
-  // 5. Fetch live chunk statuses (to detect already-completed chunks on resume)
-  //    Non-fatal — import_job_chunks table may not exist in older DB schemas.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let liveChunksRaw: any[] = []
-  try {
-    const res = await supabase
-      .from('import_job_chunks')
-      .select('chunk_no, id, status, success_count, failure_count, attempt')
-      .eq('import_job_id', jobId)
-      .order('chunk_no', { ascending: true })
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    liveChunksRaw = (res.data as any[]) ?? []
-  } catch { /* table may not exist */ }
-
   const chunkMeta = new Map<number, {
     id:            string
     status:        string
@@ -267,7 +274,8 @@ export async function executeInChunks({
     })
   }
 
-  const isResume = [...chunkMeta.values()].some((m) => m.status === 'completed')
+  // isResumedRun was already determined in step 1 from the same live chunk read.
+  const isResume = isResumedRun
 
   // 6. Update job stage (fire-and-forget — total_chunks/current_stage columns may not exist)
   supabase
@@ -394,6 +402,19 @@ export async function executeInChunks({
             skipped_rows:  totalSkipped,
           })
           .eq('id', jobId)
+
+        // Stamp current_chunk/last_activity_at (migrations 364/370) so the
+        // UI's "Chunk X of Y" progress line (ImportJobCard.tsx) and any
+        // stuck-import watchdog have live data. Previously total_chunks was
+        // set once before the loop but current_chunk was never advanced, so
+        // that UI element's null-check never passed for the whole run.
+        // Fire-and-forget like the other newer-column writes in this file —
+        // these columns may not exist in older DB schemas.
+        supabase
+          .from('import_jobs')
+          .update({ current_chunk: chunkNo, last_activity_at: completedAt })
+          .eq('id', jobId)
+          .then(() => {}, () => {})
 
         // Per-chunk metrics (fire-and-forget — table may not exist in older DB schemas)
         supabase
