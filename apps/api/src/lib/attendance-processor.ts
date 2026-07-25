@@ -437,21 +437,29 @@ async function generateAttendanceIntelligence(
       return d.toISOString()
     }
 
+    // Fresh audit finding: this insert used to write `category`/`sla_hours`
+    // keys — attendance_exceptions has neither (the real column is
+    // exception_category, and there is no sla_hours column at all, only
+    // sla_due_at). PostgREST rejects unknown JSON keys on insert, so this
+    // batch failed outright every time; the error was only log.warn'd
+    // (below), never surfaced, so no system-generated exception has ever
+    // actually been written to this table. Compare exceptions.ts:231's
+    // manual-creation path, which correctly uses exception_category.
     if (incomplete.length > 0) {
       exceptions.push({
         tenant_id: tenantId, employee_id: daily.employee_id, date: daily.date,
-        exception_type: 'missing_out_punch', category: 'punch', severity: 'medium',
+        exception_type: 'missing_out_punch', exception_category: 'punch', severity: 'medium',
         payroll_impacting: true, requires_investigation: false,
-        confidence_impact: 0.25, sla_hours: 24, sla_due_at: slaAt('missing_out_punch'),
+        confidence_impact: 0.25, sla_due_at: slaAt('missing_out_punch'),
         status: 'open',
       })
     }
     if (!hasShift && sessions.length > 0) {
       exceptions.push({
         tenant_id: tenantId, employee_id: daily.employee_id, date: daily.date,
-        exception_type: 'no_shift_assigned', category: 'shift', severity: 'high',
+        exception_type: 'no_shift_assigned', exception_category: 'shift', severity: 'high',
         payroll_impacting: true, requires_investigation: true,
-        confidence_impact: 0.25, sla_hours: 48, sla_due_at: slaAt('no_shift_assigned'),
+        confidence_impact: 0.25, sla_due_at: slaAt('no_shift_assigned'),
         status: 'open',
       })
     }
