@@ -378,9 +378,17 @@ export async function createLeaveRequest(
     isFuture  ? `Future — ${Math.round((Date.parse(fromDate) - Date.parse(todayStr)) / 86_400_000)} day(s) ahead` :
     null
 
-  // Overlap check — prevent duplicate or overlapping PENDING/APPROVED requests
+  // Overlap check — prevent duplicate or overlapping PENDING/APPROVED requests.
+  // This is the ONLY guard against overlapping requests: leave_requests has no
+  // UNIQUE/EXCLUDE constraint backstopping it at the DB level (confirmed via
+  // migration grep — the `error.code === '23505'` handler further down in this
+  // function is dead code for this scenario; nothing in the schema can raise
+  // it for a non-identical overlapping range). error was previously discarded
+  // here — a query failure (RLS hiccup, connection blip) silently proceeded as
+  // "no overlap found," letting a duplicate/overlapping PENDING request
+  // through with no error anywhere. Fail closed instead. (fresh audit finding)
   // Overlap condition: existing.from_date <= new.to_date AND existing.to_date >= new.from_date
-  const { data: overlapping } = await supabase
+  const { data: overlapping, error: overlapErr } = await supabase
     .from('leave_requests')
     .select('id')
     .eq('tenant_id', tenantId)
@@ -390,6 +398,10 @@ export async function createLeaveRequest(
     .gte('to_date', fromDate)   // existing ends on or after new start
     .limit(1)
     .maybeSingle()
+
+  if (overlapErr) {
+    return { ok: false, error: { type: 'DB_ERROR', message: 'Failed to check for overlapping leave requests' } }
+  }
 
   if (overlapping) {
     return {

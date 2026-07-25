@@ -275,6 +275,12 @@ export async function approveOtRequest(
   const approved_minutes = minutesOverride ?? req.raw_ot_minutes
   const now = new Date().toISOString()
 
+  // .eq('status', 'PENDING') + row-count check (fresh audit finding): without
+  // this, two concurrent approve calls for the same request could both pass
+  // the precheck above and both write — lower-impact than a balance-affecting
+  // approval since this is a plain overwrite (last writer wins, no double
+  // credit), but the same missing-guard pattern already fixed elsewhere in
+  // this session's leave/encashment approval races.
   const { data, error } = await supabase
     .from('overtime_requests')
     .update({
@@ -285,10 +291,12 @@ export async function approveOtRequest(
     })
     .eq('id', requestId)
     .eq('tenant_id', tenantId)
+    .eq('status', 'PENDING')
     .select('id, status, approved_minutes')
-    .single()
+    .maybeSingle()
 
   if (error) return { ok: false, error: 'Failed to approve OT request' }
+  if (!data) return { ok: false, error: 'This request was already actioned by another request' }
 
   // Sync to attendance_daily
   await supabase
