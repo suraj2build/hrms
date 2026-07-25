@@ -54,6 +54,8 @@ export function EssAssets() {
     }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['ess-me-asset-requests'] })
+      // The admin AssetRequestsDialog reads the same pending queue.
+      qc.invalidateQueries({ queryKey: ['asset-requests'] })
       setCategoryId(''); setItemName(''); setReason('')
       toast.success('Request submitted')
     },

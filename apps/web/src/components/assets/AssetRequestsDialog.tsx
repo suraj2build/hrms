@@ -41,6 +41,13 @@ export function AssetRequestsDialog({ open, onOpenChange }: { open: boolean; onO
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ['asset-requests'] })
     qc.invalidateQueries({ queryKey: ['assets'] })
+    // Fulfilling/deciding a request also changes what the requesting
+    // employee, their manager, and the employee's HR profile tab see —
+    // each reads the same data under a separate key.
+    qc.invalidateQueries({ queryKey: ['ess-me-asset-requests'] })
+    qc.invalidateQueries({ queryKey: ['ess-me-assets'] })
+    qc.invalidateQueries({ queryKey: ['manager-team-assets'] })
+    qc.invalidateQueries({ queryKey: ['emp-assets'] })
   }
   const decideMut = useMutation({
     mutationFn: (p: { id: string; decision: 'approved' | 'rejected' }) => api.patch(`/asset-requests/${p.id}/decide`, { decision: p.decision }),

@@ -145,6 +145,11 @@ export function AssetMaster() {
     mutationFn: () => api.post(`/assets/${assignFor!.id}/assign`, { employee_id: assignEmp, notes: assignNotes || null }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['assets'] })
+      // The assigned employee's own ESS view, their manager's team view, and
+      // their HR profile tab all read the same assignment under separate keys.
+      qc.invalidateQueries({ queryKey: ['ess-me-assets'] })
+      qc.invalidateQueries({ queryKey: ['manager-team-assets'] })
+      qc.invalidateQueries({ queryKey: ['emp-assets'] })
       setAssignFor(null); setAssignEmp(''); setAssignNotes('')
       toast.success('Asset assigned')
     },
@@ -155,6 +160,9 @@ export function AssetMaster() {
     mutationFn: () => api.post(`/assets/${returnFor!.id}/return`, { condition: returnCond, notes: returnNotes || null }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['assets'] })
+      qc.invalidateQueries({ queryKey: ['ess-me-assets'] })
+      qc.invalidateQueries({ queryKey: ['manager-team-assets'] })
+      qc.invalidateQueries({ queryKey: ['emp-assets'] })
       setReturnFor(null); setReturnCond('returned'); setReturnNotes('')
       toast.success('Asset returned')
     },
