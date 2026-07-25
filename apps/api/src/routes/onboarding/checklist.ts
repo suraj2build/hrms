@@ -800,6 +800,16 @@ export default async function onboardingChecklistRoutes(fastify: FastifyInstance
 
     const { employee_id, template_id, start_date } = parsed.data
 
+    // Fresh audit finding (cross-tenant IDOR): employee_id was inserted with
+    // no tenant check, then echoed back unfiltered via GET /checklists'
+    // employees:employee_id join — leaking a foreign tenant's employee
+    // identity to any HR admin who created or views a checklist.
+    const { data: checklistEmp } = await fastify.supabase
+      .from('employees').select('id').eq('id', employee_id).eq('tenant_id', tenantId).maybeSingle()
+    if (!checklistEmp) {
+      return reply.code(404).send({ error: 'NOT_FOUND', message: 'Employee not found in your organisation' })
+    }
+
     // Compute target_completion_date = start_date + 30 days
     let targetCompletionDate: string | null = null
     if (start_date) {
