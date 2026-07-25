@@ -17,6 +17,7 @@ import type { FastifyInstance } from 'fastify'
 import { z }                    from 'zod'
 import * as XLSX                from 'xlsx'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { fetchAllRows } from '../../lib/supabase-paginate.js'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -80,15 +81,21 @@ export default async function musterUploadRoutes(fastify: FastifyInstance) {
       return reply.code(400).send({ error: 'VALIDATION_ERROR', message: 'Date range cannot exceed 31 days' })
     }
 
-    // All active employees for this tenant
-    const { data: employees, error: empErr } = await fastify.supabase
-      .from('employees')
-      .select('employee_code, first_name, last_name')
-      .eq('tenant_id', req.tenantId)
-      .eq('status', 'active')
-      .order('employee_code')
-
-    if (empErr) {
+    // All active employees for this tenant — PostgREST's 1,000-row max-rows
+    // ceiling silently truncates a plain .select() too, not just .limit(N),
+    // so a large tenant's template would be missing employees with no error.
+    let employees: Array<{ employee_code: string; first_name: string; last_name: string }>
+    try {
+      employees = await fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('employees')
+          .select('employee_code, first_name, last_name')
+          .eq('tenant_id', req.tenantId)
+          .eq('status', 'active')
+          .order('employee_code')
+          .range(from, to),
+      )
+    } catch {
       return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch employees' })
     }
 
@@ -174,15 +181,21 @@ export default async function musterUploadRoutes(fastify: FastifyInstance) {
     const periodTo    = sortedDates[sortedDates.length - 1]
 
     // ── Resolve all employee codes in one query ───────────────────────────────
+    // A large enterprise's muster covers more employees than any single
+    // upload's row cap enforces, so this can exceed PostgREST's 1,000-row
+    // max-rows ceiling just like an unbounded fetch would — paginate it.
     const uniqueCodes = [...new Set(rows.map(r => r.employee_code))]
-    const { data: employees } = await fastify.supabase
-      .from('employees')
-      .select('id, employee_code')
-      .eq('tenant_id', req.tenantId)
-      .in('employee_code', uniqueCodes)
+    const resolvedEmployees = await fetchAllRows<{ id: string; employee_code: string }>((from, to) =>
+      fastify.supabase
+        .from('employees')
+        .select('id, employee_code')
+        .eq('tenant_id', req.tenantId)
+        .in('employee_code', uniqueCodes)
+        .range(from, to),
+    )
 
     const codeToId: Record<string, string> = {}
-    for (const emp of (employees ?? []) as Array<{ id: string; employee_code: string }>) {
+    for (const emp of resolvedEmployees) {
       codeToId[emp.employee_code] = emp.id
     }
 
