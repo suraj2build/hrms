@@ -12,6 +12,24 @@
 
 import type { FastifyInstance } from 'fastify'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { fetchAllRows } from '../../lib/supabase-paginate.js'
+
+// Rows per .in() call — a large tenant's employee-id list for these lookups
+// can exceed both PostgREST's 1,000-row response ceiling and safe request-URL
+// length if sent in one call.
+const ID_CHUNK = 200
+
+async function fetchByIdsChunked<T>(
+  fn: (chunk: string[]) => PromiseLike<{ data: T[] | null; error: unknown }>,
+  ids: string[],
+): Promise<T[]> {
+  const out: T[] = []
+  for (let i = 0; i < ids.length; i += ID_CHUNK) {
+    const { data } = await fn(ids.slice(i, i + ID_CHUNK))
+    if (data) out.push(...data)
+  }
+  return out
+}
 
 // Slips advance finalized → processed → paid; all count as final for reporting.
 const FINAL_SLIP_STATUSES = ['finalized', 'processed', 'paid', 'completed']
@@ -48,29 +66,41 @@ export default async function statutoryDataset(fastify: FastifyInstance) {
       { key: 'ifsc',    label: 'IFSC',     col: 'ifsc_code'      },
     ] as const
 
-    const { data: emps, error: empErr } = await fastify.supabase
-      .from('employees')
-      .select(`
-        id, employee_code, first_name, last_name,
-        job_history!job_history_employee_id_fkey ( is_current, departments ( name ) )
-      `)
-      .eq('tenant_id', tid)
-      .eq('status', 'active')
-      .eq('job_history.is_current', true)
+    // Paginated — this feeds the compliance dashboard's completeness %, so an
+    // unbounded .select() silently truncating at PostgREST's 1,000-row ceiling
+    // would understate both total_employees and the missing-ID exception list
+    // for any tenant above that size.
+    let empList: any[]
+    try {
+      empList = await fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('employees')
+          .select(`
+            id, employee_code, first_name, last_name,
+            job_history!job_history_employee_id_fkey ( is_current, departments ( name ) )
+          `)
+          .eq('tenant_id', tid)
+          .eq('status', 'active')
+          .eq('job_history.is_current', true)
+          .range(from, to),
+      )
+    } catch (empErr) {
+      return reply.code(500).send({ error: 'DB_ERROR', message: empErr instanceof Error ? empErr.message : 'Failed to fetch employees' })
+    }
 
-    if (empErr) return reply.code(500).send({ error: 'DB_ERROR', message: empErr.message })
-
-    const empList = (emps ?? []) as any[]
     const ids = empList.map(e => e.id)
 
     const bsMap = new Map<string, any>()
     if (ids.length > 0) {
-      const { data: bs } = await fastify.supabase
-        .from('employee_bank_statutory')
-        .select('employee_id, pan_number, aadhaar_number, uan_number, esi_number, account_number, ifsc_code')
-        .eq('tenant_id', tid)
-        .in('employee_id', ids)
-      for (const r of (bs ?? []) as any[]) bsMap.set(r.employee_id, r)
+      const bs = await fetchByIdsChunked<any>(
+        (chunk) => fastify.supabase
+          .from('employee_bank_statutory')
+          .select('employee_id, pan_number, aadhaar_number, uan_number, esi_number, account_number, ifsc_code')
+          .eq('tenant_id', tid)
+          .in('employee_id', chunk),
+        ids,
+      )
+      for (const r of bs) bsMap.set(r.employee_id, r)
     }
 
     const fieldMissing: Record<string, number> = {}
@@ -122,35 +152,63 @@ export default async function statutoryDataset(fastify: FastifyInstance) {
     const month = q.month
 
     // ── Parallel primary queries ────────────────────────────────────────────────
+    // epf/esi/ptax/lwf contributions are paginated — a month's rows across the
+    // whole tenant can exceed PostgREST's 1,000-row ceiling, which would
+    // silently understate every remittance total this dataset reports.
+    let epfRows: any[]
+    try {
+      epfRows = await fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('epf_contributions')
+          .select('employee_id, employee_contribution, employer_pf, employer_eps, edli_contribution, pf_wages, voluntary_pf')
+          .eq('tenant_id', tid)
+          .eq('contribution_month', month)
+          .range(from, to),
+      )
+    } catch (epfErr) {
+      return reply.code(500).send({ error: 'DB_ERROR', message: epfErr instanceof Error ? epfErr.message : 'Failed to fetch EPF contributions' })
+    }
+
     const [
-      epfRes,
-      esiRes,
-      ptaxRes,
+      esiRows,
+      ptaxRows,
+      lwfRows,
+    ] = await Promise.all([
+      fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('esi_contributions')
+          .select('employee_id, employee_contribution, employer_contribution')
+          .eq('tenant_id', tid)
+          .eq('contribution_month', month)
+          .range(from, to),
+      ).catch(() => []),
+
+      fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('ptax_contributions')
+          .select('employee_id, ptax_amount, state_code')
+          .eq('tenant_id', tid)
+          .eq('contribution_month', month)
+          .range(from, to),
+      ).catch(() => []),
+
+      fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('lwf_contributions')
+          .select('employee_id, employee_contribution, employer_contribution, state_code')
+          .eq('tenant_id', tid)
+          .eq('contribution_month', month)
+          .range(from, to),
+      ).catch(() => []),
+    ])
+
+    const [
       epfRegRes,
       esiRegRes,
       ptaxRegsRes,
       finalizedSlipsRes,
       allSlipsRes,
-      lwfRes,
     ] = await Promise.all([
-      fastify.supabase
-        .from('epf_contributions')
-        .select('employee_id, employee_contribution, employer_pf, employer_eps, edli_contribution, pf_wages, voluntary_pf')
-        .eq('tenant_id', tid)
-        .eq('contribution_month', month),
-
-      fastify.supabase
-        .from('esi_contributions')
-        .select('employee_id, employee_contribution, employer_contribution')
-        .eq('tenant_id', tid)
-        .eq('contribution_month', month),
-
-      fastify.supabase
-        .from('ptax_contributions')
-        .select('employee_id, ptax_amount, state_code')
-        .eq('tenant_id', tid)
-        .eq('contribution_month', month),
-
       fastify.supabase
         .from('statutory_registrations')
         .select('registration_number')
@@ -188,20 +246,7 @@ export default async function statutoryDataset(fastify: FastifyInstance) {
         .select('id', { count: 'exact', head: true })
         .eq('tenant_id', tid)
         .eq('month', month),
-
-      fastify.supabase
-        .from('lwf_contributions')
-        .select('employee_id, employee_contribution, employer_contribution, state_code')
-        .eq('tenant_id', tid)
-        .eq('contribution_month', month),
     ])
-
-    if (epfRes.error) return reply.code(500).send({ error: 'DB_ERROR', message: epfRes.error.message })
-
-    const epfRows  = (epfRes.data  ?? []) as any[]
-    const esiRows  = (esiRes.data  ?? []) as any[]
-    const ptaxRows = (ptaxRes.data ?? []) as any[]
-    const lwfRows  = (lwfRes.data  ?? []) as any[]
 
     const epfRegNum  = (epfRegRes.data  as any)?.registration_number ?? null
     const esiRegNum  = (esiRegRes.data  as any)?.registration_number ?? null
@@ -218,39 +263,49 @@ export default async function statutoryDataset(fastify: FastifyInstance) {
     let missingUan = 0
     if (epfRows.length > 0) {
       const epfEmpIds = epfRows.map((r: any) => r.employee_id)
-      const { data: uanData } = await fastify.supabase
-        .from('epf_eligibility_overrides')
-        .select('employee_id')
-        .eq('tenant_id', tid)
-        .in('employee_id', epfEmpIds)
-        .not('uan', 'is', null)
-        .is('effective_to', null)
+      const uanData = await fetchByIdsChunked<{ employee_id: string }>(
+        (chunk) => fastify.supabase
+          .from('epf_eligibility_overrides')
+          .select('employee_id')
+          .eq('tenant_id', tid)
+          .in('employee_id', chunk)
+          .not('uan', 'is', null)
+          .is('effective_to', null),
+        epfEmpIds,
+      )
 
-      const uanCovered = new Set((uanData ?? []).map((r: any) => r.employee_id))
+      const uanCovered = new Set(uanData.map((r) => r.employee_id))
       missingUan = epfEmpIds.filter((id: string) => !uanCovered.has(id)).length
     }
 
     // ── TDS: employees with TDS deducted + missing PAN check ───────────────────
-    const { data: tdsSlips } = await fastify.supabase
-      .from('payroll_slips')
-      .select('employee_id, tds_deducted')
-      .eq('tenant_id', tid)
-      .eq('month', month)
-      .in('status', FINAL_SLIP_STATUSES)
-      .gt('tds_deducted', 0)
+    // Paginated — a month's finalized slips with TDS deducted can exceed 1,000
+    // rows for a large tenant.
+    const tdsSlipRows = await fetchAllRows((from, to) =>
+      fastify.supabase
+        .from('payroll_slips')
+        .select('employee_id, tds_deducted')
+        .eq('tenant_id', tid)
+        .eq('month', month)
+        .in('status', FINAL_SLIP_STATUSES)
+        .gt('tds_deducted', 0)
+        .range(from, to),
+    )
 
-    const tdsSlipRows  = (tdsSlips ?? []) as any[]
     const tdsEmpIds    = tdsSlipRows.map((r: any) => r.employee_id)
     const employeesWithTds = tdsEmpIds.length
 
     let missingPan = 0
     if (tdsEmpIds.length > 0) {
-      const { data: panData } = await fastify.supabase
-        .from('employee_bank_statutory')
-        .select('employee_id')
-        .eq('tenant_id', tid)
-        .in('employee_id', tdsEmpIds)
-        .not('pan_number', 'is', null)
+      const panData = await fetchByIdsChunked<{ employee_id: string }>(
+        (chunk) => fastify.supabase
+          .from('employee_bank_statutory')
+          .select('employee_id')
+          .eq('tenant_id', tid)
+          .in('employee_id', chunk)
+          .not('pan_number', 'is', null),
+        tdsEmpIds,
+      )
 
       const panCovered = new Set((panData ?? []).map((r: any) => r.employee_id))
       missingPan = tdsEmpIds.filter((id: string) => !panCovered.has(id)).length
