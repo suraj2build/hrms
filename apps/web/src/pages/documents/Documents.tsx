@@ -85,8 +85,16 @@ export function Documents() {
       const ext = selectedFile.name.split('.').pop()
       const path = `${tenant?.id}/${uploadMeta.employee_id}/${Date.now()}.${ext}`
 
+      // Fresh audit finding: this page uploaded to a bucket named 'documents',
+      // which was never created by any migration (see supabase/migrations —
+      // only 'employee-files' and 'attendance-uploads' exist). The backend
+      // (routes/documents/index.ts) already migrated its own storage calls to
+      // 'employee-files' — this page was never updated to match, so uploads
+      // here would fail outright ("Bucket not found"). The tenant-first-
+      // segment path convention above already matches employee-files' RLS
+      // policy (migration 385), so only the bucket name needed correcting.
       const { error: storageError } = await supabase.storage
-        .from('documents')
+        .from('employee-files')
         .upload(path, selectedFile, { upsert: false })
 
       if (storageError) throw new Error(storageError.message)
@@ -116,7 +124,7 @@ export function Documents() {
 
   async function handleDownload(doc: Document) {
     const { data: signedUrl, error } = await supabase.storage
-      .from('documents')
+      .from('employee-files')
       .createSignedUrl(doc.storage_path, 60)
 
     if (error || !signedUrl) {
