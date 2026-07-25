@@ -9,6 +9,8 @@ import { computeESI } from '../../../lib/statutory/esi-engine.js'
 import type { ESIConfig } from '../../../lib/statutory/esi-engine.js'
 import { logAction } from '../../../lib/audit-service.js'
 import { HR_ADMIN_ROLES } from '../../../lib/rbac.js'
+import { fetchAllRows } from '../../../lib/supabase-paginate.js'
+import { serverError, ErrorCode } from '../../../lib/api-errors.js'
 
 export default async function esiRoutes(fastify: FastifyInstance) {
   const auth = { preHandler: [fastify.authenticate] }
@@ -298,15 +300,22 @@ export default async function esiRoutes(fastify: FastifyInstance) {
     }
 
     // ── Active employees ──────────────────────────────────────────────────────
-    const { data: employees, error: empErr } = await fastify.supabase
-      .from('employees')
-      .select('id, employee_code')
-      .eq('tenant_id', req.tenantId)
-      .eq('status', 'active')
-
-    if (empErr) return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch employees' })
-
-    const empList = (employees ?? []) as Array<{ id: string; employee_code: string }>
+    // fetchAllRows() (not a plain .select()): tenants above 1,000 active
+    // employees would otherwise silently get ESI computed for only the first
+    // 1,000 (PostgREST's server-side max-rows ceiling).
+    let empList: Array<{ id: string; employee_code: string }>
+    try {
+      empList = await fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('employees')
+          .select('id, employee_code')
+          .eq('tenant_id', req.tenantId)
+          .eq('status', 'active')
+          .range(from, to),
+      )
+    } catch (empErr) {
+      return serverError(req, reply, empErr, ErrorCode.QUERY_FAILED, 'Failed to fetch employees')
+    }
 
     // ESI is a CENTRAL scheme: one tenant config + a per-employee Yes/No (exemption /
     // is_esi_applicable) from the override tables. No statutory group / state.

@@ -16,6 +16,8 @@ import { computeLWF, parseDeductionMonths } from '../../../lib/statutory/lwf-eng
 import type { LWFConfig } from '../../../lib/statutory/lwf-engine.js'
 import { logAction } from '../../../lib/audit-service.js'
 import { HR_ADMIN_ROLES } from '../../../lib/rbac.js'
+import { fetchAllRows } from '../../../lib/supabase-paginate.js'
+import { serverError, ErrorCode } from '../../../lib/api-errors.js'
 
 // States that levy LWF in India
 const LWF_STATES: Record<string, string> = {
@@ -235,14 +237,22 @@ export default async function lwfRoutes(fastify: FastifyInstance) {
       })
     }
 
-    // Active employees
-    const { data: employees, error: empErr } = await fastify.supabase
-      .from('employees')
-      .select('id, employee_code, site_id')
-      .eq('tenant_id', req.tenantId)
-      .eq('status', 'active')
-    if (empErr) return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch employees' })
-    const empList = (employees ?? []) as any[]
+    // Active employees — fetchAllRows() (not a plain .select()): tenants
+    // above 1,000 active employees would otherwise silently get LWF computed
+    // for only the first 1,000 (PostgREST's server-side max-rows ceiling).
+    let empList: any[]
+    try {
+      empList = await fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('employees')
+          .select('id, employee_code, site_id')
+          .eq('tenant_id', req.tenantId)
+          .eq('status', 'active')
+          .range(from, to),
+      )
+    } catch (empErr) {
+      return serverError(req, reply, empErr, ErrorCode.QUERY_FAILED, 'Failed to fetch employees')
+    }
 
     // Site state codes
     const siteIds = [...new Set(empList.map((e: any) => e.site_id).filter(Boolean))] as string[]

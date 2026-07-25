@@ -9,6 +9,8 @@ import { computeEPF } from '../../../lib/statutory/epf-engine.js'
 import type { EPFConfig, EPFInput } from '../../../lib/statutory/epf-engine.js'
 import { logAction } from '../../../lib/audit-service.js'
 import { HR_ADMIN_ROLES } from '../../../lib/rbac.js'
+import { fetchAllRows } from '../../../lib/supabase-paginate.js'
+import { serverError, ErrorCode } from '../../../lib/api-errors.js'
 
 export default async function epfRoutes(fastify: FastifyInstance) {
   const auth = { preHandler: [fastify.authenticate] }
@@ -278,16 +280,22 @@ export default async function epfRoutes(fastify: FastifyInstance) {
       adminChargesPct:         0.50,
     }
 
-    // Fetch active employees
-    const { data: employees, error: empErr } = await fastify.supabase
-      .from('employees')
-      .select('id, employee_code, first_name, last_name')
-      .eq('tenant_id', req.tenantId)
-      .eq('status', 'active')
-
-    if (empErr) return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch employees' })
-
-    const empList = (employees ?? []) as Array<{ id: string; employee_code: string; first_name: string; last_name: string }>
+    // Fetch active employees — fetchAllRows() (not a plain .select()): tenants
+    // above 1,000 active employees would otherwise silently get EPF computed
+    // for only the first 1,000 (PostgREST's server-side max-rows ceiling).
+    let empList: Array<{ id: string; employee_code: string; first_name: string; last_name: string }>
+    try {
+      empList = await fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('employees')
+          .select('id, employee_code, first_name, last_name')
+          .eq('tenant_id', req.tenantId)
+          .eq('status', 'active')
+          .range(from, to),
+      )
+    } catch (empErr) {
+      return serverError(req, reply, empErr, ErrorCode.QUERY_FAILED, 'Failed to fetch employees')
+    }
 
     // EPF is a CENTRAL scheme: one tenant config + a per-employee Yes/No (and PF wage
     // basis capped/actual) from epf_eligibility_overrides. No statutory group / state.

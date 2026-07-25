@@ -9,6 +9,8 @@ import { computePTax } from '../../../lib/statutory/ptax-engine.js'
 import type { PTaxSlab } from '../../../lib/statutory/ptax-engine.js'
 import { logAction } from '../../../lib/audit-service.js'
 import { HR_ADMIN_ROLES } from '../../../lib/rbac.js'
+import { fetchAllRows } from '../../../lib/supabase-paginate.js'
+import { serverError, ErrorCode } from '../../../lib/api-errors.js'
 
 export default async function ptaxRoutes(fastify: FastifyInstance) {
   const auth = { preHandler: [fastify.authenticate] }
@@ -407,15 +409,22 @@ export default async function ptaxRoutes(fastify: FastifyInstance) {
 
     // Fetch active employees — raw select (no FK embed) to avoid Supabase 500s
     // when the sites FK constraint name differs from what PostgREST expects.
-    const { data: employees, error: empErr } = await fastify.supabase
-      .from('employees')
-      .select('id, employee_code, site_id')
-      .eq('tenant_id', req.tenantId)
-      .eq('status', 'active')
-
-    if (empErr) return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch employees' })
-
-    const empList = (employees ?? []) as any[]
+    // fetchAllRows() (not a plain .select()): tenants above 1,000 active
+    // employees would otherwise silently get PTax computed for only the first
+    // 1,000 (PostgREST's server-side max-rows ceiling).
+    let empList: any[]
+    try {
+      empList = await fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('employees')
+          .select('id, employee_code, site_id')
+          .eq('tenant_id', req.tenantId)
+          .eq('status', 'active')
+          .range(from, to),
+      )
+    } catch (empErr) {
+      return serverError(req, reply, empErr, ErrorCode.QUERY_FAILED, 'Failed to fetch employees')
+    }
 
     // Resolve site state_code separately to avoid the FK-embed failure.
     const siteIds = [...new Set(empList.map(e => e.site_id).filter(Boolean))] as string[]
