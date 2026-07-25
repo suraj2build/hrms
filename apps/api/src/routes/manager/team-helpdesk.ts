@@ -12,6 +12,7 @@ import { z } from 'zod'
 import {
   isHrAdmin, resolveManagerEmployeeId, getDirectReportIds,
 } from '../../lib/manager-scope.js'
+import { fetchAllRows } from '../../lib/supabase-paginate.js'
 
 export default async function managerTeamHelpdeskRoute(fastify: FastifyInstance) {
   const auth = { preHandler: [fastify.authenticate] }
@@ -32,13 +33,19 @@ export default async function managerTeamHelpdeskRoute(fastify: FastifyInstance)
     if (isHrAdmin(req.userRole) && manager_employee_id) {
       employeeIds = await getDirectReportIds(fastify.supabase, req.tenantId, manager_employee_id)
     } else if (isHrAdmin(req.userRole)) {
-      // HR admin without specific manager: show all active employees
-      const { data: emps } = await fastify.supabase
-        .from('employees')
-        .select('id')
-        .eq('tenant_id', req.tenantId)
-        .eq('status', 'active')
-      employeeIds = ((emps ?? []) as any[]).map(e => e.id)
+      // HR admin without specific manager: show all active employees.
+      // Paginated — an unbounded .select() truncates at PostgREST's
+      // 1,000-row ceiling for a large tenant, silently hiding tickets
+      // raised by employees past that cutoff.
+      const emps = await fetchAllRows<{ id: string }>((from, to) =>
+        fastify.supabase
+          .from('employees')
+          .select('id')
+          .eq('tenant_id', req.tenantId)
+          .eq('status', 'active')
+          .range(from, to),
+      )
+      employeeIds = emps.map(e => e.id)
     } else {
       const managerEmpId = await resolveManagerEmployeeId(fastify.supabase, req)
       if (!managerEmpId) return reply.send({ data: [], summary: { total: 0, open: 0, in_progress: 0, awaiting_employee: 0, resolved: 0, breached: 0 } })

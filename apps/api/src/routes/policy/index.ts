@@ -279,12 +279,18 @@ export default async function policyRoutes(fastify: FastifyInstance) {
     const tenantId = req.tenantId
     const { id } = req.params as { id: string }
 
-    const [empResult, ackResult] = await Promise.all([
-      supabase
-        .from('employees')
-        .select('id, employee_code, first_name, last_name, work_location_id')
-        .eq('tenant_id', tenantId)
-        .in('status', ['active', 'on_leave']),
+    // employees is paginated — an unbounded .select() truncates at
+    // PostgREST's 1,000-row ceiling for a large tenant, understating both
+    // total and acknowledged counts in the ack-stats panel.
+    const [empRows, ackResult] = await Promise.all([
+      fetchAllRows<{ id: string; employee_code: string; first_name: string; last_name: string; work_location_id: string | null }>((from, to) =>
+        supabase
+          .from('employees')
+          .select('id, employee_code, first_name, last_name, work_location_id')
+          .eq('tenant_id', tenantId)
+          .in('status', ['active', 'on_leave'])
+          .range(from, to),
+      ),
       supabase
         .from('policy_acknowledgements')
         .select('employee_id, acknowledged_at')
@@ -296,7 +302,7 @@ export default async function policyRoutes(fastify: FastifyInstance) {
       (ackResult.data ?? []).map(a => [a.employee_id, a.acknowledged_at]),
     )
 
-    const employees = (empResult.data ?? []).map(e => ({
+    const employees = empRows.map(e => ({
       ...e,
       acknowledged:    ackMap.has(e.id),
       acknowledged_at: ackMap.get(e.id) ?? null,
@@ -519,16 +525,22 @@ export default async function policyRoutes(fastify: FastifyInstance) {
         })
       }
 
-      // WhatsApp broadcast to all active employees with phone numbers
-      const { data: empPhones } = await supabase
-        .from('employees')
-        .select('id, first_name, phone')
-        .eq('tenant_id', tenantId)
-        .eq('status', 'active')
-        .not('phone', 'is', null)
+      // WhatsApp broadcast to all active employees with phone numbers.
+      // Paginated — an unbounded .select() truncates at PostgREST's
+      // 1,000-row ceiling, silently excluding employees past that cutoff
+      // from the broadcast.
+      const empPhones = await fetchAllRows<{ id: string; first_name: string | null; phone: string | null }>((from, to) =>
+        supabase
+          .from('employees')
+          .select('id, first_name, phone')
+          .eq('tenant_id', tenantId)
+          .eq('status', 'active')
+          .not('phone', 'is', null)
+          .range(from, to),
+      )
 
       const wa = new WhatsAppProvider(supabase)
-      for (const emp of empPhones ?? []) {
+      for (const emp of empPhones) {
         if (emp.phone) {
           try {
             await wa.sendTemplate(tenantId, emp.phone, 'policy_published', {

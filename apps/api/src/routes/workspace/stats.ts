@@ -52,7 +52,6 @@ export default async function workspaceStatsRoutes(fastify: FastifyInstance) {
       confidenceResult,
       completedTodayResult,
       completedWeekResult,
-      payrollBacklogResult,
     ] = await Promise.all([
       // total_pending: any non-archived, non-completed session
       fastify.supabase
@@ -106,14 +105,23 @@ export default async function workspaceStatsRoutes(fastify: FastifyInstance) {
         .eq('status', 'employee_created')
         .gte('updated_at', weekAgo),
 
-      // payroll_backlog: active employees with no active compensation record
+    ])
+
+    // payroll_backlog: active employees with no active compensation record.
+    // Paginated separately (fetchAllRows, not a plain .select()) — this query
+    // filters on a joined table's null column, which can't combine with
+    // count:exact/head:true the way the other stats above do, so it fetches
+    // full rows and counts client-side. Left unpaginated, that count was
+    // silently capped at PostgREST's 1,000-row ceiling for a large tenant.
+    const payrollBacklogRows = await fetchAllRows((from, to) =>
       fastify.supabase
         .from('employees')
         .select('id, employee_compensations!left(id)')
         .eq('tenant_id', tenantId)
         .eq('status', 'active')
-        .is('employee_compensations.id', null),
-    ])
+        .is('employee_compensations.id', null)
+        .range(from, to),
+    )
 
     return reply.send({
       total_pending:       pendingResult.count        ?? 0,
@@ -123,7 +131,7 @@ export default async function workspaceStatsRoutes(fastify: FastifyInstance) {
       confidence_warnings: confidenceResult.count     ?? 0,
       completed_today:     completedTodayResult.count ?? 0,
       throughput_7d:       completedWeekResult.count  ?? 0,
-      payroll_backlog:     (payrollBacklogResult.data ?? []).length,
+      payroll_backlog:     payrollBacklogRows.length,
     })
   })
 

@@ -27,6 +27,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { fetchAllRows } from '../../lib/supabase-paginate.js'
 
 const assignSchema = z.object({
   employee_id:    z.string().uuid('employee_id must be a UUID'),
@@ -53,17 +54,26 @@ export default async function employeeShiftsRoutes(fastify: FastifyInstance) {
   // Returns all active employees, each decorated with their current standing shift
   // (null when no shift has been assigned yet) and their current work location.
   fastify.get('/', auth, async (req: any, reply) => {
-    const [
-      { data: employees, error: empError },
-      { data: assignments, error: assignError },
-      { data: jobRows, error: jobError },
-    ] = await Promise.all([
+    // employees is paginated — an unbounded .select() truncates at
+    // PostgREST's 1,000-row ceiling for a large tenant, silently dropping
+    // employees from the shift-override list.
+    let empError: unknown = null
+    const employeesPromise = fetchAllRows((from, to) =>
       fastify.supabase
         .from('employees')
         .select('id, first_name, last_name, employee_code')
         .eq('tenant_id', req.tenantId)
         .eq('status', 'active')
-        .order('employee_code'),
+        .order('employee_code')
+        .range(from, to),
+    ).catch((err) => { empError = err; return [] })
+
+    const [
+      employees,
+      { data: assignments, error: assignError },
+      { data: jobRows, error: jobError },
+    ] = await Promise.all([
+      employeesPromise,
 
       fastify.supabase
         .from('employee_shifts')
