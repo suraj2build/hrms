@@ -29,8 +29,14 @@ import type { PayrollSlipResult, PayrollComponentSnapshot } from './payroll-engi
 
 /** Codes of statutory lines that the engines own and therefore replace.
  *  Matched ONLY against deduction / employer_contribution lines — earnings are
- *  never stripped (so a custom earning like "PT Allowance" is safe). */
-const STATUTORY_CODE = /^(PF|EPF|PF_EMPLOYEE|PF_EMPLOYER|EPF_EDLI|EPF_ADMIN|ESI|ESIC|ESI_EMPLOYEE|ESI_EMPLOYER|PT|PTAX|PROF_TAX|PROFESSIONAL_TAX|TDS|INCOME_TAX|LWF|LWF_EMPLOYEE|LWF_EMPLOYER)$/i
+ *  never stripped (so a custom earning like "PT Allowance" is safe).
+ *  Exported so salary-config-store.ts can reject a tenant creating a custom
+ *  component whose code collides with one of these (ISSUE-142) — without this
+ *  guard, applyStatutoryToSlip() silently overwrites the custom component's
+ *  line with the statutory engine's own line on every payroll run, with no
+ *  error anywhere. Keep this list and the guard in sync; they must never
+ *  drift into two different reserved-word sets. */
+export const STATUTORY_CODE = /^(PF|EPF|PF_EMPLOYEE|PF_EMPLOYER|EPF_EDLI|EPF_ADMIN|ESI|ESIC|ESI_EMPLOYEE|ESI_EMPLOYER|PT|PTAX|PROF_TAX|PROFESSIONAL_TAX|TDS|INCOME_TAX|LWF|LWF_EMPLOYEE|LWF_EMPLOYER)$/i
 
 export interface StatutoryTrace {
   epf:  { applied: boolean; pfWages: number; employee: number; employer: number; reason?: string }

@@ -25,6 +25,7 @@ import { z } from 'zod'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { STANDARD_SALARY_COMPONENTS } from './standard-salary-components.js'
 import { fetchAllRows } from './supabase-paginate.js'
+import { STATUTORY_CODE } from './statutory-payroll.js'
 
 // ── Schemas (the one true contract) ──────────────────────────────────────────────
 
@@ -95,6 +96,22 @@ function dbFail(error: { message: string; code?: string }): StoreResult {
   return fail(500, 'DB_ERROR', error.message)
 }
 
+/**
+ * ISSUE-142: applyStatutoryToSlip() (statutory-payroll.ts) strips any
+ * deduction/employer_contribution line whose code matches STATUTORY_CODE and
+ * replaces it with the statutory engine's own computed line — silently, on
+ * every payroll run, with no error surfaced anywhere. Without this guard, a
+ * tenant could create a custom component (e.g. a deduction named "Parking
+ * Fee" with code "PT") that gets overwritten by the PT engine's line forever,
+ * with the tenant never seeing an error, just their custom line quietly not
+ * doing what they configured. Earnings are exempt — the strip only ever
+ * touches deduction/employer_contribution lines.
+ */
+function isReservedStatutoryCode(code: string, componentType: string | undefined): boolean {
+  if (componentType !== 'deduction' && componentType !== 'employer_contribution') return false
+  return STATUTORY_CODE.test(code)
+}
+
 // ── Components ───────────────────────────────────────────────────────────────────
 
 export async function listComponents(
@@ -120,6 +137,9 @@ export async function createComponent(
 ): Promise<StoreResult> {
   const parsed = componentCreateSchema.safeParse(body)
   if (!parsed.success) return fail(400, 'VALIDATION', parsed.error.issues[0]?.message ?? 'Invalid component')
+  if (isReservedStatutoryCode(parsed.data.code, parsed.data.component_type)) {
+    return fail(400, 'RESERVED_CODE', `"${parsed.data.code}" is a reserved statutory code and would be silently overwritten by the statutory engine on every payroll run. Choose a different code.`)
+  }
   const { data, error } = await supabase
     .from('salary_components')
     .insert({ ...parsed.data, tenant_id: tenantId })
@@ -137,6 +157,24 @@ export async function updateComponent(
 ): Promise<StoreResult> {
   const parsed = componentUpdateSchema.safeParse(body)
   if (!parsed.success) return fail(400, 'VALIDATION', parsed.error.issues[0]?.message ?? 'Invalid component')
+  if (parsed.data.code !== undefined) {
+    // component_type may not be in this partial update — fall back to the
+    // component's current type so a code-only rename is still checked
+    // against the type it actually has.
+    let componentType = parsed.data.component_type
+    if (componentType === undefined) {
+      const { data: existing } = await supabase
+        .from('salary_components')
+        .select('component_type')
+        .eq('id', id)
+        .eq('tenant_id', tenantId)
+        .maybeSingle()
+      componentType = (existing as { component_type?: string } | null)?.component_type as any
+    }
+    if (isReservedStatutoryCode(parsed.data.code, componentType)) {
+      return fail(400, 'RESERVED_CODE', `"${parsed.data.code}" is a reserved statutory code and would be silently overwritten by the statutory engine on every payroll run. Choose a different code.`)
+    }
+  }
   const { data, error } = await supabase
     .from('salary_components')
     .update({ ...parsed.data })
