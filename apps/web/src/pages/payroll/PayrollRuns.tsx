@@ -9,7 +9,7 @@
 
 import React, { useState, useRef, useEffect }    from 'react'
 import { Link, useNavigate }                     from 'react-router-dom'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient, type QueryClient } from '@tanstack/react-query'
 import {
   ChevronLeft, ChevronRight, Play, Lock,
   ShieldAlert, Download, Eye, Loader2,
@@ -2368,6 +2368,30 @@ function PayrollAuditTimeline({ run }: { run: PayrollRun }) {
   )
 }
 
+// Every other Payroll Center page independently queries the same underlying
+// /payroll/runs list under its own query key rather than sharing ['payroll-runs'].
+// A mutation here that changes run state (trigger/finalize/freeze/reopen) must
+// invalidate all of them, or a sibling page already mounted in the session keeps
+// showing pre-mutation data — most consequential for freeze/reopen, which gate
+// statutory filing and bank payout.
+const PAYROLL_RUNS_SIBLING_KEYS = [
+  'payroll-runs-forensics',
+  'payroll-runs-accounting',
+  'payroll-runs-payout-recon',
+  'payroll-runs-statutory',
+  'payroll-runs-variance-list',
+  'payroll-runs-history',
+  'payroll-runs-console',
+  'payroll-recent-runs-for-blockers',
+  'payroll-runs-recent',
+  'payroll-runs-finalize',
+] as const
+
+function invalidateAllPayrollRunViews(qc: QueryClient) {
+  qc.invalidateQueries({ queryKey: ['payroll-runs'] })
+  for (const key of PAYROLL_RUNS_SIBLING_KEYS) qc.invalidateQueries({ queryKey: [key] })
+}
+
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
 export function PayrollRuns() {
@@ -2384,6 +2408,11 @@ export function PayrollRuns() {
   const [runError, setRunError]                       = useState('')
   const [coverageIssues, setCoverageIssues]           = useState<CoverageIssue[]>([])
   const [liveRunId, setLiveRunId]                     = useState<string | null>(null)
+
+  // Sent as Idempotency-Key on trigger, mirroring LeaveApply.tsx's pattern.
+  // Rotated only after a successful trigger, so a failed-then-retried submit
+  // reuses the same key.
+  const triggerIdempotencyKey = useRef(crypto.randomUUID())
 
   // Phase 3: Freeze / Reopen state
   const [activeFreezeRun, setActiveFreezeRun]         = useState<PayrollRun | null>(null)
@@ -2521,7 +2550,7 @@ export function PayrollRuns() {
   const rerunMutation = useMutation({
     mutationFn: (month: string) => api.post('/payroll/runs', { month }),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['payroll-runs'] })
+      invalidateAllPayrollRunViews(qc)
       toast.success('Payroll re-run triggered')
     },
     onError: (e: unknown) => toast.error(
@@ -2558,13 +2587,14 @@ export function PayrollRuns() {
       month: runMonth,
       notes: notes || undefined,
       ...(ignoreBlockers ? { ignore_compensation_blockers: true } : {}),
-    }) as Promise<{ run_id: string; status: string }>,
+    }, { headers: { 'Idempotency-Key': triggerIdempotencyKey.current } }) as Promise<{ run_id: string; status: string }>,
     onSuccess: (data) => {
+      triggerIdempotencyKey.current = crypto.randomUUID()
       setNotes('')
       setRunError('')
       setCoverageIssues([])
       setLiveRunId(data?.run_id ?? null)
-      qc.invalidateQueries({ queryKey: ['payroll-runs'] })
+      invalidateAllPayrollRunViews(qc)
       toast.success('Payroll run triggered', { description: fmtMonth(runMonth) })
     },
     onError: (e: unknown) => {
@@ -2585,7 +2615,7 @@ export function PayrollRuns() {
     onSuccess: () => {
       setRunError('')
       setActiveFinalizeRun(null)
-      qc.invalidateQueries({ queryKey: ['payroll-runs'] })
+      invalidateAllPayrollRunViews(qc)
       toast.success('Payroll run finalized')
     },
     onError: (e: unknown) => {
@@ -2617,7 +2647,7 @@ export function PayrollRuns() {
       setForceOverrideRun(null)
       setMissingEmployees([])
       setOverrideReason('')
-      qc.invalidateQueries({ queryKey: ['payroll-runs'] })
+      invalidateAllPayrollRunViews(qc)
       toast.success('Payroll run force-finalized', {
         description: 'Override logged to audit trail. Affected employees received full pay.',
       })
@@ -2632,7 +2662,7 @@ export function PayrollRuns() {
     mutationFn: (runId: string) => api.post(`/payroll/runs/${runId}/freeze`, {}),
     onSuccess: () => {
       setActiveFreezeRun(null)
-      qc.invalidateQueries({ queryKey: ['payroll-runs'] })
+      invalidateAllPayrollRunViews(qc)
       toast.success('Period frozen — payroll is now immutably sealed')
     },
     onError: (e: unknown) => {
@@ -2647,7 +2677,7 @@ export function PayrollRuns() {
     onSuccess: () => {
       setActiveReopenRun(null)
       setReopenReason('')
-      qc.invalidateQueries({ queryKey: ['payroll-runs'] })
+      invalidateAllPayrollRunViews(qc)
       toast.success('Period reopened — audit entry recorded', {
         description: 'Trigger a new correction run for this month.',
       })
