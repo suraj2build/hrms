@@ -202,7 +202,6 @@ interface ShiftHistoryRow {
   shifts?: { name?: string | null; code?: string | null; start_time?: string | null; end_time?: string | null } | null
 }
 interface MasterOption { id: string; name: string; code?: string; city?: string; start_time?: string; end_time?: string }
-interface ManagerOption { id: string; first_name: string; last_name: string; employee_code: string }
 interface HolidayGroupRow { id: string; name?: string | null; is_active?: boolean; state_code?: string | null }
 interface StateRow { state_code: string; state_name: string; enabled: boolean }
 
@@ -1048,12 +1047,6 @@ export function EmployeeProfile() {
     queryKey: ['masters-shifts'], queryFn: () => api.get('/masters/shifts'),
     enabled: assignTarget === 'shift', staleTime: 300_000,
   })
-  const { data: managerListData } = useQuery<{ data: ManagerOption[]; total: number }>({
-    queryKey: ['employees-active-list'],
-    queryFn: () => api.get('/employees?status=active&limit=500'),
-    enabled: assignTarget === 'manager' || addJobOpen, staleTime: 120_000,
-  })
-
   const EMPLOYMENT_TYPES = ['permanent', 'contract', 'intern', 'probation', 'consultant'] as const
 
   // Field → master list options
@@ -1064,7 +1057,6 @@ export function EmployeeProfile() {
     cost_center:     (ccListData?.data    ?? []).map(r => ({ id: r.id, label: `${r.name} (${r.code})` })),
     work_location:   (wlListData?.data    ?? []).map(r => ({ id: r.id, label: r.city ? `${r.name} · ${r.city}` : r.name })),
     shift:           (shiftListData?.data ?? []).map(r => ({ id: r.id, label: `${r.name} (${r.start_time}–${r.end_time})` })),
-    manager:         (managerListData?.data ?? []).filter((e) => e.id !== id).map((e) => ({ id: e.id, label: `${e.first_name} ${e.last_name} #${e.employee_code}` })),
     employment_type: EMPLOYMENT_TYPES.map(t => ({ id: t, label: t.charAt(0).toUpperCase() + t.slice(1) })),
   }
 
@@ -4468,14 +4460,26 @@ export function EmployeeProfile() {
                   {/* New value */}
                   <div className="space-y-1">
                     <Label className="text-xs font-medium">New {cfg.title.replace('Reassign ', '').replace('Change ', '')}</Label>
-                    <select
-                      className="flex h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground outline-none focus:ring-1 ring-primary/50"
-                      value={assignForm.value}
-                      onChange={e => setAssignForm(p => ({ ...p, value: e.target.value }))}
-                    >
-                      <option value="">— Select —</option>
-                      {opts.map(o => <option key={o.id} value={o.id}>{o.label}</option>)}
-                    </select>
+                    {assignTarget === 'manager' ? (
+                      // Employee picker — search-by-name-or-code, never a raw dropdown
+                      // over the (potentially enterprise-scale) employees list. (ISSUE-146)
+                      <EmployeeSelector
+                        value={assignForm.value}
+                        onChange={v => setAssignForm(p => ({ ...p, value: typeof v === 'string' ? v : (v[0] ?? '') }))}
+                        excludeIds={id ? [id] : []}
+                        placeholder="Search manager by name or code…"
+                        className="w-full"
+                      />
+                    ) : (
+                      <select
+                        className="flex h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground outline-none focus:ring-1 ring-primary/50"
+                        value={assignForm.value}
+                        onChange={e => setAssignForm(p => ({ ...p, value: e.target.value }))}
+                      >
+                        <option value="">— Select —</option>
+                        {opts.map(o => <option key={o.id} value={o.id}>{o.label}</option>)}
+                      </select>
+                    )}
                   </div>
 
                   {/* Effective from */}
