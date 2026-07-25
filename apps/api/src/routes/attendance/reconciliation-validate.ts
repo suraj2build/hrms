@@ -24,6 +24,7 @@ import { z } from 'zod'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { buildMonthReadModel, PAYABLE_STATUSES } from '../../lib/attendance-read-model.js'
 import { normalizeAttendanceStatus } from '../../lib/attendance-utils.js'
+import { fetchAllRows } from '../../lib/supabase-paginate.js'
 
 const querySchema = z.object({
   month: z.string().regex(/^\d{4}-\d{2}$/, 'month must be YYYY-MM'),
@@ -56,15 +57,27 @@ export default async function reconciliationValidateRoute(fastify: FastifyInstan
     const fromDate = `${month}-01`
     const toDate   = new Date(y, m, 0).toISOString().slice(0, 10)
 
-    const { data: rawRows, error: rawErr } = await fastify.supabase
-      .from('attendance_daily')
-      .select('employee_id, date, status')
-      .eq('tenant_id', req.tenantId)
-      .gte('date', fromDate)
-      .lte('date', toDate)
-
-    if (rawErr) {
-      return reply.code(500).send({ error: 'RAW_QUERY_FAILED', message: rawErr.message })
+    // Paginated — an unbounded .select() here would itself be silently
+    // truncated at PostgREST's 1,000-row ceiling for a large tenant, which
+    // would make this integrity check falsely flag (or falsely clear) a
+    // discrepancy against the now-correctly-paginated read model instead of
+    // actually proving the two surfaces agree.
+    let rawRows: Array<{ employee_id: string; date: string; status: string }>
+    try {
+      rawRows = await fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('attendance_daily')
+          .select('employee_id, date, status')
+          .eq('tenant_id', req.tenantId)
+          .gte('date', fromDate)
+          .lte('date', toDate)
+          .range(from, to),
+      )
+    } catch (rawErr) {
+      return reply.code(500).send({
+        error:   'RAW_QUERY_FAILED',
+        message: rawErr instanceof Error ? rawErr.message : 'Failed to fetch raw attendance rows',
+      })
     }
 
     // Tally raw counts using the same canonical status mapping (PAYABLE_STATUSES from read model)
