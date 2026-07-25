@@ -390,6 +390,13 @@ type TenantPayrollCtx = {
  * Returns { frozen: true, reason } if the given month is currently frozen
  * (i.e. an unlifted freeze record exists in payroll_freeze_log).
  * Returns { frozen: false } when clear to proceed.
+ * Returns { frozen: true, checkFailed: true, reason } when the freeze_log query
+ * itself errored — fails CLOSED (ISSUE-147): freeze state could not be verified,
+ * so treat the month as frozen rather than silently letting a payroll mutation
+ * through on a transient DB error. Callers that use this guard in the OPPOSITE
+ * direction (confirming a month IS frozen before an unfreeze/reopen action) must
+ * check `checkFailed` explicitly — inheriting `frozen: true` there would flip
+ * their `if (!frozen)` gate the wrong way and let the action through unverified.
  *
  * Call before any operation that creates or modifies payroll data for a month.
  */
@@ -397,7 +404,7 @@ async function checkFreezeGuard(
   supabase: any,
   tenantId: string,
   month: string,
-): Promise<{ frozen: boolean; reason?: string }> {
+): Promise<{ frozen: boolean; reason?: string; checkFailed?: boolean }> {
   const { data, error } = await supabase
     .from('payroll_freeze_log')
     .select('frozen_by, reason')
@@ -410,8 +417,11 @@ async function checkFreezeGuard(
     .maybeSingle()
 
   if (error) {
-    // On query error, fail open (don't block operations due to guard failure)
-    return { frozen: false }
+    return {
+      frozen:      true,
+      checkFailed: true,
+      reason:      `Unable to verify payroll freeze status for ${month} — treating as frozen for safety. Please retry; contact support if this persists.`,
+    }
   }
   if (data) {
     return {
@@ -1266,6 +1276,9 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
     // Freeze guard — applies to live runs only; dry runs are always allowed
     if (!dry_run) {
       const freeze = await checkFreezeGuard(fastify.supabase, tenantId, month)
+      if (freeze.checkFailed) {
+        return reply.code(503).send({ error: 'FREEZE_CHECK_FAILED', message: freeze.reason })
+      }
       if (freeze.frozen) {
         return reply.code(423).send({
           error:   'PAYROLL_FROZEN',
@@ -2084,6 +2097,9 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
 
     // Freeze guard: block finalization if payroll for this month is frozen
     const freeze = await checkFreezeGuard(fastify.supabase, tenantId, run.month)
+    if (freeze.checkFailed) {
+      return reply.code(503).send({ error: 'FREEZE_CHECK_FAILED', message: freeze.reason })
+    }
     if (freeze.frozen) {
       return reply.code(423).send({
         error: 'PAYROLL_FROZEN',
@@ -3391,6 +3407,9 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
 
     // Freeze guard
     const freeze = await checkFreezeGuard(fastify.supabase, tenantId, run.month)
+    if (freeze.checkFailed) {
+      return reply.code(503).send({ error: 'FREEZE_CHECK_FAILED', message: freeze.reason })
+    }
     if (freeze.frozen) {
       return reply.code(423).send({ error: 'PAYROLL_FROZEN', message: freeze.reason })
     }
@@ -3595,6 +3614,9 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
 
     // Check already frozen
     const alreadyFrozen = await checkFreezeGuard(fastify.supabase, tenantId, run.month)
+    if (alreadyFrozen.checkFailed) {
+      return reply.code(503).send({ error: 'FREEZE_CHECK_FAILED', message: alreadyFrozen.reason })
+    }
     if (alreadyFrozen.frozen) {
       return conflictError(reply, 'ALREADY_FROZEN', `Payroll for ${run.month} is already frozen`)
     }
@@ -3870,6 +3892,9 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
     // "Reopen" break-glass flow silently does nothing. Reopening a frozen period
     // is a super_admin action.
     const freezeState = await checkFreezeGuard(fastify.supabase, tenantId, run.month)
+    if (freezeState.checkFailed) {
+      return reply.code(503).send({ error: 'FREEZE_CHECK_FAILED', message: freezeState.reason })
+    }
     let unfrozen = false
     if (freezeState.frozen) {
       if (req.userRole !== 'super_admin') {
@@ -4103,6 +4128,9 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
     const { month, reason } = parsed.data
 
     const already = await checkFreezeGuard(fastify.supabase, tenantId, month)
+    if (already.checkFailed) {
+      return reply.code(503).send({ error: 'FREEZE_CHECK_FAILED', message: already.reason })
+    }
     if (already.frozen) return conflictError(reply, 'ALREADY_FROZEN', `${month} is already frozen`)
 
     const { error } = await fastify.supabase.from('payroll_freeze_log').insert({
@@ -4126,6 +4154,14 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
     const { month, reason } = parsed.data
 
     const already = await checkFreezeGuard(fastify.supabase, tenantId, month)
+    // Explicit checkFailed check (ISSUE-147): this guard runs in the OPPOSITE
+    // direction from every other call site — it must block when the month IS
+    // frozen check FAILS to verify NOT-frozen, so `already.frozen` defaulting to
+    // true on error would incorrectly satisfy `!already.frozen === false` and let
+    // an unfreeze proceed against a freeze state we never actually confirmed.
+    if (already.checkFailed) {
+      return reply.code(503).send({ error: 'FREEZE_CHECK_FAILED', message: already.reason })
+    }
     if (!already.frozen) return conflictError(reply, 'NOT_FROZEN', `${month} is not frozen`)
 
     // Mark the freeze record as unfrozen
