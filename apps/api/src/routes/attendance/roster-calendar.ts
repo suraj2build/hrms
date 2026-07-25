@@ -39,6 +39,15 @@ import {
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 
 // ── Auth helper ───────────────────────────────────────────────────────────────
+//
+// This checks req.userId/req.userRole but does NOT itself populate them —
+// fastify.authenticate does that. There is no global auth hook in this
+// codebase (every route file wires auth per-route), so `preHandler:
+// hrAdminAuth` alone, without `fastify.authenticate` running first, leaves
+// req.userId permanently undefined and every request 401s regardless of the
+// caller's actual credentials (ISSUE-137 — this left the entire file
+// unreachable). Always use `preHandler: [fastify.authenticate, hrAdminAuth]`,
+// matching every other route file's `hrAdminAuth` object pattern.
 
 function hrAdminAuth(req: any, reply: any, done: () => void) {
   if (!req.userId) return reply.code(401).send({ error: 'Unauthorized' })
@@ -56,7 +65,7 @@ export default async function rosterCalendarRoutes(fastify: FastifyInstance) {
 
   // ── Roster Calendar — per-employee ────────────────────────────────────────
 
-  fastify.get('/roster-calendar/:employeeId', { preHandler: hrAdminAuth }, async (req: any, reply) => {
+  fastify.get('/roster-calendar/:employeeId', { preHandler: [fastify.authenticate, hrAdminAuth] }, async (req: any, reply) => {
     const { employeeId }   = req.params as { employeeId: string }
     const { month, detail } = req.query as { month?: string; detail?: string }
     const tenantId          = req.tenantId as string
@@ -91,7 +100,7 @@ export default async function rosterCalendarRoutes(fastify: FastifyInstance) {
 
   // ── Roster Calendar — bulk (multiple employees) ───────────────────────────
 
-  fastify.post('/roster-calendar/bulk', { preHandler: hrAdminAuth }, async (req: any, reply) => {
+  fastify.post('/roster-calendar/bulk', { preHandler: [fastify.authenticate, hrAdminAuth] }, async (req: any, reply) => {
     const { employee_ids, month } = req.body as { employee_ids: string[]; month: string }
     const tenantId                = req.tenantId as string
 
@@ -130,7 +139,7 @@ export default async function rosterCalendarRoutes(fastify: FastifyInstance) {
 
   // ── Single-day resolution ─────────────────────────────────────────────────
 
-  fastify.get('/roster-calendar/:employeeId/:date', { preHandler: hrAdminAuth }, async (req: any, reply) => {
+  fastify.get('/roster-calendar/:employeeId/:date', { preHandler: [fastify.authenticate, hrAdminAuth] }, async (req: any, reply) => {
     const { employeeId, date } = req.params as { employeeId: string; date: string }
     const tenantId             = req.tenantId as string
 
@@ -154,7 +163,7 @@ export default async function rosterCalendarRoutes(fastify: FastifyInstance) {
 
   // ── Working-day count (payroll) ───────────────────────────────────────────
 
-  fastify.get('/roster-calendar/:employeeId/working-days', { preHandler: hrAdminAuth }, async (req: any, reply) => {
+  fastify.get('/roster-calendar/:employeeId/working-days', { preHandler: [fastify.authenticate, hrAdminAuth] }, async (req: any, reply) => {
     const { employeeId } = req.params as { employeeId: string }
     const { month }      = req.query  as { month?: string }
     const tenantId       = req.tenantId as string
@@ -171,7 +180,7 @@ export default async function rosterCalendarRoutes(fastify: FastifyInstance) {
 
   // ── Weekly-Off Rules CRUD ─────────────────────────────────────────────────
 
-  fastify.get('/roster-weekly-off-rules', { preHandler: hrAdminAuth }, async (req: any, reply) => {
+  fastify.get('/roster-weekly-off-rules', { preHandler: [fastify.authenticate, hrAdminAuth] }, async (req: any, reply) => {
     const { rosterId } = req.query as { rosterId?: string }
     const tenantId     = req.tenantId as string
 
@@ -184,7 +193,7 @@ export default async function rosterCalendarRoutes(fastify: FastifyInstance) {
     return reply.send({ data })
   })
 
-  fastify.post('/roster-weekly-off-rules', { preHandler: hrAdminAuth }, async (req: any, reply) => {
+  fastify.post('/roster-weekly-off-rules', { preHandler: [fastify.authenticate, hrAdminAuth] }, async (req: any, reply) => {
     const tenantId = req.tenantId as string
     const body     = req.body as Record<string, unknown>
 
@@ -198,7 +207,7 @@ export default async function rosterCalendarRoutes(fastify: FastifyInstance) {
     return reply.code(201).send({ data })
   })
 
-  fastify.put('/roster-weekly-off-rules/:id', { preHandler: hrAdminAuth }, async (req: any, reply) => {
+  fastify.put('/roster-weekly-off-rules/:id', { preHandler: [fastify.authenticate, hrAdminAuth] }, async (req: any, reply) => {
     const { id }   = req.params as { id: string }
     const tenantId = req.tenantId as string
     const body     = req.body as Record<string, unknown>
@@ -216,7 +225,7 @@ export default async function rosterCalendarRoutes(fastify: FastifyInstance) {
     return reply.send({ data })
   })
 
-  fastify.delete('/roster-weekly-off-rules/:id', { preHandler: hrAdminAuth }, async (req: any, reply) => {
+  fastify.delete('/roster-weekly-off-rules/:id', { preHandler: [fastify.authenticate, hrAdminAuth] }, async (req: any, reply) => {
     const { id }   = req.params as { id: string }
     const tenantId = req.tenantId as string
 
@@ -232,7 +241,7 @@ export default async function rosterCalendarRoutes(fastify: FastifyInstance) {
 
   // ── Shift Segments CRUD ───────────────────────────────────────────────────
 
-  fastify.get('/shift-segments', { preHandler: hrAdminAuth }, async (req: any, reply) => {
+  fastify.get('/shift-segments', { preHandler: [fastify.authenticate, hrAdminAuth] }, async (req: any, reply) => {
     const { shiftId } = req.query as { shiftId?: string }
     const tenantId    = req.tenantId as string
 
@@ -245,7 +254,7 @@ export default async function rosterCalendarRoutes(fastify: FastifyInstance) {
     return reply.send({ data })
   })
 
-  fastify.post('/shift-segments', { preHandler: hrAdminAuth }, async (req: any, reply) => {
+  fastify.post('/shift-segments', { preHandler: [fastify.authenticate, hrAdminAuth] }, async (req: any, reply) => {
     const tenantId = req.tenantId as string
     const body     = req.body as Record<string, unknown>
 
@@ -259,7 +268,7 @@ export default async function rosterCalendarRoutes(fastify: FastifyInstance) {
     return reply.code(201).send({ data })
   })
 
-  fastify.put('/shift-segments/:id', { preHandler: hrAdminAuth }, async (req: any, reply) => {
+  fastify.put('/shift-segments/:id', { preHandler: [fastify.authenticate, hrAdminAuth] }, async (req: any, reply) => {
     const { id }   = req.params as { id: string }
     const tenantId = req.tenantId as string
     const body     = req.body as Record<string, unknown>
@@ -277,7 +286,7 @@ export default async function rosterCalendarRoutes(fastify: FastifyInstance) {
     return reply.send({ data })
   })
 
-  fastify.delete('/shift-segments/:id', { preHandler: hrAdminAuth }, async (req: any, reply) => {
+  fastify.delete('/shift-segments/:id', { preHandler: [fastify.authenticate, hrAdminAuth] }, async (req: any, reply) => {
     const { id }   = req.params as { id: string }
     const tenantId = req.tenantId as string
 
@@ -293,7 +302,7 @@ export default async function rosterCalendarRoutes(fastify: FastifyInstance) {
 
   // ── Rotation Groups CRUD ──────────────────────────────────────────────────
 
-  fastify.get('/roster-rotation-groups', { preHandler: hrAdminAuth }, async (req: any, reply) => {
+  fastify.get('/roster-rotation-groups', { preHandler: [fastify.authenticate, hrAdminAuth] }, async (req: any, reply) => {
     const tenantId = req.tenantId as string
 
     const { data, error } = await supabase
@@ -306,7 +315,7 @@ export default async function rosterCalendarRoutes(fastify: FastifyInstance) {
     return reply.send({ data })
   })
 
-  fastify.post('/roster-rotation-groups', { preHandler: hrAdminAuth }, async (req: any, reply) => {
+  fastify.post('/roster-rotation-groups', { preHandler: [fastify.authenticate, hrAdminAuth] }, async (req: any, reply) => {
     const tenantId = req.tenantId as string
     const body     = req.body as Record<string, unknown>
 
@@ -320,7 +329,7 @@ export default async function rosterCalendarRoutes(fastify: FastifyInstance) {
     return reply.code(201).send({ data })
   })
 
-  fastify.put('/roster-rotation-groups/:id', { preHandler: hrAdminAuth }, async (req: any, reply) => {
+  fastify.put('/roster-rotation-groups/:id', { preHandler: [fastify.authenticate, hrAdminAuth] }, async (req: any, reply) => {
     const { id }   = req.params as { id: string }
     const tenantId = req.tenantId as string
     const body     = req.body as Record<string, unknown>
@@ -340,7 +349,7 @@ export default async function rosterCalendarRoutes(fastify: FastifyInstance) {
 
   // ── Rotation Members CRUD ─────────────────────────────────────────────────
 
-  fastify.get('/roster-rotation-members', { preHandler: hrAdminAuth }, async (req: any, reply) => {
+  fastify.get('/roster-rotation-members', { preHandler: [fastify.authenticate, hrAdminAuth] }, async (req: any, reply) => {
     const { groupId } = req.query as { groupId?: string }
     const tenantId    = req.tenantId as string
 
@@ -357,7 +366,7 @@ export default async function rosterCalendarRoutes(fastify: FastifyInstance) {
     return reply.send({ data })
   })
 
-  fastify.post('/roster-rotation-members', { preHandler: hrAdminAuth }, async (req: any, reply) => {
+  fastify.post('/roster-rotation-members', { preHandler: [fastify.authenticate, hrAdminAuth] }, async (req: any, reply) => {
     const tenantId = req.tenantId as string
     const body     = req.body as Record<string, unknown>
 
@@ -371,7 +380,7 @@ export default async function rosterCalendarRoutes(fastify: FastifyInstance) {
     return reply.code(201).send({ data })
   })
 
-  fastify.delete('/roster-rotation-members/:id', { preHandler: hrAdminAuth }, async (req: any, reply) => {
+  fastify.delete('/roster-rotation-members/:id', { preHandler: [fastify.authenticate, hrAdminAuth] }, async (req: any, reply) => {
     const { id }   = req.params as { id: string }
     const tenantId = req.tenantId as string
 
@@ -387,7 +396,7 @@ export default async function rosterCalendarRoutes(fastify: FastifyInstance) {
 
   // ── Holiday Groups CRUD ───────────────────────────────────────────────────
 
-  fastify.get('/roster-holiday-groups', { preHandler: hrAdminAuth }, async (req: any, reply) => {
+  fastify.get('/roster-holiday-groups', { preHandler: [fastify.authenticate, hrAdminAuth] }, async (req: any, reply) => {
     const tenantId = req.tenantId as string
 
     const { data, error } = await supabase
@@ -400,7 +409,7 @@ export default async function rosterCalendarRoutes(fastify: FastifyInstance) {
     return reply.send({ data })
   })
 
-  fastify.post('/roster-holiday-groups', { preHandler: hrAdminAuth }, async (req: any, reply) => {
+  fastify.post('/roster-holiday-groups', { preHandler: [fastify.authenticate, hrAdminAuth] }, async (req: any, reply) => {
     const tenantId = req.tenantId as string
     const body     = req.body as Record<string, unknown>
 
@@ -414,7 +423,7 @@ export default async function rosterCalendarRoutes(fastify: FastifyInstance) {
     return reply.code(201).send({ data })
   })
 
-  fastify.put('/roster-holiday-groups/:id', { preHandler: hrAdminAuth }, async (req: any, reply) => {
+  fastify.put('/roster-holiday-groups/:id', { preHandler: [fastify.authenticate, hrAdminAuth] }, async (req: any, reply) => {
     const { id }   = req.params as { id: string }
     const tenantId = req.tenantId as string
     const body     = req.body as Record<string, unknown>
@@ -434,7 +443,7 @@ export default async function rosterCalendarRoutes(fastify: FastifyInstance) {
 
   // ── Explain — full resolution chain for a single employee/date ───────────
 
-  fastify.get('/roster-simulation/explain', { preHandler: hrAdminAuth }, async (req: any, reply) => {
+  fastify.get('/roster-simulation/explain', { preHandler: [fastify.authenticate, hrAdminAuth] }, async (req: any, reply) => {
     const { employeeId, date } = req.query as { employeeId?: string; date?: string }
     const tenantId             = req.tenantId as string
 
@@ -454,7 +463,7 @@ export default async function rosterCalendarRoutes(fastify: FastifyInstance) {
 
   // ── Validate — check a month calendar for logical issues ─────────────────
 
-  fastify.get('/roster-simulation/validate', { preHandler: hrAdminAuth }, async (req: any, reply) => {
+  fastify.get('/roster-simulation/validate', { preHandler: [fastify.authenticate, hrAdminAuth] }, async (req: any, reply) => {
     const { employeeId, month } = req.query as { employeeId?: string; month?: string }
     const tenantId              = req.tenantId as string
 
@@ -487,7 +496,7 @@ export default async function rosterCalendarRoutes(fastify: FastifyInstance) {
 
   // ── Test Dataset — return 8 edge-case scenarios for QA seeding ───────────
 
-  fastify.get('/roster-simulation/test-dataset', { preHandler: hrAdminAuth }, async (req: any, reply) => {
+  fastify.get('/roster-simulation/test-dataset', { preHandler: [fastify.authenticate, hrAdminAuth] }, async (req: any, reply) => {
     try {
       return reply.send({ data: generateTestDataset() })
     } catch (err: unknown) {
@@ -498,7 +507,7 @@ export default async function rosterCalendarRoutes(fastify: FastifyInstance) {
 
   // ── Coverage Analytics ────────────────────────────────────────────────────
 
-  fastify.get('/roster-simulation/coverage', { preHandler: hrAdminAuth }, async (req: any, reply) => {
+  fastify.get('/roster-simulation/coverage', { preHandler: [fastify.authenticate, hrAdminAuth] }, async (req: any, reply) => {
     const { month, rosterIds } = req.query as { month?: string; rosterIds?: string }
     const tenantId             = req.tenantId as string
 
