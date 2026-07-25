@@ -29,6 +29,7 @@ import Anthropic from '@anthropic-ai/sdk'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { logAction } from '../../lib/audit-service.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
+import { serverError, notFound, validationError, ErrorCode } from '../../lib/api-errors.js'
 
 /** Weighted readiness score (0–10 scale) from the 6 scorecard dimensions. */
 function computeWeightedScore(c: {
@@ -117,8 +118,13 @@ const UpdateCandidateSchema = z.object({
   attrition_risk_flag: z.boolean().optional().nullable(),
 })
 
+// succession_idp_actions.action_type CHECK constraint (migration 330) — the
+// ground truth for valid action types. Matches the frontend's ActionType
+// union (AdminSuccession.tsx).
+const ACTION_TYPES = ['course', 'assignment', 'mentoring', 'certification', 'coaching'] as const
+
 const AddIdpActionSchema = z.object({
-  action_type: z.string().optional(),
+  action_type: z.enum(ACTION_TYPES).optional(),
   description: z.string().min(1, 'description is required'),
   target_date: z.string().optional().nullable(),
 })
@@ -127,7 +133,7 @@ const UpdateIdpActionSchema = z.object({
   completed_at: z.string().optional().nullable(),
   description: z.string().optional(),
   target_date: z.string().optional().nullable(),
-  action_type: z.string().optional(),
+  action_type: z.enum(ACTION_TYPES).optional(),
 })
 
 const CreateCalibrationSchema = z.object({
@@ -492,7 +498,7 @@ export default async function successionRoutes(fastify: FastifyInstance) {
       .order('created_at')
       .limit(100)
 
-    if (error) return reply.status(500).send({ error: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch IDP actions')
     return reply.send({ data: data ?? [] })
   })
 
@@ -502,7 +508,7 @@ export default async function successionRoutes(fastify: FastifyInstance) {
     const tenantId = req.tenantId
     const { cid } = req.params as { id: string; cid: string }
     const parsed = AddIdpActionSchema.safeParse(req.body)
-    if (!parsed.success) return reply.status(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message ?? 'Invalid request body' })
+    if (!parsed.success) return validationError(reply, ErrorCode.VALIDATION_ERROR, parsed.error.issues[0]?.message ?? 'Invalid request body')
     const { action_type = 'course', description, target_date } = parsed.data
 
     const { data, error } = await supabase
@@ -518,7 +524,7 @@ export default async function successionRoutes(fastify: FastifyInstance) {
       .select('id')
       .single()
 
-    if (error) return reply.status(500).send({ error: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to add IDP action')
     return reply.status(201).send({ data })
   })
 
@@ -528,12 +534,12 @@ export default async function successionRoutes(fastify: FastifyInstance) {
     const tenantId = req.tenantId
     const { aid } = req.params as { id: string; cid: string; aid: string }
     const parsed = UpdateIdpActionSchema.safeParse(req.body)
-    if (!parsed.success) return reply.status(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message ?? 'Invalid request body' })
+    if (!parsed.success) return validationError(reply, ErrorCode.VALIDATION_ERROR, parsed.error.issues[0]?.message ?? 'Invalid request body')
     const body = parsed.data as Record<string, unknown>
     const allowed = ['completed_at', 'description', 'target_date', 'action_type']
     const update: Record<string, unknown> = {}
     for (const k of allowed) { if (body[k] !== undefined) update[k] = body[k] }
-    if (Object.keys(update).length === 0) return reply.status(400).send({ error: 'No fields to update' })
+    if (Object.keys(update).length === 0) return validationError(reply, ErrorCode.VALIDATION_ERROR, 'No fields to update')
 
     const { error } = await supabase
       .from('succession_idp_actions')
@@ -541,7 +547,7 @@ export default async function successionRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', tenantId)
       .eq('id', aid)
 
-    if (error) return reply.status(500).send({ error: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update IDP action')
     return reply.send({ data: { updated: true } })
   })
 
@@ -557,7 +563,7 @@ export default async function successionRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', tenantId)
       .eq('id', aid)
 
-    if (error) return reply.status(500).send({ error: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.DELETE_FAILED, 'Failed to delete IDP action')
     return reply.send({ data: { deleted: true } })
   })
 
@@ -575,7 +581,7 @@ export default async function successionRoutes(fastify: FastifyInstance) {
       .eq('id', cid)
       .single()
 
-    if (!candidate) return reply.status(404).send({ error: 'Candidate not found' })
+    if (!candidate) return notFound(reply, 'NOT_FOUND', 'Candidate not found')
     const c = candidate as any
 
     if (!process.env.ANTHROPIC_API_KEY) return reply.status(503).send({ error: 'AI_NOT_CONFIGURED', message: 'AI generation is not available in this environment' })
@@ -585,7 +591,7 @@ export default async function successionRoutes(fastify: FastifyInstance) {
       const msg = await ai.messages.create({
         model:      'claude-haiku-4-5-20251001',
         max_tokens: 800,
-        system: 'You are an HR succession planning expert. Generate practical IDP actions. Return ONLY a JSON array of objects with keys: action_type (course|stretch|mentoring|project|certification), description (concise action, max 120 chars), target_months (number).',
+        system: `You are an HR succession planning expert. Generate practical IDP actions. Return ONLY a JSON array of objects with keys: action_type (${ACTION_TYPES.join('|')}), description (concise action, max 120 chars), target_months (number).`,
         messages: [{
           role:    'user',
           content: `Generate 5 IDP actions for:\nName: ${c.employees?.first_name} ${c.employees?.last_name}\nRole: ${c.employees?.designation} (${c.employees?.department})\nReadiness: ${c.readiness_level}\nStrengths: ${c.strengths || 'N/A'}\nGaps: ${c.gaps || 'N/A'}\nCurrent plan: ${c.development_plan || 'None'}`,
