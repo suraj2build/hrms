@@ -1160,7 +1160,13 @@ export function EmployeeProfile() {
       const path = await uploadEmployeeFile(tenantId, id!, 'photos', file)
       await api.put(`/employees/${id}/personal-info`, { profile_photo: path })
     },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['employee-full', id] }); toast.success('Photo updated') },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['employee-full', id] })
+      // Employee List's avatar column and Org Chart nodes read the same
+      // profile_photo under ['employees', ...] keys.
+      qc.invalidateQueries({ queryKey: ['employees'] })
+      toast.success('Photo updated')
+    },
     onError:   () => toast.error('Photo upload failed'),
   })
 
@@ -1199,7 +1205,14 @@ export function EmployeeProfile() {
   const [profileForm, setProfileForm] = useState<Record<string, string>>({})
   const profileMutation = useMutation({
     mutationFn: (d: Record<string, string>) => api.put(`/employees/${id}`, d),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['employee-full', id] }); setEditProfile(false); toast.success('Saved') },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['employee-full', id] })
+      // Name/email/phone/status edited here are also shown in Employee List
+      // and Org Chart under separate ['employees', ...] keys.
+      qc.invalidateQueries({ queryKey: ['employees'] })
+      setEditProfile(false)
+      toast.success('Saved')
+    },
     onError:   () => toast.error('Save failed'),
   })
 
@@ -1208,7 +1221,12 @@ export function EmployeeProfile() {
   const [piForm, setPiForm] = useState<Record<string, string>>({})
   const piMutation = useMutation({
     mutationFn: (d: Record<string, string>) => api.put(`/employees/${id}/personal-info`, d),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['employee-full', id] }); setEditPI(false); toast.success('Saved') },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['employee-full', id] })
+      qc.invalidateQueries({ queryKey: ['employees'] })
+      setEditPI(false)
+      toast.success('Saved')
+    },
     onError:   () => toast.error('Save failed'),
   })
 
@@ -1258,6 +1276,9 @@ export function EmployeeProfile() {
       qc.invalidateQueries({ queryKey: ['job-history-all', id] })
       qc.invalidateQueries({ queryKey: ['employee-full', id] })
       qc.invalidateQueries({ queryKey: ['emp-org-context', id] })
+      // Department/designation/manager changes here are what Employee List's
+      // columns and Org Chart's tree structure are actually built from.
+      qc.invalidateQueries({ queryKey: ['employees'] })
       setAddJobOpen(false)
       if (!res?.jobChanged && !res?.orgChanged) toast.message('No changes to save')
       else toast.success(job ? 'Job details revised' : 'Job details saved')
@@ -1269,6 +1290,7 @@ export function EmployeeProfile() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['job-history-all', id] })
       qc.invalidateQueries({ queryKey: ['employee-full', id] })
+      qc.invalidateQueries({ queryKey: ['employees'] })
       toast.success('Position record deleted')
     },
     onError:   (e: Error) => toast.error('Failed to delete record', { description: e.message }),
