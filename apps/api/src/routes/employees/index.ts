@@ -5,6 +5,7 @@ import { logAction } from '../../lib/audit-service.js'
 import { EventType, MODULE } from '../../platform/events/index.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
 import { serverError, notFound, forbidden, validationError, conflictError, ErrorCode } from '../../lib/api-errors.js'
+import { revokeEmployeeAuth } from '../../lib/user-account-service.js'
 
 // NOTE: After migration 016 (lean employees), the following columns were removed
 // from the employees table and relocated to dedicated sub-tables:
@@ -508,6 +509,9 @@ export default async function employeeRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', request.tenantId)
 
     if (error) return serverError(request, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to separate employee')
+
+    // AF-001: revoke auth access.
+    await revokeEmployeeAuth(fastify.supabase, id, request.tenantId, fastify.log)
 
     return reply.send({ message: 'Employee separated successfully' })
   })

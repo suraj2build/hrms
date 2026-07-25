@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { logAction } from '../../lib/audit-service.js'
+import { revokeEmployeeAuth } from '../../lib/user-account-service.js'
 
 const schema = z.object({
   separation_type:      z.enum(['resignation','termination','retirement','end_of_contract','absconding','deceased','mutual_separation']),
@@ -72,6 +73,13 @@ export default async function separationRoutes(fastify: FastifyInstance) {
       .eq('id', req.params.id)
       .eq('tenant_id', req.tenantId)
 
+    // AF-001: revoke auth access — this path can reach 'separated' directly
+    // (a past-dated last_working_date at initiation time), not only via the
+    // relieve workflow step.
+    if (newStatus === 'separated') {
+      await revokeEmployeeAuth(fastify.supabase, req.params.id, req.tenantId, fastify.log)
+    }
+
     await logAction(fastify.supabase, {
       tenantId:    req.tenantId,
       tableName:   'employee_separation',
@@ -108,6 +116,9 @@ export default async function separationRoutes(fastify: FastifyInstance) {
         .update({ status: 'separated' })
         .eq('id', req.params.id)
         .eq('tenant_id', req.tenantId)
+
+      // AF-001: revoke auth access.
+      await revokeEmployeeAuth(fastify.supabase, req.params.id, req.tenantId, fastify.log)
     }
 
     await logAction(fastify.supabase, {

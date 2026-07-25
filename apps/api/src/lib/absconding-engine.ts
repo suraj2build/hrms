@@ -17,6 +17,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { notify } from './notify.js'
 import { logAction } from './audit-service.js'
 import { generateLetterPDF, uploadPDF } from './pdf-generator.js'
+import { revokeEmployeeAuth } from './user-account-service.js'
 
 // Days from first_ua_date that trigger each escalation.
 const THRESHOLDS = { flag: 3, second_escalation: 5, wl1: 7, wl2: 14, termination: 21 } as const
@@ -664,6 +665,10 @@ export async function processTermination(
     .update({ status: 'separated' })
     .eq('id', cas.employee_id)
     .eq('tenant_id', tenantId)
+
+  // AF-001: revoke auth access — auto-termination reaches the same terminal
+  // status as every other separation path and must revoke the same way.
+  await revokeEmployeeAuth(supabase, cas.employee_id, tenantId)
 
   // Check asset recovery requirement
   const { data: caseData } = await supabase

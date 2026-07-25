@@ -5,6 +5,7 @@ import { logAction } from '../../lib/audit-service.js'
 import { eventBus } from '../../lib/event-bus.js'
 import { computeFnfSettlement } from '../../lib/fnf-settlement-engine.js'
 import { isHrAdmin, resolveCallerEmployeeId, isDirectReport } from '../../lib/manager-scope.js'
+import { revokeEmployeeAuth } from '../../lib/user-account-service.js'
 
 // ─── Schemas ─────────────────────────────────────────────────────────────────
 
@@ -771,28 +772,8 @@ export default async function separationWorkflowRoutes(fastify: FastifyInstance)
       .eq('id', req.params.id)
       .eq('tenant_id', req.tenantId)
 
-    // AF-001: revoke auth access on final separation — mirrors ban_duration pattern in user-account.ts
-    const { data: separatedProfile } = await fastify.supabase
-      .from('profiles')
-      .select('id')
-      .eq('employee_id', req.params.id)
-      .eq('tenant_id', req.tenantId)
-      .maybeSingle()
-
-    if (separatedProfile) {
-      await fastify.supabase
-        .from('profiles')
-        .update({ is_active: false })
-        .eq('id', separatedProfile.id)
-        .eq('tenant_id', req.tenantId)
-
-      const { error: authErr } = await fastify.supabase.auth.admin.updateUserById(separatedProfile.id, {
-        ban_duration: '876000h',
-      })
-      if (authErr) {
-        fastify.log.warn({ err: authErr, employeeId: req.params.id }, 'separation/relieve: auth ban failed — profile deactivated but JWT not immediately revoked')
-      }
-    }
+    // AF-001: revoke auth access on final separation.
+    await revokeEmployeeAuth(fastify.supabase, req.params.id, req.tenantId, fastify.log)
 
     await logAction(fastify.supabase, {
       tenantId: req.tenantId, tableName: 'employee_separation', recordId: sep.id,
