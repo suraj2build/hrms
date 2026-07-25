@@ -26,6 +26,7 @@
  */
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { normalizeAttendanceStatus } from './attendance-utils.js'
+import { fetchAllRows } from './supabase-paginate.js'
 
 // ── Canonical status sets ─────────────────────────────────────────────────────
 // These are the AUTHORITATIVE definitions.  Import them everywhere rather than
@@ -143,14 +144,25 @@ export async function getMonthDailyRows(
   const fromDate = `${month}-01`
   const toDate   = new Date(y, m, 0).toISOString().slice(0, 10)  // last day of month
 
-  const { data, error } = await supabase
-    .from('attendance_daily')
-    .select('employee_id, date, status, work_hours, late_minutes, overtime_minutes, is_payable, day_fraction, computed_source')
-    .eq('tenant_id', tenantId)
-    .gte('date', fromDate)
-    .lte('date', toDate)
-
-  if (error) return { rows: [], error: error.message }
+  // A month of attendance_daily for any sizable tenant (thousands of employees
+  // × ~30 days) routinely exceeds PostgREST's 1,000-row max-rows ceiling — this
+  // module is the canonical single query point for ALL attendance aggregation
+  // (payroll, muster roll, dashboards), so an unpaginated fetch here silently
+  // truncated every one of them for large tenants. See CLAUDE.md.
+  let data: unknown[]
+  try {
+    data = await fetchAllRows((from, to) =>
+      supabase
+        .from('attendance_daily')
+        .select('employee_id, date, status, work_hours, late_minutes, overtime_minutes, is_payable, day_fraction, computed_source')
+        .eq('tenant_id', tenantId)
+        .gte('date', fromDate)
+        .lte('date', toDate)
+        .range(from, to),
+    )
+  } catch (err) {
+    return { rows: [], error: err instanceof Error ? err.message : 'Failed to fetch attendance rows' }
+  }
 
   const rows: AttendanceDailyRow[] = (data ?? []).map((r: any) => ({
     employee_id:      r.employee_id as string,
@@ -496,12 +508,21 @@ export async function buildLatestDaySnapshot(
   const date = (latestRow as { date: string } | null)?.date
     ?? refDate ?? new Date().toISOString().slice(0, 10)
 
-  const { data: rows, error } = await supabase
-    .from('attendance_daily')
-    .select('employee_id, status')
-    .eq('tenant_id', tenantId)
-    .eq('date', date)
-  if (error) return { error: error.message }
+  // One row per employee for a single day — still exceeds 1,000 for a large
+  // tenant, so this needs the same pagination as the month-range query above.
+  let rows: unknown[]
+  try {
+    rows = await fetchAllRows((from, to) =>
+      supabase
+        .from('attendance_daily')
+        .select('employee_id, status')
+        .eq('tenant_id', tenantId)
+        .eq('date', date)
+        .range(from, to),
+    )
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : 'Failed to fetch day snapshot rows' }
+  }
 
   // Collapse to one status per employee (defensive against duplicate rows).
   const byEmployee = new Map<string, string>()
@@ -550,17 +571,24 @@ export async function buildMonthReadModel(
   totals:    MonthAttendanceTotals
   rows:      AttendanceDailyRow[]
 } | { error: string }> {
-  // Fetch employees
-  const { data: empData, error: empErr } = await supabase
-    .from('employees')
-    .select('id, employee_code, first_name, last_name')
-    .eq('tenant_id', tenantId)
-    .eq('status', 'active')
-    .order('employee_code')
-
-  if (empErr) return { error: empErr.message }
-
-  const employees = (empData ?? []) as Employee[]
+  // Fetch employees — paginated: a large tenant's active headcount routinely
+  // exceeds PostgREST's 1,000-row max-rows ceiling (this is the exact table
+  // CLAUDE.md's pagination rule was written after — a blank Muster Roll for
+  // 2,877 employees).
+  let employees: Employee[]
+  try {
+    employees = await fetchAllRows<Employee>((from, to) =>
+      supabase
+        .from('employees')
+        .select('id, employee_code, first_name, last_name')
+        .eq('tenant_id', tenantId)
+        .eq('status', 'active')
+        .order('employee_code')
+        .range(from, to),
+    )
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : 'Failed to fetch employees' }
+  }
 
   // Fetch daily rows
   const { rows, error: rowErr } = await getMonthDailyRows(supabase, tenantId, month)
