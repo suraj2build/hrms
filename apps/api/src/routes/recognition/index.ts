@@ -662,6 +662,15 @@ export default async function recognitionRoutes(fastify: FastifyInstance) {
     const parsed = NominateSchema.safeParse(req.body)
     if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message ?? 'Invalid request body' })
     const { nominee_id, justification } = parsed.data
+
+    // Fresh audit finding (cross-tenant IDOR): nominee_id was inserted with
+    // no tenant check, then echoed back unfiltered via the nominations list
+    // GET's employees!award_nominations_nominee_id_fkey join — leaking a
+    // foreign tenant's employee identity to any HR admin viewing the round.
+    const { data: nominee } = await fastify.supabase
+      .from('employees').select('id').eq('id', nominee_id).eq('tenant_id', req.tenantId).maybeSingle()
+    if (!nominee) return reply.code(404).send({ error: 'Nominee not found in your organisation' })
+
     const { data, error } = await fastify.supabase.from('award_nominations')
       .insert({ tenant_id: req.tenantId, round_id: roundId, nominee_id, nominated_by: req.userId, justification: justification || null })
       .select('id').single()
@@ -810,6 +819,17 @@ export default async function recognitionRoutes(fastify: FastifyInstance) {
     const { to_employee_id, award_name, message, monetary_value } = parsed.data
     const empId = await resolveEmployeeId(fastify, req.userId, req.tenantId)
     if (!empId) return reply.code(403).send({ error: 'Employee profile not found' })
+
+    // Fresh audit finding (cross-tenant IDOR): to_employee_id was inserted
+    // with no tenant check, then echoed back unfiltered via the admin spot-
+    // awards GET's employees!to_employee_id join — leaking a foreign
+    // tenant's employee identity. Any authenticated employee can call this
+    // endpoint (spot awards are peer-to-peer, not admin-gated), so this is
+    // reachable by every user, not just HR.
+    const { data: toEmp } = await fastify.supabase
+      .from('employees').select('id').eq('id', to_employee_id).eq('tenant_id', req.tenantId).maybeSingle()
+    if (!toEmp) return reply.code(404).send({ error: 'Recipient not found in your organisation' })
+
     const { data, error } = await fastify.supabase.from('spot_awards')
       .insert({ tenant_id: req.tenantId, from_employee_id: empId, to_employee_id, award_name: award_name.trim(), message: message || null, monetary_value: monetary_value || null })
       .select('id').single()
