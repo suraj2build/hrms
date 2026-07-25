@@ -977,9 +977,17 @@ export function ImportWorkspace() {
    */
   function cellToString(cell: unknown): string {
     if (cell instanceof Date && !isNaN(cell.getTime())) {
-      const y = cell.getFullYear()
-      const m = String(cell.getMonth() + 1).padStart(2, '0')
-      const d = String(cell.getDate()).padStart(2, '0')
+      // SheetJS (cellDates: true) returns Excel date cells as Date objects
+      // anchored to UTC — e.g. an "April 1" cell becomes 2026-04-01T00:00:00Z,
+      // not local midnight. Reading it back with LOCAL getters (getFullYear/
+      // getMonth/getDate) re-interprets that UTC instant in the browser's own
+      // timezone, which silently shifts the date backward by a day for any
+      // negative-UTC-offset timezone (the classic "uploaded the right date,
+      // system recorded the day before" bug). UTC getters read the date SheetJS
+      // actually encoded, with no timezone-dependent shift.
+      const y = cell.getUTCFullYear()
+      const m = String(cell.getUTCMonth() + 1).padStart(2, '0')
+      const d = String(cell.getUTCDate()).padStart(2, '0')
       return `${y}-${m}-${d}`
     }
     return String(cell ?? '')
