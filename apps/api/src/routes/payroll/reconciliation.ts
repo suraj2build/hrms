@@ -30,6 +30,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z }                    from 'zod'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 /** Derive the target month from a computed item_id.
  *
@@ -70,10 +71,7 @@ export default async function payrollReconciliationRoutes(fastify: FastifyInstan
       })
 
     if (insertErr) {
-      req.log.warn(
-        { item_id: id, tenant_id: tenantId, err: insertErr.message },
-        'payroll reconciliation: failed to persist acknowledge action',
-      )
+      return serverError(req, reply, insertErr, ErrorCode.INSERT_FAILED, 'Failed to persist acknowledge action')
     }
 
     req.log.info(
@@ -116,10 +114,7 @@ export default async function payrollReconciliationRoutes(fastify: FastifyInstan
       })
 
     if (insertErr) {
-      req.log.warn(
-        { item_id: id, tenant_id: tenantId, err: insertErr.message },
-        'payroll reconciliation: failed to persist escalate action',
-      )
+      return serverError(req, reply, insertErr, ErrorCode.INSERT_FAILED, 'Failed to persist escalate action')
     }
 
     req.log.info(
@@ -162,10 +157,7 @@ export default async function payrollReconciliationRoutes(fastify: FastifyInstan
       })
 
     if (insertErr) {
-      req.log.warn(
-        { item_id: id, tenant_id: tenantId, err: insertErr.message },
-        'payroll reconciliation: failed to persist resolve action',
-      )
+      return serverError(req, reply, insertErr, ErrorCode.INSERT_FAILED, 'Failed to persist resolve action')
     }
 
     req.log.info(
