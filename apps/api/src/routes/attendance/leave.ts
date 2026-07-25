@@ -1450,6 +1450,21 @@ export default async function leaveRoute(fastify: FastifyInstance) {
       .maybeSingle()
     if (!lt) return notFound(reply, 'NOT_FOUND', 'Leave type not found')
 
+    // Fresh audit finding (cross-tenant IDOR): employee_ids was never
+    // checked against tenant — unlike leave_type_id just above — before
+    // being used to insert auto-approved leave_requests + attendance_daily
+    // rows. A caller could pass a UUID belonging to another tenant's
+    // employee and create auto-approved leave for it under this tenant.
+    const uniqueEmpIds = [...new Set(employee_ids)]
+    const { data: validEmps } = await fastify.supabase
+      .from('employees')
+      .select('id')
+      .eq('tenant_id', req.tenantId)
+      .in('id', uniqueEmpIds)
+    if ((validEmps?.length ?? 0) !== uniqueEmpIds.length) {
+      return validationError(reply, 'INVALID_EMPLOYEES', 'One or more employees were not found in your organisation')
+    }
+
     const dates = expandDateRange(from_date, to_date)
     const now   = new Date().toISOString()
 
