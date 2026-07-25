@@ -366,11 +366,13 @@ export default async function surveyRoutes(fastify: FastifyInstance) {
 
   fastify.get('/admin/:id', hrAuth, async (req, reply) => {
     const { id } = req.params as { id: string }
+    const tenantId = (req as any).tenantId
 
     const { data: survey, error } = await supabase
       .from('surveys')
       .select('id, title, description, status, due_date, created_at')
       .eq('id', id)
+      .eq('tenant_id', tenantId)
       .maybeSingle()
 
     if (error || !survey) return reply.status(404).send({ error: 'Survey not found' })
@@ -380,11 +382,13 @@ export default async function surveyRoutes(fastify: FastifyInstance) {
         .from('survey_questions')
         .select('id, order_idx, question_text, question_type, options, required')
         .eq('survey_id', id)
+        .eq('tenant_id', tenantId)
         .order('order_idx'),
       supabase
         .from('survey_assignments')
         .select('id, assigned_at, completed_at, employee:employees(id, first_name, last_name, employee_code)')
         .eq('survey_id', id)
+        .eq('tenant_id', tenantId)
         .order('assigned_at', { ascending: false }),
     ])
 
@@ -426,6 +430,14 @@ export default async function surveyRoutes(fastify: FastifyInstance) {
     const tenantId  = await getTenantId(profileId)
     if (!tenantId) return reply.status(400).send({ error: 'Tenant not found' })
 
+    const { data: survey } = await supabase
+      .from('surveys')
+      .select('id')
+      .eq('id', id)
+      .eq('tenant_id', tenantId)
+      .maybeSingle()
+    if (!survey) return reply.status(404).send({ error: 'Survey not found' })
+
     let empIds = employee_ids ?? []
 
     if (assign_all) {
@@ -457,17 +469,28 @@ export default async function surveyRoutes(fastify: FastifyInstance) {
 
   fastify.get('/admin/:id/results', hrAuth, async (req, reply) => {
     const { id } = req.params as { id: string }
+    const tenantId = (req as any).tenantId
+
+    const { data: survey } = await supabase
+      .from('surveys')
+      .select('id')
+      .eq('id', id)
+      .eq('tenant_id', tenantId)
+      .maybeSingle()
+    if (!survey) return reply.status(404).send({ error: 'Survey not found' })
 
     const { data: questions } = await supabase
       .from('survey_questions')
       .select('id, order_idx, question_text, question_type, options')
       .eq('survey_id', id)
+      .eq('tenant_id', tenantId)
       .order('order_idx')
 
     const { data: assignments } = await supabase
       .from('survey_assignments')
       .select('id, completed_at')
       .eq('survey_id', id)
+      .eq('tenant_id', tenantId)
 
     const assignmentIds   = (assignments ?? []).map(a => a.id)
     const totalAssigned   = assignmentIds.length
@@ -479,6 +502,7 @@ export default async function surveyRoutes(fastify: FastifyInstance) {
       const { data: responses } = await supabase
         .from('survey_responses')
         .select('question_id, response')
+        .eq('tenant_id', tenantId)
         .in('assignment_id', assignmentIds)
 
       for (const r of responses ?? []) {
@@ -519,6 +543,7 @@ export default async function surveyRoutes(fastify: FastifyInstance) {
       .from('survey_assignments')
       .select('id, completed_at, employee_id, employees(work_location_id, work_locations(id, name))')
       .eq('survey_id', id)
+      .eq('tenant_id', tenantId)
     const locMap: Record<string, { name: string; total: number; completed: number }> = {}
     for (const a of (assignedEmps ?? []) as any[]) {
       const locId   = a.employees?.work_location_id ?? '__none__'
@@ -721,6 +746,15 @@ export default async function surveyRoutes(fastify: FastifyInstance) {
     const tenantId      = req.tenantId
     const parsed = Setup360Schema.safeParse(req.body ?? {})
     if (!parsed.success) return reply.status(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message ?? 'Invalid request body' })
+
+    const { data: survey } = await supabase
+      .from('surveys')
+      .select('id')
+      .eq('id', id)
+      .eq('tenant_id', tenantId)
+      .maybeSingle()
+    if (!survey) return reply.status(404).send({ error: 'Survey not found' })
+
     const { peer_count = 3, deadline_days, self_review, manager_review } = parsed.data
 
     const deadline_at = deadline_days
