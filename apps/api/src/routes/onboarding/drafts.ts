@@ -7,6 +7,7 @@ import {
   emitOnboardingSessionRejected,
 } from '../../lib/onboarding-orchestrator.js'
 import { checkIdempotency, storeIdempotency } from '../../lib/idempotency.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 // ─── Validation schemas ────────────────────────────────────────────────────
 
@@ -461,10 +462,39 @@ export default async function draftRoutes(fastify: FastifyInstance) {
       })
     }
 
+    // Atomically claim the draft — closes the exact race the comment above
+    // describes: the precondition is now folded into this UPDATE's own WHERE
+    // clause (not just the read-check above), so a double-click or a
+    // retried approve request racing the same draft can no longer both pass
+    // and both create a separate employees row for the same candidate. The
+    // loser gets 409 before any employee is created.
+    const originalStatus = draft.status
+    const { data: claimed, error: claimErr } = await fastify.supabase
+      .from('draft_employee_profiles')
+      .update({ status: 'approved', updated_at: new Date().toISOString() })
+      .eq('id', id)
+      .eq('tenant_id', req.tenantId)
+      .in('status', allowedStatuses)
+      .select('id')
+      .maybeSingle()
+    if (claimErr) return serverError(req, reply, claimErr, ErrorCode.UPDATE_FAILED, 'Failed to claim draft for approval')
+    if (!claimed) {
+      return reply.code(409).send({
+        error:   'INVALID_STATUS',
+        message: 'Draft was already actioned by another request',
+      })
+    }
+
     // Generate employee_code via the tenant sequence (idempotent, race-safe)
     const { data: generatedCode, error: codeErr } = await fastify.supabase
       .rpc('generate_employee_code', { p_tenant_id: req.tenantId })
     if (codeErr || !generatedCode) {
+      // Revert the claim so HR can retry — otherwise this failure would
+      // leave the draft permanently stuck 'approved' with no employee ever
+      // created.
+      await fastify.supabase.from('draft_employee_profiles')
+        .update({ status: originalStatus, updated_at: new Date().toISOString() })
+        .eq('id', id).eq('tenant_id', req.tenantId).eq('status', 'approved')
       return reply.code(500).send({ error: 'CODE_GEN_ERROR', message: `Failed to generate employee code: ${codeErr?.message ?? 'unknown'}` })
     }
     const employeeCode = generatedCode as string
@@ -496,6 +526,11 @@ export default async function draftRoutes(fastify: FastifyInstance) {
       .single()
 
     if (empError || !employee) {
+      // Same revert as above — the employee row was never created, so the
+      // draft must not be left stuck 'approved'.
+      await fastify.supabase.from('draft_employee_profiles')
+        .update({ status: originalStatus, updated_at: new Date().toISOString() })
+        .eq('id', id).eq('tenant_id', req.tenantId).eq('status', 'approved')
       return reply.code(500).send({ error: 'DB_ERROR', message: empError?.message ?? 'Failed to create employee' })
     }
 
