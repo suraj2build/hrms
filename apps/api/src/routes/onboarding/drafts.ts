@@ -10,10 +10,24 @@ import { checkIdempotency, storeIdempotency } from '../../lib/idempotency.js'
 
 // ─── Validation schemas ────────────────────────────────────────────────────
 
+// Editable data columns on draft_employee_profiles (migration 109 + 178 + 212).
+// Excludes structural/system columns (id, tenant_id, session_id, status,
+// validation_*, duplicate_risk, hr_overrides, approved_*, rejection_reason,
+// linked_employee_id, exception_*, created_at, updated_at) — those must
+// never be settable via an arbitrary field_name from the request body.
+const EDITABLE_DRAFT_FIELDS = [
+  'first_name', 'last_name', 'email', 'phone', 'dob', 'gender',
+  'address_line1', 'address_city', 'address_state', 'address_pincode',
+  'employee_code', 'joining_date', 'department_id', 'designation_id', 'grade_id',
+  'employment_type', 'pan_number', 'uan_number', 'esi_number', 'pf_number',
+  'bank_name', 'bank_account_number', 'bank_ifsc', 'bank_account_type',
+  'ctc_annual', 'previous_employer', 'previous_designation',
+] as const
+
 const fieldOverridesSchema = z.object({
   overrides: z.array(
     z.object({
-      field_name: z.string().min(1),
+      field_name: z.enum(EDITABLE_DRAFT_FIELDS),
       value: z.string(),
     }),
   ).min(1),
@@ -127,6 +141,7 @@ export default async function draftRoutes(fastify: FastifyInstance) {
       .from('draft_employee_profiles')
       .update({ ...profileUpdates, updated_at: new Date().toISOString() })
       .eq('id', id)
+      .eq('tenant_id', req.tenantId)
 
     if (updateError) return reply.code(500).send({ error: 'DB_ERROR', message: updateError.message })
 
