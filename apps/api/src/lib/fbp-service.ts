@@ -16,6 +16,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import {
   computeFbpTaxable, cumulativeMonths, sumComponentPaid,
 } from './fbp-reconciliation.js'
+import { fetchAllRows } from './supabase-paginate.js'
 
 export interface ReconciliationRow {
   employee_id:         string
@@ -57,13 +58,22 @@ export async function computeQuarterReconciliation(
   const months = cumulativeMonths(financialYear, quarter)
 
   // 2. Finalized payslips across the YTD window.
-  const { data: slips, error: slipErr } = await supabase
-    .from('payroll_slips')
-    .select('employee_id, component_breakdown, month')
-    .eq('tenant_id', tenantId)
-    .in('month', months)
-    .eq('status', 'finalized')
-  if (slipErr) throw new Error(`fbp: failed to load payslips: ${slipErr.message}`)
+  // Builds YTD taxable/exempt amounts for every employee across up to 12
+  // months — easily exceeds PostgREST's 1000-row cap for a large tenant.
+  let slips: any[]
+  try {
+    slips = await fetchAllRows<any>((from, to) =>
+      supabase
+        .from('payroll_slips')
+        .select('employee_id, component_breakdown, month')
+        .eq('tenant_id', tenantId)
+        .in('month', months)
+        .eq('status', 'finalized')
+        .range(from, to),
+    )
+  } catch (err: any) {
+    throw new Error(`fbp: failed to load payslips: ${err.message}`)
+  }
 
   // Group slips by employee.
   const slipsByEmp = new Map<string, Array<{ component_breakdown: any }>>()
@@ -74,14 +84,21 @@ export async function computeQuarterReconciliation(
   }
 
   // 3. Approved bills YTD (quarters 1..Q), summed per (employee, component).
-  const { data: bills, error: billErr } = await supabase
-    .from('fbp_bill_submissions')
-    .select('employee_id, salary_component_id, amount, approved_amount')
-    .eq('tenant_id', tenantId)
-    .eq('financial_year', financialYear)
-    .lte('quarter', quarter)
-    .eq('status', 'approved')
-  if (billErr) throw new Error(`fbp: failed to load bills: ${billErr.message}`)
+  let bills: any[]
+  try {
+    bills = await fetchAllRows<any>((from, to) =>
+      supabase
+        .from('fbp_bill_submissions')
+        .select('employee_id, salary_component_id, amount, approved_amount')
+        .eq('tenant_id', tenantId)
+        .eq('financial_year', financialYear)
+        .lte('quarter', quarter)
+        .eq('status', 'approved')
+        .range(from, to),
+    )
+  } catch (err: any) {
+    throw new Error(`fbp: failed to load bills: ${err.message}`)
+  }
 
   const proofByKey = new Map<string, number>()
   for (const b of (bills ?? []) as any[]) {
@@ -90,13 +107,24 @@ export async function computeQuarterReconciliation(
     proofByKey.set(key, (proofByKey.get(key) ?? 0) + amt)
   }
 
-  // 4. Existing reconciliations (to preserve locked rows).
-  const { data: existing } = await supabase
-    .from('fbp_reconciliations')
-    .select('employee_id, salary_component_id, status, paid_amount, proof_amount, exemption_limit, taxable_amount')
-    .eq('tenant_id', tenantId)
-    .eq('financial_year', financialYear)
-    .eq('quarter', quarter)
+  // 4. Existing reconciliations (to preserve locked rows). Must be complete —
+  // a truncated scan would miss some already-locked rows below, and this
+  // function would silently recompute and overwrite them, contradicting the
+  // "never overwritten" guarantee documented above.
+  let existing: any[]
+  try {
+    existing = await fetchAllRows<any>((from, to) =>
+      supabase
+        .from('fbp_reconciliations')
+        .select('employee_id, salary_component_id, status, paid_amount, proof_amount, exemption_limit, taxable_amount')
+        .eq('tenant_id', tenantId)
+        .eq('financial_year', financialYear)
+        .eq('quarter', quarter)
+        .range(from, to),
+    )
+  } catch (err: any) {
+    throw new Error(`fbp: failed to load existing reconciliations: ${err.message}`)
+  }
   const existingByKey = new Map<string, any>(
     (existing ?? []).map((r: any) => [`${r.employee_id}:${r.salary_component_id}`, r]),
   )
