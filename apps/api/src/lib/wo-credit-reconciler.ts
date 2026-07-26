@@ -20,6 +20,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { isMonthLocked } from './period-lock.js'
 import { durableQueue }  from './durable-queue.js'
+import { fetchAllRows }  from './supabase-paginate.js'
 
 const RECON_INTERVAL_MS = 6 * 60 * 60 * 1_000   // every 6h (daily-grain; cheap + idempotent)
 const WARMUP_MS         = 7 * 60 * 1_000
@@ -113,12 +114,17 @@ export async function resolveWoEmployees(
   }
 
   // Active employees + effective roster (employees.roster_id > site default_roster_id)
-  const { data: emps } = await supabase
-    .from('employees')
-    .select('id, roster_id, site_id, status')
-    .eq('tenant_id', tenantId)
-    .eq('status', 'active')
-  const empRows = (emps ?? []) as any[]
+  // Runs every 6 hours (RECON_INTERVAL_MS) and reconciles weekly-off credits
+  // for every active employee, which feed LOP/payroll — paginated so
+  // employees past PostgREST's 1000-row cap aren't silently excluded.
+  const empRows = await fetchAllRows<any>((from, to) =>
+    supabase
+      .from('employees')
+      .select('id, roster_id, site_id, status')
+      .eq('tenant_id', tenantId)
+      .eq('status', 'active')
+      .range(from, to),
+  )
 
   const siteIds = [...new Set(empRows.map(e => e.site_id).filter(Boolean))]
   const siteDefaultRoster = new Map<string, string | null>()
