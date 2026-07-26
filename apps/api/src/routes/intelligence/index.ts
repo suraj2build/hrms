@@ -11,6 +11,7 @@ import { computeUpcoming } from '../../lib/compliance-calendar.js'
 import { computeLifecycleRisks, type LifecycleCategory } from '../../lib/lifecycle-expiry.js'
 import { buildDailyDigest, buildWeeklyDigest, buildMonthlyDigest } from '../../lib/digest-builder.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
+import { isHrAdmin, resolveCallerEmployeeId, isDirectReport } from '../../lib/manager-scope.js'
 
 interface SourceRecord { table: string; count: number; sample?: string }
 
@@ -433,10 +434,18 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
   fastify.get('/employee/:id/360', { preHandler: [fastify.authenticate] }, async (req: any, reply) => {
     const tenantId: string = req.tenantId
     const { id: employeeId } = req.params as { id: string }
-    // employees can only view their own 360
-    if (req.userRole === 'employee') {
-      const { data: prof } = await fastify.supabase.from('profiles').select('employee_id').eq('id', req.userId).eq('tenant_id', tenantId).maybeSingle()
-      if (!prof || prof.employee_id !== employeeId) return reply.code(403).send({ error: 'FORBIDDEN' })
+    // Self, HR admin, or a manager viewing one of their own direct reports —
+    // any other role (including 'manager' targeting a non-report) is blocked.
+    // Previously only req.userRole === 'employee' was scoped, so a manager
+    // could pull any employee's compensation/leave/PII in the tenant by id.
+    if (!isHrAdmin(req.userRole)) {
+      const myEmployeeId = await resolveCallerEmployeeId(fastify.supabase, req.userId, tenantId)
+      const isSelf = !!myEmployeeId && myEmployeeId === employeeId
+      let isManagerOfTarget = false
+      if (!isSelf && req.userRole === 'manager' && myEmployeeId) {
+        isManagerOfTarget = await isDirectReport(fastify.supabase, tenantId, myEmployeeId, employeeId)
+      }
+      if (!isSelf && !isManagerOfTarget) return reply.code(403).send({ error: 'FORBIDDEN' })
     }
     try {
       const now           = new Date()
