@@ -83,6 +83,17 @@ export default async function loansRoutes(fastify: FastifyInstance) {
       if (profile?.employee_id !== parsed.data.employee_id) {
         return reply.code(403).send({ error: 'FORBIDDEN', message: 'You can only request a loan for yourself' })
       }
+    } else {
+      // HR-admin path: employee_id is caller-supplied — verify it belongs to
+      // this tenant before it's used in the insert below (the employee_loans
+      // FK only checks the row exists somewhere, not that it's this tenant's).
+      const { data: targetEmp } = await fastify.supabase
+        .from('employees')
+        .select('id')
+        .eq('id', parsed.data.employee_id)
+        .eq('tenant_id', req.tenantId)
+        .maybeSingle()
+      if (!targetEmp) return reply.code(404).send({ error: 'EMPLOYEE_NOT_FOUND', message: 'Employee not found' })
     }
 
     const emiAmount = computeEMI(parsed.data.principal_amount, parsed.data.interest_rate_pct, parsed.data.tenure_months)
@@ -480,6 +491,18 @@ export default async function loansRoutes(fastify: FastifyInstance) {
     }
 
     const now = new Date().toISOString()
+
+    // loan_id is caller-supplied — verify it belongs to this tenant before
+    // inserting. The FK only checks the loan row exists somewhere, not that
+    // it's this tenant's; without this a payment could be permanently
+    // recorded against another tenant's loan.
+    const { data: targetLoan } = await fastify.supabase
+      .from('employee_loans')
+      .select('id')
+      .eq('id', parsed.data.loan_id)
+      .eq('tenant_id', req.tenantId)
+      .maybeSingle()
+    if (!targetLoan) return reply.code(404).send({ error: 'LOAN_NOT_FOUND', message: 'Loan not found' })
 
     // Insert payment record
     const { data: payment, error: payErr } = await fastify.supabase
