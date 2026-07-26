@@ -304,17 +304,34 @@ export async function processAttendanceCorrection(
       })
 
     if (punchErr) {
-      // Non-fatal: recompute can still run using existing punch data.
-      // Log the error so it is visible in operational monitoring.
-      log.warn(
+      // Fatal: the correction's entire purpose is to write these corrected
+      // punch rows. Recomputing without them would attendance-recompute
+      // against the OLD/wrong punch data and then mark the correction
+      // 'applied' — reporting success while the requested fix never
+      // actually happened. Fail loudly instead so HR can retry.
+      const nextRetryCount = currentRetryCount + 1
+      log.error(
         {
+          event:         LOG_EVENTS.FAILED,
           correction_id: correctionId,
+          tenant_id:     tenantId,
           employee_id:   employeeId,
           date,
+          retry_count:   nextRetryCount,
           err:           punchErr,
         },
-        'correction-processor: punch_log upsert failed — proceeding to recompute with existing data',
+        'correction-processor: punch_log upsert failed — correction marked failed, retryable by HR',
       )
+      await supabase
+        .from('attendance_corrections')
+        .update({
+          status:         'failed',
+          failure_reason: `PUNCH_UPSERT_FAILED: ${punchErr.message ?? 'unknown error'}`,
+          retry_count:    nextRetryCount,
+        })
+        .eq('id', correctionId)
+        .eq('tenant_id', tenantId)
+      return
     }
   }
 

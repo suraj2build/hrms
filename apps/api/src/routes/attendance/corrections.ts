@@ -697,8 +697,12 @@ export default async function attendanceCorrectionsRoute(fastify: FastifyInstanc
     }
 
     // ── Reset to processing (approved_by / approved_at intentionally NOT touched) ──
+    // The precondition is folded into the UPDATE's own WHERE clause (not just
+    // the read-check above) so two concurrent retry requests can't both win:
+    // only the request that actually flips 'failed' → 'processing' proceeds to
+    // schedule a recompute worker.
     const now = new Date().toISOString()
-    const { error: updateErr } = await fastify.supabase
+    const { data: retryRows, error: updateErr } = await fastify.supabase
       .from('attendance_corrections')
       .update({
         status:                'processing',
@@ -707,9 +711,17 @@ export default async function attendanceCorrectionsRoute(fastify: FastifyInstanc
       })
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
+      .eq('status', 'failed')
+      .select('id')
 
     if (updateErr) {
       return reply.code(500).send({ error: 'UPDATE_FAILED', message: 'Failed to initiate retry' })
+    }
+    if (!retryRows || retryRows.length === 0) {
+      return reply.code(409).send({
+        error:   'CONFLICT',
+        message: 'Correction was already actioned by another request',
+      })
     }
 
     // ── Step 8: structured log — retry requested ──────────────────────────
@@ -792,14 +804,24 @@ export default async function attendanceCorrectionsRoute(fastify: FastifyInstanc
       return reply.code(authResult.code).send({ error: authResult.error, message: authResult.message })
     }
 
-    const { error: updateErr } = await fastify.supabase
+    // Fold the 'pending' precondition into the UPDATE's own WHERE clause: the
+    // async authoriseApprover() round-trip above opens a window where an
+    // approve request can flip this row to 'processing' first — without this
+    // guard, this update would stomp it back to 'rejected' while a recompute
+    // worker is already in flight, corrupting the documented lifecycle.
+    const { data: rejectRows, error: updateErr } = await fastify.supabase
       .from('attendance_corrections')
       .update({ status: 'rejected', rejection_reason: rejectionReason })
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
+      .eq('status', 'pending')
+      .select('id')
 
     if (updateErr) {
       return reply.code(500).send({ error: 'UPDATE_FAILED', message: 'Failed to reject correction' })
+    }
+    if (!rejectRows || rejectRows.length === 0) {
+      return reply.code(409).send({ error: 'CONFLICT', message: 'Correction was already actioned by another request' })
     }
 
     auditLog(req.tenantId, id, 'UPDATE', req.userId, {
