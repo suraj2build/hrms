@@ -389,20 +389,22 @@ async function dispatchTrustAdminInboxItem(opts: TrustAdminInboxOpts): Promise<v
 }
 
 /** For document events: look up linked_employee_id from the session (set only
- *  after approval — silently skips if the session is still pre-approval). */
+ *  after approval — silently skips if the session is still pre-approval).
+ *  onboarding_sessions itself has no employee link; it flows through
+ *  draft_employee_profiles.session_id → .linked_employee_id, which
+ *  drafts.ts's approve route sets once the employees row is created. */
 async function resolveSessionEmployeeId(
   supabase: SupabaseClient,
   sessionId: string,
   tenantId:  string,
 ): Promise<string | null> {
-  // onboarding_sessions does not store a linked employee id; the link is not tracked here.
   const { data } = await supabase
-    .from('onboarding_sessions')
-    .select('id')
-    .eq('id', sessionId)
+    .from('draft_employee_profiles')
+    .select('linked_employee_id')
+    .eq('session_id', sessionId)
     .eq('tenant_id', tenantId)
     .maybeSingle()
-  return data ? null : null
+  return data?.linked_employee_id ?? null
 }
 
 // ── Handler registration (call once at startup) ────────────────────────────────
