@@ -499,6 +499,7 @@ async function _resolveShiftId(
 
 async function _fetchShiftWithSegments(
   supabase: SupabaseClient,
+  tenantId: string,
   shiftId:  string,
 ): Promise<{
   shift_id:      string
@@ -513,13 +514,20 @@ async function _fetchShiftWithSegments(
     .from('shifts')
     .select('id, name, start_time, end_time, grace_minutes, flex_policy')
     .eq('id', shiftId)
+    .eq('tenant_id', tenantId)
     .maybeSingle()
   if (!shift) return null
 
+  // shift_segments carries its own tenant_id (migration 147) — without this
+  // filter, a segment row inserted under another tenant but pointing at this
+  // shift_id (e.g. via an unvalidated FK write elsewhere) would be picked up
+  // here, flipping is_split_shift and corrupting this tenant's OT/split-shift
+  // computation with a foreign tenant's segment data.
   const { data: segs } = await supabase
     .from('shift_segments')
     .select('*')
     .eq('shift_id', shiftId)
+    .eq('tenant_id', tenantId)
     .order('segment_order')
 
   return {
@@ -618,7 +626,7 @@ export async function resolveShiftExpectation(
     return { shift_id: null, grace_minutes: 15, is_split_shift: false, is_rotation: !!rotation, rotation_group_id: rotation?.group_id ?? null }
   }
 
-  const sd = await _fetchShiftWithSegments(supabase, shiftId)
+  const sd = await _fetchShiftWithSegments(supabase, tenantId, shiftId)
   if (!sd) {
     return { shift_id: shiftId, grace_minutes: 15, is_split_shift: false, is_rotation: !!rotation }
   }
@@ -666,7 +674,7 @@ export async function resolveRosterDay(
   const rotation  = await _fetchRotationMembership(supabase, tenantId, employeeId, dateStr)
   const rotShift  = rotation ? _resolveRotationShift(dateStr, rotation.cohort_index, rotation.config) : null
   const shiftId   = await _resolveShiftId(supabase, tenantId, employeeId, dateStr, ctx.site_default_shift_id, rotShift)
-  const sd        = (woffStatus.is_weekly_off || isHoliday) ? null : (shiftId ? await _fetchShiftWithSegments(supabase, shiftId) : null)
+  const sd        = (woffStatus.is_weekly_off || isHoliday) ? null : (shiftId ? await _fetchShiftWithSegments(supabase, tenantId, shiftId) : null)
   const isSplit   = (sd?.segments.length ?? 0) > 1
 
   // Fatigue
@@ -772,7 +780,7 @@ export async function buildEmployeeRosterCalendar(
   async function getShift(id: string | null) {
     if (!id) return null
     if (shiftCache.has(id)) return shiftCache.get(id)!
-    const s = await _fetchShiftWithSegments(supabase, id)
+    const s = await _fetchShiftWithSegments(supabase, tenantId, id)
     shiftCache.set(id, s)
     return s
   }
@@ -1079,7 +1087,7 @@ export async function explainRosterDay(
   else if (ctx.site_default_shift_id) { shiftSrc = 'site_default';       resolvedShiftId = ctx.site_default_shift_id }
 
   const sd = (!woffStatus.is_weekly_off && !isHoliday && resolvedShiftId)
-    ? await _fetchShiftWithSegments(supabase, resolvedShiftId)
+    ? await _fetchShiftWithSegments(supabase, tenantId, resolvedShiftId)
     : null
 
   // ── Fatigue computation ──────────────────────────────────────────────────

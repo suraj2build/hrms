@@ -258,6 +258,18 @@ export default async function rosterCalendarRoutes(fastify: FastifyInstance) {
     const tenantId = req.tenantId as string
     const body     = req.body as Record<string, unknown>
 
+    // Fresh audit finding: shift_id was accepted from the client with no
+    // tenant-ownership check, letting a caller attach a segment row to
+    // another tenant's shift — _fetchShiftWithSegments (roster-calendar-
+    // engine.ts) previously had no tenant filter either, so that injected
+    // segment would silently flip is_split_shift for the OTHER tenant's
+    // employees on that shift and corrupt their OT/split-shift computation.
+    if (body.shift_id) {
+      const { data: shift } = await supabase
+        .from('shifts').select('id').eq('id', body.shift_id as string).eq('tenant_id', tenantId).maybeSingle()
+      if (!shift) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Shift not found in your organisation' })
+    }
+
     const { data, error } = await supabase
       .from('shift_segments')
       .insert({ ...body, tenant_id: tenantId })
