@@ -167,18 +167,19 @@ export default async function successionRoutes(fastify: FastifyInstance) {
   fastify.get('/dashboard', hrAuth, async (req: any, reply) => {
     const tenantId = req.tenantId
 
-    const [plansResult, candidatesResult] = await Promise.all([
-      supabase.from('succession_plans')
-        .select('id, risk_level')
-        .eq('tenant_id', tenantId)
-        .eq('status', 'active'),
-      supabase.from('succession_candidates')
-        .select('readiness_level')
-        .eq('tenant_id', tenantId),
+    const [plans, candidates] = await Promise.all([
+      fetchAllRows<any>((from, to) =>
+        supabase.from('succession_plans')
+          .select('id, risk_level')
+          .eq('tenant_id', tenantId)
+          .eq('status', 'active')
+          .range(from, to)),
+      fetchAllRows<any>((from, to) =>
+        supabase.from('succession_candidates')
+          .select('readiness_level')
+          .eq('tenant_id', tenantId)
+          .range(from, to)),
     ])
-
-    const plans = plansResult.data ?? []
-    const candidates = candidatesResult.data ?? []
 
     const riskBreakdown = { critical: 0, high: 0, medium: 0, low: 0 }
     plans.forEach(p => { riskBreakdown[p.risk_level as keyof typeof riskBreakdown]++ })
@@ -215,7 +216,7 @@ export default async function successionRoutes(fastify: FastifyInstance) {
           .range(from, to),
       )
     } catch (err: any) {
-      return reply.status(500).send({ error: err.message })
+      return serverError(req, reply, err, ErrorCode.QUERY_FAILED, 'Failed to fetch succession plans')
     }
 
     // Attach candidate counts
@@ -288,7 +289,7 @@ export default async function successionRoutes(fastify: FastifyInstance) {
       .select('id')
       .single()
 
-    if (error) return reply.status(500).send({ error: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create succession plan')
 
     await logAction(supabase, { tenantId, tableName: 'succession_plans', recordId: data.id, action: 'INSERT', performedBy: req.userId, newData: { position_title, risk_level } })
     return reply.status(201).send({ data })
@@ -316,7 +317,7 @@ export default async function successionRoutes(fastify: FastifyInstance) {
     }
 
     const { error } = await supabase.from('succession_plans').update(update).eq('tenant_id', tenantId).eq('id', id)
-    if (error) return reply.status(500).send({ error: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update succession plan')
     await logAction(supabase, { tenantId, tableName: 'succession_plans', recordId: id, action: 'UPDATE', performedBy: req.userId, newData: update })
     return reply.send({ data: { updated: true } })
   })
@@ -327,7 +328,7 @@ export default async function successionRoutes(fastify: FastifyInstance) {
     const tenantId = req.tenantId
     const { id } = req.params as { id: string }
     const { error } = await supabase.from('succession_plans').update({ status: 'archived' }).eq('tenant_id', tenantId).eq('id', id)
-    if (error) return reply.status(500).send({ error: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to archive succession plan')
     await logAction(supabase, { tenantId, tableName: 'succession_plans', recordId: id, action: 'UPDATE', performedBy: req.userId, newData: { status: 'archived' } })
     return reply.send({ data: { archived: true } })
   })
@@ -357,7 +358,7 @@ export default async function successionRoutes(fastify: FastifyInstance) {
     if (error) {
       if (error.code === '23505') return reply.status(409).send({ error: 'CONFLICT', message: 'This employee is already a candidate for this plan' })
       if (error.code === '23514') return reply.status(400).send({ error: 'VALIDATION_ERROR', message: error.message })
-      return reply.status(500).send({ error: error.message })
+      return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to add succession candidate')
     }
     await logAction(supabase, { tenantId, tableName: 'succession_candidates', recordId: data.id, action: 'INSERT', performedBy: req.userId, newData: { plan_id, employee_id, readiness_level } })
     return reply.status(201).send({ data })
@@ -385,7 +386,7 @@ export default async function successionRoutes(fastify: FastifyInstance) {
     const { error } = await supabase.from('succession_candidates').update(update).eq('tenant_id', tenantId).eq('id', cid)
     if (error) {
       if (error.code === '23514') return reply.status(400).send({ error: 'VALIDATION_ERROR', message: error.message })
-      return reply.status(500).send({ error: error.message })
+      return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update succession candidate')
     }
     return reply.send({ data: { updated: true } })
   })
@@ -396,7 +397,7 @@ export default async function successionRoutes(fastify: FastifyInstance) {
     const tenantId = req.tenantId
     const { cid } = req.params as { id: string; cid: string }
     const { error } = await supabase.from('succession_candidates').delete().eq('tenant_id', tenantId).eq('id', cid)
-    if (error) return reply.status(500).send({ error: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.DELETE_FAILED, 'Failed to remove succession candidate')
     return reply.send({ data: { deleted: true } })
   })
 
@@ -418,7 +419,7 @@ export default async function successionRoutes(fastify: FastifyInstance) {
           .range(from, to)
       ) as any[]
     } catch (err: any) {
-      return reply.status(500).send({ error: err.message })
+      return serverError(req, reply, err, ErrorCode.QUERY_FAILED, 'Failed to fetch succession candidates')
     }
 
     const grid: Record<string, any[]> = {}
@@ -454,7 +455,7 @@ export default async function successionRoutes(fastify: FastifyInstance) {
           .range(from, to)
       ) as any[]
     } catch (err: any) {
-      return reply.status(500).send({ error: err.message })
+      return serverError(req, reply, err, ErrorCode.QUERY_FAILED, 'Failed to fetch succession plans')
     }
 
     const planIds = plans.map(p => p.id)
@@ -475,7 +476,7 @@ export default async function successionRoutes(fastify: FastifyInstance) {
           .range(from, to)
       ) as any[]
     } catch (err: any) {
-      return reply.status(500).send({ error: err.message })
+      return serverError(req, reply, err, ErrorCode.QUERY_FAILED, 'Failed to fetch succession candidates')
     }
 
     const candsByPlan: Record<string, any[]> = {}
@@ -711,7 +712,7 @@ export default async function successionRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', tenantId)
       .order('created_at', { ascending: false })
       .limit(200)
-    if (error) return reply.status(500).send({ error: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch calibration sessions')
     return reply.send({ data: data ?? [] })
   })
 
@@ -733,7 +734,7 @@ export default async function successionRoutes(fastify: FastifyInstance) {
       .select('id')
       .single()
 
-    if (error) return reply.status(500).send({ error: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create calibration session')
     return reply.status(201).send({ data })
   })
 
@@ -793,7 +794,7 @@ export default async function successionRoutes(fastify: FastifyInstance) {
       .select('id')
       .single()
 
-    if (error) return reply.status(500).send({ error: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to record calibration change')
 
     // Apply the change to the candidate record
     if (field_changed && new_value !== undefined) {
@@ -814,7 +815,7 @@ export default async function successionRoutes(fastify: FastifyInstance) {
       .from('calibration_sessions')
       .update({ status: 'closed', closed_at: new Date().toISOString() })
       .eq('id', sessionId).eq('tenant_id', req.tenantId)
-    if (error) return reply.status(500).send({ error: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to close calibration session')
     return reply.send({ data: { closed: true } })
   })
 
@@ -860,12 +861,13 @@ export default async function successionRoutes(fastify: FastifyInstance) {
     const tenantId = req.tenantId
 
     // Fetch candidates with appraisal data
-    const { data: candidates } = await supabase
-      .from('succession_candidates')
-      .select('id, employee_id')
-      .eq('tenant_id', tenantId)
+    const candidates = await fetchAllRows<any>((from, to) =>
+      supabase.from('succession_candidates')
+        .select('id, employee_id')
+        .eq('tenant_id', tenantId)
+        .range(from, to))
 
-    if (!candidates?.length) return reply.send({ data: { plotted: 0 } })
+    if (!candidates.length) return reply.send({ data: { plotted: 0 } })
 
     let plotted = 0
     for (const c of candidates as any[]) {
