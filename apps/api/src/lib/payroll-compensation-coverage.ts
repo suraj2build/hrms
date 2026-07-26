@@ -12,6 +12,8 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { fetchAllRows } from './supabase-paginate.js'
 import { fetchActiveEmployees } from './payroll-employees.js'
+import { fetchTenantTz } from './attendance-engine.js'
+import { getLocalDate } from './org-context.js'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -115,7 +117,13 @@ export async function buildCompensationCoverageAudit(
   tenantId: string,
   periodEnd?: string,
 ): Promise<CompensationCoverageAudit> {
-  const today = new Date().toISOString().slice(0, 10)
+  // Server-UTC "today" lags the tenant's IST calendar date by up to 5.5
+  // hours after midnight IST — a compensation record effective from the
+  // real IST-today would then compare > UTC-today and get misclassified
+  // as future-dated, corrupting the payroll-readiness gate during that
+  // window (same bug class as ISSUE-154 / tds.ts).
+  const tz    = await fetchTenantTz(supabase, tenantId)
+  const today = getLocalDate(new Date().toISOString(), tz)
   const effectiveCutoff = periodEnd ?? today
 
   // ── 1. Fetch all active employees (RPC-first — immune to ranged-read caps) ─

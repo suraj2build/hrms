@@ -324,15 +324,25 @@ export default async function advancesRoutes(fastify: FastifyInstance) {
     const startDate = new Date()
     startDate.setDate(1)                          // first of month
     startDate.setMonth(startDate.getMonth() + 1)  // recovery starts next month
+    // True-up: recoveryMonths equal installments of the rounded per-month
+    // amount don't necessarily sum back to disbursed_amount (e.g. 10,000 / 3
+    // = 3,333.33 x 3 = 9,999.99, one paisa short) — the last installment
+    // absorbs the residual so the schedule recovers the full amount.
+    let recoveredSoFar = 0
     for (let i = 0; i < recoveryMonths; i++) {
       const dt = new Date(startDate)
       dt.setMonth(dt.getMonth() + i)
+      const isLast = i === recoveryMonths - 1
+      const amount = isLast
+        ? Math.round((parsed.data.disbursed_amount - recoveredSoFar) * 100) / 100
+        : scheduledAmount
+      recoveredSoFar += amount
       schedules.push({
         tenant_id:       req.tenantId,
         advance_id:      id,
         employee_id:     d0.employee_id,
         recovery_month:  `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}`,
-        scheduled_amount: scheduledAmount,
+        scheduled_amount: amount,
         status:          'pending',
       })
     }

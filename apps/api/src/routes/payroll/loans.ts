@@ -314,8 +314,14 @@ export default async function loansRoutes(fastify: FastifyInstance) {
       const dueMonth = `${dueDate.getFullYear()}-${String(dueDate.getMonth() + 1).padStart(2, '0')}`
 
       const interestPaid = Math.round(outstanding * monthlyRate * 100) / 100
-      const principalPaid = Math.min(Math.round((emi - interestPaid) * 100) / 100, outstanding)
-      outstanding = Math.max(0, Math.round((outstanding - principalPaid) * 100) / 100)
+      // True-up: per-installment rounding accumulates drift over the tenure
+      // (e.g. principal 476,795 @ 23.81% over 83mo left ₹1.01 outstanding
+      // after the "last" installment). Force the final installment to close
+      // out the loan exactly, absorbing whatever residual rounding left —
+      // its emi_amount may therefore differ slightly from the regular EMI.
+      const isLast = i === tenure
+      const principalPaid = isLast ? outstanding : Math.min(Math.round((emi - interestPaid) * 100) / 100, outstanding)
+      outstanding = isLast ? 0 : Math.max(0, Math.round((outstanding - principalPaid) * 100) / 100)
 
       schedules.push({
         tenant_id: req.tenantId,
@@ -323,7 +329,7 @@ export default async function loansRoutes(fastify: FastifyInstance) {
         employee_id: loanData.employee_id,
         installment_number: i,
         due_month: dueMonth,
-        emi_amount: emi,
+        emi_amount: isLast ? Math.round((interestPaid + principalPaid) * 100) / 100 : emi,
         principal_component: principalPaid,
         interest_component: interestPaid,
         outstanding_balance: outstanding,
