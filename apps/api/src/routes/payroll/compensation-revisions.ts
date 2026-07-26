@@ -28,7 +28,7 @@ export default async function compensationRevisionsRoutes(fastify: FastifyInstan
   }
 
   // ── GET /payroll/revisions ────────────────────────────────────────────────────
-  fastify.get('/', auth, async (req: any, reply) => {
+  fastify.get('/', { preHandler: [fastify.authenticate, requireHrAdmin] }, async (req: any, reply) => {
     const querySchema = z.object({
       employee_id: z.string().uuid().optional(),
       status: z.string().optional(),
@@ -63,7 +63,7 @@ export default async function compensationRevisionsRoutes(fastify: FastifyInstan
   })
 
   // ── GET /payroll/revisions/:id ────────────────────────────────────────────────
-  fastify.get('/:id', auth, async (req: any, reply) => {
+  fastify.get('/:id', { preHandler: [fastify.authenticate, requireHrAdmin] }, async (req: any, reply) => {
     const { id } = req.params as { id: string }
 
     const { data, error } = await fastify.supabase
@@ -483,6 +483,22 @@ export default async function compensationRevisionsRoutes(fastify: FastifyInstan
   // ── GET /payroll/revisions/snapshots/:employeeId ──────────────────────────────
   fastify.get('/snapshots/:employeeId', auth, async (req: any, reply) => {
     const { employeeId } = req.params as { employeeId: string }
+
+    // Unlike the sibling /employee/:employeeId route above, this had no
+    // ownership check — any employee could read another employee's
+    // gross/net salary snapshot history.
+    const isHrAdmin = (HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)
+    if (!isHrAdmin) {
+      const { data: callerProfile } = await fastify.supabase
+        .from('profiles')
+        .select('employee_id')
+        .eq('id', req.userId)
+        .eq('tenant_id', req.tenantId)
+        .single()
+      if (callerProfile?.employee_id !== employeeId) {
+        return forbidden(reply, 'FORBIDDEN', 'You can only view your own compensation snapshots')
+      }
+    }
 
     const paginationSchema = z.object({
       limit:  z.coerce.number().int().min(1).max(200).default(50),

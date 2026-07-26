@@ -31,7 +31,7 @@ export default async function loansRoutes(fastify: FastifyInstance) {
   }
 
   // ── GET /payroll/loans ────────────────────────────────────────────────────────
-  fastify.get('/', auth, async (req: any, reply) => {
+  fastify.get('/', { preHandler: [fastify.authenticate, requireHrAdmin] }, async (req: any, reply) => {
     const querySchema = z.object({
       employee_id: z.string().uuid().optional(),
       status: z.string().optional(),
@@ -353,7 +353,7 @@ export default async function loansRoutes(fastify: FastifyInstance) {
   })
 
   // ── GET /payroll/loans/:id/schedule ──────────────────────────────────────────
-  fastify.get('/:id/schedule', auth, async (req: any, reply) => {
+  fastify.get('/:id/schedule', { preHandler: [fastify.authenticate, requireHrAdmin] }, async (req: any, reply) => {
     const { id } = req.params as { id: string }
 
     const { data, error } = await fastify.supabase

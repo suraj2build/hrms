@@ -740,6 +740,29 @@ export default async function reimbursementsRoutes(fastify: FastifyInstance) {
   fastify.get('/claims/:id/attachments', auth, async (req: any, reply) => {
     const { id } = req.params as { id: string }
 
+    // Ownership check — mirrors the POST route below (previously missing
+    // here), letting any employee list a colleague's attachment metadata
+    // (file names, storage paths) via a guessed/leaked claim id.
+    const { data: claim } = await fastify.supabase
+      .from('reimbursement_claims')
+      .select('id, employee_id')
+      .eq('id', id)
+      .eq('tenant_id', req.tenantId)
+      .maybeSingle()
+    if (!claim) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Claim not found' })
+
+    if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
+      const { data: profile } = await fastify.supabase
+        .from('profiles')
+        .select('employee_id')
+        .eq('id', req.userId)
+        .eq('tenant_id', req.tenantId)
+        .single()
+      if (profile?.employee_id !== claim.employee_id) {
+        return reply.code(403).send({ error: 'FORBIDDEN', message: 'You can only view attachments on your own claims' })
+      }
+    }
+
     const { data, error } = await fastify.supabase
       .from('reimbursement_attachments')
       .select('*')

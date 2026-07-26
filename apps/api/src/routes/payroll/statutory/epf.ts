@@ -131,7 +131,7 @@ export default async function epfRoutes(fastify: FastifyInstance) {
   })
 
   // ── GET /payroll/statutory/epf/eligibility ────────────────────────────────────
-  fastify.get('/eligibility', auth, async (req: any, reply) => {
+  fastify.get('/eligibility', { preHandler: [fastify.authenticate, requireHrAdmin] }, async (req: any, reply) => {
     const { data, error } = await fastify.supabase
       .from('epf_eligibility_overrides')
       .select('*, employees(id, first_name, last_name, employee_code)')
@@ -186,7 +186,7 @@ export default async function epfRoutes(fastify: FastifyInstance) {
   })
 
   // ── GET /payroll/statutory/epf/contributions ──────────────────────────────────
-  fastify.get('/contributions', auth, async (req: any, reply) => {
+  fastify.get('/contributions', { preHandler: [fastify.authenticate, requireHrAdmin] }, async (req: any, reply) => {
     const querySchema = z.object({
       month: z.string().optional(),
       employee_id: z.string().uuid().optional(),

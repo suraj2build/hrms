@@ -368,7 +368,7 @@ export default async function advancesRoutes(fastify: FastifyInstance) {
   })
 
   // ── GET /payroll/advances/:id/schedule ───────────────────────────────────────
-  fastify.get('/:id/schedule', auth, async (req: any, reply) => {
+  fastify.get('/:id/schedule', { preHandler: [fastify.authenticate, requireHrAdmin] }, async (req: any, reply) => {
     const { id } = req.params as { id: string }
 
     const { data, error } = await fastify.supabase
