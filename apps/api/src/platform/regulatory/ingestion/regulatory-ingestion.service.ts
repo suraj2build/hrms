@@ -53,13 +53,18 @@ export class RegulatoryIngestionService {
   /**
    * Approve a revision after human review — marks as approved only.
    * Does NOT automatically change benchmarks. Benchmark update is a separate manual step.
+   * tenantId scopes the update to revisions visible to the caller's tenant
+   * (own tenant_id or platform-wide/null), matching listPending()'s read
+   * scope — previously missing entirely, letting any tenant's admin
+   * approve/reject another tenant's compliance revision.
    */
-  async approve(supabase: SupabaseClient, revisionId: string, reviewedBy: string): Promise<void> {
+  async approve(supabase: SupabaseClient, revisionId: string, reviewedBy: string, tenantId: string): Promise<void> {
     try {
       await supabase
         .from('compliance_revision_events')
         .update({ status: 'approved', reviewed_at: new Date().toISOString(), reviewed_by: reviewedBy })
         .eq('id', revisionId)
+        .or(`tenant_id.eq.${tenantId},tenant_id.is.null`)
     } catch {
       // Non-fatal
     }
@@ -68,12 +73,13 @@ export class RegulatoryIngestionService {
   /**
    * Reject a revision.
    */
-  async reject(supabase: SupabaseClient, revisionId: string, reviewedBy: string): Promise<void> {
+  async reject(supabase: SupabaseClient, revisionId: string, reviewedBy: string, tenantId: string): Promise<void> {
     try {
       await supabase
         .from('compliance_revision_events')
         .update({ status: 'rejected', reviewed_at: new Date().toISOString(), reviewed_by: reviewedBy })
         .eq('id', revisionId)
+        .or(`tenant_id.eq.${tenantId},tenant_id.is.null`)
     } catch {
       // Non-fatal
     }

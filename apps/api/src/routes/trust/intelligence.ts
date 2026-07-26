@@ -248,7 +248,7 @@ export default async function trustIntelligenceRoutes(fastify: FastifyInstance) 
    */
   fastify.post('/trust/regulatory/revisions/:id/approve', adminAuth, async (req, reply) => {
     const { id } = req.params as any
-    await regulatoryIngestionService.approve(fastify.supabase, id, (req as any).userId)
+    await regulatoryIngestionService.approve(fastify.supabase, id, (req as any).userId, (req as any).tenantId)
     return { success: true }
   })
 
@@ -258,7 +258,7 @@ export default async function trustIntelligenceRoutes(fastify: FastifyInstance) 
    */
   fastify.post('/trust/regulatory/revisions/:id/reject', adminAuth, async (req, reply) => {
     const { id } = req.params as any
-    await regulatoryIngestionService.reject(fastify.supabase, id, (req as any).userId)
+    await regulatoryIngestionService.reject(fastify.supabase, id, (req as any).userId, (req as any).tenantId)
     return { success: true }
   })
 

@@ -3727,6 +3727,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
     const { data, error } = await fastify.supabase
       .from('payroll_validation_rules')
       .select('*')
+      .eq('tenant_id', req.tenantId)
       .order('stage')
       .order('code')
 
@@ -3760,6 +3761,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       .from('payroll_validation_rules')
       .update(parsed.data)
       .eq('id', id)
+      .eq('tenant_id', req.tenantId)
       .select()
       .single()
 

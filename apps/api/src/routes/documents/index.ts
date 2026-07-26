@@ -7,10 +7,11 @@
  *   - signed URL generation for file serving (1-hour TTL)
  *   - storage cleanup on deletion (prevents orphan files)
  *
- * RBAC: read is open to all authenticated users (tenant-scoped);
- *       write (insert/delete) requires hr_admin or super_admin.
+ * RBAC: read and write both require hr_admin or super_admin — this is the
+ *       admin document console (/admin/documents). ESS self-service reads
+ *       go through a separate self-scoped route, not this one.
  *
- * GET    /documents           — list docs (tenant-scoped, with signed URLs)
+ * GET    /documents           — list docs (tenant-scoped, with signed URLs, hr_admin+)
  * POST   /documents           — insert metadata row (hr_admin+)
  * DELETE /documents/:id       — delete metadata + storage file (hr_admin+)
  */
@@ -74,13 +75,13 @@ async function createSignedUrl(
 }
 
 export default async function documentRoutes(fastify: FastifyInstance) {
-  const auth      = { preHandler: [fastify.authenticate] }
   const adminAuth = { preHandler: [fastify.authenticate, requireRole(...HR_ADMIN_ROLES)] }
 
   // ── GET /documents ───────────────────────────────────────────────────────────
-  // Open to all authenticated users (tenant-scoped). Returns signed URLs so
-  // the client can display files without additional API calls.
-  fastify.get('/documents', auth, async (req: any, reply) => {
+  // hr_admin+ only — was previously open to any authenticated user with no
+  // employee_id filter, returning every employee's documents (Aadhaar, PAN,
+  // contracts, etc.) tenant-wide, each with a working 1-hour signed download URL.
+  fastify.get('/documents', adminAuth, async (req: any, reply) => {
     const { doc_type } = req.query as { doc_type?: string }
 
     let data: any[]
