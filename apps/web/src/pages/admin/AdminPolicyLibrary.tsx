@@ -27,7 +27,8 @@ import { useAuthStore }  from '@/stores/authStore'
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 type PolicyStatus   = 'draft' | 'published' | 'archived'
-type PolicyCategory = 'leave' | 'compensation' | 'conduct' | 'recruitment' | 'learning' | 'health' | 'it' | 'posh' | 'compliance' | 'other'
+// Matches hr_policies.category CHECK constraint (migration 341)
+type PolicyCategory = 'leave' | 'compensation' | 'conduct' | 'recruitment' | 'learning' | 'health' | 'it' | 'other' | 'attendance' | 'notice_period' | 'payroll' | 'faq'
 
 interface Policy {
   id:                       string
@@ -65,15 +66,17 @@ interface AckStats {
 }
 
 const CATEGORIES: { value: PolicyCategory; label: string }[] = [
-  { value: 'leave',         label: 'Leave & Attendance' },
+  { value: 'leave',         label: 'Leave' },
+  { value: 'attendance',    label: 'Attendance' },
   { value: 'compensation',  label: 'Compensation & Benefits' },
+  { value: 'payroll',       label: 'Payroll' },
   { value: 'conduct',       label: 'Code of Conduct' },
   { value: 'recruitment',   label: 'Recruitment & Onboarding' },
   { value: 'learning',      label: 'Learning & Development' },
   { value: 'health',        label: 'Health & Wellness' },
   { value: 'it',            label: 'IT & Security' },
-  { value: 'posh',          label: 'POSH' },
-  { value: 'compliance',    label: 'Compliance' },
+  { value: 'notice_period', label: 'Notice Period' },
+  { value: 'faq',           label: 'FAQ' },
   { value: 'other',         label: 'Other' },
 ]
 

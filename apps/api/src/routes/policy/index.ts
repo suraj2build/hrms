@@ -36,9 +36,15 @@ const AskPolicySchema = z.object({
   language: z.string().optional(),
 })
 
+// hr_policies.category CHECK constraint (migration 341) — the ground truth
+// for valid categories. Distinct from helpdesk_tickets.category (migration
+// 337), which separately allows 'posh'/'compliance' — those are NOT valid
+// here.
+const POLICY_CATEGORIES = ['leave', 'compensation', 'conduct', 'recruitment', 'learning', 'health', 'it', 'other', 'attendance', 'notice_period', 'payroll', 'faq'] as const
+
 const CreatePolicySchema = z.object({
   title: z.string().min(1, 'title is required'),
-  category: z.string().optional(),
+  category: z.enum(POLICY_CATEGORIES).optional(),
   description: z.string().optional().nullable(),
   content: z.string().optional().nullable(),
   file_url: z.string().optional().nullable(),
@@ -49,7 +55,7 @@ const CreatePolicySchema = z.object({
 
 const UpdatePolicySchema = z.object({
   title: z.string().optional(),
-  category: z.string().optional(),
+  category: z.enum(POLICY_CATEGORIES).optional(),
   description: z.string().optional().nullable(),
   content: z.string().optional().nullable(),
   file_url: z.string().optional().nullable(),
@@ -421,7 +427,10 @@ export default async function policyRoutes(fastify: FastifyInstance) {
       .select('id')
       .single()
 
-    if (error) return reply.status(500).send({ error: error.message })
+    if (error) {
+      req.log.error({ err: error, tenantId }, 'policy/create: insert failed')
+      return reply.status(500).send({ error: 'INSERT_FAILED', message: 'Failed to create policy' })
+    }
 
     await logAction(supabase, {
       tenantId,
@@ -465,7 +474,10 @@ export default async function policyRoutes(fastify: FastifyInstance) {
       .select('id, title')
       .single()
 
-    if (error) return reply.status(500).send({ error: error.message })
+    if (error) {
+      req.log.error({ err: error, tenantId, id }, 'policy/update: update failed')
+      return reply.status(500).send({ error: 'UPDATE_FAILED', message: 'Failed to update policy' })
+    }
 
     await logAction(supabase, {
       tenantId,
