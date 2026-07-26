@@ -216,6 +216,30 @@ export default async function holidaysRoutes(fastify: FastifyInstance) {
 
     const { holiday_id, group_ids } = parsed.data
 
+    // Verify holiday_id and every group_id belong to the caller's tenant before
+    // writing — the FKs only require existence, not tenant match, so an
+    // unchecked write here would let a caller point their own tenant's
+    // assignment row at another tenant's holiday/group record.
+    const { data: holidayRow } = await fastify.supabase
+      .from('holiday_calendar')
+      .select('id')
+      .eq('id', holiday_id)
+      .eq('tenant_id', req.tenantId)
+      .maybeSingle()
+    if (!holidayRow) return reply.code(400).send({ error: 'INVALID_HOLIDAY', message: 'Holiday not found' })
+
+    if (group_ids.length > 0) {
+      const { data: groupRows } = await fastify.supabase
+        .from('roster_holiday_groups')
+        .select('id')
+        .eq('tenant_id', req.tenantId)
+        .in('id', group_ids)
+      const validIds = new Set((groupRows ?? []).map((g: any) => g.id))
+      if (group_ids.some(gid => !validIds.has(gid))) {
+        return reply.code(400).send({ error: 'INVALID_GROUP', message: 'One or more groups not found' })
+      }
+    }
+
     // Delete existing assignments for this holiday, then insert the new set
     await fastify.supabase
       .from('holiday_group_assignments')
