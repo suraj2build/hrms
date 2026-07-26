@@ -429,7 +429,7 @@ export default async function governanceRoutes(fastify: FastifyInstance) {
   // ════════════════════════════════════════════════════════════════════════════
 
   // GET /payroll/statutory/governance/audit
-  fastify.get('/audit', auth, async (req: any, reply) => {
+  fastify.get('/audit', adminAuth, async (req: any, reply) => {
     const querySchema = z.object({
       employee_id: z.string().uuid().optional(),
       event_type:  z.string().optional(),
@@ -467,7 +467,7 @@ export default async function governanceRoutes(fastify: FastifyInstance) {
   // ════════════════════════════════════════════════════════════════════════════
 
   // GET /payroll/statutory/governance/resolve/:employeeId/:month
-  fastify.get('/resolve/:employeeId/:month', auth, async (req: any, reply) => {
+  fastify.get('/resolve/:employeeId/:month', adminAuth, async (req: any, reply) => {
     const { employeeId, month } = req.params as { employeeId: string; month: string }
 
     // Validate month format
