@@ -23,6 +23,17 @@ import { buildActivePeriodSummary, buildLatestDaySnapshot } from '../../lib/atte
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
 
+// `${month}-31` is an invalid date literal for the 5 of 12 months with fewer
+// than 31 days (Feb, Apr, Jun, Sep, Nov) — Postgres has no lenient date
+// parsing, so a bare .lte('date', `${month}-31`) throws for those months
+// instead of just clamping. Compute the real last day of the month instead
+// (matches the fix already applied in routes/payroll/arrears.ts).
+function monthEndDate(month: string): string {
+  const [y, m] = month.split('-').map(Number)
+  const lastDay = new Date(y, m, 0).getDate()
+  return `${month}-${String(lastDay).padStart(2, '0')}`
+}
+
 export default async function workspaceStatsRoutes(fastify: FastifyInstance) {
   const auth = { preHandler: [fastify.authenticate] }
 
@@ -469,12 +480,16 @@ export default async function workspaceStatsRoutes(fastify: FastifyInstance) {
         .eq('tenant_id', tenantId)
         .eq('resolved', false),
 
-      // deduction_gaps: employees with pt_applicable=true
+      // deduction_gaps: ACTIVE employees with pt_applicable=true — the join's
+      // own comment already claimed this scope, but the query had no active
+      // filter at all, inflating the count with terminated employees' stale
+      // pt_applicable=true rows.
       fastify.supabase
         .from('employee_bank_statutory')
-        .select('id', { count: 'exact', head: true })
+        .select('id, employees!inner(status)', { count: 'exact', head: true })
         .eq('tenant_id', tenantId)
-        .eq('pt_applicable', true),
+        .eq('pt_applicable', true)
+        .eq('employees.status', 'active'),
 
       // Pending validation issues
       fastify.supabase
@@ -502,7 +517,7 @@ export default async function workspaceStatsRoutes(fastify: FastifyInstance) {
           .select('employee_id')
           .eq('tenant_id', tenantId)
           .gte('date', `${currentMonth}-01`)
-          .lte('date', `${currentMonth}-31`)
+          .lte('date', monthEndDate(currentMonth))
           .gt('overtime_minutes', 0)
           .range(from, to)
       ),
@@ -622,15 +637,23 @@ export default async function workspaceStatsRoutes(fastify: FastifyInstance) {
 
     const active = totalActive ?? 0
 
-    // EPF/ESI/PAN/PTAX: fetch all statutory rows (table exceeds 1000 rows at scale)
+    // EPF/ESI/PAN/PTAX: fetch statutory rows for ACTIVE employees only (table
+    // exceeds 1000 rows at scale). employee_bank_statutory rows persist for
+    // terminated employees (no cascade beyond the employees FK itself), so
+    // without this join a terminated employee's stale filled-in statutory
+    // data would count toward *Covered while `active` (the denominator) only
+    // counts active employees — inflating coverage and masking real gaps
+    // among active staff (can even push *Missing = max(0, active - covered)
+    // to 0 when it shouldn't be).
     const epfRows = await fetchAllRows<{
       id: string; uan_number: string | null; esi_number?: string | null
       pan_number?: string | null; pt_applicable?: boolean | null
     }>((from, to) =>
       fastify.supabase
         .from('employee_bank_statutory')
-        .select('id, uan_number, esi_number, pan_number, pt_applicable')
+        .select('id, uan_number, esi_number, pan_number, pt_applicable, employees!inner(status)')
         .eq('tenant_id', tenantId)
+        .eq('employees.status', 'active')
         .range(from, to)
     )
 
@@ -742,7 +765,7 @@ export default async function workspaceStatsRoutes(fastify: FastifyInstance) {
           .select('employee_id, status, is_payable, overtime_minutes')
           .eq('tenant_id', tenantId)
           .gte('date', `${month}-01`)
-          .lte('date', `${month}-31`)
+          .lte('date', monthEndDate(month))
           .range(from, to)
       ),
       // OT records grouped by employee
@@ -752,7 +775,7 @@ export default async function workspaceStatsRoutes(fastify: FastifyInstance) {
           .select('employee_id, overtime_minutes')
           .eq('tenant_id', tenantId)
           .gte('date', `${month}-01`)
-          .lte('date', `${month}-31`)
+          .lte('date', monthEndDate(month))
           .gt('overtime_minutes', 0)
           .range(from, to)
       ),
