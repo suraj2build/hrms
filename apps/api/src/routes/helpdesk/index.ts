@@ -17,6 +17,7 @@ import { resolveAssistantChain } from '../../lib/ai/config.js'
 import { chatCompleteWithFallback } from '../../lib/ai/llm.js'
 import { WhatsAppProvider } from '../../lib/whatsapp-provider.js'
 import { serverError, notFound, forbidden, validationError, conflictError, ErrorCode } from '../../lib/api-errors.js'
+import { fetchAllRows } from '../../lib/supabase-paginate.js'
 
 // Default SLA windows by priority (used when no tenant policy row exists).
 // Response = time to first HR reply; Resolution = time to resolve/close.
@@ -887,14 +888,16 @@ Write a helpful, professional HR reply to address the employee's concern:`
     const since = new Date()
     since.setDate(since.getDate() - days)
 
-    const { data } = await fastify.supabase
-      .from('helpdesk_tickets')
-      .select('csat_rating')
-      .eq('tenant_id', req.tenantId)
-      .not('csat_rating', 'is', null)
-      .gte('csat_submitted_at', since.toISOString())
+    const data = await fetchAllRows<{ csat_rating: number }>((from, to) =>
+      fastify.supabase
+        .from('helpdesk_tickets')
+        .select('csat_rating')
+        .eq('tenant_id', req.tenantId)
+        .not('csat_rating', 'is', null)
+        .gte('csat_submitted_at', since.toISOString())
+        .range(from, to))
 
-    const ratings = ((data ?? []) as { csat_rating: number }[]).map(r => r.csat_rating)
+    const ratings = data.map(r => r.csat_rating)
     const distribution: Record<number, number> = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 }
     for (const r of ratings) distribution[r] = (distribution[r] ?? 0) + 1
 
@@ -950,14 +953,14 @@ Write a helpful, professional HR reply to address the employee's concern:`
   // ── GET /helpdesk/admin/satisfaction-report ───────────────────────────────────
 
   fastify.get('/admin/satisfaction-report', hrAdminAuth, async (req: any, reply) => {
-    const { data: tickets } = await fastify.supabase
-      .from('helpdesk_tickets')
-      .select('satisfaction_rating, satisfaction_comment, category, resolved_at')
-      .eq('tenant_id', req.tenantId)
-      .not('satisfaction_rating', 'is', null)
-      .order('satisfaction_rated_at', { ascending: false })
-
-    const rows = (tickets ?? []) as { satisfaction_rating: number; satisfaction_comment: string | null; category: string; resolved_at: string | null }[]
+    const rows = await fetchAllRows<{ satisfaction_rating: number; satisfaction_comment: string | null; category: string; resolved_at: string | null }>((from, to) =>
+      fastify.supabase
+        .from('helpdesk_tickets')
+        .select('satisfaction_rating, satisfaction_comment, category, resolved_at')
+        .eq('tenant_id', req.tenantId)
+        .not('satisfaction_rating', 'is', null)
+        .order('satisfaction_rated_at', { ascending: false })
+        .range(from, to))
 
     const ratings = rows.map(r => r.satisfaction_rating)
     const avg_rating = ratings.length
