@@ -408,8 +408,14 @@ export function buildCostCenterAllocations(
     const comps         = e.compensation_snapshot?.components ?? []
     const employerBurden = round2(comps.filter(c => c.component_type === 'employer_contribution').reduce((b, c) => b + c.monthly_amount, 0))
     const statutoryBurden = round2(e.deductions)
+    // Only report overtime_cost when an actual OT compensation component
+    // exists — the previous fallback fabricated a flat ₹100/hour figure
+    // with no connection to the employee's actual configured OT policy rate
+    // (extra_rate / weekend_rate / holiday_rate in ot-engine.ts), displaying
+    // a fictitious number on the department cost breakdown whenever no OT
+    // component was present.
     const otComp        = comps.find(c => c.code === 'OT' || c.code === 'OVERTIME')
-    const overtimeCost  = round2(otComp?.monthly_amount ?? (e.overtime_hours > 0 ? e.overtime_hours * 100 : 0))
+    const overtimeCost  = round2(otComp?.monthly_amount ?? 0)
     const totalEmpCost  = round2(e.gross_pay + employerBurden)
 
     // e.deductions is the actual computed total_deductions for the month
