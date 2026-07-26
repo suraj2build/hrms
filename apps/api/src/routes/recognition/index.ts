@@ -179,7 +179,7 @@ export default async function recognitionRoutes(fastify: FastifyInstance) {
       .select('code, label, icon, description, points')
       .eq('tenant_id', req.tenantId).eq('is_active', true)
       .order('label', { ascending: true }).limit(100)
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to load badges' })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to load badges')
     return reply.send({ data: data ?? [] })
   })
 
@@ -191,7 +191,7 @@ export default async function recognitionRoutes(fastify: FastifyInstance) {
       .select('id, from_employee, to_employee, badge_code, message, points, created_at')
       .eq('tenant_id', req.tenantId).eq('visibility', 'public')
       .order('created_at', { ascending: false }).limit(limit)
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to load feed' })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to load feed')
     return reply.send({ data: await enrich(fastify, req.tenantId, rows ?? []) })
   })
 
@@ -322,7 +322,7 @@ export default async function recognitionRoutes(fastify: FastifyInstance) {
       })
       .select('id')
       .single()
-    if (error) return reply.code(500).send({ error: 'INSERT_FAILED', message: 'Failed to record recognition' })
+    if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to record recognition')
 
     // Public recognition also flows into the Community feed (blueprint intent).
     if (parsed.data.visibility === 'public') {
@@ -457,7 +457,7 @@ export default async function recognitionRoutes(fastify: FastifyInstance) {
       .select('code, label, icon, description, points, is_active')
       .eq('tenant_id', req.tenantId)
       .order('label').limit(100)
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to load badges' })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to load badges')
     return reply.send({ data: data ?? [] })
   })
 
@@ -540,8 +540,7 @@ export default async function recognitionRoutes(fastify: FastifyInstance) {
       )
       return reply.send({ data })
     } catch (err) {
-      req.log.error({ err }, 'formal_awards list query failed')
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch awards' })
+      return serverError(req, reply, err, ErrorCode.QUERY_FAILED, 'Failed to fetch awards')
     }
   })
 
@@ -617,13 +616,25 @@ export default async function recognitionRoutes(fastify: FastifyInstance) {
     const parsed = DeclareWinnerSchema.safeParse(req.body)
     if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message ?? 'Invalid request body' })
     const { winner_employee_id, winner_notes } = parsed.data
-    // Update the round
+
+    // winner_employee_id is caller-supplied — verify it belongs to this
+    // tenant before it's written and echoed back via the admin rounds join
+    // and the ESS-facing GET /recognition/awards/winners (open to every
+    // authenticated employee), which would otherwise leak a foreign
+    // tenant's employee identity.
+    const { data: winnerEmp } = await fastify.supabase
+      .from('employees').select('id').eq('id', winner_employee_id).eq('tenant_id', req.tenantId).maybeSingle()
+    if (!winnerEmp) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Winner not found in your organisation' })
+
+    // Fold status='open' into the WHERE clause so a closed round's winner
+    // can't be silently overwritten by a repeat/concurrent call.
     const { data: round, error: re } = await fastify.supabase.from('award_rounds')
       .update({ status: 'closed', winner_employee_id, winner_notes: winner_notes || null, declared_at: new Date().toISOString(), declared_by: req.userId })
-      .eq('tenant_id', req.tenantId).eq('id', roundId)
+      .eq('tenant_id', req.tenantId).eq('id', roundId).eq('status', 'open')
       .select('period_label, formal_awards!award_rounds_award_id_fkey(name)')
-      .single()
+      .maybeSingle()
     if (re) return serverError(req, reply, re, ErrorCode.UPDATE_FAILED, 'Failed to declare award winner')
+    if (!round) return reply.code(409).send({ error: 'ALREADY_CLOSED', message: 'This round has already been closed' })
     // Mark winning nomination
     await fastify.supabase.from('award_nominations')
       .update({ status: 'winner', reviewed_at: new Date().toISOString(), reviewed_by: req.userId })
@@ -668,8 +679,7 @@ export default async function recognitionRoutes(fastify: FastifyInstance) {
       )
       return reply.send({ data })
     } catch (err) {
-      req.log.error({ err }, 'award_nominations list query failed')
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch nominations' })
+      return serverError(req, reply, err, ErrorCode.QUERY_FAILED, 'Failed to fetch nominations')
     }
   })
 
@@ -705,8 +715,16 @@ export default async function recognitionRoutes(fastify: FastifyInstance) {
     const update: Record<string, unknown> = {}
     if (status) { update.status = status; update.reviewed_at = new Date().toISOString(); update.reviewed_by = req.userId }
     if (justification !== undefined) update.justification = justification
-    const { error } = await fastify.supabase.from('award_nominations').update(update).eq('tenant_id', req.tenantId).eq('id', nomId)
+
+    let query = fastify.supabase.from('award_nominations').update(update).eq('tenant_id', req.tenantId).eq('id', nomId)
+    // Once declare-winner has marked a nomination 'winner', it must not be
+    // reverted through this generic status PATCH — that would leave
+    // award_rounds.winner_employee_id pointing at a nomination no longer
+    // marked as the winner, an inconsistent state with no error surfaced.
+    if (status) query = query.neq('status', 'winner')
+    const { data, error } = await query.select('id').maybeSingle()
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update nomination')
+    if (status && !data) return reply.code(409).send({ error: 'ALREADY_WINNER', message: 'Cannot change the status of a declared winner' })
     return reply.send({ data: { updated: true } })
   })
 
@@ -752,7 +770,7 @@ export default async function recognitionRoutes(fastify: FastifyInstance) {
       }
     } else {
       if (!approve) {
-        update = { status: 'rejected', reviewed_at: now, reviewed_by: req.userId, approval_level: 1 }
+        update = { status: 'rejected', reviewed_at: now, reviewed_by: req.userId, approval_level: 2 }
       } else {
         update = { status: 'shortlisted', approved_by_l2: req.userId, l2_approved_at: now, reviewed_at: now, reviewed_by: req.userId, approval_level: 2 }
       }

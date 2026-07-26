@@ -109,12 +109,15 @@ const UpdateCandidateSchema = z.object({
   notes: z.string().optional().nullable(),
   nine_box_performance: z.number().int().min(1).max(3).optional().nullable(),
   nine_box_potential: z.number().int().min(1).max(3).optional().nullable(),
-  score_performance: z.number().min(0).max(10).optional().nullable(),
-  score_skill_gap: z.number().min(0).max(10).optional().nullable(),
-  score_leadership: z.number().min(0).max(10).optional().nullable(),
-  score_mobility: z.number().min(0).max(10).optional().nullable(),
-  score_tenure: z.number().min(0).max(10).optional().nullable(),
-  score_attrition_risk: z.number().min(0).max(10).optional().nullable(),
+  // .int() — these columns are SMALLINT (migration 330); a fractional value
+  // (e.g. 7.5) previously passed zod validation and failed at the DB layer
+  // with an opaque type-cast error instead of a clean 400.
+  score_performance: z.number().int().min(0).max(10).optional().nullable(),
+  score_skill_gap: z.number().int().min(0).max(10).optional().nullable(),
+  score_leadership: z.number().int().min(0).max(10).optional().nullable(),
+  score_mobility: z.number().int().min(0).max(10).optional().nullable(),
+  score_tenure: z.number().int().min(0).max(10).optional().nullable(),
+  score_attrition_risk: z.number().int().min(0).max(10).optional().nullable(),
   attrition_risk_flag: z.boolean().optional().nullable(),
 })
 

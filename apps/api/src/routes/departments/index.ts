@@ -5,6 +5,7 @@ import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+const MAX_PARENT_DEPTH = 20   // maximum parent_id chain depth before aborting cycle check
 
 const deptSchema = z.object({
   name: z.string().min(1),
@@ -97,6 +98,37 @@ export default async function orgRoutes(fastify: FastifyInstance) {
     const { id } = req.params as { id: string }
     const parsed = deptSchema.safeParse(req.body)
     if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION', message: parsed.error.errors[0]?.message })
+
+    // Circular-reference guard (fresh audit finding) — unlike
+    // employees/manager.ts's manager_id update, this had no self-parent
+    // check and no ancestor-chain walk. Two successive edits (set A's
+    // parent to B, then B's parent to A) create a cycle that silently
+    // drops both departments from the org-chart tree (Organization.tsx's
+    // buildTree() pushes each into the other's children and neither ends
+    // up in roots), with no error surfaced anywhere.
+    if (parsed.data.parent_id) {
+      if (parsed.data.parent_id === id) {
+        return reply.code(422).send({ error: 'CIRCULAR_REFERENCE', message: 'A department cannot be its own parent.' })
+      }
+
+      const { data: newParent } = await fastify.supabase
+        .from('departments').select('id').eq('id', parsed.data.parent_id).eq('tenant_id', req.tenantId).maybeSingle()
+      if (!newParent) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Parent department not found in this tenant' })
+
+      let cursor: string | null = parsed.data.parent_id
+      let depth = 0
+      while (cursor && depth < MAX_PARENT_DEPTH) {
+        const { data: node } = await fastify.supabase
+          .from('departments').select('parent_id').eq('id', cursor).eq('tenant_id', req.tenantId).maybeSingle()
+        const nodeRow = node as { parent_id: string | null } | null
+        if (!nodeRow) break
+        cursor = nodeRow.parent_id
+        depth++
+        if (cursor === id) {
+          return reply.code(422).send({ error: 'CIRCULAR_REFERENCE', message: 'Setting this parent would create a circular department hierarchy.' })
+        }
+      }
+    }
 
     const { data, error } = await fastify.supabase
       .from('departments').update(parsed.data).eq('id', id).eq('tenant_id', req.tenantId).select().single()
