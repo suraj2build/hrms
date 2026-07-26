@@ -61,6 +61,18 @@ export default async function setupChecklistRoutes(fastify: FastifyInstance) {
         .eq('tenant_id', tenantId),
     ])
 
+    // Any one of these failing (RLS misconfig, transient DB error, table
+    // rename) previously left `count` null/undefined, silently reported as
+    // 0 — indistinguishable from a tenant that genuinely has no rows yet,
+    // which would tell an HR admin a setup step is incomplete when it may
+    // just be a query failure.
+    const failed = [depts, desigs, grades, sites, workLocs, leaveTypes, salaryComps]
+      .find(r => r.error)
+    if (failed?.error) {
+      req.log.error({ err: failed.error }, 'setup-checklist: count query failed')
+      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to load setup checklist' })
+    }
+
     return reply.send({
       data: {
         departments:       depts.count       ?? 0,
