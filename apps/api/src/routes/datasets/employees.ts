@@ -15,6 +15,7 @@
 import type { FastifyInstance } from 'fastify'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 // R5 — site/region/zone/site_type added so headcount can be disaggregated by the
 // retail geography dimensions (migration 248). Same KPI, new GROUP BY axis.
@@ -106,7 +107,7 @@ export default async function employeesDataset(fastify: FastifyInstance) {
     try {
       empData = await fetchAllRows((from, to) => (empQuery as any).range(from, to))
     } catch (err: any) {
-      return reply.code(500).send({ error: 'DB_ERROR', message: err.message })
+      return serverError(req, reply, err, ErrorCode.QUERY_FAILED, 'Failed to fetch employees dataset')
     }
     const joinerData = await fetchAllRows((from, to) =>
       fastify.supabase

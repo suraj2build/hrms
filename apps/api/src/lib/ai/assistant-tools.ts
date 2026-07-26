@@ -879,13 +879,21 @@ async function cancelLeaveRequest(ctx: ToolCtx, args: { request_id: string }): P
   if (fetchErr || !req) return 'Leave request not found or you do not have permission to cancel it.'
   if (req.status !== 'PENDING') return `Cannot cancel a request with status ${req.status}. Only PENDING requests can be cancelled.`
 
-  const { error } = await ctx.supabase
+  // TOCTOU-safe: fold the PENDING precondition into the UPDATE's own WHERE clause,
+  // so a concurrent approval/rejection between the read above and this write can't
+  // be silently clobbered back to CANCELLED.
+  const { data: updated, error } = await ctx.supabase
     .from('leave_requests')
     .update({ status: 'CANCELLED', updated_at: new Date().toISOString() })
     .eq('id', args.request_id)
     .eq('tenant_id', ctx.caller.tenantId)
+    .eq('employee_id', ctx.employeeId)
+    .eq('status', 'PENDING')
+    .select('id')
+    .maybeSingle()
 
   if (error) return `Failed to cancel: ${error.message}`
+  if (!updated) return 'This request can no longer be cancelled — its status changed (e.g. it was just approved or rejected) before the cancellation went through.'
   const typeName = (req.leave_types as any)?.name ?? 'leave'
   return `✅ ${typeName} request (${req.from_date} → ${req.to_date}) has been cancelled.`
 }
@@ -1170,11 +1178,14 @@ async function escalateTicket(ctx: ToolCtx, args: { ticket_id?: string; reason?:
   if (!ctx.employeeId) return 'No employee profile linked to your account.'
   if (!args.ticket_id?.trim() || !args.reason?.trim()) return 'Ticket ID and reason are required.'
 
+  const ticketId = sanitizeQuery(args.ticket_id)
+  if (!ticketId) return `Ticket "${args.ticket_id}" not found.`
+
   // Find the ticket
   const { data: ticket } = await ctx.supabase
     .from('helpdesk_tickets')
     .select('id, subject, status, employee_id')
-    .or(`id.eq.${args.ticket_id},ticket_number.eq.${args.ticket_id}`)
+    .or(`id.eq.${ticketId},ticket_number.eq.${ticketId}`)
     .eq('tenant_id', ctx.caller.tenantId)
     .maybeSingle()
 

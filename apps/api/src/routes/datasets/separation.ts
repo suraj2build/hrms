@@ -12,6 +12,8 @@
 
 import type { FastifyInstance } from 'fastify'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { fetchAllRows } from '../../lib/supabase-paginate.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 type GroupBy = 'exit_type' | 'department' | 'location'
 const VALID_GROUP_BY = new Set<string>(['exit_type', 'department', 'location'])
@@ -81,11 +83,12 @@ export default async function separationDataset(fastify: FastifyInstance) {
     if (filterDeptId) sepQuery = sepQuery.eq('employees.job_history.department_id', filterDeptId)
     if (filterLocId)  sepQuery = sepQuery.eq('employees.job_history.work_location_id', filterLocId)
 
-    const { data: sepData, error: sepErr } = await sepQuery
-
-    if (sepErr) return reply.code(500).send({ error: 'DB_ERROR', message: sepErr.message })
-
-    const separations = (sepData ?? []) as any[]
+    let separations: any[]
+    try {
+      separations = await fetchAllRows((from, to) => (sepQuery as any).range(from, to))
+    } catch (err: any) {
+      return serverError(req, reply, err, ErrorCode.QUERY_FAILED, 'Failed to fetch separation dataset')
+    }
 
     // ── Group helper ──────────────────────────────────────────────────────────
     function jh(sep: any) {

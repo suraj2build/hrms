@@ -13,6 +13,7 @@
 import type { FastifyInstance } from 'fastify'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 type GroupBy = 'leave_type' | 'department' | 'employment_type'
 const VALID_GROUP_BY = new Set<string>(['leave_type', 'department', 'employment_type'])
@@ -85,7 +86,7 @@ export default async function leaveDataset(fastify: FastifyInstance) {
     try {
       leaves = await fetchAllRows((from, to) => (leaveQuery as any).range(from, to))
     } catch (err: any) {
-      return reply.code(500).send({ error: 'DB_ERROR', message: err.message })
+      return serverError(req, reply, err, ErrorCode.QUERY_FAILED, 'Failed to fetch leave dataset')
     }
 
     // ── Group helper ──────────────────────────────────────────────────────────

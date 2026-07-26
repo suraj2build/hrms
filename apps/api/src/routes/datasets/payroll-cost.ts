@@ -14,6 +14,7 @@
 import type { FastifyInstance } from 'fastify'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 // Payroll slips advance finalized → processed → paid through the pay cycle.
 // All of these are "final" data for reporting; only 'draft' is excluded.
@@ -186,7 +187,7 @@ export default async function payrollCostDataset(fastify: FastifyInstance) {
     try {
       slips = await fetchAllRows((from, to) => (slipsQuery as any).range(from, to))
     } catch (err: any) {
-      return reply.code(500).send({ error: 'DB_ERROR', message: err.message })
+      return serverError(req, reply, err, ErrorCode.QUERY_FAILED, 'Failed to fetch payroll cost dataset')
     }
 
     // ── Per-department aggregation ──────────────────────────────────────────────

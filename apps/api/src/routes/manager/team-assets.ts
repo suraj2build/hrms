@@ -36,19 +36,25 @@ export default async function managerTeamAssetsRoute(fastify: FastifyInstance) {
       if (!employeeIds.length) return reply.send({ data: [] })
     }
 
-    const { data, error } = await fastify.supabase
-      .from('assets')
-      .select(`
-        id, asset_code, name, serial_number, status, notes, created_at,
-        asset_categories ( name ),
-        employees:assigned_to ( id, first_name, last_name, employee_code )
-      `)
-      .eq('tenant_id', req.tenantId)
-      .eq('status', 'assigned')
-      .in('assigned_to', employeeIds)
-      .order('asset_code')
-
-    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch team assets')
+    let data: any[]
+    try {
+      data = await fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('assets')
+          .select(`
+            id, asset_code, name, serial_number, status, notes, created_at,
+            asset_categories ( name ),
+            employees:assigned_to ( id, first_name, last_name, employee_code )
+          `)
+          .eq('tenant_id', req.tenantId)
+          .eq('status', 'assigned')
+          .in('assigned_to', employeeIds)
+          .order('asset_code')
+          .range(from, to)
+      )
+    } catch (error) {
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch team assets')
+    }
 
     const rows = (data ?? []).map((a: any) => ({
       id:            a.id,

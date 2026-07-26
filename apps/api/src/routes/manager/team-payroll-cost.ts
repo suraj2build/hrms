@@ -86,18 +86,24 @@ export default async function managerTeamPayrollCostRoute(fastify: FastifyInstan
     // payroll output. (payroll_run_employees is read-only legacy: nothing writes it.)
     // OT cost is derived from the slip's component_breakdown; volatility is computed
     // against the prior month's net pay.
-    const { data: rows, error } = await fastify.supabase
-      .from('payroll_slips')
-      .select(`
-        employee_id, gross_pay, net_pay, lop_amount, component_breakdown,
-        employees!inner( id, first_name, last_name, employee_code, designations(name) )
-      `)
-      .eq('tenant_id', req.tenantId)
-      .eq('run_id', run.id)
-      .in('employee_id', employeeIds)
-      .order('gross_pay', { ascending: false })
-
-    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch team payroll cost')
+    let rows: any[]
+    try {
+      rows = await fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('payroll_slips')
+          .select(`
+            employee_id, gross_pay, net_pay, lop_amount, component_breakdown,
+            employees!inner( id, first_name, last_name, employee_code, designations(name) )
+          `)
+          .eq('tenant_id', req.tenantId)
+          .eq('run_id', run.id)
+          .in('employee_id', employeeIds)
+          .order('gross_pay', { ascending: false })
+          .range(from, to)
+      )
+    } catch (error) {
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch team payroll cost')
+    }
 
     // Prior-month net pay per employee → volatility = |net − prior| / prior × 100
     const priorNet = new Map<string, number>()

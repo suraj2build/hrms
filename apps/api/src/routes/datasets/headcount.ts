@@ -15,6 +15,7 @@
 import type { FastifyInstance } from 'fastify'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 function r2(n: number): number { return Math.round(n * 100) / 100 }
 
@@ -112,7 +113,7 @@ export default async function headcountDataset(fastify: FastifyInstance) {
     try {
       allEmployees = await fetchAllRows((from, to) => (empQuery as any).range(from, to))
     } catch (err: any) {
-      return reply.code(500).send({ error: 'DB_ERROR', message: err.message })
+      return serverError(req, reply, err, ErrorCode.QUERY_FAILED, 'Failed to fetch headcount dataset')
     }
     const allSeps: any[] = await fetchAllRows((from, to) => (sepQuery as any).range(from, to))
 

@@ -28,6 +28,7 @@ import { logAction }                   from '../../lib/audit-service.js'
 import { notify }                      from '../../lib/notify.js'
 import { fetchAllRows }                from '../../lib/supabase-paginate.js'
 import { WhatsAppProvider }            from '../../lib/whatsapp-provider.js'
+import { serverError, ErrorCode }      from '../../lib/api-errors.js'
 
 // ── Body schemas ─────────────────────────────────────────────────────────────
 
@@ -96,7 +97,7 @@ export default async function policyRoutes(fastify: FastifyInstance) {
       p_limit:     5,
     })
 
-    if (error) return reply.status(500).send({ error: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to search policies')
 
     return reply.send({ data: data ?? [] })
   })
@@ -121,7 +122,7 @@ export default async function policyRoutes(fastify: FastifyInstance) {
       p_query:     question.trim(),
       p_limit:     4,
     })
-    if (searchErr) return reply.status(500).send({ error: searchErr.message })
+    if (searchErr) return serverError(req, reply, searchErr, ErrorCode.QUERY_FAILED, 'Failed to search policies')
 
     type HitRow = { id: string; title: string; category: string; content: string | null; snippet: string }
     const policies: HitRow[] = (hits ?? []) as HitRow[]
@@ -274,7 +275,7 @@ export default async function policyRoutes(fastify: FastifyInstance) {
       .order('created_at', { ascending: false })
       .limit(Number(limit))
 
-    if (error) return reply.status(500).send({ error: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch policy Q&A logs')
 
     return reply.send({ data: data ?? [] })
   })
@@ -591,7 +592,7 @@ export default async function policyRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', tenantId)
       .eq('id', id)
 
-    if (error) return reply.status(500).send({ error: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to archive policy')
 
     await logAction(supabase, {
       tenantId,
@@ -639,7 +640,7 @@ export default async function policyRoutes(fastify: FastifyInstance) {
         { onConflict: 'tenant_id,policy_id,employee_id' },
       )
 
-    if (error) return reply.status(500).send({ error: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to acknowledge policy')
 
     return reply.send({ data: { acknowledged: true } })
   })

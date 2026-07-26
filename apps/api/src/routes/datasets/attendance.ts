@@ -16,6 +16,7 @@
 import type { FastifyInstance } from 'fastify'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 function r2(n: number): number { return Math.round(n * 100) / 100 }
 function r1(n: number): number { return Math.round(n * 10) / 10 }
@@ -76,7 +77,7 @@ export default async function attendanceDataset(fastify: FastifyInstance) {
           .range(from, to),
       )
     } catch (err: any) {
-      return reply.code(500).send({ error: 'DB_ERROR', message: err.message })
+      return serverError(req, reply, err, ErrorCode.QUERY_FAILED, 'Failed to fetch attendance dataset')
     }
 
     // ── Query: employees with current job history ───────────────────────────────

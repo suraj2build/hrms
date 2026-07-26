@@ -13,6 +13,7 @@
 
 import type { FastifyInstance } from 'fastify'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 type GroupBy = 'status' | 'category'
 const VALID_GROUP_BY = new Set<string>(['status', 'category'])
@@ -58,7 +59,7 @@ export default async function assetsDataset(fastify: FastifyInstance) {
     if (filterStatus)     assetsQuery = assetsQuery.eq('status', filterStatus)
 
     const { data, error } = await assetsQuery
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch assets dataset')
 
     const assets = (data ?? []) as any[]
 
