@@ -8,7 +8,7 @@
  * approval authority. The manager never approves or bypasses the workflow.
  */
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import {
@@ -100,6 +100,13 @@ function RecommendDialog({ member, onClose }: { member: TeamComp; onClose: () =>
   const delta = newCtc != null ? newCtc - current : null
   const deltaPct = delta != null && current > 0 ? (delta / current) * 100 : null
 
+  // The backend explicitly supports an Idempotency-Key on this endpoint
+  // (checkIdempotency/storeIdempotency, keyed 'compensation-revision-create')
+  // to stop a double-click or network retry from creating two separate
+  // pending revision rows for the same employee — but nothing here was
+  // sending the header, so the backend guard was never actually engaged.
+  const idempotencyKey = useRef(crypto.randomUUID())
+
   const submit = useMutation({
     mutationFn: () => api.post('/compensation/revisions', {
       employee_id:    member.employee_id,
@@ -107,8 +114,9 @@ function RecommendDialog({ member, onClose }: { member: TeamComp; onClose: () =>
       effective_date: effective,
       reason:         reason.trim(),
       new_ctc_annual: newCtc,
-    }),
+    }, { headers: { 'Idempotency-Key': idempotencyKey.current } }),
     onSuccess: () => {
+      idempotencyKey.current = crypto.randomUUID()
       qc.invalidateQueries({ queryKey: ['manager-team-comp'] })
       qc.invalidateQueries({ queryKey: ['manager-comp-history', member.employee_id] })
       // Same compensation_revisions row is also read by the admin Comp

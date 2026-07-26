@@ -925,6 +925,20 @@ export default async function reimbursementsRoutes(fastify: FastifyInstance) {
     const approveBodySchema = z.object({ approved_amount: z.number().optional().nullable() }).passthrough()
     const approveBodyParsed = approveBodySchema.safeParse(req.body)
     if (!approveBodyParsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: approveBodyParsed.error.issues[0]?.message ?? 'Invalid request body' })
+
+    // Idempotency: the status guard below already blocks a genuine
+    // double-approve, but a network-retried request would otherwise see a
+    // confusing "already actioned" 409 for an approval that actually
+    // succeeded — replay the original response instead.
+    const iKey = (req.headers['idempotency-key'] as string | undefined)?.trim()
+    if (iKey) {
+      const cached = await checkIdempotency(fastify.supabase, req.tenantId, iKey, 'reimbursement-approve')
+      if (cached) {
+        reply.header('Idempotency-Replayed', 'true')
+        return reply.code(cached.status_code).send(cached.response)
+      }
+    }
+
     const { data: existing } = await fastify.supabase
       .from('reimbursement_claims')
       .select('id, status, employee_id, claimed_amount')
@@ -955,13 +969,19 @@ export default async function reimbursementsRoutes(fastify: FastifyInstance) {
 
     const now = new Date().toISOString()
     const approvedAmt = approveBodyParsed.data.approved_amount ?? (existing as any).claimed_amount
+    // Fold the reviewable-status precondition into this UPDATE's own WHERE
+    // clause too — the async gateApprove() call above opens a window where a
+    // concurrent/retried approve request can race this one; without the
+    // guard both could pass the earlier read-check and both succeed here.
     const { data, error } = await fastify.supabase
       .from('reimbursement_claims')
       .update({ status: 'approved', approved_amount: approvedAmt, reviewed_by: req.userId, reviewed_at: now, updated_at: now })
-      .eq('id', id).eq('tenant_id', req.tenantId).select().single()
+      .eq('id', id).eq('tenant_id', req.tenantId).in('status', ['submitted', 'under_review']).select().maybeSingle()
 
     if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    if (!data) return reply.code(409).send({ error: 'ALREADY_ACTIONED', message: 'Claim was already actioned by another request' })
     await logAction(fastify.supabase, { tenantId: req.tenantId, tableName: 'reimbursement_claims', recordId: id, action: 'UPDATE', performedBy: req.userId, onBehalfOf: (existing as any).employee_id ?? null, newData: { status: 'approved', approved_amount: approvedAmt } })
+    if (iKey) await storeIdempotency(fastify.supabase, req.tenantId, iKey, 'reimbursement-approve', 200, { data })
     return reply.send({ data })
   })
 

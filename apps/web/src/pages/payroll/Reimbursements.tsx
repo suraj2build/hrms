@@ -308,9 +308,18 @@ export function Reimbursements() {
     staleTime: 60_000,
   })
 
+  // Same rationale as payIdempotencyKeys below — the mutation is shared
+  // across all rows in the list, so the key is keyed per claim id.
+  const approveIdempotencyKeys = useRef(new Map<string, string>())
   const approveMutation = useMutation({
-    mutationFn: (id: string) => api.post(`/payroll/reimbursements/${id}/approve`),
-    onSuccess: () => {
+    mutationFn: (id: string) => {
+      if (!approveIdempotencyKeys.current.has(id)) approveIdempotencyKeys.current.set(id, crypto.randomUUID())
+      return api.post(`/payroll/reimbursements/${id}/approve`, undefined, {
+        headers: { 'Idempotency-Key': approveIdempotencyKeys.current.get(id)! },
+      })
+    },
+    onSuccess: (_data, id) => {
+      approveIdempotencyKeys.current.delete(id)
       qc.invalidateQueries({ queryKey: ['reimbursements'] })
       toast.success('Reimbursement claim approved')
     },
