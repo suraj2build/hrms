@@ -92,8 +92,14 @@ const noData = (status = 204): StoreResult => ({ status })
 const fail  = (status: number, error: string, message: string): StoreResult =>
   ({ status, error: { error, message } })
 
+// This module returns a StoreResult (status + body) rather than writing to a
+// Fastify reply directly, so it can't use the serverError() request-context
+// helper from lib/api-errors.ts (no req.log available here) — but the
+// "never forward raw DB text to clients" rule still applies regardless.
+// Callers already receive the full { message, code } via the discarded
+// `error` param if a future caller wants to log it with req.log themselves.
 function dbFail(error: { message: string; code?: string }): StoreResult {
-  return fail(500, 'DB_ERROR', error.message)
+  return fail(500, 'DB_ERROR', 'A database error occurred. Please try again or contact support.')
 }
 
 /**
