@@ -24,6 +24,8 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { emitOnboardingChecklistCompleted } from '../../lib/onboarding-orchestrator.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { serverError, notFound, forbidden, validationError, ErrorCode } from '../../lib/api-errors.js'
+import { fetchAllRows } from '../../lib/supabase-paginate.js'
 
 /**
  * Self-or-HR access check. An employee may access their own checklist/tasks.
@@ -121,7 +123,7 @@ export default async function onboardingChecklistRoutes(fastify: FastifyInstance
         .select('id, name, description, is_active, created_at')
         .eq('tenant_id', tenantId)
         .order('created_at', { ascending: false })
-      if (flatErr) return reply.code(500).send({ error: 'DB_ERROR', message: flatErr.message })
+      if (flatErr) return serverError(req, reply, flatErr, ErrorCode.QUERY_FAILED, 'Failed to fetch onboarding templates')
       return reply.send({ data: (flat ?? []).map((t: any) => ({ ...t, onboarding_checklist_items: [] })) })
     }
 
@@ -157,8 +159,7 @@ export default async function onboardingChecklistRoutes(fastify: FastifyInstance
       .single()
 
     if (error) {
-      fastify.log.error({ error }, 'Failed to create onboarding template')
-      return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+      return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create onboarding template')
     }
 
     return reply.code(201).send({ data })
@@ -174,13 +175,13 @@ export default async function onboardingChecklistRoutes(fastify: FastifyInstance
       .eq('tenant_id', req.tenantId)
       .eq('template_id', templateId)
       .order('sort_order', { ascending: true })
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch template items')
     return reply.send({ data: data ?? [] })
   })
 
   fastify.post('/templates/:id/items', auth, async (req: any, reply) => {
     if (!HR_ADMIN_ROLES.includes(req.userRole)) {
-      return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
+      return forbidden(reply, 'FORBIDDEN', 'HR admin access required')
     }
 
     const templateId: string = (req.params as any).id
@@ -195,7 +196,7 @@ export default async function onboardingChecklistRoutes(fastify: FastifyInstance
       .single()
 
     if (tmplError || !template) {
-      return reply.code(404).send({ error: 'NOT_FOUND', message: 'Template not found' })
+      return notFound(reply, 'TEMPLATE_NOT_FOUND', 'Template not found')
     }
 
     const parsed = addTemplateItemSchema.safeParse(req.body)
@@ -222,8 +223,7 @@ export default async function onboardingChecklistRoutes(fastify: FastifyInstance
       .single()
 
     if (error) {
-      fastify.log.error({ error }, 'Failed to add template item')
-      return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+      return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to add template item')
     }
 
     return reply.code(201).send({ data })
@@ -232,7 +232,7 @@ export default async function onboardingChecklistRoutes(fastify: FastifyInstance
   // ── DELETE /templates/:id/items/:itemId ─────────────────────────────────────
   fastify.delete('/templates/:id/items/:itemId', auth, async (req: any, reply) => {
     if (!HR_ADMIN_ROLES.includes(req.userRole)) {
-      return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
+      return forbidden(reply, 'FORBIDDEN', 'HR admin access required')
     }
 
     const templateId: string = (req.params as any).id
@@ -248,7 +248,7 @@ export default async function onboardingChecklistRoutes(fastify: FastifyInstance
       .single()
 
     if (tmplError || !template) {
-      return reply.code(404).send({ error: 'NOT_FOUND', message: 'Template not found' })
+      return notFound(reply, 'TEMPLATE_NOT_FOUND', 'Template not found')
     }
 
     const { error } = await fastify.supabase
@@ -259,8 +259,7 @@ export default async function onboardingChecklistRoutes(fastify: FastifyInstance
       .eq('tenant_id', tenantId)
 
     if (error) {
-      fastify.log.error({ error }, 'Failed to delete template item')
-      return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+      return serverError(req, reply, error, ErrorCode.DELETE_FAILED, 'Failed to delete template item')
     }
 
     return reply.code(204).send()
@@ -273,7 +272,7 @@ export default async function onboardingChecklistRoutes(fastify: FastifyInstance
 
     // HR admins can view any; employees can view their own
     if (!canAccessEmployee(req, employeeId)) {
-      return reply.code(403).send({ error: 'FORBIDDEN', message: 'Access denied' })
+      return forbidden(reply, 'FORBIDDEN', 'Access denied')
     }
 
     const { data, error } = await fastify.supabase
@@ -306,8 +305,7 @@ export default async function onboardingChecklistRoutes(fastify: FastifyInstance
       .order('created_at', { ascending: false })
 
     if (error) {
-      fastify.log.error({ error }, 'Failed to fetch employee checklist')
-      return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch employee checklist')
     }
 
     return reply.send({ data: data ?? [] })
@@ -316,7 +314,7 @@ export default async function onboardingChecklistRoutes(fastify: FastifyInstance
   // ── POST /employees/:employeeId/checklist ───────────────────────────────────
   fastify.post('/employees/:employeeId/checklist', auth, async (req: any, reply) => {
     if (!HR_ADMIN_ROLES.includes(req.userRole)) {
-      return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
+      return forbidden(reply, 'FORBIDDEN', 'HR admin access required')
     }
 
     const employeeId: string = (req.params as any).employeeId
@@ -341,7 +339,7 @@ export default async function onboardingChecklistRoutes(fastify: FastifyInstance
     const { data: checklistEmp } = await fastify.supabase
       .from('employees').select('id').eq('id', employeeId).eq('tenant_id', tenantId).maybeSingle()
     if (!checklistEmp) {
-      return reply.code(404).send({ error: 'NOT_FOUND', message: 'Employee not found in your organisation' })
+      return notFound(reply, 'EMPLOYEE_NOT_FOUND', 'Employee not found in your organisation')
     }
 
     // Compute target_completion_date = start_date + 30 days
@@ -372,7 +370,7 @@ export default async function onboardingChecklistRoutes(fastify: FastifyInstance
         .single()
 
       if (tmplError || !tmpl) {
-        return reply.code(404).send({ error: 'NOT_FOUND', message: 'Template not found' })
+        return notFound(reply, 'TEMPLATE_NOT_FOUND', 'Template not found')
       }
 
       const { data: items, error: itemsError } = await fastify.supabase
@@ -383,8 +381,7 @@ export default async function onboardingChecklistRoutes(fastify: FastifyInstance
         .order('sort_order', { ascending: true })
 
       if (itemsError) {
-        fastify.log.error({ error: itemsError }, 'Failed to fetch template items')
-        return reply.code(500).send({ error: 'DB_ERROR', message: itemsError.message })
+        return serverError(req, reply, itemsError, ErrorCode.QUERY_FAILED, 'Failed to fetch template items')
       }
 
       templateItems = (items ?? []).map((item) => ({
@@ -413,8 +410,7 @@ export default async function onboardingChecklistRoutes(fastify: FastifyInstance
       .single()
 
     if (checklistError || !checklist) {
-      fastify.log.error({ error: checklistError }, 'Failed to create checklist')
-      return reply.code(500).send({ error: 'DB_ERROR', message: checklistError?.message ?? 'Insert failed' })
+      return serverError(req, reply, checklistError, ErrorCode.INSERT_FAILED, 'Failed to create checklist')
     }
 
     // Copy template items as tasks if any
@@ -441,8 +437,7 @@ export default async function onboardingChecklistRoutes(fastify: FastifyInstance
         .select('id, title, is_mandatory, sort_order, status, due_date, created_at')
 
       if (tasksError) {
-        fastify.log.error({ error: tasksError }, 'Failed to insert checklist tasks')
-        return reply.code(500).send({ error: 'DB_ERROR', message: tasksError.message })
+        return serverError(req, reply, tasksError, ErrorCode.INSERT_FAILED, 'Failed to insert checklist tasks')
       }
 
       tasks = insertedTasks ?? []
@@ -464,7 +459,7 @@ export default async function onboardingChecklistRoutes(fastify: FastifyInstance
 
     // HR admins or the employee themselves can update tasks
     if (!canAccessEmployee(req, employeeId)) {
-      return reply.code(403).send({ error: 'FORBIDDEN', message: 'Access denied' })
+      return forbidden(reply, 'FORBIDDEN', 'Access denied')
     }
 
     const parsed = updateTaskStatusSchema.safeParse(req.body)
@@ -497,12 +492,12 @@ export default async function onboardingChecklistRoutes(fastify: FastifyInstance
       .single()
 
     if (taskFetchError || !task) {
-      return reply.code(404).send({ error: 'NOT_FOUND', message: 'Task not found' })
+      return notFound(reply, 'TASK_NOT_FOUND', 'Task not found')
     }
 
     const checklist = (task as any).employee_onboarding_checklists
     if (checklist.employee_id !== employeeId || checklist.tenant_id !== tenantId) {
-      return reply.code(403).send({ error: 'FORBIDDEN', message: 'Task does not belong to this employee' })
+      return forbidden(reply, 'FORBIDDEN', 'Task does not belong to this employee')
     }
 
     // Update the task
@@ -519,8 +514,7 @@ export default async function onboardingChecklistRoutes(fastify: FastifyInstance
       .single()
 
     if (updateError || !updatedTask) {
-      fastify.log.error({ error: updateError }, 'Failed to update task status')
-      return reply.code(500).send({ error: 'DB_ERROR', message: updateError?.message ?? 'Update failed' })
+      return serverError(req, reply, updateError, ErrorCode.UPDATE_FAILED, 'Failed to update task status')
     }
 
     // Auto-complete checklist if all mandatory tasks are completed
@@ -537,8 +531,12 @@ export default async function onboardingChecklistRoutes(fastify: FastifyInstance
         mandatoryTasks.length > 0 &&
         mandatoryTasks.every((t) => t.status === 'completed' || t.status === 'skipped')
 
+      // TOCTOU guard: fold the not-yet-completed precondition into the UPDATE's
+      // own WHERE clause instead of trusting the earlier read of checklist.status
+      // — two concurrent task-completions can otherwise both observe "not
+      // completed yet" and both fire emitOnboardingChecklistCompleted.
       if (allMandatoryDone && checklist.status !== 'completed') {
-        await fastify.supabase
+        const { data: closedChecklist } = await fastify.supabase
           .from('employee_onboarding_checklists')
           .update({
             status: 'completed',
@@ -546,13 +544,18 @@ export default async function onboardingChecklistRoutes(fastify: FastifyInstance
           })
           .eq('id', checklistId)
           .eq('tenant_id', tenantId)
+          .neq('status', 'completed')
+          .select('id')
+          .maybeSingle()
 
-        emitOnboardingChecklistCompleted({
-          tenantId,
-          employeeId,
-          checklistId,
-          correlationId: (req as any).correlationId,
-        })
+        if (closedChecklist) {
+          emitOnboardingChecklistCompleted({
+            tenantId,
+            employeeId,
+            checklistId,
+            correlationId: (req as any).correlationId,
+          })
+        }
       }
     }
 
@@ -564,42 +567,45 @@ export default async function onboardingChecklistRoutes(fastify: FastifyInstance
   // ── GET /checklists ─── list all employee checklists for tenant (with counts) ─
   fastify.get('/checklists', auth, async (req: any, reply) => {
     if (!HR_ADMIN_ROLES.includes(req.userRole)) {
-      return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
+      return forbidden(reply, 'FORBIDDEN', 'HR admin access required')
     }
 
     const tenantId: string = req.tenantId
 
-    const { data, error } = await fastify.supabase
-      .from('employee_onboarding_checklists')
-      .select(`
-        id,
-        employee_id,
-        template_id,
-        status,
-        start_date,
-        target_completion_date,
-        completed_at,
-        created_at,
-        employees:employee_id (
-          id,
-          first_name,
-          last_name,
-          employee_code,
-          joining_date,
-          departments ( name )
-        ),
-        template:template_id (
-          id,
-          name
-        ),
-        employee_onboarding_tasks ( id, status )
-      `)
-      .eq('tenant_id', tenantId)
-      .order('created_at', { ascending: false })
-
-    if (error) {
-      fastify.log.error({ error }, 'Failed to list onboarding checklists')
-      return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    let data: any[]
+    try {
+      data = await fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('employee_onboarding_checklists')
+          .select(`
+            id,
+            employee_id,
+            template_id,
+            status,
+            start_date,
+            target_completion_date,
+            completed_at,
+            created_at,
+            employees:employee_id (
+              id,
+              first_name,
+              last_name,
+              employee_code,
+              joining_date,
+              departments ( name )
+            ),
+            template:template_id (
+              id,
+              name
+            ),
+            employee_onboarding_tasks ( id, status )
+          `)
+          .eq('tenant_id', tenantId)
+          .order('created_at', { ascending: false })
+          .range(from, to),
+      )
+    } catch (error) {
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to list onboarding checklists')
     }
 
     const rows = (data ?? []).map((cl: any) => {
@@ -649,11 +655,11 @@ export default async function onboardingChecklistRoutes(fastify: FastifyInstance
       .single()
 
     if (clError || !checklist) {
-      return reply.code(404).send({ error: 'NOT_FOUND', message: 'Checklist not found' })
+      return notFound(reply, 'CHECKLIST_NOT_FOUND', 'Checklist not found')
     }
 
     if (!canAccessEmployee(req, checklist.employee_id)) {
-      return reply.code(403).send({ error: 'FORBIDDEN', message: 'Access denied' })
+      return forbidden(reply, 'FORBIDDEN', 'Access denied')
     }
 
     const { data, error } = await fastify.supabase
@@ -676,8 +682,7 @@ export default async function onboardingChecklistRoutes(fastify: FastifyInstance
       .order('sort_order', { ascending: true })
 
     if (error) {
-      fastify.log.error({ error }, 'Failed to fetch checklist tasks')
-      return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch checklist tasks')
     }
 
     return reply.send({ data: data ?? [] })
@@ -718,14 +723,14 @@ export default async function onboardingChecklistRoutes(fastify: FastifyInstance
       .single()
 
     if (taskFetchError || !task) {
-      return reply.code(404).send({ error: 'NOT_FOUND', message: 'Task not found' })
+      return notFound(reply, 'TASK_NOT_FOUND', 'Task not found')
     }
 
     const checklist = (task as any).employee_onboarding_checklists
 
     // HR admins or the owning employee can update
     if (!canAccessEmployee(req, checklist.employee_id)) {
-      return reply.code(403).send({ error: 'FORBIDDEN', message: 'Access denied' })
+      return forbidden(reply, 'FORBIDDEN', 'Access denied')
     }
 
     // Update the task
@@ -742,8 +747,7 @@ export default async function onboardingChecklistRoutes(fastify: FastifyInstance
       .single()
 
     if (updateError || !updatedTask) {
-      fastify.log.error({ error: updateError }, 'Failed to update task status')
-      return reply.code(500).send({ error: 'DB_ERROR', message: updateError?.message ?? 'Update failed' })
+      return serverError(req, reply, updateError, ErrorCode.UPDATE_FAILED, 'Failed to update task status')
     }
 
     // Auto-complete checklist if all mandatory tasks are completed
@@ -760,8 +764,12 @@ export default async function onboardingChecklistRoutes(fastify: FastifyInstance
         mandatoryTasks.length > 0 &&
         mandatoryTasks.every((t) => t.status === 'completed' || t.status === 'skipped')
 
+      // TOCTOU guard: see the twin PATCH /employees/:employeeId/tasks/:taskId
+      // handler above — fold the not-yet-completed precondition into the
+      // UPDATE's own WHERE clause so two concurrent completions can't both
+      // fire emitOnboardingChecklistCompleted.
       if (allMandatoryDone && checklist.status !== 'completed') {
-        await fastify.supabase
+        const { data: closedChecklist } = await fastify.supabase
           .from('employee_onboarding_checklists')
           .update({
             status: 'completed',
@@ -769,13 +777,18 @@ export default async function onboardingChecklistRoutes(fastify: FastifyInstance
           })
           .eq('id', checklistId)
           .eq('tenant_id', tenantId)
+          .neq('status', 'completed')
+          .select('id')
+          .maybeSingle()
 
-        emitOnboardingChecklistCompleted({
-          tenantId,
-          employeeId:    checklist.employee_id,
-          checklistId,
-          correlationId: (req as any).correlationId,
-        })
+        if (closedChecklist) {
+          emitOnboardingChecklistCompleted({
+            tenantId,
+            employeeId:    checklist.employee_id,
+            checklistId,
+            correlationId: (req as any).correlationId,
+          })
+        }
       }
     }
 
@@ -785,7 +798,7 @@ export default async function onboardingChecklistRoutes(fastify: FastifyInstance
   // ── DELETE /template-items/:itemId ─── delete item by id (tenant-scoped) ──────
   fastify.delete('/template-items/:itemId', auth, async (req: any, reply) => {
     if (!HR_ADMIN_ROLES.includes(req.userRole)) {
-      return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
+      return forbidden(reply, 'FORBIDDEN', 'HR admin access required')
     }
 
     const itemId: string = (req.params as any).itemId
@@ -798,8 +811,7 @@ export default async function onboardingChecklistRoutes(fastify: FastifyInstance
       .eq('tenant_id', tenantId)
 
     if (error) {
-      fastify.log.error({ error }, 'Failed to delete template item')
-      return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+      return serverError(req, reply, error, ErrorCode.DELETE_FAILED, 'Failed to delete template item')
     }
 
     return reply.code(204).send()
@@ -808,7 +820,7 @@ export default async function onboardingChecklistRoutes(fastify: FastifyInstance
   // ── POST /checklists ─── assign checklist (body {employee_id, template_id}) ───
   fastify.post('/checklists', auth, async (req: any, reply) => {
     if (!HR_ADMIN_ROLES.includes(req.userRole)) {
-      return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
+      return forbidden(reply, 'FORBIDDEN', 'HR admin access required')
     }
 
     const tenantId: string = req.tenantId
@@ -837,7 +849,7 @@ export default async function onboardingChecklistRoutes(fastify: FastifyInstance
     const { data: checklistEmp } = await fastify.supabase
       .from('employees').select('id').eq('id', employee_id).eq('tenant_id', tenantId).maybeSingle()
     if (!checklistEmp) {
-      return reply.code(404).send({ error: 'NOT_FOUND', message: 'Employee not found in your organisation' })
+      return notFound(reply, 'EMPLOYEE_NOT_FOUND', 'Employee not found in your organisation')
     }
 
     // Compute target_completion_date = start_date + 30 days
@@ -868,7 +880,7 @@ export default async function onboardingChecklistRoutes(fastify: FastifyInstance
         .single()
 
       if (tmplError || !tmpl) {
-        return reply.code(404).send({ error: 'NOT_FOUND', message: 'Template not found' })
+        return notFound(reply, 'TEMPLATE_NOT_FOUND', 'Template not found')
       }
 
       const { data: items, error: itemsError } = await fastify.supabase
@@ -879,8 +891,7 @@ export default async function onboardingChecklistRoutes(fastify: FastifyInstance
         .order('sort_order', { ascending: true })
 
       if (itemsError) {
-        fastify.log.error({ error: itemsError }, 'Failed to fetch template items')
-        return reply.code(500).send({ error: 'DB_ERROR', message: itemsError.message })
+        return serverError(req, reply, itemsError, ErrorCode.QUERY_FAILED, 'Failed to fetch template items')
       }
 
       templateItems = (items ?? []).map((item) => ({
@@ -909,8 +920,7 @@ export default async function onboardingChecklistRoutes(fastify: FastifyInstance
       .single()
 
     if (checklistError || !checklist) {
-      fastify.log.error({ error: checklistError }, 'Failed to create checklist')
-      return reply.code(500).send({ error: 'DB_ERROR', message: checklistError?.message ?? 'Insert failed' })
+      return serverError(req, reply, checklistError, ErrorCode.INSERT_FAILED, 'Failed to create checklist')
     }
 
     // Copy template items as tasks if any
@@ -937,8 +947,7 @@ export default async function onboardingChecklistRoutes(fastify: FastifyInstance
         .select('id, title, is_mandatory, sort_order, status, due_date, created_at')
 
       if (tasksError) {
-        fastify.log.error({ error: tasksError }, 'Failed to insert checklist tasks')
-        return reply.code(500).send({ error: 'DB_ERROR', message: tasksError.message })
+        return serverError(req, reply, tasksError, ErrorCode.INSERT_FAILED, 'Failed to insert checklist tasks')
       }
 
       tasks = insertedTasks ?? []
