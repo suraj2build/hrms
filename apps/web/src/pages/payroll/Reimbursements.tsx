@@ -5,7 +5,7 @@
  * Access: admin only (super_admin, hr_admin).
  */
 
-import { useState }                                from 'react'
+import { useState, useRef }                        from 'react'
 import { useQuery, useMutation, useQueryClient, keepPreviousData }   from '@tanstack/react-query'
 import {
   Loader2, RefreshCw, Plus, CheckCircle2,
@@ -317,9 +317,19 @@ export function Reimbursements() {
     onError: (e: Error) => toast.error('Approval failed', { description: e.message }),
   })
 
+  // One claim can be paid at a time (button disables mid-request), but a
+  // network-retried request still needs a stable key per claim so the retry
+  // replays the original response instead of erroring on an already-paid claim.
+  const payIdempotencyKeys = useRef(new Map<string, string>())
   const payMutation = useMutation({
-    mutationFn: (id: string) => api.post(`/payroll/reimbursements/${id}/pay`),
-    onSuccess: () => {
+    mutationFn: (id: string) => {
+      if (!payIdempotencyKeys.current.has(id)) payIdempotencyKeys.current.set(id, crypto.randomUUID())
+      return api.post(`/payroll/reimbursements/${id}/pay`, undefined, {
+        headers: { 'Idempotency-Key': payIdempotencyKeys.current.get(id)! },
+      })
+    },
+    onSuccess: (_data, id) => {
+      payIdempotencyKeys.current.delete(id)
       qc.invalidateQueries({ queryKey: ['reimbursements'] })
       toast.success('Claim marked as paid')
     },

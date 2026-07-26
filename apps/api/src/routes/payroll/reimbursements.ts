@@ -8,6 +8,7 @@ import { z } from 'zod'
 import { logAction } from '../../lib/audit-service.js'
 import { gateApprove, gateReject } from '../../lib/approval-orchestrator.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { checkIdempotency, storeIdempotency } from '../../lib/idempotency.js'
 
 const CATEGORY_TYPES = ['medical', 'travel', 'food', 'telephone', 'internet', 'books', 'uniform', 'other'] as const
 
@@ -1017,24 +1018,33 @@ export default async function reimbursementsRoutes(fastify: FastifyInstance) {
    */
   fastify.post('/:id/pay', { preHandler: [fastify.authenticate, requireHrAdmin] }, async (req: any, reply) => {
     const { id } = req.params as { id: string }
-    const { data: existing } = await fastify.supabase
-      .from('reimbursement_claims')
-      .select('id, status, employee_id, approved_amount')
-      .eq('id', id).eq('tenant_id', req.tenantId).single()
 
-    if (!existing) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Claim not found' })
-    if ((existing as any).status !== 'approved') {
-      return reply.code(409).send({ error: 'INVALID_STATUS', message: 'Only approved claims can be marked as paid' })
+    // Idempotency: the .eq('status','approved') guard below already blocks a
+    // genuine double-pay, but a network-retried request would see the first
+    // call's success as a confusing "already paid" 409 — replay the original
+    // response instead.
+    const iKey = (req.headers['idempotency-key'] as string | undefined)?.trim()
+    if (iKey) {
+      const cached = await checkIdempotency(fastify.supabase, req.tenantId, iKey, 'reimbursement-pay')
+      if (cached) {
+        reply.header('Idempotency-Replayed', 'true')
+        return reply.code(cached.status_code).send(cached.response)
+      }
     }
 
     const now = new Date().toISOString()
     const { data, error } = await fastify.supabase
       .from('reimbursement_claims')
       .update({ status: 'paid', paid_at: now, updated_at: now })
-      .eq('id', id).eq('tenant_id', req.tenantId).select().single()
+      .eq('id', id).eq('tenant_id', req.tenantId)
+      .eq('status', 'approved')   // fold the precondition into the WHERE — TOCTOU-safe
+      .select().maybeSingle()
 
     if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
-    await logAction(fastify.supabase, { tenantId: req.tenantId, tableName: 'reimbursement_claims', recordId: id, action: 'UPDATE', performedBy: req.userId, onBehalfOf: (existing as any).employee_id ?? null, newData: { status: 'paid' } })
+    if (!data) return reply.code(409).send({ error: 'INVALID_STATUS', message: 'Claim not found or not in an approved state' })
+
+    await logAction(fastify.supabase, { tenantId: req.tenantId, tableName: 'reimbursement_claims', recordId: id, action: 'UPDATE', performedBy: req.userId, onBehalfOf: (data as any).employee_id ?? null, newData: { status: 'paid' } })
+    if (iKey) await storeIdempotency(fastify.supabase, req.tenantId, iKey, 'reimbursement-pay', 200, { data })
     return reply.send({ data })
   })
 
