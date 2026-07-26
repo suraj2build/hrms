@@ -13,8 +13,20 @@ import { fetchTimeline } from '../../lib/timeline-aggregator.js'
 export default async function timelineRoutes(fastify: FastifyInstance) {
   const auth = { preHandler: [fastify.authenticate] }
 
+  // Onboarding lifecycle timeline is an HR-ops surface — neither route had
+  // a role check, letting any authenticated employee read another
+  // employee's onboarding event history.
+  function requireHrAdmin(req: any, reply: any): boolean {
+    if (req.userRole !== 'hr_admin' && req.userRole !== 'super_admin') {
+      reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
+      return false
+    }
+    return true
+  }
+
   // ── GET /onboarding/sessions/:id/timeline ─────────────────────────────────
   fastify.get('/onboarding/sessions/:id/timeline', auth, async (req: any, reply) => {
+    if (!requireHrAdmin(req, reply)) return
     const { id: sessionId } = req.params as { id: string }
     const tenantId: string  = req.tenantId
 
@@ -45,6 +57,7 @@ export default async function timelineRoutes(fastify: FastifyInstance) {
 
   // ── GET /employees/:id/onboarding-timeline ────────────────────────────────
   fastify.get('/employees/:id/onboarding-timeline', auth, async (req: any, reply) => {
+    if (!requireHrAdmin(req, reply)) return
     const { id: employeeId } = req.params as { id: string }
     const tenantId: string   = req.tenantId
 

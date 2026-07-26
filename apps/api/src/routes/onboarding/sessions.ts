@@ -76,6 +76,9 @@ export default async function sessionRoutes(fastify: FastifyInstance) {
 
   // ── GET /onboarding/sessions ───────────────────────────────────────────────
   fastify.get('/sessions', auth, async (req: any, reply) => {
+    if (req.userRole !== 'hr_admin' && req.userRole !== 'super_admin') {
+      return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
+    }
     const {
       status,
       page = '1',
@@ -126,6 +129,9 @@ export default async function sessionRoutes(fastify: FastifyInstance) {
 
   // ── GET /onboarding/sessions/:id ──────────────────────────────────────────
   fastify.get('/sessions/:id', auth, async (req: any, reply) => {
+    if (req.userRole !== 'hr_admin' && req.userRole !== 'super_admin') {
+      return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
+    }
     const { id } = req.params as { id: string }
 
     const { data: session, error: sessionError } = await fastify.supabase
@@ -252,6 +258,9 @@ export default async function sessionRoutes(fastify: FastifyInstance) {
 
   // ── GET /onboarding/sessions/:id/documents ────────────────────────────────
   fastify.get('/sessions/:id/documents', auth, async (req: any, reply) => {
+    if (req.userRole !== 'hr_admin' && req.userRole !== 'super_admin') {
+      return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
+    }
     const { id } = req.params as { id: string }
 
     // Query documents directly — session ownership is enforced by tenant_id

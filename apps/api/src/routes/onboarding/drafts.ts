@@ -45,6 +45,10 @@ export default async function draftRoutes(fastify: FastifyInstance) {
 
   // ── GET /onboarding/drafts/:id ────────────────────────────────────────────
   fastify.get('/drafts/:id', auth, async (req: any, reply) => {
+    if (req.userRole !== 'hr_admin' && req.userRole !== 'super_admin') {
+      return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
+    }
+
     const { id } = req.params as { id: string }
 
     const { data: draft, error: draftError } = await fastify.supabase
