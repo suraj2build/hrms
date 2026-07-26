@@ -469,9 +469,13 @@ export default async function assetsRoutes(fastify: FastifyInstance) {
     if (asset.status !== 'available') return reply.code(409).send({ error: 'NOT_AVAILABLE', message: `Asset is '${asset.status}'.` })
 
     // Assign the asset (mirror /assets/:id/assign) + log the movement.
-    await fastify.supabase.from('assets')
+    // Fold the availability check into the UPDATE itself so two concurrent
+    // fulfill requests targeting the same asset can't both "win" the race.
+    const { data: assigned } = await fastify.supabase.from('assets')
       .update({ status: 'assigned', assigned_to: reqRow.employee_id, updated_at: new Date().toISOString() })
-      .eq('id', asset.id).eq('tenant_id', req.tenantId)
+      .eq('id', asset.id).eq('tenant_id', req.tenantId).eq('status', 'available')
+      .select().maybeSingle()
+    if (!assigned) return reply.code(409).send({ error: 'NOT_AVAILABLE', message: 'Asset was just assigned by another request.' })
     await fastify.supabase.from('employee_asset_ledger').insert({
       tenant_id: req.tenantId, asset_id: asset.id, employee_id: reqRow.employee_id,
       action: 'assigned', condition_notes: 'Fulfilled asset request', performed_by: req.userId,
