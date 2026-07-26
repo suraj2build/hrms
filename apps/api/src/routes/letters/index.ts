@@ -501,6 +501,17 @@ export default async function lettersRoutes(fastify: FastifyInstance) {
 
     if (tmplErr || !tmpl) return reply.status(404).send({ error: 'Template not found' })
 
+    // employee_id is a raw UUID from the request body — resolveEmployeeVars()
+    // already tenant-scopes its own lookup but silently returns {} rather
+    // than throwing when the employee isn't found in this tenant, so a
+    // foreign-tenant id would previously fall through and create a letter
+    // (with blank fields) attributed to that id. GET /letters/issued then
+    // joins `employees` unfiltered by tenant, leaking that employee's real
+    // name/code back into this tenant's letters list.
+    const { data: emp } = await supabase
+      .from('employees').select('id').eq('id', employee_id).eq('tenant_id', tenantId).maybeSingle()
+    if (!emp) return reply.status(404).send({ error: 'Employee not found in your organisation' })
+
     // Resolve variables
     const empVars = await resolveEmployeeVars(supabase, tenantId, employee_id)
     const { body, subject, missing } = renderTemplate(
@@ -651,6 +662,9 @@ export default async function lettersRoutes(fastify: FastifyInstance) {
       .single()
 
     if (!letter) return reply.status(404).send({ error: 'Letter not found' })
+    if (letter.approval_status !== 'pending_approval') {
+      return reply.status(409).send({ error: 'INVALID_STATE', message: `Letter is not pending approval (status: ${letter.approval_status})` })
+    }
 
     const { data: actor } = await supabase
       .from('profiles').select('id:employee_id').eq('id', userId).eq('tenant_id', tenantId).single()
@@ -660,20 +674,32 @@ export default async function lettersRoutes(fastify: FastifyInstance) {
     const nextLevel    = currentLevel + 1
     const isLastLevel  = currentLevel >= maxLevel
 
+    const newStatus = isLastLevel ? 'approved' : 'pending_approval'
+    const newLevel  = isLastLevel ? currentLevel : nextLevel
+
+    // Fold the precondition into the UPDATE itself and check the returned
+    // row — two concurrent approve calls (double-click/retry) would
+    // otherwise both pass the SELECT check above and both write a
+    // duplicate approval-log entry for the same real approval.
+    const { data: updated } = await supabase
+      .from('generated_letters')
+      .update({ approval_status: newStatus, current_level: newLevel })
+      .eq('id', letterId)
+      .eq('tenant_id', tenantId)
+      .eq('approval_status', 'pending_approval')
+      .eq('current_level', currentLevel)
+      .select('id')
+      .maybeSingle()
+
+    if (!updated) {
+      return reply.status(409).send({ error: 'CONFLICT', message: 'This letter was already actioned by another request' })
+    }
+
     await supabase.from('letter_approval_log').insert({
       tenant_id: tenantId, letter_id: letterId,
       level: currentLevel, action: 'approved',
       actor_id: actor?.id, comments,
     })
-
-    const newStatus = isLastLevel ? 'approved' : 'pending_approval'
-    const newLevel  = isLastLevel ? currentLevel : nextLevel
-
-    await supabase
-      .from('generated_letters')
-      .update({ approval_status: newStatus, current_level: newLevel })
-      .eq('id', letterId)
-      .eq('tenant_id', tenantId)
 
     await logAction(supabase, {
       tenantId,
@@ -703,19 +729,35 @@ export default async function lettersRoutes(fastify: FastifyInstance) {
 
     const { data: letter } = await supabase
       .from('generated_letters')
-      .select('current_level').eq('id', letterId).eq('tenant_id', tenantId).single()
+      .select('current_level, approval_status').eq('id', letterId).eq('tenant_id', tenantId).single()
 
-    await supabase.from('letter_approval_log').insert({
-      tenant_id: tenantId, letter_id: letterId,
-      level: letter?.current_level ?? 1, action: 'rejected',
-      actor_id: actor?.id, comments,
-    })
+    if (!letter) return reply.status(404).send({ error: 'Letter not found' })
+    if (letter.approval_status !== 'pending_approval') {
+      return reply.status(409).send({ error: 'INVALID_STATE', message: `Letter is not pending approval (status: ${letter.approval_status})` })
+    }
 
-    await supabase
+    // Fold the precondition into the UPDATE itself — without this, an
+    // already-issued (delivered to the employee) letter could be flipped
+    // to rejected after the fact, since the SELECT above is not atomic
+    // with the UPDATE.
+    const { data: updated } = await supabase
       .from('generated_letters')
       .update({ approval_status: 'rejected', rejection_reason: comments })
       .eq('id', letterId)
       .eq('tenant_id', tenantId)
+      .eq('approval_status', 'pending_approval')
+      .select('id')
+      .maybeSingle()
+
+    if (!updated) {
+      return reply.status(409).send({ error: 'CONFLICT', message: 'This letter was already actioned by another request' })
+    }
+
+    await supabase.from('letter_approval_log').insert({
+      tenant_id: tenantId, letter_id: letterId,
+      level: letter.current_level ?? 1, action: 'rejected',
+      actor_id: actor?.id, comments,
+    })
 
     await logAction(supabase, {
       tenantId,
