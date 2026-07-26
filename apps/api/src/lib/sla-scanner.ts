@@ -282,15 +282,18 @@ export async function scan(supabase: SupabaseClient): Promise<void> {
     // when now > sla_due_at and it is not yet resolved/closed. Stamp
     // sla_breached_at once so the admin queue can flag it.
     const nowIso = new Date().toISOString()
-    const { data: overTickets } = await supabase
-      .from('helpdesk_tickets')
-      .select('id, subject, priority, sla_hours, sla_due_at, created_at, employees(first_name, last_name)')
-      .eq('tenant_id', tenantId)
-      .is('sla_breached_at', null)
-      .not('status', 'in', '(resolved,closed)')
-      .lt('sla_due_at', nowIso)
+    const overTickets = await fetchAllRows<any>((from, to) =>
+      supabase
+        .from('helpdesk_tickets')
+        .select('id, subject, priority, sla_hours, sla_due_at, created_at, employees(first_name, last_name)')
+        .eq('tenant_id', tenantId)
+        .is('sla_breached_at', null)
+        .not('status', 'in', '(resolved,closed)')
+        .lt('sla_due_at', nowIso)
+        .range(from, to)
+    )
 
-    for (const row of (overTickets ?? [])) {
+    for (const row of overTickets) {
       const dedupeKey = `helpdesk:${row.id}`
       if (notifiedIds.has(dedupeKey)) continue
 
@@ -335,16 +338,19 @@ export async function scan(supabase: SupabaseClient): Promise<void> {
     // resolution_due_at is set per-ticket from priority at creation. A ticket
     // breaches its resolution SLA when now > resolution_due_at and it is still
     // open. Stamp resolution_breached_at once and alert HR.
-    const { data: unresolved } = await supabase
-      .from('helpdesk_tickets')
-      .select('id, subject, resolution_due_at, created_at, employees(first_name, last_name)')
-      .eq('tenant_id', tenantId)
-      .is('resolution_breached_at', null)
-      .not('resolution_due_at', 'is', null)
-      .not('status', 'in', '(resolved,closed)')
-      .lt('resolution_due_at', nowIso)
+    const unresolved = await fetchAllRows<any>((from, to) =>
+      supabase
+        .from('helpdesk_tickets')
+        .select('id, subject, resolution_due_at, created_at, employees(first_name, last_name)')
+        .eq('tenant_id', tenantId)
+        .is('resolution_breached_at', null)
+        .not('resolution_due_at', 'is', null)
+        .not('status', 'in', '(resolved,closed)')
+        .lt('resolution_due_at', nowIso)
+        .range(from, to)
+    )
 
-    for (const row of (unresolved ?? [])) {
+    for (const row of unresolved) {
       const dedupeKey = `helpdesk-res:${row.id}`
       if (notifiedIds.has(dedupeKey)) continue
 
