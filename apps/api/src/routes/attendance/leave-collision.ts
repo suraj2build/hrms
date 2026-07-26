@@ -295,6 +295,19 @@ export default async function leaveCollisionRoutes(fastify: FastifyInstance) {
       return reply.code(422).send({ error: 'NO_EMPLOYEE', message: 'Profile not linked to an employee' })
     }
 
+    // pool_id is caller-supplied — verify it belongs to this tenant before
+    // inserting, otherwise an employee could select another tenant's pool
+    // entry (silent cross-tenant reference, no error).
+    const { data: poolEntry } = await fastify.supabase
+      .from('optional_holiday_pool')
+      .select('id')
+      .eq('id', parsed.data.pool_id)
+      .eq('tenant_id', req.tenantId)
+      .maybeSingle()
+    if (!poolEntry) {
+      return reply.code(404).send({ error: 'NOT_FOUND', message: 'Optional holiday pool entry not found' })
+    }
+
     const { data, error } = await fastify.supabase
       .from('employee_optional_holidays')
       .insert({
@@ -398,6 +411,20 @@ export default async function leaveCollisionRoutes(fastify: FastifyInstance) {
       return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
     }
     const year = parsed.data.year ?? new Date().getFullYear()
+
+    // holiday_id is caller-supplied — verify it belongs to this tenant's
+    // holiday_calendar before inserting. Without this, GET /pool's
+    // holiday_calendar(...) embed (via FK, not re-filtered by tenant) could
+    // surface a foreign tenant's holiday name/date in this tenant's HR view.
+    const { data: holiday } = await fastify.supabase
+      .from('holiday_calendar')
+      .select('id')
+      .eq('id', parsed.data.holiday_id)
+      .eq('tenant_id', req.tenantId)
+      .maybeSingle()
+    if (!holiday) {
+      return reply.code(404).send({ error: 'NOT_FOUND', message: 'Holiday not found' })
+    }
 
     const { data, error } = await fastify.supabase
       .from('optional_holiday_pool')
