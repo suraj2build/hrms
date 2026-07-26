@@ -4290,11 +4290,13 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
     const reconMonth = run.month as string
 
     // COMPUTED (from payslips) — real slip codes. TDS isn't on the slip.
-    const { data: slips } = await fastify.supabase
-      .from('payroll_slips')
-      .select('component_breakdown, employee_id')
-      .eq('run_id', run.id)
-      .eq('tenant_id', tenantId)
+    const slips = await fetchAllRows<any>((from, to) =>
+      fastify.supabase
+        .from('payroll_slips')
+        .select('component_breakdown, employee_id')
+        .eq('run_id', run.id)
+        .eq('tenant_id', tenantId)
+        .range(from, to))
 
     const recon = {
       pf:  { payable: 0, computed: 0, variance: 0, filed: false },
@@ -4302,9 +4304,9 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       pt:  { payable: 0, computed: 0, variance: 0, filed: false },
       tds: { payable: 0, computed: 0, variance: 0, filed: false },
     }
-    const employeeCount = slips?.length ?? 0
+    const employeeCount = slips.length
 
-    for (const slip of (slips ?? [])) {
+    for (const slip of slips) {
       for (const comp of (slip.component_breakdown ?? [])) {
         const code = (comp.code ?? '').toUpperCase()
         const amt  = Number(comp.monthly_amount ?? 0)
@@ -4686,23 +4688,28 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
     const { runId } = req.params as { runId: string }
     const tenantId = req.tenantId as string
 
-    const { data: slips, error } = await fastify.supabase
-      .from('payroll_slips')
-      .select(`
-        id, employee_id, month, gross_pay, net_pay, total_deductions, lop_amount, status, held_reason,
-        employees (
-          employee_code,
-          profiles!profile_id ( full_name ),
-          bank_details:employee_bank_statutory ( account_number_masked:account_number, bank_name, ifsc_code )
-        )
-      `)
-      .eq('run_id', runId)
-      .eq('tenant_id', tenantId)
-      .order('employee_id')
+    let slips: any[]
+    try {
+      slips = await fetchAllRows<any>((from, to) =>
+        fastify.supabase
+          .from('payroll_slips')
+          .select(`
+            id, employee_id, month, gross_pay, net_pay, total_deductions, lop_amount, status, held_reason,
+            employees (
+              employee_code,
+              profiles!profile_id ( full_name ),
+              bank_details:employee_bank_statutory ( account_number_masked:account_number, bank_name, ifsc_code )
+            )
+          `)
+          .eq('run_id', runId)
+          .eq('tenant_id', tenantId)
+          .order('employee_id')
+          .range(from, to))
+    } catch (error: any) {
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch payout employee details')
+    }
 
-    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch payout employee details')
-
-    const mapped = (slips ?? []).map((s: any) => {
+    const mapped = slips.map((s: any) => {
       const bank = (s.employees?.bank_details ?? []).find((b: any) => b.is_primary) ?? s.employees?.bank_details?.[0] ?? null
       return {
         slip_id:          s.id,
@@ -5141,15 +5148,20 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
 
     if (!ledger) return notFound(reply, 'NOT_FOUND', 'No ledger found for this run — generate ledger first')
 
-    const { data, error } = await fastify.supabase
-      .from('payroll_cost_allocations')
-      .select('employee_id, department_id, cost_center_id, department_name, cost_center_name, gross_pay, net_pay, lop_recovery, employer_burden, statutory_burden, overtime_cost, total_cost, allocation_pct')
-      .eq('ledger_id', (ledger as any).id)
-      .eq('tenant_id', tenantId)
-      .order('total_cost', { ascending: false })
-
-    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch cost allocations')
-    return reply.send({ data: data ?? [] })
+    let data: any[]
+    try {
+      data = await fetchAllRows<any>((from, to) =>
+        fastify.supabase
+          .from('payroll_cost_allocations')
+          .select('employee_id, department_id, cost_center_id, department_name, cost_center_name, gross_pay, net_pay, lop_recovery, employer_burden, statutory_burden, overtime_cost, total_cost, allocation_pct')
+          .eq('ledger_id', (ledger as any).id)
+          .eq('tenant_id', tenantId)
+          .order('total_cost', { ascending: false })
+          .range(from, to))
+    } catch (error: any) {
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch cost allocations')
+    }
+    return reply.send({ data })
   })
 
   // ── GET /payroll/accounting/summary ─────────────────────────────────────────
@@ -5210,16 +5222,21 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
   fastify.get('/payroll/accounting/gl-summary', hrAdminAuth, async (req: any, reply) => {
     const tenantId = req.tenantId as string
 
-    const { data, error } = await fastify.supabase
-      .from('payroll_ledger_entries')
-      .select('gl_account_code, gl_account_name, entry_category, debit_amount, credit_amount')
-      .eq('tenant_id', tenantId)
-
-    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch GL account summary')
+    let data: any[]
+    try {
+      data = await fetchAllRows<any>((from, to) =>
+        fastify.supabase
+          .from('payroll_ledger_entries')
+          .select('gl_account_code, gl_account_name, entry_category, debit_amount, credit_amount')
+          .eq('tenant_id', tenantId)
+          .range(from, to))
+    } catch (error: any) {
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch GL account summary')
+    }
 
     // Aggregate by GL account
     const glMap = new Map<string, { code: string; name: string; category: string; totalDebit: number; totalCredit: number }>()
-    for (const row of (data ?? []) as any[]) {
+    for (const row of data as any[]) {
       const existing = glMap.get(row.gl_account_code)
       if (existing) {
         existing.totalDebit  += row.debit_amount  ?? 0
@@ -5381,18 +5398,23 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       .maybeSingle()
 
     // Get slips with bank details
-    const { data: slips, error: sErr } = await fastify.supabase
-      .from('payroll_slips')
-      .select(`
-        id, employee_id, net_pay,
-        employees (
-          bank_details:employee_bank_statutory ( account_number_masked:account_number, ifsc_code )
-        )
-      `)
-      .eq('run_id', id)
-      .eq('tenant_id', tenantId)
-
-    if (sErr || !slips) return serverError(req, reply, sErr ?? new Error('Slips not found'), 'SLIPS_FETCH_FAILED', 'Failed to fetch payroll slips for payout obligations')
+    let slips: any[]
+    try {
+      slips = await fetchAllRows<any>((from, to) =>
+        fastify.supabase
+          .from('payroll_slips')
+          .select(`
+            id, employee_id, net_pay,
+            employees (
+              bank_details:employee_bank_statutory ( account_number_masked:account_number, ifsc_code )
+            )
+          `)
+          .eq('run_id', id)
+          .eq('tenant_id', tenantId)
+          .range(from, to))
+    } catch (sErr: any) {
+      return serverError(req, reply, sErr, 'SLIPS_FETCH_FAILED', 'Failed to fetch payroll slips for payout obligations')
+    }
 
     const obligations = buildPayoutObligations(
       id, tenantId, (ledger as any)?.id ?? null,
