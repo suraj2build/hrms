@@ -18,6 +18,7 @@ import type { FastifyInstance } from 'fastify'
 import { z }                    from 'zod'
 import { eventBus }             from '../../lib/event-bus.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { fetchAllRows } from '../../lib/supabase-paginate.js'
 
 const dateRe = /^\d{4}-\d{2}-\d{2}$/
 
@@ -669,18 +670,27 @@ export default async function compensationRevisionsRoute(fastify: FastifyInstanc
     }
 
     // ── Resolve the cohort (active employees only) ────────────────────────────
-    let empQ = fastify.supabase
-      .from('employees')
-      .select('id, first_name, last_name, employee_code')
-      .eq('tenant_id', req.tenantId)
-      .eq('status', 'active')
-    if (d.employee_ids?.length) empQ = empQ.in('id', d.employee_ids)
-    if (d.department_id)        empQ = empQ.eq('department_id', d.department_id)
-    if (d.grade)                empQ = empQ.eq('grade', d.grade)
-
-    const { data: cohort, error: cohortErr } = await empQ
-    if (cohortErr) return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to resolve cohort' })
-    if (!cohort?.length) return reply.send({ created: [], skipped: [], cohort_size: 0 })
+    // A department_id/grade-only filter can match well over 1000 employees
+    // in a large tenant — paginated so a bulk increment/promotion doesn't
+    // silently drop everyone past PostgREST's row cap with no error, which
+    // would contradict the "never silently dropped" guarantee above.
+    let cohort: any[]
+    try {
+      cohort = await fetchAllRows<any>((from, to) => {
+        let empQ = fastify.supabase
+          .from('employees')
+          .select('id, first_name, last_name, employee_code')
+          .eq('tenant_id', req.tenantId)
+          .eq('status', 'active')
+        if (d.employee_ids?.length) empQ = empQ.in('id', d.employee_ids)
+        if (d.department_id)        empQ = empQ.eq('department_id', d.department_id)
+        if (d.grade)                empQ = empQ.eq('grade', d.grade)
+        return empQ.range(from, to)
+      })
+    } catch {
+      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to resolve cohort' })
+    }
+    if (!cohort.length) return reply.send({ created: [], skipped: [], cohort_size: 0 })
 
     const empIds = cohort.map((e: any) => e.id)
 
