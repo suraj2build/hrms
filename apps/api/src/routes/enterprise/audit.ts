@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 export default async function auditRoutes(fastify: FastifyInstance) {
 
@@ -32,7 +33,7 @@ export default async function auditRoutes(fastify: FastifyInstance) {
     if (q.to)                                     qb = qb.lte('created_at', q.to)
 
     const { data, error, count } = await qb
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch audit logs')
 
     const rows = (data ?? []) as any[]
 
@@ -67,8 +68,8 @@ export default async function auditRoutes(fastify: FastifyInstance) {
           .eq('tenant_id', req.tenantId)
           .range(from, to),
       )
-    } catch (err: any) {
-      return reply.code(500).send({ error: 'DB_ERROR', message: err.message })
+    } catch (err: unknown) {
+      return serverError(req, reply, err, ErrorCode.QUERY_FAILED, 'Failed to fetch audit log tables')
     }
     const tables = Array.from(new Set(rows.map((r: any) => r.table_name))).sort()
     return reply.send({ data: tables })
@@ -129,8 +130,7 @@ export default async function auditRoutes(fastify: FastifyInstance) {
 
       return reply.send({ events, total: events.length, exported_at: new Date().toISOString() })
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err)
-      return reply.code(500).send({ error: 'INTERNAL_ERROR', message })
+      return serverError(req, reply, err, ErrorCode.QUERY_FAILED, 'Failed to export audit events')
     }
   })
 
@@ -148,26 +148,11 @@ export default async function auditRoutes(fastify: FastifyInstance) {
         .select('event_id,event_type,module,actor_id,severity')
         .gte('timestamp', from)
         .lte('timestamp', to)
-        .limit(2000)
 
       // Tenant isolation is mandatory.
       qb = qb.eq('tenant_id', tenant_id)
 
-      const { data, error } = await qb
-
-      if (error) {
-        return reply.send({
-          total: 0,
-          by_severity: { info: 0, warning: 0, high: 0, critical: 0 },
-          by_module: {},
-          by_event_type: {},
-          top_actors: [],
-          computed_at: new Date().toISOString(),
-          error: error.message,
-        })
-      }
-
-      const events = data ?? []
+      const events = await fetchAllRows((pageFrom, pageTo) => qb.range(pageFrom, pageTo))
 
       const by_severity: Record<string, number> = { info: 0, warning: 0, high: 0, critical: 0 }
       const by_module:     Record<string, number> = {}
@@ -204,16 +189,7 @@ export default async function auditRoutes(fastify: FastifyInstance) {
         computed_at: new Date().toISOString(),
       })
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err)
-      return reply.send({
-        total: 0,
-        by_severity: { info: 0, warning: 0, high: 0, critical: 0 },
-        by_module: {},
-        by_event_type: {},
-        top_actors: [],
-        computed_at: new Date().toISOString(),
-        error: message,
-      })
+      return serverError(req, reply, err, ErrorCode.COMPUTE_FAILED, 'Failed to compute audit stats')
     }
   })
 }

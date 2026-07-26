@@ -15,6 +15,7 @@ import {
   getRazorpay, isBillingConfigured, PLAN_IDS, WEBHOOK_SECRET, PUBLIC_KEY_ID,
 } from '../../lib/razorpay.js'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 const checkoutSchema = z.object({ plan: z.enum(['standard', 'enterprise']) })
 
@@ -33,7 +34,7 @@ export default async function billingRoutes(fastify: FastifyInstance) {
       .select('plan, status, subscription_status, subscription_plan_id, current_period_end, trial_ends_at, per_employee_rate')
       .eq('id', req.tenantId)
       .single()
-    if (error) return reply.code(500).send({ error: 'DB', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch billing status')
     return reply.send({ data: { ...data, configured: isBillingConfigured(), keyId: PUBLIC_KEY_ID } })
   })
 

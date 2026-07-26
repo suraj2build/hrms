@@ -14,6 +14,7 @@ import { replayIntelligenceService }       from '../../platform/fabric/replay/re
 import { knowledgeLayerService }           from '../../platform/fabric/knowledge/knowledge-layer.service.js'
 import { fabricControlPlaneService }       from '../../platform/fabric/control-plane/fabric-control-plane.service.js'
 import { requireRole, HR_ADMIN_ROLES }     from '../../lib/rbac.js'
+import { serverError, ErrorCode }          from '../../lib/api-errors.js'
 
 export default async function fabricRoutes(fastify: FastifyInstance) {
   // Every route here surfaces governance/decision/orchestration data — trust
@@ -30,7 +31,7 @@ export default async function fabricRoutes(fastify: FastifyInstance) {
       const snapshot = await fabricControlPlaneService.computeFabricHealth(fastify.supabase, orgId)
       return snapshot
     } catch (err: unknown) {
-      return reply.status(500).send({ error: err instanceof Error ? err.message : 'Unknown error' })
+      return serverError(req, reply, err, ErrorCode.COMPUTE_FAILED, 'Failed to compute fabric health')
     }
   })
 

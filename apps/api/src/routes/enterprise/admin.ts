@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify'
 import { slaService }            from '../../platform/operations/sla/sla.service.js'
 import { governanceEvaluator }   from '../../platform/governance/evaluators/event-evaluator.js'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 export default async function adminRoutes(fastify: FastifyInstance) {
 
@@ -28,8 +29,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
         computed_at: new Date().toISOString(),
       })
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err)
-      return reply.status(500).send({ error: message })
+      return serverError(req, reply, err, ErrorCode.QUERY_FAILED, 'Failed to fetch operations queue')
     }
   })
 
@@ -43,8 +43,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
         scanned_at: new Date().toISOString(),
       })
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err)
-      return reply.status(500).send({ error: message })
+      return serverError(req, reply, err, ErrorCode.COMPUTE_FAILED, 'Failed to scan SLA breaches')
     }
   })
 
@@ -73,8 +72,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
         checked_at: new Date().toISOString(),
       })
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err)
-      return reply.status(500).send({ error: message })
+      return serverError(req, reply, err, ErrorCode.COMPUTE_FAILED, 'Failed to compute health status')
     }
   })
 
@@ -85,8 +83,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
       governanceEvaluator.resetListener(name)
       return reply.send({ reset: true, listener: name })
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err)
-      return reply.status(500).send({ error: message })
+      return serverError(req, reply, err, ErrorCode.UPDATE_FAILED, 'Failed to reset listener')
     }
   })
 }
