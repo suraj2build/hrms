@@ -159,7 +159,7 @@ export default async function woCreditRoutes(fastify: FastifyInstance) {
   })
 
   // ── GET /review?year&month ─────────────────────────────────────────────────
-  fastify.get('/attendance/wo-credit/review', auth, async (req: any, reply) => {
+  fastify.get('/attendance/wo-credit/review', hrAdminAuth, async (req: any, reply) => {
     const now = new Date()
     const year  = parseInt((req.query as any).year  ?? String(now.getUTCFullYear()), 10)
     const month = parseInt((req.query as any).month ?? String(now.getUTCMonth() + 1), 10)

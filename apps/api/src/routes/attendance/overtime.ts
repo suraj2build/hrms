@@ -266,6 +266,15 @@ export default async function overtimeRoutes(fastify: FastifyInstance) {
     if (!parsed.success) {
       return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
     }
+
+    // ot_policy_id is caller-supplied and was previously trusted without a
+    // tenant check — resolveOtPolicy() also had no tenant filter, so an
+    // assignment to a foreign tenant's policy id would silently resolve and
+    // apply that tenant's OT rate/multiplier/caps to this employee.
+    const { data: policy } = await fastify.supabase
+      .from('overtime_policies').select('id').eq('id', parsed.data.ot_policy_id).eq('tenant_id', req.tenantId).maybeSingle()
+    if (!policy) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Overtime policy not found' })
+
     const { data, error } = await fastify.supabase
       .from('employee_overtime_policies')
       .upsert(

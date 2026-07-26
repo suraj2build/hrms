@@ -71,6 +71,7 @@ export async function resolveOtPolicy(
       .from('overtime_policies')
       .select('*')
       .eq('id', policyId)
+      .eq('tenant_id', tenantId)
       .eq('is_active', true)
       .maybeSingle()
     if (data) return data as OtPolicy
