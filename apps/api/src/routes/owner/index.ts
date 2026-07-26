@@ -331,7 +331,7 @@ export default async function ownerRoutes(fastify: FastifyInstance) {
   })
 
   // PATCH /owner/tenants/:id
-  fastify.patch('/owner/tenants/:id', ownerAuth, async (req: any, reply) => {
+  fastify.patch('/owner/tenants/:id', ownerOnlyAuth, async (req: any, reply) => {
     const { id } = req.params
     const parsed = patchTenantSchema.safeParse(req.body)
     if (!parsed.success) {
