@@ -17,6 +17,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { serverError, notFound, ErrorCode } from '../../lib/api-errors.js'
 
 function requireHrAdmin(req: any, reply: any, done: () => void) {
   if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
@@ -49,7 +50,7 @@ export default async function privacyRoutes(fastify: FastifyInstance) {
     q = q.range(Number(offset), Number(offset) + Number(limit) - 1)
 
     const { data, error, count } = await q
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch compliance controls')
 
     // Attach latest evidence snapshot per control
     const controlIds = (data ?? []).map((c: any) => c.control_id)
@@ -109,7 +110,7 @@ export default async function privacyRoutes(fastify: FastifyInstance) {
     query = query.range(offset, offset + limit - 1)
 
     const { data, error, count } = await query
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch PII access log')
     return reply.send({ data: data ?? [], total: count ?? 0, limit, offset })
   })
 
@@ -136,7 +137,7 @@ export default async function privacyRoutes(fastify: FastifyInstance) {
     query = query.range(offset, offset + limit - 1)
 
     const { data, error, count } = await query
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch erasure requests')
 
     const today = new Date()
     const enriched = (data ?? []).map((r: any) => ({
@@ -160,6 +161,19 @@ export default async function privacyRoutes(fastify: FastifyInstance) {
     const parsed = schema.safeParse(req.body)
     if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
 
+    // Cross-tenant IDOR guard: employee_id was only zod-validated as a UUID,
+    // never checked to belong to the caller's tenant, before being inserted
+    // (with tenant_id: req.tenantId) into erasure_requests.
+    if (parsed.data.employee_id) {
+      const { data: emp } = await fastify.supabase
+        .from('employees')
+        .select('id')
+        .eq('id', parsed.data.employee_id)
+        .eq('tenant_id', req.tenantId)
+        .maybeSingle()
+      if (!emp) return notFound(reply, 'EMPLOYEE_NOT_FOUND', 'Employee not found')
+    }
+
     const { data, error } = await fastify.supabase
       .from('erasure_requests')
       .insert({
@@ -171,7 +185,7 @@ export default async function privacyRoutes(fastify: FastifyInstance) {
       .select()
       .single()
 
-    if (error) return reply.code(500).send({ error: 'INSERT_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create erasure request')
     return reply.code(201).send({ data })
   })
 
@@ -202,7 +216,7 @@ export default async function privacyRoutes(fastify: FastifyInstance) {
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
 
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update erasure request')
     return reply.send({ message: 'Erasure request updated' })
   })
 
@@ -233,7 +247,7 @@ export default async function privacyRoutes(fastify: FastifyInstance) {
     query = query.range(offset, offset + limit - 1)
 
     const { data, error, count } = await query
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch compliance evaluations')
     return reply.send({ data: data ?? [], total: count ?? 0, limit, offset })
   })
 
@@ -260,7 +274,7 @@ export default async function privacyRoutes(fastify: FastifyInstance) {
     query = query.range(offset, offset + limit - 1)
 
     const { data, error, count } = await query
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch retention enforcement runs')
     return reply.send({ data: data ?? [], total: count ?? 0, limit, offset })
   })
 

@@ -57,32 +57,38 @@ export class RegulatoryIngestionService {
    * (own tenant_id or platform-wide/null), matching listPending()'s read
    * scope — previously missing entirely, letting any tenant's admin
    * approve/reject another tenant's compliance revision.
+   *
+   * Returns 'ok' | 'not_found'. A real Supabase error is thrown (never
+   * swallowed) so the route can distinguish a genuine DB failure from a
+   * bad/out-of-scope revisionId instead of always reporting success.
    */
-  async approve(supabase: SupabaseClient, revisionId: string, reviewedBy: string, tenantId: string): Promise<void> {
-    try {
-      await supabase
-        .from('compliance_revision_events')
-        .update({ status: 'approved', reviewed_at: new Date().toISOString(), reviewed_by: reviewedBy })
-        .eq('id', revisionId)
-        .or(`tenant_id.eq.${tenantId},tenant_id.is.null`)
-    } catch {
-      // Non-fatal
-    }
+  async approve(supabase: SupabaseClient, revisionId: string, reviewedBy: string, tenantId: string): Promise<'ok' | 'not_found'> {
+    const { data, error } = await supabase
+      .from('compliance_revision_events')
+      .update({ status: 'approved', reviewed_at: new Date().toISOString(), reviewed_by: reviewedBy })
+      .eq('id', revisionId)
+      .or(`tenant_id.eq.${tenantId},tenant_id.is.null`)
+      .select('id')
+
+    if (error) throw error
+    if (!data || data.length === 0) return 'not_found'
+    return 'ok'
   }
 
   /**
-   * Reject a revision.
+   * Reject a revision. Same not-found / real-error semantics as approve().
    */
-  async reject(supabase: SupabaseClient, revisionId: string, reviewedBy: string, tenantId: string): Promise<void> {
-    try {
-      await supabase
-        .from('compliance_revision_events')
-        .update({ status: 'rejected', reviewed_at: new Date().toISOString(), reviewed_by: reviewedBy })
-        .eq('id', revisionId)
-        .or(`tenant_id.eq.${tenantId},tenant_id.is.null`)
-    } catch {
-      // Non-fatal
-    }
+  async reject(supabase: SupabaseClient, revisionId: string, reviewedBy: string, tenantId: string): Promise<'ok' | 'not_found'> {
+    const { data, error } = await supabase
+      .from('compliance_revision_events')
+      .update({ status: 'rejected', reviewed_at: new Date().toISOString(), reviewed_by: reviewedBy })
+      .eq('id', revisionId)
+      .or(`tenant_id.eq.${tenantId},tenant_id.is.null`)
+      .select('id')
+
+    if (error) throw error
+    if (!data || data.length === 0) return 'not_found'
+    return 'ok'
   }
 
   /**

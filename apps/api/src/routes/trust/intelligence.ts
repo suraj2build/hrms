@@ -12,6 +12,7 @@ import { verificationOrchestrator }    from '../../platform/trust/orchestrator/v
 import { verificationRetryService }    from '../../platform/integrations/retry/verification-retry.service.js'
 import { aadhaarVerificationService }  from '../../platform/trust/verification/aadhaar/aadhaar-verification.service.js'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { serverError, notFound, ErrorCode } from '../../lib/api-errors.js'
 
 export default async function trustIntelligenceRoutes(fastify: FastifyInstance) {
   // Almost every route below is tenant-wide or takes an arbitrary
@@ -40,6 +41,18 @@ export default async function trustIntelligenceRoutes(fastify: FastifyInstance) 
     const parsed = EvaluateSchema.safeParse(req.body)
     if (!parsed.success) return reply.status(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message ?? 'Invalid request body' })
     const tenantId = (req as any).tenantId
+
+    // Cross-tenant IDOR guard: employee_id was only validated as UUID-shaped,
+    // never checked to belong to the caller's tenant, before being used to
+    // evaluate (and persist) trust/verification data for that employee.
+    const { data: emp } = await fastify.supabase
+      .from('employees')
+      .select('id')
+      .eq('id', parsed.data.employee_id)
+      .eq('tenant_id', tenantId)
+      .maybeSingle()
+    if (!emp) return notFound(reply, 'EMPLOYEE_NOT_FOUND', 'Employee not found')
+
     try {
       const result = await trustIntelligenceService.evaluateEmployee(fastify.supabase, {
         employee_id:    parsed.data.employee_id,
@@ -51,7 +64,7 @@ export default async function trustIntelligenceRoutes(fastify: FastifyInstance) 
       })
       return result
     } catch (err: any) {
-      return reply.status(500).send({ error: err?.message ?? 'Trust evaluation failed' })
+      return serverError(req, reply, err, ErrorCode.COMPUTE_FAILED, 'Trust evaluation failed')
     }
   })
 
@@ -79,7 +92,7 @@ export default async function trustIntelligenceRoutes(fastify: FastifyInstance) 
       .eq('tenant_id', tenantId)
       .order('detected_at', { ascending: false })
       .limit(Number(limit))
-    if (error) return reply.status(500).send({ error: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch duplicate detection events')
     return { duplicates: data ?? [], total: (data ?? []).length }
   })
 
@@ -98,7 +111,7 @@ export default async function trustIntelligenceRoutes(fastify: FastifyInstance) 
       .limit(Number(limit))
     if (employee_id) q = q.eq('entity_id', employee_id)
     const { data, error } = await q
-    if (error) return reply.status(500).send({ error: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch verification events')
     return { verifications: data ?? [], total: (data ?? []).length }
   })
 
@@ -121,7 +134,7 @@ export default async function trustIntelligenceRoutes(fastify: FastifyInstance) 
     if (score_type) q = q.eq('score_type', score_type)
 
     const { data, error } = await q
-    if (error) return reply.status(500).send({ error: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch trust scores')
 
     const scores = data ?? []
 
@@ -170,7 +183,7 @@ export default async function trustIntelligenceRoutes(fastify: FastifyInstance) 
       .eq('entity_id', employeeId)
       .eq('score_type', 'employee')
       .maybeSingle()
-    if (error) return reply.status(500).send({ error: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch employee trust score')
     return {
       score:          data?.score          ?? null,
       severity:       data?.severity        ?? null,
@@ -196,7 +209,7 @@ export default async function trustIntelligenceRoutes(fastify: FastifyInstance) 
     const tenantId = (req as any).tenantId
     q = q.or(`org_id.eq.${tenantId},org_id.is.null`)
     const { data, error } = await q
-    if (error) return reply.status(500).send({ error: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch regulatory revisions')
     return { revisions: data ?? [], total: (data ?? []).length }
   })
 
@@ -235,10 +248,9 @@ export default async function trustIntelligenceRoutes(fastify: FastifyInstance) 
         source_reference: parsed.data.source_reference,
       })
     } catch (err) {
-      fastify.log.error({ err }, 'trust: regulatoryIngestionService.ingest threw')
-      return reply.status(500).send({ error: 'INGEST_FAILED', message: 'Failed to ingest revision' })
+      return serverError(req, reply, err, 'INGEST_FAILED', 'Failed to ingest revision')
     }
-    if (!id) return reply.status(500).send({ error: 'INGEST_FAILED', message: 'Failed to ingest revision' })
+    if (!id) return serverError(req, reply, new Error('ingest returned no id'), 'INGEST_FAILED', 'Failed to ingest revision')
     return reply.status(201).send({ id })
   })
 
@@ -248,8 +260,13 @@ export default async function trustIntelligenceRoutes(fastify: FastifyInstance) 
    */
   fastify.post('/trust/regulatory/revisions/:id/approve', adminAuth, async (req, reply) => {
     const { id } = req.params as any
-    await regulatoryIngestionService.approve(fastify.supabase, id, (req as any).userId, (req as any).tenantId)
-    return { success: true }
+    try {
+      const result = await regulatoryIngestionService.approve(fastify.supabase, id, (req as any).userId, (req as any).tenantId)
+      if (result === 'not_found') return notFound(reply, 'REVISION_NOT_FOUND', 'Regulatory revision not found')
+      return { success: true }
+    } catch (err) {
+      return serverError(req, reply, err, ErrorCode.UPDATE_FAILED, 'Failed to approve regulatory revision')
+    }
   })
 
   /**
@@ -258,8 +275,13 @@ export default async function trustIntelligenceRoutes(fastify: FastifyInstance) 
    */
   fastify.post('/trust/regulatory/revisions/:id/reject', adminAuth, async (req, reply) => {
     const { id } = req.params as any
-    await regulatoryIngestionService.reject(fastify.supabase, id, (req as any).userId, (req as any).tenantId)
-    return { success: true }
+    try {
+      const result = await regulatoryIngestionService.reject(fastify.supabase, id, (req as any).userId, (req as any).tenantId)
+      if (result === 'not_found') return notFound(reply, 'REVISION_NOT_FOUND', 'Regulatory revision not found')
+      return { success: true }
+    } catch (err) {
+      return serverError(req, reply, err, ErrorCode.UPDATE_FAILED, 'Failed to reject regulatory revision')
+    }
   })
 
   /**
@@ -290,7 +312,7 @@ export default async function trustIntelligenceRoutes(fastify: FastifyInstance) 
       .eq('employee_id', employeeId)
       .eq('tenant_id', tenantId)
       .order('updated_at', { ascending: false })
-    if (error) return reply.status(500).send({ error: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch verification records')
     return { data: data ?? [] }
   })
 
@@ -371,8 +393,7 @@ export default async function trustIntelligenceRoutes(fastify: FastifyInstance) 
           aadhaar_consent: true,
         })
       } catch (err) {
-        fastify.log.error({ err, employeeId }, 'trust: verificationOrchestrator.verify threw (HR aadhaar)')
-        return reply.status(500).send({ error: 'VERIFICATION_FAILED', message: 'Aadhaar verification engine error' })
+        return serverError(req, reply, err, 'VERIFICATION_FAILED', 'Aadhaar verification engine error')
       }
 
       // PII-safe echo of the outcome (mask only).
@@ -424,8 +445,7 @@ export default async function trustIntelligenceRoutes(fastify: FastifyInstance) 
           aadhaar_consent: true,
         })
       } catch (err) {
-        fastify.log.error({ err, employeeId }, 'trust: verificationOrchestrator.verify threw (ESS aadhaar)')
-        return reply.status(500).send({ error: 'VERIFICATION_FAILED', message: 'Aadhaar verification engine error' })
+        return serverError(req, reply, err, 'VERIFICATION_FAILED', 'Aadhaar verification engine error')
       }
 
       const v = aadhaarVerificationService.validateStructure(aadhaar)
@@ -443,7 +463,7 @@ export default async function trustIntelligenceRoutes(fastify: FastifyInstance) 
       .from('verification_records')
       .select('status, verification_type')
       .eq('tenant_id', tenantId)
-    if (error) return reply.status(500).send({ error: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch verification statistics')
     const records = data ?? []
     return {
       total:        records.length,

@@ -8,6 +8,7 @@
 
 import type { FastifyInstance } from 'fastify'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 function requireHrAdmin(req: any, reply: any, done: () => void) {
   if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
@@ -35,7 +36,7 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', tenantId)
       .order('timestamp', { ascending: false })
       .range(Number(offset), Number(offset) + Number(limit) - 1)
-    if (error) return reply.status(500).send({ error: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch governance events')
     return { events: data ?? [], total: count ?? 0, limit: Number(limit), offset: Number(offset) }
   })
 
@@ -49,7 +50,7 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
       .in('severity', ['high', 'critical'])
       .order('timestamp', { ascending: false })
       .limit(50)
-    if (error) return reply.status(500).send({ error: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch compliance alerts')
     return { alerts: data ?? [], total: (data ?? []).length }
   })
 
@@ -63,7 +64,7 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
       .in('severity', ['high', 'critical'])
       .order('timestamp', { ascending: false })
       .limit(100)
-    if (error) return reply.status(500).send({ error: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch risk summary')
 
     // Group by entity, compute simple cumulative score
     const entityMap = new Map<
@@ -104,7 +105,7 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
       .eq('status', 'open')
       .order('created_at', { ascending: false })
       .limit(Number(limit))
-    if (error) return reply.status(500).send({ error: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch open incidents')
     return { incidents: data ?? [], total: (data ?? []).length }
   })
 }
