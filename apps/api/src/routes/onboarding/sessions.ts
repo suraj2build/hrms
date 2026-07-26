@@ -19,7 +19,12 @@ const createSessionSchema = z.object({
 })
 
 const createDocumentSchema = z.object({
-  document_type: z.string().min(1),
+  document_type: z.enum([
+    'aadhaar', 'pan', 'passport', 'driving_license',
+    'resume', 'offer_letter', 'experience_letter', 'relieving_letter', 'joining_letter',
+    'salary_slip', 'compensation_letter', 'bank_proof',
+    'pf_uan_document', 'esi_document', 'tax_document', 'other',
+  ]),
   file_name: z.string().min(1),
   file_size: z.number().int().nonnegative(),
   mime_type: z.string().min(1),
@@ -791,27 +796,43 @@ export default async function sessionRoutes(fastify: FastifyInstance) {
           bank_account_number: null, bank_ifsc: null, bank_account_type: null,
           ctc_annual: null, previous_employer: null, previous_designation: null,
         }
-        await fastify.supabase
+        const { error: wipeErr } = await fastify.supabase
           .from('draft_employee_profiles')
           .update({ ...NULLABLE_EXTRACT_COLS, updated_at: new Date().toISOString() })
           .eq('id', existing.id)
 
-        const { error: updateErr } = await fastify.supabase
-          .from('draft_employee_profiles')
-          .update({
-            ...profileColumns,
-            overall_confidence: merged.overall_confidence,
-            missing_critical_fields: merged.missing_critical_fields,
-            conflict_fields: merged.conflict_fields,
-            status: 'draft_ready',
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', existing.id)
+        if (wipeErr) {
+          // Don't attempt the repopulate — the draft may now be in a mixed
+          // state (some columns wiped, none repopulated). Surface this as a
+          // failure rather than silently reporting success against a
+          // possibly-blanked draft.
+          fastify.log.error({ wipeErr, draftId: existing.id }, 'extract: draft_employee_profiles wipe UPDATE failed')
+          docErrors.push({ docId: sessionId, step: 'draft_save', reason: wipeErr.message ?? 'Failed to reset draft profile before re-extraction' })
+        } else {
+          const { error: updateErr } = await fastify.supabase
+            .from('draft_employee_profiles')
+            .update({
+              ...profileColumns,
+              overall_confidence: merged.overall_confidence,
+              missing_critical_fields: merged.missing_critical_fields,
+              conflict_fields: merged.conflict_fields,
+              status: 'draft_ready',
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', existing.id)
 
-        if (updateErr) {
-          fastify.log.error({ updateErr, draftId: existing.id }, 'extract: draft_employee_profiles UPDATE failed — migration 178 may not be applied')
+          if (updateErr) {
+            // The wipe above already succeeded, so the draft now sits with
+            // its extractable columns nulled and NOT repopulated — do not
+            // treat this as success (draftProfileId left null) or the
+            // frontend gets a "valid" draft_profile_id pointing at a
+            // blanked-out row.
+            fastify.log.error({ updateErr, draftId: existing.id }, 'extract: draft_employee_profiles UPDATE failed — migration 178 may not be applied')
+            docErrors.push({ docId: sessionId, step: 'draft_save', reason: updateErr.message ?? 'Failed to save extracted fields to draft profile' })
+          } else {
+            draftProfileId = existing.id
+          }
         }
-        draftProfileId = existing.id
       } else {
         const { data: newDraft, error: insertErr } = await fastify.supabase
           .from('draft_employee_profiles')
