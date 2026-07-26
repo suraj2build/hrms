@@ -98,19 +98,24 @@ export default async function certificationRoutes(fastify: FastifyInstance) {
     const today = new Date().toISOString().split('T')[0]
     const cutoffStr = cutoff.toISOString().split('T')[0]
 
-    const { data, error } = await fastify.supabase
-      .from('employee_certifications')
-      .select('*, employees(id, employee_code, profiles!profile_id(full_name))')
-      .eq('tenant_id', req.tenantId)
-      .eq('status', 'active')
-      .not('expiry_date', 'is', null)
-      .gte('expiry_date', today)
-      .lte('expiry_date', cutoffStr)
-      .order('expiry_date', { ascending: true })
+    let records: any[]
+    try {
+      records = await fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('employee_certifications')
+          .select('*, employees(id, employee_code, profiles!profile_id(full_name))')
+          .eq('tenant_id', req.tenantId)
+          .eq('status', 'active')
+          .not('expiry_date', 'is', null)
+          .gte('expiry_date', today)
+          .lte('expiry_date', cutoffStr)
+          .order('expiry_date', { ascending: true })
+          .range(from, to)
+      ) as any[]
+    } catch (err: any) {
+      return reply.code(500).send({ error: 'QUERY_FAILED', message: err.message })
+    }
 
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
-
-    const records = (data ?? []) as any[]
     const today_d = new Date(today)
     const enriched = records.map(r => ({
       ...r,

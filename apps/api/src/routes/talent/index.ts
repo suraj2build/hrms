@@ -93,13 +93,20 @@ export default async function talentRoutes(fastify: FastifyInstance) {
     const ids = data.map((r: any) => r.id)
     const countMap: Record<string, number> = {}
     if (ids.length > 0) {
-      const { data: interests } = await supabase
-        .from('talent_interests')
-        .select('role_id')
-        .eq('tenant_id', req.tenantId)
-        .in('role_id', ids)
-        .neq('status', 'withdrawn')
-      ;(interests ?? []).forEach((i: any) => { countMap[i.role_id] = (countMap[i.role_id] ?? 0) + 1 })
+      try {
+        const interests = await fetchAllRows((from, to) =>
+          supabase
+            .from('talent_interests')
+            .select('role_id')
+            .eq('tenant_id', req.tenantId)
+            .in('role_id', ids)
+            .neq('status', 'withdrawn')
+            .range(from, to)
+        ) as any[]
+        interests.forEach((i: any) => { countMap[i.role_id] = (countMap[i.role_id] ?? 0) + 1 })
+      } catch (err: any) {
+        return reply.code(500).send({ error: err.message })
+      }
     }
 
     return reply.send({ data: data.map((r: any) => ({ ...r, interest_count: countMap[r.id] ?? 0 })) })

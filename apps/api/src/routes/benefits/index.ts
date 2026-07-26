@@ -13,6 +13,7 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { logAction } from '../../lib/audit-service.js'
+import { fetchAllRows } from '../../lib/supabase-paginate.js'
 import { InsuranceProvider } from '../../lib/insurance-provider.js'
 
 const PLAN_TYPES = ['health', 'term_life', 'accident', 'wellness', 'meal', 'transport', 'nps', 'other'] as const
@@ -373,16 +374,21 @@ export default async function benefitsRoutes(fastify: FastifyInstance) {
   fastify.get('/admin/enrollments', hrAdminAuth, async (req: any, reply) => {
     const qs = z.object({ plan_id: z.string().uuid().optional() }).safeParse(req.query)
 
-    let q = fastify.supabase
-      .from('benefit_enrollments')
-      .select('id, plan_id, status, dependent_ids, enrolled_at, updated_at, employees(first_name, last_name, employee_code), benefit_plans(name, plan_type)')
-      .eq('tenant_id', req.tenantId)
-      .order('updated_at', { ascending: false })
-
-    if (qs.data?.plan_id) q = q.eq('plan_id', qs.data.plan_id)
-
-    const { data, error } = await q
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
-    return reply.send({ data: data ?? [] })
+    let data: any[]
+    try {
+      data = await fetchAllRows((from, to) => {
+        let q = fastify.supabase
+          .from('benefit_enrollments')
+          .select('id, plan_id, status, dependent_ids, enrolled_at, updated_at, employees(first_name, last_name, employee_code), benefit_plans(name, plan_type)')
+          .eq('tenant_id', req.tenantId)
+          .order('updated_at', { ascending: false })
+          .range(from, to)
+        if (qs.data?.plan_id) q = q.eq('plan_id', qs.data.plan_id)
+        return q
+      }) as any[]
+    } catch (err: any) {
+      return reply.code(500).send({ error: 'DB_ERROR', message: err.message })
+    }
+    return reply.send({ data })
   })
 }

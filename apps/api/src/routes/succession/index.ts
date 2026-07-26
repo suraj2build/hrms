@@ -405,20 +405,26 @@ export default async function successionRoutes(fastify: FastifyInstance) {
   fastify.get('/nine-box', hrAuth, async (req: any, reply) => {
     const tenantId = req.tenantId
 
-    const { data, error } = await supabase
-      .from('succession_candidates')
-      .select(`
-        id, nine_box_performance, nine_box_potential, readiness_level, readiness_score,
-        employees!succession_candidates_employee_id_fkey(id, first_name, last_name, employee_code, designation:designations(name), department:departments!department_id(name))
-      `)
-      .eq('tenant_id', tenantId)
-
-    if (error) return reply.status(500).send({ error: error.message })
+    let data: any[]
+    try {
+      data = await fetchAllRows((from, to) =>
+        supabase
+          .from('succession_candidates')
+          .select(`
+            id, nine_box_performance, nine_box_potential, readiness_level, readiness_score,
+            employees!succession_candidates_employee_id_fkey(id, first_name, last_name, employee_code, designation:designations(name), department:departments!department_id(name))
+          `)
+          .eq('tenant_id', tenantId)
+          .range(from, to)
+      ) as any[]
+    } catch (err: any) {
+      return reply.status(500).send({ error: err.message })
+    }
 
     const grid: Record<string, any[]> = {}
     const ungrouped: any[] = []
 
-    for (const c of (data ?? [])) {
+    for (const c of data) {
       if (c.nine_box_performance != null && c.nine_box_potential != null) {
         const key = `${c.nine_box_performance},${c.nine_box_potential}`
         if (!grid[key]) grid[key] = []
@@ -436,32 +442,44 @@ export default async function successionRoutes(fastify: FastifyInstance) {
   fastify.get('/ai-recommendations', hrAuth, async (req: any, reply) => {
     const tenantId = req.tenantId
 
-    const { data: plans, error: plansError } = await supabase
-      .from('succession_plans')
-      .select('id, position_title, department, risk_level')
-      .eq('tenant_id', tenantId)
-      .eq('status', 'active')
+    let plans: any[]
+    let candidates: any[]
+    try {
+      plans = await fetchAllRows((from, to) =>
+        supabase
+          .from('succession_plans')
+          .select('id, position_title, department, risk_level')
+          .eq('tenant_id', tenantId)
+          .eq('status', 'active')
+          .range(from, to)
+      ) as any[]
+    } catch (err: any) {
+      return reply.status(500).send({ error: err.message })
+    }
 
-    if (plansError) return reply.status(500).send({ error: plansError.message })
-
-    const planIds = (plans ?? []).map(p => p.id)
+    const planIds = plans.map(p => p.id)
     if (planIds.length === 0) return reply.send({ data: [] })
 
-    const { data: candidates, error: candError } = await supabase
-      .from('succession_candidates')
-      .select(`
-        id, plan_id, readiness_level, readiness_score,
-        score_performance, score_skill_gap, score_leadership, score_mobility, score_tenure, score_attrition_risk,
-        attrition_risk_flag,
-        employees!succession_candidates_employee_id_fkey(id, first_name, last_name, employee_code, designation:designations(name), department:departments!department_id(name))
-      `)
-      .eq('tenant_id', tenantId)
-      .in('plan_id', planIds)
-
-    if (candError) return reply.status(500).send({ error: candError.message })
+    try {
+      candidates = await fetchAllRows((from, to) =>
+        supabase
+          .from('succession_candidates')
+          .select(`
+            id, plan_id, readiness_level, readiness_score,
+            score_performance, score_skill_gap, score_leadership, score_mobility, score_tenure, score_attrition_risk,
+            attrition_risk_flag,
+            employees!succession_candidates_employee_id_fkey(id, first_name, last_name, employee_code, designation:designations(name), department:departments!department_id(name))
+          `)
+          .eq('tenant_id', tenantId)
+          .in('plan_id', planIds)
+          .range(from, to)
+      ) as any[]
+    } catch (err: any) {
+      return reply.status(500).send({ error: err.message })
+    }
 
     const candsByPlan: Record<string, any[]> = {}
-    for (const c of (candidates ?? [])) {
+    for (const c of candidates) {
       if (!candsByPlan[c.plan_id]) candsByPlan[c.plan_id] = []
       candsByPlan[c.plan_id].push(c)
     }

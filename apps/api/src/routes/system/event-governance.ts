@@ -19,6 +19,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { fetchAllRows } from '../../lib/supabase-paginate.js'
 
 // ── Query / body schemas ──────────────────────────────────────────────────────
 
@@ -562,36 +563,32 @@ export default async function eventGovernanceRoutes(fastify: FastifyInstance) {
     // approach consistent with the rest of the codebase.
     const since7d = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()
 
-    const [statusRes, typeRes, dailyRes] = await Promise.all([
-      // Count by status — no date restriction, gives lifetime totals.
-      fastify.supabase
-        .from('event_log')
-        .select('status')
-        .eq('tenant_id', tenantId),
+    // event_log grows continuously and readily exceeds PostgREST's 1000-row
+    // cap for any active tenant — a plain .select() here previously silently
+    // truncated by_status/by_type to whatever the most recent 1000 rows were.
+    let statusRows: any[], typeRows: any[], dailyRows: any[]
+    try {
+      ;[statusRows, typeRows, dailyRows] = await Promise.all([
+        // Count by status — no date restriction, gives lifetime totals.
+        fetchAllRows((from, to) =>
+          fastify.supabase.from('event_log').select('status').eq('tenant_id', tenantId).range(from, to)),
 
-      // Count by event_type — no date restriction, gives lifetime totals.
-      fastify.supabase
-        .from('event_log')
-        .select('event_type')
-        .eq('tenant_id', tenantId),
+        // Count by event_type — no date restriction, gives lifetime totals.
+        fetchAllRows((from, to) =>
+          fastify.supabase.from('event_log').select('event_type').eq('tenant_id', tenantId).range(from, to)),
 
-      // Daily volume — last 7 days only.
-      fastify.supabase
-        .from('event_log')
-        .select('created_at')
-        .eq('tenant_id', tenantId)
-        .gte('created_at', since7d),
-    ])
-
-    if (statusRes.error || typeRes.error || dailyRes.error) {
-      const err = statusRes.error ?? typeRes.error ?? dailyRes.error
+        // Daily volume — last 7 days only.
+        fetchAllRows((from, to) =>
+          fastify.supabase.from('event_log').select('created_at').eq('tenant_id', tenantId).gte('created_at', since7d).range(from, to)),
+      ]) as [any[], any[], any[]]
+    } catch (err) {
       req.log.error({ err }, 'event governance stats query failed')
       return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to compute event stats' })
     }
 
     // by_status
     const statusCounts: Record<string, number> = {}
-    for (const row of statusRes.data ?? []) {
+    for (const row of statusRows) {
       const s = (row as any).status ?? 'unknown'
       statusCounts[s] = (statusCounts[s] ?? 0) + 1
     }
@@ -601,7 +598,7 @@ export default async function eventGovernanceRoutes(fastify: FastifyInstance) {
 
     // by_type — top 10
     const typeCounts: Record<string, number> = {}
-    for (const row of typeRes.data ?? []) {
+    for (const row of typeRows) {
       const t = (row as any).event_type ?? 'unknown'
       typeCounts[t] = (typeCounts[t] ?? 0) + 1
     }
@@ -617,7 +614,7 @@ export default async function eventGovernanceRoutes(fastify: FastifyInstance) {
       const d = new Date(Date.now() - i * 24 * 60 * 60 * 1000)
       dayCounts[d.toISOString().slice(0, 10)] = 0
     }
-    for (const row of dailyRes.data ?? []) {
+    for (const row of dailyRows) {
       const day = ((row as any).created_at as string).slice(0, 10)
       if (day in dayCounts) {
         dayCounts[day] += 1
