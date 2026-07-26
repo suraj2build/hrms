@@ -102,13 +102,29 @@ export function applyStatutoryToSlip(
   const earnings = comps.filter(c => c.component_type === 'earning')
 
   // ── Wage bases ────────────────────────────────────────────────────────────
-  // PF wage = earnings flagged PF-applicable (basic + DA + any pf-applicable).
+  // component_breakdown's monthly_amount values are the full, un-prorated
+  // monthly amounts (computePayrollSlip's own docstring: "Gross pay = sum of
+  // earning components (full-month amounts)") — LOP is applied only as a
+  // separate deduction line, never reducing gross_pay or any component
+  // itself. Statutory wage bases must reflect actual EARNED wages for the
+  // month, not the full-month figure, or PF is over-deducted and ESI/PT/LWF
+  // eligibility is under-counted for any employee with LOP days this month
+  // (fresh audit finding — verified: Basic 18,000/Gross 30,000 with 11/22
+  // LOP days previously computed PF on the full 18,000 → capped-at-ceiling
+  // ₹1,800 deducted, and ESI on the full 30,000 → wrongly marked ineligible,
+  // instead of the correct earned Basic 9,000 → PF ₹1,080, and earned gross
+  // 15,000 → correctly ESI-eligible). Apply the same proportional reduction
+  // LOP applies to gross_pay to the PF-applicable earnings subtotal.
+  const payableFraction = slip.gross_pay > 0
+    ? (slip.gross_pay - slip.lop_amount) / slip.gross_pay
+    : 1
   const pfWages = round2(
     earnings.filter(c => c.is_pf_applicable || c.affects_pf)
-            .reduce((s, c) => s + c.monthly_amount, 0),
+            .reduce((s, c) => s + c.monthly_amount, 0) * payableFraction,
   )
-  // ESI / PT are computed on monthly gross earnings.
-  const grossWages = slip.gross_pay
+  // ESI / PT / LWF are computed on earned gross (gross_pay less LOP), not the
+  // full un-prorated monthly gross.
+  const grossWages = round2(slip.gross_pay - slip.lop_amount)
 
   // ── EPF ───────────────────────────────────────────────────────────────────
   // Fold the per-employee PF wage basis into the config so the SLIP matches the
