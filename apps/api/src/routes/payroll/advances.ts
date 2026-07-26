@@ -9,7 +9,8 @@ import { logAction } from '../../lib/audit-service.js'
 import { gateApprove, gateReject } from '../../lib/approval-orchestrator.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { checkIdempotency, storeIdempotency } from '../../lib/idempotency.js'
-import { serverError, ErrorCode } from '../../lib/api-errors.js'
+import { serverError, notFound, conflictError, ErrorCode } from '../../lib/api-errors.js'
+import { fetchAllRows } from '../../lib/supabase-paginate.js'
 
 const RECOVERY_TYPES = ['payroll_deduction', 'manual_payment', 'adjustment'] as const
 
@@ -432,19 +433,25 @@ export default async function advancesRoutes(fastify: FastifyInstance) {
   fastify.get('/pending-recoveries/:month', { preHandler: [fastify.authenticate, requireHrAdmin] }, async (req: any, reply) => {
     const { month } = req.params as { month: string }
 
-    const [{ data: advances }, { data: schedules }] = await Promise.all([
-      fastify.supabase
-        .from('advance_salary_requests')
-        .select('*, employees(id, first_name, last_name, employee_code)')
-        .eq('tenant_id', req.tenantId)
-        .in('status', ['disbursed', 'recovering'])
-        .eq('is_recovery_paused', false),
-      fastify.supabase
-        .from('advance_recovery_schedules')
-        .select('*')
-        .eq('tenant_id', req.tenantId)
-        .eq('recovery_month', month)
-        .eq('status', 'pending'),
+    const [advances, schedules] = await Promise.all([
+      fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('advance_salary_requests')
+          .select('*, employees(id, first_name, last_name, employee_code)')
+          .eq('tenant_id', req.tenantId)
+          .in('status', ['disbursed', 'recovering'])
+          .eq('is_recovery_paused', false)
+          .range(from, to),
+      ),
+      fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('advance_recovery_schedules')
+          .select('*')
+          .eq('tenant_id', req.tenantId)
+          .eq('recovery_month', month)
+          .eq('status', 'pending')
+          .range(from, to),
+      ),
     ])
 
     const scheduleMap = new Map<string, any[]>()
@@ -478,6 +485,35 @@ export default async function advancesRoutes(fastify: FastifyInstance) {
       return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
     }
 
+    // advance_id is caller-supplied — verify it belongs to this tenant
+    // before it's referenced by the recovery insert below, otherwise a
+    // recovery row could be created against a foreign tenant's advance.
+    const { data: advance, error: advErr } = await fastify.supabase
+      .from('advance_salary_requests')
+      .select('id')
+      .eq('id', parsed.data.advance_id)
+      .eq('tenant_id', req.tenantId)
+      .maybeSingle()
+    if (advErr) return serverError(req, reply, advErr, ErrorCode.QUERY_FAILED, 'Failed to verify advance')
+    if (!advance) return notFound(reply, 'ADVANCE_NOT_FOUND', 'Advance not found')
+
+    // Fold the pending-status guard into the schedule update's own WHERE
+    // clause (was a separate unchecked update with no precondition at all),
+    // so recovering the same schedule twice can't insert a duplicate
+    // advance_recoveries row for the same recovery.
+    if (parsed.data.schedule_id) {
+      const { data: updatedSched, error: schedErr } = await fastify.supabase
+        .from('advance_recovery_schedules')
+        .update({ status: 'recovered' })
+        .eq('id', parsed.data.schedule_id)
+        .eq('tenant_id', req.tenantId)
+        .eq('status', 'pending')
+        .select('id')
+        .maybeSingle()
+      if (schedErr) return serverError(req, reply, schedErr, ErrorCode.UPDATE_FAILED, 'Failed to update recovery schedule')
+      if (!updatedSched) return conflictError(reply, 'ALREADY_RECOVERED', 'This recovery schedule has already been recovered')
+    }
+
     // Insert recovery record
     const { data: recovery, error: recoveryErr } = await fastify.supabase
       .from('advance_recoveries')
@@ -491,36 +527,31 @@ export default async function advancesRoutes(fastify: FastifyInstance) {
 
     if (recoveryErr) return serverError(req, reply, recoveryErr, ErrorCode.INSERT_FAILED, 'Failed to record advance recovery')
 
-    // Update schedule status if provided
-    if (parsed.data.schedule_id) {
-      await fastify.supabase
-        .from('advance_recovery_schedules')
-        .update({ status: 'recovered' })
-        .eq('id', parsed.data.schedule_id)
-        .eq('tenant_id', req.tenantId)
-    }
-
     // Check if all schedules recovered for this advance
-    const { count: pendingCount } = await fastify.supabase
+    const { count: pendingCount, error: pendingErr } = await fastify.supabase
       .from('advance_recovery_schedules')
       .select('id', { count: 'exact', head: true })
       .eq('advance_id', parsed.data.advance_id)
       .eq('tenant_id', req.tenantId)
       .eq('status', 'pending')
 
+    if (pendingErr) return serverError(req, reply, pendingErr, ErrorCode.QUERY_FAILED, 'Failed to check remaining recovery schedules')
+
     if ((pendingCount ?? 0) === 0) {
-      await fastify.supabase
+      const { error: doneErr } = await fastify.supabase
         .from('advance_salary_requests')
         .update({ status: 'fully_recovered', updated_at: new Date().toISOString() })
         .eq('id', parsed.data.advance_id)
         .eq('tenant_id', req.tenantId)
+      if (doneErr) return serverError(req, reply, doneErr, ErrorCode.UPDATE_FAILED, 'Recovery recorded but failed to update advance status')
     } else {
-      await fastify.supabase
+      const { error: recoveringErr } = await fastify.supabase
         .from('advance_salary_requests')
         .update({ status: 'recovering', updated_at: new Date().toISOString() })
         .eq('id', parsed.data.advance_id)
         .eq('tenant_id', req.tenantId)
         .in('status', ['disbursed'])
+      if (recoveringErr) return serverError(req, reply, recoveringErr, ErrorCode.UPDATE_FAILED, 'Recovery recorded but failed to update advance status')
     }
 
     return reply.code(201).send({ data: recovery })

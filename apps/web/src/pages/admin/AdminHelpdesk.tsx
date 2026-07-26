@@ -291,6 +291,9 @@ export function AdminHelpdesk() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['admin-helpdesk', 'detail', openId] })
       invalidate()
+      // Promotion inserts a new hr_policies row (category 'faq') — the
+      // Policy Library page reads that same table under a separate key.
+      qc.invalidateQueries({ queryKey: ['policy-library'] })
       toast.success('Ticket promoted to Knowledge Base')
     },
     onError: (e: Error) => toast.error('Failed to promote', { description: e.message }),

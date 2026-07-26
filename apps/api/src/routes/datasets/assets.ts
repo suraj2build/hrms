@@ -14,6 +14,7 @@
 import type { FastifyInstance } from 'fastify'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { serverError, ErrorCode } from '../../lib/api-errors.js'
+import { fetchAllRows } from '../../lib/supabase-paginate.js'
 
 type GroupBy = 'status' | 'category'
 const VALID_GROUP_BY = new Set<string>(['status', 'category'])
@@ -47,21 +48,25 @@ export default async function assetsDataset(fastify: FastifyInstance) {
     const filterCategoryId = q.filter_category_id ?? null
     const filterStatus     = q.filter_status      ?? null
 
-    let assetsQuery = fastify.supabase
-      .from('assets')
-      .select(`
-        id, status, category_id, purchase_cost, assigned_to,
-        asset_categories ( id, name )
-      `)
-      .eq('tenant_id', tid)
+    let assets: any[]
+    try {
+      assets = await fetchAllRows((from, to) => {
+        let assetsQuery = fastify.supabase
+          .from('assets')
+          .select(`
+            id, status, category_id, purchase_cost, assigned_to,
+            asset_categories ( id, name )
+          `)
+          .eq('tenant_id', tid)
 
-    if (filterCategoryId) assetsQuery = assetsQuery.eq('category_id', filterCategoryId)
-    if (filterStatus)     assetsQuery = assetsQuery.eq('status', filterStatus)
+        if (filterCategoryId) assetsQuery = assetsQuery.eq('category_id', filterCategoryId)
+        if (filterStatus)     assetsQuery = assetsQuery.eq('status', filterStatus)
 
-    const { data, error } = await assetsQuery
-    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch assets dataset')
-
-    const assets = (data ?? []) as any[]
+        return assetsQuery.range(from, to)
+      })
+    } catch (error) {
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch assets dataset')
+    }
 
     function getGroupKey(a: any): { key: string; label: string } {
       switch (groupBy) {
