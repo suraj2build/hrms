@@ -54,6 +54,7 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { testConnection, effectiveModel, type AssistantConfig } from '../../lib/ai/llm.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -236,7 +237,7 @@ export default async function ownerRoutes(fastify: FastifyInstance) {
     if (search) query = query.ilike('name', `%${search}%`)
 
     const { data, error, count } = await query
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch tenants')
 
     return reply.send({ data, meta: { total: count ?? 0, page, limit } })
   })
@@ -281,7 +282,7 @@ export default async function ownerRoutes(fastify: FastifyInstance) {
       if (tenantErr.code === '23505') {
         return reply.code(409).send({ error: 'DUPLICATE', message: 'A tenant with this name/slug already exists' })
       }
-      return reply.code(500).send({ error: 'DB_ERROR', message: tenantErr.message })
+      return serverError(req, reply, tenantErr, ErrorCode.INSERT_FAILED, 'Failed to create tenant')
     }
 
     return reply.code(201).send({ data: tenant })
@@ -318,7 +319,7 @@ export default async function ownerRoutes(fastify: FastifyInstance) {
 
     if (tenantRes.error) {
       if (tenantRes.error.code === 'PGRST116') return reply.code(404).send({ error: 'NOT_FOUND', message: 'Tenant not found' })
-      return reply.code(500).send({ error: 'DB_ERROR', message: tenantRes.error.message })
+      return serverError(req, reply, tenantRes.error, ErrorCode.QUERY_FAILED, 'Failed to fetch tenant')
     }
 
     return reply.send({
@@ -357,7 +358,7 @@ export default async function ownerRoutes(fastify: FastifyInstance) {
       .select()
       .single()
 
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update tenant')
     return reply.send({ data })
   })
 
@@ -384,7 +385,7 @@ export default async function ownerRoutes(fastify: FastifyInstance) {
       .select('id, name, status, license_issued_at, license_expires_at')
       .single()
 
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to issue license')
     return reply.send({ data })
   })
 
@@ -393,7 +394,7 @@ export default async function ownerRoutes(fastify: FastifyInstance) {
     const { id } = req.params
     const { data, error } = await fastify.supabase
       .from('tenants').update({ status: 'active' }).eq('id', id).select('id, status').single()
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to activate tenant')
     return reply.send({ data })
   })
 
@@ -408,7 +409,7 @@ export default async function ownerRoutes(fastify: FastifyInstance) {
       .from('tenants')
       .update({ status: 'suspended', notes: parsed.data.reason ?? null })
       .eq('id', id).select('id, status').single()
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to suspend tenant')
     return reply.send({ data })
   })
 
@@ -417,7 +418,7 @@ export default async function ownerRoutes(fastify: FastifyInstance) {
     const { id } = req.params
     const { data, error } = await fastify.supabase
       .from('tenants').update({ status: 'cancelled' }).eq('id', id).select('id, status').single()
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to cancel tenant')
     return reply.send({ data })
   })
 
@@ -440,7 +441,7 @@ export default async function ownerRoutes(fastify: FastifyInstance) {
     // Delete the tenant — ON DELETE CASCADE removes all dependent tenant rows
     const { error: delErr } = await fastify.supabase
       .from('tenants').delete().eq('id', id)
-    if (delErr) return reply.code(500).send({ error: 'DB_ERROR', message: delErr.message })
+    if (delErr) return serverError(req, reply, delErr, ErrorCode.DELETE_FAILED, 'Failed to delete tenant')
 
     // Best-effort: delete the freed auth users (don't fail the request if this errors)
     let authDeleted = 0
@@ -486,7 +487,7 @@ export default async function ownerRoutes(fastify: FastifyInstance) {
       .in('role', ['super_admin', 'hr_admin', 'manager'])
       .order('created_at', { ascending: true })
 
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch tenant admins')
     if (!profiles?.length) return reply.send({ data: [] })
 
     // Enrich with emails from Supabase auth (service-role Admin API)
@@ -582,7 +583,7 @@ export default async function ownerRoutes(fastify: FastifyInstance) {
           return reply.code(409).send({ error: 'AUTH_DUPLICATE', message: 'This email already has an auth account. Use a different email or reset their password.' })
         }
       } else {
-        return reply.code(500).send({ error: 'AUTH_ERROR', message: authErr.message })
+        return serverError(req, reply, authErr, ErrorCode.INSERT_FAILED, 'Failed to create admin auth account')
       }
     }
 
@@ -607,7 +608,7 @@ export default async function ownerRoutes(fastify: FastifyInstance) {
     if (profileErr) {
       // Roll back auth user if profile insert fails
       await (fastify.supabase.auth as any).admin.deleteUser(userId).catch(() => {})
-      return reply.code(500).send({ error: 'DB_ERROR', message: profileErr.message })
+      return serverError(req, reply, profileErr, ErrorCode.INSERT_FAILED, 'Failed to create admin profile')
     }
 
     return reply.code(201).send({
@@ -643,7 +644,7 @@ export default async function ownerRoutes(fastify: FastifyInstance) {
       .select('id, full_name, role, is_active')
       .single()
 
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update admin')
     return reply.send({ data })
   })
 
@@ -678,7 +679,7 @@ export default async function ownerRoutes(fastify: FastifyInstance) {
       password: newPassword,
     })
 
-    if (resetErr) return reply.code(500).send({ error: 'AUTH_ERROR', message: resetErr.message })
+    if (resetErr) return serverError(req, reply, resetErr, ErrorCode.UPDATE_FAILED, 'Failed to reset password')
 
     return reply.send({
       data: {
@@ -715,7 +716,7 @@ export default async function ownerRoutes(fastify: FastifyInstance) {
     if (status) query = query.eq('status', status)
 
     const { data, error, count } = await query
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch signup requests')
 
     return reply.send({ data, meta: { total: count ?? 0, page, limit } })
   })
@@ -731,7 +732,7 @@ export default async function ownerRoutes(fastify: FastifyInstance) {
 
     if (error) {
       if (error.code === 'PGRST116') return reply.code(404).send({ error: 'NOT_FOUND' })
-      return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch signup request')
     }
     return reply.send({ data })
   })
@@ -777,7 +778,7 @@ export default async function ownerRoutes(fastify: FastifyInstance) {
       .select()
       .single()
 
-    if (tenantErr) return reply.code(500).send({ error: 'DB_ERROR', message: tenantErr.message })
+    if (tenantErr) return serverError(req, reply, tenantErr, ErrorCode.INSERT_FAILED, 'Failed to create tenant from signup request')
 
     // Update request status
     await fastify.supabase
@@ -814,7 +815,7 @@ export default async function ownerRoutes(fastify: FastifyInstance) {
       .select('id, status, rejection_reason')
       .single()
 
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to reject signup request')
     if (!data)  return reply.code(409).send({ error: 'CONFLICT', message: 'Request is not pending or not found' })
 
     return reply.send({ data })
@@ -843,7 +844,7 @@ export default async function ownerRoutes(fastify: FastifyInstance) {
     if (activeOnly) query = query.eq('is_active', true)
 
     const { data, error } = await query
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch API keys')
 
     return reply.send({ data })
   })
@@ -880,7 +881,7 @@ export default async function ownerRoutes(fastify: FastifyInstance) {
       .select('id, tenant_id, name, key_prefix, scopes, expires_at, is_active, created_at')
       .single()
 
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create API key')
 
     // Return the full key ONCE — it won't be retrievable again
     return reply.code(201).send({
@@ -899,7 +900,7 @@ export default async function ownerRoutes(fastify: FastifyInstance) {
       .select('id, is_active')
       .single()
 
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to revoke API key')
     return reply.send({ data })
   })
 
@@ -926,7 +927,7 @@ export default async function ownerRoutes(fastify: FastifyInstance) {
         return q.range(from, to)
       })
     } catch (err: any) {
-      return reply.code(500).send({ error: 'DB_ERROR', message: err.message })
+      return serverError(req, reply, err, ErrorCode.QUERY_FAILED, 'Failed to fetch API usage')
     }
 
     // Aggregate by tenant
@@ -987,7 +988,7 @@ export default async function ownerRoutes(fastify: FastifyInstance) {
           .range(from, to),
       )
     } catch (err: any) {
-      return reply.code(500).send({ error: 'DB_ERROR', message: err.message })
+      return serverError(req, reply, err, ErrorCode.QUERY_FAILED, 'Failed to fetch API usage for tenant')
     }
 
     return reply.send({ data, meta: { tenant_id: tenantId, days } })
@@ -1020,7 +1021,7 @@ export default async function ownerRoutes(fastify: FastifyInstance) {
     if (month)    query = query.eq('snapshot_month', month)
 
     const { data, error, count } = await query
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch billing snapshots')
 
     // Total amount across result set
     const totalAmount = (data ?? []).reduce((s, r) => s + Number(r.amount_due ?? 0), 0)
@@ -1041,7 +1042,7 @@ export default async function ownerRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', tenantId)
       .order('snapshot_month', { ascending: false })
 
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch tenant billing history')
 
     const total = (data ?? []).reduce((s, r) => s + Number(r.amount_due ?? 0), 0)
 
@@ -1053,13 +1054,13 @@ export default async function ownerRoutes(fastify: FastifyInstance) {
   // ══════════════════════════════════════════════════════════════════════════════
 
   // GET /owner/admins
-  fastify.get('/owner/admins', ownerAuth, async (_req, reply) => {
+  fastify.get('/owner/admins', ownerAuth, async (req: any, reply) => {
     const { data, error } = await fastify.supabase
       .from('platform_admins')
       .select('id, name, email, role, is_active, last_login_at, created_at, invited_by')
       .order('created_at', { ascending: true })
 
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch platform admins')
     return reply.send({ data })
   })
 
@@ -1160,7 +1161,7 @@ export default async function ownerRoutes(fastify: FastifyInstance) {
       .select('id, name, email, role, is_active')
       .single()
 
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update platform admin')
     return reply.send({ data })
   })
 
@@ -1180,7 +1181,7 @@ export default async function ownerRoutes(fastify: FastifyInstance) {
       .select('id, is_active')
       .single()
 
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to deactivate platform admin')
     return reply.send({ data, message: 'Admin deactivated' })
   })
 
@@ -1192,7 +1193,7 @@ export default async function ownerRoutes(fastify: FastifyInstance) {
       .eq('id', req.platformAdminId)
       .single()
 
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch profile')
     return reply.send({ data })
   })
 
@@ -1286,10 +1287,10 @@ export default async function ownerRoutes(fastify: FastifyInstance) {
   const AI_PROVIDERS = ['groq', 'openai', 'gemini']
 
   // ── GET /owner/ai-config — the global managed master chain (keys masked) ───────
-  fastify.get('/owner/ai-config', ownerAuth, async (_req, reply) => {
+  fastify.get('/owner/ai-config', ownerAuth, async (req: any, reply) => {
     const { data, error } = await fastify.supabase
       .from('ai_managed_config').select('*').eq('id', 1).maybeSingle()
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch AI config')
     const chain = Array.isArray((data as any)?.providers_json) ? (data as any).providers_json : []
     return reply.send({
       data: {
@@ -1347,7 +1348,7 @@ export default async function ownerRoutes(fastify: FastifyInstance) {
     const { error } = await fastify.supabase
       .from('ai_managed_config')
       .upsert({ id: 1, providers_json, updated_by: req.platformAdminId, updated_at: new Date().toISOString() }, { onConflict: 'id' })
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to save AI config')
     return reply.send({ data: { ok: true } })
   })
 
@@ -1384,7 +1385,7 @@ export default async function ownerRoutes(fastify: FastifyInstance) {
     }
     const { data, error } = await fastify.supabase
       .from('tenants').update({ ai_mode: mode }).eq('id', id).select('id, ai_mode').single()
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update tenant AI mode')
     return reply.send({ data })
   })
 
@@ -1414,7 +1415,7 @@ export default async function ownerRoutes(fastify: FastifyInstance) {
       usage = usageRows
       prices = pricesResult.data
     } catch (err: any) {
-      return reply.code(500).send({ error: 'DB_ERROR', message: err.message })
+      return serverError(req, reply, err, ErrorCode.QUERY_FAILED, 'Failed to fetch AI usage')
     }
 
     // Price lookup: exact provider+model, else provider '*' fallback, else 0.
@@ -1463,12 +1464,12 @@ export default async function ownerRoutes(fastify: FastifyInstance) {
   })
 
   // ── GET /owner/ai-pricing — the editable price table ───────────────────────────
-  fastify.get('/owner/ai-pricing', ownerAuth, async (_req, reply) => {
+  fastify.get('/owner/ai-pricing', ownerAuth, async (req: any, reply) => {
     const { data, error } = await fastify.supabase
       .from('ai_price_table')
       .select('id, provider, model, prompt_per_mtok, completion_per_mtok, currency, updated_at')
       .order('provider', { ascending: true }).order('model', { ascending: true })
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch AI price table')
     return reply.send({ data: { rows: data ?? [] } })
   })
 

@@ -9,6 +9,7 @@ import { logAction } from '../../lib/audit-service.js'
 import { gateApprove, gateReject } from '../../lib/approval-orchestrator.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { checkIdempotency, storeIdempotency } from '../../lib/idempotency.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 const CATEGORY_TYPES = ['medical', 'travel', 'food', 'telephone', 'internet', 'books', 'uniform', 'other'] as const
 
@@ -71,7 +72,7 @@ export default async function reimbursementsRoutes(fastify: FastifyInstance) {
     }
 
     const { data, count, error } = await q
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch reimbursement claims')
     return reply.send({ data: data ?? [], total: count ?? 0 })
   })
 
@@ -134,7 +135,7 @@ export default async function reimbursementsRoutes(fastify: FastifyInstance) {
       .select('*, reimbursement_categories(id, name, code, category_type)')
       .single()
 
-    if (error) return reply.code(500).send({ error: 'INSERT_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create reimbursement claim')
     return reply.code(201).send({ data })
   })
 
@@ -192,7 +193,7 @@ export default async function reimbursementsRoutes(fastify: FastifyInstance) {
       .select('*, reimbursement_categories(id, name, code, category_type)')
       .single()
 
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update reimbursement claim')
     return reply.send({ data })
   })
 
@@ -239,7 +240,7 @@ export default async function reimbursementsRoutes(fastify: FastifyInstance) {
       .select('id, status, submitted_at')
       .single()
 
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to submit reimbursement claim')
     return reply.send({ message: 'Claim submitted for approval', data })
   })
 
@@ -283,7 +284,7 @@ export default async function reimbursementsRoutes(fastify: FastifyInstance) {
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
 
-    if (error) return reply.code(500).send({ error: 'DELETE_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.DELETE_FAILED, 'Failed to delete reimbursement claim')
     return reply.code(204).send()
   })
 
@@ -308,7 +309,7 @@ export default async function reimbursementsRoutes(fastify: FastifyInstance) {
     }
 
     const { data, error } = await q
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch reimbursement categories')
     return reply.send({ data: data ?? [] })
   })
 
@@ -340,7 +341,7 @@ export default async function reimbursementsRoutes(fastify: FastifyInstance) {
       if (error.code === '23505') {
         return reply.code(409).send({ error: 'DUPLICATE_CODE', message: 'A category with this code already exists' })
       }
-      return reply.code(500).send({ error: 'INSERT_FAILED', message: error.message })
+      return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create reimbursement category')
     }
 
     return reply.code(201).send({ data })
@@ -375,7 +376,7 @@ export default async function reimbursementsRoutes(fastify: FastifyInstance) {
       .select()
       .single()
 
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update reimbursement category')
     if (!data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Category not found' })
 
     return reply.send({ data })
@@ -471,7 +472,7 @@ export default async function reimbursementsRoutes(fastify: FastifyInstance) {
     q = q.range(offset, offset + limit - 1)
 
     const { data, count, error } = await q
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch reimbursement claims')
     return reply.send({ data: data ?? [], total: count ?? 0, limit, offset })
   })
 
@@ -503,7 +504,7 @@ export default async function reimbursementsRoutes(fastify: FastifyInstance) {
       .select()
       .single()
 
-    if (error) return reply.code(500).send({ error: 'INSERT_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create reimbursement claim')
     return reply.code(201).send({ data })
   })
 
@@ -545,7 +546,7 @@ export default async function reimbursementsRoutes(fastify: FastifyInstance) {
       .select()
       .single()
 
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update reimbursement claim')
     return reply.send({ data })
   })
 
@@ -561,7 +562,7 @@ export default async function reimbursementsRoutes(fastify: FastifyInstance) {
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
 
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to submit reimbursement claim')
     return reply.send({ message: 'Claim submitted' })
   })
 
@@ -640,7 +641,7 @@ export default async function reimbursementsRoutes(fastify: FastifyInstance) {
       .select()
       .single()
 
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to approve reimbursement claim')
     if (!data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Claim not found' })
 
     await logAction(fastify.supabase, {
@@ -721,7 +722,7 @@ export default async function reimbursementsRoutes(fastify: FastifyInstance) {
       .select()
       .single()
 
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to reject reimbursement claim')
     if (!data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Claim not found' })
 
     await logAction(fastify.supabase, {
@@ -770,7 +771,7 @@ export default async function reimbursementsRoutes(fastify: FastifyInstance) {
       .eq('claim_id', id)
       .eq('tenant_id', req.tenantId)
 
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch claim attachments')
     return reply.send({ data: data ?? [] })
   })
 
@@ -824,7 +825,7 @@ export default async function reimbursementsRoutes(fastify: FastifyInstance) {
       .select()
       .single()
 
-    if (error) return reply.code(500).send({ error: 'INSERT_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to save claim attachment')
     return reply.code(201).send({ data })
   })
 
@@ -864,7 +865,7 @@ export default async function reimbursementsRoutes(fastify: FastifyInstance) {
     q = q.range(offset, offset + limit - 1)
 
     const { data, count, error } = await q
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch reimbursement claims')
 
     // Flatten the embedded employee/category relations into the flat field names
     // the admin table renders (employee_name, category_name, claim_month).
@@ -911,7 +912,7 @@ export default async function reimbursementsRoutes(fastify: FastifyInstance) {
       .update({ status: 'approved', approved_amount: parsed.data.approved_amount, reviewed_by: req.userId, reviewed_at: now, updated_at: now })
       .eq('id', id).eq('tenant_id', req.tenantId).select().single()
 
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to review reimbursement claim')
     await logAction(fastify.supabase, { tenantId: req.tenantId, tableName: 'reimbursement_claims', recordId: id, action: 'UPDATE', performedBy: req.userId, onBehalfOf: (existing as any).employee_id ?? null, newData: { status: 'approved', approved_amount: parsed.data.approved_amount } })
     return reply.send({ data })
   })
@@ -978,7 +979,7 @@ export default async function reimbursementsRoutes(fastify: FastifyInstance) {
       .update({ status: 'approved', approved_amount: approvedAmt, reviewed_by: req.userId, reviewed_at: now, updated_at: now })
       .eq('id', id).eq('tenant_id', req.tenantId).in('status', ['submitted', 'under_review']).select().maybeSingle()
 
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to approve reimbursement claim')
     if (!data) return reply.code(409).send({ error: 'ALREADY_ACTIONED', message: 'Claim was already actioned by another request' })
     await logAction(fastify.supabase, { tenantId: req.tenantId, tableName: 'reimbursement_claims', recordId: id, action: 'UPDATE', performedBy: req.userId, onBehalfOf: (existing as any).employee_id ?? null, newData: { status: 'approved', approved_amount: approvedAmt } })
     if (iKey) await storeIdempotency(fastify.supabase, req.tenantId, iKey, 'reimbursement-approve', 200, { data })
@@ -1027,7 +1028,7 @@ export default async function reimbursementsRoutes(fastify: FastifyInstance) {
       .update({ status: 'rejected', rejection_reason: parsed.data.rejection_reason, reviewed_by: req.userId, reviewed_at: now, updated_at: now })
       .eq('id', id).eq('tenant_id', req.tenantId).select().single()
 
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to reject reimbursement claim')
     await logAction(fastify.supabase, { tenantId: req.tenantId, tableName: 'reimbursement_claims', recordId: id, action: 'UPDATE', performedBy: req.userId, onBehalfOf: (existing as any).employee_id ?? null, newData: { status: 'rejected', rejection_reason: parsed.data.rejection_reason } })
     return reply.send({ data })
   })
@@ -1060,7 +1061,7 @@ export default async function reimbursementsRoutes(fastify: FastifyInstance) {
       .eq('status', 'approved')   // fold the precondition into the WHERE — TOCTOU-safe
       .select().maybeSingle()
 
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to mark reimbursement claim as paid')
     if (!data) return reply.code(409).send({ error: 'INVALID_STATUS', message: 'Claim not found or not in an approved state' })
 
     await logAction(fastify.supabase, { tenantId: req.tenantId, tableName: 'reimbursement_claims', recordId: id, action: 'UPDATE', performedBy: req.userId, onBehalfOf: (data as any).employee_id ?? null, newData: { status: 'paid' } })
@@ -1083,7 +1084,7 @@ export default async function reimbursementsRoutes(fastify: FastifyInstance) {
       .or(`claim_date.gte.${firstDay},expense_date.gte.${firstDay}`)
       .or(`claim_date.lte.${lastDay},expense_date.lte.${lastDay}`)
 
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch pending reimbursement payments')
     return reply.send({ data: data ?? [], month })
   })
 }

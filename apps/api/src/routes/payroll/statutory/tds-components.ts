@@ -15,6 +15,7 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { logAction } from '../../../lib/audit-service.js'
 import { HR_ADMIN_ROLES } from '../../../lib/rbac.js'
+import { serverError, ErrorCode } from '../../../lib/api-errors.js'
 
 // tax_declaration_components.parent_group / .declaration_type CHECK
 // constraints (migration 168) — the ground truth for valid values.
@@ -86,7 +87,7 @@ export default async function tdsComponentsRoute(fastify: FastifyInstance) {
 
     const { data, error } = await q
     if (error) {
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch tax declaration components')
     }
 
     const components = (data as any[]) ?? []
@@ -125,7 +126,7 @@ export default async function tdsComponentsRoute(fastify: FastifyInstance) {
       .maybeSingle()
 
     if (error) {
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch component')
     }
     if (!data) {
       return reply.code(404).send({ error: 'NOT_FOUND', message: 'Component not found' })
@@ -167,7 +168,7 @@ export default async function tdsComponentsRoute(fastify: FastifyInstance) {
       .single()
 
     if (error) {
-      return reply.code(500).send({ error: 'INSERT_FAILED', message: error.message })
+      return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create component')
     }
 
     await logAction(fastify.supabase, {
@@ -231,7 +232,7 @@ export default async function tdsComponentsRoute(fastify: FastifyInstance) {
       .single()
 
     if (error) {
-      return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+      return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update component')
     }
 
     return reply.send({ data })
