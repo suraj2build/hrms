@@ -246,13 +246,17 @@ export default async function essLoansRoutes(fastify: FastifyInstance) {
     }
 
     const now = new Date().toISOString()
-    const { error } = await fastify.supabase
+    const { data: updated, error } = await fastify.supabase
       .from('advance_salary_requests')
       .update({ status: 'pending_hr', manager_approved_by: req.userId, manager_approved_at: now, updated_at: now })
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
+      .eq('status', 'pending_manager')
+      .select('id')
+      .maybeSingle()
 
     if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    if (!updated) return reply.code(409).send({ error: 'INVALID_STATUS', message: 'Request is no longer pending manager approval' })
     return reply.send({ message: 'Approved — forwarded to HR for final approval' })
   })
 
@@ -281,11 +285,16 @@ export default async function essLoansRoutes(fastify: FastifyInstance) {
     if ((emp as any)?.manager_id !== managerEmpId) return reply.code(403).send({ error: 'FORBIDDEN' })
 
     const now = new Date().toISOString()
-    await fastify.supabase
+    const { data: updated, error } = await fastify.supabase
       .from('advance_salary_requests')
       .update({ status: 'rejected', rejection_reason: parsed.data.reason, manager_rejected_at: now, updated_at: now })
       .eq('id', id).eq('tenant_id', req.tenantId)
+      .eq('status', 'pending_manager')
+      .select('id')
+      .maybeSingle()
 
+    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    if (!updated) return reply.code(409).send({ error: 'INVALID_STATUS', message: 'Request is no longer pending manager approval' })
     return reply.send({ message: 'Advance request rejected' })
   })
 
@@ -311,11 +320,16 @@ export default async function essLoansRoutes(fastify: FastifyInstance) {
     if ((emp as any)?.manager_id !== managerEmpId) return reply.code(403).send({ error: 'FORBIDDEN' })
 
     const now = new Date().toISOString()
-    await fastify.supabase
+    const { data: updated, error } = await fastify.supabase
       .from('employee_loans')
       .update({ status: 'pending_hr', manager_approved_by: req.userId, manager_approved_at: now, updated_at: now })
       .eq('id', id).eq('tenant_id', req.tenantId)
+      .eq('status', 'pending_manager')
+      .select('id')
+      .maybeSingle()
 
+    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    if (!updated) return reply.code(409).send({ error: 'INVALID_STATUS', message: 'Loan is no longer pending manager approval' })
     return reply.send({ message: 'Approved — forwarded to HR for final approval' })
   })
 
@@ -342,11 +356,16 @@ export default async function essLoansRoutes(fastify: FastifyInstance) {
     if ((emp as any)?.manager_id !== managerEmpId) return reply.code(403).send({ error: 'FORBIDDEN' })
 
     const now = new Date().toISOString()
-    await fastify.supabase
+    const { data: updated, error } = await fastify.supabase
       .from('employee_loans')
       .update({ status: 'rejected', rejection_reason: parsed.data.reason, manager_rejected_at: now, updated_at: now })
       .eq('id', id).eq('tenant_id', req.tenantId)
+      .eq('status', 'pending_manager')
+      .select('id')
+      .maybeSingle()
 
+    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    if (!updated) return reply.code(409).send({ error: 'INVALID_STATUS', message: 'Loan is no longer pending manager approval' })
     return reply.send({ message: 'Loan request rejected' })
   })
 }
