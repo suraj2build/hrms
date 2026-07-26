@@ -135,6 +135,7 @@ export default async function workforceDrillRoutes(fastify: FastifyInstance) {
             last_name,
             job_history!job_history_employee_id_fkey(
               is_current,
+              department_id,
               departments(name),
               manager_id
             )
@@ -151,29 +152,35 @@ export default async function workforceDrillRoutes(fastify: FastifyInstance) {
       fastify.log.warn({ err: (err as Error)?.message }, 'workforce-drill: employee join failed, falling back to simple query')
     }
 
-    // Build employee lookup map — id → { code, name, department }
-    type EmpMeta = { employee_code: string; name: string; department: string | null }
+    // Build employee lookup map — id → { code, name, department }. When
+    // isManager, the query above already scoped job_history.manager_id, so
+    // empMeta only contains this manager's team — every metric loop below
+    // must skip any employee_id NOT present here, otherwise a manager could
+    // see tenant-wide metric values (OT hours, reliability scores, etc.) for
+    // employees outside their team even though display fields degrade to
+    // "Unknown"/"N/A".
+    type EmpMeta = { employee_code: string; name: string; department: string | null; department_id: string | null }
     const empMeta = new Map<string, EmpMeta>()
 
     if (empRows && empRows.length > 0) {
       for (const e of empRows as any[]) {
         const deptName = e.job_history?.[0]?.departments?.name ?? null
+        const deptId   = e.job_history?.[0]?.department_id ?? null
         empMeta.set(e.id, {
           employee_code: e.employee_code,
           name:          `${e.first_name} ${e.last_name}`,
           department:    deptName,
+          department_id: deptId,
         })
       }
     }
 
-    // Apply department filter after the join (if present)
-    const allowedEmployeeIds = department_id
-      ? new Set(
-          [...empMeta.entries()]
-            .filter(() => true)  // department filter applied below
-            .map(([id]) => id)
-        )
-      : null
+    // Applies to every metric loop below: manager-scope + department filter.
+    function isAllowed(employee_id: string): boolean {
+      if (isManager && !empMeta.has(employee_id)) return false
+      if (department_id && empMeta.get(employee_id)?.department_id !== department_id) return false
+      return true
+    }
 
     // ── Step 2: Fetch metric-specific data ────────────────────────────────────
 
@@ -219,19 +226,7 @@ export default async function workforceDrillRoutes(fastify: FastifyInstance) {
 
       for (const [employee_id, stats] of empStats.entries()) {
         if (stats.targetDays === 0) continue
-
-        // Department filter
-        if (department_id && empMeta.get(employee_id)?.department !== undefined) {
-          // We can only filter if we have department data
-          const empDept = (empRows as any[])?.find((e: any) => e.id === employee_id)
-          if (!empDept) continue
-          const deptName = (empRows as any[])?.find((e: any) => e.id === employee_id)
-            ?.job_history?.[0]?.departments?.name
-          // department_id filter: check via empRows
-          const empJobDeptId = (empRows as any[])?.find((e: any) => e.id === employee_id)
-            ?.job_history?.[0]?.department_id
-          if (empJobDeptId && empJobDeptId !== department_id) continue
-        }
+        if (!isAllowed(employee_id)) continue
 
         const rate     = stats.totalDays > 0 ? stats.targetDays / stats.totalDays : 0
         const pct      = parseFloat((rate * 100).toFixed(1))
@@ -295,6 +290,7 @@ export default async function workforceDrillRoutes(fastify: FastifyInstance) {
       }
 
       for (const [employee_id, stats] of empOtStats.entries()) {
+        if (!isAllowed(employee_id)) continue
         const totalHours = parseFloat((stats.total_ot_minutes / 60).toFixed(1))
         // Severity: high if > 40 OT hours, medium if > 20, low otherwise
         const severity: Severity = totalHours >= 40 ? 'high' : totalHours >= 20 ? 'medium' : 'low'
@@ -368,6 +364,7 @@ export default async function workforceDrillRoutes(fastify: FastifyInstance) {
       }
 
       for (const [employee_id, stats] of pressureMap.entries()) {
+        if (!isAllowed(employee_id)) continue
         const totalPressureDays = stats.weekly_off_days + stats.holiday_days
         const severity: Severity = totalPressureDays >= 5 ? 'high' : totalPressureDays >= 2 ? 'medium' : 'low'
 
@@ -429,6 +426,7 @@ export default async function workforceDrillRoutes(fastify: FastifyInstance) {
       }
 
       for (const [employee_id, stats] of relMap.entries()) {
+        if (!isAllowed(employee_id)) continue
         const absentRate = stats.total > 0 ? stats.absent / stats.total : 0
         const lateRate   = stats.total > 0 ? stats.late   / stats.total : 0
         const score      = Math.max(0, Math.min(100, Math.round(100 - absentRate * 60 - lateRate * 20)))

@@ -165,7 +165,7 @@ export default async function surveyRoutes(fastify: FastifyInstance) {
       .eq('employee_id', empId)
       .order('assigned_at', { ascending: false })
 
-    if (error) return reply.status(500).send({ error: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch your surveys')
     return reply.send({ data: data ?? [] })
   })
 
@@ -241,12 +241,19 @@ export default async function surveyRoutes(fastify: FastifyInstance) {
       .from('survey_responses')
       .upsert(rows, { onConflict: 'assignment_id,question_id' })
 
-    if (respErr) return reply.status(500).send({ error: respErr.message })
+    if (respErr) return serverError(req, reply, respErr, ErrorCode.INSERT_FAILED, 'Failed to save survey responses')
 
-    await supabase
+    // Fold the completed_at guard into this UPDATE's own WHERE clause — the
+    // earlier SELECT above is a separate query, so two concurrent submits
+    // could both pass it before either writes. This UPDATE only succeeds for
+    // whichever request gets there first.
+    const { error: completeErr } = await supabase
       .from('survey_assignments')
       .update({ completed_at: new Date().toISOString() })
       .eq('id', assignment.id)
+      .is('completed_at', null)
+
+    if (completeErr) return serverError(req, reply, completeErr, ErrorCode.UPDATE_FAILED, 'Responses saved but failed to mark survey complete')
 
     // LLM sentiment analysis for text responses (best-effort, async)
     const textResponses = responses
@@ -302,19 +309,25 @@ export default async function surveyRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', req.tenantId)
       .order('created_at', { ascending: false })
 
-    if (error) return reply.status(500).send({ error: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch surveys')
 
     const surveyIds = (data ?? []).map(s => s.id)
     const statsMap: Record<string, { total: number; completed: number }> = {}
 
     if (surveyIds.length) {
-      const { data: asgns } = await supabase
-        .from('survey_assignments')
-        .select('survey_id, completed_at')
-        .eq('tenant_id', req.tenantId)
-        .in('survey_id', surveyIds)
+      // A tenant running several assign-all surveys can have assignment
+      // counts well past PostgREST's 1,000-row cap — an unbounded .select()
+      // would silently under-report total_assigned/total_completed here.
+      const asgns = await fetchAllRows<{ survey_id: string; completed_at: string | null }>((from, to) =>
+        supabase
+          .from('survey_assignments')
+          .select('survey_id, completed_at')
+          .eq('tenant_id', req.tenantId)
+          .in('survey_id', surveyIds)
+          .range(from, to),
+      )
 
-      for (const a of asgns ?? []) {
+      for (const a of asgns) {
         if (!statsMap[a.survey_id]) statsMap[a.survey_id] = { total: 0, completed: 0 }
         statsMap[a.survey_id].total++
         if (a.completed_at) statsMap[a.survey_id].completed++
@@ -485,7 +498,7 @@ export default async function surveyRoutes(fastify: FastifyInstance) {
       .from('survey_assignments')
       .upsert(rows, { onConflict: 'survey_id,employee_id', ignoreDuplicates: true })
 
-    if (error) return reply.status(500).send({ error: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to assign survey')
     return reply.send({ data: { assigned: empIds.length } })
   })
 
@@ -510,26 +523,37 @@ export default async function surveyRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', tenantId)
       .order('order_idx')
 
-    const { data: assignments } = await supabase
-      .from('survey_assignments')
-      .select('id, completed_at')
-      .eq('survey_id', id)
-      .eq('tenant_id', tenantId)
+    // Assign-all surveys can generate assignment counts well past
+    // PostgREST's 1,000-row cap — an unbounded .select() would silently
+    // undercount total_assigned/total_completed with no error.
+    const assignments = await fetchAllRows<{ id: string; completed_at: string | null }>((from, to) =>
+      supabase
+        .from('survey_assignments')
+        .select('id, completed_at')
+        .eq('survey_id', id)
+        .eq('tenant_id', tenantId)
+        .range(from, to),
+    )
 
-    const assignmentIds   = (assignments ?? []).map(a => a.id)
+    const assignmentIds   = assignments.map(a => a.id)
     const totalAssigned   = assignmentIds.length
-    const totalCompleted  = (assignments ?? []).filter(a => a.completed_at).length
+    const totalCompleted  = assignments.filter(a => a.completed_at).length
 
     const responsesByQ: Record<string, unknown[]> = {}
 
     if (assignmentIds.length) {
-      const { data: responses } = await supabase
-        .from('survey_responses')
-        .select('question_id, response')
-        .eq('tenant_id', tenantId)
-        .in('assignment_id', assignmentIds)
+      // Response rows = assignments × questions, so this can exceed 1,000
+      // even faster than the assignments query above.
+      const responses = await fetchAllRows<{ question_id: string; response: unknown }>((from, to) =>
+        supabase
+          .from('survey_responses')
+          .select('question_id, response')
+          .eq('tenant_id', tenantId)
+          .in('assignment_id', assignmentIds)
+          .range(from, to),
+      )
 
-      for (const r of responses ?? []) {
+      for (const r of responses) {
         if (!responsesByQ[r.question_id]) responsesByQ[r.question_id] = []
         responsesByQ[r.question_id].push(r.response)
       }
@@ -563,13 +587,16 @@ export default async function surveyRoutes(fastify: FastifyInstance) {
     })
 
     // Location breakdown
-    const { data: assignedEmps } = await supabase
-      .from('survey_assignments')
-      .select('id, completed_at, employee_id, employees(work_location_id, work_locations(id, name))')
-      .eq('survey_id', id)
-      .eq('tenant_id', tenantId)
+    const assignedEmps = await fetchAllRows<any>((from, to) =>
+      supabase
+        .from('survey_assignments')
+        .select('id, completed_at, employee_id, employees(work_location_id, work_locations(id, name))')
+        .eq('survey_id', id)
+        .eq('tenant_id', tenantId)
+        .range(from, to),
+    )
     const locMap: Record<string, { name: string; total: number; completed: number }> = {}
-    for (const a of (assignedEmps ?? []) as any[]) {
+    for (const a of assignedEmps) {
       const locId   = a.employees?.work_location_id ?? '__none__'
       const locName = a.employees?.work_locations?.name ?? 'Unassigned'
       if (!locMap[locId]) locMap[locId] = { name: locName, total: 0, completed: 0 }
@@ -633,14 +660,15 @@ export default async function surveyRoutes(fastify: FastifyInstance) {
       })
       .select('id')
       .single()
-    if (se || !survey) return reply.status(500).send({ error: se?.message })
+    if (se || !survey) return serverError(req, reply, se, ErrorCode.INSERT_FAILED, 'Failed to create survey from template')
 
     const questions = (tmpl.questions as any[]).map(q => ({
       ...q,
       survey_id: survey.id,
       tenant_id: tenantId,
     }))
-    await supabase.from('survey_questions').insert(questions)
+    const { error: qErr } = await supabase.from('survey_questions').insert(questions)
+    if (qErr) return serverError(req, reply, qErr, ErrorCode.INSERT_FAILED, 'Survey created but failed to save questions')
 
     return reply.status(201).send({
       data: { id: survey.id, title: title || tmpl.name, survey_type: tmpl.survey_type },
@@ -747,6 +775,22 @@ export default async function surveyRoutes(fastify: FastifyInstance) {
     const empIds = employee_ids ?? []
     if (empIds.length === 0) return reply.status(400).send({ error: 'employee_ids required' })
 
+    // employee_ids is caller-supplied — verify every id belongs to this
+    // tenant before it's used, matching the same check on /admin/:id/assign
+    // and /my/360/:roundId/nominate. Without it, survey_assignments rows
+    // could be created referencing another tenant's employee under this
+    // tenant_id, corrupting completion stats and potentially exposing survey
+    // content to a foreign employee.
+    const uniqueEmpIds = [...new Set(empIds)]
+    const { data: validEmps } = await supabase
+      .from('employees')
+      .select('id')
+      .eq('tenant_id', tenantId)
+      .in('id', uniqueEmpIds)
+    if ((validEmps?.length ?? 0) !== uniqueEmpIds.length) {
+      return reply.status(400).send({ error: 'INVALID_EMPLOYEES', message: 'One or more employees were not found in your organisation' })
+    }
+
     const assignments = empIds.map(emp_id => ({
       survey_id:      survey.id,
       employee_id:    emp_id,
@@ -758,7 +802,7 @@ export default async function surveyRoutes(fastify: FastifyInstance) {
       .from('survey_assignments')
       .upsert(assignments, { onConflict: 'survey_id,employee_id', ignoreDuplicates: true })
 
-    if (error) return reply.status(500).send({ error: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to trigger lifecycle survey')
 
     return reply.send({ data: { assigned: empIds.length, survey_title: survey.title } })
   })
@@ -801,7 +845,7 @@ export default async function surveyRoutes(fastify: FastifyInstance) {
       .select('id')
       .single()
 
-    if (error) return reply.status(500).send({ error: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to set up 360 feedback round')
     return reply.status(201).send({ data: round })
   })
 
@@ -951,7 +995,7 @@ export default async function surveyRoutes(fastify: FastifyInstance) {
       .from('feedback_360_nominators')
       .upsert(rows, { onConflict: 'round_id,employee_id', ignoreDuplicates: true })
 
-    if (error) return reply.status(500).send({ error: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to submit 360 nominations')
     return reply.send({ data: { nominated: rows.length } })
   })
 }

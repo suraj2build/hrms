@@ -156,6 +156,24 @@ export default async function analyticsRoutes(fastify: FastifyInstance) {
       return reply.code(400).send({ error: 'SELF_MODIFY', message: 'Cannot change your own status.' })
     }
 
+    // Verify the target and block touching another super_admin — mirrors the
+    // /role endpoint's guard above. Without this, an hr_admin (also granted
+    // adminAuth here) could deactivate a super_admin's profile and, via the
+    // auth ban below, lock them out of their own Supabase Auth account.
+    const { data: target, error: fetchErr } = await fastify.supabase
+      .from('profiles')
+      .select('id, role')
+      .eq('id', id)
+      .eq('tenant_id', req.tenantId)
+      .single()
+
+    if (fetchErr || !target) {
+      return reply.code(404).send({ error: 'NOT_FOUND', message: 'User not found.' })
+    }
+    if ((target as any).role === 'super_admin') {
+      return reply.code(403).send({ error: 'FORBIDDEN', message: 'Cannot change another super admin’s status.' })
+    }
+
     const { data, error } = await fastify.supabase
       .from('profiles')
       .update({ is_active: parsed.data.is_active })

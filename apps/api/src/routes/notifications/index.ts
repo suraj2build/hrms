@@ -228,14 +228,10 @@ export default async function notificationsRoutes(fastify: FastifyInstance) {
         .eq('tenant_id', req.tenantId)
         .select('id')
 
-      if (error) {
-        fastify.log.warn({ event: 'notifications.escalate_failed', err: error.message })
-        return reply.send({ escalated: 0 })
-      }
+      if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to escalate items')
       return reply.send({ escalated: (data ?? []).length })
     } catch (err) {
-      fastify.log.error({ err }, 'notifications/escalate: unexpected error')
-      return reply.send({ escalated: 0 })
+      return serverError(req, reply, err, ErrorCode.UPDATE_FAILED, 'Failed to escalate items')
     }
   })
 
@@ -274,14 +270,10 @@ export default async function notificationsRoutes(fastify: FastifyInstance) {
         .select('id')
         .single()
 
-      if (error) {
-        fastify.log.warn({ event: 'notifications.notes_failed', err: error.message })
-        return reply.code(201).send({ id: null, saved: false })
-      }
+      if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to save note')
       return reply.code(201).send({ id: (data as any).id, saved: true })
     } catch (err) {
-      fastify.log.error({ err }, 'notifications/notes: unexpected error')
-      return reply.code(201).send({ id: null, saved: false })
+      return serverError(req, reply, err, ErrorCode.INSERT_FAILED, 'Failed to save note')
     }
   })
 

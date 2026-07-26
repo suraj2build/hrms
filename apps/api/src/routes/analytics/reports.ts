@@ -18,6 +18,18 @@
 import type { FastifyInstance } from 'fastify'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { fetchAllRows }  from '../../lib/supabase-paginate.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
+
+// Not every month has 31 days — a bare `${month}-31` literal against a
+// TIMESTAMPTZ column throws "date/time field value out of range" for
+// Apr/Jun/Sep/Nov/Feb, 500ing the endpoint whenever `to` falls in one of
+// those months. Compute the real last day instead (matches the fix already
+// applied in payroll/arrears.ts and workspace/stats.ts).
+function monthEndDate(month: string): string {
+  const [y, m] = month.split('-').map(Number)
+  const lastDay = new Date(y, m, 0).getDate()
+  return `${month}-${String(lastDay).padStart(2, '0')}`
+}
 
 export default async function reportsRoutes(fastify: FastifyInstance) {
   // All report endpoints expose tenant-wide data (full salary register,
@@ -71,8 +83,8 @@ export default async function reportsRoutes(fastify: FastifyInstance) {
     let employees: any[]
     try {
       employees = await fetchAllRows((from, to) => (empQuery as any).range(from, to))
-    } catch (error: any) {
-      return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    } catch (error) {
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch headcount data')
     }
 
     // Fetch separations in range for attrition calculation
@@ -83,7 +95,7 @@ export default async function reportsRoutes(fastify: FastifyInstance) {
         .eq('tenant_id', tid)
         .eq('status', 'separated')
         .gte('updated_at', fromMonth)
-        .lte('updated_at', `${toMonth.slice(0, 7)}-31`)
+        .lte('updated_at', monthEndDate(toMonth.slice(0, 7)))
         .range(from, to),
     )
 
@@ -323,8 +335,8 @@ export default async function reportsRoutes(fastify: FastifyInstance) {
           .eq('is_active', true)
           .range(from, to),
       )
-    } catch (compErr: any) {
-      return reply.code(500).send({ error: 'DB_ERROR', message: compErr.message })
+    } catch (compErr) {
+      return serverError(req, reply, compErr, ErrorCode.QUERY_FAILED, 'Failed to fetch salary register data')
     }
 
     // Fetch employees with job history for name + dept
@@ -437,8 +449,8 @@ export default async function reportsRoutes(fastify: FastifyInstance) {
           .eq('tenant_id', tid)
           .range(from, to),
       )
-    } catch (statErr: any) {
-      return reply.code(500).send({ error: 'DB_ERROR', message: statErr.message })
+    } catch (statErr) {
+      return serverError(req, reply, statErr, ErrorCode.QUERY_FAILED, 'Failed to fetch statutory report data')
     }
 
     // Active compensations for gross/CTC

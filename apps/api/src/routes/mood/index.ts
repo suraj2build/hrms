@@ -446,12 +446,21 @@ export default async function moodRoutes(fastify: FastifyInstance) {
 
   // ── POST /mood/admin/pulse ───────────────────────────────────────────────────
 
+  // Must match the pulse_questions.poll_category CHECK constraint
+  // (migration 333_mood_intelligence.sql) — a value zod lets through but the
+  // DB rejects would otherwise surface as an opaque 500 instead of a clean
+  // 400 VALIDATION_ERROR.
+  const POLL_CATEGORIES = [
+    'weekly_pulse', 'manager_quality', 'post_appraisal',
+    'onboarding', 'post_transfer', 'festival', 'custom',
+  ] as const
+
   const CreatePulseSchema = z.object({
     question:      z.string().min(1),
     options:       z.array(z.unknown()).optional().nullable(),
     starts_at:     z.string().optional().nullable(),
     ends_at:       z.string().optional().nullable(),
-    poll_category: z.string().optional(),
+    poll_category: z.enum(POLL_CATEGORIES).optional(),
   })
 
   const UpdatePulseSchema = z.object({
@@ -460,7 +469,7 @@ export default async function moodRoutes(fastify: FastifyInstance) {
     status:        z.enum(['draft', 'active', 'closed']).optional(),
     starts_at:     z.string().optional().nullable(),
     ends_at:       z.string().optional().nullable(),
-    poll_category: z.string().optional(),
+    poll_category: z.enum(POLL_CATEGORIES).optional(),
   })
 
   fastify.post('/admin/pulse', hrAuth, async (req: any, reply) => {

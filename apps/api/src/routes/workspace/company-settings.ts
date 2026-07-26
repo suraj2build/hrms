@@ -94,12 +94,17 @@ export default async function companySettingsRoutes(fastify: FastifyInstance) {
     if (body.timezone    != null) allowed.timezone    = String(body.timezone)
     if (body.logo_url    != null) allowed.logo_url    = body.logo_url === '' ? null : String(body.logo_url)
     if (body.settings    != null && typeof body.settings === 'object') {
-      // Merge into existing settings rather than overwrite
-      const { data: existing } = await fastify.supabase
+      // Merge into existing settings rather than overwrite. If this read
+      // fails, `existing` would silently be undefined and the merge below
+      // would collapse to just the new partial payload — permanently
+      // discarding every previously stored setting on the subsequent
+      // .update(). Bail instead of proceeding to write.
+      const { data: existing, error: readErr } = await fastify.supabase
         .from('tenants')
         .select('settings')
         .eq('id', tenantId)
         .single()
+      if (readErr) return serverError(req, reply, readErr, ErrorCode.QUERY_FAILED, 'Failed to read existing company settings')
       allowed.settings = { ...(existing?.settings ?? {}), ...body.settings }
     }
 

@@ -207,14 +207,29 @@ export default async function opsDashboardRoutes(fastify: FastifyInstance) {
       action_route?: string
     }> = []
 
+    // Each category below is capped at .limit(50) for the in-memory preview
+    // list, so `issues.length` (used for `total` further down) understates
+    // the real backlog once any category exceeds 50. Track each category's
+    // true count via a separate head:true query and report the sum as
+    // `total_backlog` alongside the existing (now explicitly-capped) `total`.
+    let trueTotal = 0
+
     if (type === 'all' || type === 'payroll_failures') {
-      const { data: runErrs } = await fastify.supabase
-        .from('payroll_run_events')
-        .select('id, event_type, employee_id, payload, error_details, created_at, run_id')
-        .eq('tenant_id', tenantId)
-        .in('event_type', ['data_fetch_failed','compensation_missing','validation_failed','slip_insert_failed'])
-        .order('created_at', { ascending: false })
-        .limit(50)
+      const [{ data: runErrs }, { count: runErrCount }] = await Promise.all([
+        fastify.supabase
+          .from('payroll_run_events')
+          .select('id, event_type, employee_id, payload, error_details, created_at, run_id')
+          .eq('tenant_id', tenantId)
+          .in('event_type', ['data_fetch_failed','compensation_missing','validation_failed','slip_insert_failed'])
+          .order('created_at', { ascending: false })
+          .limit(50),
+        fastify.supabase
+          .from('payroll_run_events')
+          .select('id', { count: 'exact', head: true })
+          .eq('tenant_id', tenantId)
+          .in('event_type', ['data_fetch_failed','compensation_missing','validation_failed','slip_insert_failed']),
+      ])
+      trueTotal += runErrCount ?? 0
 
       for (const e of (runErrs ?? []) as any[]) {
         issues.push({
@@ -232,13 +247,21 @@ export default async function opsDashboardRoutes(fastify: FastifyInstance) {
     }
 
     if (type === 'all' || type === 'blockers') {
-      const { data: blockers } = await fastify.supabase
-        .from('payroll_run_blockers')
-        .select('id, blocker_type:rule_code, employee_id, reason, severity, status, created_at, run_id')
-        .eq('tenant_id', tenantId)
-        .eq('status', 'open')
-        .order('created_at', { ascending: false })
-        .limit(50)
+      const [{ data: blockers }, { count: blockerCount }] = await Promise.all([
+        fastify.supabase
+          .from('payroll_run_blockers')
+          .select('id, blocker_type:rule_code, employee_id, reason, severity, status, created_at, run_id')
+          .eq('tenant_id', tenantId)
+          .eq('status', 'open')
+          .order('created_at', { ascending: false })
+          .limit(50),
+        fastify.supabase
+          .from('payroll_run_blockers')
+          .select('id', { count: 'exact', head: true })
+          .eq('tenant_id', tenantId)
+          .eq('status', 'open'),
+      ])
+      trueTotal += blockerCount ?? 0
 
       for (const b of (blockers ?? []) as any[]) {
         issues.push({
@@ -256,13 +279,21 @@ export default async function opsDashboardRoutes(fastify: FastifyInstance) {
     }
 
     if (type === 'all' || type === 'adjustments') {
-      const { data: adjs } = await fastify.supabase
-        .from('payroll_adjustments')
-        .select('id, employee_id, locked_month, adjustment_type, reason, status, created_at')
-        .eq('tenant_id', tenantId)
-        .eq('status', 'pending')
-        .order('created_at', { ascending: false })
-        .limit(50)
+      const [{ data: adjs }, { count: adjCount }] = await Promise.all([
+        fastify.supabase
+          .from('payroll_adjustments')
+          .select('id, employee_id, locked_month, adjustment_type, reason, status, created_at')
+          .eq('tenant_id', tenantId)
+          .eq('status', 'pending')
+          .order('created_at', { ascending: false })
+          .limit(50),
+        fastify.supabase
+          .from('payroll_adjustments')
+          .select('id', { count: 'exact', head: true })
+          .eq('tenant_id', tenantId)
+          .eq('status', 'pending'),
+      ])
+      trueTotal += adjCount ?? 0
 
       for (const a of (adjs ?? []) as any[]) {
         issues.push({
@@ -280,14 +311,24 @@ export default async function opsDashboardRoutes(fastify: FastifyInstance) {
     }
 
     if (type === 'all' || type === 'scheduler_failures') {
-      const { data: sjl } = await fastify.supabase
-        .from('scheduler_job_log')
-        .select('id, job_type, job_name, error_message, started_at, status')
-        .eq('tenant_id', tenantId)
-        .eq('status', 'failed')
-        .gte('started_at', new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString())
-        .order('started_at', { ascending: false })
-        .limit(50)
+      const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()
+      const [{ data: sjl }, { count: sjlCount }] = await Promise.all([
+        fastify.supabase
+          .from('scheduler_job_log')
+          .select('id, job_type, job_name, error_message, started_at, status')
+          .eq('tenant_id', tenantId)
+          .eq('status', 'failed')
+          .gte('started_at', sevenDaysAgo)
+          .order('started_at', { ascending: false })
+          .limit(50),
+        fastify.supabase
+          .from('scheduler_job_log')
+          .select('id', { count: 'exact', head: true })
+          .eq('tenant_id', tenantId)
+          .eq('status', 'failed')
+          .gte('started_at', sevenDaysAgo),
+      ])
+      trueTotal += sjlCount ?? 0
 
       for (const j of (sjl ?? []) as any[]) {
         issues.push({
@@ -308,7 +349,11 @@ export default async function opsDashboardRoutes(fastify: FastifyInstance) {
     issues.sort((a, b) => b.created_at.localeCompare(a.created_at))
     const page = issues.slice(offset, offset + limit)
 
-    return reply.send({ data: page, total: issues.length, limit, offset })
+    // `total` reflects the true backlog count (trueTotal); `preview_total`
+    // is the size of the in-memory list actually available to page through
+    // (each category capped at 50) — surfacing both prevents "total" from
+    // silently understating the backlog once any category exceeds 50.
+    return reply.send({ data: page, total: trueTotal, preview_total: issues.length, limit, offset })
   })
 
   // ── GET /payroll/ops/validate ─────────────────────────────────────────────────

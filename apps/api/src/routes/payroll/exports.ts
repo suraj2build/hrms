@@ -25,6 +25,7 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 function toCSV(headers: string[], rows: Record<string, unknown>[]): string {
   const escape = (v: unknown): string => {
@@ -88,23 +89,28 @@ export default async function payrollExportsRoutes(fastify: FastifyInstance) {
         if (employee_id) q = q.eq('employee_id', employee_id)
         return q.range(from, to)
       })
-    } catch (err: any) {
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: err?.message ?? 'Failed to fetch EPF contributions' })
+    } catch (err) {
+      return serverError(req, reply, err, ErrorCode.QUERY_FAILED, 'Failed to fetch EPF contributions')
     }
     if (site_id) rows = rows.filter(r => r.employees?.site_id === site_id)
 
-    // Also fetch UANs from epf_eligibility_overrides
+    // Also fetch UANs from epf_eligibility_overrides — the parent EPF query
+    // above is already paginated, so this lookup must be too, otherwise UANs
+    // silently resolve empty for any tenant with >1,000 EPF rows/month.
     const empIds = rows.map(r => r.employee_id)
     let uanMap = new Map<string, string | null>()
     if (empIds.length > 0) {
-      const { data: uanRows } = await fastify.supabase
-        .from('epf_eligibility_overrides')
-        .select('employee_id, uan')
-        .eq('tenant_id', req.tenantId)
-        .in('employee_id', empIds)
-        .is('effective_to', null)
+      const uanRows = await fetchAllRows<{ employee_id: string; uan: string | null }>((from, to) =>
+        fastify.supabase
+          .from('epf_eligibility_overrides')
+          .select('employee_id, uan')
+          .eq('tenant_id', req.tenantId)
+          .in('employee_id', empIds)
+          .is('effective_to', null)
+          .range(from, to),
+      )
 
-      for (const r of (uanRows ?? []) as any[]) {
+      for (const r of uanRows) {
         uanMap.set(r.employee_id, r.uan ?? null)
       }
     }
@@ -163,8 +169,8 @@ export default async function payrollExportsRoutes(fastify: FastifyInstance) {
         if (employee_id) q = q.eq('employee_id', employee_id)
         return q.range(from, to)
       })
-    } catch (err: any) {
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: err?.message ?? 'Failed to fetch ESI contributions' })
+    } catch (err) {
+      return serverError(req, reply, err, ErrorCode.QUERY_FAILED, 'Failed to fetch ESI contributions')
     }
     if (site_id) rows = rows.filter(r => r.employees?.site_id === site_id)
 
@@ -237,8 +243,8 @@ export default async function payrollExportsRoutes(fastify: FastifyInstance) {
         if (employee_id) q = q.eq('employee_id', employee_id)
         return q.range(from, to)
       })
-    } catch (err: any) {
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: err?.message ?? 'Failed to fetch PTax contributions' })
+    } catch (err) {
+      return serverError(req, reply, err, ErrorCode.QUERY_FAILED, 'Failed to fetch PTax contributions')
     }
 
     // Fetch PTax registrations per state
@@ -314,8 +320,8 @@ export default async function payrollExportsRoutes(fastify: FastifyInstance) {
         if (employee_id) q = q.eq('employee_id', employee_id)
         return q.range(from, to)
       })
-    } catch (err: any) {
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: err?.message ?? 'Failed to fetch LWF contributions' })
+    } catch (err) {
+      return serverError(req, reply, err, ErrorCode.QUERY_FAILED, 'Failed to fetch LWF contributions')
     }
 
     // Resolve LWF registration number per state from lwf_state_settings
@@ -393,8 +399,8 @@ export default async function payrollExportsRoutes(fastify: FastifyInstance) {
         if (employee_id) q = q.eq('employee_id', employee_id)
         return q.range(from, to)
       })
-    } catch (err: any) {
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: err?.message ?? 'Failed to fetch TDS declaration snapshots' })
+    } catch (err) {
+      return serverError(req, reply, err, ErrorCode.QUERY_FAILED, 'Failed to fetch TDS declaration snapshots')
     }
 
     // Dedupe: keep latest snapshot per employee
@@ -465,8 +471,8 @@ export default async function payrollExportsRoutes(fastify: FastifyInstance) {
             .range(from, to),
         ),
       ])
-    } catch (err: any) {
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: err?.message ?? 'Failed to fetch contribution totals' })
+    } catch (err) {
+      return serverError(req, reply, err, ErrorCode.QUERY_FAILED, 'Failed to fetch contribution totals')
     }
 
     const r2 = (n: number) => Math.round(n * 100) / 100
@@ -590,8 +596,8 @@ export default async function payrollExportsRoutes(fastify: FastifyInstance) {
           return q.range(from, to)
         }),
       ])
-    } catch (err: any) {
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: err?.message ?? 'Failed to fetch reconciliation data' })
+    } catch (err) {
+      return serverError(req, reply, err, ErrorCode.QUERY_FAILED, 'Failed to fetch reconciliation data')
     }
 
     const epfMap   = new Map(epfRows.map((r: any) => [r.employee_id, r]))

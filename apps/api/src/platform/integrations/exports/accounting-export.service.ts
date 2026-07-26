@@ -112,6 +112,23 @@ export class AccountingExportService {
         lines.push(row('Payroll Payable', 'TDS Payable', emp.tds, narration('TDS Deduction')))
       }
 
+      // 4a-d. Employee-side deductions withheld from gross pay — without
+      // these, "Payroll Payable" (credited by gross_pay above) is only ever
+      // reduced by TDS and net_pay, leaving a residual balance equal to
+      // these four fields' sum that never zeroes out.
+      if (emp.epf_employee > 0) {
+        lines.push(row('Payroll Payable', 'EPF Payable', emp.epf_employee, narration('EPF Employee')))
+      }
+      if (emp.esi_employee > 0) {
+        lines.push(row('Payroll Payable', 'ESI Payable', emp.esi_employee, narration('ESI Employee')))
+      }
+      if (emp.professional_tax > 0) {
+        lines.push(row('Payroll Payable', 'Professional Tax Payable', emp.professional_tax, narration('Professional Tax')))
+      }
+      if (emp.other_deductions > 0) {
+        lines.push(row('Payroll Payable', 'Other Deductions Payable', emp.other_deductions, narration('Other Deductions')))
+      }
+
       // 5. Net Pay: DR "Payroll Payable" CR "Bank Account"
       if (emp.net_pay > 0) {
         lines.push(row('Payroll Payable', 'Bank Account', emp.net_pay, narration('Net Salary')))
@@ -152,6 +169,10 @@ export class AccountingExportService {
       if (emp.epf_employer > 0) messages.push(voucher('EPF Employer Contribution', 'EPF Payable', emp.epf_employer))
       if (emp.esi_employer > 0) messages.push(voucher('ESI Employer Contribution', 'ESI Payable', emp.esi_employer))
       if (emp.tds > 0) messages.push(voucher('Payroll Payable', 'TDS Payable', emp.tds))
+      if (emp.epf_employee > 0) messages.push(voucher('Payroll Payable', 'EPF Payable', emp.epf_employee))
+      if (emp.esi_employee > 0) messages.push(voucher('Payroll Payable', 'ESI Payable', emp.esi_employee))
+      if (emp.professional_tax > 0) messages.push(voucher('Payroll Payable', 'Professional Tax Payable', emp.professional_tax))
+      if (emp.other_deductions > 0) messages.push(voucher('Payroll Payable', 'Other Deductions Payable', emp.other_deductions))
       if (emp.net_pay > 0) messages.push(voucher('Payroll Payable', 'Bank Account', emp.net_pay))
     }
 
@@ -201,6 +222,10 @@ export class AccountingExportService {
       if (emp.epf_employer > 0) addTransaction('EPF Employer Contribution', 'EPF Payable', emp.epf_employer, empMemo)
       if (emp.esi_employer > 0) addTransaction('ESI Employer Contribution', 'ESI Payable', emp.esi_employer, empMemo)
       if (emp.tds > 0) addTransaction('Payroll Payable', 'TDS Payable', emp.tds, empMemo)
+      if (emp.epf_employee > 0) addTransaction('Payroll Payable', 'EPF Payable', emp.epf_employee, empMemo)
+      if (emp.esi_employee > 0) addTransaction('Payroll Payable', 'ESI Payable', emp.esi_employee, empMemo)
+      if (emp.professional_tax > 0) addTransaction('Payroll Payable', 'Professional Tax Payable', emp.professional_tax, empMemo)
+      if (emp.other_deductions > 0) addTransaction('Payroll Payable', 'Other Deductions Payable', emp.other_deductions, empMemo)
       if (emp.net_pay > 0) addTransaction('Payroll Payable', 'Bank Account', emp.net_pay, empMemo)
     }
 

@@ -20,6 +20,7 @@ import type { FastifyInstance } from 'fastify'
 import { z }                    from 'zod'
 import { HR_ADMIN_ROLES }       from '../../lib/rbac.js'
 import { fetchAllRows }         from '../../lib/supabase-paginate.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 const dateRe   = /^\d{4}-\d{2}-\d{2}$/
 const monthRe  = /^\d{4}-\d{2}$/
 
@@ -147,19 +148,22 @@ export default async function executiveIntelligenceRoutes(fastify: FastifyInstan
     nextMonth.setMonth(nextMonth.getMonth() + 1)
     const to = new Date(nextMonth.getTime() - 86_400_000).toISOString().slice(0, 10)
 
-    const { data: snapshots, error } = await fastify.supabase
-      .from('workforce_staffing_snapshots')
-      .select('coverage_ratio, staffing_pressure, snapshot_date')
-      .eq('tenant_id', req.tenantId)
-      .gte('snapshot_date', from)
-      .lte('snapshot_date', to)
-
-    if (error) {
-      req.log.error({ err: error }, 'staffing snapshots query failed')
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch staffing snapshots' })
+    // A snapshot is unique per dept/day, so a tenant with 33+ departments
+    // exceeds PostgREST's 1,000-row cap within a single month.
+    let rows: any[]
+    try {
+      rows = await fetchAllRows((rangeFrom, rangeTo) =>
+        fastify.supabase
+          .from('workforce_staffing_snapshots')
+          .select('coverage_ratio, staffing_pressure, snapshot_date')
+          .eq('tenant_id', req.tenantId)
+          .gte('snapshot_date', from)
+          .lte('snapshot_date', to)
+          .range(rangeFrom, rangeTo),
+      )
+    } catch (error) {
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch staffing snapshots')
     }
-
-    const rows = snapshots ?? []
     const count = rows.length
 
     const avg_coverage = count > 0
@@ -311,7 +315,7 @@ export default async function executiveIntelligenceRoutes(fastify: FastifyInstan
       ? { from: parsed.data.from, to: parsed.data.to }
       : defaultRange(30)
 
-    const [excTotalRes, excBreachedRes, excOpenRes, incTotalRes, incBreachedRes, incOpenRes, resolutionRes] = await Promise.all([
+    const [excTotalRes, excBreachedRes, excOpenRes, incTotalRes, incBreachedRes, incOpenRes] = await Promise.all([
       // Total exceptions in period
       fastify.supabase
         .from('attendance_exceptions')
@@ -359,8 +363,19 @@ export default async function executiveIntelligenceRoutes(fastify: FastifyInstan
         .select('id', { count: 'exact', head: true })
         .eq('tenant_id', req.tenantId)
         .eq('status', 'open'),
+    ])
 
-      // Resolution hours for resolved exceptions
+    // A transient failure on any of these would otherwise silently read as
+    // 0 (via `.count ?? 0`) — a false "all clear" on an executive risk
+    // dashboard instead of a visible error.
+    for (const res of [excTotalRes, excBreachedRes, excOpenRes, incTotalRes, incBreachedRes, incOpenRes]) {
+      if (res.error) return serverError(req, reply, res.error, ErrorCode.QUERY_FAILED, 'Failed to fetch SLA metrics')
+    }
+
+    // Resolution hours for resolved exceptions — a real .select() (not
+    // count-only), so it must be paginated separately from the head:true
+    // count queries above, which are exempt from the 1,000-row cap.
+    const resolutionRows = await fetchAllRows((from, to) =>
       fastify.supabase
         .from('attendance_exceptions')
         .select('created_at, resolved_at')
@@ -368,8 +383,9 @@ export default async function executiveIntelligenceRoutes(fastify: FastifyInstan
         .eq('status', 'resolved')
         .gte('created_at', range.from)
         .lte('created_at', range.to)
-        .not('resolved_at', 'is', null),
-    ])
+        .not('resolved_at', 'is', null)
+        .range(from, to),
+    )
 
     const exc_total   = excTotalRes.count   ?? 0
     const exc_breached = excBreachedRes.count ?? 0
@@ -378,10 +394,9 @@ export default async function executiveIntelligenceRoutes(fastify: FastifyInstan
     const inc_breached = incBreachedRes.count ?? 0
     const open_incidents = incOpenRes.count  ?? 0
 
-    const resRows = resolutionRes.data ?? []
-    const avg_resolution_hours = resRows.length > 0
+    const avg_resolution_hours = resolutionRows.length > 0
       ? parseFloat(
-          (resRows.reduce((s: number, r: any) => s + ((r.resolved_at && r.created_at) ? (new Date(r.resolved_at).getTime() - new Date(r.created_at).getTime()) / 3_600_000 : 0), 0) / resRows.length).toFixed(1),
+          (resolutionRows.reduce((s: number, r: any) => s + ((r.resolved_at && r.created_at) ? (new Date(r.resolved_at).getTime() - new Date(r.created_at).getTime()) / 3_600_000 : 0), 0) / resolutionRows.length).toFixed(1),
         )
       : 0
 
@@ -412,19 +427,22 @@ export default async function executiveIntelligenceRoutes(fastify: FastifyInstan
       ? { from: parsed.data.from, to: parsed.data.to }
       : defaultRange(30)
 
-    const { data: rows, error } = await fastify.supabase
-      .from('attendance_exceptions')
-      .select('status, severity, exception_type, created_at, resolved_at')
-      .eq('tenant_id', req.tenantId)
-      .gte('created_at', range.from)
-      .lte('created_at', range.to)
-
-    if (error) {
-      req.log.error({ err: error }, 'exception resolution query failed')
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch exception data' })
+    let rows: any[]
+    try {
+      rows = await fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('attendance_exceptions')
+          .select('status, severity, exception_type, created_at, resolved_at')
+          .eq('tenant_id', req.tenantId)
+          .gte('created_at', range.from)
+          .lte('created_at', range.to)
+          .range(from, to),
+      )
+    } catch (error) {
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch exception data')
     }
 
-    const allRows       = ((rows ?? []) as any[]).map((r: any) => ({
+    const allRows       = (rows as any[]).map((r: any) => ({
       ...r,
       resolution_hours: (r.resolved_at && r.created_at)
         ? (new Date(r.resolved_at).getTime() - new Date(r.created_at).getTime()) / 3_600_000

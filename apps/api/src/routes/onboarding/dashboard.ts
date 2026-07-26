@@ -1,4 +1,6 @@
 import type { FastifyInstance } from 'fastify'
+import { fetchAllRows } from '../../lib/supabase-paginate.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 export default async function onboardingDashboardRoutes(fastify: FastifyInstance) {
   const auth = { preHandler: [fastify.authenticate] }
@@ -23,8 +25,6 @@ export default async function onboardingDashboardRoutes(fastify: FastifyInstance
       extractionFailedResult,
       approvedThisMonthResult,
       rejectedThisMonthResult,
-      avgConfidenceResult,
-      sessionsByStatusResult,
       recentSessionsResult,
       duplicateRisksResult,
     ] = await Promise.all([
@@ -67,19 +67,6 @@ export default async function onboardingDashboardRoutes(fastify: FastifyInstance
         .gte('updated_at', monthStart)
         .lte('updated_at', monthEnd),
 
-      // avg_confidence_score from draft_employee_profiles
-      fastify.supabase
-        .from('draft_employee_profiles')
-        .select('overall_confidence')
-        .eq('tenant_id', tenantId),
-
-      // sessions_by_status
-      fastify.supabase
-        .from('onboarding_sessions')
-        .select('status')
-        .eq('tenant_id', tenantId)
-        .neq('status', 'archived'),
-
       // recent_sessions (last 10)
       fastify.supabase
         .from('onboarding_sessions')
@@ -100,8 +87,34 @@ export default async function onboardingDashboardRoutes(fastify: FastifyInstance
         .not('duplicate_risk', 'is', null),
     ])
 
+    // Both queries below are real .select()s (not count-only), so — unlike
+    // the head:true count queries above — they're subject to PostgREST's
+    // 1,000-row cap and must be paginated separately.
+    let confidenceRows: Array<{ overall_confidence: number | null }>
+    let statusRows: Array<{ status: string }>
+    try {
+      ;[confidenceRows, statusRows] = await Promise.all([
+        fetchAllRows<{ overall_confidence: number | null }>((from, to) =>
+          fastify.supabase
+            .from('draft_employee_profiles')
+            .select('overall_confidence')
+            .eq('tenant_id', tenantId)
+            .range(from, to),
+        ),
+        fetchAllRows<{ status: string }>((from, to) =>
+          fastify.supabase
+            .from('onboarding_sessions')
+            .select('status')
+            .eq('tenant_id', tenantId)
+            .neq('status', 'archived')
+            .range(from, to),
+        ),
+      ])
+    } catch (error) {
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch onboarding dashboard stats')
+    }
+
     // Calculate avg confidence
-    const confidenceRows = (avgConfidenceResult.data ?? []) as Array<{ overall_confidence: number | null }>
     const validConfidences = confidenceRows
       .map((r) => r.overall_confidence)
       .filter((v): v is number => typeof v === 'number')
@@ -111,7 +124,6 @@ export default async function onboardingDashboardRoutes(fastify: FastifyInstance
         : 0
 
     // Aggregate sessions_by_status
-    const statusRows = (sessionsByStatusResult.data ?? []) as Array<{ status: string }>
     const statusCounts: Record<string, number> = {}
     for (const row of statusRows) {
       statusCounts[row.status] = (statusCounts[row.status] ?? 0) + 1
