@@ -927,6 +927,13 @@ Write a helpful, professional HR reply to address the employee's concern:`
       .single()
     if (!ticket) return notFound(reply, 'NOT_FOUND', 'Ticket not found')
     if ((ticket as any).status !== 'resolved') return validationError(reply, 'INVALID_STATE', 'Can only rate resolved tickets')
+    // Ticket ownership was fetched above but never checked — any authenticated
+    // employee could rate any resolved ticket in the tenant, polluting the
+    // satisfaction report. Only the ticket's own raiser may rate it.
+    const callerEmployeeId = await resolveCallerEmployeeId(fastify, req.userId, tenantId)
+    if (!callerEmployeeId || callerEmployeeId !== (ticket as any).employee_id) {
+      return forbidden(reply, 'FORBIDDEN', 'You can only rate your own tickets')
+    }
     const { error } = await fastify.supabase
       .from('helpdesk_tickets')
       .update({

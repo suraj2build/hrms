@@ -169,6 +169,16 @@ export default async function compensationRevisionsRoute(fastify: FastifyInstanc
     if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch revision' })
     if (!data)  return reply.code(404).send({ error: 'NOT_FOUND', message: 'Revision not found' })
 
+    // Unlike the list route above, this single-record lookup had no
+    // ownership check — any authenticated employee could pass an arbitrary
+    // revision id and read another employee's before/after CTC detail.
+    if (!isAdmin(req.userRole)) {
+      const empId = await callerEmployeeId(req)
+      if (!empId || (data as any).employee_id !== empId) {
+        return reply.code(404).send({ error: 'NOT_FOUND', message: 'Revision not found' })
+      }
+    }
+
     return reply.send({ data })
   })
 

@@ -206,7 +206,13 @@ export default async function notificationsRoutes(fastify: FastifyInstance) {
   })
 
   // ── POST /notifications/escalate ──────────────────────────────────────────
+  // Mutates the tenant's shared inbox_items queue — HR-ops only, matching
+  // /notes below (was previously auth-only, letting any employee escalate
+  // arbitrary queue items).
   fastify.post('/escalate', auth, async (req: any, reply) => {
+    if (!isHrAdmin(req)) {
+      return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
+    }
     const body = req.body as { item_ids?: string[] }
     if (!Array.isArray(body?.item_ids) || body.item_ids.length === 0) {
       return reply.code(400).send({ error: 'INVALID_BODY', message: 'item_ids array is required' })
@@ -235,7 +241,10 @@ export default async function notificationsRoutes(fastify: FastifyInstance) {
 
   // ── POST /notifications/notes ─────────────────────────────────────────────
   fastify.post('/notes', auth, async (req: any, reply) => {
-    const body = req.body as { employee_id?: string; queue_item_id?: string; note?: string; created_by?: string }
+    if (!isHrAdmin(req)) {
+      return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
+    }
+    const body = req.body as { employee_id?: string; queue_item_id?: string; note?: string }
     if (!body?.employee_id || !body?.note?.trim()) {
       return reply.code(400).send({ error: 'INVALID_BODY', message: 'employee_id and note are required' })
     }
@@ -247,7 +256,10 @@ export default async function notificationsRoutes(fastify: FastifyInstance) {
           employee_id:   body.employee_id,
           queue_item_id: body.queue_item_id ?? null,
           note:          body.note.trim(),
-          created_by:    body.created_by ?? req.userId,
+          // Author is always the authenticated caller, never client-supplied —
+          // the body previously accepted an arbitrary created_by, letting a
+          // caller attribute a note to someone else.
+          created_by:    req.userId,
           created_at:    new Date().toISOString(),
         })
         .select('id')

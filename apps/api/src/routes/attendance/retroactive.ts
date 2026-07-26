@@ -118,6 +118,7 @@ export default async function attendanceRetroactiveRoute(fastify: FastifyInstanc
 
   // ── GET /attendance/retroactive/employee/:employeeId ──────────────────────────
   fastify.get('/attendance/retroactive/employee/:employeeId', auth, async (req: any, reply) => {
+    if (!requireAdmin(req, reply)) return
     const { employeeId } = req.params as { employeeId: string }
 
     const parsed = employeeQuerySchema.safeParse(req.query)

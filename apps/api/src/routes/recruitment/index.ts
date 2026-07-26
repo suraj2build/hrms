@@ -1824,6 +1824,22 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
     const parsed = schema.safeParse(req.body)
     if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
 
+    // interviewer_id below is always the caller (not client-supplied), but
+    // nothing previously verified the caller is actually on this round's
+    // panel — any authenticated employee could inject a scorecard
+    // (including a strong_no recommendation) into an interview they were
+    // never assigned to.
+    const { data: panelMember } = await fastify.supabase
+      .from('interview_panel')
+      .select('id')
+      .eq('round_id', id)
+      .eq('interviewer_id', req.userId)
+      .eq('tenant_id', req.tenantId)
+      .maybeSingle()
+    if (!panelMember) {
+      return reply.code(403).send({ error: 'FORBIDDEN', message: 'You are not on this interview panel' })
+    }
+
     const { data, error } = await fastify.supabase
       .from('interview_scores')
       .upsert({
