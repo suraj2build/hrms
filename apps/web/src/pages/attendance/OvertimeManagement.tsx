@@ -340,6 +340,10 @@ function RequestsTab() {
       api.post(`/overtime/requests/${id}/approve`, minutes ? { approved_minutes: minutes } : {}),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['ot-requests'] })
+      // ManagerTeamOvertimeRequests.tsx reads the same endpoint under
+      // ['manager-team-overtime'] — invalidate both so approving here
+      // doesn't leave that queue stale.
+      qc.invalidateQueries({ queryKey: ['manager-team-overtime'] })
       setActionRowId(null)
       toast.success('Overtime request approved')
     },
@@ -357,6 +361,7 @@ function RequestsTab() {
     mutationFn: (id: string) => api.post(`/overtime/requests/${id}/reject`, {}),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['ot-requests'] })
+      qc.invalidateQueries({ queryKey: ['manager-team-overtime'] })
       setActionRowId(null)
       toast.success('Overtime request rejected')
     },

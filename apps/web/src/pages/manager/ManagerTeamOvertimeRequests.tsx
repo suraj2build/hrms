@@ -131,7 +131,10 @@ export function ManagerTeamOvertimeRequests({ embedded = false }: { embedded?: b
 
   const approveMut = useMutation({
     mutationFn: (id: string) => api.post(`/overtime/requests/${id}/approve`, {}),
-    onSuccess:  () => { toast.success('OT request approved'); qc.invalidateQueries({ queryKey: ['manager-team-overtime'] }) },
+    // The admin OvertimeManagement.tsx "Requests" tab reads the same
+    // /overtime/requests endpoint under ['ot-requests'] — invalidate both so
+    // approving here doesn't leave that queue stale.
+    onSuccess:  () => { toast.success('OT request approved'); qc.invalidateQueries({ queryKey: ['manager-team-overtime'] }); qc.invalidateQueries({ queryKey: ['ot-requests'] }) },
     onError:    (e: Error) => {
       if (e instanceof ApiError && e.error === 'PERIOD_LOCKED') {
         toast.error('Period locked', { description: 'Overtime approval is blocked — the attendance period has been finalized for payroll.' })
@@ -143,7 +146,7 @@ export function ManagerTeamOvertimeRequests({ embedded = false }: { embedded?: b
 
   const rejectMut = useMutation({
     mutationFn: (id: string) => api.post(`/overtime/requests/${id}/reject`, {}),
-    onSuccess:  () => { toast.success('OT request rejected'); qc.invalidateQueries({ queryKey: ['manager-team-overtime'] }) },
+    onSuccess:  () => { toast.success('OT request rejected'); qc.invalidateQueries({ queryKey: ['manager-team-overtime'] }); qc.invalidateQueries({ queryKey: ['ot-requests'] }) },
     onError:    (e: Error) => {
       if (e instanceof ApiError && e.error === 'PERIOD_LOCKED') {
         toast.error('Period locked', { description: 'Overtime rejection is blocked — the attendance period has been finalized for payroll.' })

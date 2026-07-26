@@ -120,10 +120,15 @@ export function ManagerTeamCompOff({ embedded = false }: { embedded?: boolean })
     onSuccess:  () => {
       toast.success('Comp-off approved')
       qc.invalidateQueries({ queryKey: ['manager-team-compoff'] })
-      // The employee's own ESS approvals tracker and the admin CompOff view
-      // read the same records under separate keys.
+      // The employee's own ESS approvals tracker, the admin CompOff view, the
+      // ESS profile/leave-balance comp-off tabs, and the HR FlowDesk pending
+      // queue all read the same /attendance/comp-off records under separate
+      // keys.
       qc.invalidateQueries({ queryKey: ['ess-approvals-compoff'] })
       qc.invalidateQueries({ queryKey: ['comp-off'] })
+      qc.invalidateQueries({ queryKey: ['ess-comp-off'] })
+      qc.invalidateQueries({ queryKey: ['ess-compoff-my'] })
+      qc.invalidateQueries({ queryKey: ['flowdesk-compoff'] })
     },
     onError:    (e: Error) => {
       if (e instanceof ApiError && e.error === 'PERIOD_LOCKED') {
@@ -141,6 +146,9 @@ export function ManagerTeamCompOff({ embedded = false }: { embedded?: boolean })
       qc.invalidateQueries({ queryKey: ['manager-team-compoff'] })
       qc.invalidateQueries({ queryKey: ['ess-approvals-compoff'] })
       qc.invalidateQueries({ queryKey: ['comp-off'] })
+      qc.invalidateQueries({ queryKey: ['ess-comp-off'] })
+      qc.invalidateQueries({ queryKey: ['ess-compoff-my'] })
+      qc.invalidateQueries({ queryKey: ['flowdesk-compoff'] })
     },
     onError:    () => toast.error('Failed to reject'),
   })

@@ -5,7 +5,7 @@
  * the existing recruitment workflow as 'draft' (pending HR approval); HR then
  * approves/holds/cancels. Backend: POST /recruitment/requisitions (manager-or-HR).
  */
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { Briefcase, Plus } from 'lucide-react'
@@ -80,6 +80,11 @@ export function ManagerRequisition() {
   const reasonLabel = form.reason === 'replacement' ? 'Replacement' : 'New role'
   const canSubmit = form.title.trim().length > 0 && Number(form.openings) >= 1
 
+  // Backend supports an Idempotency-Key on this endpoint (checkIdempotency/
+  // storeIdempotency, keyed 'requisition-create') so a duplicate submit
+  // (double-click, network retry) doesn't create two draft requisitions.
+  const idempotencyKey = useRef(crypto.randomUUID())
+
   const create = useMutation({
     mutationFn: () => {
       // The schema has no dedicated reason column, so record hiring vs
@@ -93,12 +98,18 @@ export function ManagerRequisition() {
         openings:        Number(form.openings),
         target_date:     form.target_date || null,
         jd_text:         jd,
-      })
+      }, { headers: { 'Idempotency-Key': idempotencyKey.current } })
     },
     onSuccess: () => {
       toast.success('Requisition submitted', { description: 'Sent to HR for approval.' })
       setForm(EMPTY)
+      idempotencyKey.current = crypto.randomUUID()
       qc.invalidateQueries({ queryKey: ['manager', 'requisitions'] })
+      // AdminRecruitment.tsx's queue (['recruitment', 'requisitions', ...])
+      // and stats tile (['recruitment', 'stats']) read the same
+      // job_requisitions table — invalidate the whole 'recruitment' family
+      // so HR sees the new draft without a manual refresh.
+      qc.invalidateQueries({ queryKey: ['recruitment'] })
     },
     onError: (e: Error) => toast.error('Failed to submit requisition', { description: e.message }),
   })

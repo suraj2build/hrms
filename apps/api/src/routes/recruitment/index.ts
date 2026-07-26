@@ -20,6 +20,7 @@ import { isOfferSignoffEnabled } from '../../lib/payroll-flags.js'
 import { sanitizeOrFilterTerm } from '../../lib/postgrest-filter.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
 import { serverError, ErrorCode } from '../../lib/api-errors.js'
+import { checkIdempotency, storeIdempotency } from '../../lib/idempotency.js'
 import {
   sendEmail,
   applicationReceivedEmail,
@@ -359,6 +360,15 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
     const parsed = schema.safeParse(req.body)
     if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
 
+    const iKey = (req.headers['idempotency-key'] as string | undefined)?.trim()
+    if (iKey) {
+      const cached = await checkIdempotency(fastify.supabase, req.tenantId, iKey, 'requisition-create')
+      if (cached) {
+        reply.header('Idempotency-Replayed', 'true')
+        return reply.code(cached.status_code).send(cached.response)
+      }
+    }
+
     const { data, error } = await fastify.supabase
       .from('job_requisitions')
       .insert({
@@ -394,7 +404,9 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
       action_label: 'View',
     })
 
-    return reply.code(201).send({ data })
+    const responseBody = { data }
+    if (iKey) await storeIdempotency(fastify.supabase, req.tenantId, iKey, 'requisition-create', 201, responseBody)
+    return reply.code(201).send(responseBody)
   })
 
   fastify.put('/requisitions/:id', hrAdminAuth, async (req: any, reply) => {

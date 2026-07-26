@@ -100,7 +100,14 @@ export function ManagerTeamRegularisation() {
       const { approved = 0, failed, total } = res.summary
       toast.success(`Approved ${approved} of ${total}${failed > 0 ? ` · ${failed} failed` : ''}`)
       setSelected(new Set())
+      // Same /attendance/regularisation/team data also backs the HR-admin
+      // queue (['reg-pending']), the ESS approvals tracker
+      // (['ess-approvals-corrections']), and the employee's own status page
+      // (['regularization-my']) — invalidate all so they don't go stale.
       qc.invalidateQueries({ queryKey: ['manager-team-regularisation'] })
+      qc.invalidateQueries({ queryKey: ['reg-pending'] })
+      qc.invalidateQueries({ queryKey: ['ess-approvals-corrections'] })
+      qc.invalidateQueries({ queryKey: ['regularization-my'] })
     },
     onError: (err: unknown) => toast.error(err instanceof Error ? err.message : 'Bulk approve failed'),
   })
@@ -114,6 +121,9 @@ export function ManagerTeamRegularisation() {
       setSelected(new Set())
       setRejectReason('')
       qc.invalidateQueries({ queryKey: ['manager-team-regularisation'] })
+      qc.invalidateQueries({ queryKey: ['reg-pending'] })
+      qc.invalidateQueries({ queryKey: ['ess-approvals-corrections'] })
+      qc.invalidateQueries({ queryKey: ['regularization-my'] })
     },
     onError: (err: unknown) => toast.error(err instanceof Error ? err.message : 'Bulk reject failed'),
   })
