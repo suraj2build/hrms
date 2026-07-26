@@ -76,7 +76,7 @@ const CreatePlanSchema = z.object({
   position_title: z.string().min(1, 'position_title is required'),
   department: z.string().optional().nullable(),
   incumbent_id: z.string().uuid().optional().nullable(),
-  risk_level: z.string().optional(),
+  risk_level: z.enum(['low', 'medium', 'high', 'critical']).optional(),
   notes: z.string().optional().nullable(),
 })
 
@@ -84,7 +84,7 @@ const UpdatePlanSchema = z.object({
   position_title: z.string().optional(),
   department: z.string().optional().nullable(),
   incumbent_id: z.string().uuid().optional().nullable(),
-  risk_level: z.string().optional(),
+  risk_level: z.enum(['low', 'medium', 'high', 'critical']).optional(),
   notes: z.string().optional().nullable(),
 })
 
@@ -261,6 +261,7 @@ export default async function successionRoutes(fastify: FastifyInstance) {
     ])
 
     if (planResult.error || !planResult.data) return reply.status(404).send({ error: 'Plan not found' })
+    if (candidatesResult.error) return serverError(req, reply, candidatesResult.error, ErrorCode.QUERY_FAILED, 'Failed to fetch succession candidates')
 
     return reply.send({ data: { ...planResult.data, candidates: candidatesResult.data ?? [] } })
   })
@@ -357,7 +358,7 @@ export default async function successionRoutes(fastify: FastifyInstance) {
 
     if (error) {
       if (error.code === '23505') return reply.status(409).send({ error: 'CONFLICT', message: 'This employee is already a candidate for this plan' })
-      if (error.code === '23514') return reply.status(400).send({ error: 'VALIDATION_ERROR', message: error.message })
+      if (error.code === '23514') return validationError(reply, ErrorCode.VALIDATION_ERROR, 'Invalid value for one or more scorecard fields')
       return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to add succession candidate')
     }
     await logAction(supabase, { tenantId, tableName: 'succession_candidates', recordId: data.id, action: 'INSERT', performedBy: req.userId, newData: { plan_id, employee_id, readiness_level } })
@@ -385,7 +386,7 @@ export default async function successionRoutes(fastify: FastifyInstance) {
 
     const { error } = await supabase.from('succession_candidates').update(update).eq('tenant_id', tenantId).eq('id', cid)
     if (error) {
-      if (error.code === '23514') return reply.status(400).send({ error: 'VALIDATION_ERROR', message: error.message })
+      if (error.code === '23514') return validationError(reply, ErrorCode.VALIDATION_ERROR, 'Invalid value for one or more scorecard fields')
       return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update succession candidate')
     }
     return reply.send({ data: { updated: true } })
@@ -777,6 +778,16 @@ export default async function successionRoutes(fastify: FastifyInstance) {
       .maybeSingle()
     const candidate_id = candRow?.id
     if (!candidate_id) return reply.status(404).send({ error: 'No succession candidate found for this employee' })
+
+    // Fresh audit finding: sessionId was inserted with no tenant-ownership
+    // check, giving any tenant an existence oracle for other tenants' session UUIDs.
+    const { data: sessionRow } = await supabase
+      .from('calibration_sessions')
+      .select('id')
+      .eq('id', sessionId)
+      .eq('tenant_id', tenantId)
+      .maybeSingle()
+    if (!sessionRow) return notFound(reply, 'CALIBRATION_SESSION_NOT_FOUND', 'Calibration session not found')
 
     const { data, error } = await supabase
       .from('calibration_changes')
