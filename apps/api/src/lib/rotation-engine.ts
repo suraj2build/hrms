@@ -116,7 +116,17 @@ export async function resolveRotationCondition(
   supabase:          SupabaseClient,
   rotationPolicyId:  string,
   conditionType:     RotationConditionType,
+  date:              string,  // YYYY-MM-DD — picks the rule version effective on this date (AHI-3)
 ): Promise<RotationShiftMeta | null> {
+  // Temporal (AHI-3): a rotation_policy_rules row is closed (effective_to set)
+  // and a new one opened whenever the policy is edited (PUT /masters/
+  // rotation-policies/:id), so two rows can match the same
+  // (rotation_policy_id, condition_type) at once. Without this filter,
+  // .maybeSingle() throws "multiple rows returned" as soon as a policy has
+  // been edited even once, and the error was silently discarded by the
+  // caller — resolving to null and blanking the roster-planner grid for
+  // every employee on that policy. Mirrors the fix already applied in
+  // shift-resolution-engine.ts for the same table.
   const { data: rule } = await supabase
     .from('rotation_policy_rules')
     .select(`
@@ -131,6 +141,10 @@ export async function resolveRotationCondition(
     `)
     .eq('rotation_policy_id', rotationPolicyId)
     .eq('condition_type', conditionType)
+    .lte('effective_from', date)
+    .or('effective_to.is.null,effective_to.gte.' + date)
+    .order('effective_from', { ascending: false })
+    .limit(1)
     .maybeSingle()
 
   if (!rule) return null
@@ -189,5 +203,5 @@ export async function resolveViaRotationPolicy(
   if (!condition) return null
 
   // Step 3 — look up the shift for this condition
-  return resolveRotationCondition(supabase, policyId, condition)
+  return resolveRotationCondition(supabase, policyId, condition, date)
 }

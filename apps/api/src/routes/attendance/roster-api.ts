@@ -169,10 +169,15 @@ export default async function rosterRoute(fastify: FastifyInstance) {
       if (!policyId) return null
       const cached = policyConds.get(policyId)
       if (cached) return cached
+      // Resolved as of the end of the displayed month — a reasonable single
+      // effective date for this per-policy (not per-day) cache; mirrors the
+      // AHI-3 temporal filter in resolveRotationCondition, which previously
+      // had none and would throw "multiple rows" (silently swallowed to
+      // null) as soon as a policy had been edited even once.
       const [wd, sat, sun] = await Promise.all([
-        resolveRotationCondition(fastify.supabase, policyId, 'weekday_working'),
-        resolveRotationCondition(fastify.supabase, policyId, 'saturday_working'),
-        resolveRotationCondition(fastify.supabase, policyId, 'sunday_working'),
+        resolveRotationCondition(fastify.supabase, policyId, 'weekday_working', toDate),
+        resolveRotationCondition(fastify.supabase, policyId, 'saturday_working', toDate),
+        resolveRotationCondition(fastify.supabase, policyId, 'sunday_working', toDate),
       ])
       const c: Record<CondKey, string | null> = {
         weekday_working:  wd?.shiftId  ?? null,
