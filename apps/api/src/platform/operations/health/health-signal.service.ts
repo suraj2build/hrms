@@ -27,7 +27,7 @@ export class HealthSignalService {
     }
 
     // Pull risk scores for domain-relevant entity types
-    const topRisks = riskScoreService.getTopRisks(20)
+    const topRisks = riskScoreService.getTopRisks(20, orgId)
     const domainRisks = topRisks.filter(r => this.riskBelongsToDomain(r.type, domain))
     const criticalRisks = domainRisks.filter(r => r.severity === 'critical').length
     const highRisks     = domainRisks.filter(r => r.severity === 'high').length

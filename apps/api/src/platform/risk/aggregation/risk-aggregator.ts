@@ -17,12 +17,9 @@ export interface RiskSummary {
 }
 
 export class RiskAggregator {
-  /**
-   * Summarize risk signals across all entity types for an org.
-   * orgId is provided for future DB-backed implementations.
-   */
-  summarize(_orgId: string): RiskSummary {
-    const topRisks = riskScoreService.getTopRisks(20)
+  /** Summarize risk signals across all entity types for an org. */
+  summarize(orgId: string): RiskSummary {
+    const topRisks = riskScoreService.getTopRisks(20, orgId)
     return {
       employee_count:   topRisks.filter(r => r.type === 'employee').length,
       branch_count:     topRisks.filter(r => r.type === 'branch').length,

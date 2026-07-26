@@ -13,6 +13,7 @@ export type RiskScoreType = 'employee' | 'branch' | 'payroll' | 'attendance' | '
 export interface RiskScore {
   type:          RiskScoreType
   entity_id:     string
+  tenant_id:     string
   score:         number                            // 0–100, higher = riskier
   severity:      EventSeverity
   contributing_classifications: RiskClassification[]
@@ -20,6 +21,10 @@ export interface RiskScore {
 }
 
 export class RiskScoreService {
+  // Keyed by tenant_id:entity_type:entity_id (fresh audit finding — this was
+  // previously keyed by entity_type:entity_id only, with getTopRisks()
+  // returning entries across every tenant with no filter, exposing raw
+  // entity UUIDs and risk severity for other tenants via the ops heatmap).
   private readonly scores: Map<string, RiskScore> = new Map()
 
   /**
@@ -27,7 +32,7 @@ export class RiskScoreService {
    * New score = existing * 0.7 + new_classification * 0.3
    */
   upsertFromClassification(classification: RiskClassification): void {
-    const key      = `${classification.entity_type}:${classification.entity_id}`
+    const key      = `${classification.tenant_id}:${classification.entity_type}:${classification.entity_id}`
     const existing = this.scores.get(key)
     const newScore = existing
       ? Math.min(100, (existing.score * 0.7) + (classification.score * 0.3))
@@ -36,6 +41,7 @@ export class RiskScoreService {
     this.scores.set(key, {
       type:          this.mapEntityTypeToScoreType(classification.entity_type),
       entity_id:     classification.entity_id,
+      tenant_id:     classification.tenant_id,
       score:         newScore,
       severity:      this.scoreToSeverity(newScore),
       contributing_classifications: [
@@ -46,14 +52,17 @@ export class RiskScoreService {
     })
   }
 
-  /** Get the current risk score for an entity. */
-  getScore(entityId: string, entityType: string): RiskScore | undefined {
-    return this.scores.get(`${entityType}:${entityId}`)
+  /** Get the current risk score for an entity within a tenant. */
+  getScore(entityId: string, entityType: string, tenantId: string): RiskScore | undefined {
+    return this.scores.get(`${tenantId}:${entityType}:${entityId}`)
   }
 
-  /** Get the top N riskiest entities (sorted by score descending). */
-  getTopRisks(limit = 10): RiskScore[] {
-    return [...this.scores.values()]
+  /** Get the top N riskiest entities for a tenant (sorted by score descending). */
+  getTopRisks(limit = 10, tenantId?: string): RiskScore[] {
+    const all = tenantId
+      ? [...this.scores.values()].filter(s => s.tenant_id === tenantId)
+      : [...this.scores.values()]
+    return all
       .sort((a, b) => b.score - a.score)
       .slice(0, limit)
   }

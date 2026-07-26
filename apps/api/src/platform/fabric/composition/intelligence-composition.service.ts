@@ -38,7 +38,7 @@ export class IntelligenceCompositionService {
       : 80
 
     // Security risk — from risk score service (inverted: risk → health)
-    const riskScore  = riskScoreService.getScore(entity_id, entity_type)
+    const riskScore  = riskScoreService.getScore(entity_id, entity_type, tenant_id)
     const secRisk    = riskScore ? riskScore.score : 0    // 0–100, higher = riskier
 
     // Composite risk: invert health scores to risk

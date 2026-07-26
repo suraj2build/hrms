@@ -17,7 +17,7 @@ export class HeatmapService {
    */
   buildDomainHeatmap(domain: HealthDomain, orgId: string): HeatmapSnapshot {
     const period = new Date().toISOString().slice(0, 7)  // YYYY-MM
-    const topRisks = riskScoreService.getTopRisks(50)
+    const topRisks = riskScoreService.getTopRisks(50, orgId)
     const clusters = observabilityIntelligenceService.getClusters(orgId)
 
     const cells: HeatmapCell[] = topRisks
