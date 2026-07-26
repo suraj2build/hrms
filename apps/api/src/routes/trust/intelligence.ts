@@ -452,7 +452,7 @@ export default async function trustIntelligenceRoutes(fastify: FastifyInstance) 
       degraded:     records.filter(r => r.status === 'degraded').length,
       needs_review: records.filter(r => r.status === 'needs_review').length,
       failed:       records.filter(r => r.status === 'failed').length,
-      retry_queue:  verificationRetryService.stats(),
+      retry_queue:  verificationRetryService.stats(tenantId),
     }
   })
 }

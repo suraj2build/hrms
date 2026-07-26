@@ -1,6 +1,7 @@
 type VerificationType = 'pan' | 'bank_account' | 'aadhaar'
 
 interface RetryEntry {
+  tenant_id:         string
   employee_id:       string
   verification_type: VerificationType
   attempts:          number
@@ -17,40 +18,40 @@ const MAX_DELAY_MS  = 300_000  // 5min
 export class VerificationRetryService {
   private readonly queue = new Map<string, RetryEntry>()
 
-  private key(employeeId: string, type: VerificationType): string {
-    return `${employeeId}:${type}`
+  private key(tenantId: string, employeeId: string, type: VerificationType): string {
+    return `${tenantId}:${employeeId}:${type}`
   }
 
   private backoff(attempts: number): number {
     return Math.min(BASE_DELAY_MS * Math.pow(2, attempts - 1), MAX_DELAY_MS)
   }
 
-  enqueue(employeeId: string, type: VerificationType, error: string): void {
-    const k = this.key(employeeId, type)
+  enqueue(tenantId: string, employeeId: string, type: VerificationType, error: string): void {
+    const k = this.key(tenantId, employeeId, type)
     const existing = this.queue.get(k)
     if (existing?.exhausted) return  // do not re-enqueue exhausted entries
 
     const attempts = (existing?.attempts ?? 0) + 1
     const exhausted = attempts >= MAX_ATTEMPTS
     this.queue.set(k, {
-      employee_id: employeeId, verification_type: type,
+      tenant_id: tenantId, employee_id: employeeId, verification_type: type,
       attempts, last_attempt_ms: Date.now(),
       next_retry_ms: Date.now() + this.backoff(attempts),
       last_error: error, exhausted,
     })
   }
 
-  dequeue(employeeId: string, type: VerificationType): void {
-    this.queue.delete(this.key(employeeId, type))
+  dequeue(tenantId: string, employeeId: string, type: VerificationType): void {
+    this.queue.delete(this.key(tenantId, employeeId, type))
   }
 
-  getDueRetries(): RetryEntry[] {
+  getDueRetries(tenantId: string): RetryEntry[] {
     const now = Date.now()
-    return [...this.queue.values()].filter(e => !e.exhausted && e.next_retry_ms <= now)
+    return [...this.queue.values()].filter(e => e.tenant_id === tenantId && !e.exhausted && e.next_retry_ms <= now)
   }
 
-  stats(): { total: number; pending: number; exhausted: number } {
-    const all = [...this.queue.values()]
+  stats(tenantId: string): { total: number; pending: number; exhausted: number } {
+    const all = [...this.queue.values()].filter(e => e.tenant_id === tenantId)
     return {
       total:     all.length,
       pending:   all.filter(e => !e.exhausted).length,

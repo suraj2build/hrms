@@ -82,9 +82,9 @@ export class VerificationOrchestrator {
       })
 
       if (status === 'degraded') {
-        verificationRetryService.enqueue(params.employee_id, 'pan', result.error ?? 'provider unavailable')
+        verificationRetryService.enqueue(params.tenant_id, params.employee_id, 'pan', result.error ?? 'provider unavailable')
       } else {
-        verificationRetryService.dequeue(params.employee_id, 'pan')
+        verificationRetryService.dequeue(params.tenant_id, params.employee_id, 'pan')
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err)
@@ -118,9 +118,9 @@ export class VerificationOrchestrator {
       })
 
       if (status === 'degraded') {
-        verificationRetryService.enqueue(params.employee_id, 'bank_account', result.error ?? 'provider unavailable')
+        verificationRetryService.enqueue(params.tenant_id, params.employee_id, 'bank_account', result.error ?? 'provider unavailable')
       } else {
-        verificationRetryService.dequeue(params.employee_id, 'bank_account')
+        verificationRetryService.dequeue(params.tenant_id, params.employee_id, 'bank_account')
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err)
@@ -151,9 +151,9 @@ export class VerificationOrchestrator {
       })
 
       if (status === 'degraded') {
-        verificationRetryService.enqueue(params.employee_id, 'aadhaar', result.error ?? 'provider unavailable')
+        verificationRetryService.enqueue(params.tenant_id, params.employee_id, 'aadhaar', result.error ?? 'provider unavailable')
       } else {
-        verificationRetryService.dequeue(params.employee_id, 'aadhaar')
+        verificationRetryService.dequeue(params.tenant_id, params.employee_id, 'aadhaar')
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err)
