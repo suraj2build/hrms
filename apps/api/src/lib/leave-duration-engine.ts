@@ -197,7 +197,7 @@ function roundToPrecision(value: number, mode: RoundingMode, precision: number):
     case 'nearest_0_5':  return Math.round(value * 2) / 2
     case 'half_down':    return Math.floor(value * factor + 0.5 - Number.EPSILON) / factor
     case 'half_up':
-    default:             return Math.round(value * factor * 10) / (factor * 10)
+    default:             return Math.round(value * factor) / factor
   }
 }
 
