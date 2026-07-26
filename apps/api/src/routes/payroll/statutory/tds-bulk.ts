@@ -22,6 +22,8 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { HR_ADMIN_ROLES } from '../../../lib/rbac.js'
 import { fetchAllRows } from '../../../lib/supabase-paginate.js'
+import { fetchTenantTz } from '../../../lib/attendance-engine.js'
+import { getLocalDate } from '../../../lib/org-context.js'
 
 /** Rows per .in() call — keeps the request URL well under server/proxy
  *  request-line limits. The request-body schemas here allow up to 500
@@ -641,8 +643,12 @@ export default async function tdsBulkRoutes(fastify: FastifyInstance) {
       .in('declaration_id', declList.map((d: any) => d.id))
       .eq('document_state', 'rejected')
 
-    // Monthly TDS recovery — from tds_monthly_projections (current month)
-    const currentMonth = new Date().toISOString().slice(0, 7)
+    // Monthly TDS recovery — from tds_monthly_projections (current month).
+    // Tenant-local, not server UTC (see tds.ts recompute endpoint for the
+    // same fix) — a UTC month would look up the wrong projection row near
+    // IST midnight.
+    const tzForMonth   = await fetchTenantTz(fastify.supabase, req.tenantId)
+    const currentMonth = getLocalDate(new Date().toISOString(), tzForMonth).slice(0, 7)
     const { data: projRow } = await fastify.supabase
       .from('tds_monthly_projections')
       .select('tds_this_month')

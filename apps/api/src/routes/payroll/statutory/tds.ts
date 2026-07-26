@@ -1245,7 +1245,17 @@ ${section('Part D — Loss from House Property (Home Loan Interest)', hlDecls,
 
     const totalDeductions = ((declarations ?? []) as any[]).reduce((sum: number, d: any) => sum + (d.approved_amount ?? 0), 0)
 
-    const currentMonth = new Date().toISOString().slice(0, 7)
+    // Fresh audit finding: currentMonth used to be the server's own UTC
+    // month, not the tenant's IST month — the same class of bug already
+    // fixed above (declaration window) and in absconding-engine.ts
+    // (ISSUE-154). Recomputing between 00:00-05:29 IST would resolve to
+    // the PREVIOUS month, which (a) excludes that month's already-deducted
+    // TDS from alreadyDeducted, (b) re-includes the previous month in
+    // futureMonths, and (c) the upsert below then overwrites that month's
+    // tds_this_month with a freshly computed value — risking a double
+    // deduction/misrecorded TDS for a month that may already be closed.
+    const tzForMonth    = await fetchTenantTz(fastify.supabase, req.tenantId)
+    const currentMonth = getLocalDate(new Date().toISOString(), tzForMonth).slice(0, 7)
     const { data: existingProjections } = await fastify.supabase
       .from('tds_monthly_projections')
       .select('tds_this_month, projection_month')
