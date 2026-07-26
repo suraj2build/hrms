@@ -48,7 +48,7 @@ export default async function notificationTemplatesRoutes(fastify: FastifyInstan
 
 
   // ── GET /notifications/templates/channels ──────────────────────────────────
-  fastify.get('/channels', auth, async (req: any, reply) => {
+  fastify.get('/channels', { preHandler: [fastify.authenticate, requireHrAdmin] }, async (req: any, reply) => {
     const { data, error } = await fastify.supabase
       .from('notification_channels')
       .select('*')
@@ -201,7 +201,7 @@ export default async function notificationTemplatesRoutes(fastify: FastifyInstan
   })
 
   // ── GET /notifications/templates/log ───────────────────────────────────────
-  fastify.get('/log', auth, async (req: any, reply) => {
+  fastify.get('/log', { preHandler: [fastify.authenticate, requireHrAdmin] }, async (req: any, reply) => {
     const querySchema = z.object({
       recipient_employee_id: z.string().uuid().optional(),
       status: z.string().optional(),

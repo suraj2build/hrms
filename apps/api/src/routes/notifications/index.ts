@@ -249,6 +249,15 @@ export default async function notificationsRoutes(fastify: FastifyInstance) {
       return reply.code(400).send({ error: 'INVALID_BODY', message: 'employee_id and note are required' })
     }
     try {
+      const { data: emp } = await fastify.supabase
+        .from('employees')
+        .select('id')
+        .eq('id', body.employee_id)
+        .eq('tenant_id', req.tenantId)
+        .maybeSingle()
+      if (!emp) {
+        return reply.code(400).send({ error: 'INVALID_EMPLOYEE', message: 'Employee not found' })
+      }
       const { data, error } = await fastify.supabase
         .from('operational_notes')
         .insert({
