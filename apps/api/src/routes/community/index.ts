@@ -17,6 +17,7 @@ import { ensureTodaysCelebrations } from '../../lib/community-celebrations.js'
 import { containsProfanity } from '../../lib/profanity.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { serverError, ErrorCode } from '../../lib/api-errors.js'
+import { fetchAllRows } from '../../lib/supabase-paginate.js'
 const PROFANITY_MSG = 'Your message looks like it contains inappropriate language. Please rephrase.'
 const REACTIONS = ['like', 'celebrate', 'appreciate', 'support'] as const
 
@@ -53,29 +54,50 @@ export default async function communityRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', req.tenantId).eq('status', 'active')
       .order('pinned', { ascending: false }).order('created_at', { ascending: false })
       .limit(limit)
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to load feed' })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to load feed')
 
     const rows = posts ?? []
     const postIds = rows.map((p: any) => p.id)
 
-    // Reactions + comment counts in two batched reads, aggregated in JS.
-    const [reactRes, commentRes] = await Promise.all([
-      postIds.length
-        ? fastify.supabase.from('feed_reactions').select('post_id, employee_id, reaction').eq('tenant_id', req.tenantId).in('post_id', postIds)
-        : Promise.resolve({ data: [] as any[] }),
-      postIds.length
-        ? fastify.supabase.from('feed_comments').select('post_id').eq('tenant_id', req.tenantId).in('post_id', postIds)
-        : Promise.resolve({ data: [] as any[] }),
-    ])
+    // Reactions + comment counts, fully paginated (a post can accumulate well
+    // past PostgREST's 1,000-row max-rows ceiling — see CLAUDE.md).
+    let reactRows: any[]
+    let commentRows: any[]
+    try {
+      ;[reactRows, commentRows] = await Promise.all([
+        postIds.length
+          ? fetchAllRows((from, to) =>
+              fastify.supabase
+                .from('feed_reactions')
+                .select('post_id, employee_id, reaction')
+                .eq('tenant_id', req.tenantId)
+                .in('post_id', postIds)
+                .range(from, to),
+            )
+          : Promise.resolve([] as any[]),
+        postIds.length
+          ? fetchAllRows((from, to) =>
+              fastify.supabase
+                .from('feed_comments')
+                .select('post_id')
+                .eq('tenant_id', req.tenantId)
+                .in('post_id', postIds)
+                .range(from, to),
+            )
+          : Promise.resolve([] as any[]),
+      ])
+    } catch (error) {
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to load feed reactions/comments')
+    }
 
     const reactCount = new Map<string, number>()
     const myReaction = new Map<string, string>()
-    for (const r of (reactRes.data ?? []) as any[]) {
+    for (const r of reactRows as any[]) {
       reactCount.set(r.post_id, (reactCount.get(r.post_id) ?? 0) + 1)
       if (me && r.employee_id === me) myReaction.set(r.post_id, r.reaction)
     }
     const commentCount = new Map<string, number>()
-    for (const c of (commentRes.data ?? []) as any[]) {
+    for (const c of commentRows as any[]) {
       commentCount.set(c.post_id, (commentCount.get(c.post_id) ?? 0) + 1)
     }
 
@@ -129,7 +151,7 @@ export default async function communityRoutes(fastify: FastifyInstance) {
       })
       .select('id')
       .single()
-    if (error) return reply.code(500).send({ error: 'INSERT_FAILED', message: 'Failed to post wish' })
+    if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to post wish')
     return reply.code(201).send({ data })
   })
 
@@ -168,7 +190,7 @@ export default async function communityRoutes(fastify: FastifyInstance) {
       })
       .select('id')
       .single()
-    if (error) return reply.code(500).send({ error: 'INSERT_FAILED', message: 'Failed to create post' })
+    if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create post')
     return reply.code(201).send({ data })
   })
 
@@ -219,17 +241,24 @@ export default async function communityRoutes(fastify: FastifyInstance) {
     if (existing) {
       if ((existing as any).reaction === parsed.data.reaction) {
         // Same reaction → toggle off.
-        await fastify.supabase.from('feed_reactions').delete().eq('id', (existing as any).id)
+        const { error: deleteError } = await fastify.supabase.from('feed_reactions').delete().eq('id', (existing as any).id)
+        if (deleteError) return serverError(req, reply, deleteError, ErrorCode.DELETE_FAILED, 'Failed to remove reaction')
         return reply.send({ data: { reaction: null } })
       }
-      await fastify.supabase.from('feed_reactions').update({ reaction: parsed.data.reaction }).eq('id', (existing as any).id)
+      const { error: updateError } = await fastify.supabase.from('feed_reactions').update({ reaction: parsed.data.reaction }).eq('id', (existing as any).id)
+      if (updateError) return serverError(req, reply, updateError, ErrorCode.UPDATE_FAILED, 'Failed to update reaction')
       return reply.send({ data: { reaction: parsed.data.reaction } })
     }
 
     const { error } = await fastify.supabase
       .from('feed_reactions')
       .insert({ tenant_id: req.tenantId, post_id: id, employee_id: me, reaction: parsed.data.reaction })
-    if (error) return reply.code(500).send({ error: 'INSERT_FAILED', message: 'Failed to react' })
+    // 23505 = a concurrent request already inserted this reaction (TOCTOU
+    // between the select-existing check above and this insert) → idempotent
+    // success, same pattern as POST /community/posts/:id/report below.
+    if (error && (error as any).code !== '23505') {
+      return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to react')
+    }
     return reply.send({ data: { reaction: parsed.data.reaction } })
   })
 
@@ -241,7 +270,7 @@ export default async function communityRoutes(fastify: FastifyInstance) {
       .select('id, employee_id, body, created_at')
       .eq('tenant_id', req.tenantId).eq('post_id', id)
       .order('created_at', { ascending: true }).limit(200)
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to load comments' })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to load comments')
 
     const names = await namesFor(fastify, req.tenantId, (rows ?? []).map((c: any) => c.employee_id))
     const data = (rows ?? []).map((c: any) => ({ ...c, author_name: c.employee_id ? names.get(c.employee_id) : null }))
@@ -268,7 +297,7 @@ export default async function communityRoutes(fastify: FastifyInstance) {
       .insert({ tenant_id: req.tenantId, post_id: id, employee_id: me, body: parsed.data.body })
       .select('id')
       .single()
-    if (error) return reply.code(500).send({ error: 'INSERT_FAILED', message: 'Failed to add comment' })
+    if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to add comment')
     return reply.code(201).send({ data })
   })
 
@@ -291,7 +320,7 @@ export default async function communityRoutes(fastify: FastifyInstance) {
       .insert({ tenant_id: req.tenantId, post_id: id, reporter_employee: reporter, reason: parsed.data.reason ?? null })
     // 23505 = already reported by this person → idempotent success.
     if (error && error.code !== '23505') {
-      return reply.code(500).send({ error: 'INSERT_FAILED', message: 'Failed to submit report' })
+      return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to submit report')
     }
     return reply.code(201).send({ message: 'Report submitted' })
   })
@@ -308,7 +337,7 @@ export default async function communityRoutes(fastify: FastifyInstance) {
       .select('id, post_id, reporter_employee, reason, created_at')
       .eq('tenant_id', req.tenantId).eq('status', 'open')
       .order('created_at', { ascending: false }).limit(200)
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to load reports' })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to load reports')
 
     const rows = reports ?? []
     const postIds = [...new Set(rows.map((r: any) => r.post_id))]
