@@ -54,13 +54,31 @@ export default async function documentTypesRoutes(fastify: FastifyInstance) {
     return reply.send(data)
   })
 
+  // Always soft-deactivates — documents.document_type_id references this
+  // table with ON DELETE SET NULL, so a hard delete would silently strip the
+  // classification off every document of this type tenant-wide with no
+  // warning. Deactivating (like every sibling master) preserves that link.
   fastify.delete('/:id', hrAdminAuth, async (req: any, reply) => {
+    const { id } = req.params as { id: string }
+
+    const { count } = await fastify.supabase
+      .from('documents')
+      .select('id', { count: 'exact', head: true })
+      .eq('document_type_id', id)
+      .eq('tenant_id', req.tenantId)
+    const inUse = (count ?? 0) > 0
+
     const { error } = await fastify.supabase
       .from('document_types')
-      .delete()
-      .eq('id', req.params.id)
+      .update({ is_active: false })
+      .eq('id', id)
       .eq('tenant_id', req.tenantId)
     if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
-    return reply.code(204).send()
+    return reply.send({
+      deactivated: true,
+      message: inUse
+        ? 'Document type deactivated — in use by existing documents'
+        : 'Document type deactivated',
+    })
   })
 }
