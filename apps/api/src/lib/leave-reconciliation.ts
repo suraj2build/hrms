@@ -46,6 +46,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { detectBalanceDrift }  from './leave-replay-engine.js'
+import { fetchAllRows }        from './supabase-paginate.js'
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -162,22 +163,36 @@ export async function runLeaveReconciliation(
     const warnCutoff = new Date(Date.now() + EXPIRY_WARN_DAYS * 86_400_000).toISOString().slice(0, 10)
 
     // ── Fetch all ledger rows for the year ──────────────────────────────────────
-    const { data: ledgerRows, error: ledErr } = await supabase
-      .from('leave_accrual_ledger')
-      .select('employee_id, leave_type_id, year, days, accrual_type, is_expired, expires_on, accrued_on')
-      .eq('tenant_id', tenantId)
-      .eq('year', year)
-
-    if (ledErr) throw new Error(`Ledger query failed: ${ledErr.message}`)
+    // Completeness is this engine's entire purpose — paginated so drift
+    // among employees past PostgREST's 1000-row cap isn't silently missed.
+    let ledgerRows: any[]
+    try {
+      ledgerRows = await fetchAllRows<any>((from, to) =>
+        supabase
+          .from('leave_accrual_ledger')
+          .select('employee_id, leave_type_id, year, days, accrual_type, is_expired, expires_on, accrued_on')
+          .eq('tenant_id', tenantId)
+          .eq('year', year)
+          .range(from, to),
+      )
+    } catch (err: any) {
+      throw new Error(`Ledger query failed: ${err.message}`)
+    }
 
     // ── Fetch all balance rows for the year ─────────────────────────────────────
-    const { data: balanceRows, error: balErr } = await supabase
-      .from('employee_leave_balance')
-      .select('employee_id, leave_type_id, year, balance')
-      .eq('tenant_id', tenantId)
-      .eq('year', year)
-
-    if (balErr) throw new Error(`Balance query failed: ${balErr.message}`)
+    let balanceRows: any[]
+    try {
+      balanceRows = await fetchAllRows<any>((from, to) =>
+        supabase
+          .from('employee_leave_balance')
+          .select('employee_id, leave_type_id, year, balance')
+          .eq('tenant_id', tenantId)
+          .eq('year', year)
+          .range(from, to),
+      )
+    } catch (err: any) {
+      throw new Error(`Balance query failed: ${err.message}`)
+    }
 
     // ── Build ledger aggregate map ──────────────────────────────────────────────
     // key: `${employee_id}|${leave_type_id}`
