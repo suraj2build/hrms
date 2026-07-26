@@ -146,23 +146,27 @@ export class WebhookService {
         })
         .eq('id', deliveryId)
 
-      // Update webhook aggregate counters
-      await this.supabase.rpc('increment_webhook_success', {
-        p_webhook_id: webhook.id,
-        p_tenant_id:  tenantId,
-      }).then(({ error }) => {
-        if (error) {
-          // Fallback: manual update if rpc not available
-          this.supabase
-            .from('webhooks')
-            .update({
-              last_success_at:      new Date().toISOString(),
-              total_deliveries:     this.supabase.rpc('raw_increment', {}), // handled below
-            })
-            .eq('id', webhook.id)
-            .eq('tenant_id', tenantId)
-        }
-      })
+      // Update webhook aggregate counters — select-then-update, matching
+      // _deliverToWebhook's success branch. There is no increment_webhook_success
+      // RPC in this schema (the fallback below used to unconditionally fire and
+      // itself assigned an un-awaited Promise as total_deliveries, corrupting
+      // the column on every successful manual retry).
+      const { data: wh } = await this.supabase
+        .from('webhooks')
+        .select('total_deliveries, successful_deliveries')
+        .eq('id', webhook.id)
+        .eq('tenant_id', tenantId)
+        .single()
+
+      await this.supabase
+        .from('webhooks')
+        .update({
+          last_success_at:       new Date().toISOString(),
+          total_deliveries:      ((wh?.total_deliveries      as number) ?? 0) + 1,
+          successful_deliveries: ((wh?.successful_deliveries as number) ?? 0) + 1,
+        })
+        .eq('id', webhook.id)
+        .eq('tenant_id', tenantId)
 
       return { success: true, http_status: result.http_status }
     } else {

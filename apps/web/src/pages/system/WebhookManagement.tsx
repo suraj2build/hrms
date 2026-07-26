@@ -471,7 +471,7 @@ export function WebhookManagement() {
     onSuccess: () => {
       setRetryingId(null)
       qc.invalidateQueries({ queryKey: ['webhook-deliveries', selectedId] })
-      toast.success('Delivery retry queued')
+      toast.success('Delivery retried')
     },
     onError: (e: Error) => {
       setRetryingId(null)

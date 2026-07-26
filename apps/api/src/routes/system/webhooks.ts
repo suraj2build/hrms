@@ -17,6 +17,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z }                    from 'zod'
 import { ssrfCheck }            from '../../lib/ssrf-guard.js'
+import { WebhookService }       from '../../lib/webhook-service.js'
 
 // ── Validation schemas ────────────────────────────────────────────────────────
 
@@ -455,19 +456,22 @@ export default async function webhooksRoutes(fastify: FastifyInstance) {
       return reply.code(404).send({ error: 'NOT_FOUND', message: 'Delivery not found' })
     }
 
-    const { error: updateError } = await fastify.supabase
-      .from('webhook_deliveries')
-      .update({
-        status:        'retrying',
-        next_retry_at: new Date().toISOString(),
-      })
-      .eq('id', deliveryId)
+    // Actually re-attempt the HTTP delivery. This previously just flipped the
+    // row's status to 'retrying' with no scheduler/poller anywhere in the
+    // codebase ever reading it back out — the API reported "scheduled for
+    // retry" while the event was never redelivered, silently doing nothing.
+    const webhookService = new WebhookService(fastify.supabase)
+    const result = await webhookService.retryDelivery(deliveryId, req.tenantId)
 
-    if (updateError) {
-      req.log.error({ err: updateError }, 'delivery retry update failed')
-      return reply.code(500).send({ error: 'UPDATE_FAILED', message: 'Failed to schedule retry' })
+    if (!result.success) {
+      return reply.code(502).send({
+        error:       'RETRY_FAILED',
+        message:     result.error ?? 'Retry attempt failed',
+        http_status: result.http_status,
+        delivery_id: deliveryId,
+      })
     }
 
-    return reply.send({ message: 'Delivery scheduled for retry', delivery_id: deliveryId })
+    return reply.send({ message: 'Delivery retried successfully', delivery_id: deliveryId, http_status: result.http_status })
   })
 }
