@@ -6,10 +6,19 @@ import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 export default async function adminRoutes(fastify: FastifyInstance) {
 
   // GET /enterprise/queue
-  fastify.get('/queue', { preHandler: [fastify.authenticate] }, async (_req, reply) => {
+  // scanBreaches()/getTracked() operate on a process-global, cross-tenant
+  // in-memory store (fresh audit finding) — getTracked(orgId) already
+  // supports tenant filtering, but scanBreaches() must scan every tracked
+  // entry across all tenants to detect newly-overdue ones (breach status is
+  // computed by elapsed time, not queryable per tenant), so the returned
+  // breach list is filtered to this tenant AFTER the scan rather than
+  // during it. Also added the same HR-admin gate the sibling mutation
+  // routes below already have — this endpoint returns entity ids/severity
+  // for payroll/compliance/incident SLAs, not general-employee data.
+  fastify.get('/queue', { preHandler: [fastify.authenticate, requireRole(...HR_ADMIN_ROLES)] }, async (req: any, reply) => {
     try {
-      const sla_breaches   = slaService.scanBreaches()
-      const pending_sla    = slaService.getTracked()
+      const sla_breaches   = slaService.scanBreaches().filter(b => b.tenant_id === req.tenantId)
+      const pending_sla    = slaService.getTracked(req.tenantId)
       const listener_health = governanceEvaluator.listenerHealth()
 
       return reply.send({
@@ -25,9 +34,9 @@ export default async function adminRoutes(fastify: FastifyInstance) {
   })
 
   // POST /enterprise/sla/scan
-  fastify.post('/sla/scan', { preHandler: [fastify.authenticate, requireRole(...HR_ADMIN_ROLES)] }, async (_req, reply) => {
+  fastify.post('/sla/scan', { preHandler: [fastify.authenticate, requireRole(...HR_ADMIN_ROLES)] }, async (req: any, reply) => {
     try {
-      const breaches = slaService.scanBreaches()
+      const breaches = slaService.scanBreaches().filter(b => b.tenant_id === req.tenantId)
       return reply.send({
         breaches,
         count:      breaches.length,
@@ -40,11 +49,11 @@ export default async function adminRoutes(fastify: FastifyInstance) {
   })
 
   // GET /enterprise/health
-  fastify.get('/health', { preHandler: [fastify.authenticate] }, async (_req, reply) => {
+  fastify.get('/health', { preHandler: [fastify.authenticate] }, async (req: any, reply) => {
     try {
       const listeners     = governanceEvaluator.listenerHealth()
       const listenerCount = listeners.length
-      const tracked       = slaService.getTracked()
+      const tracked       = slaService.getTracked(req.tenantId)
 
       const checks = {
         event_publisher: { status: 'ok' as const },
