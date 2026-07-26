@@ -217,11 +217,13 @@ export default async function assetsRoutes(fastify: FastifyInstance) {
       .update({ status: 'assigned', assigned_to: parsed.data.employee_id, updated_at: new Date().toISOString() })
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
+      .eq('status', 'available')
       .select()
-      .single()
+      .maybeSingle()
     if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (!data) return reply.code(409).send({ error: 'NOT_AVAILABLE', message: 'Asset was assigned by another request — refresh and try again.' })
 
-    await fastify.supabase.from('employee_asset_ledger').insert({
+    const { error: ledgerErr } = await fastify.supabase.from('employee_asset_ledger').insert({
       tenant_id:       req.tenantId,
       asset_id:        id,
       employee_id:     parsed.data.employee_id,
@@ -229,6 +231,7 @@ export default async function assetsRoutes(fastify: FastifyInstance) {
       condition_notes: parsed.data.notes ?? null,
       performed_by:    req.userId,
     })
+    if (ledgerErr) req.log.warn({ err: ledgerErr, assetId: id }, 'assets/assign: failed to write asset ledger entry')
 
     await logAction(fastify.supabase, {
       tenantId: req.tenantId, tableName: 'assets', recordId: id,
@@ -273,12 +276,14 @@ export default async function assetsRoutes(fastify: FastifyInstance) {
       .update({ status: newStatus, assigned_to: null, updated_at: new Date().toISOString() })
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
+      .eq('status', 'assigned')
       .select()
-      .single()
+      .maybeSingle()
     if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (!data) return reply.code(409).send({ error: 'NOT_ASSIGNED', message: 'Asset was already returned by another request — refresh and try again.' })
 
     if (employeeId) {
-      await fastify.supabase.from('employee_asset_ledger').insert({
+      const { error: ledgerErr } = await fastify.supabase.from('employee_asset_ledger').insert({
         tenant_id:       req.tenantId,
         asset_id:        id,
         employee_id:     employeeId,
@@ -286,6 +291,7 @@ export default async function assetsRoutes(fastify: FastifyInstance) {
         condition_notes: parsed.data.notes ?? null,
         performed_by:    req.userId,
       })
+      if (ledgerErr) req.log.warn({ err: ledgerErr, assetId: id }, 'assets/return: failed to write asset ledger entry')
     }
 
     await logAction(fastify.supabase, {
