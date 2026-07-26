@@ -2548,9 +2548,17 @@ export function PayrollRuns() {
   })
 
   // ── Re-run a failed/partial-failed run ──────────────────────────────────────
+  // Same endpoint as triggerMutation (which already sends Idempotency-Key) —
+  // a network retry here would otherwise risk kicking off a duplicate payroll
+  // run. Keyed per-month since this mutation can be called for different runs.
+  const rerunIdempotencyKeys = useRef(new Map<string, string>())
   const rerunMutation = useMutation({
-    mutationFn: (month: string) => api.post('/payroll/runs', { month }),
-    onSuccess: () => {
+    mutationFn: (month: string) => {
+      if (!rerunIdempotencyKeys.current.has(month)) rerunIdempotencyKeys.current.set(month, crypto.randomUUID())
+      return api.post('/payroll/runs', { month }, { headers: { 'Idempotency-Key': rerunIdempotencyKeys.current.get(month)! } })
+    },
+    onSuccess: (_data, month) => {
+      rerunIdempotencyKeys.current.delete(month)
       invalidateAllPayrollRunViews(qc)
       toast.success('Payroll re-run triggered')
     },
