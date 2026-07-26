@@ -45,7 +45,7 @@ export class DecisionGraphService {
 
   /** Append a directed edge between two nodes. */
   async addEdge(supabase: SupabaseClient, edge: DecisionGraphEdge): Promise<void> {
-    void supabase
+    const { error } = await supabase
       .from('decision_graph_edges')
       .insert({
         from_node_id: edge.from_node_id,
@@ -55,6 +55,11 @@ export class DecisionGraphService {
         weight:       edge.weight,
         created_at:   edge.created_at ?? new Date().toISOString(),
       })
+    // Matches the sibling addNode()'s error handling above: log and swallow
+    // rather than throw, since a missing edge shouldn't fail the caller's
+    // primary operation — but previously this wasn't even awaited, so the
+    // error was invisible even to logs.
+    if (error) console.warn('[DecisionGraphService] addEdge failed', error.message)
   }
 
   /** Get all decision nodes for an entity (for lineage view). */

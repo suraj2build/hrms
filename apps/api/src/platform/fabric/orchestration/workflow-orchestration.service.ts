@@ -44,7 +44,12 @@ export class WorkflowOrchestrationService {
       }),
     }
 
-    void supabase
+    // Previously fire-and-forget (`void ...insert(...)`, error never checked) —
+    // the caller (POST /fabric/orchestration/escalate) got a 201 with a fresh
+    // activityId regardless of whether the row actually landed, so a transient
+    // insert failure produced an activity_id that GET /fabric/orchestration
+    // would never list, with no way for the client to detect the mismatch.
+    const { error } = await supabase
       .from('orchestration_activity_logs')
       .insert({
         activity_id:   activity.activity_id,
@@ -58,17 +63,19 @@ export class WorkflowOrchestrationService {
         metadata:      activity.metadata ?? null,
         explainability: activity.explainability,
       })
+    if (error) throw new Error('Failed to start orchestration activity')
 
     return activityId
   }
 
   /** Complete an orchestration activity. */
   async completeOrchestration(supabase: SupabaseClient, activityId: string, orgId: string): Promise<void> {
-    void supabase
+    const { error } = await supabase
       .from('orchestration_activity_logs')
       .update({ status: 'completed', completed_at: new Date().toISOString() })
       .eq('activity_id', activityId)
       .eq('tenant_id', orgId)
+    if (error) throw new Error('Failed to complete orchestration activity')
   }
 
   /** Get recent orchestration activities for an org. */

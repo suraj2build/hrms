@@ -58,9 +58,14 @@ export function getIntegrationConfig(provider: IntegrationProvider): Integration
     case 'decentro_pan': {
       const api_key   = process.env['DECENTRO_API_KEY']
       const client_id = process.env['DECENTRO_CLIENT_ID']
+      // pan-verification.adapter.ts expects api_key as a colon-joined
+      // "client_id:client_secret" pair (Decentro's actual auth model) — client_id
+      // was previously read here only to compute `enabled` and then discarded,
+      // so the adapter always sent client_secret as undefined regardless of
+      // config, silently degrading PAN verification to local-only.
       return {
         provider, enabled: !!(api_key && client_id),
-        api_key,
+        api_key: (api_key && client_id) ? `${client_id}:${api_key}` : api_key,
         base_url: process.env['DECENTRO_BASE_URL'] ?? 'https://in.decentro.tech',
         timeout_ms,
       }

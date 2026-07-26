@@ -29,14 +29,26 @@ export interface DriftDetectionResult {
   explainability?: ExplainabilityResult
 }
 
+const WINDOW_MS = 60 * 60 * 1000 // 1 hour
+
 export class DriftDetectionService {
-  /** In-memory counters keyed by `tenant_id:event_type`. */
-  private counters: Map<string, number> = new Map()
+  /**
+   * In-memory sliding-window timestamps keyed by `tenant_id:event_type`.
+   * Previously a bare lifetime counter that only ever grew (no decay) — once
+   * a tenant crossed a threshold once (e.g. its 6th payroll finalize ever),
+   * every subsequent event of that type re-fired the same "drift" alert
+   * forever, turning a spike detector into a permanent false-positive after
+   * one crossing. Now only events within the last hour count toward the
+   * threshold, matching the "sliding window" behavior the class doc claims.
+   */
+  private timestamps: Map<string, number[]> = new Map()
 
   private bump(key: string): number {
-    const n = (this.counters.get(key) ?? 0) + 1
-    this.counters.set(key, n)
-    return n
+    const now = Date.now()
+    const recent = (this.timestamps.get(key) ?? []).filter(t => now - t < WINDOW_MS)
+    recent.push(now)
+    this.timestamps.set(key, recent)
+    return recent.length
   }
 
   /**
@@ -111,7 +123,7 @@ export class DriftDetectionService {
 
   /** Reset all counters — used for testing or session resets. */
   resetCounters(): void {
-    this.counters.clear()
+    this.timestamps.clear()
   }
 }
 

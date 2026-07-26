@@ -23,8 +23,12 @@ governanceRuleRegistry.register({
   replay_safe:    true,
   explainability_template: 'Employee has exceeded the recommended compensation revision frequency for the rolling 12-month window.',
   matches(event) {
+    // max_revisions_per_year: 3 means 3 is still within policy — only the 4th+
+    // revision in the window actually exceeds the limit. Was firing one
+    // revision early (on the 3rd, not the 4th) and reason() below claimed
+    // "exceeds policy limit of 3" even when revisionCount === 3, which isn't true.
     const revisionCount = (event.payload?.revisions_in_12m as number) ?? 0
-    return revisionCount >= 3
+    return revisionCount > 3
   },
   reason(event) {
     const revisionCount = (event.payload?.revisions_in_12m as number) ?? 0
@@ -44,7 +48,11 @@ governanceRuleRegistry.register({
   enabled:        true,
   event_types:    ['compensation.revision.approved'],
   conditions:     { delta_pct_threshold: 40 },
-  actions:        [{ type: 'alert', severity: 'high' }, { type: 'score' }, { type: 'incident', incident_type: 'compensation_anomaly' }],
+  // 'compensation_anomaly' is not a valid operational_incidents.incident_type
+  // (migration 090's CHECK constraint has no such value) — 'payroll_impact' is
+  // the closest matching category and is what IncidentService.createFromGovernance
+  // would need to insert successfully once wired to a governance action executor.
+  actions:        [{ type: 'alert', severity: 'high' }, { type: 'score' }, { type: 'incident', incident_type: 'payroll_impact' }],
   replay_safe:    true,
   explainability_template: 'Compensation revision shows an unusually large percentage increase that warrants review.',
   matches(event) {

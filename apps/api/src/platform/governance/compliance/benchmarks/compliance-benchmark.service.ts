@@ -26,6 +26,14 @@ export interface ComplianceBenchmark {
   jurisdiction?:  string
   effective_from: string
   effective_to?:  string
+  /**
+   * 'ceiling' (default): value must be <= threshold to comply (PF/ESI wage
+   * caps, OT hour limits). 'floor': value must be >= threshold to comply
+   * (minimum wage) — without this, validate()'s single `value <= threshold`
+   * check would report paying BELOW minimum wage as compliant and paying
+   * above it as a violation.
+   */
+  direction?:     'ceiling' | 'floor'
 }
 
 export interface ComplianceValidationResult {
@@ -61,6 +69,7 @@ const DEFAULT_BENCHMARKS: ComplianceBenchmark[] = [
     unit:           'INR/day',
     jurisdiction:   'IN',
     effective_from: '2024-10-01',
+    direction:      'floor',
   },
   {
     type:           'overtime_threshold',
@@ -123,10 +132,13 @@ export class ComplianceBenchmarkService {
     if (!bench) {
       return { compliant: true, severity: 'info', violations: [] }
     }
-    const compliant = value <= bench.threshold
+    const isFloor = bench.direction === 'floor'
+    const compliant = isFloor ? value >= bench.threshold : value <= bench.threshold
     const violation = compliant
       ? []
-      : [`${bench.label}: ${value} ${bench.unit} exceeds threshold ${bench.threshold} ${bench.unit}`]
+      : [isFloor
+          ? `${bench.label}: ${value} ${bench.unit} is below the minimum threshold ${bench.threshold} ${bench.unit}`
+          : `${bench.label}: ${value} ${bench.unit} exceeds threshold ${bench.threshold} ${bench.unit}`]
     return {
       compliant,
       severity:          compliant ? 'info' : 'warning',
