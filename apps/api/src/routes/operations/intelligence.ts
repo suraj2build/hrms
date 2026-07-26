@@ -11,6 +11,7 @@ import { slaService }                     from '../../platform/operations/sla/sl
 import { simulationService }              from '../../platform/operations/simulation/simulation.service.js'
 import { securityIntelligenceService }    from '../../platform/operations/security-intelligence/security-intelligence.service.js'
 import { triggerRegistry }                from '../../platform/operations/automation/trigger-registry.js'
+import { requireRole, HR_ADMIN_ROLES }    from '../../lib/rbac.js'
 
 export default async function operationsRoutes(fastify: FastifyInstance) {
 
@@ -157,7 +158,12 @@ export default async function operationsRoutes(fastify: FastifyInstance) {
   })
 
   // GET /operations/security/signals — security intelligence events
-  fastify.get('/operations/security/signals', { preHandler: [fastify.authenticate] }, async (req, _reply) => {
+  // Same class of data as the dedicated /security/* workspace (unusual
+  // approval velocity, excessive overrides, escalation bypass — which
+  // manager/admin triggered them), which requires HR-admin. This route was
+  // only gated on fastify.authenticate, letting any employee see which
+  // admins in their tenant were flagged for unusual behavior.
+  fastify.get('/operations/security/signals', { preHandler: [fastify.authenticate, requireRole(...HR_ADMIN_ROLES)] }, async (req, _reply) => {
     const tenantId = (req as any).tenantId
     const { limit = '50' } = req.query as any
     const events = securityIntelligenceService.getEvents(tenantId, Number(limit))

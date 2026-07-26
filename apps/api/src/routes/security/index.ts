@@ -168,6 +168,17 @@ export default async function securityRoutes(fastify: FastifyInstance) {
   // ── GET /security/detection-rules ────────────────────────────────────────
 
   fastify.get('/detection-rules', auth, async (req: any, reply) => {
+    // Matches PATCH below and this file's own documented access model
+    // ("super_admin only — security events contain platform-level data").
+    // security_detection_rules is a platform-global table with no tenant
+    // filter, so any tenant's hr_admin could otherwise read exact
+    // fraud/abuse-detection thresholds (e.g. "more than 15 leave approvals
+    // in 5 minutes triggers a high alert") and calibrate evasion just
+    // under them.
+    if (req.userRole !== 'super_admin') {
+      return reply.code(403).send({ error: 'FORBIDDEN', message: 'Only super admins can view detection rules' })
+    }
+
     const { enabled } = req.query as Record<string, string>
 
     let query = fastify.supabase
