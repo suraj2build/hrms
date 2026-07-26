@@ -3,6 +3,7 @@ import type { FastifyInstance } from 'fastify'
 import Anthropic from '@anthropic-ai/sdk'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 // ── Sentiment helpers ──────────────────────────────────────────────────────────
 
@@ -79,7 +80,7 @@ const CreateSurveySchema = z.object({
   due_date: z.string().nullable().optional(),
   questions: z.array(z.object({
     question_text: z.string(),
-    question_type: z.string(),
+    question_type: z.enum(['text', 'rating', 'single', 'multi']),
     options: z.array(z.string()).nullable().optional(),
     required: z.boolean().optional(),
     order_idx: z.number().optional(),
@@ -89,7 +90,7 @@ const CreateSurveySchema = z.object({
 const UpdateSurveySchema = z.object({
   title: z.string().optional(),
   description: z.string().optional(),
-  status: z.string().optional(),
+  status: z.enum(['draft', 'active', 'closed']).optional(),
   due_date: z.string().optional(),
 })
 
@@ -119,7 +120,7 @@ const Setup360Schema = z.object({
 
 const Approve360Schema = z.object({
   nominator_ids: z.array(z.string()),
-  status: z.string().optional(),
+  status: z.enum(['open', 'nomination_open', 'approved', 'surveys_sent', 'closed']).optional(),
 })
 
 const Nominate360Schema = z.object({
@@ -345,7 +346,7 @@ export default async function surveyRoutes(fastify: FastifyInstance) {
       .select('id')
       .single()
 
-    if (error) return reply.status(500).send({ error: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create survey')
 
     if (questions?.length) {
       const questionRows = questions.map((q, i) => ({
@@ -357,7 +358,8 @@ export default async function surveyRoutes(fastify: FastifyInstance) {
         options:       q.options?.length ? q.options : null,
         required:      q.required ?? true,
       }))
-      await supabase.from('survey_questions').insert(questionRows)
+      const { error: qErr } = await supabase.from('survey_questions').insert(questionRows)
+      if (qErr) return serverError(req, reply, qErr, ErrorCode.INSERT_FAILED, 'Survey created but failed to save questions')
     }
 
     return reply.status(201).send({ data: { id: survey.id } })
@@ -416,7 +418,7 @@ export default async function surveyRoutes(fastify: FastifyInstance) {
       .eq('id', id)
       .eq('tenant_id', (req as any).tenantId)
 
-    if (error) return reply.status(500).send({ error: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update survey')
     return reply.send({ data: { ok: true } })
   })
 
@@ -823,12 +825,13 @@ export default async function surveyRoutes(fastify: FastifyInstance) {
     if (!parsed.success) return reply.status(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message ?? 'Invalid request body' })
     const { nominator_ids, status = 'approved' } = parsed.data
 
-    await supabase
+    const { error } = await supabase
       .from('feedback_360_rounds')
       .update({ status })
       .eq('id', roundId)
       .eq('tenant_id', tenantId)
 
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to approve 360 round')
     return reply.send({ data: { ok: true, approved: nominator_ids?.length ?? 0 } })
   })
 

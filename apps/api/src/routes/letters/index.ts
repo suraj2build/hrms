@@ -207,7 +207,7 @@ function renderTemplate(
 // ── Request validation schemas ────────────────────────────────────────────────
 
 const approvalChainItemSchema = z.object({
-  level:         z.number().int().min(1),
+  level:         z.number().int().min(1).max(3),
   approver_role: z.string().min(1),
   label:         z.string().optional(),
 })
@@ -360,7 +360,8 @@ export default async function lettersRoutes(fastify: FastifyInstance) {
         approver_role: row.approver_role,
         label: row.label ?? `Level ${row.level}`,
       }))
-      await supabase.from('letter_approval_chains').insert(rows)
+      const { error: chainErr } = await supabase.from('letter_approval_chains').insert(rows)
+      if (chainErr) return serverError(req, reply, chainErr, ErrorCode.INSERT_FAILED, 'Failed to save approval chain')
     }
 
     return reply.status(201).send({ data: tmpl })
@@ -443,7 +444,8 @@ export default async function lettersRoutes(fastify: FastifyInstance) {
           level: row.level, approver_role: row.approver_role,
           label: row.label ?? `Level ${row.level}`,
         }))
-        await supabase.from('letter_approval_chains').insert(rows)
+        const { error: chainErr } = await supabase.from('letter_approval_chains').insert(rows)
+        if (chainErr) return serverError(req, reply, chainErr, ErrorCode.INSERT_FAILED, 'Failed to save approval chain')
       }
     }
 

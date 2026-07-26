@@ -23,6 +23,7 @@ import { logAction }                   from '../../lib/audit-service.js'
 import { resolveAssistantChain }       from '../../lib/ai/config.js'
 import { chatCompleteWithFallback }    from '../../lib/ai/llm.js'
 import { fetchAllRows }                from '../../lib/supabase-paginate.js'
+import { serverError, ErrorCode }      from '../../lib/api-errors.js'
 
 export default async function moodRoutes(fastify: FastifyInstance) {
   const { supabase } = fastify
@@ -154,7 +155,7 @@ export default async function moodRoutes(fastify: FastifyInstance) {
         { onConflict: 'tenant_id,employee_id,checkin_date' },
       )
 
-    if (error) return reply.status(500).send({ error: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to save mood check-in')
     return reply.send({ data: { saved: true } })
   })
 
@@ -196,7 +197,7 @@ export default async function moodRoutes(fastify: FastifyInstance) {
         { onConflict: 'tenant_id,question_id,employee_id' },
       )
 
-    if (error) return reply.status(500).send({ error: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to save pulse response')
     return reply.send({ data: { saved: true } })
   })
 
@@ -438,7 +439,7 @@ export default async function moodRoutes(fastify: FastifyInstance) {
     if (status) q.eq('status', status)
 
     const { data, error } = await q
-    if (error) return reply.status(500).send({ error: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch pulse questions')
 
     return reply.send({ data: data ?? [] })
   })
@@ -456,7 +457,7 @@ export default async function moodRoutes(fastify: FastifyInstance) {
   const UpdatePulseSchema = z.object({
     question:      z.string().min(1).optional(),
     options:       z.array(z.unknown()).optional().nullable(),
-    status:        z.string().optional(),
+    status:        z.enum(['draft', 'active', 'closed']).optional(),
     starts_at:     z.string().optional().nullable(),
     ends_at:       z.string().optional().nullable(),
     poll_category: z.string().optional(),
@@ -483,7 +484,7 @@ export default async function moodRoutes(fastify: FastifyInstance) {
       .select('id')
       .single()
 
-    if (error) return reply.status(500).send({ error: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create pulse question')
 
     await logAction(supabase, {
       tenantId,
@@ -523,7 +524,7 @@ export default async function moodRoutes(fastify: FastifyInstance) {
       .select('id, status')
       .single()
 
-    if (error) return reply.status(500).send({ error: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update pulse question')
 
     await logAction(supabase, {
       tenantId,
@@ -559,7 +560,7 @@ export default async function moodRoutes(fastify: FastifyInstance) {
       .order('created_at', { ascending: false })
       .range(offset, offset + limit - 1)
 
-    if (error) return reply.status(500).send({ error: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch pulse responses')
     return reply.send({ data: data ?? [], total: count ?? 0, limit, offset })
   })
 
@@ -576,7 +577,7 @@ export default async function moodRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', tenantId)
       .eq('month', targetMonth)
 
-    if (error) return reply.status(500).send({ error: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch cluster breakdown')
     return reply.send({ data: data ?? [] })
   })
 
@@ -593,7 +594,7 @@ export default async function moodRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', tenantId)
       .eq('month', targetMonth)
 
-    if (error) return reply.status(500).send({ error: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch region breakdown')
     return reply.send({ data: data ?? [] })
   })
 }

@@ -72,7 +72,7 @@ export const structureUpdateSchema = structureSchema.partial()
 
 export const structureComponentSchema = z.object({
   salary_component_id: z.string().uuid('Invalid component ID'),
-  calculation_type:    z.enum(['fixed', 'pct_of_basic', 'pct_of_ctc', 'pct_of_gross']),
+  calculation_type:    z.enum(CALC_TYPES),
   default_value:       z.number().min(0, 'Value must be >= 0'),
   sequence:            z.number().int().optional().default(0),
   is_active:           z.boolean().optional().default(true),
