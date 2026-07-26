@@ -17,6 +17,8 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
+import { fetchAllRows } from '../../lib/supabase-paginate.js'
 
 function requireAdmin(req: any, reply: any, done: () => void) {
   if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
@@ -80,7 +82,7 @@ export default async function securityRoutes(fastify: FastifyInstance) {
     query = query.range(offset, offset + limit - 1)
 
     const { data, error, count } = await query
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch security events')
     return reply.send({ data: data ?? [], total: count ?? 0, limit, offset })
   })
 
@@ -119,7 +121,7 @@ export default async function securityRoutes(fastify: FastifyInstance) {
     query = query.range(offset, offset + limit - 1)
 
     const { data, error, count } = await query
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch security alerts')
     return reply.send({ data: data ?? [], total: count ?? 0, limit, offset })
   })
 
@@ -161,7 +163,7 @@ export default async function securityRoutes(fastify: FastifyInstance) {
     }
     const { error } = await upd
 
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update alert')
     return reply.send({ message: `Alert ${parsed.data.status}` })
   })
 
@@ -189,7 +191,7 @@ export default async function securityRoutes(fastify: FastifyInstance) {
     if (enabled !== undefined) query = query.eq('enabled', enabled === 'true')
 
     const { data, error } = await query
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch detection rules')
     return reply.send({ data: data ?? [] })
   })
 
@@ -216,7 +218,7 @@ export default async function securityRoutes(fastify: FastifyInstance) {
       .update(parsed.data)
       .eq('id', id)
 
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update detection rule')
     return reply.send({ message: 'Rule updated' })
   })
 
@@ -252,7 +254,7 @@ export default async function securityRoutes(fastify: FastifyInstance) {
         req.log.warn('security_intelligence_events table not provisioned — returning empty (apply migration 188)')
         return reply.send({ data: [], total: 0, limit, offset, unavailable: true })
       }
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch security intelligence events')
     }
     return reply.send({ data: data ?? [], total: count ?? 0, limit, offset })
   })
@@ -289,7 +291,7 @@ export default async function securityRoutes(fastify: FastifyInstance) {
         req.log.warn('verification_events table not provisioned — returning empty')
         return reply.send({ data: [], total: 0, limit, offset, unavailable: true })
       }
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch verification events')
     }
     return reply.send({ data: data ?? [], total: count ?? 0, limit, offset })
   })
@@ -299,29 +301,37 @@ export default async function securityRoutes(fastify: FastifyInstance) {
   fastify.get('/health', auth, async (req: any, reply) => {
     const tenantId = req.tenantId
 
-    const [
-      { data: alertRows },
-      { data: eventRows },
-      { data: ruleRows },
-    ] = await Promise.all([
-      fastify.supabase
-        .from('security_alerts')
-        .select('status, severity, triggered_at, mtta_seconds, mttr_seconds')
-        .or(`tenant_id.eq.${tenantId},tenant_id.is.null`)
-        .gte('triggered_at', new Date(Date.now() - 30 * 86400000).toISOString()),
-      fastify.supabase
-        .from('security_events')
-        .select('severity, event_type')
-        .or(`tenant_id.eq.${tenantId},tenant_id.is.null`)
-        .gte('occurred_at', new Date(Date.now() - 7 * 86400000).toISOString()),
-      fastify.supabase
-        .from('security_detection_rules')
-        .select('enabled, severity'),
-    ])
-
-    const alerts = (alertRows ?? []) as any[]
-    const events = (eventRows ?? []) as any[]
-    const rules  = (ruleRows ?? []) as any[]
+    let alerts: any[]
+    let events: any[]
+    let rules: any[]
+    try {
+      ;[alerts, events, rules] = await Promise.all([
+        fetchAllRows<any>((from, to) =>
+          fastify.supabase
+            .from('security_alerts')
+            .select('status, severity, triggered_at, mtta_seconds, mttr_seconds')
+            .or(`tenant_id.eq.${tenantId},tenant_id.is.null`)
+            .gte('triggered_at', new Date(Date.now() - 30 * 86400000).toISOString())
+            .range(from, to),
+        ),
+        fetchAllRows<any>((from, to) =>
+          fastify.supabase
+            .from('security_events')
+            .select('severity, event_type')
+            .or(`tenant_id.eq.${tenantId},tenant_id.is.null`)
+            .gte('occurred_at', new Date(Date.now() - 7 * 86400000).toISOString())
+            .range(from, to),
+        ),
+        fetchAllRows<any>((from, to) =>
+          fastify.supabase
+            .from('security_detection_rules')
+            .select('enabled, severity')
+            .range(from, to),
+        ),
+      ])
+    } catch (error) {
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch security health metrics')
+    }
 
     const openAlerts     = alerts.filter(a => a.status === 'open')
     const criticalOpen   = openAlerts.filter(a => a.severity === 'critical').length

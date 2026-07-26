@@ -14,8 +14,12 @@ export default async function signalIntelligenceRoutes(fastify: FastifyInstance)
    * Run suppression → prioritization → clustering on a batch of signals.
    */
   fastify.post('/signals/process', { preHandler: [fastify.authenticate] }, async (req, reply) => {
+    const tenantId = (req as any).tenantId as string
     const body   = req.body as { signals?: PlatformSignal[] }
-    const input  = Array.isArray(body?.signals) ? body.signals : []
+    const rawInput = Array.isArray(body?.signals) ? body.signals : []
+    // Never trust a client-supplied tenant_id — always assert the caller's own tenant
+    // so a request cannot reference or poison another tenant's suppression state.
+    const input = rawInput.map(signal => ({ ...signal, tenant_id: tenantId }))
 
     let suppressed_count = 0
     const processed: PlatformSignal[] = []

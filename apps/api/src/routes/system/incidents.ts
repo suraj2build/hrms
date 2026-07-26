@@ -17,6 +17,7 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { serverError, notFound, forbidden, validationError, conflictError, ErrorCode } from '../../lib/api-errors.js'
+import { fetchAllRows } from '../../lib/supabase-paginate.js'
 
 // ── Schemas ───────────────────────────────────────────────────────────────────
 
@@ -194,16 +195,18 @@ export default async function incidentsRoute(fastify: FastifyInstance) {
     const tenantId = req.tenantId
 
     // Fetch all incidents for the tenant (lightweight: only status, severity, type, sla_breached, resolved_at, created_at)
-    const { data, error } = await fastify.supabase
-      .from('operational_incidents')
-      .select('status, severity, incident_type, sla_breached, resolved_at, created_at')
-      .eq('tenant_id', tenantId)
-
-    if (error) {
+    let rows: any[]
+    try {
+      rows = await fetchAllRows<any>((from, to) =>
+        fastify.supabase
+          .from('operational_incidents')
+          .select('status, severity, incident_type, sla_breached, resolved_at, created_at')
+          .eq('tenant_id', tenantId)
+          .range(from, to),
+      )
+    } catch (error) {
       return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch incident summary')
     }
-
-    const rows = data ?? []
 
     // Count by status
     const by_status: Record<string, number> = {}

@@ -12,6 +12,7 @@ import { simulationService }              from '../../platform/operations/simula
 import { securityIntelligenceService }    from '../../platform/operations/security-intelligence/security-intelligence.service.js'
 import { triggerRegistry }                from '../../platform/operations/automation/trigger-registry.js'
 import { requireRole, HR_ADMIN_ROLES }    from '../../lib/rbac.js'
+import { serverError, ErrorCode }         from '../../lib/api-errors.js'
 
 export default async function operationsRoutes(fastify: FastifyInstance) {
 
@@ -62,7 +63,7 @@ export default async function operationsRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', tenantId)
       .order('fired_at', { ascending: false })
       .limit(Number(limit))
-    if (error) return reply.status(500).send({ error: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch automation activity')
     return { activities: data ?? [], total: (data ?? []).length }
   })
 
@@ -153,7 +154,7 @@ export default async function operationsRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', tenantId)
       .order('created_at', { ascending: false })
       .limit(Number(limit))
-    if (error) return reply.status(500).send({ error: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch simulation history')
     return { runs: data ?? [], total: (data ?? []).length }
   })
 
@@ -180,7 +181,7 @@ export default async function operationsRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', tenantId)
       .order('breached_at', { ascending: false })
       .limit(Number(limit))
-    if (error) return reply.status(500).send({ error: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch SLA breaches')
     return { breaches: data ?? [], total: (data ?? []).length }
   })
 }
