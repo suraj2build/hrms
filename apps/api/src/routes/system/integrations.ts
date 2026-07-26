@@ -61,9 +61,19 @@ function isAdmin(role: string): boolean {
 
 export default async function integrationsRoutes(fastify: FastifyInstance) {
   const auth = { preHandler: [fastify.authenticate] }
+  // Integration config can carry auth-related fields (endpoint_url, auth_type,
+  // and a config blob) — these GET routes were previously auth-only despite
+  // the docstring already saying "restricted to super_admin / hr_admin" and
+  // every write route in this file enforcing it.
+  const adminAuth = {
+    preHandler: [fastify.authenticate, (req: any, reply: any, done: () => void) => {
+      if (!isAdmin(req.userRole)) return forbidden(reply, 'FORBIDDEN', 'Admin access required')
+      done()
+    }],
+  }
 
   // ── GET /system/integrations ──────────────────────────────────────────────
-  fastify.get('/system/integrations', auth, async (req: any, reply) => {
+  fastify.get('/system/integrations', adminAuth, async (req: any, reply) => {
     const parsed = listQuerySchema.safeParse(req.query)
     if (!parsed.success) {
       return validationError(reply, ErrorCode.VALIDATION_ERROR, parsed.error.issues[0]?.message)
@@ -88,7 +98,7 @@ export default async function integrationsRoutes(fastify: FastifyInstance) {
   })
 
   // ── GET /system/integrations/:id ──────────────────────────────────────────
-  fastify.get('/system/integrations/:id', auth, async (req: any, reply) => {
+  fastify.get('/system/integrations/:id', adminAuth, async (req: any, reply) => {
     const { id } = req.params as { id: string }
 
     const { data: integration, error: integrationError } = await fastify.supabase
@@ -253,7 +263,7 @@ export default async function integrationsRoutes(fastify: FastifyInstance) {
   })
 
   // ── GET /system/integrations/:id/audit ───────────────────────────────────
-  fastify.get('/system/integrations/:id/audit', auth, async (req: any, reply) => {
+  fastify.get('/system/integrations/:id/audit', adminAuth, async (req: any, reply) => {
     const { id } = req.params as { id: string }
 
     const parsed = auditQuerySchema.safeParse(req.query)

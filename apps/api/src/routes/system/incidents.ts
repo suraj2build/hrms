@@ -106,10 +106,20 @@ async function addTimelineEvent(
 // ── Plugin ────────────────────────────────────────────────────────────────────
 
 export default async function incidentsRoute(fastify: FastifyInstance) {
-  const auth      = { preHandler: [fastify.authenticate] }
+  const auth = { preHandler: [fastify.authenticate] }
+  // Incident management is an admin console (every write route here already
+  // checks isAdmin) — the 3 GET routes below were previously auth-only,
+  // letting any employee read incident details, payroll-impact amounts, and
+  // internal comments/timeline for the whole tenant.
+  const adminAuth = {
+    preHandler: [fastify.authenticate, (req: any, reply: any, done: () => void) => {
+      if (!isAdmin(req.userRole)) return forbidden(reply, 'FORBIDDEN', 'HR admin access required')
+      done()
+    }],
+  }
 
   // ── GET /system/incidents ─────────────────────────────────────────────────
-  fastify.get('/system/incidents', auth, async (req: any, reply) => {
+  fastify.get('/system/incidents', adminAuth, async (req: any, reply) => {
     const parsed = listQuerySchema.safeParse(req.query)
     if (!parsed.success) {
       return validationError(reply, ErrorCode.VALIDATION_ERROR, parsed.error.issues[0]?.message)
@@ -180,7 +190,7 @@ export default async function incidentsRoute(fastify: FastifyInstance) {
   })
 
   // ── GET /system/incidents/summary ─────────────────────────────────────────
-  fastify.get('/system/incidents/summary', auth, async (req: any, reply) => {
+  fastify.get('/system/incidents/summary', adminAuth, async (req: any, reply) => {
     const tenantId = req.tenantId
 
     // Fetch all incidents for the tenant (lightweight: only status, severity, type, sla_breached, resolved_at, created_at)
@@ -252,7 +262,7 @@ export default async function incidentsRoute(fastify: FastifyInstance) {
   })
 
   // ── GET /system/incidents/:id ─────────────────────────────────────────────
-  fastify.get('/system/incidents/:id', auth, async (req: any, reply) => {
+  fastify.get('/system/incidents/:id', adminAuth, async (req: any, reply) => {
     const { id } = req.params as { id: string }
 
     // Fetch incident
