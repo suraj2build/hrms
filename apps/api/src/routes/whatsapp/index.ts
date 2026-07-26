@@ -66,16 +66,27 @@ const whatsappRoutes: FastifyPluginAsync = async (fastify) => {
 
       if (!from || !text) return reply.code(200).send('ok')
 
-      // Look up employee by phone across all tenants
+      // Look up employee by phone across all tenants. `employees.phone` has
+      // no unique constraint and no dedicated WhatsApp opt-in mapping exists
+      // — a recycled mobile number (routine in India within ~90 days of
+      // going inactive) can genuinely match more than one active employee
+      // across tenants. Fetch 2 so a collision can be detected instead of
+      // `.limit(1)` silently picking an arbitrary row and writing this
+      // message's mood/note/ack against the wrong employee and tenant.
       const supabase = fastify.supabase
       const { data: employees } = await supabase
         .from('employees')
         .select('id, tenant_id, first_name')
         .eq('phone', from)
         .eq('status', 'active')
-        .limit(1)
+        .limit(2)
 
-      const employee = (employees as { id: string; tenant_id: string; first_name: string }[] | null)?.[0]
+      const matches = (employees as { id: string; tenant_id: string; first_name: string }[] | null) ?? []
+      if (matches.length > 1) {
+        req.log.error({ from, tenantIds: matches.map(m => m.tenant_id) }, '[whatsapp] ambiguous phone number matches multiple active employees — dropping message')
+        return reply.code(200).send('ok')
+      }
+      const employee = matches[0]
       if (!employee) return reply.code(200).send('ok')
 
       const { id: employeeId, tenant_id: tenantId } = employee

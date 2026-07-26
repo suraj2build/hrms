@@ -23,6 +23,7 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { buildMonthReadModel } from '../../lib/attendance-read-model.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 const monthRe = /^\d{4}-\d{2}$/
 
@@ -52,8 +53,7 @@ export default async function payrollSummaryRoute(fastify: FastifyInstance) {
     const result = await buildMonthReadModel(fastify.supabase, req.tenantId, month)
 
     if ('error' in result) {
-      req.log.error({ err: result.error }, 'payroll-summary read model failed')
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: result.error })
+      return serverError(req, reply, result.error, ErrorCode.QUERY_FAILED, 'Failed to build payroll summary')
     }
 
     const { summaries, totals } = result

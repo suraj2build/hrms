@@ -22,6 +22,7 @@ import {
   listLeaveRequests,
   cancelLeaveRequest,
 }                               from '../../lib/leave-request-service.js'
+import { MANAGER_ROLES }       from '../../lib/rbac.js'
 
 const dateRe = /^\d{4}-\d{2}-\d{2}$/
 
@@ -191,6 +192,15 @@ export default async function leaveEmployeeRoutes(fastify: FastifyInstance) {
    *   limit        — default 20
    */
   fastify.get('/leave/requests', auth, async (req: any, reply) => {
+    // HR/manager only — this alias accepts an arbitrary employee_id (and
+    // returns every tenant leave request, including reasons/rejection
+    // reasons, when employee_id is omitted), unlike /leave/my-requests
+    // above which always self-scopes. Was previously reachable by any
+    // authenticated employee.
+    if (!(MANAGER_ROLES as readonly string[]).includes(req.userRole)) {
+      return reply.code(403).send({ error: 'FORBIDDEN', message: 'Not authorised' })
+    }
+
     const querySchema = z.object({
       employee_id: z.string().uuid().optional(),
       status:      z.string().optional(),

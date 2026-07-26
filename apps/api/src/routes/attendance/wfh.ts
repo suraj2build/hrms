@@ -7,6 +7,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { isHrAdmin, resolveCallerEmployeeId } from '../../lib/manager-scope.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
 function dayCount(from: string, to: string): number {
@@ -88,11 +89,17 @@ export default async function wfhRoutes(fastify: FastifyInstance) {
       if (!mgrId || emp?.manager_id !== mgrId) return reply.code(403).send({ error: 'FORBIDDEN', message: 'Not your team member' })
     }
 
+    // Fold the 'pending' precondition into the UPDATE itself — the read
+    // above is advisory only; without this, two concurrent decide calls
+    // (e.g. a manager and HR admin both acting on the same request) could
+    // both pass the read-check and the second would silently overwrite the
+    // first's decision.
     const { data, error } = await fastify.supabase
       .from('wfh_requests')
       .update({ status: parsed.data.decision, decided_by: req.userId, decided_at: new Date().toISOString(), decision_remarks: parsed.data.remarks ?? null, updated_at: new Date().toISOString() })
-      .eq('id', id).eq('tenant_id', req.tenantId).select().single()
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+      .eq('id', id).eq('tenant_id', req.tenantId).eq('status', 'pending').select().maybeSingle()
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to record WFH decision')
+    if (!data) return reply.code(409).send({ error: 'NOT_PENDING', message: 'Request already decided' })
     return reply.send({ data })
   })
 }

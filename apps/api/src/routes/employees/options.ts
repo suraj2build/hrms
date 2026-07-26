@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 /**
  * GET /employees/options
@@ -54,7 +55,7 @@ export default async function employeeOptionsRoute(fastify: FastifyInstance) {
     const { data, error } = await query
 
     if (error) {
-      return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+      return serverError(request, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch employee options')
     }
 
     return reply.send({ data: data ?? [] })
