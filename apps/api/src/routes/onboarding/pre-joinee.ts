@@ -539,6 +539,9 @@ export default async function preJoineeRoutes(fastify: FastifyInstance) {
   // ── 1. GET /onboarding/pre-joinee — list invitations ───────────────────────
 
   fastify.get('/onboarding/pre-joinee', auth, async (req: any, reply) => {
+    if (!HR_ADMIN_ROLES.includes(req.userRole as any)) {
+      return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
+    }
     const tenantId: string = req.tenantId
 
     const { data, error } = await fastify.supabase
@@ -587,6 +590,9 @@ export default async function preJoineeRoutes(fastify: FastifyInstance) {
   // ── 2. POST /onboarding/pre-joinee — create invitation ────────────────────
 
   fastify.post('/onboarding/pre-joinee', auth, async (req: any, reply) => {
+    if (!HR_ADMIN_ROLES.includes(req.userRole as any)) {
+      return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
+    }
     const tenantId: string = req.tenantId
 
     const parsed = createInvitationSchema.safeParse(req.body)
@@ -702,6 +708,9 @@ export default async function preJoineeRoutes(fastify: FastifyInstance) {
   // Re-emails the candidate and pushes the expiry out so an expired/old link
   // works again. Keeps the same token (the previously emailed link stays valid).
   fastify.post('/onboarding/pre-joinee/:id/resend', auth, async (req: any, reply) => {
+    if (!HR_ADMIN_ROLES.includes(req.userRole as any)) {
+      return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
+    }
     const tenantId: string = req.tenantId
     const { id } = req.params as { id: string }
 
@@ -768,6 +777,9 @@ export default async function preJoineeRoutes(fastify: FastifyInstance) {
   // ── 3. DELETE /onboarding/pre-joinee/:id — cancel/delete invitation ────────
 
   fastify.delete('/onboarding/pre-joinee/:id', auth, async (req: any, reply) => {
+    if (!HR_ADMIN_ROLES.includes(req.userRole as any)) {
+      return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
+    }
     const tenantId: string = req.tenantId
     const { id } = req.params as { id: string }
 
@@ -797,6 +809,9 @@ export default async function preJoineeRoutes(fastify: FastifyInstance) {
   // Backfill: push an already-submitted candidate into the AI review queue.
   // Idempotent — if a session is already linked, returns it unchanged.
   fastify.post('/onboarding/pre-joinee/:id/push-to-review', auth, async (req: any, reply) => {
+    if (!HR_ADMIN_ROLES.includes(req.userRole as any)) {
+      return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
+    }
     const tenantId: string = req.tenantId
     const { id } = req.params as { id: string }
 
@@ -1323,6 +1338,9 @@ export default async function preJoineeRoutes(fastify: FastifyInstance) {
   // Bounce a submitted invitation back to the candidate to revise/re-upload the
   // flagged document(s). Re-opens their portal (status → changes_requested).
   fastify.post('/onboarding/pre-joinee/:id/request-reupload', auth, async (req: any, reply) => {
+    if (!HR_ADMIN_ROLES.includes(req.userRole as any)) {
+      return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
+    }
     const tenantId: string = req.tenantId
     const { id } = req.params as { id: string }
 
@@ -1353,6 +1371,9 @@ export default async function preJoineeRoutes(fastify: FastifyInstance) {
   // ── 6. GET /onboarding/pre-joinee/:id/submission — get submission for HR ───
 
   fastify.get('/onboarding/pre-joinee/:id/submission', auth, async (req: any, reply) => {
+    if (!HR_ADMIN_ROLES.includes(req.userRole as any)) {
+      return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
+    }
     const tenantId: string = req.tenantId
     const { id } = req.params as { id: string }
 
@@ -1764,6 +1785,9 @@ export default async function preJoineeRoutes(fastify: FastifyInstance) {
 
   // ── PATCH /onboarding/pre-joinee/:id/buddy ─────────────────────────────────
   fastify.patch('/onboarding/pre-joinee/:id/buddy', auth, async (req: any, reply) => {
+    if (!HR_ADMIN_ROLES.includes(req.userRole as any)) {
+      return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
+    }
     const { id }              = req.params as { id: string }
     const { buddy_employee_id } = req.body as { buddy_employee_id: string | null }
     const { tenantId }        = req
