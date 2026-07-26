@@ -518,6 +518,19 @@ export default async function helpdeskRoutes(fastify: FastifyInstance) {
     const parsed = schema.safeParse(req.body)
     if (!parsed.success) return validationError(reply, 'VALIDATION_ERROR', parsed.error.issues[0]?.message ?? 'Validation failed')
 
+    // assigned_to is caller-supplied — verify it's a profile in this tenant
+    // before it's used. Without this, a ticket (and the notification it
+    // triggers below) could be pointed at another tenant's user.
+    if (parsed.data.assigned_to) {
+      const { data: agent } = await fastify.supabase
+        .from('profiles')
+        .select('id')
+        .eq('id', parsed.data.assigned_to)
+        .eq('tenant_id', req.tenantId)
+        .maybeSingle()
+      if (!agent) return notFound(reply, 'AGENT_NOT_FOUND', 'Assignee not found')
+    }
+
     const { data, error } = await fastify.supabase
       .from('helpdesk_tickets')
       .update({ assigned_to: parsed.data.assigned_to })
