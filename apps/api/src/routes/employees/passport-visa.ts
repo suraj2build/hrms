@@ -11,6 +11,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { serverError, notFound, ErrorCode } from '../../lib/api-errors.js'
 
 const createSchema = z.object({
   record_type:    z.enum(['passport', 'visa']),
@@ -57,7 +58,7 @@ export default async function passportVisaRoutes(fastify: FastifyInstance) {
       .order('record_type', { ascending: true })
       .order('created_at', { ascending: false })
 
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch passport/visa records')
     return reply.send({ data: data ?? [] })
   })
 
@@ -81,7 +82,7 @@ export default async function passportVisaRoutes(fastify: FastifyInstance) {
       .select('*')
       .single()
 
-    if (error) return reply.code(500).send({ error: 'INSERT_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create passport/visa record')
     return reply.code(201).send({ data })
   })
 
@@ -104,8 +105,8 @@ export default async function passportVisaRoutes(fastify: FastifyInstance) {
       .select('*')
       .single()
 
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
-    if (!data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Record not found' })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update passport/visa record')
+    if (!data) return notFound(reply, 'NOT_FOUND', 'Record not found')
     return reply.send({ data })
   })
 
@@ -122,7 +123,7 @@ export default async function passportVisaRoutes(fastify: FastifyInstance) {
       .eq('employee_id', req.params.id)
       .eq('tenant_id', req.tenantId)
 
-    if (error) return reply.code(500).send({ error: 'DELETE_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.DELETE_FAILED, 'Failed to delete passport/visa record')
     return reply.code(204).send()
   })
 }

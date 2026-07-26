@@ -17,6 +17,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { round2 } from './payroll-engine.js'
+import { getLeaveYear } from './leave-entitlement-service.js'
 
 export interface FnfBreakdown {
   gratuity_amount:         number
@@ -142,7 +143,36 @@ export async function computeFnfSettlement(
   const encashableTypeIds = ((rules ?? []) as any[]).map(r => r.leave_type_id)
   let encashDays = 0
   if (encashableTypeIds.length > 0) {
-    const year = new Date(lastWorking).getFullYear()
+    // employee_leave_balance.year is keyed per the employee's assigned
+    // policy year_type: for 'financial' (Apr–Mar) policies it stores the FY
+    // START year, not the calendar year — so a Jan–Mar exit under a
+    // financial-year policy would silently match zero balance rows if keyed
+    // by plain calendar year. Resolve the employee's policy year_type first
+    // (policy assignment is one-per-employee — see the "one-policy" guard
+    // in leave-entitlement-service.ts) and compute the leave year the same
+    // way accrual does.
+    const { data: assignment } = await supabase
+      .from('leave_policy_assignments')
+      .select('policy_id')
+      .eq('tenant_id', tenantId)
+      .eq('scope_type', 'employee')
+      .eq('scope_id', employeeId)
+      .or(`effective_from.is.null,effective_from.lte.${lastWorking}`)
+      .or(`effective_to.is.null,effective_to.gte.${lastWorking}`)
+      .maybeSingle()
+
+    let yearType: 'calendar' | 'financial' = 'calendar'
+    if ((assignment as any)?.policy_id) {
+      const { data: master } = await supabase
+        .from('leave_policy_masters')
+        .select('year_type')
+        .eq('id', (assignment as any).policy_id)
+        .eq('tenant_id', tenantId)
+        .maybeSingle()
+      if ((master as any)?.year_type === 'financial') yearType = 'financial'
+    }
+
+    const year = getLeaveYear(new Date(lastWorking), yearType)
     const { data: balances } = await supabase
       .from('employee_leave_balance')
       .select('balance, leave_type_id')

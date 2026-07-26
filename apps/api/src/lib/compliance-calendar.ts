@@ -146,7 +146,10 @@ export async function computeComplianceCalendar(
     }
     if (s.esi_enabled) {
       const c = closureMap.get(`esi:${period}`)
-      push('ESI', `ESI contribution — ${monLabel}`, 'Central', ny, nm, 15, !!c, c?.ref ?? null, c?.filed_at ?? null)
+      // ESI contribution is due by the 21st of the following month under
+      // the ESI Act — was copy-pasted from EPF's 15th, marking filings
+      // "overdue" up to 6 days early.
+      push('ESI', `ESI contribution — ${monLabel}`, 'Central', ny, nm, 21, !!c, c?.ref ?? null, c?.filed_at ?? null)
     }
     if (s.tds_enabled) {
       const c = closureMap.get(`tds:${period}`)

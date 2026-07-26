@@ -11,6 +11,7 @@ import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { isHrAdmin, resolveCallerEmployeeId } from '../../lib/manager-scope.js'
 import { logAction } from '../../lib/audit-service.js'
 import { serverError, ErrorCode } from '../../lib/api-errors.js'
+import { fetchAllRows } from '../../lib/supabase-paginate.js'
 
 const SEED_QUESTIONS = [
   { category: 'reason',       question_text: 'What is the primary reason for your departure?', response_type: 'single_choice', options: ['Better opportunity','Compensation & benefits','Work-life balance','Relationship with manager','Career growth','Relocation','Personal reasons','Other'], is_required: true },
@@ -257,23 +258,33 @@ export default async function exitInterviewRoutes(fastify: FastifyInstance) {
 
   // ── Analytics (HR) ────────────────────────────────────────────────────────
   fastify.get('/separations/exit-analytics', hrAdminAuth, async (req: any, reply) => {
-    const { data: seps } = await fastify.supabase
-      .from('employee_separation')
-      .select('id, exit_interview_would_recommend')
-      .eq('tenant_id', req.tenantId).eq('exit_interview_status', 'submitted')
-    const sepIds = (seps ?? []).map((s: any) => s.id)
+    // Both queries below can exceed PostgREST's 1,000-row cap for a
+    // long-lived enterprise tenant (separations/responses accumulate over
+    // the company's lifetime), silently truncating by_category/top_reasons
+    // with no error.
+    const seps = await fetchAllRows<any>((from, to) =>
+      fastify.supabase
+        .from('employee_separation')
+        .select('id, exit_interview_would_recommend')
+        .eq('tenant_id', req.tenantId).eq('exit_interview_status', 'submitted')
+        .range(from, to),
+    )
+    const sepIds = seps.map((s: any) => s.id)
     if (sepIds.length === 0) {
       return reply.send({ data: { total: 0, would_recommend_pct: null, by_category: [], top_reasons: [] } })
     }
 
-    const [{ data: responses }, { data: questions }] = await Promise.all([
-      fastify.supabase.from('exit_interview_responses').select('separation_id, question_id, rating, choice').eq('tenant_id', req.tenantId).in('separation_id', sepIds),
+    const [responses, { data: questions }] = await Promise.all([
+      fetchAllRows<any>((from, to) =>
+        fastify.supabase.from('exit_interview_responses').select('separation_id, question_id, rating, choice')
+          .eq('tenant_id', req.tenantId).in('separation_id', sepIds).range(from, to),
+      ),
       fastify.supabase.from('exit_interview_questions').select('id, category, response_type').eq('tenant_id', req.tenantId),
     ])
     const qById = new Map((questions ?? []).map((q: any) => [q.id, q]))
     const catAgg: Record<string, { sum: number; n: number }> = {}
     const reasonAgg: Record<string, number> = {}
-    for (const r of responses ?? []) {
+    for (const r of responses) {
       const q = qById.get(r.question_id); if (!q) continue
       if (q.response_type === 'rating' && r.rating != null) {
         catAgg[q.category] ??= { sum: 0, n: 0 }

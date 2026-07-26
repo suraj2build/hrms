@@ -7,6 +7,7 @@ import { computeFnfSettlement } from '../../lib/fnf-settlement-engine.js'
 import { isHrAdmin, resolveCallerEmployeeId, isDirectReport } from '../../lib/manager-scope.js'
 import { revokeEmployeeAuth } from '../../lib/user-account-service.js'
 import { serverError, ErrorCode } from '../../lib/api-errors.js'
+import { fetchAllRows } from '../../lib/supabase-paginate.js'
 
 // ─── Schemas ─────────────────────────────────────────────────────────────────
 
@@ -97,25 +98,35 @@ export default async function separationWorkflowRoutes(fastify: FastifyInstance)
 
   // ── GET /separations — list all separations with clearances + F&F for tenant ──
   fastify.get('/separations', hrAdminAuth, async (req: any, reply) => {
-    const { data: seps, error } = await fastify.supabase
-      .from('employee_separation')
-      .select(`
-        id, separation_type, initiated_by, notice_date,
-        last_working_date, exit_reason, clearance_done,
-        exit_interview_done, remarks, created_at,
-        lifecycle_stage, approval_status, relieved_at, archived_at,
-        employees!inner (
-          id, first_name, last_name, employee_code,
-          departments ( name )
-        )
-      `)
-      .eq('tenant_id', req.tenantId)
-      .order('created_at', { ascending: false })
-
-    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch separations')
+    // Separations accumulate over the tenant's lifetime (unlike active
+    // employees, which shrink on separation), so a long-lived enterprise
+    // tenant can exceed PostgREST's 1,000-row cap here — an unbounded
+    // .select() would silently drop older separation records with no error.
+    let seps: any[]
+    try {
+      seps = await fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('employee_separation')
+          .select(`
+            id, separation_type, initiated_by, notice_date,
+            last_working_date, exit_reason, clearance_done,
+            exit_interview_done, remarks, created_at,
+            lifecycle_stage, approval_status, relieved_at, archived_at,
+            employees!inner (
+              id, first_name, last_name, employee_code,
+              departments ( name )
+            )
+          `)
+          .eq('tenant_id', req.tenantId)
+          .order('created_at', { ascending: false })
+          .range(from, to),
+      )
+    } catch (error) {
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch separations')
+    }
 
     // Attach clearances + F&F for each separation
-    const result = await Promise.all((seps ?? []).map(async (sep: any) => {
+    const result = await Promise.all(seps.map(async (sep: any) => {
       const { data: clearances } = await fastify.supabase
         .from('separation_clearances')
         .select('id, department, status, cleared_by, cleared_at, remarks')
@@ -673,11 +684,12 @@ export default async function separationWorkflowRoutes(fastify: FastifyInstance)
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to approve separation')
     if (!data) return reply.code(409).send({ error: 'ALREADY_DECIDED', message: 'This separation has already been approved or rejected' })
 
-    await fastify.supabase
+    const { error: statusErr } = await fastify.supabase
       .from('employees')
       .update({ status: 'on_notice' })
       .eq('id', req.params.id)
       .eq('tenant_id', req.tenantId)
+    if (statusErr) fastify.log.error({ err: statusErr, employeeId: req.params.id }, 'separation/approve: failed to set employee status to on_notice')
 
     await logAction(fastify.supabase, {
       tenantId: req.tenantId, tableName: 'employee_separation', recordId: sep.id,
@@ -721,14 +733,20 @@ export default async function separationWorkflowRoutes(fastify: FastifyInstance)
     if (parsed.data.to && parsed.data.to !== nextStage)
       return reply.code(409).send({ error: 'INVALID_TARGET', message: `Next valid stage is '${nextStage}', not '${parsed.data.to}'` })
 
+    // Fold the fromStage precondition into the UPDATE's own WHERE clause —
+    // without it, two concurrent /advance calls (double-click, retried
+    // request) both pass the earlier SELECT-based check and both apply,
+    // silently skipping a stage or double-emitting stage-changed events.
     const { data, error } = await fastify.supabase
       .from('employee_separation')
       .update({ lifecycle_stage: nextStage, updated_at: new Date().toISOString() })
       .eq('id', sep.id)
       .eq('tenant_id', req.tenantId)
+      .eq('lifecycle_stage', fromStage)
       .select()
-      .single()
+      .maybeSingle()
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to advance separation stage')
+    if (!data) return reply.code(409).send({ error: 'STAGE_CHANGED', message: 'Separation stage has already changed since this was loaded' })
 
     await logAction(fastify.supabase, {
       tenantId: req.tenantId, tableName: 'employee_separation', recordId: sep.id,
@@ -772,6 +790,10 @@ export default async function separationWorkflowRoutes(fastify: FastifyInstance)
     const now = new Date().toISOString()
     const lastWorkingDate = sep.last_working_date ?? now.slice(0, 10)
 
+    // Fold the fromStage precondition into the UPDATE's own WHERE clause —
+    // two concurrent /relieve calls would otherwise both pass the earlier
+    // clearance/F&F checks and both apply, duplicating the auth-revocation
+    // call and the emitted 'separation.relieved' event.
     const { data, error } = await fastify.supabase
       .from('employee_separation')
       .update({
@@ -782,15 +804,18 @@ export default async function separationWorkflowRoutes(fastify: FastifyInstance)
       })
       .eq('id', sep.id)
       .eq('tenant_id', req.tenantId)
+      .eq('lifecycle_stage', fromStage)
       .select()
-      .single()
+      .maybeSingle()
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to relieve employee')
+    if (!data) return reply.code(409).send({ error: 'STAGE_CHANGED', message: 'Separation stage has already changed since this was loaded' })
 
-    await fastify.supabase
+    const { error: statusErr } = await fastify.supabase
       .from('employees')
       .update({ status: 'separated' })
       .eq('id', req.params.id)
       .eq('tenant_id', req.tenantId)
+    if (statusErr) fastify.log.error({ err: statusErr, employeeId: req.params.id }, 'separation/relieve: failed to set employee status to separated')
 
     // AF-001: revoke auth access on final separation.
     await revokeEmployeeAuth(fastify.supabase, req.params.id, req.tenantId, fastify.log)
@@ -829,14 +854,19 @@ export default async function separationWorkflowRoutes(fastify: FastifyInstance)
 
     const now = new Date().toISOString()
 
+    // Fold the 'relieved' precondition into the UPDATE's own WHERE clause —
+    // two concurrent /archive calls would otherwise both pass the earlier
+    // check and both apply, double-emitting 'separation.archived'.
     const { data, error } = await fastify.supabase
       .from('employee_separation')
       .update({ lifecycle_stage: 'archived', archived_at: now, archived_by: req.userId, updated_at: now })
       .eq('id', sep.id)
       .eq('tenant_id', req.tenantId)
+      .eq('lifecycle_stage', 'relieved')
       .select()
-      .single()
+      .maybeSingle()
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to archive separation')
+    if (!data) return reply.code(409).send({ error: 'STAGE_CHANGED', message: 'Separation stage has already changed since this was loaded' })
 
     await logAction(fastify.supabase, {
       tenantId: req.tenantId, tableName: 'employee_separation', recordId: sep.id,

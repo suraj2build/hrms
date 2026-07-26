@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { logAction } from '../../lib/audit-service.js'
 import { revokeEmployeeAuth } from '../../lib/user-account-service.js'
+import { serverError, notFound, ErrorCode } from '../../lib/api-errors.js'
 
 const schema = z.object({
   separation_type:      z.enum(['resignation','termination','retirement','end_of_contract','absconding','deceased','mutual_separation']),
@@ -37,7 +38,7 @@ export default async function separationRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', req.tenantId)
       .single()
     if (error && error.code !== 'PGRST116')
-      return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch separation record')
     return reply.send({ data: data ?? null })
   })
 
@@ -61,16 +62,17 @@ export default async function separationRoutes(fastify: FastifyInstance) {
         created_by:  req.userId,
       })
       .select().single()
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to initiate separation')
 
     // Update employee status based on last_working_date
     const lwd = parsed.data.last_working_date
     const newStatus = lwd && new Date(lwd) <= new Date() ? 'separated' : 'on_notice'
-    await fastify.supabase
+    const { error: statusErr } = await fastify.supabase
       .from('employees')
       .update({ status: newStatus })
       .eq('id', req.params.id)
       .eq('tenant_id', req.tenantId)
+    if (statusErr) fastify.log.error({ err: statusErr, employeeId: req.params.id }, 'separation/initiate: failed to update employee status')
 
     // AF-001: revoke auth access — this path can reach 'separated' directly
     // (a past-dated last_working_date at initiation time), not only via the
@@ -105,16 +107,17 @@ export default async function separationRoutes(fastify: FastifyInstance) {
       .eq('employee_id', req.params.id)
       .eq('tenant_id', req.tenantId)
       .select().single()
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
-    if (!data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Separation record not found' })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update separation record')
+    if (!data) return notFound(reply, 'NOT_FOUND', 'Separation record not found')
 
     // If last_working_date updated and now in past, mark as separated
     if (parsed.data.last_working_date && new Date(parsed.data.last_working_date) <= new Date()) {
-      await fastify.supabase
+      const { error: statusErr } = await fastify.supabase
         .from('employees')
         .update({ status: 'separated' })
         .eq('id', req.params.id)
         .eq('tenant_id', req.tenantId)
+      if (statusErr) fastify.log.error({ err: statusErr, employeeId: req.params.id }, 'separation/update: failed to update employee status')
 
       // AF-001: revoke auth access.
       await revokeEmployeeAuth(fastify.supabase, req.params.id, req.tenantId, fastify.log)

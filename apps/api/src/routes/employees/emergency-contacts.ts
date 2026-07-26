@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { optStr } from '../../lib/zod-form.js'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { serverError, notFound, ErrorCode } from '../../lib/api-errors.js'
 
 const schema = z.object({
   name:            z.string().min(1, 'Name is required'),
@@ -36,7 +37,7 @@ export default async function emergencyContactsRoutes(fastify: FastifyInstance) 
       .eq('employee_id', req.params.id)
       .eq('tenant_id', req.tenantId)
       .order('is_primary', { ascending: false })
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch emergency contacts')
     return reply.send({ data })
   })
 
@@ -58,7 +59,7 @@ export default async function emergencyContactsRoutes(fastify: FastifyInstance) 
       .from('emergency_contacts')
       .insert({ ...parsed.data, employee_id: req.params.id, tenant_id: req.tenantId })
       .select().single()
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create emergency contact')
     return reply.code(201).send(data)
   })
 
@@ -81,8 +82,8 @@ export default async function emergencyContactsRoutes(fastify: FastifyInstance) 
       .eq('employee_id', req.params.id)
       .eq('tenant_id', req.tenantId)
       .select().single()
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
-    if (!data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Contact not found' })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update emergency contact')
+    if (!data) return notFound(reply, 'NOT_FOUND', 'Contact not found')
     return reply.send(data)
   })
 
@@ -93,7 +94,7 @@ export default async function emergencyContactsRoutes(fastify: FastifyInstance) 
       .eq('id', req.params.contactId)
       .eq('employee_id', req.params.id)
       .eq('tenant_id', req.tenantId)
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.DELETE_FAILED, 'Failed to delete emergency contact')
     return reply.code(204).send()
   })
 }

@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { optStr, optDate, optUuid } from '../../lib/zod-form.js'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { serverError, notFound, ErrorCode } from '../../lib/api-errors.js'
 
 const schema = z.object({
   scheme:               z.enum(['pf','gratuity','esi','superannuation']),
@@ -55,7 +56,7 @@ export default async function nominationsRoutes(fastify: FastifyInstance) {
       .eq('employee_id', req.params.id)
       .eq('tenant_id', req.tenantId)
       .order('scheme')
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch nominations')
     return reply.send({ data })
   })
 
@@ -74,7 +75,7 @@ export default async function nominationsRoutes(fastify: FastifyInstance) {
       .from('employee_nominations')
       .insert({ ...parsed.data, employee_id: req.params.id, tenant_id: req.tenantId })
       .select('*, relationship_types(id, name)').single()
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create nomination')
     return reply.code(201).send(data)
   })
 
@@ -83,9 +84,13 @@ export default async function nominationsRoutes(fastify: FastifyInstance) {
     if (!parsed.success)
       return reply.code(400).send({ error: 'VALIDATION', message: parsed.error.issues[0].message })
     if (parsed.data.share_percentage) {
-      // Fetch current scheme for this nomination
+      // Fetch current scheme for this nomination — scoped to employee_id too
+      // (not just id + tenant_id), otherwise a nomId belonging to a
+      // different employee in the same tenant would run validateShareTotal
+      // against the wrong employee's scheme/totals.
       const { data: existing } = await fastify.supabase
-        .from('employee_nominations').select('scheme').eq('id', req.params.nomId).eq('tenant_id', req.tenantId).single()
+        .from('employee_nominations').select('scheme')
+        .eq('id', req.params.nomId).eq('employee_id', req.params.id).eq('tenant_id', req.tenantId).single()
       const scheme = parsed.data.scheme ?? existing?.scheme
       const valid = await validateShareTotal(fastify, req.params.id, req.tenantId, scheme, parsed.data.share_percentage, req.params.nomId)
       if (!valid)
@@ -98,8 +103,8 @@ export default async function nominationsRoutes(fastify: FastifyInstance) {
       .eq('employee_id', req.params.id)
       .eq('tenant_id', req.tenantId)
       .select('*, relationship_types(id, name)').single()
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
-    if (!data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Nomination not found' })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update nomination')
+    if (!data) return notFound(reply, 'NOT_FOUND', 'Nomination not found')
     return reply.send(data)
   })
 
@@ -110,7 +115,7 @@ export default async function nominationsRoutes(fastify: FastifyInstance) {
       .eq('id', req.params.nomId)
       .eq('employee_id', req.params.id)
       .eq('tenant_id', req.tenantId)
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.DELETE_FAILED, 'Failed to delete nomination')
     return reply.code(204).send()
   })
 }
