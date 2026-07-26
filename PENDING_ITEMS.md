@@ -155,14 +155,6 @@ swap the raw `reply.code(500).send(...)` for the matching `api-errors.ts`
 helper, matching the `ErrorCode` to the operation type per CLAUDE.md's
 mapping table), then run `node scripts/check-manual-500s.mjs --update`.
 
-### 3.2 — `apps/api/src/routes/approvals/governance-evolution.ts` — not otherwise audited
-
-Flagged only for its raw-error-leak pattern (see 3.1); this file has not been
-reviewed this session for IDOR, missing-auth, TOCTOU, or other bug classes the
-rest of `routes/approvals/` was checked for. Worth a dedicated pass given how
-serious the findings were in the sibling `workflows.ts` file in the same
-directory (see the critical approval-authorization-bypass fix in git history).
-
 ---
 
 ## 4. Investigated and ruled out (kept here for reference — not pending)
