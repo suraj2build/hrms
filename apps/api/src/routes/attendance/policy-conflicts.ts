@@ -8,6 +8,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
+import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 
 const dateRe  = /^\d{4}-\d{2}-\d{2}$/
 const monthRe = /^\d{4}-\d{2}$/
@@ -59,6 +60,9 @@ export default async function attendancePolicyConflictsRoute(fastify: FastifyIns
 
   // ── GET /attendance/policy-conflicts ──────────────────────────────────────────
   fastify.get('/attendance/policy-conflicts', auth, async (req: any, reply) => {
+    if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
+      return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
+    }
     const parsed = listQuerySchema.safeParse(req.query)
     if (!parsed.success) {
       return reply.code(400).send({
@@ -160,6 +164,9 @@ export default async function attendancePolicyConflictsRoute(fastify: FastifyIns
 
   // ── GET /attendance/policy-conflicts/employee/:employeeId ─────────────────────
   fastify.get('/attendance/policy-conflicts/employee/:employeeId', auth, async (req: any, reply) => {
+    if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
+      return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
+    }
     const { employeeId } = req.params as { employeeId: string }
 
     const parsed = employeeQuerySchema.safeParse(req.query)

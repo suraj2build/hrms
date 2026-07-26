@@ -437,6 +437,20 @@ export default async function overtimeRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', req.tenantId)
       .maybeSingle()
     if (error || !data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'OT request not found' })
+
+    // Unlike the list route above, this single-record lookup had no
+    // ownership check — any employee could read another employee's OT
+    // request (notes, rejection reason) by guessing/enumerating the id.
+    if (!isHrAdmin(req.userRole)) {
+      const empId = (data as any).employees?.id
+      const myEmpId = await resolveCallerEmployeeId(fastify.supabase, req.userId, req.tenantId)
+      const isSelf = !!myEmpId && myEmpId === empId
+      const isManager = !isSelf && !!myEmpId
+        && await isDirectReport(fastify.supabase, req.tenantId, myEmpId, empId)
+      if (!isSelf && !isManager) {
+        return reply.code(404).send({ error: 'NOT_FOUND', message: 'OT request not found' })
+      }
+    }
     return reply.send({ data })
   })
 

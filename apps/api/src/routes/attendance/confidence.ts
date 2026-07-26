@@ -55,6 +55,9 @@ export default async function attendanceConfidenceRoute(fastify: FastifyInstance
 
   // ── GET /attendance/confidence/employee/:employeeId ───────────────────────────
   fastify.get('/attendance/confidence/employee/:employeeId', auth, async (req: any, reply) => {
+    if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
+      return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
+    }
     const { employeeId } = req.params as { employeeId: string }
 
     const parsed = employeeQuerySchema.safeParse(req.query)

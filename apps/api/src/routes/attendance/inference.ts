@@ -40,6 +40,9 @@ export default async function attendanceInferenceRoute(fastify: FastifyInstance)
 
   // ── GET /attendance/inference ─────────────────────────────────────────────────
   fastify.get('/attendance/inference', auth, async (req: any, reply) => {
+    if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
+      return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
+    }
     const parsed = listQuerySchema.safeParse(req.query)
     if (!parsed.success) {
       return reply.code(400).send({
@@ -94,6 +97,9 @@ export default async function attendanceInferenceRoute(fastify: FastifyInstance)
 
   // ── GET /attendance/inference/employee/:employeeId ────────────────────────────
   fastify.get('/attendance/inference/employee/:employeeId', auth, async (req: any, reply) => {
+    if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
+      return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
+    }
     const { employeeId } = req.params as { employeeId: string }
 
     const parsed = employeeQuerySchema.safeParse(req.query)

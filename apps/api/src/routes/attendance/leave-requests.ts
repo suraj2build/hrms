@@ -284,6 +284,31 @@ export default async function leaveRequestsRoutes(fastify: FastifyInstance) {
       })
     }
 
+    // getLeaveRequest() is tenant-scoped only — no ownership check — so any
+    // authenticated user could read another employee's leave request by
+    // guessing/enumerating the id. Apply the same self/manager/HR-admin
+    // scoping used by the list route above.
+    const isHrAdmin = (HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)
+    if (!isHrAdmin) {
+      const { data: callerProfile } = await fastify.supabase
+        .from('profiles')
+        .select('employee_id')
+        .eq('id', req.userId)
+        .eq('tenant_id', req.tenantId)
+        .maybeSingle()
+      const myEmployeeId = (callerProfile as { employee_id: string | null } | null)?.employee_id
+      const targetEmployeeId = (result.value as any).employee_id
+      const isSelf = !!myEmployeeId && myEmployeeId === targetEmployeeId
+      let isManagerOfTarget = false
+      if (!isSelf && req.userRole === 'manager' && myEmployeeId) {
+        const reportIds = await getDirectReportIds(fastify.supabase, req.tenantId, myEmployeeId)
+        isManagerOfTarget = reportIds.includes(targetEmployeeId)
+      }
+      if (!isSelf && !isManagerOfTarget) {
+        return reply.code(404).send({ error: 'NOT_FOUND', message: 'Leave request not found' })
+      }
+    }
+
     return reply.send({ data: result.value })
   })
 

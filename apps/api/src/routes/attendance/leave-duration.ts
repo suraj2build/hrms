@@ -20,6 +20,8 @@ import {
   type LeaveSessionSpan,
   type DayContext,
 } from '../../lib/leave-duration-engine.js'
+import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { getDirectReportIds } from '../../lib/manager-scope.js'
 
 const dateRe = /^\d{4}-\d{2}-\d{2}$/
 
@@ -287,6 +289,29 @@ export default async function leaveDurationRoutes(fastify: FastifyInstance) {
     }
 
     const lr = leaveReq as any
+
+    // Tenant-scoped only above — no ownership check — so any authenticated
+    // user could re-explain another employee's leave-duration breakdown by
+    // guessing/enumerating the request id.
+    const isHrAdmin = (HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)
+    if (!isHrAdmin) {
+      const { data: callerProfile } = await fastify.supabase
+        .from('profiles')
+        .select('employee_id')
+        .eq('id', req.userId)
+        .eq('tenant_id', req.tenantId)
+        .maybeSingle()
+      const myEmployeeId = (callerProfile as { employee_id: string | null } | null)?.employee_id
+      const isSelf = !!myEmployeeId && myEmployeeId === lr.employee_id
+      let isManagerOfTarget = false
+      if (!isSelf && req.userRole === 'manager' && myEmployeeId) {
+        const reportIds = await getDirectReportIds(fastify.supabase, req.tenantId, myEmployeeId)
+        isManagerOfTarget = reportIds.includes(lr.employee_id)
+      }
+      if (!isSelf && !isManagerOfTarget) {
+        return reply.code(404).send({ error: 'NOT_FOUND', message: 'Leave request not found' })
+      }
+    }
 
     // Reconstruct the span from stored fields.
     // Prefer the new start_session / end_session columns; fall back to session for

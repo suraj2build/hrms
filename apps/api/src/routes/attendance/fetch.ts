@@ -10,6 +10,7 @@
  */
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
+import { isHrAdmin, resolveCallerEmployeeId, isDirectReport } from '../../lib/manager-scope.js'
 
 const dateRe = /^\d{4}-\d{2}-\d{2}$/
 
@@ -24,6 +25,20 @@ export default async function fetchRoute(fastify: FastifyInstance) {
     { preHandler: [fastify.authenticate] },
     async (req, reply) => {
       const { employeeId } = req.params as { employeeId: string }
+
+      // Used both for ESS self-view and manager/HR viewing a team member's
+      // attendance — was previously tenant-verified but had no ownership
+      // check at all, letting any employee read any coworker's daily
+      // attendance/work-hours/LOP by supplying an arbitrary employeeId.
+      if (!isHrAdmin((req as any).userRole)) {
+        const callerEmpId = await resolveCallerEmployeeId(fastify.supabase, (req as any).userId, (req as any).tenantId)
+        const isSelf = !!callerEmpId && callerEmpId === employeeId
+        const isManagerOfTarget = !isSelf && !!callerEmpId
+          && await isDirectReport(fastify.supabase, (req as any).tenantId, callerEmpId, employeeId)
+        if (!isSelf && !isManagerOfTarget) {
+          return reply.code(403).send({ error: 'FORBIDDEN', message: 'You can only view your own or your team’s attendance' })
+        }
+      }
 
       const parsed = querySchema.safeParse(req.query)
       if (!parsed.success) {
