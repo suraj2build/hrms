@@ -53,6 +53,14 @@ const createTemplateSchema = z.object({
 const CHECKLIST_ITEM_CATEGORIES = ['it_setup', 'document_collection', 'access_provisioning', 'induction', 'compliance', 'other'] as const
 const CHECKLIST_ITEM_ROLES = ['hr', 'it', 'manager', 'admin', 'employee'] as const
 
+/** due_date = start_date + due_day_offset days (null if either input is missing). */
+function computeTaskDueDate(startDate: string | null, dueDayOffset: number | null): string | null {
+  if (!startDate || dueDayOffset == null) return null
+  const d = new Date(startDate)
+  d.setDate(d.getDate() + dueDayOffset)
+  return d.toISOString().substring(0, 10)
+}
+
 const addTemplateItemSchema = z.object({
   title: z.string().min(1).max(300),
   description: z.string().max(1000).optional(),
@@ -352,6 +360,7 @@ export default async function onboardingChecklistRoutes(fastify: FastifyInstance
       sort_order: number
       category: string | null
       assigned_to_role: string | null
+      due_day_offset: number | null
     }> = []
 
     if (template_id) {
@@ -368,7 +377,7 @@ export default async function onboardingChecklistRoutes(fastify: FastifyInstance
 
       const { data: items, error: itemsError } = await fastify.supabase
         .from('onboarding_checklist_items')
-        .select('title, description, is_mandatory, sort_order, category, assigned_to_role')
+        .select('title, description, is_mandatory, sort_order, category, assigned_to_role, due_day_offset')
         .eq('template_id', template_id)
         .eq('tenant_id', tenantId)
         .order('sort_order', { ascending: true })
@@ -385,6 +394,7 @@ export default async function onboardingChecklistRoutes(fastify: FastifyInstance
         sort_order: item.sort_order,
         category: item.category ?? null,
         assigned_to_role: item.assigned_to_role ?? null,
+        due_day_offset: item.due_day_offset ?? null,
       }))
     }
 
@@ -419,6 +429,7 @@ export default async function onboardingChecklistRoutes(fastify: FastifyInstance
         sort_order: item.sort_order,
         category: item.category,
         assigned_to_role: item.assigned_to_role,
+        due_date: computeTaskDueDate(start_date ?? null, item.due_day_offset),
         status: 'pending' as const,
         notes: null,
         completed_at: null,
@@ -427,7 +438,7 @@ export default async function onboardingChecklistRoutes(fastify: FastifyInstance
       const { data: insertedTasks, error: tasksError } = await fastify.supabase
         .from('employee_onboarding_tasks')
         .insert(taskInserts)
-        .select('id, title, is_mandatory, sort_order, status, created_at')
+        .select('id, title, is_mandatory, sort_order, status, due_date, created_at')
 
       if (tasksError) {
         fastify.log.error({ error: tasksError }, 'Failed to insert checklist tasks')
@@ -845,6 +856,7 @@ export default async function onboardingChecklistRoutes(fastify: FastifyInstance
       sort_order: number
       category: string | null
       assigned_to_role: string | null
+      due_day_offset: number | null
     }> = []
 
     if (template_id) {
@@ -861,7 +873,7 @@ export default async function onboardingChecklistRoutes(fastify: FastifyInstance
 
       const { data: items, error: itemsError } = await fastify.supabase
         .from('onboarding_checklist_items')
-        .select('title, description, is_mandatory, sort_order, category, assigned_to_role')
+        .select('title, description, is_mandatory, sort_order, category, assigned_to_role, due_day_offset')
         .eq('template_id', template_id)
         .eq('tenant_id', tenantId)
         .order('sort_order', { ascending: true })
@@ -878,6 +890,7 @@ export default async function onboardingChecklistRoutes(fastify: FastifyInstance
         sort_order: item.sort_order,
         category: item.category ?? null,
         assigned_to_role: item.assigned_to_role ?? null,
+        due_day_offset: item.due_day_offset ?? null,
       }))
     }
 
@@ -912,6 +925,7 @@ export default async function onboardingChecklistRoutes(fastify: FastifyInstance
         sort_order: item.sort_order,
         category: item.category,
         assigned_to_role: item.assigned_to_role,
+        due_date: computeTaskDueDate(start_date ?? null, item.due_day_offset),
         status: 'pending' as const,
         notes: null,
         completed_at: null,
@@ -920,7 +934,7 @@ export default async function onboardingChecklistRoutes(fastify: FastifyInstance
       const { data: insertedTasks, error: tasksError } = await fastify.supabase
         .from('employee_onboarding_tasks')
         .insert(taskInserts)
-        .select('id, title, is_mandatory, sort_order, status, created_at')
+        .select('id, title, is_mandatory, sort_order, status, due_date, created_at')
 
       if (tasksError) {
         fastify.log.error({ error: tasksError }, 'Failed to insert checklist tasks')
