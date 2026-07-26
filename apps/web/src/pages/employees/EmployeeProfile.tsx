@@ -1478,12 +1478,15 @@ export function EmployeeProfile() {
       const path = await uploadEmployeeFile(tenantId, id!, 'documents', file)
       await api.post(`/employees/${id}/documents`, { name, doc_type, storage_path: path, file_size: file.size, mime_type: file.type })
     },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['emp-docs', id] }); setDocMetaOpen(false); setDocMeta(null); setDocFile(null); toast.success('Document uploaded') },
+    // Same backend documents table also backs the HR vault (['documents']) and
+    // ESS (['ess-documents', employeeId]) — invalidate by prefix so uploading
+    // from this profile tab doesn't leave those other two views stale.
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['emp-docs', id] }); qc.invalidateQueries({ queryKey: ['documents'] }); qc.invalidateQueries({ queryKey: ['ess-documents'] }); setDocMetaOpen(false); setDocMeta(null); setDocFile(null); toast.success('Document uploaded') },
     onError:   () => toast.error('Upload failed'),
   })
   const delDocMutation = useMutation({
     mutationFn: (docId: string) => api.delete(`/employees/${id}/documents/${docId}`),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['emp-docs', id] }); toast.success('Document deleted') },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['emp-docs', id] }); qc.invalidateQueries({ queryKey: ['documents'] }); qc.invalidateQueries({ queryKey: ['ess-documents'] }); toast.success('Document deleted') },
     onError:   (e: Error) => toast.error('Failed to delete document', { description: e.message }),
   })
 

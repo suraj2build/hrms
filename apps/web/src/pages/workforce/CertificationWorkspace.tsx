@@ -171,6 +171,8 @@ export function CertificationWorkspace() {
       toast.success('Certification deleted')
       qc.invalidateQueries({ queryKey: ['certifications'] })
       qc.invalidateQueries({ queryKey: ['cert-stats'] })
+      qc.invalidateQueries({ queryKey: ['certifications-expiring'] })
+      qc.invalidateQueries({ queryKey: ['certifications-expired'] })
     },
     onError: () => toast.error('Delete failed'),
   })

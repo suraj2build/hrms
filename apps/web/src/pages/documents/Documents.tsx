@@ -63,7 +63,13 @@ export function Documents() {
   const deleteMutation = useMutation({
     mutationFn: (id: string) => api.delete(`/documents/${id}`),
     onSuccess: () => {
+      // Same backend documents table is also shown on the employee profile's
+      // documents tab (['emp-docs', id]) and ESS (['ess-documents', employeeId]) —
+      // invalidate by prefix so a delete from the HR vault doesn't leave those
+      // other two views showing a document that no longer exists.
       queryClient.invalidateQueries({ queryKey: ['documents'] })
+      queryClient.invalidateQueries({ queryKey: ['emp-docs'] })
+      queryClient.invalidateQueries({ queryKey: ['ess-documents'] })
       toast.success('Document deleted')
     },
     onError: (e: Error) => toast.error('Failed to delete document', { description: e.message }),
@@ -110,6 +116,8 @@ export function Documents() {
       })
 
       queryClient.invalidateQueries({ queryKey: ['documents'] })
+      queryClient.invalidateQueries({ queryKey: ['emp-docs'] })
+      queryClient.invalidateQueries({ queryKey: ['ess-documents'] })
       toast.success('Document uploaded successfully')
       setUploadDialog(false)
       setSelectedFile(null)

@@ -387,7 +387,11 @@ function GenerateLetterDialog({ onClose }: { onClose: () => void }) {
       })
       setGenerated(res.data)
       setStep(3)
+      // ESS's letters list reads the same generated/issued letters under
+      // ['ess-my-letters'] — invalidate alongside the admin list so an
+      // employee sees it without a manual refresh.
       qc.invalidateQueries({ queryKey: ['letters-issued'] })
+      qc.invalidateQueries({ queryKey: ['ess-my-letters'] })
     } finally {
       setGenerating(false)
     }
@@ -399,6 +403,7 @@ function GenerateLetterDialog({ onClose }: { onClose: () => void }) {
     try {
       await api.post(`/letters/issued/${generated.id}/submit-for-approval`, {})
       qc.invalidateQueries({ queryKey: ['letters-issued'] })
+      qc.invalidateQueries({ queryKey: ['ess-my-letters'] })
       onClose()
     } finally {
       setSubmitting(false)
@@ -411,6 +416,7 @@ function GenerateLetterDialog({ onClose }: { onClose: () => void }) {
     try {
       await api.post(`/letters/issued/${generated.id}/issue`, {})
       qc.invalidateQueries({ queryKey: ['letters-issued'] })
+      qc.invalidateQueries({ queryKey: ['ess-my-letters'] })
       onClose()
     } finally {
       setSubmitting(false)
@@ -604,6 +610,7 @@ function LetterDetailDialog({
       if (action === 'issue')   await api.post(`/letters/issued/${letterId}/issue`, {})
       qc.invalidateQueries({ queryKey: ['letters-issued'] })
       qc.invalidateQueries({ queryKey: ['letter-detail', letterId] })
+      qc.invalidateQueries({ queryKey: ['ess-my-letters'] })
       onClose()
     } finally {
       setActing(false)
@@ -809,11 +816,17 @@ export function LettersAdmin() {
 
   const fulfillReq = async (id: string) => {
     await api.post(`/letters/requests/${id}/fulfill`, {})
+    // ESS reads its own request/letter status under ['my-letter-requests'] and
+    // ['ess-my-letters'] — invalidate so the employee sees the fulfilled
+    // request without a manual refresh.
     qc.invalidateQueries({ queryKey: ['ess-requests'] })
+    qc.invalidateQueries({ queryKey: ['my-letter-requests'] })
+    qc.invalidateQueries({ queryKey: ['ess-my-letters'] })
   }
   const rejectReq = async (id: string) => {
     await api.post(`/letters/requests/${id}/reject`, { reason: 'Declined by HR' })
     qc.invalidateQueries({ queryKey: ['ess-requests'] })
+    qc.invalidateQueries({ queryKey: ['my-letter-requests'] })
   }
 
   const TABS = [

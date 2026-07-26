@@ -59,13 +59,16 @@ export function MobileCommunity({ base: _base }: { base: string }) {
       type: isHr && announce ? 'announcement' : 'update',
       pinned: isHr && announce ? true : undefined,
     }),
-    onSuccess: () => { setBody(''); setAnnounce(false); toast.success('Posted'); qc.invalidateQueries({ queryKey: ['mobile-community-feed'] }) },
+    // Mobile and desktop (EssCommunity.tsx) read the same /community/feed
+    // endpoint under different query keys — invalidate both so posting from
+    // one surface doesn't leave the other showing a stale feed.
+    onSuccess: () => { setBody(''); setAnnounce(false); toast.success('Posted'); qc.invalidateQueries({ queryKey: ['mobile-community-feed'] }); qc.invalidateQueries({ queryKey: ['community-feed'] }) },
     onError: (e: Error) => toast.error('Could not post', { description: e.message }),
   })
 
   const react = useMutation({
     mutationFn: ({ id, reaction }: { id: string; reaction: Reaction }) => api.post(`/community/posts/${id}/react`, { reaction }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['mobile-community-feed'] }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['mobile-community-feed'] }); qc.invalidateQueries({ queryKey: ['community-feed'] }) },
     onError: (e: Error) => toast.error('Could not react', { description: e.message }),
   })
 
@@ -185,6 +188,8 @@ function Comments({ postId }: { postId: string }) {
       setText('')
       qc.invalidateQueries({ queryKey: ['mobile-community-comments', postId] })
       qc.invalidateQueries({ queryKey: ['mobile-community-feed'] })
+      qc.invalidateQueries({ queryKey: ['community-comments', postId] })
+      qc.invalidateQueries({ queryKey: ['community-feed'] })
     },
     onError: (e: Error) => toast.error('Could not comment', { description: e.message }),
   })

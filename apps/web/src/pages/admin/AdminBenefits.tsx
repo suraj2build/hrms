@@ -108,6 +108,9 @@ export function AdminBenefits() {
  p.id ? api.put(`/benefits/admin/plans/${p.id}`, p.body) : api.post('/benefits/admin/plans', p.body),
  onSuccess: () => {
  qc.invalidateQueries({ queryKey: ['admin-benefit-plans'] })
+ // ESS reads the same plan data under ['ess-benefit-plans'] — invalidate
+ // so editing/deactivating a plan here doesn't leave ESS showing stale terms.
+ qc.invalidateQueries({ queryKey: ['ess-benefit-plans'] })
  toast.success(editing ?'Plan updated':'Plan created')
  setShowForm(false); setEditing(null)
  },
@@ -116,7 +119,7 @@ export function AdminBenefits() {
 
  const deactivate = useMutation({
  mutationFn: (id: string) => api.delete(`/benefits/admin/plans/${id}`),
- onSuccess: () => { qc.invalidateQueries({ queryKey: ['admin-benefit-plans'] }); toast.success('Plan deactivated') },
+ onSuccess: () => { qc.invalidateQueries({ queryKey: ['admin-benefit-plans'] }); qc.invalidateQueries({ queryKey: ['ess-benefit-plans'] }); toast.success('Plan deactivated') },
  onError: (e: unknown) => toast.error(e instanceof Error ? e.message :'Could not deactivate'),
  })
 

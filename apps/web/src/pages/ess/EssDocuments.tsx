@@ -388,8 +388,13 @@ export function EssDocuments() {
       })
       toast.success('Document uploaded')
       setUploadOpen(false); setUpFile(null); setUpName(''); setUpType('certificate'); setUpExpiry('')
+      // Same backend documents table also backs the HR vault (['documents'])
+      // and the employee profile documents tab (['emp-docs', id]) — invalidate
+      // by prefix so uploading from ESS doesn't leave those views stale.
       qc.invalidateQueries({ queryKey: ['ess-documents', employeeId] })
       qc.invalidateQueries({ queryKey: ['ess-expiry', employeeId] })
+      qc.invalidateQueries({ queryKey: ['documents'] })
+      qc.invalidateQueries({ queryKey: ['emp-docs'] })
     } catch (e) {
       toast.error('Upload failed', { description: e instanceof Error ? e.message : 'Please try again' })
     } finally {
@@ -404,6 +409,8 @@ export function EssDocuments() {
       toast.success('Document deleted')
       qc.invalidateQueries({ queryKey: ['ess-documents', employeeId] })
       qc.invalidateQueries({ queryKey: ['ess-expiry', employeeId] })
+      qc.invalidateQueries({ queryKey: ['documents'] })
+      qc.invalidateQueries({ queryKey: ['emp-docs'] })
     } catch (e) {
       toast.error('Delete failed', { description: e instanceof Error ? e.message : 'Please try again' })
     } finally {

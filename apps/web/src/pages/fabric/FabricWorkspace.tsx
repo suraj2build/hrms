@@ -32,6 +32,7 @@ import {
 }                                                              from '@/components/ui/intelligence/index.js'
 import { api }                                                 from '@/lib/api/client'
 import { cn }                                                  from '@/lib/utils'
+import { EmployeeSelector }                                    from '@/components/filters/EmployeeSelector'
 
 // ── Local types ───────────────────────────────────────────────────────────────
 
@@ -529,7 +530,14 @@ export default function FabricWorkspace() {
               </div>
               <div className="space-y-1.5 col-span-2">
                 <Label>Escalate To (optional)</Label>
-                <Input placeholder="HR Manager / name or role" value={escalateTo} onChange={e => setEscalateTo(e.target.value)} />
+                {/* Backend requires escalate_to to be a resolved employee UUID
+                    (EscalateSchema: z.string().uuid()) — a free-text name/role
+                    would always fail validation. Search-by-name/code, submit the id. */}
+                <EmployeeSelector
+                  value={escalateTo}
+                  onChange={(v) => setEscalateTo(typeof v === 'string' ? v : '')}
+                  placeholder="Search by name or employee code…"
+                />
               </div>
             </div>
             <Button

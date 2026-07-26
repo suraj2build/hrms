@@ -231,6 +231,10 @@ function InterestPanel({ role, onClose }: { role: TalentRole; onClose: () => voi
       toast.success('Status updated')
       qc.invalidateQueries({ queryKey: ['talent-interests', role.id] })
       qc.invalidateQueries({ queryKey: ['talent-roles'] })
+      // ESS's "My Interests" tab reads the same interest row under
+      // ['talent-my-interests'] — invalidate so an employee sees HR's
+      // approve/shortlist/reject decision without a manual refresh.
+      qc.invalidateQueries({ queryKey: ['talent-my-interests'] })
     },
     onError: () => toast.error('Failed to update status'),
   })

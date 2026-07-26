@@ -355,6 +355,7 @@ export function ShiftRoster() {
     selectAll:   false,
   })
   const [bulkSelected,       setBulkSelected]       = useState<Set<string>>(new Set())
+  const [bulkSearch,         setBulkSearch]         = useState('')
   const [actionKey,          setActionKey]           = useState<string | null>(null)
   const [bulkLoading,        setBulkLoading]         = useState(false)
   const [bulkError,          setBulkError]           = useState('')
@@ -791,8 +792,24 @@ export function ShiftRoster() {
                       {bulkSelected.size === employees.length ? 'Deselect all' : 'Select all'}
                     </button>
                   </div>
+                  {/* CLAUDE.md employee-picker rule: at enterprise scale (employees
+                      can exceed 1,000) an admin can't find a specific person by
+                      scrolling a bare checklist — filter by name or code. */}
+                  <input
+                    type="text"
+                    value={bulkSearch}
+                    onChange={(e) => setBulkSearch(e.target.value)}
+                    placeholder="Search by name or employee code…"
+                    className="mb-2 w-full rounded-md border border-input bg-background px-2 py-1 text-xs outline-none focus:ring-1 focus:ring-primary"
+                  />
                   <div className="space-y-1 max-h-48 overflow-y-auto pr-1">
-                    {employees.map((emp) => (
+                    {employees
+                      .filter((emp) => {
+                        const q = bulkSearch.trim().toLowerCase()
+                        if (!q) return true
+                        return emp.name.toLowerCase().includes(q) || emp.employee_code.toLowerCase().includes(q)
+                      })
+                      .map((emp) => (
                       <label key={emp.id} className="flex items-center gap-2 cursor-pointer group">
                         <input
                           type="checkbox"

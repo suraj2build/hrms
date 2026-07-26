@@ -67,6 +67,10 @@ function CommentThread({ postId }: { postId: string }) {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['community-comments', postId] })
       qc.invalidateQueries({ queryKey: ['community-feed'] })
+      // Mobile (MobileCommunity.tsx) reads the same /community/feed endpoint
+      // under different query keys — invalidate both so it doesn't go stale.
+      qc.invalidateQueries({ queryKey: ['mobile-community-comments', postId] })
+      qc.invalidateQueries({ queryKey: ['mobile-community-feed'] })
       setText('')
     },
     onError: (e: Error) => toast.error('Could not comment', { description: e.message }),
@@ -114,7 +118,7 @@ function ModerationMenu({ p }: { p: FeedPost }) {
   const { profile } = useAuthStore()
   const isHr = profile?.role === 'hr_admin' || profile?.role === 'super_admin'
 
-  const refetch = () => qc.invalidateQueries({ queryKey: ['community-feed'] })
+  const refetch = () => { qc.invalidateQueries({ queryKey: ['community-feed'] }); qc.invalidateQueries({ queryKey: ['mobile-community-feed'] }) }
 
   const report = useMutation({
     mutationFn: () => api.post(`/community/posts/${p.id}/report`, {}),
@@ -161,7 +165,7 @@ function PostCard({ p }: { p: FeedPost }) {
   const [showComments, setShowComments] = useState(false)
   const react = useMutation({
     mutationFn: (reaction: string) => api.post(`/community/posts/${p.id}/react`, { reaction }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['community-feed'] }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['community-feed'] }); qc.invalidateQueries({ queryKey: ['mobile-community-feed'] }) },
     onError: (e: Error) => toast.error('Could not react', { description: e.message }),
   })
   const isAnnouncement = p.type === 'announcement'
@@ -239,6 +243,7 @@ function Composer() {
     }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['community-feed'] })
+      qc.invalidateQueries({ queryKey: ['mobile-community-feed'] })
       toast.success('Posted')
       setBody(''); setAnnounce(false)
     },
