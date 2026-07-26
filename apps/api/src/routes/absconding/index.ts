@@ -18,7 +18,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
-import { serverError, ErrorCode } from '../../lib/api-errors.js'
+import { serverError, notFound, ErrorCode } from '../../lib/api-errors.js'
 
 // absconding_cases.response_channel CHECK (migration 323) — the ground truth
 // for valid channel values. absconding_communications.channel has no CHECK
@@ -76,7 +76,7 @@ export default async function abscondingRoutes(fastify: FastifyInstance) {
     // basic name search — filter in-memory if search provided (small sets)
     const { data, count, error } = await q
 
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch absconding cases')
 
     let rows = (data ?? []) as any[]
     if (search) {
@@ -166,7 +166,7 @@ export default async function abscondingRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', req.tenantId)
       .order('created_at', { ascending: true })
 
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch case communications')
     return reply.send({ data: data ?? [] })
   })
 
@@ -207,6 +207,21 @@ export default async function abscondingRoutes(fastify: FastifyInstance) {
 
     if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION', message: parsed.error.issues[0].message })
 
+    // Verify the case belongs to this tenant before attaching anything to it —
+    // unlike every other case-mutating action in this file (warning letters,
+    // flag-for-termination, resolve), this was the one route that never
+    // re-fetched the case with a tenant filter, so a caller-supplied caseId
+    // from another tenant would otherwise insert a communication record (and,
+    // for employee_response, silently no-op an unchecked cross-tenant UPDATE)
+    // against a case this tenant doesn't own.
+    const { data: caseRow } = await fastify.supabase
+      .from('absconding_cases')
+      .select('id')
+      .eq('id', req.params.caseId)
+      .eq('tenant_id', req.tenantId)
+      .maybeSingle()
+    if (!caseRow) return notFound(reply, 'CASE_NOT_FOUND', 'Case not found')
+
     // If employee responded, record it on the case too
     if (parsed.data.comm_type === 'employee_response') {
       const { error: caseUpdateErr } = await fastify.supabase
@@ -235,7 +250,7 @@ export default async function abscondingRoutes(fastify: FastifyInstance) {
       .select()
       .single()
 
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to record communication')
     return reply.code(201).send({ data })
   })
 
@@ -297,7 +312,7 @@ export default async function abscondingRoutes(fastify: FastifyInstance) {
       const result = await scanAndEscalate(fastify.supabase, req.tenantId)
       return reply.send({ data: result })
     } catch (e: any) {
-      return reply.code(500).send({ error: 'SCAN_FAILED', message: e.message })
+      return serverError(req, reply, e, ErrorCode.COMPUTE_FAILED, 'Absconding scan failed')
     }
   })
 
@@ -482,13 +497,16 @@ export default async function abscondingRoutes(fastify: FastifyInstance) {
 
     if (Object.keys(update).length === 0) return reply.code(400).send({ error: 'Nothing to update' })
 
-    const { error } = await fastify.supabase
+    const { data, error } = await fastify.supabase
       .from('absconding_cases')
       .update(update)
       .eq('id', caseId)
       .eq('tenant_id', req.tenantId)
+      .select('id')
+      .maybeSingle()
 
-    if (error) return reply.code(500).send({ error: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update asset recovery status')
+    if (!data) return notFound(reply, 'CASE_NOT_FOUND', 'Case not found')
     return reply.send({ data: { updated: true } })
   })
 }

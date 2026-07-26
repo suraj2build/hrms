@@ -13,6 +13,32 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
+
+// PostgREST/URL-length safe batch size for `.in('employee_id', ...)` filters,
+// matching the CODE_BATCH convention already used in upload.ts.
+const EMP_ID_BATCH = 400
+
+/**
+ * Fetches every row for a query filtered by employee_id, chunking the id
+ * list (so `.in()` never grows unbounded) and paginating each chunk (so a
+ * single chunk's result set is never silently capped at PostgREST's 1000-row
+ * ceiling). Without this, "compute for all" on a tenant with >1000 rows of
+ * late-days/corrections/daily-attendance in the period would silently score
+ * risk against a truncated fraction of the real data, tenant-wide, with no
+ * error signal.
+ */
+async function fetchAllRowsForEmployees<T>(
+  employeeIds: string[],
+  queryFn: (batchIds: string[], from: number, to: number) => PromiseLike<{ data: T[] | null; error: unknown }>,
+): Promise<T[]> {
+  const rows: T[] = []
+  for (let i = 0; i < employeeIds.length; i += EMP_ID_BATCH) {
+    const batch = employeeIds.slice(i, i + EMP_ID_BATCH)
+    rows.push(...await fetchAllRows((from, to) => queryFn(batch, from, to)))
+  }
+  return rows
+}
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
 
@@ -321,54 +347,69 @@ export default async function attendanceRiskRoute(fastify: FastifyInstance) {
     let computedCount = 0
     let elevatedCount = 0
 
-    // Batch queries across all employees at once for efficiency
-    const [
-      { data: lateDays },
-      { data: correctionRows },
-      { data: dailyRows },
-    ] = await Promise.all([
-      // Chronic late count per employee
-      fastify.supabase
-        .from('attendance_daily')
-        .select('employee_id, status')
-        .eq('tenant_id', req.tenantId)
-        .in('employee_id', targetIds)
-        .eq('status', 'late')
-        .gte('date', periodStart)
-        .lte('date', periodEnd),
+    // Batch queries across all employees, chunked + paginated (see
+    // fetchAllRowsForEmployees) — a plain unpaginated .in() here previously
+    // truncated silently at 1000 rows on any tenant/period combination
+    // exceeding that, and none of the 3 queries checked their error either
+    // (a transient DB failure would score every employee as "no late days /
+    // no corrections" instead of failing loudly).
+    let lateDays: any[], correctionRows: any[], dailyRows: any[]
+    try {
+      ;[lateDays, correctionRows, dailyRows] = await Promise.all([
+        // Chronic late count per employee
+        fetchAllRowsForEmployees(targetIds, (batch, from, to) =>
+          fastify.supabase
+            .from('attendance_daily')
+            .select('employee_id, status')
+            .eq('tenant_id', req.tenantId)
+            .in('employee_id', batch)
+            .eq('status', 'late')
+            .gte('date', periodStart)
+            .lte('date', periodEnd)
+            .range(from, to)),
 
-      // Correction/regularisation abuse count per employee
-      fastify.supabase
-        .from('attendance_regularisation')
-        .select('employee_id, status')
-        .eq('tenant_id', req.tenantId)
-        .in('employee_id', targetIds)
-        .in('status', ['pending', 'approved'])
-        .gte('date', periodStart)
-        .lte('date', periodEnd),
+        // Correction/regularisation abuse count per employee
+        fetchAllRowsForEmployees(targetIds, (batch, from, to) =>
+          fastify.supabase
+            .from('attendance_regularisation')
+            .select('employee_id, status')
+            .eq('tenant_id', req.tenantId)
+            .in('employee_id', batch)
+            .in('status', ['pending', 'approved'])
+            .gte('date', periodStart)
+            .lte('date', periodEnd)
+            .range(from, to)),
 
-      // All daily records for volatility calculation
-      fastify.supabase
-        .from('attendance_daily')
-        .select('employee_id, is_payable')
-        .eq('tenant_id', req.tenantId)
-        .in('employee_id', targetIds)
-        .gte('date', periodStart)
-        .lte('date', periodEnd),
-    ])
+        // All daily records for volatility calculation
+        fetchAllRowsForEmployees(targetIds, (batch, from, to) =>
+          fastify.supabase
+            .from('attendance_daily')
+            .select('employee_id, is_payable')
+            .eq('tenant_id', req.tenantId)
+            .in('employee_id', batch)
+            .gte('date', periodStart)
+            .lte('date', periodEnd)
+            .range(from, to)),
+      ])
+    } catch (err) {
+      return serverError(req, reply, err, ErrorCode.QUERY_FAILED, 'Failed to fetch attendance metrics for risk compute')
+    }
 
-    // Punch anomalies — table may not exist; wrap in try/catch
+    // Punch anomalies — table may not exist; wrap in try/catch (also
+    // chunked + paginated, same reasoning as above)
     let anomalyMap: Map<string, number> = new Map()
     try {
-      const { data: anomalyRows } = await fastify.supabase
-        .from('attendance_anomalies')
-        .select('employee_id')
-        .eq('tenant_id', req.tenantId)
-        .in('employee_id', targetIds)
-        .gte('date', periodStart)
-        .lte('date', periodEnd)
+      const anomalyRows = await fetchAllRowsForEmployees(targetIds, (batch, from, to) =>
+        fastify.supabase
+          .from('attendance_anomalies')
+          .select('employee_id')
+          .eq('tenant_id', req.tenantId)
+          .in('employee_id', batch)
+          .gte('date', periodStart)
+          .lte('date', periodEnd)
+          .range(from, to))
 
-      for (const row of (anomalyRows ?? []) as any[]) {
+      for (const row of anomalyRows as any[]) {
         anomalyMap.set(row.employee_id, (anomalyMap.get(row.employee_id) ?? 0) + 1)
       }
     } catch {

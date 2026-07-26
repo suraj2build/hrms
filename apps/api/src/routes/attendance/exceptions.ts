@@ -1,8 +1,8 @@
 /**
  * Attendance Exceptions Routes
  *
- * GET  /attendance/exceptions           — List exceptions with filters (any authenticated role)
- * GET  /attendance/exceptions/summary   — Counts by category and severity
+ * GET  /attendance/exceptions           — List exceptions with filters (admin only)
+ * GET  /attendance/exceptions/summary   — Counts by category and severity (admin only)
  * POST /attendance/exceptions           — Manually create an exception (admin only)
  * PUT  /attendance/exceptions/:id       — Update status / resolve (admin only)
  */
@@ -11,6 +11,7 @@ import { z } from 'zod'
 import { EXCEPTION_TAXONOMY, getExceptionMeta, computeSlaAt } from '../../lib/exception-taxonomy.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
+import { serverError, forbidden, ErrorCode } from '../../lib/api-errors.js'
 
 const dateRe = /^\d{4}-\d{2}-\d{2}$/
 
@@ -53,7 +54,15 @@ export default async function attendanceExceptionsRoute(fastify: FastifyInstance
   const auth = { preHandler: [fastify.authenticate] }
 
   // ── GET /attendance/exceptions ────────────────────────────────────────────────
+  // HR admin only — every consumer (ExceptionGovernance.tsx, ControlCenter.tsx)
+  // is an admin-only page; this route previously had no role check at all,
+  // so any authenticated employee could list every exception tenant-wide
+  // (or target a specific coworker via ?employee_id=) with no filter.
   fastify.get('/attendance/exceptions', auth, async (req: any, reply) => {
+    if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
+      return forbidden(reply, 'FORBIDDEN', 'HR admin access required')
+    }
+
     const parsed = listQuerySchema.safeParse(req.query)
     if (!parsed.success) {
       return reply.code(400).send({
@@ -97,8 +106,7 @@ export default async function attendanceExceptionsRoute(fastify: FastifyInstance
     const { data, error, count } = await q
 
     if (error) {
-      req.log.error({ err: error }, 'attendance_exceptions query failed')
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch exceptions' })
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch exceptions')
     }
 
     const rows = ((data ?? []) as Array<Record<string, any>>).map((r) => {
@@ -118,6 +126,10 @@ export default async function attendanceExceptionsRoute(fastify: FastifyInstance
 
   // ── GET /attendance/exceptions/summary ────────────────────────────────────────
   fastify.get('/attendance/exceptions/summary', auth, async (req: any, reply) => {
+    if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
+      return forbidden(reply, 'FORBIDDEN', 'HR admin access required')
+    }
+
     const parsed = summaryQuerySchema.safeParse(req.query)
     if (!parsed.success) {
       return reply.code(400).send({
@@ -161,8 +173,7 @@ export default async function attendanceExceptionsRoute(fastify: FastifyInstance
         requires_investigation: boolean
       }>
     } catch (error) {
-      req.log.error({ err: error }, 'attendance_exceptions summary query failed')
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch exceptions summary' })
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch exceptions summary')
     }
 
     const by_category: Record<string, number> = {}
