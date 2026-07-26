@@ -18,6 +18,7 @@ import { HR_ADMIN_ROLES, MANAGER_ROLES } from '../../lib/rbac.js'
 import { notifyHrAdmins } from '../../lib/notify.js'
 import { isOfferSignoffEnabled } from '../../lib/payroll-flags.js'
 import { sanitizeOrFilterTerm } from '../../lib/postgrest-filter.js'
+import { fetchAllRows } from '../../lib/supabase-paginate.js'
 import {
   sendEmail,
   applicationReceivedEmail,
@@ -523,9 +524,15 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
     const firstPending = (steps ?? []).find((s: any) => s.status === 'pending')
     if (firstPending?.id !== stepId) return reply.code(409).send({ error: 'OUT_OF_ORDER', message: 'Earlier approval steps are still pending' })
 
-    await fastify.supabase.from('requisition_approvals')
+    // Fold the 'pending' precondition into the WHERE clause — two concurrent
+    // decisions on the same step (e.g. two HR admins) would otherwise both
+    // pass the status==='pending' checks above and the second write would
+    // silently overwrite the first admin's decision with no conflict signal.
+    const { data: decided } = await fastify.supabase.from('requisition_approvals')
       .update({ status: parsed.data.decision, decided_by: req.userId, decided_at: new Date().toISOString(), remarks: parsed.data.remarks ?? null, updated_at: new Date().toISOString() })
-      .eq('id', stepId).eq('tenant_id', req.tenantId)
+      .eq('id', stepId).eq('tenant_id', req.tenantId).eq('status', 'pending')
+      .select('id').maybeSingle()
+    if (!decided) return reply.code(409).send({ error: 'NOT_PENDING', message: 'Step already decided' })
 
     // Final approval opens the requisition; a rejection leaves it as draft.
     const remaining = (steps ?? []).filter((s: any) => s.id !== stepId && s.status === 'pending')
@@ -629,7 +636,7 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
 
   // ── Candidates ────────────────────────────────────────────────────────────
 
-  fastify.get('/candidates', auth, async (req: any, reply) => {
+  fastify.get('/candidates', hrAdminAuth, async (req: any, reply) => {
     const querySchema = z.object({
       search: z.string().optional(),
       source: z.string().optional(),
@@ -720,7 +727,7 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
 
   // ── Applications ──────────────────────────────────────────────────────────
 
-  fastify.get('/applications', auth, async (req: any, reply) => {
+  fastify.get('/applications', hrAdminAuth, async (req: any, reply) => {
     const querySchema = z.object({
       requisition_id: z.string().uuid().optional(),
       candidate_id:   z.string().uuid().optional(),
@@ -895,12 +902,19 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
     const parsed = schema.safeParse(req.body)
     if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
 
-    const { error } = await fastify.supabase
+    // Reject is unconditional today (no current-status guard), unlike /move
+    // which restricts valid stage transitions — a mis-click on an already
+    // hired/rejected/withdrawn application would flip it back to rejected
+    // (and re-fire the rejection email below) with no error.
+    const { data: rejected, error } = await fastify.supabase
       .from('applications')
       .update({ status: 'rejected', rejection_reason: parsed.data.rejection_reason })
       .eq('id', id).eq('tenant_id', req.tenantId)
+      .not('status', 'in', '("hired","rejected","withdrawn")')
+      .select('id').maybeSingle()
 
     if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    if (!rejected) return reply.code(409).send({ error: 'INVALID_STATE', message: 'Application not found or already in a final state' })
     await logAction(fastify.supabase, { tenantId: req.tenantId, tableName: 'applications', recordId: id, action: 'UPDATE', performedBy: req.userId, newData: { status: 'rejected', rejection_reason: parsed.data.rejection_reason } })
 
     // Rejection email to candidate (non-blocking)
@@ -1021,15 +1035,11 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
   // ── Stats ─────────────────────────────────────────────────────────────────
 
   fastify.get('/stats', auth, async (req: any, reply) => {
-    const [{ data: reqRows }, { data: appRows }] = await Promise.all([
-      fastify.supabase
-        .from('job_requisitions')
-        .select('status')
-        .eq('tenant_id', req.tenantId),
-      fastify.supabase
-        .from('applications')
-        .select('status')
-        .eq('tenant_id', req.tenantId),
+    const [reqRows, appRows] = await Promise.all([
+      fetchAllRows<any>((from, to) =>
+        fastify.supabase.from('job_requisitions').select('status').eq('tenant_id', req.tenantId).range(from, to)),
+      fetchAllRows<any>((from, to) =>
+        fastify.supabase.from('applications').select('status').eq('tenant_id', req.tenantId).range(from, to)),
     ])
 
     const reqStats = { draft: 0, open: 0, on_hold: 0, filled: 0, cancelled: 0, total: 0 }
@@ -1052,33 +1062,17 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
   fastify.get('/analytics', auth, async (req: any, reply) => {
     const tenantId = req.tenantId
 
-    const [
-      { data: appRows },
-      { data: reqRows },
-      { data: interviewRows },
-      { data: scoreRows },
-      { data: sourceRows },
-    ] = await Promise.all([
-      fastify.supabase
-        .from('applications')
-        .select('status, created_at, updated_at')
-        .eq('tenant_id', tenantId),
-      fastify.supabase
-        .from('job_requisitions')
-        .select('status')
-        .eq('tenant_id', tenantId),
-      fastify.supabase
-        .from('interview_rounds')
-        .select('status')
-        .eq('tenant_id', tenantId),
-      fastify.supabase
-        .from('interview_scores')
-        .select('recommendation')
-        .eq('tenant_id', tenantId),
-      fastify.supabase
-        .from('applications')
-        .select('candidates(source)')
-        .eq('tenant_id', tenantId),
+    const [appRows, reqRows, interviewRows, scoreRows, sourceRows] = await Promise.all([
+      fetchAllRows<any>((from, to) =>
+        fastify.supabase.from('applications').select('status, created_at, updated_at').eq('tenant_id', tenantId).range(from, to)),
+      fetchAllRows<any>((from, to) =>
+        fastify.supabase.from('job_requisitions').select('status').eq('tenant_id', tenantId).range(from, to)),
+      fetchAllRows<any>((from, to) =>
+        fastify.supabase.from('interview_rounds').select('status').eq('tenant_id', tenantId).range(from, to)),
+      fetchAllRows<any>((from, to) =>
+        fastify.supabase.from('interview_scores').select('recommendation').eq('tenant_id', tenantId).range(from, to)),
+      fetchAllRows<any>((from, to) =>
+        fastify.supabase.from('applications').select('candidates(source)').eq('tenant_id', tenantId).range(from, to)),
     ])
 
     // Funnel + TAT
@@ -1150,19 +1144,16 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
   fastify.get('/analytics/interviewers', auth, async (req: any, reply) => {
     const tenantId = req.tenantId
 
-    const [{ data: scoreRows }, { data: roundRows }, { data: appRows }] = await Promise.all([
-      fastify.supabase
-        .from('interview_scores')
-        .select('round_id, interviewer_id, technical_score, communication_score, culture_score, overall_score, recommendation, profiles:interviewer_id(full_name)')
-        .eq('tenant_id', tenantId),
-      fastify.supabase
-        .from('interview_rounds')
-        .select('id, application_id')
-        .eq('tenant_id', tenantId),
-      fastify.supabase
-        .from('applications')
-        .select('id, status')
-        .eq('tenant_id', tenantId),
+    const [scoreRows, roundRows, appRows] = await Promise.all([
+      fetchAllRows<any>((from, to) =>
+        fastify.supabase
+          .from('interview_scores')
+          .select('round_id, interviewer_id, technical_score, communication_score, culture_score, overall_score, recommendation, profiles:interviewer_id(full_name)')
+          .eq('tenant_id', tenantId).range(from, to)),
+      fetchAllRows<any>((from, to) =>
+        fastify.supabase.from('interview_rounds').select('id, application_id').eq('tenant_id', tenantId).range(from, to)),
+      fetchAllRows<any>((from, to) =>
+        fastify.supabase.from('applications').select('id, status').eq('tenant_id', tenantId).range(from, to)),
     ])
 
     const roundToApp = new Map<string, string>(((roundRows ?? []) as any[]).map(r => [r.id, r.application_id]))
@@ -1631,7 +1622,7 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
 
   // ── Application Timeline ──────────────────────────────────────────────────
 
-  fastify.get('/applications/:id/timeline', auth, async (req: any, reply) => {
+  fastify.get('/applications/:id/timeline', hrAdminAuth, async (req: any, reply) => {
     const { id } = req.params as { id: string }
 
     const [{ data: rounds }, { data: activity }] = await Promise.all([
@@ -1818,7 +1809,7 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
 
   // ── Scorecards ────────────────────────────────────────────────────────────
 
-  fastify.get('/interviews/:id/scorecard', auth, async (req: any, reply) => {
+  fastify.get('/interviews/:id/scorecard', hrAdminAuth, async (req: any, reply) => {
     const { id } = req.params as { id: string }
 
     const { data: scores, error } = await fastify.supabase
@@ -1891,7 +1882,7 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
   // ── Offer Letter Data ─────────────────────────────────────────────────────
   // Returns structured data for the frontend to render + print the offer letter.
 
-  fastify.get('/offers/:appId', auth, async (req: any, reply) => {
+  fastify.get('/offers/:appId', hrAdminAuth, async (req: any, reply) => {
     const { appId } = req.params as { appId: string }
 
     const { data: app } = await fastify.supabase
@@ -2302,8 +2293,17 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
     const reqn = (ctx.app as any).job_requisitions
     const now = new Date().toISOString()
 
-    await fastify.supabase.from('recruitment_offer_letters')
-      .update({ status: 'accepted', accepted_at: now, updated_at: now }).eq('id', ctx.offer.id).eq('tenant_id', tenantId)
+    // Fold the precondition into the WHERE clause — an unauthenticated public
+    // endpoint keyed only by a UUID is an easy double-submit target (slow
+    // network retry, double-click), and without this a race between two
+    // requests could both pass the status==='sent' check above and both go
+    // on to create a duplicate pre-joinee invitation below.
+    const { data: claimed } = await fastify.supabase.from('recruitment_offer_letters')
+      .update({ status: 'accepted', accepted_at: now, updated_at: now })
+      .eq('id', ctx.offer.id).eq('tenant_id', tenantId).eq('status', 'sent')
+      .select('id').maybeSingle()
+    if (!claimed) return reply.send({ ok: true, message: 'Offer already accepted.' })
+
     await fastify.supabase.from('applications')
       .update({ status: 'hired', offer_accepted: true }).eq('id', appId).eq('tenant_id', tenantId)
 
@@ -2335,8 +2335,15 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
 
     const tenantId = (ctx.app as any).tenant_id
     const now = new Date().toISOString()
-    await fastify.supabase.from('recruitment_offer_letters')
-      .update({ status: 'declined', declined_at: now, updated_at: now }).eq('id', ctx.offer.id).eq('tenant_id', tenantId)
+    // Same fold-precondition-into-WHERE guard as offer/accept — closes a
+    // double-submit race between two decline requests (or an accept/decline
+    // race, since both check ctx.offer.status !== 'sent' independently).
+    const { data: claimed } = await fastify.supabase.from('recruitment_offer_letters')
+      .update({ status: 'declined', declined_at: now, updated_at: now })
+      .eq('id', ctx.offer.id).eq('tenant_id', tenantId).eq('status', 'sent')
+      .select('id').maybeSingle()
+    if (!claimed) return reply.send({ ok: true, message: 'Offer already declined.' })
+
     await fastify.supabase.from('applications')
       .update({ status: 'rejected', offer_accepted: false, rejection_reason: 'Offer declined by candidate' }).eq('id', appId).eq('tenant_id', tenantId)
 
