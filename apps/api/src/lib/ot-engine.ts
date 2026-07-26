@@ -158,6 +158,67 @@ export function computeOtMinutes(
   }
 }
 
+// ── Weekly / monthly cap enforcement ────────────────────────────────────────────
+// computeOtMinutes only applies the daily cap (it's a pure function with no DB
+// access) even though max_ot_minutes_per_week/month are configurable on the
+// policy. These helpers let createOtRequest enforce them by summing OT already
+// recorded elsewhere in the same week/month and clamping the new day's minutes
+// to what's left of the budget.
+
+function weekRange(dateStr: string): { from: string; to: string } {
+  const [y, m, d] = dateStr.split('-').map(Number)
+  const dt = new Date(Date.UTC(y, m - 1, d))
+  const mondayOffset = (dt.getUTCDay() + 6) % 7 // Mon=0 .. Sun=6
+  const monday = new Date(dt)
+  monday.setUTCDate(dt.getUTCDate() - mondayOffset)
+  const sunday = new Date(monday)
+  sunday.setUTCDate(monday.getUTCDate() + 6)
+  return { from: monday.toISOString().slice(0, 10), to: sunday.toISOString().slice(0, 10) }
+}
+
+function monthRange(dateStr: string): { from: string; to: string } {
+  const [y, m] = dateStr.split('-').map(Number)
+  const lastDay = new Date(Date.UTC(y, m, 0)).getUTCDate()
+  return {
+    from: `${y}-${String(m).padStart(2, '0')}-01`,
+    to:   `${y}-${String(m).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`,
+  }
+}
+
+async function sumPriorOtMinutes(
+  supabase:    SupabaseClient,
+  tenantId:    string,
+  employeeId:  string,
+  fromDate:    string,
+  toDate:      string,
+  excludeDate: string,
+  policy:      OtPolicy,
+): Promise<number> {
+  const { data } = await supabase
+    .from('overtime_requests')
+    .select('raw_ot_minutes, approved_minutes, attendance_date')
+    .eq('tenant_id', tenantId)
+    .eq('employee_id', employeeId)
+    .gte('attendance_date', fromDate)
+    .lte('attendance_date', toDate)
+    .neq('attendance_date', excludeDate)
+    .neq('status', 'REJECTED')
+
+  let total = 0
+  for (const row of (data ?? []) as any[]) {
+    if (row.approved_minutes != null) {
+      total += row.approved_minutes
+    } else {
+      // Still pending — approximate its eligible minutes via the daily cap.
+      // Not exact (rounding is ignored) but close enough for budget purposes.
+      total += policy.max_ot_minutes_per_day != null
+        ? Math.min(row.raw_ot_minutes, policy.max_ot_minutes_per_day)
+        : row.raw_ot_minutes
+    }
+  }
+  return total
+}
+
 // ── Request creation ───────────────────────────────────────────────────────────
 
 export interface CreateOtRequestOpts {
@@ -207,6 +268,22 @@ export async function createOtRequest(
   // Resolve policy
   const policy = await resolveOtPolicy(supabase, tenantId, employeeId)
   const result = computeOtMinutes(policy, rawOtMinutes, isWeekendDay, isHolidayDay)
+
+  // Enforce weekly / monthly caps — computeOtMinutes only applies the daily
+  // cap. Clamp today's eligible minutes to what's left of the configured
+  // budget after summing OT already recorded elsewhere in the same week/month.
+  if (policy && result.eligible_minutes > 0) {
+    if (policy.max_ot_minutes_per_week != null) {
+      const { from, to } = weekRange(attendanceDate)
+      const prior = await sumPriorOtMinutes(supabase, tenantId, employeeId, from, to, attendanceDate, policy)
+      result.eligible_minutes = Math.min(result.eligible_minutes, Math.max(0, policy.max_ot_minutes_per_week - prior))
+    }
+    if (policy.max_ot_minutes_per_month != null) {
+      const { from, to } = monthRange(attendanceDate)
+      const prior = await sumPriorOtMinutes(supabase, tenantId, employeeId, from, to, attendanceDate, policy)
+      result.eligible_minutes = Math.min(result.eligible_minutes, Math.max(0, policy.max_ot_minutes_per_month - prior))
+    }
+  }
 
   if (result.eligible_minutes <= 0) {
     return { ok: false, error: 'No eligible OT minutes after policy application' }
