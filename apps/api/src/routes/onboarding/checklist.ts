@@ -45,13 +45,21 @@ const createTemplateSchema = z.object({
   is_active: z.boolean().default(true),
 })
 
+// onboarding_checklist_items.category / .assigned_to_role CHECK constraints
+// (migration 206) — the ground truth for valid values. Also mirrored on
+// employee_onboarding_tasks, but that table is only ever populated by
+// copying an already-validated template item's values (see below), never
+// from fresh user input.
+const CHECKLIST_ITEM_CATEGORIES = ['it_setup', 'document_collection', 'access_provisioning', 'induction', 'compliance', 'other'] as const
+const CHECKLIST_ITEM_ROLES = ['hr', 'it', 'manager', 'admin', 'employee'] as const
+
 const addTemplateItemSchema = z.object({
   title: z.string().min(1).max(300),
   description: z.string().max(1000).optional(),
   is_mandatory: z.boolean().default(true),
   sort_order: z.number().int().min(0).default(0),
-  category: z.string().max(100).optional(),
-  assigned_to_role: z.string().max(100).optional(),
+  category: z.enum(CHECKLIST_ITEM_CATEGORIES).optional(),
+  assigned_to_role: z.enum(CHECKLIST_ITEM_ROLES).optional(),
 })
 
 const createChecklistSchema = z.object({

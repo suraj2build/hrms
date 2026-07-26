@@ -98,23 +98,22 @@ interface EmployeeTask {
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
+// Matches onboarding_checklist_items.category CHECK constraint (migration 206)
 const ITEM_CATEGORIES = [
-  { value: 'documentation', label: 'Documentation' },
   { value: 'it_setup', label: 'IT Setup' },
-  { value: 'training', label: 'Training' },
-  { value: 'hr_formalities', label: 'HR Formalities' },
+  { value: 'document_collection', label: 'Document Collection' },
+  { value: 'access_provisioning', label: 'Access Provisioning' },
+  { value: 'induction', label: 'Induction' },
   { value: 'compliance', label: 'Compliance' },
-  { value: 'orientation', label: 'Orientation' },
-  { value: 'equipment', label: 'Equipment' },
   { value: 'other', label: 'Other' },
 ]
 
+// Matches onboarding_checklist_items.assigned_to_role CHECK constraint (migration 206)
 const ROLE_OPTIONS = [
   { value: 'hr', label: 'HR' },
   { value: 'manager', label: 'Manager' },
   { value: 'it', label: 'IT' },
   { value: 'employee', label: 'Employee' },
-  { value: 'finance', label: 'Finance' },
   { value: 'admin', label: 'Admin' },
 ]
 
@@ -133,13 +132,11 @@ function categoryLabel(cat: string): string {
 
 function categoryColor(cat: string): string {
   const map: Record<string, string> = {
-    documentation: 'bg-info/15 text-info',
     it_setup: 'bg-info/15 text-info',
-    training: 'bg-warning/15 text-warning',
-    hr_formalities: 'bg-destructive/15 text-destructive',
+    document_collection: 'bg-warning/15 text-warning',
+    access_provisioning: 'bg-accent-teal/15 text-accent-teal',
+    induction: 'bg-accent-coral/15 text-accent-coral',
     compliance: 'bg-destructive/15 text-destructive',
-    orientation: 'bg-accent-teal/15 text-accent-teal',
-    equipment: 'bg-accent-coral/15 text-accent-coral',
     other: 'bg-muted text-muted-foreground',
   }
   return map[cat] ?? 'bg-muted text-muted-foreground'
@@ -302,7 +299,7 @@ function ChecklistTemplatesTab() {
   const [addItemTemplateId, setAddItemTemplateId] = useState<string | null>(null)
   const [itemTitle, setItemTitle] = useState('')
   const [itemDesc, setItemDesc] = useState('')
-  const [itemCategory, setItemCategory] = useState('documentation')
+  const [itemCategory, setItemCategory] = useState('it_setup')
   const [itemRole, setItemRole] = useState('hr')
   const [itemDueDay, setItemDueDay] = useState(1)
   const [itemMandatory, setItemMandatory] = useState(true)
@@ -369,7 +366,7 @@ function ChecklistTemplatesTab() {
   function resetItemForm() {
     setItemTitle('')
     setItemDesc('')
-    setItemCategory('documentation')
+    setItemCategory('it_setup')
     setItemRole('hr')
     setItemDueDay(1)
     setItemMandatory(true)
