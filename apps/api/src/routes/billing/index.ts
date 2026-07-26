@@ -14,11 +14,17 @@ import { z } from 'zod'
 import {
   getRazorpay, isBillingConfigured, PLAN_IDS, WEBHOOK_SECRET, PUBLIC_KEY_ID,
 } from '../../lib/razorpay.js'
+import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 
 const checkoutSchema = z.object({ plan: z.enum(['standard', 'enterprise']) })
 
 export default async function billingRoutes(fastify: FastifyInstance) {
-  const auth = { preHandler: [fastify.authenticate] }
+  // Financial terms (rate, plan, subscription status) and live subscription
+  // mutation — only ever surfaced to the admin billing UI (AdminShellV2),
+  // but that's a client-side route gate only. Lock server-side to hr_admin
+  // so a regular employee can't read the tenant's billing terms or create a
+  // live Razorpay subscription by calling the API directly.
+  const auth = { preHandler: [fastify.authenticate, requireRole(...HR_ADMIN_ROLES)] }
 
   // ── GET /billing/status ─────────────────────────────────────────────────────
   fastify.get('/billing/status', auth, async (req, reply) => {
