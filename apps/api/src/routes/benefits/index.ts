@@ -15,6 +15,7 @@ import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { logAction } from '../../lib/audit-service.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
 import { InsuranceProvider } from '../../lib/insurance-provider.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 const PLAN_TYPES = ['health', 'term_life', 'accident', 'wellness', 'meal', 'transport', 'nps', 'other'] as const
 
@@ -71,7 +72,7 @@ export default async function benefitsRoutes(fastify: FastifyInstance) {
       .order('plan_type', { ascending: true })
       .order('name', { ascending: true })
 
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch benefit plans')
 
     const today = new Date().toISOString().slice(0, 10)
     const plans = ((data ?? []) as any[])
@@ -103,7 +104,7 @@ export default async function benefitsRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', req.tenantId)
       .eq('employee_id', employeeId)
 
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch benefit enrollments')
     return reply.send({ data: data ?? [] })
   })
 
@@ -120,7 +121,7 @@ export default async function benefitsRoutes(fastify: FastifyInstance) {
       .eq('is_dependent', true)
       .order('created_at', { ascending: true })
 
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch dependents')
 
     const deps = ((data ?? []) as any[]).map(d => ({
       id:           d.id,
@@ -197,7 +198,7 @@ export default async function benefitsRoutes(fastify: FastifyInstance) {
       .select()
       .single()
 
-    if (error) return reply.code(500).send({ error: 'UPSERT_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to save benefit enrollment')
 
     await logAction(fastify.supabase, {
       tenantId:    req.tenantId,
@@ -234,7 +235,7 @@ export default async function benefitsRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', req.tenantId)
       .order('created_at', { ascending: false })
 
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch benefit plans')
 
     const today = new Date().toISOString().slice(0, 10)
     const plans = ((data ?? []) as any[]).map(p => {
@@ -303,7 +304,7 @@ export default async function benefitsRoutes(fastify: FastifyInstance) {
       .select()
       .single()
 
-    if (error) return reply.code(500).send({ error: 'INSERT_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create benefit plan')
 
     await logAction(fastify.supabase, {
       tenantId:    req.tenantId,
@@ -331,7 +332,7 @@ export default async function benefitsRoutes(fastify: FastifyInstance) {
       .select()
       .single()
 
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update benefit plan')
     if (!data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Plan not found' })
 
     await logAction(fastify.supabase, {
@@ -356,7 +357,7 @@ export default async function benefitsRoutes(fastify: FastifyInstance) {
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
 
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to deactivate benefit plan')
 
     await logAction(fastify.supabase, {
       tenantId:    req.tenantId,
@@ -387,7 +388,7 @@ export default async function benefitsRoutes(fastify: FastifyInstance) {
         return q
       }) as any[]
     } catch (err: any) {
-      return reply.code(500).send({ error: 'DB_ERROR', message: err.message })
+      return serverError(req, reply, err, ErrorCode.QUERY_FAILED, 'Failed to fetch benefit enrollments')
     }
     return reply.send({ data })
   })

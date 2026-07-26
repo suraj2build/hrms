@@ -43,6 +43,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { logAction } from '../../lib/audit-service.js'
 import { z } from 'zod'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 // ── Embedded-employee normaliser ──────────────────────────────────────────────
 // employees has no `full_name` / `designation` columns (name is first+last,
@@ -292,7 +293,7 @@ export default async function lettersRoutes(fastify: FastifyInstance) {
     if (active !== undefined) q = q.eq('is_active', active === 'true' || active === true)
 
     const { data, error } = await q
-    if (error) return reply.status(500).send({ error: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch letter templates')
     return { data }
   })
 
@@ -347,7 +348,7 @@ export default async function lettersRoutes(fastify: FastifyInstance) {
 
     if (error) {
       if (error.code === '23505') return reply.status(409).send({ error: 'Template code already exists' })
-      return reply.status(500).send({ error: error.message })
+      return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create letter template')
     }
 
     // Save approval chain rows
@@ -385,7 +386,7 @@ export default async function lettersRoutes(fastify: FastifyInstance) {
       .from('letter_templates')
       .upsert(rows, { onConflict: 'tenant_id,code', ignoreDuplicates: true })
       .select('id')
-    if (error) return reply.status(500).send({ error: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to seed standard letter templates')
 
     const created = (data as Array<{ id: string }> | null)?.length ?? 0
     return reply.status(201).send({ data: { created, skipped: rows.length - created, total: rows.length } })
@@ -430,7 +431,7 @@ export default async function lettersRoutes(fastify: FastifyInstance) {
       .select()
       .single()
 
-    if (error) return reply.status(500).send({ error: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update letter template')
     if (!tmpl) return reply.status(404).send({ error: 'Template not found' })
 
     // Replace approval chain if provided
@@ -460,7 +461,7 @@ export default async function lettersRoutes(fastify: FastifyInstance) {
       .eq('id', id)
       .eq('tenant_id', tenantId)
 
-    if (error) return reply.status(500).send({ error: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to delete letter template')
     return { success: true }
   })
 
@@ -541,7 +542,7 @@ export default async function lettersRoutes(fastify: FastifyInstance) {
       .select()
       .single()
 
-    if (letErr) return reply.status(500).send({ error: letErr.message })
+    if (letErr) return serverError(req, reply, letErr, ErrorCode.INSERT_FAILED, 'Failed to generate letter')
 
     await logAction(supabase, {
       tenantId,
@@ -579,7 +580,7 @@ export default async function lettersRoutes(fastify: FastifyInstance) {
     if (to)          q = q.lte('created_at', to)
 
     const { data, count, error } = await q
-    if (error) return reply.status(500).send({ error: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch issued letters')
     return { data: (data ?? []).map((r: any) => ({ ...r, employee: normEmp(r.employee) })), total: count }
   })
 
@@ -630,7 +631,7 @@ export default async function lettersRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', tenantId)
       .eq('approval_status', 'draft')
 
-    if (error) return reply.status(500).send({ error: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to submit letter for approval')
 
     await logAction(supabase, {
       tenantId,
@@ -790,7 +791,7 @@ export default async function lettersRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', tenantId)
       .in('approval_status', ['approved', 'draft'])   // can issue approved or approval-exempt drafts
 
-    if (error) return reply.status(500).send({ error: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to issue letter')
 
     await logAction(supabase, {
       tenantId,
@@ -816,7 +817,7 @@ export default async function lettersRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', tenantId)
       .eq('approval_status', 'draft')
 
-    if (error) return reply.status(500).send({ error: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.DELETE_FAILED, 'Failed to delete letter')
 
     await logAction(supabase, {
       tenantId,
@@ -845,7 +846,7 @@ export default async function lettersRoutes(fastify: FastifyInstance) {
       .eq('is_active', true)
       .order('name')
 
-    if (error) return reply.status(500).send({ error: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch requestable letter templates')
     return { data }
   })
 
@@ -868,7 +869,7 @@ export default async function lettersRoutes(fastify: FastifyInstance) {
       .eq('approval_status', 'issued')
       .order('issued_at', { ascending: false })
 
-    if (error) return reply.status(500).send({ error: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch your letters')
     return { data }
   })
 
@@ -925,7 +926,7 @@ export default async function lettersRoutes(fastify: FastifyInstance) {
       .select()
       .single()
 
-    if (error) return reply.status(500).send({ error: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to submit letter request')
 
     await logAction(supabase, {
       tenantId,
@@ -958,7 +959,7 @@ export default async function lettersRoutes(fastify: FastifyInstance) {
       .eq('employee_id', emp.id)
       .order('requested_at', { ascending: false })
 
-    if (error) return reply.status(500).send({ error: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch your letter requests')
     return { data }
   })
 
@@ -986,7 +987,7 @@ export default async function lettersRoutes(fastify: FastifyInstance) {
     if (status) q = q.eq('status', status)
 
     const { data, count, error } = await q
-    if (error) return reply.status(500).send({ error: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch letter requests')
     return { data: (data ?? []).map((r: any) => ({ ...r, employee: normEmp(r.employee) })), total: count }
   })
 
@@ -1037,7 +1038,7 @@ export default async function lettersRoutes(fastify: FastifyInstance) {
       .select()
       .single()
 
-    if (letErr) return reply.status(500).send({ error: letErr.message })
+    if (letErr) return serverError(req, reply, letErr, ErrorCode.INSERT_FAILED, 'Failed to generate letter for request')
 
     await supabase
       .from('letter_requests')
@@ -1086,7 +1087,7 @@ export default async function lettersRoutes(fastify: FastifyInstance) {
       .eq('id', id)
       .eq('tenant_id', tenantId)
 
-    if (error) return reply.status(500).send({ error: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to reject letter request')
 
     await logAction(supabase, {
       tenantId,

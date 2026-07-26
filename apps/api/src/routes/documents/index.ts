@@ -20,6 +20,7 @@ import { z } from 'zod'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { logAction } from '../../lib/audit-service.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 const MAX_FILE_SIZE = 5 * 1024 * 1024 // 5 MB
 
@@ -180,7 +181,7 @@ export default async function documentRoutes(fastify: FastifyInstance) {
       .select('id, name, doc_type, storage_path, file_size, mime_type, expires_at, created_at, employee_id')
       .single()
 
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create document record')
 
     await logAction(fastify.supabase, {
       tenantId:    req.tenantId,
@@ -240,7 +241,7 @@ export default async function documentRoutes(fastify: FastifyInstance) {
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
 
-    if (deleteErr) return reply.code(500).send({ error: 'DB_ERROR', message: deleteErr.message })
+    if (deleteErr) return serverError(req, reply, deleteErr, ErrorCode.DELETE_FAILED, 'Failed to delete document record')
 
     await logAction(fastify.supabase, {
       tenantId:    req.tenantId,

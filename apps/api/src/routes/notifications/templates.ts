@@ -15,6 +15,7 @@ import {
   extractPlaceholders,
 } from '../../lib/notification-catalog.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 // SINGLE SOURCE OF TRUTH lives in lib/notification-catalog.ts — these aliases
 // keep the zod enums in lockstep with the catalog (and the DB CHECK constraints).
@@ -55,7 +56,7 @@ export default async function notificationTemplatesRoutes(fastify: FastifyInstan
       .eq('tenant_id', req.tenantId)
       .order('channel_type', { ascending: true })
 
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch notification channels')
     return reply.send({ data: data ?? [] })
   })
 
@@ -85,7 +86,7 @@ export default async function notificationTemplatesRoutes(fastify: FastifyInstan
       .select()
       .single()
 
-    if (error) return reply.code(500).send({ error: 'UPSERT_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update notification channel')
     return reply.send({ data })
   })
 
@@ -111,7 +112,7 @@ export default async function notificationTemplatesRoutes(fastify: FastifyInstan
     if (parsed.data.is_active !== undefined) q = q.eq('is_active', parsed.data.is_active === 'true')
 
     const { data, error } = await q
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch notification templates')
     return reply.send({ data: data ?? [] })
   })
 
@@ -150,7 +151,7 @@ export default async function notificationTemplatesRoutes(fastify: FastifyInstan
       if (error.code === '23505') {
         return reply.code(409).send({ error: 'DUPLICATE_CODE', message: 'A template with this code already exists' })
       }
-      return reply.code(500).send({ error: 'INSERT_FAILED', message: error.message })
+      return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create notification template')
     }
 
     return reply.code(201).send({ data })
@@ -194,7 +195,7 @@ export default async function notificationTemplatesRoutes(fastify: FastifyInstan
       .select()
       .single()
 
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update notification template')
     if (!data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Template not found' })
 
     return reply.send({ data })
@@ -227,7 +228,7 @@ export default async function notificationTemplatesRoutes(fastify: FastifyInstan
     if (parsed.data.to) q = q.lte('created_at', parsed.data.to)
 
     const { data, error } = await q
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch notification log')
     return reply.send({ data: data ?? [] })
   })
 
@@ -300,7 +301,7 @@ export default async function notificationTemplatesRoutes(fastify: FastifyInstan
       .select('id')
       .single()
 
-    if (error) return reply.code(500).send({ error: 'INSERT_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to queue notification')
 
     return reply.code(201).send({ notification_id: (data as any).id })
   })

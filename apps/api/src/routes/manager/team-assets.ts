@@ -11,6 +11,7 @@ import {
   isHrAdmin, resolveManagerEmployeeId, getDirectReportIds,
 } from '../../lib/manager-scope.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 export default async function managerTeamAssetsRoute(fastify: FastifyInstance) {
   const auth = { preHandler: [fastify.authenticate] }
@@ -47,7 +48,7 @@ export default async function managerTeamAssetsRoute(fastify: FastifyInstance) {
       .in('assigned_to', employeeIds)
       .order('asset_code')
 
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch team assets')
 
     const rows = (data ?? []).map((a: any) => ({
       id:            a.id,

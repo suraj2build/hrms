@@ -12,6 +12,7 @@ import { computeLifecycleRisks, type LifecycleCategory } from '../../lib/lifecyc
 import { buildDailyDigest, buildWeeklyDigest, buildMonthlyDigest } from '../../lib/digest-builder.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
 import { isHrAdmin, resolveCallerEmployeeId, isDirectReport } from '../../lib/manager-scope.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 interface SourceRecord { table: string; count: number; sample?: string }
 
@@ -341,8 +342,7 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
         },
       })
     } catch (err: unknown) {
-      fastify.log.error({ err }, 'intelligence/workforce-command error')
-      return reply.code(500).send({ error: 'INTELLIGENCE_ERROR', message: err instanceof Error ? err.message : 'Unknown error' })
+      return serverError(req, reply, err, ErrorCode.COMPUTE_FAILED, 'Failed to compute workforce command summary')
     }
   })
 
@@ -390,8 +390,7 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
       }
       return reply.send({ data: { summary: parts.join(' '), team_size: teamSize, new_joiners_this_month: newJoiners, probation_due: probDue, pending_leave_approvals: pendingLeave, generated_at: now.toISOString() } })
     } catch (err: unknown) {
-      fastify.log.error({ err }, 'intelligence/manager-summary error')
-      return reply.code(500).send({ error: 'INTELLIGENCE_ERROR', message: err instanceof Error ? err.message : 'Unknown error' })
+      return serverError(req, reply, err, ErrorCode.COMPUTE_FAILED, 'Failed to compute manager summary')
     }
   })
 
@@ -425,8 +424,7 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
       await fastify.supabase.from('intelligence_digest').upsert({ tenant_id: tenantId, period_type: 'monthly', period_start: periodStart, period_end: periodEnd, narrative: parts.join(' '), metrics, generated_at: now.toISOString() }, { onConflict: 'tenant_id,period_type,period_start' })
       return reply.send({ data: { narrative: parts.join(' '), metrics, period_start: periodStart, period_end: periodEnd, generated_at: now.toISOString() } })
     } catch (err: unknown) {
-      fastify.log.error({ err }, 'intelligence/executive-narrative error')
-      return reply.code(500).send({ error: 'INTELLIGENCE_ERROR', message: err instanceof Error ? err.message : 'Unknown error' })
+      return serverError(req, reply, err, ErrorCode.COMPUTE_FAILED, 'Failed to generate executive narrative')
     }
   })
 
@@ -575,8 +573,7 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
         },
       })
     } catch (err: unknown) {
-      fastify.log.error({ err }, 'intelligence/employee 360 error')
-      return reply.code(500).send({ error: 'INTELLIGENCE_ERROR', message: err instanceof Error ? err.message : 'Unknown error' })
+      return serverError(req, reply, err, ErrorCode.COMPUTE_FAILED, 'Failed to build employee 360 view')
     }
   })
 
@@ -605,8 +602,7 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
       if (!sep && !probationDue && (!assets || assets === 0)) parts.push('No compliance concerns detected.')
       return reply.send({ data: { employee: { id: emp.id, name: emp.first_name + ' ' + emp.last_name, code: emp.employee_code, status: emp.status, joining_date: emp.joining_date }, summary: parts.join(' '), separation: sep ?? null, assigned_assets: assets ?? 0, probation_due: probationDue, generated_at: now.toISOString() } })
     } catch (err: unknown) {
-      fastify.log.error({ err }, 'intelligence/employee insights error')
-      return reply.code(500).send({ error: 'INTELLIGENCE_ERROR', message: err instanceof Error ? err.message : 'Unknown error' })
+      return serverError(req, reply, err, ErrorCode.COMPUTE_FAILED, 'Failed to compute employee insights')
     }
   })
 
@@ -694,8 +690,7 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
 
       return reply.send({ departments })
     } catch (err: unknown) {
-      fastify.log.error({ err }, 'intelligence/org/departments error')
-      return reply.code(500).send({ error: 'INTELLIGENCE_ERROR', message: err instanceof Error ? err.message : 'Unknown error' })
+      return serverError(req, reply, err, ErrorCode.COMPUTE_FAILED, 'Failed to compute department breakdown')
     }
   })
 
@@ -903,8 +898,7 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
         generated_at: now.toISOString(),
       })
     } catch (err: unknown) {
-      fastify.log.error({ err }, 'intelligence/action-center error')
-      return reply.code(500).send({ error: 'INTELLIGENCE_ERROR', message: err instanceof Error ? err.message : 'Unknown error' })
+      return serverError(req, reply, err, ErrorCode.COMPUTE_FAILED, 'Failed to build action center observations')
     }
   })
 
@@ -957,8 +951,7 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
       const signal: 'elevated' | 'normal' | 'low' = total >= 10 ? 'elevated' : total >= 3 ? 'normal' : 'low'
       return reply.send({ signal, by_department, total })
     } catch (err: unknown) {
-      fastify.log.error({ err }, 'intelligence/org/attrition-signal error')
-      return reply.code(500).send({ error: 'INTELLIGENCE_ERROR', message: err instanceof Error ? err.message : 'Unknown error' })
+      return serverError(req, reply, err, ErrorCode.COMPUTE_FAILED, 'Failed to compute attrition signal')
     }
   })
 
@@ -1052,8 +1045,7 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
         dimensions_configured: siteMeta.size > 0 && Array.from(siteMeta.values()).some(m => m.region || m.zone || m.site_type),
       })
     } catch (err: unknown) {
-      fastify.log.error({ err }, 'intelligence/org/headcount-by-site error')
-      return reply.code(500).send({ error: 'INTELLIGENCE_ERROR', message: err instanceof Error ? err.message : 'Unknown error' })
+      return serverError(req, reply, err, ErrorCode.COMPUTE_FAILED, 'Failed to compute headcount by site')
     }
   })
 
@@ -1066,8 +1058,7 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
     try {
       return reply.send(await buildDailyDigest(fastify.supabase, tenantId))
     } catch (err: unknown) {
-      fastify.log.error({ err }, 'intelligence/digest/daily error')
-      return reply.code(500).send({ error: 'INTELLIGENCE_ERROR', message: err instanceof Error ? err.message : 'Unknown error' })
+      return serverError(req, reply, err, ErrorCode.COMPUTE_FAILED, 'Failed to build daily digest')
     }
   })
 
@@ -1080,8 +1071,7 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
     try {
       return reply.send(await buildWeeklyDigest(fastify.supabase, tenantId))
     } catch (err: unknown) {
-      fastify.log.error({ err }, 'intelligence/digest/weekly error')
-      return reply.code(500).send({ error: 'INTELLIGENCE_ERROR', message: err instanceof Error ? err.message : 'Unknown error' })
+      return serverError(req, reply, err, ErrorCode.COMPUTE_FAILED, 'Failed to build weekly digest')
     }
   })
 
@@ -1379,8 +1369,7 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
         sources,
       })
     } catch (err: unknown) {
-      fastify.log.error({ err }, 'intelligence/search error')
-      return reply.code(500).send({ error: 'INTELLIGENCE_ERROR', message: err instanceof Error ? err.message : 'Unknown error' })
+      return serverError(req, reply, err, ErrorCode.COMPUTE_FAILED, 'Failed to execute intelligence search')
     }
   })
 
@@ -1393,8 +1382,7 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
     try {
       return reply.send(await buildMonthlyDigest(fastify.supabase, tenantId))
     } catch (err: unknown) {
-      fastify.log.error({ err }, 'intelligence/digest/monthly error')
-      return reply.code(500).send({ error: 'INTELLIGENCE_ERROR', message: err instanceof Error ? err.message : 'Unknown error' })
+      return serverError(req, reply, err, ErrorCode.COMPUTE_FAILED, 'Failed to build monthly digest')
     }
   })
 
@@ -1536,8 +1524,7 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
         generated_at: now.toISOString(),
       })
     } catch (err: unknown) {
-      fastify.log.error({ err }, 'intelligence/onboarding/readiness error')
-      return reply.code(500).send({ error: 'INTELLIGENCE_ERROR', message: err instanceof Error ? err.message : 'Unknown error' })
+      return serverError(req, reply, err, ErrorCode.COMPUTE_FAILED, 'Failed to compute onboarding readiness')
     }
   })
 }

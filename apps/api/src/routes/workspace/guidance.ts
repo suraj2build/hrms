@@ -11,6 +11,7 @@
 import type { FastifyInstance } from 'fastify'
 import { DEFAULT_GUIDANCE_CONFIG, mergeGuidance } from '../../lib/guidance-defaults.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 export default async function guidanceRoutes(fastify: FastifyInstance) {
   const auth = { preHandler: [fastify.authenticate] }
@@ -28,7 +29,7 @@ export default async function guidanceRoutes(fastify: FastifyInstance) {
     const tenantId = req.tenantId
     const { data, error } = await fastify.supabase
       .from('tenants').select('settings').eq('id', tenantId).single()
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch guidance configuration')
     const stored = (data?.settings as any)?.guidance ?? null
     return reply.send({ data: mergeGuidance(DEFAULT_GUIDANCE_CONFIG, stored) })
   })
@@ -45,7 +46,7 @@ export default async function guidanceRoutes(fastify: FastifyInstance) {
     // Read current settings, deep-merge the guidance sub-tree, write whole settings back.
     const { data: tenantRow, error: readErr } = await fastify.supabase
       .from('tenants').select('settings').eq('id', tenantId).single()
-    if (readErr) return reply.code(500).send({ error: 'DB_ERROR', message: readErr.message })
+    if (readErr) return serverError(req, reply, readErr, ErrorCode.QUERY_FAILED, 'Failed to read current guidance settings')
 
     const settings = (tenantRow?.settings as Record<string, unknown>) ?? {}
     const currentGuidance = mergeGuidance(DEFAULT_GUIDANCE_CONFIG, (settings as any).guidance ?? null)
@@ -55,7 +56,7 @@ export default async function guidanceRoutes(fastify: FastifyInstance) {
       .from('tenants')
       .update({ settings: { ...settings, guidance: mergedGuidance } })
       .eq('id', tenantId)
-    if (updErr) return reply.code(500).send({ error: 'DB_ERROR', message: updErr.message })
+    if (updErr) return serverError(req, reply, updErr, ErrorCode.UPDATE_FAILED, 'Failed to update guidance configuration')
 
     return reply.send({ data: mergedGuidance })
   })

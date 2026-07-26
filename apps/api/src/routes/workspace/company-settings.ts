@@ -10,6 +10,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 const ALLOWED_SIZES   = ['1-10','11-50','51-200','201-500','501-2000','2001-5000','5001+']
 const ALLOWED_INDUSTRIES = [
@@ -48,7 +49,7 @@ export default async function companySettingsRoutes(fastify: FastifyInstance) {
     ])
 
     if (tenantRes.error) {
-      return reply.code(500).send({ error: 'DB_ERROR', message: tenantRes.error.message })
+      return serverError(req, reply, tenantRes.error, ErrorCode.QUERY_FAILED, 'Failed to fetch company settings')
     }
 
     return reply.send({
@@ -113,7 +114,7 @@ export default async function companySettingsRoutes(fastify: FastifyInstance) {
       .select('id, name, slug, plan, logo_url, industry, size_range, country, timezone, settings')
       .single()
 
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update company settings')
 
     return reply.send({ data })
   })
@@ -167,7 +168,7 @@ export default async function companySettingsRoutes(fastify: FastifyInstance) {
       .select('prefix, last_number')
       .single()
 
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update employee code prefix')
 
     return reply.send({
       data: {

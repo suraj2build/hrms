@@ -20,6 +20,7 @@ import { z } from 'zod'
 import type { FastifyInstance } from 'fastify'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 async function resolveCallerEmployeeId(fastify: any, userId: string, tenantId: string): Promise<string | null> {
   const { data } = await fastify.supabase
@@ -86,7 +87,7 @@ export default async function talentRoutes(fastify: FastifyInstance) {
         return q.range(from, to)
       })
     } catch (err: any) {
-      return reply.code(500).send({ error: err.message })
+      return serverError(req, reply, err, ErrorCode.QUERY_FAILED, 'Failed to fetch talent roles')
     }
 
     // Attach interest counts
@@ -105,7 +106,7 @@ export default async function talentRoutes(fastify: FastifyInstance) {
         ) as any[]
         interests.forEach((i: any) => { countMap[i.role_id] = (countMap[i.role_id] ?? 0) + 1 })
       } catch (err: any) {
-        return reply.code(500).send({ error: err.message })
+        return serverError(req, reply, err, ErrorCode.QUERY_FAILED, 'Failed to fetch role interest counts')
       }
     }
 
@@ -134,7 +135,7 @@ export default async function talentRoutes(fastify: FastifyInstance) {
       .select('id')
       .single()
 
-    if (error) return reply.code(500).send({ error: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create talent role')
     return reply.code(201).send({ data })
   })
 
@@ -150,7 +151,7 @@ export default async function talentRoutes(fastify: FastifyInstance) {
     if (Object.keys(update).length === 0) return reply.code(400).send({ error: 'No fields to update' })
 
     const { error } = await supabase.from('talent_roles').update(update).eq('id', id).eq('tenant_id', req.tenantId)
-    if (error) return reply.code(500).send({ error: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update talent role')
     return reply.send({ data: { updated: true } })
   })
 
@@ -158,7 +159,7 @@ export default async function talentRoutes(fastify: FastifyInstance) {
   fastify.post('/roles/:id/close', hrAuth, async (req: any, reply) => {
     const { id } = req.params as { id: string }
     const { error } = await supabase.from('talent_roles').update({ is_open: false }).eq('id', id).eq('tenant_id', req.tenantId)
-    if (error) return reply.code(500).send({ error: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to close talent role')
     return reply.send({ data: { closed: true } })
   })
 
@@ -177,7 +178,7 @@ export default async function talentRoutes(fastify: FastifyInstance) {
           .range(from, to),
       )
     } catch (err: any) {
-      return reply.code(500).send({ error: err.message })
+      return serverError(req, reply, err, ErrorCode.QUERY_FAILED, 'Failed to fetch role interests')
     }
     return reply.send({ data })
   })
@@ -195,7 +196,7 @@ export default async function talentRoutes(fastify: FastifyInstance) {
       .eq('id', iid)
       .eq('tenant_id', req.tenantId)
 
-    if (error) return reply.code(500).send({ error: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update interest status')
     return reply.send({ data: { updated: true } })
   })
 
@@ -213,7 +214,7 @@ export default async function talentRoutes(fastify: FastifyInstance) {
           .range(from, to),
       )
     } catch (err: any) {
-      return reply.code(500).send({ error: err.message })
+      return serverError(req, reply, err, ErrorCode.QUERY_FAILED, 'Failed to fetch open roles')
     }
 
     // Attach whether the caller has already expressed interest
@@ -272,7 +273,7 @@ export default async function talentRoutes(fastify: FastifyInstance) {
       .select('id')
       .single()
 
-    if (error) return reply.code(500).send({ error: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to register interest')
     return reply.code(201).send({ data })
   })
 
@@ -289,7 +290,7 @@ export default async function talentRoutes(fastify: FastifyInstance) {
       .order('created_at', { ascending: false })
       .limit(200)
 
-    if (error) return reply.code(500).send({ error: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch your interests')
     return reply.send({ data: data ?? [] })
   })
 
@@ -306,7 +307,7 @@ export default async function talentRoutes(fastify: FastifyInstance) {
       .eq('employee_id', employeeId)
       .eq('tenant_id', req.tenantId)
 
-    if (error) return reply.code(500).send({ error: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to withdraw interest')
     return reply.send({ data: { withdrawn: true } })
   })
 }

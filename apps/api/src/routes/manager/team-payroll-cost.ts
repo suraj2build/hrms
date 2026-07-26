@@ -17,6 +17,7 @@ import {
 } from '../../lib/manager-scope.js'
 import { otFromBreakdown } from '../../lib/payroll-dept-snapshot.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 const monthRe = /^\d{4}-\d{2}$/
 
@@ -96,7 +97,7 @@ export default async function managerTeamPayrollCostRoute(fastify: FastifyInstan
       .in('employee_id', employeeIds)
       .order('gross_pay', { ascending: false })
 
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch team payroll cost')
 
     // Prior-month net pay per employee → volatility = |net − prior| / prior × 100
     const priorNet = new Map<string, number>()

@@ -7,6 +7,7 @@
  */
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 const reportSchema = z.object({
   message:        z.string().min(1).max(2000),
@@ -44,7 +45,7 @@ export default async function supportRoutes(fastify: FastifyInstance) {
       .select('id')
       .single()
 
-    if (error) return reply.code(500).send({ error: 'DB', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to save error report')
     return reply.code(201).send({ data: { id: data.id } })
   })
 }

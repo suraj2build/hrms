@@ -18,6 +18,7 @@
 import type { FastifyInstance } from 'fastify'
 import { runDigestForTenant } from '../../lib/digest-scheduler.js'
 import type { DigestFrequency } from '../../lib/digest-builder.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 const DIGEST_FREQUENCIES: DigestFrequency[] = ['daily', 'weekly', 'monthly']
 
@@ -200,8 +201,7 @@ export default async function notificationsRoutes(fastify: FastifyInstance) {
       )
       return reply.send({ data: result })
     } catch (err: unknown) {
-      fastify.log.error({ err }, 'notifications/digest/run error')
-      return reply.code(500).send({ error: 'DIGEST_ERROR', message: err instanceof Error ? err.message : 'Unknown error' })
+      return serverError(req, reply, err, ErrorCode.COMPUTE_FAILED, 'Failed to send digest')
     }
   })
 

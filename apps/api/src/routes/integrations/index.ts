@@ -7,6 +7,7 @@ import {
 } from '../../platform/integrations/index.js'
 import type { AccountingFormat, PayrollExportInput } from '../../platform/integrations/index.js'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 export default async function integrationRoutes(fastify: FastifyInstance) {
   const auth = { preHandler: [fastify.authenticate] }
@@ -40,8 +41,7 @@ export default async function integrationRoutes(fastify: FastifyInstance) {
       const result = await panVerificationAdapter.verify(body.pan)
       return result
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err)
-      return reply.status(500).send({ error: message })
+      return serverError(req, reply, err, ErrorCode.COMPUTE_FAILED, 'PAN verification failed')
     }
   })
 
@@ -54,8 +54,7 @@ export default async function integrationRoutes(fastify: FastifyInstance) {
       const result = await ifscVerificationAdapter.lookup(ifsc)
       return result
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err)
-      return reply.status(500).send({ error: message })
+      return serverError(req, reply, err, ErrorCode.COMPUTE_FAILED, 'IFSC lookup failed')
     }
   })
 
@@ -106,8 +105,7 @@ export default async function integrationRoutes(fastify: FastifyInstance) {
           return reply.send(output)
       }
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err)
-      return reply.status(500).send({ error: message })
+      return serverError(req, reply, err, ErrorCode.COMPUTE_FAILED, 'Accounting export failed')
     }
   })
 }

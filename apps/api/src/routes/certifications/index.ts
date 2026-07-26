@@ -17,6 +17,7 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 export default async function certificationRoutes(fastify: FastifyInstance) {
   const auth = { preHandler: [fastify.authenticate] }
@@ -83,7 +84,7 @@ export default async function certificationRoutes(fastify: FastifyInstance) {
     query = query.range(offset, offset + limit - 1)
 
     const { data, error, count } = await query
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch certifications')
     return reply.send({ data: data ?? [], total: count ?? 0, limit, offset })
   })
 
@@ -113,7 +114,7 @@ export default async function certificationRoutes(fastify: FastifyInstance) {
           .range(from, to)
       ) as any[]
     } catch (err: any) {
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: err.message })
+      return serverError(req, reply, err, ErrorCode.QUERY_FAILED, 'Failed to fetch expiring certifications')
     }
 
     const today_d = new Date(today)
@@ -138,7 +139,7 @@ export default async function certificationRoutes(fastify: FastifyInstance) {
           .range(from, to)
       ) as any[]
     } catch (err: any) {
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: err.message })
+      return serverError(req, reply, err, ErrorCode.QUERY_FAILED, 'Failed to fetch certification stats')
     }
     const today = new Date()
     const in30  = new Date(); in30.setDate(today.getDate() + 30)
@@ -209,7 +210,7 @@ export default async function certificationRoutes(fastify: FastifyInstance) {
 
     if (error) {
       if (error.code === '23505') return reply.code(409).send({ error: 'DUPLICATE', message: 'Certification already exists for this employee' })
-      return reply.code(500).send({ error: 'INSERT_FAILED', message: error.message })
+      return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create certification')
     }
     return reply.code(201).send({ data })
   })
@@ -238,7 +239,7 @@ export default async function certificationRoutes(fastify: FastifyInstance) {
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
 
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update certification')
     return reply.send({ message: 'Certification updated' })
   })
 
@@ -252,7 +253,7 @@ export default async function certificationRoutes(fastify: FastifyInstance) {
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
 
-    if (error) return reply.code(500).send({ error: 'DELETE_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.DELETE_FAILED, 'Failed to delete certification')
     return reply.send({ message: 'Certification deleted' })
   })
 }
