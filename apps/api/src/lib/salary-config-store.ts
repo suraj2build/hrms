@@ -388,18 +388,28 @@ export async function addStructureComponent(
   const parsed = addStructureComponentSchema.safeParse(body)
   if (!parsed.success) return fail(400, 'VALIDATION', parsed.error.issues[0]?.message ?? 'Invalid component')
 
+  // structureId comes straight from the URL param and salary_component_id
+  // from the request body — neither was previously checked against the
+  // caller's tenant, so either could reference another tenant's structure
+  // or component, corrupting that tenant's payroll configuration.
+  const { data: structure } = await supabase
+    .from('salary_structures').select('id').eq('id', structureId).eq('tenant_id', tenantId).maybeSingle()
+  if (!structure) return fail(404, 'NOT_FOUND', 'Salary structure not found')
+
+  const { data: comp } = await supabase
+    .from('salary_components')
+    .select('default_calculation_type, default_value')
+    .eq('id', parsed.data.salary_component_id)
+    .eq('tenant_id', tenantId)
+    .maybeSingle()
+  if (!comp) return fail(404, 'NOT_FOUND', 'Salary component not found')
+
   let { calculation_type, default_value } = parsed.data
 
   // Fall back to the component's suggested default rule when the caller omits it.
   if (calculation_type == null || default_value == null) {
-    const { data: comp } = await supabase
-      .from('salary_components')
-      .select('default_calculation_type, default_value')
-      .eq('id', parsed.data.salary_component_id)
-      .eq('tenant_id', tenantId)
-      .maybeSingle()
-    calculation_type = calculation_type ?? (comp?.default_calculation_type ?? undefined)
-    default_value    = default_value    ?? (comp?.default_value != null ? Number(comp.default_value) : undefined)
+    calculation_type = calculation_type ?? (comp.default_calculation_type ?? undefined)
+    default_value    = default_value    ?? (comp.default_value != null ? Number(comp.default_value) : undefined)
   }
 
   if (calculation_type == null || default_value == null) {
