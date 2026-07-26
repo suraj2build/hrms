@@ -2677,38 +2677,39 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
             .eq('tenant_id', req.tenantId)
         }
 
-        // Loan outstanding balance sweep: reduce by principal_component for each paid EMI
+        // Loan outstanding balance sweep: reduce by principal_component for each paid EMI.
+        // `paid_amount` (otherwise unused on this table) doubles as an
+        // "already applied to outstanding_balance" marker: without it, a
+        // retried/duplicate finalize call would re-match the same
+        // status='paid' rows (that status never reverts) and double-decrement
+        // the loan balance. Filtering on `.is('paid_amount', null)` makes the
+        // sweep idempotent, and `record_loan_payment_atomic` makes each
+        // decrement itself race-safe against concurrent finalize calls.
         const { data: paidLoanScheds } = await fastify.supabase
           .from('loan_schedules')
-          .select('loan_id, principal_component')
+          .select('id, loan_id, principal_component')
           .eq('tenant_id', req.tenantId)
           .eq('due_month', run.month)
           .eq('status', 'paid')
           .eq('payroll_run_id', id)
+          .is('paid_amount', null)
 
-        const loanPrincipalMap = new Map<string, number>()
         for (const s of (paidLoanScheds ?? []) as any[]) {
-          loanPrincipalMap.set(s.loan_id, (loanPrincipalMap.get(s.loan_id) ?? 0) + (s.principal_component ?? 0))
-        }
-
-        for (const [loanId, principalPaid] of loanPrincipalMap) {
-          const { data: loanRow } = await fastify.supabase
-            .from('employee_loans')
-            .select('outstanding_balance')
-            .eq('id', loanId)
-            .eq('tenant_id', req.tenantId)
+          const principalPaid = s.principal_component ?? 0
+          const { data: rpcResult, error: rpcErr } = await fastify.supabase
+            .rpc('record_loan_payment_atomic', {
+              p_tenant_id:      req.tenantId,
+              p_loan_id:        s.loan_id,
+              p_principal_paid: principalPaid,
+            })
             .single()
 
-          if (loanRow) {
-            const newOutstanding = Math.max(0, Math.round(((loanRow as any).outstanding_balance - principalPaid) * 100) / 100)
+          if (!rpcErr && rpcResult) {
+            // Mark this schedule as balance-applied so a retry can't re-decrement.
             await fastify.supabase
-              .from('employee_loans')
-              .update({
-                outstanding_balance: newOutstanding,
-                status:              newOutstanding <= 0 ? 'completed' : 'active',
-                updated_at:          now,
-              })
-              .eq('id', loanId)
+              .from('loan_schedules')
+              .update({ paid_amount: principalPaid })
+              .eq('id', s.id)
               .eq('tenant_id', req.tenantId)
           }
         }
