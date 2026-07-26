@@ -190,9 +190,26 @@ export default async function fbpRoutes(fastify: FastifyInstance) {
     return reply.code(201).send({ data })
   })
 
-  // ── List attachments for a submission (ESS sees own; HR sees all via RLS) ─────
+  // ── List attachments for a submission (ESS sees own; HR sees all) ─────────────
+  // The "via RLS" comment was stale — fastify.supabase is a service-role
+  // client and bypasses RLS entirely, so this route had no actual ownership
+  // enforcement, letting any employee read another employee's FBP bill
+  // attachment metadata (including storage_path) by guessing a submission id.
   fastify.get('/submissions/:id/attachments', auth, async (req: any, reply) => {
     const { id } = req.params as { id: string }
+
+    if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
+      const empId = await resolveEmployeeId(req)
+      const { data: submission } = await fastify.supabase
+        .from('fbp_bill_submissions')
+        .select('id')
+        .eq('id', id)
+        .eq('tenant_id', req.tenantId)
+        .eq('employee_id', empId ?? '')
+        .maybeSingle()
+      if (!submission) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Submission not found' })
+    }
+
     const { data, error } = await fastify.supabase
       .from('fbp_bill_attachments')
       .select('id, file_name, storage_path, mime_type, file_size_bytes, uploaded_at')

@@ -240,7 +240,7 @@ export default async function variablePayRoutes(fastify: FastifyInstance) {
   })
 
   // ── GET /payroll/variable-pay/batches/:id/payouts ────────────────────────────
-  fastify.get('/batches/:id/payouts', auth, async (req: any, reply) => {
+  fastify.get('/batches/:id/payouts', { preHandler: [fastify.authenticate, requireHrAdmin] }, async (req: any, reply) => {
     const { id } = req.params as { id: string }
 
     let data: any[]

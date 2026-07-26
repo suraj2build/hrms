@@ -196,7 +196,7 @@ export default async function governanceRoutes(fastify: FastifyInstance) {
   })
 
   // ── GET /payroll/governance/maker-checker ─────────────────────────────────────
-  fastify.get('/maker-checker', auth, async (req: any, reply) => {
+  fastify.get('/maker-checker', { preHandler: [fastify.authenticate, requireHrAdmin] }, async (req: any, reply) => {
     const querySchema = z.object({
       entity_type: z.string().optional(),
       status: z.string().optional(),
@@ -302,7 +302,7 @@ export default async function governanceRoutes(fastify: FastifyInstance) {
   })
 
   // ── GET /payroll/governance/variance-approvals ────────────────────────────────
-  fastify.get('/variance-approvals', auth, async (req: any, reply) => {
+  fastify.get('/variance-approvals', { preHandler: [fastify.authenticate, requireHrAdmin] }, async (req: any, reply) => {
     const querySchema = z.object({
       payroll_run_id: z.string().uuid().optional(),
       status: z.string().optional(),

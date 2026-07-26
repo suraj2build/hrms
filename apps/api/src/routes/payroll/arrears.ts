@@ -22,7 +22,7 @@ export default async function arrearsRoutes(fastify: FastifyInstance) {
   }
 
   // ── GET /payroll/arrears/batches ──────────────────────────────────────────────
-  fastify.get('/batches', auth, async (req: any, reply) => {
+  fastify.get('/batches', { preHandler: [fastify.authenticate, requireHrAdmin] }, async (req: any, reply) => {
     const querySchema = z.object({
       status: z.string().optional(),
       from_period: z.string().optional(),
@@ -81,7 +81,7 @@ export default async function arrearsRoutes(fastify: FastifyInstance) {
   })
 
   // ── GET /payroll/arrears/batches/:id ─────────────────────────────────────────
-  fastify.get('/batches/:id', auth, async (req: any, reply) => {
+  fastify.get('/batches/:id', { preHandler: [fastify.authenticate, requireHrAdmin] }, async (req: any, reply) => {
     const { id } = req.params as { id: string }
 
     const { data, error } = await fastify.supabase
@@ -153,7 +153,7 @@ export default async function arrearsRoutes(fastify: FastifyInstance) {
 
   // ── GET /payroll/arrears/batches/:id/records ──────────────────────────────────
   // Fetch the calculated arrear records for a batch (+ employee name/code).
-  fastify.get('/batches/:id/records', auth, async (req: any, reply) => {
+  fastify.get('/batches/:id/records', { preHandler: [fastify.authenticate, requireHrAdmin] }, async (req: any, reply) => {
     const { id } = req.params as { id: string }
 
     const { data: batch } = await fastify.supabase
@@ -214,8 +214,14 @@ export default async function arrearsRoutes(fastify: FastifyInstance) {
       return reply.code(409).send({ error: 'LOCKED', message: 'Batch already approved/processed' })
     }
 
+    // Fresh audit finding: `${to_period}-31` produces an invalid date literal
+    // (e.g. "2026-02-31") for any month with fewer than 31 days — Feb, Apr,
+    // Jun, Sep, Nov — causing this query to fail outright for 5 of 12
+    // possible to_period months. Compute the month's real last day instead.
     const from = `${(batch as any).from_period}-01`
-    const to   = `${(batch as any).to_period}-31`
+    const [toYear, toMonth] = (batch as any).to_period.split('-').map(Number)
+    const toLastDay = new Date(toYear, toMonth, 0).getDate()
+    const to = `${(batch as any).to_period}-${String(toLastDay).padStart(2, '0')}`
     const { data: revs, error: revErr } = await fastify.supabase
       .from('compensation_revisions')
       .select('employee_id, before_ctc_monthly, new_ctc_annual, effective_date, retro_months')
@@ -301,7 +307,7 @@ export default async function arrearsRoutes(fastify: FastifyInstance) {
   })
 
   // ── GET /payroll/arrears/employee/:employeeId ─────────────────────────────────
-  fastify.get('/employee/:employeeId', auth, async (req: any, reply) => {
+  fastify.get('/employee/:employeeId', { preHandler: [fastify.authenticate, requireHrAdmin] }, async (req: any, reply) => {
     const { employeeId } = req.params as { employeeId: string }
 
     const { data, error } = await fastify.supabase
