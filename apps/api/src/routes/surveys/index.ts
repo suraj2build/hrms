@@ -441,6 +441,21 @@ export default async function surveyRoutes(fastify: FastifyInstance) {
 
     let empIds = employee_ids ?? []
 
+    if (!assign_all && empIds.length) {
+      // employee_ids is caller-supplied — verify every id belongs to this
+      // tenant before it's used, otherwise survey_assignments rows could be
+      // created referencing another tenant's employee under this tenant_id.
+      const uniqueEmpIds = [...new Set(empIds)]
+      const { data: validEmps } = await supabase
+        .from('employees')
+        .select('id')
+        .eq('tenant_id', tenantId)
+        .in('id', uniqueEmpIds)
+      if ((validEmps?.length ?? 0) !== uniqueEmpIds.length) {
+        return reply.status(400).send({ error: 'INVALID_EMPLOYEES', message: 'One or more employees were not found in your organisation' })
+      }
+    }
+
     if (assign_all) {
       // Paginated — an unbounded .select() truncates at PostgREST's 1,000-row
       // ceiling, so "assign to all" would silently only reach the first 1,000
@@ -905,6 +920,21 @@ export default async function surveyRoutes(fastify: FastifyInstance) {
     }
     if ((round as any).status !== 'open') {
       return reply.status(400).send({ error: 'Nominations are closed' })
+    }
+
+    // employee_ids (peer nominees) is caller-supplied — verify every id
+    // belongs to this tenant. Without this, an employee could nominate a
+    // foreign tenant's employee_id, and the HR 360-report endpoint's
+    // employees(first_name, last_name) join would then surface that
+    // foreign tenant's employee name inside this tenant's report.
+    const uniquePeerIds = [...new Set(employee_ids)]
+    const { data: validPeers } = await supabase
+      .from('employees')
+      .select('id')
+      .eq('tenant_id', tenantId)
+      .in('id', uniquePeerIds)
+    if ((validPeers?.length ?? 0) !== uniquePeerIds.length) {
+      return reply.status(400).send({ error: 'INVALID_EMPLOYEES', message: 'One or more nominated peers were not found in your organisation' })
     }
 
     const rows = employee_ids.map(pid => ({
