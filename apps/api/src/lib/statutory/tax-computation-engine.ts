@@ -40,6 +40,16 @@ export interface TaxComputationInput {
   }
   alreadyDeducted: number
   remainingMonths: number
+  /**
+   * "Today" as YYYY-MM-DD, resolved in the tenant's own timezone (via
+   * fetchTenantTz + getLocalDate). Drives which FY months buildMonthlyBreakdown
+   * treats as future vs already-elapsed. Optional for backward compatibility —
+   * callers that don't pass it fall back to the server's UTC clock, which can
+   * be off by a day right at a month boundary (the same class of bug fixed in
+   * tds.ts for ISSUE-154); callers with a tenantId available should always
+   * pass this.
+   */
+  todayStr?: string
 }
 
 export interface TaxComputationResult {
@@ -442,10 +452,15 @@ function buildMonthlyBreakdown(
   financialYear: string,
   remainingMonths: number,
   monthlyTDS: number,
+  todayStr?: string,
 ): Array<{ month: string; monthNum: number; tdsThisMonth: number }> {
   const fyStart = parseInt(financialYear.split('-')[0], 10)
-  const now = new Date()
-  const currentMonthStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+  const currentMonthStr = todayStr
+    ? todayStr.slice(0, 7)
+    : (() => {
+        const now = new Date()
+        return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+      })()
 
   return FY_MONTH_ORDER.map((monthNum) => {
     const year = monthNum >= 4 ? fyStart : fyStart + 1
@@ -479,7 +494,7 @@ export async function computeTaxWithDB(
   const recommendedRegime: 'old' | 'new' = oldRegimeTax <= newRegimeTax ? 'old' : 'new'
   const taxSavingWithOptimal = Math.abs(oldRegimeTax - newRegimeTax)
 
-  const monthlyBreakdown = buildMonthlyBreakdown(financialYear, input.remainingMonths, chosenResult.monthlyTDS)
+  const monthlyBreakdown = buildMonthlyBreakdown(financialYear, input.remainingMonths, chosenResult.monthlyTDS, input.todayStr)
 
   const grossSalary       = input.grossAnnualIncome
   const prevSalary        = Math.max(0, deductions.previousEmployerSalary ?? 0)

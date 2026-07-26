@@ -368,15 +368,23 @@ export default async function tdsRoutes(fastify: FastifyInstance) {
     const now = new Date().toISOString()
     const fromStatus = (existing as any).status
 
+    // Fold the precondition into the UPDATE's own WHERE clause — a duplicate
+    // double-click/retry could otherwise re-run this after the first request
+    // already advanced the declaration past 'submitted' (e.g. HR already
+    // approved it in between), silently kicking it back to 'submitted'.
     const { data, error } = await fastify.supabase
       .from('tax_declarations')
       .update({ status: 'submitted', submitted_at: now, updated_at: now })
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
+      .in('status', allowedFromStatuses)
       .select()
-      .single()
+      .maybeSingle()
 
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to submit declaration')
+    if (!data) {
+      return reply.code(409).send({ error: 'INVALID_STATUS', message: 'Declaration status changed before this submission could be applied' })
+    }
 
     await writeAuditLog(fastify, req.tenantId, id, req.userId, fromStatus, 'submitted', 'Submitted for review by employee')
 
@@ -783,6 +791,11 @@ ${section('Part D — Loss from House Property (Home Loan Interest)', hlDecls,
     const now = new Date().toISOString()
     const fromStatus = (existing as any).status
 
+    // Fold the reviewable-status precondition into the UPDATE's own WHERE
+    // clause — the SELECT above is only a pre-check; without re-asserting it
+    // here, a concurrent approve/reject/request-revision on the same
+    // declaration could both pass the pre-check and both writes would apply,
+    // with the loser's outcome silently overwritten by the winner's.
     const { data, error } = await fastify.supabase
       .from('tax_declarations')
       .update({
@@ -794,10 +807,14 @@ ${section('Part D — Loss from House Property (Home Loan Interest)', hlDecls,
       })
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
+      .in('status', REVIEWABLE_STATUSES)
       .select()
-      .single()
+      .maybeSingle()
 
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to approve declaration')
+    if (!data) {
+      return reply.code(409).send({ error: 'INVALID_STATUS', message: 'Declaration status changed before this approval could be applied' })
+    }
 
     await writeAuditLog(fastify, req.tenantId, id, req.userId, fromStatus, 'approved', parsed.data.notes, {
       approved_amount: parsed.data.approved_amount,
@@ -844,6 +861,8 @@ ${section('Part D — Loss from House Property (Home Loan Interest)', hlDecls,
     const now = new Date().toISOString()
     const fromStatus = (existing as any).status
 
+    // See the twin approve handler above — fold the precondition into the
+    // UPDATE's own WHERE clause to close the TOCTOU window.
     const { data, error } = await fastify.supabase
       .from('tax_declarations')
       .update({
@@ -855,10 +874,14 @@ ${section('Part D — Loss from House Property (Home Loan Interest)', hlDecls,
       })
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
+      .in('status', REVIEWABLE_STATUSES)
       .select()
-      .single()
+      .maybeSingle()
 
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to reject declaration')
+    if (!data) {
+      return reply.code(409).send({ error: 'INVALID_STATUS', message: 'Declaration status changed before this rejection could be applied' })
+    }
 
     await writeAuditLog(fastify, req.tenantId, id, req.userId, fromStatus, 'rejected', parsed.data.rejection_reason)
 
@@ -903,15 +926,21 @@ ${section('Part D — Loss from House Property (Home Loan Interest)', hlDecls,
     const now = new Date().toISOString()
     const fromStatus = (existing as any).status
 
+    // See the approve/reject handlers above — fold the precondition into the
+    // UPDATE's own WHERE clause to close the TOCTOU window.
     const { data, error } = await fastify.supabase
       .from('tax_declarations')
       .update({ status: 'revision_requested', rejection_reason: parsed.data.notes, updated_at: now })
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
+      .in('status', reviewableOrApproved)
       .select()
-      .single()
+      .maybeSingle()
 
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update declaration status')
+    if (!data) {
+      return reply.code(409).send({ error: 'INVALID_STATUS', message: 'Declaration status changed before this update could be applied' })
+    }
 
     await writeAuditLog(fastify, req.tenantId, id, req.userId, fromStatus, 'revision_requested', parsed.data.notes)
 
@@ -1093,6 +1122,10 @@ ${section('Part D — Loss from House Property (Home Loan Interest)', hlDecls,
     }
 
     const now = new Date().toISOString()
+    // Fold the not-yet-verified precondition into the UPDATE's own WHERE
+    // clause — two concurrent verify calls on the same proof could otherwise
+    // both pass the pre-check above and both write, double-logging the
+    // verification action for what's really a single state transition.
     const { data, error } = await fastify.supabase
       .from('declaration_proofs')
       .update({
@@ -1105,10 +1138,12 @@ ${section('Part D — Loss from House Property (Home Loan Interest)', hlDecls,
       })
       .eq('id', proofId)
       .eq('tenant_id', req.tenantId)
+      .neq('document_state', 'verified')
       .select()
-      .single()
+      .maybeSingle()
 
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to verify proof')
+    if (!data) return reply.code(409).send({ error: 'ALREADY_VERIFIED', message: 'Proof is already verified' })
     await logAction(fastify.supabase, {
       tenantId:    req.tenantId,
       tableName:   'declaration_proofs',
@@ -1394,13 +1429,25 @@ ${section('Part D — Loss from House Property (Home Loan Interest)', hlDecls,
       newData:     { financial_year: parsed.data.financial_year, total_declared: totalDeclared, total_approved: totalApproved } as Record<string, unknown>,
     })
 
-    // Mark approved declarations as payroll_applied
+    // Mark approved declarations as payroll_applied. Checking this error matters:
+    // an unnoticed failure here would leave the source declarations still
+    // 'approved' while the client is told the snapshot succeeded, so a second
+    // POST /snapshots for the same employee+FY (e.g. a re-run before the next
+    // payroll cycle) would re-fetch the same unlocked declarations and insert a
+    // duplicate snapshot with identical totals. Revert the snapshot itself on
+    // failure so the operation is atomic — either both the snapshot and the
+    // lock land, or neither does, and the caller can safely retry.
     if (items.length > 0) {
-      await fastify.supabase
+      const { error: lockErr } = await fastify.supabase
         .from('tax_declarations')
         .update({ status: 'payroll_applied', updated_at: new Date().toISOString() })
         .in('id', items.map((d: any) => d.id))
         .eq('tenant_id', req.tenantId)
+
+      if (lockErr) {
+        await fastify.supabase.from('tds_declaration_snapshots').delete().eq('id', (snapshot as any).id).eq('tenant_id', req.tenantId)
+        return serverError(req, reply, lockErr, ErrorCode.UPDATE_FAILED, 'Failed to lock declarations against the new snapshot')
+      }
     }
 
     return reply.code(201).send({ data: snapshot })

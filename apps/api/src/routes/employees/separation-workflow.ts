@@ -39,7 +39,7 @@ async function getClearanceDepts(fastify: any, tenantId: string) {
   const { data } = await fastify.supabase
     .from('clearance_departments')
     .select('id, code, label, display_order, is_active')
-    .eq('tenant_id', tenantId).order('display_order')
+    .eq('tenant_id', tenantId).eq('is_active', true).order('display_order')
   if (data && data.length > 0) return data
   const rows = DEFAULT_CLEARANCE_DEPTS.map((d, i) => ({ tenant_id: tenantId, code: d.code, label: d.label, display_order: i }))
   const { data: seeded } = await fastify.supabase.from('clearance_departments').insert(rows).select('id, code, label, display_order, is_active')
@@ -316,8 +316,17 @@ export default async function separationWorkflowRoutes(fastify: FastifyInstance)
       .eq('tenant_id', req.tenantId)
 
     if (!fetchErr && allClearances) {
+      // Clearance rows are seeded once, per-employee, from the tenant's actual
+      // configured department list (getClearanceDepts()) — not the fixed
+      // CLEARANCE_DEPARTMENTS default. Comparing against that hardcoded
+      // literal's length breaks completion detection for any tenant that has
+      // customized their clearance departments (added/removed via
+      // /settlement/clearance-departments): allClearances.length is then
+      // permanently != CLEARANCE_DEPARTMENTS.length, so clearance_done never
+      // flips true and /relieve stays blocked forever. length > 0 is the
+      // correct check — every row present for this employee must be cleared.
       const allCleared =
-        allClearances.length === CLEARANCE_DEPARTMENTS.length &&
+        allClearances.length > 0 &&
         allClearances.every((c: any) => c.status === 'cleared')
 
       if (allCleared) {
@@ -620,15 +629,23 @@ export default async function separationWorkflowRoutes(fastify: FastifyInstance)
 
     const now = new Date().toISOString()
 
+    // Fold the 'pending' precondition into the WHERE clause on both branches —
+    // without it, a re-invocation (double-click, retried request) after the
+    // separation has already been approved/rejected and even advanced further
+    // through the lifecycle unconditionally overwrites approval_status and,
+    // on the approve branch, force-resets lifecycle_stage back to
+    // 'notice_period' regardless of how far clearance/F&F progress has moved.
     if (parsed.data.decision === 'rejected') {
       const { data, error } = await fastify.supabase
         .from('employee_separation')
         .update({ approval_status: 'rejected', remarks: parsed.data.remarks ?? sep.remarks ?? null, updated_at: now })
         .eq('id', sep.id)
         .eq('tenant_id', req.tenantId)
+        .eq('approval_status', 'pending')
         .select()
-        .single()
+        .maybeSingle()
       if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to reject separation')
+      if (!data) return reply.code(409).send({ error: 'ALREADY_DECIDED', message: 'This separation has already been approved or rejected' })
 
       await logAction(fastify.supabase, {
         tenantId: req.tenantId, tableName: 'employee_separation', recordId: sep.id,
@@ -650,9 +667,11 @@ export default async function separationWorkflowRoutes(fastify: FastifyInstance)
       })
       .eq('id', sep.id)
       .eq('tenant_id', req.tenantId)
+      .eq('approval_status', 'pending')
       .select()
-      .single()
+      .maybeSingle()
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to approve separation')
+    if (!data) return reply.code(409).send({ error: 'ALREADY_DECIDED', message: 'This separation has already been approved or rejected' })
 
     await fastify.supabase
       .from('employees')

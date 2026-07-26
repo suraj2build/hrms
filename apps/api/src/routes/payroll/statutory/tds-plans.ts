@@ -23,19 +23,30 @@ import { computeTaxWithDB } from '../../../lib/statutory/tax-computation-engine.
 import { logAction } from '../../../lib/audit-service.js'
 import { checkDeclarationWindow } from './tds.js'
 import { serverError, ErrorCode } from '../../../lib/api-errors.js'
+import { fetchTenantTz } from '../../../lib/attendance-engine.js'
+import { getLocalDate } from '../../../lib/org-context.js'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function currentFinancialYear(): string {
-  const now = new Date()
-  const fyYear = now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1
+// Resolve "today" in the tenant's own timezone, not the server's (UTC) clock —
+// at e.g. 00:15 IST on the 1st, the server's UTC clock still reads the last
+// day of the previous month, which shifted the FY/remaining-months math by a
+// day right at every month boundary. Matches the same fix already applied to
+// tds.ts (ISSUE-154 class).
+async function tenantTodayStr(fastify: any, tenantId: string): Promise<string> {
+  const tz = await fetchTenantTz(fastify.supabase, tenantId)
+  return getLocalDate(new Date().toISOString(), tz)
+}
+
+function currentFinancialYear(todayStr: string): string {
+  const [y, m] = todayStr.split('-').map(Number)
+  const fyYear = m >= 4 ? y : y - 1
   return `${fyYear}-${String(fyYear + 1).slice(2)}`
 }
 
-function remainingMonthsInFY(financialYear: string): number {
+function remainingMonthsInFY(financialYear: string, todayStr: string): number {
   const fyStart = parseInt(financialYear.split('-')[0], 10)
-  const now = new Date()
-  const currentMonthStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+  const currentMonthStr = todayStr.slice(0, 7)
 
   const fyMonths: string[] = []
   for (let m = 4; m <= 12; m++) fyMonths.push(`${fyStart}-${String(m).padStart(2, '0')}`)
@@ -90,6 +101,7 @@ function buildComputationInput(
   components: any[],
   alreadyDeducted: number,
   remainingMonths: number,
+  todayStr: string,
 ): import('../../../lib/statutory/tax-computation-engine.js').TaxComputationInput {
   // Build a map of section_code → declared_amount from plan items + component metadata
   const compMap: Record<string, any> = {}
@@ -127,6 +139,7 @@ function buildComputationInput(
     },
     alreadyDeducted,
     remainingMonths,
+    todayStr,
   }
 }
 
@@ -184,11 +197,13 @@ export default async function tdsPlansRoute(fastify: FastifyInstance) {
     const grossMonthly = (latestSlip as any)?.gross_pay ?? 0
     const grossAnnual  = grossMonthly * 12
 
+    const todayStr = await tenantTodayStr(fastify, req.tenantId)
+
     // Compute tax for each plan
     const comparisons = await Promise.all(
       (plans as any[]).map(async (plan: any) => {
         const fy = plan.financial_year
-        const remaining = remainingMonthsInFY(fy)
+        const remaining = remainingMonthsInFY(fy, todayStr)
 
         // Load items for this plan with component data
         const { data: items } = await fastify.supabase
@@ -218,6 +233,7 @@ export default async function tdsPlansRoute(fastify: FastifyInstance) {
           components,
           alreadyDeducted,
           remaining,
+          todayStr,
         )
 
         const result = await computeTaxWithDB(fastify.supabase, inputData)
@@ -259,7 +275,7 @@ export default async function tdsPlansRoute(fastify: FastifyInstance) {
     }
 
     const qs = z.object({ financial_year: z.string().optional() }).safeParse(req.query)
-    const fy = qs.data?.financial_year ?? currentFinancialYear()
+    const fy = qs.data?.financial_year ?? currentFinancialYear(await tenantTodayStr(fastify, req.tenantId))
 
     const { data, error } = await fastify.supabase
       .from('tax_declaration_plans')
@@ -583,6 +599,7 @@ export default async function tdsPlansRoute(fastify: FastifyInstance) {
 
     const alreadyDeducted = ((slips as any[]) ?? []).reduce((s: number, r: any) => s + (r.tds_deducted ?? 0), 0)
 
+    const todayStr = await tenantTodayStr(fastify, req.tenantId)
     const inputData = buildComputationInput(
       grossAnnual,
       (plan as any).tax_regime as 'old' | 'new',
@@ -590,7 +607,8 @@ export default async function tdsPlansRoute(fastify: FastifyInstance) {
       planItems,
       components,
       alreadyDeducted,
-      remainingMonthsInFY(fy),
+      remainingMonthsInFY(fy, todayStr),
+      todayStr,
     )
 
     const r = await computeTaxWithDB(fastify.supabase, inputData)
@@ -694,6 +712,7 @@ export default async function tdsPlansRoute(fastify: FastifyInstance) {
 
     const alreadyDeducted = ((slips as any[]) ?? []).reduce((s: number, r: any) => s + (r.tds_deducted ?? 0), 0)
 
+    const todayStr = await tenantTodayStr(fastify, req.tenantId)
     const inputData = buildComputationInput(
       grossAnnual,
       (plan as any).tax_regime as 'old' | 'new',
@@ -701,7 +720,8 @@ export default async function tdsPlansRoute(fastify: FastifyInstance) {
       planItems,
       components,
       alreadyDeducted,
-      remainingMonthsInFY(fy),
+      remainingMonthsInFY(fy, todayStr),
+      todayStr,
     )
 
     const taxResult = await computeTaxWithDB(fastify.supabase, inputData)

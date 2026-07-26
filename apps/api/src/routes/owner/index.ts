@@ -159,6 +159,25 @@ const approveRequestSchema = z.object({
   per_employee_rate: z.number().min(0).default(0),
 })
 
+// Supabase Auth's admin.listUsers() paginates like PostgREST — a single call
+// only ever returns one page (perPage caps at 1000), and the auth user list is
+// platform-wide, not scoped to a tenant. Callers that need "every auth user"
+// (email enrichment, duplicate-email checks) must page through it the same
+// way fetchAllRows pages through PostgREST, or the list silently truncates
+// once the platform has >1000 total registered users.
+async function listAllAuthUsers(supabaseAuth: any): Promise<any[]> {
+  const users: any[] = []
+  let page = 1
+  while (true) {
+    const { data } = await supabaseAuth.admin.listUsers({ perPage: 1000, page })
+    const batch = data?.users ?? []
+    if (batch.length === 0) break
+    users.push(...batch)
+    page += 1
+  }
+  return users
+}
+
 // ── Route Registration ────────────────────────────────────────────────────────
 
 export default async function ownerRoutes(fastify: FastifyInstance) {
@@ -491,11 +510,10 @@ export default async function ownerRoutes(fastify: FastifyInstance) {
     if (!profiles?.length) return reply.send({ data: [] })
 
     // Enrich with emails from Supabase auth (service-role Admin API)
-    // listUsers returns up to 1000 by default — fine for tenant admin lists
     const emailMap: Record<string, string> = {}
     try {
-      const { data: authList } = await (fastify.supabase.auth as any).admin.listUsers({ perPage: 1000, page: 1 })
-      for (const u of (authList?.users ?? [])) {
+      const authUsers = await listAllAuthUsers(fastify.supabase.auth as any)
+      for (const u of authUsers) {
         emailMap[u.id] = u.email ?? ''
       }
     } catch (_) { /* email enrichment is best-effort */ }
@@ -542,8 +560,8 @@ export default async function ownerRoutes(fastify: FastifyInstance) {
     // Duplicate check: find auth user by email → check if they already have a profile here
     // (profiles has no email column — look up via auth Admin API)
     try {
-      const { data: authList } = await (fastify.supabase.auth as any).admin.listUsers({ perPage: 1000, page: 1 })
-      const existingAuthUser = (authList?.users ?? []).find((u: any) => u.email === email)
+      const authUsers = await listAllAuthUsers(fastify.supabase.auth as any)
+      const existingAuthUser = authUsers.find((u: any) => u.email === email)
       if (existingAuthUser) {
         const { data: dup } = await fastify.supabase
           .from('profiles').select('id').eq('id', existingAuthUser.id).eq('tenant_id', tenantId).maybeSingle()
@@ -567,8 +585,8 @@ export default async function ownerRoutes(fastify: FastifyInstance) {
       if (authErr.message?.includes('already been registered') || authErr.status === 422) {
         // Auth user already exists — look up their ID and link to this tenant instead
         try {
-          const { data: existingList } = await (fastify.supabase.auth as any).admin.listUsers({ perPage: 1000 })
-          const existingUser = existingList?.users?.find((u: any) => u.email === email)
+          const existingList = await listAllAuthUsers(fastify.supabase.auth as any)
+          const existingUser = existingList.find((u: any) => u.email === email)
           if (!existingUser) {
             return reply.code(409).send({ error: 'AUTH_DUPLICATE', message: 'This email already exists but could not be found. Try resetting their password.' })
           }

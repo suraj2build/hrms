@@ -46,11 +46,17 @@ export async function revokeEmployeeAuth(
 
   if (!profile) return
 
-  await supabase
+  const { error: profileErr } = await supabase
     .from('profiles')
     .update({ is_active: false })
     .eq('id', profile.id)
     .eq('tenant_id', tenantId)
+  if (profileErr) {
+    log.warn(
+      { err: profileErr, employeeId },
+      'revokeEmployeeAuth: profile deactivation failed — is_active still true, auth ban attempted regardless',
+    )
+  }
 
   const { error: authErr } = await supabase.auth.admin.updateUserById(profile.id, {
     ban_duration: '876000h',
