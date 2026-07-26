@@ -12,6 +12,8 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { fetchTenantTz } from './attendance-engine.js'
+import { getLocalDate } from './org-context.js'
 
 export type ComplianceStatus = 'upcoming' | 'due_soon' | 'overdue' | 'completed'
 
@@ -75,8 +77,16 @@ export async function computeComplianceCalendar(
 ): Promise<ComplianceDeadline[]> {
   const backMonths = options.backMonths ?? 3
   const fwdMonths  = options.fwdMonths ?? 3
-  const now        = options.today ?? new Date()
-  const todayIso   = ymd(now.getUTCFullYear(), now.getUTCMonth() + 1, now.getUTCDate())
+  // Resolve "today" in the tenant's local timezone, not the server's UTC
+  // clock — same bug class as ISSUE-154 (absconding-engine.ts) and the
+  // compensation-coverage fix: a raw server-UTC date misreports overdue/
+  // due_soon status for up to ~5.5 hours a day for IST tenants, since a
+  // filing that's already overdue at IST midnight still reads as "today"
+  // in UTC. An explicit options.today override (used by callers/tests that
+  // already have a concrete date) bypasses the tenant lookup.
+  const todayIso = options.today
+    ? ymd(options.today.getUTCFullYear(), options.today.getUTCMonth() + 1, options.today.getUTCDate())
+    : getLocalDate(new Date().toISOString(), await fetchTenantTz(supabase, tenantId))
 
   // ── what's enabled + jurisdictions ─────────────────────────────────────────
   const [{ data: settings }, { data: regs }, { data: lwfStates }] = await Promise.all([
@@ -111,8 +121,7 @@ export async function computeComplianceCalendar(
   }
 
   const out: ComplianceDeadline[] = []
-  const baseY = now.getUTCFullYear()
-  const baseM = now.getUTCMonth() + 1
+  const [baseY, baseM] = todayIso.split('-').map(Number)
 
   // Monthly statutes over the window (contribution month → due next month).
   for (let off = -backMonths; off <= fwdMonths; off++) {
