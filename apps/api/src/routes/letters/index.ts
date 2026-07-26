@@ -677,6 +677,27 @@ export default async function lettersRoutes(fastify: FastifyInstance) {
     const nextLevel    = currentLevel + 1
     const isLastLevel  = currentLevel >= maxLevel
 
+    // Fresh audit finding: hrAdminAuth was the ONLY gate on this route, so
+    // any hr_admin could approve every configured level themselves in
+    // sequence, defeating the whole point of a multi-level approval chain
+    // (separation of duties). If this template's chain has a row for the
+    // current level, the acting user's role must match approver_role — no
+    // chain row for this level means the chain isn't configured that
+    // granularly, so it stays transparent (hrAdminAuth-only), same as the
+    // "no chain configured" fallback used elsewhere (e.g. gateApprove).
+    const { data: chainStep } = await supabase
+      .from('letter_approval_chains')
+      .select('approver_role')
+      .eq('template_id', letter.template_id)
+      .eq('level', currentLevel)
+      .maybeSingle()
+    if (chainStep && (req as any).userRole !== chainStep.approver_role && (req as any).userRole !== 'super_admin') {
+      return reply.status(403).send({
+        error:   'FORBIDDEN',
+        message: `Level ${currentLevel} of this approval chain requires role '${chainStep.approver_role}'`,
+      })
+    }
+
     const newStatus = isLastLevel ? 'approved' : 'pending_approval'
     const newLevel  = isLastLevel ? currentLevel : nextLevel
 
@@ -732,11 +753,26 @@ export default async function lettersRoutes(fastify: FastifyInstance) {
 
     const { data: letter } = await supabase
       .from('generated_letters')
-      .select('current_level, approval_status').eq('id', letterId).eq('tenant_id', tenantId).single()
+      .select('current_level, approval_status, template_id').eq('id', letterId).eq('tenant_id', tenantId).single()
 
     if (!letter) return reply.status(404).send({ error: 'Letter not found' })
     if (letter.approval_status !== 'pending_approval') {
       return reply.status(409).send({ error: 'INVALID_STATE', message: `Letter is not pending approval (status: ${letter.approval_status})` })
+    }
+
+    // Same chain-role enforcement as /approve — hrAdminAuth alone doesn't
+    // respect a configured multi-level approver_role per level.
+    const { data: chainStep } = await supabase
+      .from('letter_approval_chains')
+      .select('approver_role')
+      .eq('template_id', letter.template_id)
+      .eq('level', letter.current_level ?? 1)
+      .maybeSingle()
+    if (chainStep && (req as any).userRole !== chainStep.approver_role && (req as any).userRole !== 'super_admin') {
+      return reply.status(403).send({
+        error:   'FORBIDDEN',
+        message: `Level ${letter.current_level ?? 1} of this approval chain requires role '${chainStep.approver_role}'`,
+      })
     }
 
     // Fold the precondition into the UPDATE itself — without this, an
@@ -1013,6 +1049,22 @@ export default async function lettersRoutes(fastify: FastifyInstance) {
     if (!request) return reply.status(404).send({ error: 'Request not found' })
     if (request.status !== 'pending') return reply.status(400).send({ error: 'Request already processed' })
 
+    // Atomically claim the request (pending → processing) before generating
+    // anything — without this, two concurrent fulfill calls both pass the
+    // read-check above and both insert a generated_letters row for the same
+    // request before either update below lands, producing a duplicate
+    // letter. The loser gets 409 before any letter is generated.
+    const { data: claimed, error: claimErr } = await supabase
+      .from('letter_requests')
+      .update({ status: 'processing' })
+      .eq('id', id)
+      .eq('tenant_id', tenantId)
+      .eq('status', 'pending')
+      .select('id')
+      .maybeSingle()
+    if (claimErr) return serverError(req, reply, claimErr, ErrorCode.UPDATE_FAILED, 'Failed to claim letter request')
+    if (!claimed) return reply.status(409).send({ error: 'Request was already actioned by another request' })
+
     const tmpl = request.template as any
     const empVars = await resolveEmployeeVars(supabase, tenantId, request.employee_id)
     const { body, subject, missing } = renderTemplate(
@@ -1040,9 +1092,16 @@ export default async function lettersRoutes(fastify: FastifyInstance) {
       .select()
       .single()
 
-    if (letErr) return serverError(req, reply, letErr, ErrorCode.INSERT_FAILED, 'Failed to generate letter for request')
+    if (letErr) {
+      // Revert the claim so this request can be retried instead of being
+      // permanently stuck 'processing' with no letter ever generated.
+      await supabase.from('letter_requests')
+        .update({ status: 'pending' })
+        .eq('id', id).eq('tenant_id', tenantId).eq('status', 'processing')
+      return serverError(req, reply, letErr, ErrorCode.INSERT_FAILED, 'Failed to generate letter for request')
+    }
 
-    await supabase
+    const { error: fulfillErr } = await supabase
       .from('letter_requests')
       .update({
         status: 'fulfilled',
@@ -1051,6 +1110,9 @@ export default async function lettersRoutes(fastify: FastifyInstance) {
         generated_letter_id: letter.id,
       })
       .eq('id', id)
+      .eq('tenant_id', tenantId)
+
+    if (fulfillErr) return serverError(req, reply, fulfillErr, ErrorCode.UPDATE_FAILED, 'Letter generated but failed to mark request as fulfilled')
 
     await logAction(supabase, {
       tenantId,
@@ -1078,7 +1140,11 @@ export default async function lettersRoutes(fastify: FastifyInstance) {
     const { data: processor } = await supabase
       .from('profiles').select('id:employee_id').eq('id', userId).eq('tenant_id', tenantId).single()
 
-    const { error } = await supabase
+    // Fold the 'pending' precondition into the UPDATE's own WHERE clause —
+    // previously unconditioned, so an already-fulfilled or already-rejected
+    // request could be silently flipped to 'rejected' even after a letter
+    // had already been issued for it.
+    const { data: rejected, error } = await supabase
       .from('letter_requests')
       .update({
         status: 'rejected',
@@ -1088,8 +1154,12 @@ export default async function lettersRoutes(fastify: FastifyInstance) {
       })
       .eq('id', id)
       .eq('tenant_id', tenantId)
+      .eq('status', 'pending')
+      .select('id')
+      .maybeSingle()
 
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to reject letter request')
+    if (!rejected) return reply.status(409).send({ error: 'Request was already actioned by another request' })
 
     await logAction(supabase, {
       tenantId,
