@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { z } from 'zod'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 const schema = z.object({
   name:        z.string().min(1, 'Name is required'),
@@ -19,7 +20,7 @@ export default async function identityTypesRoutes(fastify: FastifyInstance) {
       .select('*')
       .eq('tenant_id', req.tenantId)
       .order('name')
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch identity types')
     return reply.send({ data })
   })
 
@@ -32,7 +33,7 @@ export default async function identityTypesRoutes(fastify: FastifyInstance) {
       .insert({ ...parsed.data, tenant_id: req.tenantId })
       .select()
       .single()
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create identity type')
     return reply.code(201).send(data)
   })
 
@@ -47,7 +48,7 @@ export default async function identityTypesRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', req.tenantId)
       .select()
       .single()
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update identity type')
     if (!data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Identity type not found' })
     return reply.send(data)
   })
@@ -71,7 +72,7 @@ export default async function identityTypesRoutes(fastify: FastifyInstance) {
       .update({ is_active: false })
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to deactivate identity type')
     return reply.send({
       deactivated: true,
       message: inUse

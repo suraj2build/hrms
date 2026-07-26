@@ -16,6 +16,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z }                    from 'zod'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 const SELECT_COLS =
   'id, code, name, region, country, pt_applicable, lwf_applicable, lwf_frequency, min_wage_zone, is_active, created_at, updated_at'
@@ -55,7 +56,7 @@ export default async function statesRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', req.tenantId)
       .order('code')
 
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch states')
     return reply.send({ data: data ?? [] })
   })
 
@@ -68,7 +69,7 @@ export default async function statesRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', req.tenantId)
       .maybeSingle()
 
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch state')
     if (!data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'State not found' })
     return reply.send({ data })
   })
@@ -82,7 +83,7 @@ export default async function statesRoutes(fastify: FastifyInstance) {
       .eq('state_id', id)
       .eq('tenant_id', req.tenantId)
 
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch state usage')
     return reply.send({ data: { sites: count ?? 0, total: count ?? 0 } })
   })
 
@@ -104,7 +105,7 @@ export default async function statesRoutes(fastify: FastifyInstance) {
           error:   'DUPLICATE',
           message: `A state with code "${parsed.data.code}" or name "${parsed.data.name}" already exists`,
         })
-      return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+      return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create state')
     }
     return reply.code(201).send({ data })
   })
@@ -126,7 +127,7 @@ export default async function statesRoutes(fastify: FastifyInstance) {
     if (error) {
       if (error.code === '23505')
         return reply.code(409).send({ error: 'DUPLICATE', message: 'Another state already uses that code or name' })
-      return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+      return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update state')
     }
     if (!data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'State not found' })
     return reply.send({ data })
@@ -149,7 +150,7 @@ export default async function statesRoutes(fastify: FastifyInstance) {
         .eq('id', mergeTo)
         .eq('tenant_id', req.tenantId)
         .maybeSingle()
-      if (mergeCheckErr) return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to verify merge target' })
+      if (mergeCheckErr) return serverError(req, reply, mergeCheckErr, ErrorCode.QUERY_FAILED, 'Failed to verify merge target')
       if (!mergeTarget) return reply.code(400).send({ error: 'VALIDATION', message: 'merge_to must reference a state in your organisation' })
     }
 
@@ -159,7 +160,7 @@ export default async function statesRoutes(fastify: FastifyInstance) {
       .eq('state_id', id)
       .eq('tenant_id', req.tenantId)
 
-    if (countErr) return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to check usage' })
+    if (countErr) return serverError(req, reply, countErr, ErrorCode.QUERY_FAILED, 'Failed to check state usage')
     const usageCount = count ?? 0
 
     if (usageCount > 0 && !mergeTo)
@@ -175,7 +176,7 @@ export default async function statesRoutes(fastify: FastifyInstance) {
         .update({ state_id: mergeTo })
         .eq('state_id', id)
         .eq('tenant_id', req.tenantId)
-      if (reassignErr) return reply.code(500).send({ error: 'REASSIGN_FAILED', message: reassignErr.message })
+      if (reassignErr) return serverError(req, reply, reassignErr, ErrorCode.UPDATE_FAILED, 'Failed to reassign sites to the merge target state')
     }
 
     const { error } = await fastify.supabase
@@ -184,7 +185,7 @@ export default async function statesRoutes(fastify: FastifyInstance) {
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
 
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.DELETE_FAILED, 'Failed to delete state')
     return reply.code(204).send()
   })
 }

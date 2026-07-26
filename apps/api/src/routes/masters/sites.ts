@@ -30,6 +30,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z }                    from 'zod'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 const SELECT_COLS =
   'id, name, location, timezone, state_code, site_type, city, region, zone, default_roster_id, default_rotation_policy_id, default_leave_policy_id, default_shift_id, holiday_group_id, created_at'
@@ -171,8 +172,7 @@ export default async function sitesRoutes(fastify: FastifyInstance) {
       .order('name')
 
     if (error) {
-      req.log.error({ err: error }, 'GET /masters/sites failed')
-      return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch sites')
     }
     return reply.send({ data: data ?? [] })
   })
@@ -290,7 +290,7 @@ export default async function sitesRoutes(fastify: FastifyInstance) {
           message: `A site named "${parsed.data.name}" already exists`,
         })
       }
-      return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+      return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create site')
     }
 
     return reply.code(201).send({ data })
@@ -404,7 +404,7 @@ export default async function sitesRoutes(fastify: FastifyInstance) {
       .single()
 
     if (error) {
-      return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+      return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update site')
     }
     if (!data) {
       return reply.code(404).send({ error: 'NOT_FOUND', message: 'Site not found' })
@@ -423,7 +423,7 @@ export default async function sitesRoutes(fastify: FastifyInstance) {
       .eq('site_id', id)
       .eq('tenant_id', req.tenantId)
 
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch site usage')
 
     return reply.send({ data: { work_locations: count ?? 0, total: count ?? 0 } })
   })
@@ -447,7 +447,7 @@ export default async function sitesRoutes(fastify: FastifyInstance) {
         .eq('id', mergeTo)
         .eq('tenant_id', req.tenantId)
         .maybeSingle()
-      if (mergeCheckErr) return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to verify merge target' })
+      if (mergeCheckErr) return serverError(req, reply, mergeCheckErr, ErrorCode.QUERY_FAILED, 'Failed to verify merge target')
       if (!mergeTarget) return reply.code(400).send({ error: 'VALIDATION', message: 'merge_to must reference a site in your organisation' })
     }
 
@@ -457,7 +457,7 @@ export default async function sitesRoutes(fastify: FastifyInstance) {
       .eq('site_id', id)
       .eq('tenant_id', req.tenantId)
 
-    if (countErr) return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to check site usage' })
+    if (countErr) return serverError(req, reply, countErr, ErrorCode.QUERY_FAILED, 'Failed to check site usage')
 
     const usageCount = count ?? 0
 
@@ -475,7 +475,7 @@ export default async function sitesRoutes(fastify: FastifyInstance) {
         .update({ site_id: mergeTo })
         .eq('site_id', id)
         .eq('tenant_id', req.tenantId)
-      if (reassignErr) return reply.code(500).send({ error: 'REASSIGN_FAILED', message: reassignErr.message })
+      if (reassignErr) return serverError(req, reply, reassignErr, ErrorCode.UPDATE_FAILED, 'Failed to reassign work locations to the merge target site')
     }
 
     const { error } = await fastify.supabase
@@ -484,7 +484,7 @@ export default async function sitesRoutes(fastify: FastifyInstance) {
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
 
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.DELETE_FAILED, 'Failed to delete site')
     return reply.code(204).send()
   })
 }

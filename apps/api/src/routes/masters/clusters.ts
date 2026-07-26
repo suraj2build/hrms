@@ -17,6 +17,7 @@ import type { FastifyInstance } from 'fastify'
 import { z }                    from 'zod'
 import { generateUniqueCode }   from '../../lib/generate-code.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 const SELECT_COLS =
   'id, code, name, region, cluster_manager_id, parent_cluster_id, description, is_active, created_at, updated_at'
@@ -65,7 +66,7 @@ export default async function clustersRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', req.tenantId)
       .order('name')
 
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch clusters')
     return reply.send({ data: data ?? [] })
   })
 
@@ -78,7 +79,7 @@ export default async function clustersRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', req.tenantId)
       .maybeSingle()
 
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch cluster')
     if (!data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Cluster not found' })
     return reply.send({ data })
   })
@@ -92,7 +93,7 @@ export default async function clustersRoutes(fastify: FastifyInstance) {
       .eq('cluster_id', id)
       .eq('tenant_id', req.tenantId)
 
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch cluster usage')
     return reply.send({ data: { sites: count ?? 0, total: count ?? 0 } })
   })
 
@@ -122,7 +123,7 @@ export default async function clustersRoutes(fastify: FastifyInstance) {
     if (error) {
       if (error.code === '23505')
         return reply.code(409).send({ error: 'DUPLICATE', message: `A cluster with code "${code}" or name "${parsed.data.name}" already exists` })
-      return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+      return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create cluster')
     }
     return reply.code(201).send({ data })
   })
@@ -156,7 +157,7 @@ export default async function clustersRoutes(fastify: FastifyInstance) {
     if (error) {
       if (error.code === '23505')
         return reply.code(409).send({ error: 'DUPLICATE', message: 'Another cluster already uses that code or name' })
-      return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+      return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update cluster')
     }
     if (!data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Cluster not found' })
     return reply.send({ data })
@@ -179,7 +180,7 @@ export default async function clustersRoutes(fastify: FastifyInstance) {
         .eq('id', mergeTo)
         .eq('tenant_id', req.tenantId)
         .maybeSingle()
-      if (mergeCheckErr) return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to verify merge target' })
+      if (mergeCheckErr) return serverError(req, reply, mergeCheckErr, ErrorCode.QUERY_FAILED, 'Failed to verify merge target')
       if (!mergeTarget) return reply.code(400).send({ error: 'VALIDATION', message: 'merge_to must reference a cluster in your organisation' })
     }
 
@@ -189,7 +190,7 @@ export default async function clustersRoutes(fastify: FastifyInstance) {
       .eq('cluster_id', id)
       .eq('tenant_id', req.tenantId)
 
-    if (countErr) return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to check usage' })
+    if (countErr) return serverError(req, reply, countErr, ErrorCode.QUERY_FAILED, 'Failed to check cluster usage')
     const usageCount = count ?? 0
 
     if (usageCount > 0 && !mergeTo)
@@ -205,7 +206,7 @@ export default async function clustersRoutes(fastify: FastifyInstance) {
         .update({ cluster_id: mergeTo })
         .eq('cluster_id', id)
         .eq('tenant_id', req.tenantId)
-      if (reassignErr) return reply.code(500).send({ error: 'REASSIGN_FAILED', message: reassignErr.message })
+      if (reassignErr) return serverError(req, reply, reassignErr, ErrorCode.UPDATE_FAILED, 'Failed to reassign sites to the merge target cluster')
     }
 
     const { error } = await fastify.supabase
@@ -214,7 +215,7 @@ export default async function clustersRoutes(fastify: FastifyInstance) {
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
 
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.DELETE_FAILED, 'Failed to delete cluster')
     return reply.code(204).send()
   })
 }

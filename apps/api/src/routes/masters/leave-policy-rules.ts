@@ -19,7 +19,8 @@
 import type { FastifyInstance } from 'fastify'
 import { z }                    from 'zod'
 import { logAction }            from '../../lib/audit-service.js'
-import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { HR_ADMIN_ROLES }       from '../../lib/rbac.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 const ruleSchema = z.object({
   leave_type_id:                z.string().uuid(),
@@ -94,7 +95,7 @@ export default async function leavePolicyRulesRoutes(fastify: FastifyInstance) {
       .order('leave_type_id')
 
     if (error) {
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch leave policy rules')
     }
 
     return reply.send({ data: data ?? [] })
@@ -156,7 +157,7 @@ export default async function leavePolicyRulesRoutes(fastify: FastifyInstance) {
           message: 'A rule for this leave type already exists in this policy',
         })
       }
-      return reply.code(500).send({ error: 'INSERT_FAILED', message: error.message })
+      return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create leave policy rule')
     }
 
     await logAction(fastify.supabase, {
@@ -242,7 +243,7 @@ export async function leavePolicyRulesMutationsRoutes(fastify: FastifyInstance) 
       .single()
 
     if (error) {
-      return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+      return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update leave policy rule')
     }
 
     await logAction(fastify.supabase, {
@@ -271,7 +272,7 @@ export async function leavePolicyRulesMutationsRoutes(fastify: FastifyInstance) 
       .eq('tenant_id', req.tenantId)
 
     if (error) {
-      return reply.code(500).send({ error: 'DELETE_FAILED', message: error.message })
+      return serverError(req, reply, error, ErrorCode.DELETE_FAILED, 'Failed to delete leave policy rule')
     }
 
     await logAction(fastify.supabase, {

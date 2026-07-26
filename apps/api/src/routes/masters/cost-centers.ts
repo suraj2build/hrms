@@ -15,6 +15,7 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { generateUniqueCode } from '../../lib/generate-code.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 const schema = z.object({
   name:        z.string().min(1, 'Name is required'),
@@ -47,7 +48,7 @@ export default async function costCentersRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', req.tenantId)
       .order('name')
 
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch cost centers')
     return reply.send({ data: data ?? [] })
   })
 
@@ -60,7 +61,7 @@ export default async function costCentersRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', req.tenantId)
       .maybeSingle()
 
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch cost center')
     if (!data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Cost center not found' })
     return reply.send({ data })
   })
@@ -87,7 +88,7 @@ export default async function costCentersRoutes(fastify: FastifyInstance) {
           message: `A cost center with code "${parsed.data.code}" already exists`,
         })
       }
-      return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+      return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create cost center')
     }
     return reply.code(201).send({ data })
   })
@@ -106,7 +107,7 @@ export default async function costCentersRoutes(fastify: FastifyInstance) {
       .select('id, name, code, description, is_active, created_at')
       .single()
 
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update cost center')
     if (!data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Cost center not found' })
     return reply.send({ data })
   })
@@ -121,7 +122,7 @@ export default async function costCentersRoutes(fastify: FastifyInstance) {
       .eq('cost_center_id', id)
       .eq('tenant_id', req.tenantId)
 
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch cost center usage')
     return reply.send({ data: { job_history: count ?? 0, total: count ?? 0 } })
   })
 
@@ -143,7 +144,7 @@ export default async function costCentersRoutes(fastify: FastifyInstance) {
         .eq('id', mergeTo)
         .eq('tenant_id', req.tenantId)
         .maybeSingle()
-      if (mergeCheckErr) return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to verify merge target' })
+      if (mergeCheckErr) return serverError(req, reply, mergeCheckErr, ErrorCode.QUERY_FAILED, 'Failed to verify merge target')
       if (!mergeTarget) return reply.code(400).send({ error: 'VALIDATION', message: 'merge_to must reference a cost center in your organisation' })
     }
 
@@ -153,7 +154,7 @@ export default async function costCentersRoutes(fastify: FastifyInstance) {
       .eq('cost_center_id', id)
       .eq('tenant_id', req.tenantId)
 
-    if (countErr) return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to check usage' })
+    if (countErr) return serverError(req, reply, countErr, ErrorCode.QUERY_FAILED, 'Failed to check cost center usage')
 
     const usageCount = count ?? 0
 
@@ -171,7 +172,7 @@ export default async function costCentersRoutes(fastify: FastifyInstance) {
         .update({ cost_center_id: mergeTo })
         .eq('cost_center_id', id)
         .eq('tenant_id', req.tenantId)
-      if (reassignErr) return reply.code(500).send({ error: 'REASSIGN_FAILED', message: reassignErr.message })
+      if (reassignErr) return serverError(req, reply, reassignErr, ErrorCode.UPDATE_FAILED, 'Failed to reassign job history to the merge target cost center')
     }
 
     const { error } = await fastify.supabase
@@ -180,7 +181,7 @@ export default async function costCentersRoutes(fastify: FastifyInstance) {
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
 
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.DELETE_FAILED, 'Failed to delete cost center')
     return reply.code(204).send()
   })
 }

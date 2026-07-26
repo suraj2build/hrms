@@ -10,6 +10,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z }                   from 'zod'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 const assetCatSchema = z.object({
   code:                  z.string().min(1, 'Code is required').max(50).transform(v => v.toUpperCase().trim()),
@@ -41,7 +42,7 @@ export default async function assetCategoriesRoutes(fastify: FastifyInstance) {
       .select('*')
       .eq('tenant_id', req.tenantId)
       .order('name')
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch asset categories')
     return reply.send({ data: data ?? [] })
   })
 
@@ -61,7 +62,7 @@ export default async function assetCategoriesRoutes(fastify: FastifyInstance) {
     if (error) {
       if (error.code === '23505')
         return reply.code(409).send({ error: 'DUPLICATE', message: `Asset category code "${parsed.data.code}" already exists` })
-      return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+      return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create asset category')
     }
     return reply.code(201).send({ data })
   })
@@ -81,7 +82,7 @@ export default async function assetCategoriesRoutes(fastify: FastifyInstance) {
       .select()
       .single()
 
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update asset category')
     if (!data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Asset category not found' })
     return reply.send({ data })
   })
@@ -110,7 +111,7 @@ export default async function assetCategoriesRoutes(fastify: FastifyInstance) {
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
 
-    if (updErr) return reply.code(500).send({ error: 'UPDATE_FAILED', message: updErr.message })
+    if (updErr) return serverError(req, reply, updErr, ErrorCode.UPDATE_FAILED, 'Failed to deactivate asset category')
     return reply.send({
       deactivated: true,
       message: inUse

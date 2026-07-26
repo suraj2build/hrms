@@ -22,6 +22,7 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { CENTRAL_HOLIDAYS_BY_YEAR, SUPPORTED_HOLIDAY_YEARS } from '../../lib/standard-holidays.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 const createSchema = z.object({
   date:        z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'date must be YYYY-MM-DD'),
@@ -67,7 +68,7 @@ export default async function holidaysRoutes(fastify: FastifyInstance) {
     }
 
     const { data, error } = await query
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch holidays')
     return reply.send({ data })
   })
 
@@ -88,7 +89,7 @@ export default async function holidaysRoutes(fastify: FastifyInstance) {
       .select('id, date, name, is_optional, site_id, location_id, holiday_group_id, created_at')
       .single()
 
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create holiday')
     return reply.code(201).send(data)
   })
 
@@ -129,7 +130,7 @@ export default async function holidaysRoutes(fastify: FastifyInstance) {
       .upsert(rows, { onConflict: 'tenant_id,date', ignoreDuplicates: true })
       .select('id')
 
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to seed standard holidays')
 
     const created = (data as Array<{ id: string }> | null)?.length ?? 0
     return reply.code(201).send({ data: { created, skipped: rows.length - created, total: rows.length, years } })
@@ -160,7 +161,7 @@ export default async function holidaysRoutes(fastify: FastifyInstance) {
 
     if (error) {
       if (error.code === '23505') return reply.code(409).send({ error: 'DUPLICATE', message: 'A holiday already exists on that date' })
-      return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+      return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update holiday')
     }
     if (!data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Holiday not found' })
     return reply.send(data)
@@ -252,7 +253,7 @@ export default async function holidaysRoutes(fastify: FastifyInstance) {
       const { error } = await fastify.supabase
         .from('holiday_group_assignments')
         .insert(rows)
-      if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+      if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to save holiday group assignments')
     }
 
     // Sync legacy single-FK for backward compat (first group or NULL)
@@ -277,7 +278,7 @@ export default async function holidaysRoutes(fastify: FastifyInstance) {
       .eq('id', req.params.id)
       .eq('tenant_id', req.tenantId)
 
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.DELETE_FAILED, 'Failed to delete holiday')
     return reply.code(204).send()
   })
 }

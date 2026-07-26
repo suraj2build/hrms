@@ -19,6 +19,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 const createSchema = z.object({
   code: z
@@ -69,8 +70,7 @@ export default async function importantDateTypesRoutes(fastify: FastifyInstance)
     const { data, error } = await query
 
     if (error) {
-      req.log.error({ err: error }, 'important-date-types list failed')
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch date types' })
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch date types')
     }
 
     return reply.send({ data: data ?? [] })
@@ -119,8 +119,7 @@ export default async function importantDateTypesRoutes(fastify: FastifyInstance)
       .single()
 
     if (error) {
-      req.log.error({ err: error }, 'important-date-types create failed')
-      return reply.code(500).send({ error: 'INSERT_FAILED', message: 'Failed to create date type' })
+      return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create date type')
     }
 
     return reply.code(201).send({ data })
@@ -172,8 +171,7 @@ export default async function importantDateTypesRoutes(fastify: FastifyInstance)
       .single()
 
     if (error) {
-      req.log.error({ err: error }, 'important-date-types update failed')
-      return reply.code(500).send({ error: 'UPDATE_FAILED', message: 'Failed to update date type' })
+      return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update date type')
     }
 
     return reply.send({ data })
@@ -225,8 +223,7 @@ export default async function importantDateTypesRoutes(fastify: FastifyInstance)
       .eq('tenant_id', req.tenantId)
 
     if (error) {
-      req.log.error({ err: error }, 'important-date-types delete failed')
-      return reply.code(500).send({ error: 'DELETE_FAILED', message: 'Failed to delete date type' })
+      return serverError(req, reply, error, ErrorCode.DELETE_FAILED, 'Failed to delete date type')
     }
 
     return reply.code(204).send()

@@ -27,6 +27,7 @@ import {
 } from '../../lib/policy-governance.js'
 import { resolveEffectivePolicyForEmployee } from '../../lib/leave-policy-service.js'
 import { HR_ADMIN_ROLES }                    from '../../lib/rbac.js'
+import { serverError, ErrorCode }            from '../../lib/api-errors.js'
 const masterSchema = z.object({
   name:        z.string().min(1).max(100),
   description: z.string().max(500).optional(),
@@ -62,7 +63,7 @@ export default async function leavePolicyMastersRoutes(fastify: FastifyInstance)
       .order('name')
 
     if (error) {
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch leave policy masters')
     }
 
     const rows = (data ?? []).map((m: any) => ({
@@ -119,7 +120,7 @@ export default async function leavePolicyMastersRoutes(fastify: FastifyInstance)
       .maybeSingle()
 
     if (error) {
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch leave policy master')
     }
     if (!data) {
       return reply.code(404).send({ error: 'NOT_FOUND', message: 'Policy not found' })
@@ -178,7 +179,7 @@ export default async function leavePolicyMastersRoutes(fastify: FastifyInstance)
           message: `A policy named "${parsed.data.name}" already exists`,
         })
       }
-      return reply.code(500).send({ error: 'INSERT_FAILED', message: 'Failed to create policy' })
+      return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create policy')
     }
 
     await logAction(fastify.supabase, {
@@ -246,7 +247,7 @@ export default async function leavePolicyMastersRoutes(fastify: FastifyInstance)
         }
         return reply.code(409).send({ error: 'DUPLICATE', message: 'A policy with that name already exists' })
       }
-      return reply.code(500).send({ error: 'UPDATE_FAILED', message: 'Failed to update policy' })
+      return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update policy')
     }
     if (!data) {
       return reply.code(404).send({ error: 'NOT_FOUND', message: 'Policy not found' })
@@ -294,7 +295,7 @@ export default async function leavePolicyMastersRoutes(fastify: FastifyInstance)
       .eq('tenant_id', req.tenantId)
 
     if (error) {
-      return reply.code(500).send({ error: 'DELETE_FAILED', message: error.message })
+      return serverError(req, reply, error, ErrorCode.DELETE_FAILED, 'Failed to delete leave policy master')
     }
 
     await logAction(fastify.supabase, {
@@ -332,7 +333,7 @@ export default async function leavePolicyMastersRoutes(fastify: FastifyInstance)
       .eq('policy_id', id)
       .order('version', { ascending: false })
 
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch policy versions')
     return reply.send({ data: data ?? [] })
   })
 
@@ -350,7 +351,7 @@ export default async function leavePolicyMastersRoutes(fastify: FastifyInstance)
       .order('changed_at', { ascending: false })
       .limit(200)
 
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch policy change log')
     return reply.send({ data: data ?? [] })
   })
 

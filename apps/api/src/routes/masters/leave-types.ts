@@ -14,6 +14,7 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { STANDARD_LEAVE_TYPES } from '../../lib/standard-leave-types.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 const schema = z.object({
   name:              z.string().min(1, 'Name is required').max(50, 'Name must be 50 characters or less'),
@@ -48,8 +49,7 @@ export default async function leaveTypesRoutes(fastify: FastifyInstance) {
       .order('name')
 
     if (error) {
-      req.log.error({ err: error }, 'leave types list failed')
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch leave types' })
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch leave types')
     }
 
     return reply.send({ data: data ?? [] })
@@ -78,8 +78,7 @@ export default async function leaveTypesRoutes(fastify: FastifyInstance) {
       .select('id')
 
     if (error) {
-      req.log.error({ err: error }, 'leave type seed failed')
-      return reply.code(500).send({ error: 'SEED_FAILED', message: error.message })
+      return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to seed standard leave types')
     }
 
     const created = (data as Array<{ id: string }> | null)?.length ?? 0
@@ -111,8 +110,7 @@ export default async function leaveTypesRoutes(fastify: FastifyInstance) {
           message: `Leave type "${parsed.data.name}" already exists`,
         })
       }
-      req.log.error({ err: error }, 'leave type insert failed')
-      return reply.code(500).send({ error: 'INSERT_FAILED', message: 'Failed to create leave type' })
+      return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create leave type')
     }
 
     return reply.code(201).send({ data })
@@ -142,8 +140,7 @@ export default async function leaveTypesRoutes(fastify: FastifyInstance) {
       if (error.code === '23505') {
         return reply.code(409).send({ error: 'DUPLICATE', message: 'A leave type with that name already exists' })
       }
-      req.log.error({ err: error }, 'leave type update failed')
-      return reply.code(500).send({ error: 'UPDATE_FAILED', message: 'Failed to update leave type' })
+      return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update leave type')
     }
 
     if (!data) {
@@ -169,8 +166,7 @@ export default async function leaveTypesRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', req.tenantId)
 
     if (countErr) {
-      req.log.error({ err: countErr }, 'leave type usage check failed')
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to check leave type usage' })
+      return serverError(req, reply, countErr, ErrorCode.QUERY_FAILED, 'Failed to check leave type usage')
     }
 
     if ((count ?? 0) > 0) {
@@ -182,8 +178,7 @@ export default async function leaveTypesRoutes(fastify: FastifyInstance) {
         .eq('tenant_id', req.tenantId)
 
       if (updateErr) {
-        req.log.error({ err: updateErr }, 'leave type deactivate failed')
-        return reply.code(500).send({ error: 'UPDATE_FAILED', message: 'Failed to deactivate leave type' })
+        return serverError(req, reply, updateErr, ErrorCode.UPDATE_FAILED, 'Failed to deactivate leave type')
       }
 
       return reply.send({
@@ -200,8 +195,7 @@ export default async function leaveTypesRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', req.tenantId)
 
     if (deleteErr) {
-      req.log.error({ err: deleteErr }, 'leave type delete failed')
-      return reply.code(500).send({ error: 'DELETE_FAILED', message: 'Failed to delete leave type' })
+      return serverError(req, reply, deleteErr, ErrorCode.DELETE_FAILED, 'Failed to delete leave type')
     }
 
     return reply.code(204).send()

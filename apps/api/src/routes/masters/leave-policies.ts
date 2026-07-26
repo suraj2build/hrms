@@ -15,6 +15,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z }                    from 'zod'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 // ── Validation schema ──────────────────────────────────────────────────────────
 
@@ -78,7 +79,7 @@ export default async function leavePoliciesRoutes(fastify: FastifyInstance) {
       .order('created_at')
 
     if (error) {
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch leave policies')
     }
     return reply.send({ data: data ?? [] })
   })
@@ -95,7 +96,7 @@ export default async function leavePoliciesRoutes(fastify: FastifyInstance) {
       .maybeSingle()
 
     if (error) {
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch leave policy')
     }
     // Return null data instead of 404 — frontend treats null as "no policy configured"
     return reply.send({ data: data ?? null })
@@ -142,7 +143,7 @@ export default async function leavePoliciesRoutes(fastify: FastifyInstance) {
       .single()
 
     if (error) {
-      return reply.code(500).send({ error: 'UPSERT_FAILED', message: error.message })
+      return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to save leave policy')
     }
     return reply.code(201).send({ data })
   })
@@ -169,7 +170,7 @@ export default async function leavePoliciesRoutes(fastify: FastifyInstance) {
       .single()
 
     if (error) {
-      return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+      return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update leave policy')
     }
     if (!data) {
       return reply.code(404).send({ error: 'NOT_FOUND', message: 'Policy not found' })
@@ -188,7 +189,7 @@ export default async function leavePoliciesRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', req.tenantId)
 
     if (error) {
-      return reply.code(500).send({ error: 'DELETE_FAILED', message: error.message })
+      return serverError(req, reply, error, ErrorCode.DELETE_FAILED, 'Failed to delete leave policy')
     }
     return reply.code(204).send()
   })
