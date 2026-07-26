@@ -26,6 +26,7 @@ import { z }                    from 'zod'
 import * as XLSX                from 'xlsx'
 import { HR_ADMIN_ROLES }       from '../../lib/rbac.js'
 import { fetchAllRows }         from '../../lib/supabase-paginate.js'
+import { serverError, notFound, forbidden, validationError, ErrorCode } from '../../lib/api-errors.js'
 const monthRe = /^\d{4}-\d{2}$/
 const dateRe  = /^\d{4}-\d{2}-\d{2}$/
 
@@ -541,7 +542,7 @@ export default async function reportExportRoutes(fastify: FastifyInstance) {
 
   function hrAdminGuard(req: any, reply: any, done: () => void) {
     if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
-      reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
+      forbidden(reply, 'FORBIDDEN', 'HR admin access required')
       return
     }
     done()
@@ -571,7 +572,7 @@ export default async function reportExportRoutes(fastify: FastifyInstance) {
     })
     const parsed = schema.safeParse(req.query)
     if (!parsed.success) {
-      return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+      return validationError(reply, ErrorCode.VALIDATION_ERROR, parsed.error.issues[0]?.message)
     }
     const { month, department_id } = parsed.data
     const tenantId = req.tenantId as string
@@ -607,11 +608,10 @@ export default async function reportExportRoutes(fastify: FastifyInstance) {
         return q.range(from, to)
       })
     } catch (err: any) {
-      req.log.error({ err }, 'muster-roll export: employee query failed')
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch employees' })
+      return serverError(req, reply, err, ErrorCode.QUERY_FAILED, 'Failed to fetch employees')
     }
     if (employees.length === 0) {
-      return reply.code(404).send({ error: 'NO_DATA', message: 'No active employees found for the selected filters.' })
+      return notFound(reply, 'NO_DATA', 'No active employees found for the selected filters.')
     }
 
     // ── Fetch attendance_daily for the month ──────────────────────────────────
@@ -627,8 +627,7 @@ export default async function reportExportRoutes(fastify: FastifyInstance) {
           .range(rangeFrom, rangeTo),
       )
     } catch (err: any) {
-      req.log.error({ err }, 'muster-roll export: attendance query failed')
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch attendance records' })
+      return serverError(req, reply, err, ErrorCode.QUERY_FAILED, 'Failed to fetch attendance records')
     }
 
     if (daily.length > MUSTER_EXPORT_LIMIT) {
@@ -799,7 +798,7 @@ export default async function reportExportRoutes(fastify: FastifyInstance) {
     })
     const parsed = schema.safeParse(req.query)
     if (!parsed.success) {
-      return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+      return validationError(reply, ErrorCode.VALIDATION_ERROR, parsed.error.issues[0]?.message)
     }
     const { month, run_id, department_id } = parsed.data
     const tenantId = req.tenantId as string
@@ -827,10 +826,7 @@ export default async function reportExportRoutes(fastify: FastifyInstance) {
     }
 
     if (!runRow) {
-      return reply.code(404).send({
-        error:   'NO_RUN',
-        message: `No payroll run found for ${month}. Create a payroll run first via POST /payroll/runs.`,
-      })
+      return notFound(reply, 'NO_RUN', `No payroll run found for ${month}. Create a payroll run first via POST /payroll/runs.`)
     }
 
     // ── Fetch payroll slips with employee context ──────────────────────────────
@@ -855,11 +851,10 @@ export default async function reportExportRoutes(fastify: FastifyInstance) {
           .range(from, to),
       )
     } catch (slipErr) {
-      req.log.error({ err: slipErr, run_id: runRow.id }, 'salary-sheet export: slips query failed')
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch payroll slips' })
+      return serverError(req, reply, slipErr, ErrorCode.QUERY_FAILED, 'Failed to fetch payroll slips')
     }
     if (slips.length === 0) {
-      return reply.code(404).send({ error: 'NO_SLIPS', message: 'No payroll slips found for this run.' })
+      return notFound(reply, 'NO_SLIPS', 'No payroll slips found for this run.')
     }
 
     // Apply department filter
@@ -871,7 +866,7 @@ export default async function reportExportRoutes(fastify: FastifyInstance) {
       })
     }
     if (rows.length === 0) {
-      return reply.code(404).send({ error: 'NO_DATA', message: 'No slips match the selected department filter.' })
+      return notFound(reply, 'NO_DATA', 'No slips match the selected department filter.')
     }
 
     // ── Discover component columns from component_breakdown ───────────────────
@@ -1047,7 +1042,7 @@ export default async function reportExportRoutes(fastify: FastifyInstance) {
     })
     const parsed = schema.safeParse(req.query)
     if (!parsed.success) {
-      return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+      return validationError(reply, ErrorCode.VALIDATION_ERROR, parsed.error.issues[0]?.message)
     }
     const { from, to, department_id, leave_type_id, status } = parsed.data
     const tenantId = req.tenantId as string
@@ -1081,8 +1076,7 @@ export default async function reportExportRoutes(fastify: FastifyInstance) {
         return q.range(rangeFrom, rangeTo)
       })
     } catch (lrErr) {
-      req.log.error({ err: lrErr }, 'leave-register export: query failed')
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch leave requests' })
+      return serverError(req, reply, lrErr, ErrorCode.QUERY_FAILED, 'Failed to fetch leave requests')
     }
 
     // Apply department filter (post-fetch — can't easily push to Supabase with nested join)
@@ -1095,7 +1089,7 @@ export default async function reportExportRoutes(fastify: FastifyInstance) {
     }
 
     if (filtered.length === 0) {
-      return reply.code(404).send({ error: 'NO_DATA', message: 'No leave requests found for the selected filters.' })
+      return notFound(reply, 'NO_DATA', 'No leave requests found for the selected filters.')
     }
 
     // ── Sheet 1: Leave Register ────────────────────────────────────────────────
@@ -1268,7 +1262,7 @@ export default async function reportExportRoutes(fastify: FastifyInstance) {
     })
     const parsed = schema.safeParse(req.query)
     if (!parsed.success) {
-      return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+      return validationError(reply, ErrorCode.VALIDATION_ERROR, parsed.error.issues[0]?.message)
     }
     const { month, run_id, department_id } = parsed.data
     const tenantId = req.tenantId as string
@@ -1276,7 +1270,7 @@ export default async function reportExportRoutes(fastify: FastifyInstance) {
     const { rows, runRow, error } = await fetchPayrollRegisterRows(
       fastify.supabase, tenantId, month, run_id, department_id, req.log,
     )
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, error)
 
     // Mask account numbers before sending to the browser
     const maskedRows = rows.map(r => ({
@@ -1329,7 +1323,7 @@ export default async function reportExportRoutes(fastify: FastifyInstance) {
     })
     const parsed = schema.safeParse(req.query)
     if (!parsed.success) {
-      return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+      return validationError(reply, ErrorCode.VALIDATION_ERROR, parsed.error.issues[0]?.message)
     }
     const { month, run_id, department_id } = parsed.data
     const tenantId = req.tenantId as string
@@ -1337,9 +1331,9 @@ export default async function reportExportRoutes(fastify: FastifyInstance) {
     const { rows, runRow, error } = await fetchPayrollRegisterRows(
       fastify.supabase, tenantId, month, run_id, department_id, req.log,
     )
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, error)
     if (rows.length === 0) {
-      return reply.code(404).send({ error: 'NO_DATA', message: 'No payroll slips found for the selected filters.' })
+      return notFound(reply, 'NO_DATA', 'No payroll slips found for the selected filters.')
     }
 
     const readyRows       = rows.filter(r => r.payment_status === 'READY')
@@ -1539,7 +1533,7 @@ export default async function reportExportRoutes(fastify: FastifyInstance) {
     })
     const parsed = schema.safeParse(req.query)
     if (!parsed.success) {
-      return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+      return validationError(reply, ErrorCode.VALIDATION_ERROR, parsed.error.issues[0]?.message)
     }
     const { month, department_id } = parsed.data
     const tenantId = req.tenantId as string
@@ -1547,7 +1541,7 @@ export default async function reportExportRoutes(fastify: FastifyInstance) {
     const { rows, runRow, error } = await fetchComparisonRows(
       fastify.supabase, tenantId, month, department_id, req.log,
     )
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, error)
 
     const mismatchCount     = rows.filter(r => r.is_mismatch).length
     const noSlipCount       = rows.filter(r => !r.has_payroll_slip).length
@@ -1599,7 +1593,7 @@ export default async function reportExportRoutes(fastify: FastifyInstance) {
     })
     const parsed = schema.safeParse(req.query)
     if (!parsed.success) {
-      return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+      return validationError(reply, ErrorCode.VALIDATION_ERROR, parsed.error.issues[0]?.message)
     }
     const { month, department_id } = parsed.data
     const tenantId = req.tenantId as string
@@ -1607,9 +1601,9 @@ export default async function reportExportRoutes(fastify: FastifyInstance) {
     const { rows, runRow, error } = await fetchComparisonRows(
       fastify.supabase, tenantId, month, department_id, req.log,
     )
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, error)
     if (rows.length === 0) {
-      return reply.code(404).send({ error: 'NO_DATA', message: 'No active employees found for the selected filters.' })
+      return notFound(reply, 'NO_DATA', 'No active employees found for the selected filters.')
     }
 
     // ── Column layout (identical between Sheet 1 and Sheet 2) ─────────────────
