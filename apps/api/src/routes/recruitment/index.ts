@@ -19,6 +19,7 @@ import { notifyHrAdmins } from '../../lib/notify.js'
 import { isOfferSignoffEnabled } from '../../lib/payroll-flags.js'
 import { sanitizeOrFilterTerm } from '../../lib/postgrest-filter.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 import {
   sendEmail,
   applicationReceivedEmail,
@@ -171,7 +172,7 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', req.tenantId)
       .order('stage_order', { ascending: true })
 
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch pipeline stages')
     return reply.send({ data: data ?? [] })
   })
 
@@ -191,7 +192,7 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
       .select()
       .single()
 
-    if (error) return reply.code(500).send({ error: 'INSERT_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create pipeline stage')
     return reply.code(201).send({ data })
   })
 
@@ -212,7 +213,7 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
 
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update pipeline stage')
     return reply.send({ message: 'Stage updated' })
   })
 
@@ -226,7 +227,7 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', req.tenantId)
       .eq('is_system', false)
 
-    if (error) return reply.code(500).send({ error: 'DELETE_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.DELETE_FAILED, 'Failed to delete pipeline stage')
     return reply.send({ message: 'Stage deleted' })
   })
 
@@ -253,7 +254,7 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
       .insert(defaults.map(s => ({ ...s, tenant_id: req.tenantId })))
       .select()
 
-    if (error) return reply.code(500).send({ error: 'INSERT_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to seed pipeline stages')
     return reply.code(201).send({ data })
   })
 
@@ -288,7 +289,7 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
     q = q.range(parsed.data.offset, parsed.data.offset + parsed.data.limit - 1)
 
     const { data, error, count } = await q
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch requisitions')
 
     // Enrich with application counts
     const ids = (data ?? []).map((r: any) => r.id)
@@ -369,7 +370,7 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
       .select()
       .single()
 
-    if (error) return reply.code(500).send({ error: 'INSERT_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create requisition')
 
     await logAction(fastify.supabase, {
       tenantId:    req.tenantId,
@@ -433,7 +434,7 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
 
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update requisition')
 
     await logAction(fastify.supabase, {
       tenantId:    req.tenantId,
@@ -455,17 +456,26 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
     const { data: req_ } = await fastify.supabase
       .from('job_requisitions')
       .select('status, title')
-      .eq('id', id).eq('tenant_id', req.tenantId).single()
+      .eq('id', id).eq('tenant_id', req.tenantId).maybeSingle()
 
     if (!req_) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Requisition not found' })
     if ((req_ as any).status !== 'draft') return reply.code(422).send({ error: 'INVALID_STATE', message: 'Only draft requisitions can be approved' })
 
-    const { error } = await fastify.supabase
+    // Fold the 'draft' precondition into the WHERE clause — the SELECT above is
+    // only a pre-check; without eq('status','draft') here, a concurrent request
+    // (another admin approving, or a hold/cancel racing this one) could pass the
+    // same check and both writes would apply with no conflict signal. Matches
+    // the pattern already used by /hold and /reopen below.
+    const { data: approved, error } = await fastify.supabase
       .from('job_requisitions')
       .update({ status: 'open', approved_by: req.userId, approved_at: new Date().toISOString() })
       .eq('id', id).eq('tenant_id', req.tenantId)
+      .eq('status', 'draft')
+      .select('id')
+      .maybeSingle()
 
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to approve requisition')
+    if (!approved) return reply.code(409).send({ error: 'CONFLICT', message: 'Requisition status changed before approval could be applied' })
 
     await logAction(fastify.supabase, {
       tenantId:    req.tenantId, tableName: 'job_requisitions', recordId: id,
@@ -494,7 +504,7 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
     await fastify.supabase.from('requisition_approvals').delete().eq('requisition_id', id).eq('tenant_id', req.tenantId)
     const rows = DEFAULT_REQ_CHAIN.map(s => ({ tenant_id: req.tenantId, requisition_id: id, step_order: s.step_order, label: s.label, status: 'pending' }))
     const { error } = await fastify.supabase.from('requisition_approvals').insert(rows)
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to submit requisition for approval')
     return reply.code(201).send({ message: 'Submitted for approval', steps: rows.length })
   })
 
@@ -503,7 +513,7 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
     const { id } = req.params as { id: string }
     const { data, error } = await fastify.supabase
       .from('requisition_approvals').select('*').eq('requisition_id', id).eq('tenant_id', req.tenantId).order('step_order')
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch approval steps')
     return reply.send({ data: data ?? [] })
   })
 
@@ -551,7 +561,7 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
   fastify.get('/requisitions/:id/postings', auth, async (req: any, reply) => {
     const { data, error } = await fastify.supabase
       .from('job_board_postings').select('*').eq('requisition_id', req.params.id).eq('tenant_id', req.tenantId).order('posted_at', { ascending: false })
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch job board postings')
     return reply.send({ data: data ?? [] })
   })
 
@@ -564,14 +574,14 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
       .from('job_board_postings')
       .insert({ tenant_id: req.tenantId, requisition_id: req.params.id, board: parsed.data.board, external_url: parsed.data.external_url ?? null, external_ref: parsed.data.external_ref ?? null, status: 'posted', posted_by: req.userId })
       .select().single()
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create job board posting')
     return reply.code(201).send({ data })
   })
 
   fastify.delete('/requisitions/postings/:postingId', hrAdminAuth, async (req: any, reply) => {
     const { error } = await fastify.supabase
       .from('job_board_postings').delete().eq('id', req.params.postingId).eq('tenant_id', req.tenantId)
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.DELETE_FAILED, 'Failed to delete job board posting')
     return reply.code(204).send()
   })
 
@@ -585,7 +595,7 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
       .eq('id', id).eq('tenant_id', req.tenantId)
       .in('status', ['open', 'draft'])
 
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to put requisition on hold')
     await logAction(fastify.supabase, { tenantId: req.tenantId, tableName: 'job_requisitions', recordId: id, action: 'UPDATE', performedBy: req.userId, newData: { status: 'on_hold' } })
     return reply.send({ message: 'Requisition put on hold' })
   })
@@ -599,7 +609,7 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
       .eq('id', id).eq('tenant_id', req.tenantId)
       .in('status', ['on_hold', 'filled'])
 
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to reopen requisition')
     await logAction(fastify.supabase, { tenantId: req.tenantId, tableName: 'job_requisitions', recordId: id, action: 'UPDATE', performedBy: req.userId, newData: { status: 'open' } })
     return reply.send({ message: 'Requisition reopened' })
   })
@@ -612,7 +622,7 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
       .update({ status: 'cancelled' })
       .eq('id', id).eq('tenant_id', req.tenantId)
 
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to cancel requisition')
     await logAction(fastify.supabase, { tenantId: req.tenantId, tableName: 'job_requisitions', recordId: id, action: 'UPDATE', performedBy: req.userId, newData: { status: 'cancelled' } })
     return reply.send({ message: 'Requisition cancelled' })
   })
@@ -629,7 +639,7 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
     const { error } = await fastify.supabase
       .from('job_requisitions').delete().eq('id', id).eq('tenant_id', req.tenantId)
 
-    if (error) return reply.code(500).send({ error: 'DELETE_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.DELETE_FAILED, 'Failed to delete requisition')
     await logAction(fastify.supabase, { tenantId: req.tenantId, tableName: 'job_requisitions', recordId: id, action: 'DELETE', performedBy: req.userId, newData: null })
     return reply.send({ message: 'Requisition deleted' })
   })
@@ -661,7 +671,7 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
     q = q.range(parsed.data.offset, parsed.data.offset + parsed.data.limit - 1)
 
     const { data, error, count } = await q
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch candidates')
     return reply.send({ data: data ?? [], total: count ?? 0, limit: parsed.data.limit, offset: parsed.data.offset })
   })
 
@@ -690,7 +700,7 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
 
     if (error) {
       if (error.code === '23505') return reply.code(409).send({ error: 'DUPLICATE_EMAIL', message: 'A candidate with this email already exists' })
-      return reply.code(500).send({ error: 'INSERT_FAILED', message: error.message })
+      return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create candidate')
     }
 
     await logAction(fastify.supabase, { tenantId: req.tenantId, tableName: 'candidates', recordId: (data as any).id, action: 'INSERT', performedBy: req.userId, newData: parsed.data })
@@ -720,7 +730,7 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
 
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update candidate')
     await logAction(fastify.supabase, { tenantId: req.tenantId, tableName: 'candidates', recordId: id, action: 'UPDATE', performedBy: req.userId, newData: parsed.data })
     return reply.send({ message: 'Candidate updated' })
   })
@@ -758,7 +768,7 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
     q = q.range(parsed.data.offset, parsed.data.offset + parsed.data.limit - 1)
 
     const { data, error, count } = await q
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch applications')
     return reply.send({ data: data ?? [], total: count ?? 0, limit: parsed.data.limit, offset: parsed.data.offset })
   })
 
@@ -799,6 +809,20 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
       if (!stage) return reply.code(400).send({ error: 'INVALID_STAGE', message: 'Pipeline stage not found for this tenant' })
     }
 
+    // assigned_to is a raw profile UUID from the request body — verify it
+    // belongs to this tenant before writing it, same as requisition_id,
+    // candidate_id, and stage_id above, or a caller could point an
+    // application's assignee at a foreign tenant's profile UUID.
+    if (parsed.data.assigned_to) {
+      const { data: assignee } = await fastify.supabase
+        .from('profiles')
+        .select('id')
+        .eq('id', parsed.data.assigned_to)
+        .eq('tenant_id', req.tenantId)
+        .maybeSingle()
+      if (!assignee) return reply.code(400).send({ error: 'INVALID_ASSIGNEE', message: 'Assigned user not found for this tenant' })
+    }
+
     const { data, error } = await fastify.supabase
       .from('applications')
       .insert({ ...parsed.data, tenant_id: req.tenantId, status: 'applied' })
@@ -807,7 +831,7 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
 
     if (error) {
       if (error.code === '23505') return reply.code(409).send({ error: 'DUPLICATE_APPLICATION', message: 'This candidate has already applied to this requisition' })
-      return reply.code(500).send({ error: 'INSERT_FAILED', message: error.message })
+      return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create application')
     }
 
     await logAction(fastify.supabase, { tenantId: req.tenantId, tableName: 'applications', recordId: (data as any).id, action: 'INSERT', performedBy: req.userId, newData: parsed.data })
@@ -863,7 +887,7 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
       .update(updatePayload)
       .eq('id', id).eq('tenant_id', req.tenantId)
 
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to move application')
 
     // Log the move in activity trail
     await fastify.supabase
@@ -913,7 +937,7 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
       .not('status', 'in', '("hired","rejected","withdrawn")')
       .select('id').maybeSingle()
 
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to reject application')
     if (!rejected) return reply.code(409).send({ error: 'INVALID_STATE', message: 'Application not found or already in a final state' })
     await logAction(fastify.supabase, { tenantId: req.tenantId, tableName: 'applications', recordId: id, action: 'UPDATE', performedBy: req.userId, newData: { status: 'rejected', rejection_reason: parsed.data.rejection_reason } })
 
@@ -962,7 +986,7 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
     q = q.range(parsed.data.offset, parsed.data.offset + parsed.data.limit - 1)
 
     const { data, error, count } = await q
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch hired applications')
 
     // Attach BGV status per application (for the pipeline badge / gate).
     const rows = data ?? []
@@ -1291,14 +1315,15 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
   // ── Interviewers (profiles list for panel assignment) ─────────────────────
 
   fastify.get('/interviewers', auth, async (req: any, reply) => {
-    const { data, error } = await fastify.supabase
-      .from('profiles')
-      .select('id, full_name, role, employees(id, employee_code, designations(title:name))')
-      .eq('tenant_id', req.tenantId)
-      .order('full_name', { ascending: true })
+    const data = await fetchAllRows<any>((from, to) =>
+      fastify.supabase
+        .from('profiles')
+        .select('id, full_name, role, employees(id, employee_code, designations(title:name))')
+        .eq('tenant_id', req.tenantId)
+        .order('full_name', { ascending: true })
+        .range(from, to))
 
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
-    return reply.send({ data: data ?? [] })
+    return reply.send({ data })
   })
 
   // ── Interview Rounds ──────────────────────────────────────────────────────
@@ -1362,7 +1387,7 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
     q = q.range(parsed.data.offset, parsed.data.offset + parsed.data.limit - 1)
 
     const { data, error, count } = await q
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch interviews')
     return reply.send({ data: data ?? [], total: count ?? 0, limit: parsed.data.limit, offset: parsed.data.offset })
   })
 
@@ -1434,7 +1459,7 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
       .select()
       .single()
 
-    if (roundErr) return reply.code(500).send({ error: 'INSERT_FAILED', message: roundErr.message })
+    if (roundErr) return serverError(req, reply, roundErr, ErrorCode.INSERT_FAILED, 'Failed to create interview round')
 
     // Assign panel members
     if (scopedInterviewerIds.length > 0) {
@@ -1531,7 +1556,7 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
         .eq('id', id)
         .eq('tenant_id', req.tenantId)
 
-      if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+      if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update interview')
     }
 
     // Replace panel if provided
@@ -1579,7 +1604,7 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
       .eq('id', req.params.id)
       .eq('tenant_id', req.tenantId)
 
-    if (error) return reply.code(500).send({ error: 'DELETE_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.DELETE_FAILED, 'Failed to delete interview')
     return reply.send({ message: 'Interview deleted' })
   })
 
@@ -1593,20 +1618,30 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
       .select('status')
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
-      .single()
+      .maybeSingle()
 
     if (!existing) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Interview not found' })
     if (requireScheduled && (existing as any).status !== 'scheduled') {
       return reply.code(422).send({ error: 'INVALID_STATE', message: 'Interview is not in scheduled status' })
     }
 
-    const { error } = await fastify.supabase
+    // Fold the 'scheduled' precondition into the WHERE clause — the SELECT
+    // above is only a pre-check; two concurrent transitions on the same round
+    // (e.g. complete + cancel racing, or two callers both hitting no-show)
+    // could both pass it and the second write would silently clobber the
+    // first with no conflict signal.
+    let updateQuery = fastify.supabase
       .from('interview_rounds')
       .update({ status })
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
+    if (requireScheduled) updateQuery = updateQuery.eq('status', 'scheduled')
 
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    const { data: transitioned, error } = await updateQuery.select('id').maybeSingle()
+
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update interview status')
+    if (!transitioned) return reply.code(409).send({ error: 'CONFLICT', message: 'Interview status changed before this update could be applied' })
+
     await logAction(fastify.supabase, { tenantId: req.tenantId, tableName: 'interview_rounds', recordId: id, action: 'UPDATE', performedBy: req.userId, newData: { status } })
     return reply.send({ message: `Interview marked as ${status}` })
   }
@@ -1661,7 +1696,7 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', req.tenantId)
       .order('name', { ascending: true })
 
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch question bank categories')
     return reply.send({ data: data ?? [] })
   })
 
@@ -1682,7 +1717,7 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
 
     if (error) {
       if (error.code === '23505') return reply.code(409).send({ error: 'DUPLICATE', message: 'A category with this name already exists' })
-      return reply.code(500).send({ error: 'INSERT_FAILED', message: error.message })
+      return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create question bank category')
     }
     return reply.code(201).send({ data })
   })
@@ -1703,7 +1738,7 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
 
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update question bank category')
     return reply.send({ message: 'Category updated' })
   })
 
@@ -1715,7 +1750,7 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
 
-    if (error) return reply.code(500).send({ error: 'DELETE_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.DELETE_FAILED, 'Failed to delete question bank category')
     return reply.send({ message: 'Category deleted' })
   })
 
@@ -1747,7 +1782,7 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
     q = q.range(parsed.data.offset, parsed.data.offset + parsed.data.limit - 1)
 
     const { data, error, count } = await q
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch question bank items')
     return reply.send({ data: data ?? [], total: count ?? 0 })
   })
 
@@ -1768,7 +1803,7 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
       .select()
       .single()
 
-    if (error) return reply.code(500).send({ error: 'INSERT_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create question bank item')
     return reply.code(201).send({ data })
   })
 
@@ -1791,7 +1826,7 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
 
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update question bank item')
     return reply.send({ message: 'Question updated' })
   })
 
@@ -1803,7 +1838,7 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
 
-    if (error) return reply.code(500).send({ error: 'DELETE_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.DELETE_FAILED, 'Failed to delete question bank item')
     return reply.send({ message: 'Question deleted' })
   })
 
@@ -1819,7 +1854,7 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', req.tenantId)
       .order('submitted_at', { ascending: true })
 
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch scorecard')
 
     // Compute aggregate
     const rows = (scores ?? []) as any[]
@@ -1875,7 +1910,7 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
       .select()
       .single()
 
-    if (error) return reply.code(500).send({ error: 'UPSERT_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to save scorecard')
     return reply.code(201).send({ data })
   })
 
@@ -2008,7 +2043,7 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
     })
 
     if (!result.sent && !result.skipped) {
-      return reply.code(500).send({ error: 'EMAIL_FAILED', message: result.error })
+      return serverError(req, reply, result.error, ErrorCode.INTERNAL_ERROR, 'Failed to send offer email')
     }
 
     // Persist the offer + move the application to 'offer' when we have the
@@ -2086,7 +2121,7 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
         status: 'in_progress', vendor: parsed.data.vendor ?? null, initiated_by: req.userId,
       })
       .select().single()
-    if (caseErr || !bgvCase) return reply.code(500).send({ error: 'DB_ERROR', message: caseErr?.message ?? 'Failed to open BGV case' })
+    if (caseErr || !bgvCase) return serverError(req, reply, caseErr, ErrorCode.INSERT_FAILED, 'Failed to open BGV case')
 
     const types = parsed.data.check_types?.length ? parsed.data.check_types : BGV_CHECK_TYPES
     const rows = types.map(t => ({ tenant_id: req.tenantId, case_id: bgvCase.id, check_type: t, status: 'pending' }))
@@ -2122,7 +2157,7 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
     }
     const { data, error } = await fastify.supabase
       .from('bgv_checks').update(patch).eq('id', checkId).eq('tenant_id', req.tenantId).select().single()
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update BGV check')
     if (!data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Check not found' })
     return reply.send({ data })
   })
@@ -2145,25 +2180,33 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
         updated_at: new Date().toISOString(),
       })
       .eq('id', caseId).eq('tenant_id', req.tenantId).select().single()
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to finalize BGV case')
     if (!data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'BGV case not found' })
     return reply.send({ data })
   })
 
   // BGV dashboard list (cases + a check-status rollup) for HR.
   fastify.get('/bgv', hrAdminAuth, async (req: any, reply) => {
-    const { data: cases } = await fastify.supabase
-      .from('bgv_cases')
-      .select(`*, applications(candidates(first_name, last_name), job_requisitions(title))`)
-      .eq('tenant_id', req.tenantId).order('initiated_at', { ascending: false })
-    const ids = (cases ?? []).map((c: any) => c.id)
+    const cases = await fetchAllRows<any>((from, to) =>
+      fastify.supabase
+        .from('bgv_cases')
+        .select(`*, applications(candidates(first_name, last_name), job_requisitions(title))`)
+        .eq('tenant_id', req.tenantId)
+        .order('initiated_at', { ascending: false })
+        .range(from, to))
+    const ids = cases.map((c: any) => c.id)
     const byCase: Record<string, any[]> = {}
     if (ids.length) {
-      const { data: checks } = await fastify.supabase
-        .from('bgv_checks').select('case_id, check_type, status').eq('tenant_id', req.tenantId).in('case_id', ids)
-      for (const ch of checks ?? []) (byCase[ch.case_id] ??= []).push(ch)
+      const checks = await fetchAllRows<any>((from, to) =>
+        fastify.supabase
+          .from('bgv_checks')
+          .select('case_id, check_type, status')
+          .eq('tenant_id', req.tenantId)
+          .in('case_id', ids)
+          .range(from, to))
+      for (const ch of checks) (byCase[ch.case_id] ??= []).push(ch)
     }
-    const rows = (cases ?? []).map((c: any) => {
+    const rows = cases.map((c: any) => {
       const cand = c.applications?.candidates
       return {
         id: c.id, application_id: c.application_id, status: c.status, vendor: c.vendor,
@@ -2304,8 +2347,29 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
       .select('id').maybeSingle()
     if (!claimed) return reply.send({ ok: true, message: 'Offer already accepted.' })
 
-    await fastify.supabase.from('applications')
+    // The offer letter row is already claimed as 'accepted' above; this
+    // applications update was previously fire-and-forget with no error
+    // check, so a failure here would silently leave the application out of
+    // sync with its own accepted offer while still reporting success (and
+    // still going on to create a preboarding invitation off a 'hired'
+    // application that was never actually written). Capture the error,
+    // log it server-side, and short-circuit before preboarding if it fails —
+    // this is an unauthenticated public route, so the response must not
+    // leak DB details.
+    const { error: appAcceptErr } = await fastify.supabase.from('applications')
       .update({ status: 'hired', offer_accepted: true }).eq('id', appId).eq('tenant_id', tenantId)
+
+    if (appAcceptErr) {
+      req.log.error(
+        { err: appAcceptErr, tenantId, appId, requestId: req.id },
+        'Failed to update application status to hired after offer acceptance',
+      )
+      return reply.send({
+        ok: true,
+        message: 'Your offer acceptance was recorded. We hit a snag finishing setup on our end — our recruitment team has been notified and will follow up; you do not need to resubmit.',
+        preboarding: false,
+      })
+    }
 
     // Auto-create the pre-joinee invitation (closes recruitment → onboarding).
     const result = await createPreJoineeFromApp(fastify, tenantId, appId, {
@@ -2344,8 +2408,22 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
       .select('id').maybeSingle()
     if (!claimed) return reply.send({ ok: true, message: 'Offer already declined.' })
 
-    await fastify.supabase.from('applications')
+    // Same fire-and-forget gap as offer/accept — capture and log the error
+    // instead of silently proceeding to report success on an application
+    // that was never actually moved to 'rejected'.
+    const { error: appDeclineErr } = await fastify.supabase.from('applications')
       .update({ status: 'rejected', offer_accepted: false, rejection_reason: 'Offer declined by candidate' }).eq('id', appId).eq('tenant_id', tenantId)
+
+    if (appDeclineErr) {
+      req.log.error(
+        { err: appDeclineErr, tenantId, appId, requestId: req.id },
+        'Failed to update application status to rejected after offer decline',
+      )
+      return reply.send({
+        ok: true,
+        message: 'Your decline was recorded. We hit a snag finishing setup on our end — our recruitment team has been notified.',
+      })
+    }
 
     return reply.send({ ok: true, message: 'You have declined the offer. Thank you for letting us know.' })
   })
