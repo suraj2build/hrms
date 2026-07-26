@@ -17,6 +17,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { fetchAllRows } from '../../lib/supabase-paginate.js'
 
 // ── Zod schemas ───────────────────────────────────────────────────────────────
 
@@ -82,12 +83,18 @@ export default async function rotationPoliciesRoutes(fastify: FastifyInstance) {
       ruleMap.set(rid, (ruleMap.get(rid) ?? 0) + 1)
     }
 
-    // Attach employee and site counts
-    const { data: empRows } = await fastify.supabase
-      .from('employees')
-      .select('rotation_policy_id')
-      .eq('tenant_id', req.tenantId)
-      .in('rotation_policy_id', policyIds)
+    // Attach employee and site counts. Paginated — feeds the
+    // employee_count/site_count badges shown for every policy; an unbounded
+    // scan would silently undercount for a tenant with more than 1000
+    // matching employees/sites.
+    const empRows = await fetchAllRows<{ rotation_policy_id: string | null }>((from, to) =>
+      fastify.supabase
+        .from('employees')
+        .select('rotation_policy_id')
+        .eq('tenant_id', req.tenantId)
+        .in('rotation_policy_id', policyIds)
+        .range(from, to),
+    )
 
     const empMap = new Map<string, number>()
     for (const e of empRows ?? []) {
@@ -95,11 +102,14 @@ export default async function rotationPoliciesRoutes(fastify: FastifyInstance) {
       empMap.set(pid, (empMap.get(pid) ?? 0) + 1)
     }
 
-    const { data: siteRows } = await fastify.supabase
-      .from('sites')
-      .select('default_rotation_policy_id')
-      .eq('tenant_id', req.tenantId)
-      .in('default_rotation_policy_id', policyIds)
+    const siteRows = await fetchAllRows<{ default_rotation_policy_id: string | null }>((from, to) =>
+      fastify.supabase
+        .from('sites')
+        .select('default_rotation_policy_id')
+        .eq('tenant_id', req.tenantId)
+        .in('default_rotation_policy_id', policyIds)
+        .range(from, to),
+    )
 
     const siteMap = new Map<string, number>()
     for (const s of siteRows ?? []) {
@@ -305,32 +315,41 @@ export default async function rotationPoliciesRoutes(fastify: FastifyInstance) {
   fastify.get('/:id/impact', auth, async (req: any, reply) => {
     const pid = req.params.id as string
 
-    const [empResult, siteResult] = await Promise.all([
-      fastify.supabase
-        .from('employees')
-        .select('id, first_name, last_name, employee_no:employee_code')
-        .eq('tenant_id', req.tenantId)
-        .eq('rotation_policy_id', pid)
-        .eq('status', 'active')
-        .order('last_name'),
-      fastify.supabase
-        .from('sites')
-        .select('id, name, code')
-        .eq('tenant_id', req.tenantId)
-        .eq('default_rotation_policy_id', pid)
-        .order('name'),
+    // Paginated — a widely-used rotation policy's true employee list can
+    // exceed 1000 rows for an enterprise tenant; an unbounded scan would
+    // silently truncate the impact list before edit/delete.
+    const [employees, sites] = await Promise.all([
+      fetchAllRows<any>((from, to) =>
+        fastify.supabase
+          .from('employees')
+          .select('id, first_name, last_name, employee_no:employee_code')
+          .eq('tenant_id', req.tenantId)
+          .eq('rotation_policy_id', pid)
+          .eq('status', 'active')
+          .order('last_name')
+          .range(from, to),
+      ),
+      fetchAllRows<any>((from, to) =>
+        fastify.supabase
+          .from('sites')
+          .select('id, name, code')
+          .eq('tenant_id', req.tenantId)
+          .eq('default_rotation_policy_id', pid)
+          .order('name')
+          .range(from, to),
+      ),
     ])
 
     return reply.send({
       data: {
-        employee_count: empResult.data?.length ?? 0,
-        site_count:     siteResult.data?.length ?? 0,
-        employees:      (empResult.data ?? []).map((e: any) => ({
+        employee_count: employees.length,
+        site_count:     sites.length,
+        employees:      employees.map((e: any) => ({
           id:           e.id,
           employee_no:  e.employee_no,
           display_name: `${e.first_name ?? ''} ${e.last_name ?? ''}`.trim(),
         })),
-        sites:          siteResult.data ?? [],
+        sites,
       },
     })
   })

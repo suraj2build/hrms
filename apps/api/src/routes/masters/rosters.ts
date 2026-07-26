@@ -33,6 +33,7 @@ import type { FastifyInstance } from 'fastify'
 import { z }                    from 'zod'
 import { generateUniqueCode }   from '../../lib/generate-code.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { fetchAllRows }   from '../../lib/supabase-paginate.js'
 
 // ── Schemas ───────────────────────────────────────────────────────────────────
 
@@ -142,18 +143,27 @@ export default async function rostersRoutes(fastify: FastifyInstance) {
     if (rosters.length > 0) {
       const rosterIds = rosters.map((r: any) => r.id)
 
-      const [{ data: sites }, { data: employees }] = await Promise.all([
-        fastify.supabase
-          .from('sites')
-          .select('default_roster_id')
-          .eq('tenant_id', req.tenantId)
-          .in('default_roster_id', rosterIds),
-        fastify.supabase
-          .from('employees')
-          .select('roster_id')
-          .eq('tenant_id', req.tenantId)
-          .in('roster_id', rosterIds)
-          .eq('status', 'active'),
+      // Paginated — these feed the employee_count/site_count badges shown for
+      // every roster; an unbounded scan would silently undercount for a
+      // tenant with more than 1000 matching sites/employees.
+      const [sites, employees] = await Promise.all([
+        fetchAllRows<{ default_roster_id: string | null }>((from, to) =>
+          fastify.supabase
+            .from('sites')
+            .select('default_roster_id')
+            .eq('tenant_id', req.tenantId)
+            .in('default_roster_id', rosterIds)
+            .range(from, to),
+        ),
+        fetchAllRows<{ roster_id: string | null }>((from, to) =>
+          fastify.supabase
+            .from('employees')
+            .select('roster_id')
+            .eq('tenant_id', req.tenantId)
+            .in('roster_id', rosterIds)
+            .eq('status', 'active')
+            .range(from, to),
+        ),
       ])
 
       const siteCountMap:     Record<string, number> = {}
@@ -295,31 +305,37 @@ export default async function rostersRoutes(fastify: FastifyInstance) {
   fastify.get('/:id/impact', auth, async (req: any, reply) => {
     const rosterId  = (req.params as any).id
 
-    const [
-      { data: sites,           error: siteErr  },
-      { data: directEmployees, error: empErr   },
-    ] = await Promise.all([
-      fastify.supabase
-        .from('sites')
-        .select('id, name, code')
-        .eq('tenant_id', req.tenantId)
-        .eq('default_roster_id', rosterId),
-      fastify.supabase
-        .from('employees')
-        .select('id, first_name, last_name, employee_code')
-        .eq('tenant_id', req.tenantId)
-        .eq('roster_id', rosterId)
-        .eq('status', 'active'),
-    ])
-
-    if (siteErr || empErr) {
-      return reply.code(500).send({
-        error:   'DB_ERROR',
-        message: (siteErr ?? empErr)?.message,
-      })
+    // Paginated — a widely-used roster (e.g. the standard shift) can plausibly
+    // be assigned to well over 1000 employees in an enterprise tenant. An
+    // unbounded scan would understate the true impact list before an HR
+    // admin edits/deletes this roster.
+    let sites: any[]
+    let directEmployees: any[]
+    try {
+      ;[sites, directEmployees] = await Promise.all([
+        fetchAllRows<any>((from, to) =>
+          fastify.supabase
+            .from('sites')
+            .select('id, name, code')
+            .eq('tenant_id', req.tenantId)
+            .eq('default_roster_id', rosterId)
+            .range(from, to),
+        ),
+        fetchAllRows<any>((from, to) =>
+          fastify.supabase
+            .from('employees')
+            .select('id, first_name, last_name, employee_code')
+            .eq('tenant_id', req.tenantId)
+            .eq('roster_id', rosterId)
+            .eq('status', 'active')
+            .range(from, to),
+        ),
+      ])
+    } catch (err: any) {
+      return reply.code(500).send({ error: 'DB_ERROR', message: err.message })
     }
 
-    const siteIds = (sites ?? []).map((s: any) => s.id)
+    const siteIds = sites.map((s: any) => s.id)
     let inheritedCount = 0
 
     if (siteIds.length > 0) {
@@ -336,12 +352,12 @@ export default async function rostersRoutes(fastify: FastifyInstance) {
 
     return reply.send({
       data: {
-        site_count:               (sites ?? []).length,
-        direct_employee_count:    (directEmployees ?? []).length,
+        site_count:               sites.length,
+        direct_employee_count:    directEmployees.length,
         inherited_employee_count: inheritedCount,
-        total_employee_count:     (directEmployees ?? []).length + inheritedCount,
-        sites:                    sites ?? [],
-        direct_employees:         directEmployees ?? [],
+        total_employee_count:     directEmployees.length + inheritedCount,
+        sites,
+        direct_employees:         directEmployees,
       },
     })
   })
