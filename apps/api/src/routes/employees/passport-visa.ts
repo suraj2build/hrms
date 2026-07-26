@@ -45,6 +45,7 @@ export default async function passportVisaRoutes(fastify: FastifyInstance) {
 
   // GET /employees/:id/passport-visa
   fastify.get('/employees/:id/passport-visa', auth, async (req: any, reply) => {
+    if (!requireAdmin(req, reply)) return
     if (!await verifyEmployee(fastify, req.params.id, req.tenantId))
       return reply.code(404).send({ error: 'NOT_FOUND', message: 'Employee not found' })
 

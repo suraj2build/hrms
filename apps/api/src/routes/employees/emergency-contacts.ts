@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { optStr } from '../../lib/zod-form.js'
+import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 
 const schema = z.object({
   name:            z.string().min(1, 'Name is required'),
@@ -19,9 +20,14 @@ async function verifyEmployee(fastify: any, employeeId: string, tenantId: string
 }
 
 export default async function emergencyContactsRoutes(fastify: FastifyInstance) {
-  const auth = { preHandler: [fastify.authenticate] }
+  // This is the HR/admin management surface for another employee's
+  // emergency contacts — self-service access is a separate, correctly
+  // self-scoped route (/ess/me/emergency-contacts in ess/self-service.ts).
+  // Previously gated to any authenticated user, letting any employee
+  // read/create/overwrite/delete a colleague's emergency contacts.
+  const hrAdminAuth = { preHandler: [fastify.authenticate, requireRole(...HR_ADMIN_ROLES)] }
 
-  fastify.get('/employees/:id/emergency-contacts', auth, async (req: any, reply) => {
+  fastify.get('/employees/:id/emergency-contacts', hrAdminAuth, async (req: any, reply) => {
     if (!await verifyEmployee(fastify, req.params.id, req.tenantId))
       return reply.code(404).send({ error: 'NOT_FOUND', message: 'Employee not found' })
     const { data, error } = await fastify.supabase
@@ -34,7 +40,7 @@ export default async function emergencyContactsRoutes(fastify: FastifyInstance) 
     return reply.send({ data })
   })
 
-  fastify.post('/employees/:id/emergency-contacts', auth, async (req: any, reply) => {
+  fastify.post('/employees/:id/emergency-contacts', hrAdminAuth, async (req: any, reply) => {
     if (!await verifyEmployee(fastify, req.params.id, req.tenantId))
       return reply.code(404).send({ error: 'NOT_FOUND', message: 'Employee not found' })
     const parsed = schema.safeParse(req.body)
@@ -56,7 +62,7 @@ export default async function emergencyContactsRoutes(fastify: FastifyInstance) 
     return reply.code(201).send(data)
   })
 
-  fastify.put('/employees/:id/emergency-contacts/:contactId', auth, async (req: any, reply) => {
+  fastify.put('/employees/:id/emergency-contacts/:contactId', hrAdminAuth, async (req: any, reply) => {
     const parsed = schema.partial().safeParse(req.body)
     if (!parsed.success)
       return reply.code(400).send({ error: 'VALIDATION', message: parsed.error.issues[0].message })
@@ -80,7 +86,7 @@ export default async function emergencyContactsRoutes(fastify: FastifyInstance) 
     return reply.send(data)
   })
 
-  fastify.delete('/employees/:id/emergency-contacts/:contactId', auth, async (req: any, reply) => {
+  fastify.delete('/employees/:id/emergency-contacts/:contactId', hrAdminAuth, async (req: any, reply) => {
     const { error } = await fastify.supabase
       .from('emergency_contacts')
       .delete()
