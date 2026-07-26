@@ -102,6 +102,52 @@ a partial unique index on `(tenant_id, phone) WHERE status = 'active'` (to at
 least fail loudly on collision rather than silently picking one) or thread the
 receiving WABA/business-number through to scope the lookup.
 
+### 2.2 — `POST /system/orchestration/workers/heartbeat` has no role gate
+
+**Where:** `apps/api/src/routes/system/orchestration.ts:79-123`
+
+Every other route in this file is role-gated (`HR_ADMIN_ROLES` or `super_admin`
+via the `auth`/`SUPER_ADMIN` checks), but the heartbeat upsert only requires
+`fastify.authenticate` — any authenticated tenant user, including a plain
+`employee`, can upsert arbitrary `worker_registry` rows (fake `worker_id`,
+`jobs_processed`, `current_job_id`, `metadata`), corrupting the data the
+admin-only `GET /workers` and `/health` dashboards rely on. This codebase has
+no separate machine/service role (`userRole` is sourced purely from
+`profiles.role`, verified in `apps/api/src/plugins/auth.ts`), so there's no
+existing "worker" identity to distinguish from an ordinary employee JWT.
+
+**Why not fixed:** no caller of this endpoint exists anywhere in this repo —
+not the frontend, not a script, not a cron job — so it's unclear whether real
+background workers call it over HTTP with some issued credential this session
+couldn't find, or whether it's unwired/future-use. Locking it to
+`HR_ADMIN_ROLES` (matching the sibling `GET /workers` route) is the safe
+default IF nothing in production actually calls it with a lower-privilege
+identity, but guessing wrong risks breaking live job-processing heartbeats
+with no way to verify from the code alone.
+
+**Suggested next step:** check the deployed environment/infra config for
+whatever process actually calls this endpoint (a separate worker deployment,
+a queue consumer, etc.) and what credential it authenticates with. If it's a
+normal tenant JWT with some elevated role, gate on that role explicitly; if
+workers should use a dedicated service credential instead of a tenant JWT,
+that's a larger auth-model change, not a one-line fix.
+
+### 2.3 — `PUT /system/orchestration/workers/:worker_id/status` — cross-tenant worker drain/stop by design
+
+**Where:** `apps/api/src/routes/system/orchestration.ts` (`PUT .../status`)
+
+`worker_registry` is shared infrastructure with no `tenant_id` column (per the
+route's own docstring), so this super_admin-gated drain/stop action has no
+tenant scoping — and since `super_admin` is a per-tenant role (see §2.2 and
+the fix already applied to `GET /queues`), any tenant's super_admin can drain
+or stop a worker that every other tenant also depends on. This may be an
+accepted tradeoff of genuinely-shared infra rather than a bug, but is worth a
+product decision given the sibling queue-pressure endpoint was deliberately
+tightened for the same class of concern. Not fixed — no tenant column exists
+to scope on without a schema change, and it's unclear whether that's even the
+right fix (vs. e.g. requiring a platform-owner role distinct from any
+tenant's super_admin for this specific action).
+
 ---
 
 ## 3. Investigated and ruled out (kept here for reference — not pending)
