@@ -9,9 +9,15 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { computeComplianceCalendar, computeUpcoming } from '../../lib/compliance-calendar.js'
+import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 
 export default async function complianceRoutes(fastify: FastifyInstance) {
-  const auth = { preHandler: [fastify.authenticate] }
+  // HR admin only — this surfaces statutory registration numbers and filing
+  // challan/reference numbers tenant-wide (ComplianceView.tsx, payroll's
+  // ComplianceCalendar.tsx are both admin-only pages). Previously gated by
+  // fastify.authenticate alone, so any authenticated employee of any role
+  // could call these directly with no defense-in-depth from the API itself.
+  const auth = { preHandler: [fastify.authenticate, requireRole(...HR_ADMIN_ROLES)] }
 
   // GET /compliance/calendar — full window with status buckets + counts
   fastify.get('/calendar', auth, async (req: any, reply) => {

@@ -18,8 +18,26 @@
 import type { FastifyInstance } from 'fastify'
 import { z }                    from 'zod'
 import { HR_ADMIN_ROLES, MANAGER_ROLES } from '../../lib/rbac.js'
+import { fetchAllRows } from '../../lib/supabase-paginate.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 const OUT_OF_OFFICE_STATUSES = new Set(['leave', 'holiday', 'weekly_off', 'comp_off', 'rest_day', 'off'])
+
+// PostgREST/URL-length safe batch size for `.in('employee_id', ...)` filters.
+const EMP_ID_BATCH = 400
+
+/** Fetches every row for a query filtered by employee_id, chunking the id list and paginating each chunk. */
+async function fetchAllRowsForEmployees<T>(
+  employeeIds: string[],
+  queryFn: (batchIds: string[], from: number, to: number) => PromiseLike<{ data: T[] | null; error: unknown }>,
+): Promise<T[]> {
+  const rows: T[] = []
+  for (let i = 0; i < employeeIds.length; i += EMP_ID_BATCH) {
+    const batch = employeeIds.slice(i, i + EMP_ID_BATCH)
+    rows.push(...await fetchAllRows((from, to) => queryFn(batch, from, to)))
+  }
+  return rows
+}
 
 export default async function whoIsInRoute(fastify: FastifyInstance) {
   // hr_admin, super_admin → tenant-wide view
@@ -52,12 +70,7 @@ export default async function whoIsInRoute(fastify: FastifyInstance) {
     // Manager → direct reports only (employees.manager_id = caller's employee_id)
     const isAdmin = (HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)
 
-    let empQuery = fastify.supabase
-      .from('employees')
-      .select('id, first_name, last_name, employee_code')
-      .eq('tenant_id', tenantId)
-      .eq('status', 'active')
-
+    let managerEmpId: string | null = null
     if (!isAdmin) {
       // Resolve the manager's own employee_id
       const { data: callerProfile } = await fastify.supabase
@@ -67,83 +80,115 @@ export default async function whoIsInRoute(fastify: FastifyInstance) {
         .eq('tenant_id', tenantId)
         .single()
 
-      const managerEmpId = (callerProfile as any)?.employee_id
+      managerEmpId = (callerProfile as any)?.employee_id ?? null
       if (!managerEmpId) {
         return reply.send(emptyResponse(date))
       }
-      empQuery = empQuery.eq('manager_id', managerEmpId)
     }
 
-    const { data: employees, error: empErr } = await empQuery
+    // `employees` is explicitly called out in CLAUDE.md as a table that
+    // exceeds 1000 rows at enterprise scale — a plain .select() here (the
+    // admin tenant-wide path especially) previously truncated the board
+    // silently past that ceiling, the same failure mode as the Muster Roll
+    // incident.
+    let emps: any[]
+    try {
+      emps = await fetchAllRows((from, to) => {
+        let q = fastify.supabase
+          .from('employees')
+          .select('id, first_name, last_name, employee_code')
+          .eq('tenant_id', tenantId)
+          .eq('status', 'active')
+        if (managerEmpId) q = q.eq('manager_id', managerEmpId)
+        return q.range(from, to)
+      })
+    } catch (empErr: any) {
+      return serverError(req, reply, empErr, ErrorCode.QUERY_FAILED, 'Failed to fetch employees')
+    }
 
-    if (empErr) return reply.code(500).send({ error: 'QUERY_FAILED', message: empErr.message })
-
-    const emps     = (employees ?? []) as any[]
-    const empIds   = emps.map(e => e.id)
+    const empIds = emps.map(e => e.id)
 
     if (empIds.length === 0) {
       return reply.send(emptyResponse(date))
     }
 
     // ── 2. Parallel fetch: daily status, punch logs, shifts ───────────────────
-    const [dailyRes, firstInRes, shiftRosterRes, empShiftsRes, leaveAppRes] = await Promise.all([
+    // Chunked + paginated per fetchAllRowsForEmployees — with empIds now
+    // potentially in the thousands (see the employees fix above), a plain
+    // `.in('employee_id', empIds)` here would itself have hit the same
+    // truncation ceiling.
+    let dailyRows: any[], firstInRows: any[], shiftRosterRows: any[], empShiftsRows: any[], leaveAppRows: any[]
+    try {
+      ;[dailyRows, firstInRows, shiftRosterRows, empShiftsRows, leaveAppRows] = await Promise.all([
+        // Today's attendance_daily rows
+        fetchAllRowsForEmployees(empIds, (batch, from, to) =>
+          fastify.supabase
+            .from('attendance_daily')
+            .select('employee_id, status, work_hours, late_minutes')
+            .eq('tenant_id', tenantId)
+            .eq('date', date)
+            .in('employee_id', batch)
+            .range(from, to)),
 
-      // Today's attendance_daily rows
-      fastify.supabase
-        .from('attendance_daily')
-        .select('employee_id, status, work_hours, late_minutes')
-        .eq('tenant_id', tenantId)
-        .eq('date', date)
-        .in('employee_id', empIds),
+        // First check-in punch per employee today
+        fetchAllRowsForEmployees(empIds, (batch, from, to) =>
+          fastify.supabase
+            .from('attendance_logs')
+            .select('employee_id, check_in')
+            .eq('tenant_id', tenantId)
+            .gte('check_in', `${date}T00:00:00.000Z`)
+            .lt('check_in',  `${date}T23:59:59.999Z`)
+            .in('employee_id', batch)
+            .order('check_in', { ascending: true })
+            .range(from, to)),
 
-      // First check-in punch per employee today
-      fastify.supabase
-        .from('attendance_logs')
-        .select('employee_id, check_in')
-        .eq('tenant_id', tenantId)
-        .gte('check_in', `${date}T00:00:00.000Z`)
-        .lt('check_in',  `${date}T23:59:59.999Z`)
-        .in('employee_id', empIds)
-        .order('check_in', { ascending: true }),
+        // Date-specific shift roster overrides
+        fetchAllRowsForEmployees(empIds, (batch, from, to) =>
+          fastify.supabase
+            .from('shift_roster')
+            .select('employee_id, shift_id, shifts(id, name, start_time, grace_minutes)')
+            .eq('tenant_id', tenantId)
+            .eq('date', date)
+            .in('employee_id', batch)
+            .range(from, to)),
 
-      // Date-specific shift roster overrides
-      fastify.supabase
-        .from('shift_roster')
-        .select('employee_id, shift_id, shifts(id, name, start_time, grace_minutes)')
-        .eq('tenant_id', tenantId)
-        .eq('date', date)
-        .in('employee_id', empIds),
+        // Standing shift assignments (fallback)
+        fetchAllRowsForEmployees(empIds, (batch, from, to) =>
+          fastify.supabase
+            .from('employee_shifts')
+            .select('employee_id, shift_id, shifts(id, name, start_time, grace_minutes)')
+            .eq('tenant_id', tenantId)
+            .eq('is_current', true)
+            .in('employee_id', batch)
+            .range(from, to)),
 
-      // Standing shift assignments (fallback)
-      fastify.supabase
-        .from('employee_shifts')
-        .select('employee_id, shift_id, shifts(id, name, start_time, grace_minutes)')
-        .eq('tenant_id', tenantId)
-        .eq('is_current', true)
-        .in('employee_id', empIds),
-
-      // Approved leave covering today (for "Applied" badge) — canonical leave_requests
-      fastify.supabase
-        .from('leave_requests')
-        .select('employee_id, from_date, to_date')
-        .eq('tenant_id', tenantId)
-        .eq('status', 'APPROVED')
-        .lte('from_date', date)
-        .gte('to_date',   date)
-        .in('employee_id', empIds),
-    ])
+        // Approved leave covering today (for "Applied" badge) — canonical leave_requests
+        fetchAllRowsForEmployees(empIds, (batch, from, to) =>
+          fastify.supabase
+            .from('leave_requests')
+            .select('employee_id, from_date, to_date')
+            .eq('tenant_id', tenantId)
+            .eq('status', 'APPROVED')
+            .lte('from_date', date)
+            .gte('to_date',   date)
+            .in('employee_id', batch)
+            .range(from, to)),
+      ])
+    } catch (fetchErr: any) {
+      return serverError(req, reply, fetchErr, ErrorCode.QUERY_FAILED, 'Failed to fetch attendance status')
+    }
 
     // ── 3. Build lookup maps ──────────────────────────────────────────────────
 
     // Daily status map
     const dailyMap = new Map<string, { status: string; work_hours: number; late_minutes: number }>()
-    for (const r of (dailyRes.data ?? []) as any[]) {
+    for (const r of dailyRows as any[]) {
       dailyMap.set(r.employee_id, r)
     }
 
     // First check-in map
     const firstInMap = new Map<string, string>()
-    for (const r of (firstInRes.data ?? []) as any[]) {
+    for (const r of firstInRows as any[]) {
       if (!firstInMap.has(r.employee_id) && r.check_in) {
         firstInMap.set(r.employee_id, r.check_in)
       }
@@ -151,18 +196,18 @@ export default async function whoIsInRoute(fastify: FastifyInstance) {
 
     // Shift map: roster overrides standing
     const shiftMap = new Map<string, { shift_id: string; name: string; start_time: string; grace_minutes: number }>()
-    for (const r of (empShiftsRes.data ?? []) as any[]) {
+    for (const r of empShiftsRows as any[]) {
       const s = Array.isArray(r.shifts) ? r.shifts[0] : r.shifts
       if (s) shiftMap.set(r.employee_id, { shift_id: r.shift_id, name: s.name, start_time: s.start_time, grace_minutes: s.grace_minutes ?? 0 })
     }
-    for (const r of (shiftRosterRes.data ?? []) as any[]) {
+    for (const r of shiftRosterRows as any[]) {
       const s = Array.isArray(r.shifts) ? r.shifts[0] : r.shifts
       if (s) shiftMap.set(r.employee_id, { shift_id: r.shift_id, name: s.name, start_time: s.start_time, grace_minutes: s.grace_minutes ?? 0 })
     }
 
     // Leave application set (for "Applied" badge)
     const leaveAppliedSet = new Set<string>(
-      ((leaveAppRes.data ?? []) as any[]).map((r: any) => r.employee_id)
+      (leaveAppRows as any[]).map((r: any) => r.employee_id)
     )
 
     // ── 4. Helper: compute expected check-in string from shift ─────────────────
@@ -289,8 +334,7 @@ export default async function whoIsInRoute(fastify: FastifyInstance) {
       },
     })
   } catch (err: any) {
-    req.log.error({ err }, 'who-is-in unhandled error')
-    return reply.code(500).send({ error: 'INTERNAL_ERROR', message: err?.message ?? String(err) })
+    return serverError(req, reply, err, ErrorCode.INTERNAL_ERROR, 'Failed to build who-is-in board')
   }
   })
 }
