@@ -766,6 +766,18 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
     const parsed = schema.safeParse(req.body)
     if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
 
+    // requisition_id and candidate_id are raw UUIDs from the request body —
+    // verify each belongs to this tenant before writing it, or a caller who
+    // obtains a foreign tenant's requisition/candidate UUID could create an
+    // application that joins in that tenant's data on every GET /applications.
+    const { data: requisition } = await fastify.supabase
+      .from('job_requisitions').select('id').eq('id', parsed.data.requisition_id).eq('tenant_id', req.tenantId).maybeSingle()
+    if (!requisition) return reply.code(400).send({ error: 'INVALID_REQUISITION', message: 'Requisition not found for this tenant' })
+
+    const { data: candidate } = await fastify.supabase
+      .from('candidates').select('id').eq('id', parsed.data.candidate_id).eq('tenant_id', req.tenantId).maybeSingle()
+    if (!candidate) return reply.code(400).send({ error: 'INVALID_CANDIDATE', message: 'Candidate not found for this tenant' })
+
     // stage_id is a raw UUID from the request body — verify it belongs to this
     // tenant before writing it, or a Tenant-A caller who obtains a Tenant-B
     // stage UUID (leaked in an email template, log, or webhook payload) could
@@ -1404,6 +1416,22 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
 
     const { interviewer_ids, ...roundData } = parsed.data
 
+    // application_id is a raw UUID from the request body — verify it belongs
+    // to this tenant before creating a round against it, or a caller could
+    // attach an interview round to a foreign tenant's application.
+    const { data: application } = await fastify.supabase
+      .from('applications').select('id').eq('id', roundData.application_id).eq('tenant_id', req.tenantId).maybeSingle()
+    if (!application) return reply.code(400).send({ error: 'INVALID_APPLICATION', message: 'Application not found for this tenant' })
+
+    // interviewer_ids are raw profile UUIDs — filter to this tenant so a
+    // caller can't assign (and notify by email) a foreign tenant's user.
+    let scopedInterviewerIds: string[] = []
+    if (interviewer_ids.length > 0) {
+      const { data: validProfiles } = await fastify.supabase
+        .from('profiles').select('id').in('id', interviewer_ids).eq('tenant_id', req.tenantId)
+      scopedInterviewerIds = (validProfiles ?? []).map((p: any) => p.id)
+    }
+
     const { data: round, error: roundErr } = await fastify.supabase
       .from('interview_rounds')
       .insert({
@@ -1418,10 +1446,10 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
     if (roundErr) return reply.code(500).send({ error: 'INSERT_FAILED', message: roundErr.message })
 
     // Assign panel members
-    if (interviewer_ids.length > 0) {
+    if (scopedInterviewerIds.length > 0) {
       await fastify.supabase
         .from('interview_panel')
-        .insert(interviewer_ids.map(iid => ({
+        .insert(scopedInterviewerIds.map(iid => ({
           tenant_id:      req.tenantId,
           round_id:       (round as any).id,
           interviewer_id: iid,
@@ -1470,11 +1498,11 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
         }
 
         // Email each panel member
-        if (interviewer_ids.length > 0) {
+        if (scopedInterviewerIds.length > 0) {
           const { data: panelProfiles } = await fastify.supabase
             .from('profiles')
             .select('full_name, email')
-            .in('id', interviewer_ids)
+            .in('id', scopedInterviewerIds)
           for (const p of (panelProfiles ?? []) as any[]) {
             if (!p.email) continue
             await sendEmail({
@@ -1524,9 +1552,13 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
         .eq('tenant_id', req.tenantId)
 
       if (interviewer_ids.length > 0) {
-        await fastify.supabase
+        const { data: validProfiles } = await fastify.supabase
+          .from('profiles').select('id').in('id', interviewer_ids).eq('tenant_id', req.tenantId)
+        const scopedInterviewerIds = (validProfiles ?? []).map((p: any) => p.id)
+
+        if (scopedInterviewerIds.length > 0) await fastify.supabase
           .from('interview_panel')
-          .insert(interviewer_ids.map(iid => ({
+          .insert(scopedInterviewerIds.map(iid => ({
             tenant_id:      req.tenantId,
             round_id:       id,
             interviewer_id: iid,
