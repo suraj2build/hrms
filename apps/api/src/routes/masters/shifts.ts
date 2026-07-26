@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { z } from 'zod'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 const schema = z.object({
   name:           z.string().min(1, 'Name is required'),
@@ -25,7 +26,7 @@ export default async function shiftsRoutes(fastify: FastifyInstance) {
       .select('*')
       .eq('tenant_id', req.tenantId)
       .order('name')
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch shifts')
     return reply.send({ data })
   })
 
@@ -38,7 +39,7 @@ export default async function shiftsRoutes(fastify: FastifyInstance) {
       .insert({ ...parsed.data, tenant_id: req.tenantId })
       .select()
       .single()
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create shift')
     return reply.code(201).send(data)
   })
 
@@ -53,7 +54,7 @@ export default async function shiftsRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', req.tenantId)
       .select()
       .single()
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update shift')
     if (!data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Shift not found' })
     return reply.send(data)
   })
@@ -94,7 +95,7 @@ export default async function shiftsRoutes(fastify: FastifyInstance) {
       if ((error as any).code === '23503') {
         return reply.code(409).send({ error: 'IN_USE', message: 'Shift is in use and cannot be deleted. Deactivate it instead.' })
       }
-      return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+      return serverError(req, reply, error, ErrorCode.DELETE_FAILED, 'Failed to delete shift')
     }
     return reply.code(204).send()
   })

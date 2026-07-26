@@ -25,6 +25,7 @@ import type { FastifyInstance } from 'fastify'
 import { z }                   from 'zod'
 import { policyService }       from '../../lib/policy-service.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 // ── Validation schemas ────────────────────────────────────────────────────────
 
@@ -66,7 +67,7 @@ export default async function attendancePoliciesRoutes(fastify: FastifyInstance)
       .order('is_default', { ascending: false })
       .order('name')
 
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch attendance policies')
     return reply.send({ data: data ?? [] })
   })
 
@@ -89,7 +90,7 @@ export default async function attendancePoliciesRoutes(fastify: FastifyInstance)
       if (error.code === '23505') {
         return reply.code(409).send({ error: 'DUPLICATE', message: 'A policy with this name already exists' })
       }
-      return reply.code(500).send({ error: 'INSERT_FAILED', message: error.message })
+      return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create attendance policy')
     }
 
     policyService.clearTenantCache(req.tenantId)
@@ -114,7 +115,7 @@ export default async function attendancePoliciesRoutes(fastify: FastifyInstance)
       .select()
       .single()
 
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update attendance policy')
     if (!data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Policy not found' })
 
     policyService.clearTenantCache(req.tenantId)
@@ -156,7 +157,7 @@ export default async function attendancePoliciesRoutes(fastify: FastifyInstance)
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
 
-    if (error) return reply.code(500).send({ error: 'DELETE_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.DELETE_FAILED, 'Failed to delete attendance policy')
 
     policyService.clearTenantCache(req.tenantId)
     return reply.code(204).send()
@@ -223,7 +224,7 @@ export default async function attendancePoliciesRoutes(fastify: FastifyInstance)
       .eq('tenant_id', req.tenantId)
       .order('created_at', { ascending: false })
 
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch attendance policy assignments')
     return reply.send({ data: data ?? [] })
   })
 
@@ -253,7 +254,7 @@ export default async function attendancePoliciesRoutes(fastify: FastifyInstance)
       .select()
       .single()
 
-    if (error) return reply.code(500).send({ error: 'UPSERT_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to assign attendance policy to employee')
 
     policyService.clearTenantCache(req.tenantId)
     return reply.code(201).send({ data })
@@ -271,7 +272,7 @@ export default async function attendancePoliciesRoutes(fastify: FastifyInstance)
       .eq('id', assignId)
       .eq('tenant_id', req.tenantId)
 
-    if (error) return reply.code(500).send({ error: 'DELETE_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.DELETE_FAILED, 'Failed to remove attendance policy assignment')
 
     policyService.clearTenantCache(req.tenantId)
     return reply.code(204).send()

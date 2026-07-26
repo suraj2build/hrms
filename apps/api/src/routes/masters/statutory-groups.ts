@@ -11,6 +11,7 @@ import type { FastifyInstance } from 'fastify'
 import { z }                   from 'zod'
 import { logAction }           from '../../lib/audit-service.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 const statutoryGroupSchema = z.object({
   code:              z.string().min(1, 'Code is required').max(50).transform(v => v.toUpperCase().trim()),
@@ -46,7 +47,7 @@ export default async function statutoryGroupsRoutes(fastify: FastifyInstance) {
       .select('*')
       .eq('tenant_id', req.tenantId)
       .order('name')
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch statutory groups')
     return reply.send({ data: data ?? [] })
   })
 
@@ -66,7 +67,7 @@ export default async function statutoryGroupsRoutes(fastify: FastifyInstance) {
     if (error) {
       if (error.code === '23505')
         return reply.code(409).send({ error: 'DUPLICATE', message: `Statutory group code "${parsed.data.code}" already exists` })
-      return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+      return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create statutory group')
     }
     await logAction(fastify.supabase, {
       tenantId:    req.tenantId,
@@ -94,7 +95,7 @@ export default async function statutoryGroupsRoutes(fastify: FastifyInstance) {
       .select()
       .single()
 
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update statutory group')
     if (!data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Statutory group not found' })
     await logAction(fastify.supabase, {
       tenantId:    req.tenantId,
@@ -118,7 +119,7 @@ export default async function statutoryGroupsRoutes(fastify: FastifyInstance) {
       .eq('statutory_group_id', id)
       .eq('tenant_id', req.tenantId)
 
-    if (countErr) return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to check statutory group usage' })
+    if (countErr) return serverError(req, reply, countErr, ErrorCode.QUERY_FAILED, 'Failed to check statutory group usage')
 
     if ((count ?? 0) > 0) {
       const { error: updErr } = await fastify.supabase
@@ -126,7 +127,7 @@ export default async function statutoryGroupsRoutes(fastify: FastifyInstance) {
         .update({ is_active: false })
         .eq('id', id)
         .eq('tenant_id', req.tenantId)
-      if (updErr) return reply.code(500).send({ error: 'UPDATE_FAILED', message: updErr.message })
+      if (updErr) return serverError(req, reply, updErr, ErrorCode.UPDATE_FAILED, 'Failed to deactivate statutory group')
       await logAction(fastify.supabase, {
         tenantId:    req.tenantId,
         tableName:   'statutory_groups',
@@ -143,7 +144,7 @@ export default async function statutoryGroupsRoutes(fastify: FastifyInstance) {
       .delete()
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
-    if (delErr) return reply.code(500).send({ error: 'DELETE_FAILED', message: delErr.message })
+    if (delErr) return serverError(req, reply, delErr, ErrorCode.DELETE_FAILED, 'Failed to delete statutory group')
     await logAction(fastify.supabase, {
       tenantId:    req.tenantId,
       tableName:   'statutory_groups',

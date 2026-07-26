@@ -16,6 +16,7 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { generateUniqueCode } from '../../lib/generate-code.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 const schema = z.object({
   name:      z.string().min(1, 'Name is required'),
@@ -60,7 +61,7 @@ export default async function workLocationsRoutes(fastify: FastifyInstance) {
     }
 
     const { data, error } = await query
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch work locations')
     return reply.send({ data: data ?? [] })
   })
 
@@ -73,7 +74,7 @@ export default async function workLocationsRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', req.tenantId)
       .maybeSingle()
 
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch work location')
     if (!data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Work location not found' })
     return reply.send({ data })
   })
@@ -117,7 +118,7 @@ export default async function workLocationsRoutes(fastify: FastifyInstance) {
           message: `A work location with code "${parsed.data.code}" already exists`,
         })
       }
-      return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+      return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create work location')
     }
     return reply.code(201).send({ data })
   })
@@ -153,7 +154,7 @@ export default async function workLocationsRoutes(fastify: FastifyInstance) {
       .select('id, name, code, site_id, address, city, state, country, pincode, is_active, created_at')
       .single()
 
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update work location')
     if (!data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Work location not found' })
     return reply.send({ data })
   })
@@ -168,7 +169,7 @@ export default async function workLocationsRoutes(fastify: FastifyInstance) {
       .eq('work_location_id', id)
       .eq('tenant_id', req.tenantId)
 
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch work location usage')
     return reply.send({ data: { job_history: count ?? 0, total: count ?? 0 } })
   })
 
@@ -190,7 +191,7 @@ export default async function workLocationsRoutes(fastify: FastifyInstance) {
         .eq('id', mergeTo)
         .eq('tenant_id', req.tenantId)
         .maybeSingle()
-      if (mergeCheckErr) return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to verify merge target' })
+      if (mergeCheckErr) return serverError(req, reply, mergeCheckErr, ErrorCode.QUERY_FAILED, 'Failed to verify merge target')
       if (!mergeTarget) return reply.code(400).send({ error: 'VALIDATION', message: 'merge_to must reference a work location in your organisation' })
     }
 
@@ -200,7 +201,7 @@ export default async function workLocationsRoutes(fastify: FastifyInstance) {
       .eq('work_location_id', id)
       .eq('tenant_id', req.tenantId)
 
-    if (countErr) return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to check usage' })
+    if (countErr) return serverError(req, reply, countErr, ErrorCode.QUERY_FAILED, 'Failed to check work location usage')
 
     const usageCount = count ?? 0
 
@@ -218,7 +219,7 @@ export default async function workLocationsRoutes(fastify: FastifyInstance) {
         .update({ work_location_id: mergeTo })
         .eq('work_location_id', id)
         .eq('tenant_id', req.tenantId)
-      if (reassignErr) return reply.code(500).send({ error: 'REASSIGN_FAILED', message: reassignErr.message })
+      if (reassignErr) return serverError(req, reply, reassignErr, ErrorCode.UPDATE_FAILED, 'Failed to reassign job history to the merge target work location')
     }
 
     const { error } = await fastify.supabase
@@ -227,7 +228,7 @@ export default async function workLocationsRoutes(fastify: FastifyInstance) {
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
 
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.DELETE_FAILED, 'Failed to delete work location')
     return reply.code(204).send()
   })
 }

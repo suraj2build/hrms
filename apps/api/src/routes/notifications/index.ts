@@ -87,7 +87,7 @@ export default async function notificationsRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', req.tenantId)
       .eq('recipient_id', req.userId)
 
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: 'Failed to mark as read' })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to mark as read')
     return reply.send({ success: true })
   })
 
@@ -104,7 +104,7 @@ export default async function notificationsRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', req.tenantId)
       .eq('recipient_id', req.userId)
 
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: 'Failed to mark as read' })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to mark as read')
     return reply.send({ success: true })
   })
 
@@ -118,7 +118,7 @@ export default async function notificationsRoutes(fastify: FastifyInstance) {
       .eq('is_read', false)
       .select('id')
 
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: 'Failed to mark all as read' })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to mark all as read')
     return reply.send({ updated: (data ?? []).length })
   })
 
@@ -132,7 +132,7 @@ export default async function notificationsRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', req.tenantId)
       .eq('recipient_id', req.userId)
 
-    if (error) return reply.code(500).send({ error: 'DELETE_FAILED', message: 'Failed to delete notification' })
+    if (error) return serverError(req, reply, error, ErrorCode.DELETE_FAILED, 'Failed to delete notification')
     return reply.code(204).send()
   })
 

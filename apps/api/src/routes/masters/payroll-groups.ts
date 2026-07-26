@@ -11,6 +11,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z }                   from 'zod'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 const payrollGroupSchema = z.object({
   code:             z.string().min(1, 'Code is required').max(50).transform(v => v.toUpperCase().trim()),
@@ -42,7 +43,7 @@ export default async function payrollGroupsRoutes(fastify: FastifyInstance) {
       .select('*')
       .eq('tenant_id', req.tenantId)
       .order('name')
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch payroll groups')
     return reply.send({ data: data ?? [] })
   })
 
@@ -62,7 +63,7 @@ export default async function payrollGroupsRoutes(fastify: FastifyInstance) {
     if (error) {
       if (error.code === '23505')
         return reply.code(409).send({ error: 'DUPLICATE', message: `Payroll group code "${parsed.data.code}" already exists` })
-      return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+      return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create payroll group')
     }
     return reply.code(201).send({ data })
   })
@@ -82,7 +83,7 @@ export default async function payrollGroupsRoutes(fastify: FastifyInstance) {
       .select()
       .single()
 
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update payroll group')
     if (!data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Payroll group not found' })
     return reply.send({ data })
   })
@@ -99,7 +100,7 @@ export default async function payrollGroupsRoutes(fastify: FastifyInstance) {
       .eq('payroll_group_id', id)
       .eq('tenant_id', req.tenantId)
 
-    if (countErr) return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to check payroll group usage' })
+    if (countErr) return serverError(req, reply, countErr, ErrorCode.QUERY_FAILED, 'Failed to check payroll group usage')
 
     if ((count ?? 0) > 0) {
       const { error: updErr } = await fastify.supabase
@@ -107,7 +108,7 @@ export default async function payrollGroupsRoutes(fastify: FastifyInstance) {
         .update({ is_active: false })
         .eq('id', id)
         .eq('tenant_id', req.tenantId)
-      if (updErr) return reply.code(500).send({ error: 'UPDATE_FAILED', message: updErr.message })
+      if (updErr) return serverError(req, reply, updErr, ErrorCode.UPDATE_FAILED, 'Failed to deactivate payroll group')
       return reply.send({ deactivated: true, message: `Payroll group deactivated — ${count} employee(s) assigned` })
     }
 
@@ -116,7 +117,7 @@ export default async function payrollGroupsRoutes(fastify: FastifyInstance) {
       .delete()
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
-    if (delErr) return reply.code(500).send({ error: 'DELETE_FAILED', message: delErr.message })
+    if (delErr) return serverError(req, reply, delErr, ErrorCode.DELETE_FAILED, 'Failed to delete payroll group')
     return reply.code(204).send()
   })
 }

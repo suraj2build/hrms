@@ -37,6 +37,7 @@ import {
   generateTestDataset,
 } from '../../lib/roster-calendar-engine.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 // ── Auth helper ───────────────────────────────────────────────────────────────
 //
@@ -189,7 +190,7 @@ export default async function rosterCalendarRoutes(fastify: FastifyInstance) {
     q = q.order('priority', { ascending: false }).order('effective_from')
 
     const { data, error } = await q
-    if (error) return reply.code(500).send({ error: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch weekly-off rules')
     return reply.send({ data })
   })
 
@@ -203,7 +204,7 @@ export default async function rosterCalendarRoutes(fastify: FastifyInstance) {
       .select()
       .single()
 
-    if (error) return reply.code(400).send({ error: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create weekly-off rule')
     return reply.code(201).send({ data })
   })
 
@@ -220,7 +221,7 @@ export default async function rosterCalendarRoutes(fastify: FastifyInstance) {
       .select()
       .single()
 
-    if (error) return reply.code(400).send({ error: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update weekly-off rule')
     if (!data) return reply.code(404).send({ error: 'Rule not found' })
     return reply.send({ data })
   })
@@ -235,7 +236,7 @@ export default async function rosterCalendarRoutes(fastify: FastifyInstance) {
       .eq('id', id)
       .eq('tenant_id', tenantId)
 
-    if (error) return reply.code(400).send({ error: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.DELETE_FAILED, 'Failed to delete weekly-off rule')
     return reply.code(204).send()
   })
 
@@ -250,7 +251,7 @@ export default async function rosterCalendarRoutes(fastify: FastifyInstance) {
     q = q.order('shift_id').order('segment_order')
 
     const { data, error } = await q
-    if (error) return reply.code(500).send({ error: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch shift segments')
     return reply.send({ data })
   })
 
@@ -276,7 +277,7 @@ export default async function rosterCalendarRoutes(fastify: FastifyInstance) {
       .select()
       .single()
 
-    if (error) return reply.code(400).send({ error: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create shift segment')
     return reply.code(201).send({ data })
   })
 
@@ -293,7 +294,7 @@ export default async function rosterCalendarRoutes(fastify: FastifyInstance) {
       .select()
       .single()
 
-    if (error) return reply.code(400).send({ error: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update shift segment')
     if (!data) return reply.code(404).send({ error: 'Segment not found' })
     return reply.send({ data })
   })
@@ -308,7 +309,7 @@ export default async function rosterCalendarRoutes(fastify: FastifyInstance) {
       .eq('id', id)
       .eq('tenant_id', tenantId)
 
-    if (error) return reply.code(400).send({ error: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.DELETE_FAILED, 'Failed to delete shift segment')
     return reply.code(204).send()
   })
 
@@ -323,7 +324,7 @@ export default async function rosterCalendarRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', tenantId)
       .order('name')
 
-    if (error) return reply.code(500).send({ error: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch rotation groups')
     return reply.send({ data })
   })
 
@@ -337,7 +338,7 @@ export default async function rosterCalendarRoutes(fastify: FastifyInstance) {
       .select()
       .single()
 
-    if (error) return reply.code(400).send({ error: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create rotation group')
     return reply.code(201).send({ data })
   })
 
@@ -354,7 +355,7 @@ export default async function rosterCalendarRoutes(fastify: FastifyInstance) {
       .select()
       .single()
 
-    if (error) return reply.code(400).send({ error: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update rotation group')
     if (!data) return reply.code(404).send({ error: 'Rotation group not found' })
     return reply.send({ data })
   })
@@ -374,7 +375,7 @@ export default async function rosterCalendarRoutes(fastify: FastifyInstance) {
     q = q.order('cohort_index').order('effective_from')
 
     const { data, error } = await q
-    if (error) return reply.code(500).send({ error: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch rotation members')
     return reply.send({ data })
   })
 
@@ -388,7 +389,7 @@ export default async function rosterCalendarRoutes(fastify: FastifyInstance) {
       .select()
       .single()
 
-    if (error) return reply.code(400).send({ error: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to add rotation member')
     return reply.code(201).send({ data })
   })
 
@@ -402,7 +403,7 @@ export default async function rosterCalendarRoutes(fastify: FastifyInstance) {
       .eq('id', id)
       .eq('tenant_id', tenantId)
 
-    if (error) return reply.code(400).send({ error: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.DELETE_FAILED, 'Failed to remove rotation member')
     return reply.code(204).send()
   })
 

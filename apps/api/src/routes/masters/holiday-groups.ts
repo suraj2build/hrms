@@ -13,6 +13,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 const schema = z.object({
   name:        z.string().min(1, 'Name is required').max(120),
@@ -32,7 +33,7 @@ export default async function holidayGroupsRoutes(fastify: FastifyInstance) {
       .select('id, name, code, description, state_code, is_active, created_at')
       .eq('tenant_id', req.tenantId)
       .order('name', { ascending: true })
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch holiday groups')
     return reply.send({ data: data ?? [] })
   })
 
@@ -47,7 +48,7 @@ export default async function holidayGroupsRoutes(fastify: FastifyInstance) {
       .single()
     if (error) {
       if (error.code === '23505') return reply.code(409).send({ error: 'DUPLICATE', message: 'A holiday group with that name already exists' })
-      return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+      return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create holiday group')
     }
     return reply.code(201).send({ data })
   })
@@ -63,7 +64,7 @@ export default async function holidayGroupsRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', req.tenantId)
       .select('id, name, code, description, state_code, is_active, created_at')
       .single()
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update holiday group')
     if (!data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Holiday group not found' })
     return reply.send({ data })
   })
@@ -77,7 +78,7 @@ export default async function holidayGroupsRoutes(fastify: FastifyInstance) {
       .delete()
       .eq('id', (req.params as { id: string }).id)
       .eq('tenant_id', req.tenantId)
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.DELETE_FAILED, 'Failed to delete holiday group')
     return reply.code(204).send()
   })
 }

@@ -12,6 +12,7 @@ import type { FastifyInstance } from 'fastify'
 import { z }                   from 'zod'
 import { generateUniqueCode }  from '../../lib/generate-code.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 const empCatSchema = z.object({
   code:                 z.string().max(50).optional().transform(v => v ? v.toUpperCase().trim() : v),
@@ -45,7 +46,7 @@ export default async function employmentCategoriesRoutes(fastify: FastifyInstanc
       .select('*')
       .eq('tenant_id', req.tenantId)
       .order('name')
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch employment categories')
     return reply.send({ data: data ?? [] })
   })
 
@@ -68,7 +69,7 @@ export default async function employmentCategoriesRoutes(fastify: FastifyInstanc
     if (error) {
       if (error.code === '23505')
         return reply.code(409).send({ error: 'DUPLICATE', message: `Category code "${code}" already exists` })
-      return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+      return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create employment category')
     }
     return reply.code(201).send({ data })
   })
@@ -88,7 +89,7 @@ export default async function employmentCategoriesRoutes(fastify: FastifyInstanc
       .select()
       .single()
 
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update employment category')
     if (!data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Employment category not found' })
     return reply.send({ data })
   })
@@ -104,7 +105,7 @@ export default async function employmentCategoriesRoutes(fastify: FastifyInstanc
       .eq('employment_category_id', id)
       .eq('tenant_id', req.tenantId)
 
-    if (countErr) return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to check category usage' })
+    if (countErr) return serverError(req, reply, countErr, ErrorCode.QUERY_FAILED, 'Failed to check category usage')
 
     if ((count ?? 0) > 0) {
       const { error: updErr } = await fastify.supabase
@@ -112,7 +113,7 @@ export default async function employmentCategoriesRoutes(fastify: FastifyInstanc
         .update({ is_active: false })
         .eq('id', id)
         .eq('tenant_id', req.tenantId)
-      if (updErr) return reply.code(500).send({ error: 'UPDATE_FAILED', message: updErr.message })
+      if (updErr) return serverError(req, reply, updErr, ErrorCode.UPDATE_FAILED, 'Failed to deactivate employment category')
       return reply.send({ deactivated: true, message: `Category deactivated — ${count} employee(s) assigned` })
     }
 
@@ -121,7 +122,7 @@ export default async function employmentCategoriesRoutes(fastify: FastifyInstanc
       .delete()
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
-    if (delErr) return reply.code(500).send({ error: 'DELETE_FAILED', message: delErr.message })
+    if (delErr) return serverError(req, reply, delErr, ErrorCode.DELETE_FAILED, 'Failed to delete employment category')
     return reply.code(204).send()
   })
 }

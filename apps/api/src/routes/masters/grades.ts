@@ -11,6 +11,7 @@ import type { FastifyInstance } from 'fastify'
 import { z }                   from 'zod'
 import { generateUniqueCode } from '../../lib/generate-code.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 const gradeSchema = z.object({
   code:           z.string().max(50).optional().transform(v => v ? v.toUpperCase().trim() : v),
@@ -41,7 +42,7 @@ export default async function gradesRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', req.tenantId)
       .order('level_order', { ascending: true })
       .order('name')
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch grades')
     return reply.send({ data: data ?? [] })
   })
 
@@ -64,7 +65,7 @@ export default async function gradesRoutes(fastify: FastifyInstance) {
     if (error) {
       if (error.code === '23505')
         return reply.code(409).send({ error: 'DUPLICATE', message: `Grade code "${parsed.data.code}" already exists` })
-      return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+      return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create grade')
     }
     return reply.code(201).send({ data })
   })
@@ -84,7 +85,7 @@ export default async function gradesRoutes(fastify: FastifyInstance) {
       .select()
       .single()
 
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update grade')
     if (!data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Grade not found' })
     return reply.send({ data })
   })
@@ -99,7 +100,7 @@ export default async function gradesRoutes(fastify: FastifyInstance) {
       .eq('grade_id', id)
       .eq('tenant_id', req.tenantId)
 
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch grade usage')
     return reply.send({ data: { job_history: count ?? 0, total: count ?? 0 } })
   })
 
@@ -124,7 +125,7 @@ export default async function gradesRoutes(fastify: FastifyInstance) {
         .eq('id', mergeTo)
         .eq('tenant_id', req.tenantId)
         .maybeSingle()
-      if (mergeCheckErr) return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to verify merge target' })
+      if (mergeCheckErr) return serverError(req, reply, mergeCheckErr, ErrorCode.QUERY_FAILED, 'Failed to verify merge target')
       if (!mergeTarget) return reply.code(400).send({ error: 'VALIDATION', message: 'merge_to must reference a grade in your organisation' })
     }
 
@@ -134,7 +135,7 @@ export default async function gradesRoutes(fastify: FastifyInstance) {
       .eq('grade_id', id)
       .eq('tenant_id', req.tenantId)
 
-    if (countErr) return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to check grade usage' })
+    if (countErr) return serverError(req, reply, countErr, ErrorCode.QUERY_FAILED, 'Failed to check grade usage')
 
     const usageCount = count ?? 0
 
@@ -152,7 +153,7 @@ export default async function gradesRoutes(fastify: FastifyInstance) {
         .update({ grade_id: mergeTo })
         .eq('grade_id', id)
         .eq('tenant_id', req.tenantId)
-      if (reassignErr) return reply.code(500).send({ error: 'REASSIGN_FAILED', message: reassignErr.message })
+      if (reassignErr) return serverError(req, reply, reassignErr, ErrorCode.UPDATE_FAILED, 'Failed to reassign job history to the merge target grade')
     }
 
     const { error: delErr } = await fastify.supabase
@@ -160,7 +161,7 @@ export default async function gradesRoutes(fastify: FastifyInstance) {
       .delete()
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
-    if (delErr) return reply.code(500).send({ error: 'DELETE_FAILED', message: delErr.message })
+    if (delErr) return serverError(req, reply, delErr, ErrorCode.DELETE_FAILED, 'Failed to delete grade')
     return reply.code(204).send()
   })
 }
