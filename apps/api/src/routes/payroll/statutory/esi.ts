@@ -111,7 +111,7 @@ export default async function esiRoutes(fastify: FastifyInstance) {
   })
 
   // ── GET /payroll/statutory/esi/eligibility ────────────────────────────────────
-  fastify.get('/eligibility', auth, async (req: any, reply) => {
+  fastify.get('/eligibility', { preHandler: [fastify.authenticate, requireHrAdmin] }, async (req: any, reply) => {
     const querySchema = z.object({
       employee_id: z.string().uuid().optional(),
       active_only: z.enum(['true', 'false']).optional(),
@@ -222,7 +222,7 @@ export default async function esiRoutes(fastify: FastifyInstance) {
   })
 
   // ── GET /payroll/statutory/esi/contributions ──────────────────────────────────
-  fastify.get('/contributions', auth, async (req: any, reply) => {
+  fastify.get('/contributions', { preHandler: [fastify.authenticate, requireHrAdmin] }, async (req: any, reply) => {
     const querySchema = z.object({
       month: z.string().optional(),
       employee_id: z.string().uuid().optional(),

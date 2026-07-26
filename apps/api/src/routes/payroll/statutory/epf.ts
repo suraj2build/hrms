@@ -690,7 +690,7 @@ export default async function epfRoutes(fastify: FastifyInstance) {
   })
 
   // ── GET /payroll/statutory/epf/export/:month ──────────────────────────────────
-  fastify.get('/export/:month', auth, async (req: any, reply) => {
+  fastify.get('/export/:month', { preHandler: [fastify.authenticate, requireHrAdmin] }, async (req: any, reply) => {
     const { month } = req.params as { month: string }
 
     const { data, error } = await fastify.supabase

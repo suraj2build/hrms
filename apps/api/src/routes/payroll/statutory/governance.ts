@@ -253,7 +253,7 @@ export default async function governanceRoutes(fastify: FastifyInstance) {
   // ════════════════════════════════════════════════════════════════════════════
 
   // GET /payroll/statutory/governance/overrides
-  fastify.get('/overrides', auth, async (req: any, reply) => {
+  fastify.get('/overrides', adminAuth, async (req: any, reply) => {
     const querySchema = z.object({
       employee_id:    z.string().uuid().optional(),
       statutory_type: z.enum(['esi', 'ptax']).optional(),

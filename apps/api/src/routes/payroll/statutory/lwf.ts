@@ -141,7 +141,7 @@ export default async function lwfRoutes(fastify: FastifyInstance) {
   })
 
   // ── GET /payroll/statutory/lwf/state-config ───────────────────────────────────
-  fastify.get('/state-config', auth, async (req: any, reply) => {
+  fastify.get('/state-config', { preHandler: [fastify.authenticate, requireHrAdmin] }, async (req: any, reply) => {
     const { employee_id } = (req.query ?? {}) as { employee_id?: string }
     let q = fastify.supabase
       .from('lwf_state_config')
@@ -200,7 +200,7 @@ export default async function lwfRoutes(fastify: FastifyInstance) {
   })
 
   // ── GET /payroll/statutory/lwf/contributions ──────────────────────────────────
-  fastify.get('/contributions', auth, async (req: any, reply) => {
+  fastify.get('/contributions', { preHandler: [fastify.authenticate, requireHrAdmin] }, async (req: any, reply) => {
     const { month, employee_id } = (req.query ?? {}) as { month?: string; employee_id?: string }
     let q = fastify.supabase
       .from('lwf_contributions')
