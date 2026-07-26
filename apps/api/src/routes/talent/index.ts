@@ -150,16 +150,18 @@ export default async function talentRoutes(fastify: FastifyInstance) {
     for (const k of allowed) { if (b[k] !== undefined) update[k] = b[k] }
     if (Object.keys(update).length === 0) return reply.code(400).send({ error: 'No fields to update' })
 
-    const { error } = await supabase.from('talent_roles').update(update).eq('id', id).eq('tenant_id', req.tenantId)
+    const { data: updated, error } = await supabase.from('talent_roles').update(update).eq('id', id).eq('tenant_id', req.tenantId).select('id').maybeSingle()
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update talent role')
+    if (!updated) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Talent role not found' })
     return reply.send({ data: { updated: true } })
   })
 
   // ── HR: close a role ────────────────────────────────────────────────────────
   fastify.post('/roles/:id/close', hrAuth, async (req: any, reply) => {
     const { id } = req.params as { id: string }
-    const { error } = await supabase.from('talent_roles').update({ is_open: false }).eq('id', id).eq('tenant_id', req.tenantId)
+    const { data: closed, error } = await supabase.from('talent_roles').update({ is_open: false }).eq('id', id).eq('tenant_id', req.tenantId).select('id').maybeSingle()
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to close talent role')
+    if (!closed) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Talent role not found' })
     return reply.send({ data: { closed: true } })
   })
 
@@ -190,13 +192,16 @@ export default async function talentRoutes(fastify: FastifyInstance) {
     if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message ?? 'Invalid request body' })
     const { status, reviewer_notes } = parsed.data
 
-    const { error } = await supabase
+    const { data: updated, error } = await supabase
       .from('talent_interests')
       .update({ status, reviewer_notes: reviewer_notes ?? null, reviewed_at: new Date().toISOString(), reviewed_by: req.userId })
       .eq('id', iid)
       .eq('tenant_id', req.tenantId)
+      .select('id')
+      .maybeSingle()
 
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update interest status')
+    if (!updated) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Interest record not found' })
     return reply.send({ data: { updated: true } })
   })
 
@@ -300,14 +305,17 @@ export default async function talentRoutes(fastify: FastifyInstance) {
     const employeeId = await resolveCallerEmployeeId(fastify, req.userId, req.tenantId)
     if (!employeeId) return reply.code(403).send({ error: 'PROFILE_NOT_LINKED', message: 'Your profile is not linked to an employee record' })
 
-    const { error } = await supabase
+    const { data: withdrawn, error } = await supabase
       .from('talent_interests')
       .update({ status: 'withdrawn' })
       .eq('id', iid)
       .eq('employee_id', employeeId)
       .eq('tenant_id', req.tenantId)
+      .select('id')
+      .maybeSingle()
 
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to withdraw interest')
+    if (!withdrawn) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Interest record not found' })
     return reply.send({ data: { withdrawn: true } })
   })
 }

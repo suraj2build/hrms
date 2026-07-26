@@ -9,6 +9,7 @@
  */
 
 import type { FastifyInstance } from 'fastify'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 export default async function setupChecklistRoutes(fastify: FastifyInstance) {
   const auth = { preHandler: [fastify.authenticate] }
@@ -69,8 +70,7 @@ export default async function setupChecklistRoutes(fastify: FastifyInstance) {
     const failed = [depts, desigs, grades, sites, workLocs, leaveTypes, salaryComps]
       .find(r => r.error)
     if (failed?.error) {
-      req.log.error({ err: failed.error }, 'setup-checklist: count query failed')
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to load setup checklist' })
+      return serverError(req, reply, failed.error, ErrorCode.QUERY_FAILED, 'Failed to load setup checklist')
     }
 
     return reply.send({

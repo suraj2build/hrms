@@ -30,6 +30,7 @@ import { z } from 'zod'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { resolveCallerEmployeeId } from '../../lib/manager-scope.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 const assignSchema = z.object({
   employee_id:    z.string().uuid('employee_id must be a UUID'),
@@ -93,8 +94,7 @@ export default async function employeeShiftsRoutes(fastify: FastifyInstance) {
 
     if (empError || assignError || jobError) {
       const err = empError ?? assignError ?? jobError
-      req.log.error({ err }, 'employee-shifts list failed')
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch employee shifts' })
+      return serverError(req, reply, err, ErrorCode.QUERY_FAILED, 'Failed to fetch employee shifts')
     }
 
     // Build lookup: employee_id → assignment row
@@ -176,8 +176,7 @@ export default async function employeeShiftsRoutes(fastify: FastifyInstance) {
       .single()
 
     if (error) {
-      req.log.error({ err: error }, 'employee shift assign failed')
-      return reply.code(500).send({ error: 'INSERT_FAILED', message: 'Failed to assign shift' })
+      return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to assign shift')
     }
 
     return reply.code(201).send({ data })
@@ -219,8 +218,7 @@ export default async function employeeShiftsRoutes(fastify: FastifyInstance) {
       .order('effective_from', { ascending: false })
 
     if (error) {
-      req.log.error({ err: error }, 'employee shift history query failed')
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch shift history' })
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch shift history')
     }
 
     return reply.send({ data: data ?? [] })
@@ -239,8 +237,7 @@ export default async function employeeShiftsRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', req.tenantId)
 
     if (error) {
-      req.log.error({ err: error }, 'employee shift delete failed')
-      return reply.code(500).send({ error: 'DELETE_FAILED', message: 'Failed to remove assignment' })
+      return serverError(req, reply, error, ErrorCode.DELETE_FAILED, 'Failed to remove assignment')
     }
 
     return reply.code(204).send()

@@ -41,7 +41,7 @@ import { assertRangeOpen, isMonthLocked, monthOf, PeriodLockedError } from '../.
 import { isSelfApproval } from '../../lib/approval-guards.js'
 import { gateApprove, gateReject } from '../../lib/approval-orchestrator.js'
 import { MANAGER_ROLES } from '../../lib/rbac.js'
-import { conflictError } from '../../lib/api-errors.js'
+import { conflictError, serverError, ErrorCode } from '../../lib/api-errors.js'
 
 const generateSchema = z.object({
   employee_id:   z.string().uuid().optional(),   // omit = all active employees
@@ -135,7 +135,7 @@ export default async function compOffRoute(fastify: FastifyInstance) {
 
     const { data: qualifyingRaw, error: fetchErr } = await query
     if (fetchErr) {
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: fetchErr.message })
+      return serverError(req, reply, fetchErr, ErrorCode.QUERY_FAILED, 'Failed to fetch qualifying comp-off days')
     }
 
     // Mutual exclusivity: employees on a WO-credit roster do NOT earn comp-off —
@@ -218,7 +218,7 @@ export default async function compOffRoute(fastify: FastifyInstance) {
 
     const { data, error } = await q
     if (error) {
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch comp-off requests')
     }
 
     const rows = ((data ?? []) as any[]).map(row => ({
@@ -419,7 +419,7 @@ export default async function compOffRoute(fastify: FastifyInstance) {
       .select('id')
 
     if (updateErr) {
-      return reply.code(500).send({ error: 'UPDATE_FAILED', message: updateErr.message })
+      return serverError(req, reply, updateErr, ErrorCode.UPDATE_FAILED, 'Failed to approve comp-off request')
     }
 
     if (!updatedRows?.length) {
@@ -547,7 +547,7 @@ export default async function compOffRoute(fastify: FastifyInstance) {
       .select('id')
 
     if (updateErr) {
-      return reply.code(500).send({ error: 'UPDATE_FAILED', message: updateErr.message })
+      return serverError(req, reply, updateErr, ErrorCode.UPDATE_FAILED, 'Failed to reject comp-off request')
     }
 
     if (!updatedRows?.length) {

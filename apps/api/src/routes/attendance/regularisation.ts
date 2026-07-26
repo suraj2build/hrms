@@ -22,6 +22,7 @@ import {
   isHrAdmin, resolveCallerEmployeeId, getDirectReportIds,
 } from '../../lib/manager-scope.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 const dateRe = /^\d{4}-\d{2}-\d{2}$/
 
@@ -775,17 +776,31 @@ export default async function regularisationRoute(fastify: FastifyInstance) {
       })
     }
 
+    // Fold the 'pending' precondition into the UPDATE itself — the read above
+    // is advisory only. Without this, a manager's approve/reject (which run
+    // via the atomic approve_regularisation_atomic/reject_regularisation_atomic
+    // RPCs, syncing punch logs + attendance_daily) can commit in the window
+    // between our read and this write; an unguarded update would then still
+    // flip status to 'withdrawn', leaving the request record contradicting
+    // the punch data it already produced.
     const { data: updated, error: updateErr } = await fastify.supabase
       .from('attendance_regularisation')
       .update({ status: 'withdrawn' })
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
+      .eq('status', 'pending')
       .select('id, status, date')
-      .single()
+      .maybeSingle()
 
     if (updateErr) {
-      req.log.error({ err: updateErr }, 'regularisation cancel failed')
-      return reply.code(500).send({ error: 'UPDATE_FAILED', message: 'Failed to cancel request' })
+      return serverError(req, reply, updateErr, ErrorCode.UPDATE_FAILED, 'Failed to cancel request')
+    }
+
+    if (!updated) {
+      return reply.code(409).send({
+        error:   'INVALID_STATUS_TRANSITION',
+        message: 'This request was actioned by someone else before it could be withdrawn',
+      })
     }
 
     return reply.send({ message: 'Request withdrawn successfully', data: updated })

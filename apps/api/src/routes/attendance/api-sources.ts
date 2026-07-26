@@ -274,6 +274,10 @@ export default async function attendanceApiSourcesRoutes(fastify: FastifyInstanc
 
   // ── GET /attendance/api-sources ───────────────────────────────────────────
   fastify.get('/attendance/api-sources', auth, async (req: any, reply) => {
+    if (!isAdmin(req.userRole)) {
+      return reply.code(403).send({ error: 'FORBIDDEN', message: 'Admin access required' })
+    }
+
     const { data, error, count } = await fastify.supabase
       .from('attendance_api_sources')
       .select(
@@ -340,6 +344,10 @@ export default async function attendanceApiSourcesRoutes(fastify: FastifyInstanc
 
   // ── GET /attendance/api-sources/:id ───────────────────────────────────────
   fastify.get('/attendance/api-sources/:id', auth, async (req: any, reply) => {
+    if (!isAdmin(req.userRole)) {
+      return reply.code(403).send({ error: 'FORBIDDEN', message: 'Admin access required' })
+    }
+
     const { id } = req.params as { id: string }
 
     const { data, error } = await fastify.supabase
@@ -353,8 +361,17 @@ export default async function attendanceApiSourcesRoutes(fastify: FastifyInstanc
       return reply.code(404).send({ error: 'NOT_FOUND', message: 'API source not found' })
     }
 
-    // Strip sensitive auth values from response
-    const safe = { ...data, auth_config: redactAuthConfig(data.auth_config) }
+    // Strip sensitive values — extra_headers and request_body are free-form
+    // records admins use to hand-embed a bearer/API key when the built-in
+    // auth_type mechanisms don't fit the target vendor (e.g. a custom
+    // "X-Api-Key" or "Authorization" header), so they need the same
+    // redaction as auth_config, not a pass-through.
+    const safe = {
+      ...data,
+      auth_config:   redactAuthConfig(data.auth_config),
+      extra_headers: redactAuthConfig(data.extra_headers ?? {}),
+      request_body:  redactAuthConfig(data.request_body ?? {}),
+    }
     return reply.send({ data: safe })
   })
 
@@ -566,7 +583,7 @@ function redactAuthConfig(cfg: Record<string, unknown>): Record<string, unknown>
   const redacted: Record<string, unknown> = {}
   for (const [k, v] of Object.entries(cfg)) {
     const lower = k.toLowerCase()
-    if (lower.includes('key') || lower.includes('password') || lower.includes('secret') || lower.includes('token')) {
+    if (lower.includes('key') || lower.includes('password') || lower.includes('secret') || lower.includes('token') || lower.includes('authoriz')) {
       redacted[k] = typeof v === 'string' && v.length > 4 ? `${v.slice(0, 2)}${'*'.repeat(Math.min(v.length - 4, 8))}${v.slice(-2)}` : '***'
     } else {
       redacted[k] = v
