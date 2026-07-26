@@ -14,6 +14,7 @@ import { z } from 'zod'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { WhatsAppProvider } from '../../lib/whatsapp-provider.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 const CreateAwardSchema = z.object({
   name:                 z.string().min(1),
@@ -228,12 +229,18 @@ export default async function recognitionRoutes(fastify: FastifyInstance) {
   fastify.get('/recognition/leaderboard', auth, async (req: any, reply) => {
     const period   = (req.query as any).period ?? 'all'
     const since    = periodStartISO(period)
-    let q = fastify.supabase
-      .from('recognition').select('to_employee, points')
-      .eq('tenant_id', req.tenantId)
-    if (since) q = q.gte('created_at', since)
-    const { data: rows, error } = await q
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to load leaderboard' })
+    let rows: any[]
+    try {
+      rows = await fetchAllRows((from, to) => {
+        let q = fastify.supabase
+          .from('recognition').select('to_employee, points')
+          .eq('tenant_id', req.tenantId)
+        if (since) q = q.gte('created_at', since)
+        return q.range(from, to)
+      })
+    } catch (error) {
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to load leaderboard')
+    }
 
     const agg = new Map<string, { points: number; count: number }>()
     for (const r of (rows ?? []) as any[]) {
@@ -360,25 +367,34 @@ export default async function recognitionRoutes(fastify: FastifyInstance) {
     const since30d = daysAgoISO(30)
     const since7d  = daysAgoISO(7)
 
-    const [all30, all7, budget] = await Promise.all([
-      fastify.supabase
-        .from('recognition')
-        .select('from_employee, to_employee, points, created_at')
-        .eq('tenant_id', req.tenantId)
-        .gte('created_at', since30d),
-      fastify.supabase
-        .from('recognition')
-        .select('id', { count: 'exact', head: true })
-        .eq('tenant_id', req.tenantId)
-        .gte('created_at', since7d),
-      fastify.supabase
-        .from('recognition_budgets')
-        .select('monthly_points')
-        .eq('tenant_id', req.tenantId)
-        .maybeSingle(),
-    ])
+    let rows30: any[]
+    let all7: any
+    let budget: any
+    try {
+      ;[rows30, all7, budget] = await Promise.all([
+        fetchAllRows((from, to) =>
+          fastify.supabase
+            .from('recognition')
+            .select('from_employee, to_employee, points, created_at')
+            .eq('tenant_id', req.tenantId)
+            .gte('created_at', since30d)
+            .range(from, to),
+        ),
+        fastify.supabase
+          .from('recognition')
+          .select('id', { count: 'exact', head: true })
+          .eq('tenant_id', req.tenantId)
+          .gte('created_at', since7d),
+        fastify.supabase
+          .from('recognition_budgets')
+          .select('monthly_points')
+          .eq('tenant_id', req.tenantId)
+          .maybeSingle(),
+      ])
+    } catch (error) {
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to load recognition analytics')
+    }
 
-    const rows30  = (all30.data ?? []) as any[]
     const total7d = all7.count ?? 0
 
     // 30-day daily trend
@@ -460,7 +476,7 @@ export default async function recognitionRoutes(fastify: FastifyInstance) {
       .from('recognition_badges')
       .insert({ ...parsed.data, tenant_id: req.tenantId, is_active: true })
 
-    if (error) return reply.code(500).send({ error: 'INSERT_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create badge')
     return reply.code(201).send({ data: { ok: true } })
   })
 
@@ -482,7 +498,7 @@ export default async function recognitionRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', req.tenantId)
       .eq('code', code)
 
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update badge')
     return reply.send({ data: { ok: true } })
   })
 
@@ -506,7 +522,7 @@ export default async function recognitionRoutes(fastify: FastifyInstance) {
       .from('recognition_budgets')
       .upsert({ tenant_id: req.tenantId, monthly_points: parsed.data.monthly_points }, { onConflict: 'tenant_id' })
 
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update recognition budget')
     return reply.send({ data: { ok: true } })
   })
 
@@ -536,7 +552,7 @@ export default async function recognitionRoutes(fastify: FastifyInstance) {
     const { data, error } = await fastify.supabase.from('formal_awards')
       .insert({ tenant_id: req.tenantId, name: name.trim(), description, frequency: frequency || 'monthly', award_type: award_type || 'custom', monetary_value: monetary_value || null, monetary_description, eligible_group, requires_nomination: requires_nomination !== false, created_by: req.userId })
       .select('id').single()
-    if (error) return reply.code(500).send({ error: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create award program')
     return reply.code(201).send({ data })
   })
 
@@ -548,7 +564,7 @@ export default async function recognitionRoutes(fastify: FastifyInstance) {
     const update: Record<string, unknown> = {}
     for (const k of allowed) { if ((parsed.data as any)[k] !== undefined) update[k] = (parsed.data as any)[k] }
     const { error } = await fastify.supabase.from('formal_awards').update(update).eq('tenant_id', req.tenantId).eq('id', id)
-    if (error) return reply.code(500).send({ error: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update award program')
     return reply.send({ data: { updated: true } })
   })
 
@@ -561,7 +577,7 @@ export default async function recognitionRoutes(fastify: FastifyInstance) {
       .select(`*, employees!award_rounds_winner_employee_id_fkey(id, first_name, last_name, employee_code)`)
       .eq('tenant_id', req.tenantId).eq('award_id', awardId)
       .order('created_at', { ascending: false }).limit(100)
-    if (error) return reply.code(500).send({ error: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch award rounds')
     // Attach nomination count
     const roundIds = (data ?? []).map((r: any) => r.id)
     const nomCounts: Record<string, number> = {}
@@ -580,7 +596,7 @@ export default async function recognitionRoutes(fastify: FastifyInstance) {
     const { data, error } = await fastify.supabase.from('award_rounds')
       .insert({ tenant_id: req.tenantId, award_id: awardId, period_label: period_label.trim(), period_start: period_start || null, period_end: period_end || null, status: 'open', created_by: req.userId })
       .select('id').single()
-    if (error) return reply.code(500).send({ error: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create award round')
     return reply.code(201).send({ data })
   })
 
@@ -592,7 +608,7 @@ export default async function recognitionRoutes(fastify: FastifyInstance) {
     const update: Record<string, unknown> = {}
     for (const k of allowed) { if ((parsed.data as any)[k] !== undefined) update[k] = (parsed.data as any)[k] }
     const { error } = await fastify.supabase.from('award_rounds').update(update).eq('tenant_id', req.tenantId).eq('id', roundId)
-    if (error) return reply.code(500).send({ error: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update award round')
     return reply.send({ data: { updated: true } })
   })
 
@@ -607,7 +623,7 @@ export default async function recognitionRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', req.tenantId).eq('id', roundId)
       .select('period_label, formal_awards!award_rounds_award_id_fkey(name)')
       .single()
-    if (re) return reply.code(500).send({ error: re.message })
+    if (re) return serverError(req, reply, re, ErrorCode.UPDATE_FAILED, 'Failed to declare award winner')
     // Mark winning nomination
     await fastify.supabase.from('award_nominations')
       .update({ status: 'winner', reviewed_at: new Date().toISOString(), reviewed_by: req.userId })
@@ -676,7 +692,7 @@ export default async function recognitionRoutes(fastify: FastifyInstance) {
       .select('id').single()
     if (error) {
       if (error.code === '23505') return reply.code(409).send({ error: 'This employee is already nominated for this round' })
-      return reply.code(500).send({ error: error.message })
+      return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to submit nomination')
     }
     return reply.code(201).send({ data })
   })
@@ -690,7 +706,7 @@ export default async function recognitionRoutes(fastify: FastifyInstance) {
     if (status) { update.status = status; update.reviewed_at = new Date().toISOString(); update.reviewed_by = req.userId }
     if (justification !== undefined) update.justification = justification
     const { error } = await fastify.supabase.from('award_nominations').update(update).eq('tenant_id', req.tenantId).eq('id', nomId)
-    if (error) return reply.code(500).send({ error: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update nomination')
     return reply.send({ data: { updated: true } })
   })
 
@@ -719,6 +735,14 @@ export default async function recognitionRoutes(fastify: FastifyInstance) {
 
     if (fetchErr || !nom) return reply.code(404).send({ error: 'Nomination not found' })
 
+    // The nomination's own prior status/level must match the level being
+    // actioned — otherwise a caller (or a replayed/forged request) could
+    // pass `level: '2'` on a nomination still at 'pending' and jump straight
+    // to 'shortlisted', bypassing the level-1 gate entirely. Fold that
+    // precondition into the UPDATE's own WHERE clause (not just an earlier
+    // read-check) so it's also race-safe against concurrent approve calls.
+    const expectedPriorStatus = level === '1' ? 'pending' : 'level_2_pending'
+
     let update: Record<string, unknown> = {}
     if (level === '1') {
       if (!approve) {
@@ -734,13 +758,22 @@ export default async function recognitionRoutes(fastify: FastifyInstance) {
       }
     }
 
-    const { error: upErr } = await fastify.supabase
+    const { data: updated, error: upErr } = await fastify.supabase
       .from('award_nominations')
       .update(update)
       .eq('tenant_id', req.tenantId)
       .eq('id', nomId)
+      .eq('status', expectedPriorStatus)
+      .select('id')
+      .maybeSingle()
 
-    if (upErr) return reply.code(500).send({ error: upErr.message })
+    if (upErr) return serverError(req, reply, upErr, ErrorCode.UPDATE_FAILED, 'Failed to update nomination')
+    if (!updated) {
+      return reply.code(409).send({
+        error:   'INVALID_STATE',
+        message: `Cannot apply level ${level} decision — nomination is not at the expected '${expectedPriorStatus}' stage`,
+      })
+    }
 
     return reply.send({ data: { ok: true, new_status: update.status ?? 'unchanged' } })
   })
@@ -754,7 +787,7 @@ export default async function recognitionRoutes(fastify: FastifyInstance) {
         formal_awards!award_rounds_award_id_fkey(id, name, description, eligible_group, requires_nomination, monetary_value, monetary_description)`)
       .eq('tenant_id', req.tenantId).eq('status', 'open')
       .order('created_at', { ascending: false }).limit(100)
-    if (error) return reply.code(500).send({ error: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch open award rounds')
     return reply.send({ data: data ?? [] })
   })
 
@@ -769,7 +802,7 @@ export default async function recognitionRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', req.tenantId).eq('status', 'closed')
       .not('winner_employee_id', 'is', null)
       .order('declared_at', { ascending: false }).limit(20)
-    if (error) return reply.code(500).send({ error: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch award winners')
     return reply.send({ data: data ?? [] })
   })
 
@@ -809,7 +842,7 @@ export default async function recognitionRoutes(fastify: FastifyInstance) {
         employees!to_employee_id(id, first_name, last_name, employee_code, designation:designations(name))`)
       .eq('tenant_id', req.tenantId)
       .order('created_at', { ascending: false }).limit(50)
-    if (error) return reply.code(500).send({ error: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch spot awards')
     return reply.send({ data: data ?? [] })
   })
 
@@ -833,24 +866,30 @@ export default async function recognitionRoutes(fastify: FastifyInstance) {
     const { data, error } = await fastify.supabase.from('spot_awards')
       .insert({ tenant_id: req.tenantId, from_employee_id: empId, to_employee_id, award_name: award_name.trim(), message: message || null, monetary_value: monetary_value || null })
       .select('id').single()
-    if (error) return reply.code(500).send({ error: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create spot award')
     return reply.code(201).send({ data })
   })
 
   // ── Admin: overall R&R tracking dashboard ────────────────────────────────
 
   fastify.get('/recognition/admin/rnr-summary', hrAuth, async (req: any, reply) => {
-    const [awardsRes, roundsRes, nominationsRes, spotRes, peersRes] = await Promise.all([
-      fastify.supabase.from('formal_awards').select('id', { count: 'exact', head: true }).eq('tenant_id', req.tenantId).eq('is_active', true),
-      fastify.supabase.from('award_rounds').select('id, status', { count: 'exact' }).eq('tenant_id', req.tenantId),
-      fastify.supabase.from('award_nominations').select('id, status').eq('tenant_id', req.tenantId),
-      fastify.supabase.from('spot_awards').select('id, monetary_value').eq('tenant_id', req.tenantId),
-      fastify.supabase.from('recognition').select('id, points').eq('tenant_id', req.tenantId).gte('created_at', new Date(new Date().getFullYear(), 0, 1).toISOString()),
-    ])
-    const rounds = (roundsRes.data ?? []) as any[]
-    const nominations = (nominationsRes.data ?? []) as any[]
-    const spotAwards = (spotRes.data ?? []) as any[]
-    const peerRecs = (peersRes.data ?? []) as any[]
+    let awardsRes: any, rounds: any[], nominations: any[], spotAwards: any[], peerRecs: any[]
+    try {
+      const yearStart = new Date(new Date().getFullYear(), 0, 1).toISOString()
+      ;[awardsRes, rounds, nominations, spotAwards, peerRecs] = await Promise.all([
+        fastify.supabase.from('formal_awards').select('id', { count: 'exact', head: true }).eq('tenant_id', req.tenantId).eq('is_active', true),
+        fetchAllRows((from, to) =>
+          fastify.supabase.from('award_rounds').select('id, status').eq('tenant_id', req.tenantId).range(from, to)),
+        fetchAllRows((from, to) =>
+          fastify.supabase.from('award_nominations').select('id, status').eq('tenant_id', req.tenantId).range(from, to)),
+        fetchAllRows((from, to) =>
+          fastify.supabase.from('spot_awards').select('id, monetary_value').eq('tenant_id', req.tenantId).range(from, to)),
+        fetchAllRows((from, to) =>
+          fastify.supabase.from('recognition').select('id, points').eq('tenant_id', req.tenantId).gte('created_at', yearStart).range(from, to)),
+      ])
+    } catch (error) {
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to load R&R summary')
+    }
     const totalMonetary = spotAwards.reduce((s: number, a: any) => s + (a.monetary_value ?? 0), 0)
     return reply.send({
       data: {
