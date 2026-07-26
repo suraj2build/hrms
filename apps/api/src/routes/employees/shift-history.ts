@@ -13,6 +13,7 @@
  */
 import type { FastifyInstance } from 'fastify'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 async function verifyEmployee(fastify: any, employeeId: string, tenantId: string) {
   const { data } = await fastify.supabase
@@ -41,7 +42,7 @@ export default async function shiftHistoryRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', req.tenantId)
       .order('effective_from', { ascending: false })
 
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch shift history')
     return reply.send({ data: data ?? [] })
   })
 }

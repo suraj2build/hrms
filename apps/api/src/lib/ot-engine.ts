@@ -302,7 +302,7 @@ export async function createOtRequest(
     approved_minutes,
     status,
     requested_by:    requestedBy,
-    approved_by:     result.auto_approved ? null : null,
+    approved_by:     null,
     approved_at,
     ot_policy_id:    policy?.id ?? null,
     rate_type:       result.rate_type,
@@ -320,12 +320,15 @@ export async function createOtRequest(
   if (error) return { ok: false, error: 'Failed to create OT request' }
 
   // Mark attendance_daily.ot_eligible = true
-  await supabase
+  const { error: syncErr } = await supabase
     .from('attendance_daily')
     .update({ ot_eligible: true, ot_approved_minutes: approved_minutes })
     .eq('tenant_id', tenantId)
     .eq('employee_id', employeeId)
     .eq('date', attendanceDate)
+  if (syncErr) {
+    console.error(`[ot-engine] failed to sync attendance_daily.ot_eligible for employee=${employeeId} date=${attendanceDate}:`, syncErr)
+  }
 
   return { ok: true, data: data as { id: string; status: string; approved_minutes: number | null } }
 }
@@ -377,12 +380,15 @@ export async function approveOtRequest(
   if (!data) return { ok: false, error: 'This request was already actioned by another request' }
 
   // Sync to attendance_daily
-  await supabase
+  const { error: syncErr } = await supabase
     .from('attendance_daily')
     .update({ ot_approved_minutes: approved_minutes })
     .eq('tenant_id', tenantId)
     .eq('employee_id', req.employee_id)
     .eq('date', req.attendance_date)
+  if (syncErr) {
+    console.error(`[ot-engine] failed to sync attendance_daily.ot_approved_minutes for employee=${req.employee_id} date=${req.attendance_date}:`, syncErr)
+  }
 
   return { ok: true, data: data as { id: string; status: string; approved_minutes: number | null } }
 }
@@ -404,6 +410,12 @@ export async function rejectOtRequest(
   if (!req) return { ok: false, error: 'OT request not found' }
   if (req.status !== 'PENDING') return { ok: false, error: `Cannot reject a request with status ${req.status}` }
 
+  // .eq('status', 'PENDING') + row-count check (fresh audit finding): without
+  // this, a concurrent approve could land between the precheck above and this
+  // UPDATE, and this unconditional write would silently overwrite the
+  // just-approved request back to REJECTED with approved_minutes=0 — reverting
+  // an approval with no error surfaced. Mirrors the guard already on
+  // approveOtRequest above.
   const { data, error } = await supabase
     .from('overtime_requests')
     .update({
@@ -415,9 +427,11 @@ export async function rejectOtRequest(
     })
     .eq('id', requestId)
     .eq('tenant_id', tenantId)
+    .eq('status', 'PENDING')
     .select('id, status, approved_minutes')
-    .single()
+    .maybeSingle()
 
   if (error) return { ok: false, error: 'Failed to reject OT request' }
+  if (!data) return { ok: false, error: 'This request was already actioned by another request' }
   return { ok: true, data: data as { id: string; status: string; approved_minutes: number | null } }
 }

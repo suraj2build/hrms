@@ -47,6 +47,21 @@ const policySchema = z.object({
 
 const POLICY_COLS = 'id, tenant_id, name, description, is_active, created_at, updated_at'
 
+// rotation_policy_rules.shift_id only FKs to shifts(id) — no tenant compound
+// key (migration 153_rotation_policies.sql) — so the DB alone won't stop a
+// caller attaching another tenant's shift to their own rotation policy.
+// Verify every rule's shift_id belongs to this tenant before insert.
+async function allShiftsBelongToTenant(fastify: any, tenantId: string, shiftIds: string[]): Promise<boolean> {
+  if (shiftIds.length === 0) return true
+  const uniqueIds = [...new Set(shiftIds)]
+  const { data } = await fastify.supabase
+    .from('shifts')
+    .select('id')
+    .eq('tenant_id', tenantId)
+    .in('id', uniqueIds)
+  return (data?.length ?? 0) === uniqueIds.length
+}
+
 // ── Route handler ─────────────────────────────────────────────────────────────
 
 export default async function rotationPoliciesRoutes(fastify: FastifyInstance) {
@@ -151,6 +166,9 @@ export default async function rotationPoliciesRoutes(fastify: FastifyInstance) {
 
     // Insert rules if provided
     if (rules.length > 0) {
+      if (!(await allShiftsBelongToTenant(fastify, req.tenantId, rules.map(r => r.shift_id)))) {
+        return reply.code(404).send({ error: 'INVALID_SHIFT', message: 'One or more shifts were not found in your organisation' })
+      }
       const ruleRows = rules.map((r) => ({
         ...r,
         rotation_policy_id: (policy as any).id,
@@ -234,6 +252,13 @@ export default async function rotationPoliciesRoutes(fastify: FastifyInstance) {
     // effective today. Past dates continue to resolve to the version that was in
     // effect then.
     if (Array.isArray(rules)) {
+      // Validate before mutating anything below, so a bad shift_id doesn't
+      // close out the previous rule versions and then fail the insert,
+      // leaving the policy with no active rules at all.
+      if (rules.length > 0 && !(await allShiftsBelongToTenant(fastify, req.tenantId, rules.map(r => r.shift_id)))) {
+        return reply.code(404).send({ error: 'INVALID_SHIFT', message: 'One or more shifts were not found in your organisation' })
+      }
+
       const today     = new Date().toISOString().slice(0, 10)
       const yesterday = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10)
 
@@ -414,7 +439,8 @@ export default async function rotationPoliciesRoutes(fastify: FastifyInstance) {
         shift_id:           r.shift_id,
         sort_order:         r.sort_order,
       }))
-      await fastify.supabase.from('rotation_policy_rules').insert(cloneRules)
+      const { error: cloneRuleErr } = await fastify.supabase.from('rotation_policy_rules').insert(cloneRules)
+      if (cloneRuleErr) return serverError(req, reply, cloneRuleErr, ErrorCode.INSERT_FAILED, 'Policy duplicated but failed to clone its rules')
     }
 
     return reply.code(201).send(clone)
