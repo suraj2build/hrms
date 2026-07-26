@@ -16,6 +16,7 @@ import {
   isHrAdmin, resolveManagerEmployeeId, getDirectReportIds,
 } from '../../lib/manager-scope.js'
 import { otFromBreakdown } from '../../lib/payroll-dept-snapshot.js'
+import { fetchAllRows } from '../../lib/supabase-paginate.js'
 
 const monthRe = /^\d{4}-\d{2}$/
 
@@ -49,12 +50,15 @@ export default async function managerTeamPayrollCostRoute(fastify: FastifyInstan
     if (isHrAdmin(req.userRole) && manager_employee_id) {
       employeeIds = await getDirectReportIds(fastify.supabase, req.tenantId, manager_employee_id)
     } else if (isHrAdmin(req.userRole)) {
-      const { data: emps } = await fastify.supabase
-        .from('employees')
-        .select('id')
-        .eq('tenant_id', req.tenantId)
-        .in('status', ['active', 'on_notice'])
-      employeeIds = ((emps ?? []) as any[]).map(e => e.id)
+      const emps = await fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('employees')
+          .select('id')
+          .eq('tenant_id', req.tenantId)
+          .in('status', ['active', 'on_notice'])
+          .range(from, to)
+      )
+      employeeIds = (emps as any[]).map(e => e.id)
     } else {
       const managerEmpId = await resolveManagerEmployeeId(fastify.supabase, req)
       if (!managerEmpId) return reply.send({ data: [], month, run_status: null, total: null })
