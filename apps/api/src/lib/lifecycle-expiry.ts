@@ -20,6 +20,23 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { fetchAllRows } from './supabase-paginate.js'
+
+const ID_CHUNK = 200
+
+/** Runs queryFn once per chunk of `ids` (PostgREST .in() lists have a practical size limit) and concatenates the rows. */
+async function fetchByIds<T>(
+  ids: string[],
+  queryFn: (chunk: string[]) => PromiseLike<{ data: T[] | null; error: unknown }>,
+): Promise<T[]> {
+  const out: T[] = []
+  for (let i = 0; i < ids.length; i += ID_CHUNK) {
+    const { data, error } = await queryFn(ids.slice(i, i + ID_CHUNK))
+    if (error) throw error
+    out.push(...(data ?? []))
+  }
+  return out
+}
 
 export type LifecycleCategory =
   | 'document'
@@ -103,43 +120,49 @@ export async function computeLifecycleRisks(
   // ── 1. Pull each category's raw rows in parallel ───────────────────────────
   const [docs, idents, pvs, contracts, probationRows, certs] = await Promise.all([
     cats.has('document')
-      ? supabase.from('documents')
-          .select('id, employee_id, doc_type, name, expires_at')
-          .eq('tenant_id', tenantId).not('expires_at', 'is', null).lte('expires_at', horizon)
-          .then(r => r.data ?? [])
+      ? fetchAllRows<any>((from, to) =>
+          supabase.from('documents')
+            .select('id, employee_id, doc_type, name, expires_at')
+            .eq('tenant_id', tenantId).not('expires_at', 'is', null).lte('expires_at', horizon)
+            .range(from, to))
       : Promise.resolve([] as any[]),
     cats.has('identity')
-      ? supabase.from('employee_identity')
-          .select('id, employee_id, identity_number, expiry_date, identity_types(name)')
-          .eq('tenant_id', tenantId).not('expiry_date', 'is', null).lte('expiry_date', horizon)
-          .then(r => r.data ?? [])
+      ? fetchAllRows<any>((from, to) =>
+          supabase.from('employee_identity')
+            .select('id, employee_id, identity_number, expiry_date, identity_types(name)')
+            .eq('tenant_id', tenantId).not('expiry_date', 'is', null).lte('expiry_date', horizon)
+            .range(from, to))
       : Promise.resolve([] as any[]),
     (cats.has('passport') || cats.has('visa'))
-      ? supabase.from('employee_passport_visa')
-          .select('id, employee_id, record_type, doc_number, country, visa_type, expiry_date')
-          .eq('tenant_id', tenantId).not('expiry_date', 'is', null).lte('expiry_date', horizon)
-          .then(r => r.data ?? [])
+      ? fetchAllRows<any>((from, to) =>
+          supabase.from('employee_passport_visa')
+            .select('id, employee_id, record_type, doc_number, country, visa_type, expiry_date')
+            .eq('tenant_id', tenantId).not('expiry_date', 'is', null).lte('expiry_date', horizon)
+            .range(from, to))
       : Promise.resolve([] as any[]),
     cats.has('contract')
-      ? supabase.from('employee_contracts')
-          .select('id, employee_id, contract_type, end_date, status')
-          .eq('tenant_id', tenantId).not('end_date', 'is', null).lte('end_date', horizon)
-          .not('status', 'in', '("terminated")')
-          .then(r => r.data ?? [])
+      ? fetchAllRows<any>((from, to) =>
+          supabase.from('employee_contracts')
+            .select('id, employee_id, contract_type, end_date, status')
+            .eq('tenant_id', tenantId).not('end_date', 'is', null).lte('end_date', horizon)
+            .not('status', 'in', '("terminated")')
+            .range(from, to))
       : Promise.resolve([] as any[]),
     cats.has('probation')
-      ? supabase.from('job_history')
-          .select('employee_id, confirmation_date, employment_type')
-          .eq('tenant_id', tenantId).eq('is_current', true)
-          .eq('employment_type', 'probation').is('confirmation_date', null)
-          .then(r => r.data ?? [])
+      ? fetchAllRows<any>((from, to) =>
+          supabase.from('job_history')
+            .select('employee_id, confirmation_date, employment_type')
+            .eq('tenant_id', tenantId).eq('is_current', true)
+            .eq('employment_type', 'probation').is('confirmation_date', null)
+            .range(from, to))
       : Promise.resolve([] as any[]),
     cats.has('certification')
-      ? supabase.from('employee_certifications')
-          .select('id, employee_id, cert_name, cert_type, expiry_date')
-          .eq('tenant_id', tenantId).eq('status', 'active')
-          .not('expiry_date', 'is', null).lte('expiry_date', horizon)
-          .then(r => r.data ?? [])
+      ? fetchAllRows<any>((from, to) =>
+          supabase.from('employee_certifications')
+            .select('id, employee_id, cert_name, cert_type, expiry_date')
+            .eq('tenant_id', tenantId).eq('status', 'active')
+            .not('expiry_date', 'is', null).lte('expiry_date', horizon)
+            .range(from, to))
       : Promise.resolve([] as any[]),
   ])
 
@@ -158,15 +181,19 @@ export async function computeLifecycleRisks(
   const catProbationDays = new Map<string, number>()
 
   if (empIdList.length) {
-    const [{ data: emps }, { data: jh }, { data: categories }] = await Promise.all([
-      supabase.from('employees')
-        .select('id, first_name, last_name, employee_code, joining_date, status, employment_category_id')
-        .eq('tenant_id', tenantId).in('id', empIdList),
-      supabase.from('job_history')
-        .select('employee_id, department_id, departments(name)')
-        .eq('tenant_id', tenantId).eq('is_current', true).in('employee_id', empIdList),
-      supabase.from('employment_categories')
-        .select('id, probation_days').eq('tenant_id', tenantId),
+    const [emps, jh, categories] = await Promise.all([
+      fetchByIds(empIdList, (chunk) =>
+        supabase.from('employees')
+          .select('id, first_name, last_name, employee_code, joining_date, status, employment_category_id')
+          .eq('tenant_id', tenantId).in('id', chunk)),
+      fetchByIds(empIdList, (chunk) =>
+        supabase.from('job_history')
+          .select('employee_id, department_id, departments(name)')
+          .eq('tenant_id', tenantId).eq('is_current', true).in('employee_id', chunk)),
+      fetchAllRows<any>((from, to) =>
+        supabase.from('employment_categories')
+          .select('id, probation_days').eq('tenant_id', tenantId)
+          .range(from, to)),
     ])
     for (const e of (emps ?? []) as any[]) {
       empMap.set(e.id, {
