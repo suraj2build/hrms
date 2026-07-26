@@ -14,6 +14,7 @@
  */
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 import {
   chatCompleteWithFallback, testConnection,
   AssistantNotConfiguredError, isConfigUsable, effectiveModel, PROVIDER_META,
@@ -363,7 +364,7 @@ export default async function assistantRoutes(fastify: FastifyInstance) {
         .upsert(minPatch, { onConflict: 'tenant_id' }))
     }
 
-    if (error) return reply.code(500).send({ error: 'SAVE_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to save assistant config')
     return reply.send({ data: { ok: true } })
   })
 

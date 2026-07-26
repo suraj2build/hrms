@@ -16,6 +16,7 @@ import { z } from 'zod'
 import { ensureTodaysCelebrations } from '../../lib/community-celebrations.js'
 import { containsProfanity } from '../../lib/profanity.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 const PROFANITY_MSG = 'Your message looks like it contains inappropriate language. Please rephrase.'
 const REACTIONS = ['like', 'celebrate', 'appreciate', 'support'] as const
 
@@ -191,7 +192,7 @@ export default async function communityRoutes(fastify: FastifyInstance) {
     const { data, error } = await fastify.supabase
       .from('feed_posts').update(update)
       .eq('id', id).eq('tenant_id', req.tenantId).select('id')
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update post')
     if (!data || data.length === 0) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Post not found' })
     return reply.send({ message: 'Post updated' })
   })
