@@ -6,6 +6,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 const EVENT_TYPES = [
   'component_change',
@@ -106,7 +107,7 @@ export default async function payrollLedgerRoutes(fastify: FastifyInstance) {
     if (parsed.data.source_module) q = q.eq('source_module', parsed.data.source_module)
 
     const { data, error } = await q
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch payroll ledger')
     return reply.send({ data: data ?? [] })
   })
 
@@ -122,7 +123,7 @@ export default async function payrollLedgerRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', req.tenantId)
       .order('ledger_date', { ascending: false })
 
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch payroll ledger for run')
     return reply.send({ data: data ?? [] })
   })
 
@@ -160,7 +161,7 @@ export default async function payrollLedgerRoutes(fastify: FastifyInstance) {
       .select()
       .single()
 
-    if (error) return reply.code(500).send({ error: 'INSERT_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create ledger entry')
     return reply.code(201).send({ data })
   })
 
@@ -194,7 +195,7 @@ export default async function payrollLedgerRoutes(fastify: FastifyInstance) {
       .gte('ledger_date', firstOfMonth)
       .lte('ledger_date', lastOfMonth)
 
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch payroll ledger summary')
 
     // Group by event_type in memory
     const summaryMap = new Map<string, { total_delta: number; entry_count: number }>()

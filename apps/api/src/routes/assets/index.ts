@@ -115,7 +115,7 @@ export default async function assetsRoutes(fastify: FastifyInstance) {
     if (error) {
       if (error.code === '23505')
         return reply.code(409).send({ error: 'DUPLICATE', message: `Asset code "${parsed.data.asset_code}" already exists` })
-      return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+      return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create asset')
     }
 
     await logAction(fastify.supabase, {
@@ -143,7 +143,7 @@ export default async function assetsRoutes(fastify: FastifyInstance) {
     if (error) {
       if (error.code === '23505')
         return reply.code(409).send({ error: 'DUPLICATE', message: 'Asset code already exists' })
-      return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+      return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update asset')
     }
     if (!data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Asset not found' })
 
@@ -176,7 +176,7 @@ export default async function assetsRoutes(fastify: FastifyInstance) {
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
 
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.DELETE_FAILED, 'Failed to delete asset')
 
     await logAction(fastify.supabase, {
       tenantId: req.tenantId, tableName: 'assets', recordId: id,
@@ -221,7 +221,7 @@ export default async function assetsRoutes(fastify: FastifyInstance) {
       .eq('status', 'available')
       .select()
       .maybeSingle()
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to assign asset')
     if (!data) return reply.code(409).send({ error: 'NOT_AVAILABLE', message: 'Asset was assigned by another request — refresh and try again.' })
 
     const { error: ledgerErr } = await fastify.supabase.from('employee_asset_ledger').insert({
@@ -280,7 +280,7 @@ export default async function assetsRoutes(fastify: FastifyInstance) {
       .eq('status', 'assigned')
       .select()
       .maybeSingle()
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to return asset')
     if (!data) return reply.code(409).send({ error: 'NOT_ASSIGNED', message: 'Asset was already returned by another request — refresh and try again.' })
 
     if (employeeId) {
@@ -416,7 +416,7 @@ export default async function assetsRoutes(fastify: FastifyInstance) {
       .from('asset_requests')
       .insert({ tenant_id: req.tenantId, employee_id: empId, ...parsed.data, status: 'pending' })
       .select().single()
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create asset request')
     return reply.code(201).send({ data })
   })
 
@@ -474,7 +474,7 @@ export default async function assetsRoutes(fastify: FastifyInstance) {
       .from('asset_requests')
       .update({ status: parsed.data.decision, decision_remarks: parsed.data.remarks ?? null, decided_by: req.userId, decided_at: new Date().toISOString(), updated_at: new Date().toISOString() })
       .eq('id', id).eq('tenant_id', req.tenantId).eq('status', 'pending').select().single()
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to decide asset request')
     if (!data) return reply.code(409).send({ error: 'NOT_PENDING', message: 'Request not found or already decided' })
     return reply.send({ data })
   })

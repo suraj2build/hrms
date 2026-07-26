@@ -10,6 +10,7 @@ import { z } from 'zod'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { isHrAdmin, resolveCallerEmployeeId } from '../../lib/manager-scope.js'
 import { logAction } from '../../lib/audit-service.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 const SEED_QUESTIONS = [
   { category: 'reason',       question_text: 'What is the primary reason for your departure?', response_type: 'single_choice', options: ['Better opportunity','Compensation & benefits','Work-life balance','Relationship with manager','Career growth','Relocation','Personal reasons','Other'], is_required: true },
@@ -99,7 +100,7 @@ export default async function exitInterviewRoutes(fastify: FastifyInstance) {
       .from('exit_interview_questions')
       .insert({ ...parsed.data, tenant_id: req.tenantId, template_id: template.id })
       .select().single()
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create exit interview question')
     return reply.code(201).send({ data })
   })
 
@@ -110,7 +111,7 @@ export default async function exitInterviewRoutes(fastify: FastifyInstance) {
       .from('exit_interview_questions')
       .update(parsed.data).eq('id', req.params.qid).eq('tenant_id', req.tenantId)
       .select().single()
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update exit interview question')
     if (!data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Question not found' })
     return reply.send({ data })
   })
@@ -119,7 +120,7 @@ export default async function exitInterviewRoutes(fastify: FastifyInstance) {
     const { error } = await fastify.supabase
       .from('exit_interview_questions')
       .update({ is_active: false }).eq('id', req.params.qid).eq('tenant_id', req.tenantId)
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to delete exit interview question')
     return reply.code(204).send()
   })
 
@@ -180,7 +181,7 @@ export default async function exitInterviewRoutes(fastify: FastifyInstance) {
 
     const { template } = await getOrCreateTemplate(req.tenantId)
     const err = await upsertResponses(req.tenantId, sep.id, parsed.data.responses)
-    if (err) return reply.code(500).send({ error: 'DB_ERROR', message: err.message })
+    if (err) return serverError(req, reply, err, ErrorCode.UPDATE_FAILED, 'Failed to save exit interview responses')
 
     await fastify.supabase.from('employee_separation').update({
       exit_interview_status:           'draft',
@@ -209,7 +210,7 @@ export default async function exitInterviewRoutes(fastify: FastifyInstance) {
     const { template, questions } = await getOrCreateTemplate(req.tenantId)
     if (parsed.success && parsed.data.responses.length) {
       const err = await upsertResponses(req.tenantId, sep.id, parsed.data.responses)
-      if (err) return reply.code(500).send({ error: 'DB_ERROR', message: err.message })
+      if (err) return serverError(req, reply, err, ErrorCode.UPDATE_FAILED, 'Failed to save exit interview responses')
     }
 
     // Required-field guard

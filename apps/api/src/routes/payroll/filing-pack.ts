@@ -18,6 +18,7 @@ import { z } from 'zod'
 import { logAction } from '../../lib/audit-service.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 // ── Shared helpers ────────────────────────────────────────────────────────────
 
@@ -398,7 +399,7 @@ export default async function filingPackRoutes(fastify: FastifyInstance) {
           .range(from, to),
       )
     } catch (epfErr: any) {
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: epfErr.message })
+      return serverError(req, reply, epfErr, ErrorCode.QUERY_FAILED, 'Failed to fetch EPF contributions')
     }
 
     const reg      = (regResult.data   as any) ?? {}
@@ -609,7 +610,7 @@ export default async function filingPackRoutes(fastify: FastifyInstance) {
       .upsert({ tenant_id: req.tenantId, ...payload, updated_at: new Date().toISOString(), updated_by: req.userId }, { onConflict: 'tenant_id' })
       .select('deductor_tan, deductor_pan')
       .single()
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to save deductor details')
 
     await logAction(fastify.supabase, {
       tenantId: req.tenantId, tableName: 'payroll_statutory_settings', recordId: req.tenantId,
@@ -754,7 +755,7 @@ export default async function filingPackRoutes(fastify: FastifyInstance) {
           .eq('is_active', true),
       ])
     } catch (err: any) {
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: err?.message ?? 'Failed to fetch challan data' })
+      return serverError(req, reply, err, ErrorCode.QUERY_FAILED, 'Failed to fetch challan data')
     }
 
     const ptaxRegMap = new Map<string, string>()
@@ -869,7 +870,7 @@ export default async function filingPackRoutes(fastify: FastifyInstance) {
     if (financial_year) q = q.eq('period_fy', financial_year)
 
     const { data, error } = await q
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch filing artifacts')
 
     return reply.send({ data: data ?? [] })
   })
@@ -900,7 +901,7 @@ export default async function filingPackRoutes(fastify: FastifyInstance) {
       .select()
       .single()
 
-    if (error) return reply.code(500).send({ error: 'INSERT_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to record filing artifact')
 
     await logAction(fastify.supabase, {
       tenantId:    req.tenantId,
@@ -938,7 +939,7 @@ export default async function filingPackRoutes(fastify: FastifyInstance) {
       .select()
       .single()
 
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update filing artifact')
     if (!data)  return reply.code(404).send({ error: 'NOT_FOUND', message: 'Artifact not found' })
 
     await logAction(fastify.supabase, {

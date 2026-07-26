@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { generateUniqueCode } from '../../lib/generate-code.js'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
@@ -35,7 +36,7 @@ export default async function orgRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', req.tenantId)
       .order('name')
 
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch departments')
     return reply.send({ data })
   })
 
@@ -56,8 +57,8 @@ export default async function orgRoutes(fastify: FastifyInstance) {
         .eq('tenant_id', tenantId),
     ])
 
-    if (jobHistoryResult.error) return reply.code(500).send({ error: 'DB_ERROR', message: jobHistoryResult.error.message })
-    if (childDeptsResult.error) return reply.code(500).send({ error: 'DB_ERROR', message: childDeptsResult.error.message })
+    if (jobHistoryResult.error) return serverError(req, reply, jobHistoryResult.error, ErrorCode.QUERY_FAILED, 'Failed to fetch department usage')
+    if (childDeptsResult.error) return serverError(req, reply, childDeptsResult.error, ErrorCode.QUERY_FAILED, 'Failed to fetch department usage')
 
     const job_history = jobHistoryResult.count ?? 0
     const child_departments = childDeptsResult.count ?? 0
@@ -84,11 +85,10 @@ export default async function orgRoutes(fastify: FastifyInstance) {
       .select().single()
 
     if (error) {
-      req.log.error({ err: error, tenant_id: req.tenantId, code }, 'department create failed')
       if (error.code === '23505') {
         return reply.code(409).send({ error: 'DUPLICATE', message: `A department with code "${code}" already exists` })
       }
-      return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+      return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create department')
     }
     return reply.code(201).send(data)
   })
@@ -100,7 +100,7 @@ export default async function orgRoutes(fastify: FastifyInstance) {
 
     const { data, error } = await fastify.supabase
       .from('departments').update(parsed.data).eq('id', id).eq('tenant_id', req.tenantId).select().single()
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update department')
     return reply.send(data)
   })
 
@@ -136,8 +136,8 @@ export default async function orgRoutes(fastify: FastifyInstance) {
         .eq('tenant_id', tenantId),
     ])
 
-    if (jobHistoryResult.error) return reply.code(500).send({ error: 'DB_ERROR', message: jobHistoryResult.error.message })
-    if (childDeptsResult.error) return reply.code(500).send({ error: 'DB_ERROR', message: childDeptsResult.error.message })
+    if (jobHistoryResult.error) return serverError(req, reply, jobHistoryResult.error, ErrorCode.QUERY_FAILED, 'Failed to check department usage')
+    if (childDeptsResult.error) return serverError(req, reply, childDeptsResult.error, ErrorCode.QUERY_FAILED, 'Failed to check department usage')
 
     const usageCount = (jobHistoryResult.count ?? 0) + (childDeptsResult.count ?? 0)
 
@@ -162,13 +162,13 @@ export default async function orgRoutes(fastify: FastifyInstance) {
           .eq('parent_id', id)
           .eq('tenant_id', tenantId),
       ])
-      if (jhUpdate.error) return reply.code(500).send({ error: 'DB_ERROR', message: jhUpdate.error.message })
-      if (childUpdate.error) return reply.code(500).send({ error: 'DB_ERROR', message: childUpdate.error.message })
+      if (jhUpdate.error) return serverError(req, reply, jhUpdate.error, ErrorCode.UPDATE_FAILED, 'Failed to reassign department usages')
+      if (childUpdate.error) return serverError(req, reply, childUpdate.error, ErrorCode.UPDATE_FAILED, 'Failed to reassign department usages')
     }
 
     const { error } = await fastify.supabase
       .from('departments').delete().eq('id', id).eq('tenant_id', tenantId)
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.DELETE_FAILED, 'Failed to delete department')
     return reply.code(204).send()
   })
 
@@ -176,7 +176,7 @@ export default async function orgRoutes(fastify: FastifyInstance) {
   fastify.get('/designations', auth, async (req, reply) => {
     const { data, error } = await fastify.supabase
       .from('designations').select('*').eq('tenant_id', req.tenantId).order('name')
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch designations')
     return reply.send({ data })
   })
 
@@ -190,7 +190,7 @@ export default async function orgRoutes(fastify: FastifyInstance) {
       .eq('designation_id', id)
       .eq('tenant_id', tenantId)
 
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch designation usage')
 
     const job_history = count ?? 0
     return reply.send({ data: { job_history, total: job_history } })
@@ -202,7 +202,7 @@ export default async function orgRoutes(fastify: FastifyInstance) {
 
     const { data, error } = await fastify.supabase
       .from('designations').insert({ ...parsed.data, tenant_id: req.tenantId }).select().single()
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create designation')
     return reply.code(201).send(data)
   })
 
@@ -213,7 +213,7 @@ export default async function orgRoutes(fastify: FastifyInstance) {
 
     const { data, error } = await fastify.supabase
       .from('designations').update(parsed.data).eq('id', id).eq('tenant_id', req.tenantId).select().single()
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update designation')
     return reply.send(data)
   })
 
@@ -241,7 +241,7 @@ export default async function orgRoutes(fastify: FastifyInstance) {
       .eq('designation_id', id)
       .eq('tenant_id', tenantId)
 
-    if (countError) return reply.code(500).send({ error: 'DB_ERROR', message: countError.message })
+    if (countError) return serverError(req, reply, countError, ErrorCode.QUERY_FAILED, 'Failed to check designation usage')
 
     const usageCount = count ?? 0
 
@@ -259,12 +259,12 @@ export default async function orgRoutes(fastify: FastifyInstance) {
         .update({ designation_id: merge_to })
         .eq('designation_id', id)
         .eq('tenant_id', tenantId)
-      if (updateError) return reply.code(500).send({ error: 'DB_ERROR', message: updateError.message })
+      if (updateError) return serverError(req, reply, updateError, ErrorCode.UPDATE_FAILED, 'Failed to reassign designation usages')
     }
 
     const { error } = await fastify.supabase
       .from('designations').delete().eq('id', id).eq('tenant_id', tenantId)
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.DELETE_FAILED, 'Failed to delete designation')
     return reply.code(204).send()
   })
 
@@ -272,7 +272,7 @@ export default async function orgRoutes(fastify: FastifyInstance) {
   fastify.get('/grades', auth, async (req, reply) => {
     const { data, error } = await fastify.supabase
       .from('grades').select('*').eq('tenant_id', req.tenantId).order('name')
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch grades')
     return reply.send({ data })
   })
 
@@ -286,7 +286,7 @@ export default async function orgRoutes(fastify: FastifyInstance) {
       .eq('grade_id', id)
       .eq('tenant_id', tenantId)
 
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch grade usage')
 
     const job_history = count ?? 0
     return reply.send({ data: { job_history, total: job_history } })
@@ -301,7 +301,7 @@ export default async function orgRoutes(fastify: FastifyInstance) {
 
     const { data, error } = await fastify.supabase
       .from('grades').insert({ ...parsed.data, code, tenant_id: req.tenantId }).select().single()
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create grade')
     return reply.code(201).send(data)
   })
 
@@ -312,7 +312,7 @@ export default async function orgRoutes(fastify: FastifyInstance) {
 
     const { data, error } = await fastify.supabase
       .from('grades').update(parsed.data).eq('id', id).eq('tenant_id', req.tenantId).select().single()
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update grade')
     return reply.send(data)
   })
 
@@ -340,7 +340,7 @@ export default async function orgRoutes(fastify: FastifyInstance) {
       .eq('grade_id', id)
       .eq('tenant_id', tenantId)
 
-    if (countError) return reply.code(500).send({ error: 'DB_ERROR', message: countError.message })
+    if (countError) return serverError(req, reply, countError, ErrorCode.QUERY_FAILED, 'Failed to check grade usage')
 
     const usageCount = count ?? 0
 
@@ -358,12 +358,12 @@ export default async function orgRoutes(fastify: FastifyInstance) {
         .update({ grade_id: merge_to })
         .eq('grade_id', id)
         .eq('tenant_id', tenantId)
-      if (updateError) return reply.code(500).send({ error: 'DB_ERROR', message: updateError.message })
+      if (updateError) return serverError(req, reply, updateError, ErrorCode.UPDATE_FAILED, 'Failed to reassign grade usages')
     }
 
     const { error } = await fastify.supabase
       .from('grades').delete().eq('id', id).eq('tenant_id', tenantId)
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.DELETE_FAILED, 'Failed to delete grade')
     return reply.code(204).send()
   })
 }

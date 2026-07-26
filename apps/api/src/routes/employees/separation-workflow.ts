@@ -6,6 +6,7 @@ import { eventBus } from '../../lib/event-bus.js'
 import { computeFnfSettlement } from '../../lib/fnf-settlement-engine.js'
 import { isHrAdmin, resolveCallerEmployeeId, isDirectReport } from '../../lib/manager-scope.js'
 import { revokeEmployeeAuth } from '../../lib/user-account-service.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 // ─── Schemas ─────────────────────────────────────────────────────────────────
 
@@ -111,7 +112,7 @@ export default async function separationWorkflowRoutes(fastify: FastifyInstance)
       .eq('tenant_id', req.tenantId)
       .order('created_at', { ascending: false })
 
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch separations')
 
     // Attach clearances + F&F for each separation
     const result = await Promise.all((seps ?? []).map(async (sep: any) => {
@@ -165,7 +166,7 @@ export default async function separationWorkflowRoutes(fastify: FastifyInstance)
       .order('department', { ascending: true })
 
     if (error)
-      return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch separation clearances')
 
     return reply.send({ data: data ?? [] })
   })
@@ -208,7 +209,7 @@ export default async function separationWorkflowRoutes(fastify: FastifyInstance)
       .select()
 
     if (error)
-      return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+      return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to initialize clearances')
 
     await logAction(fastify.supabase, {
       tenantId:    req.tenantId,
@@ -303,7 +304,7 @@ export default async function separationWorkflowRoutes(fastify: FastifyInstance)
       .single()
 
     if (error)
-      return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+      return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update clearance status')
     if (!updated)
       return reply.code(404).send({ error: 'NOT_FOUND', message: 'Clearance record not found' })
 
@@ -355,7 +356,7 @@ export default async function separationWorkflowRoutes(fastify: FastifyInstance)
       .maybeSingle()
 
     if (error)
-      return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch F&F summary')
 
     return reply.send({ data: data ?? null })
   })
@@ -398,7 +399,7 @@ export default async function separationWorkflowRoutes(fastify: FastifyInstance)
         .select()
         .single()
       if (error)
-        return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+        return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update F&F settlement')
       result = data
       statusCode = 200
     } else {
@@ -415,7 +416,7 @@ export default async function separationWorkflowRoutes(fastify: FastifyInstance)
         .select()
         .single()
       if (error)
-        return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+        return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create F&F settlement')
       result = data
     }
 
@@ -482,14 +483,14 @@ export default async function separationWorkflowRoutes(fastify: FastifyInstance)
       const { data, error } = await fastify.supabase
         .from('separation_ff_summary')
         .update(payload).eq('id', existing.id).eq('tenant_id', req.tenantId).select().single()
-      if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+      if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update computed F&F settlement')
       result = data
     } else {
       const { data, error } = await fastify.supabase
         .from('separation_ff_summary')
         .insert({ ...payload, employee_id: req.params.id, tenant_id: req.tenantId, separation_id: separation.id, status: 'draft', computed_by: req.userId })
         .select().single()
-      if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+      if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create computed F&F settlement')
       result = data
     }
 
@@ -516,7 +517,7 @@ export default async function separationWorkflowRoutes(fastify: FastifyInstance)
       .maybeSingle()
 
     if (fetchErr)
-      return reply.code(500).send({ error: 'DB_ERROR', message: fetchErr.message })
+      return serverError(req, reply, fetchErr, ErrorCode.QUERY_FAILED, 'Failed to fetch F&F record')
     if (!ff)
       return reply.code(404).send({ error: 'NOT_FOUND', message: 'F&F record not found' })
     if (ff.status === 'approved' || ff.status === 'paid')
@@ -537,7 +538,7 @@ export default async function separationWorkflowRoutes(fastify: FastifyInstance)
       .single()
 
     if (error)
-      return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+      return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to approve F&F settlement')
 
     await logAction(fastify.supabase, {
       tenantId:    req.tenantId,
@@ -566,7 +567,7 @@ export default async function separationWorkflowRoutes(fastify: FastifyInstance)
       .maybeSingle()
 
     if (fetchErr)
-      return reply.code(500).send({ error: 'DB_ERROR', message: fetchErr.message })
+      return serverError(req, reply, fetchErr, ErrorCode.QUERY_FAILED, 'Failed to fetch F&F record')
     if (!ff)
       return reply.code(404).send({ error: 'NOT_FOUND', message: 'F&F record not found' })
     if (ff.status !== 'approved')
@@ -587,7 +588,7 @@ export default async function separationWorkflowRoutes(fastify: FastifyInstance)
       .single()
 
     if (error)
-      return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+      return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to mark F&F settlement as paid')
 
     await logAction(fastify.supabase, {
       tenantId:    req.tenantId,
@@ -627,7 +628,7 @@ export default async function separationWorkflowRoutes(fastify: FastifyInstance)
         .eq('tenant_id', req.tenantId)
         .select()
         .single()
-      if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+      if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to reject separation')
 
       await logAction(fastify.supabase, {
         tenantId: req.tenantId, tableName: 'employee_separation', recordId: sep.id,
@@ -651,7 +652,7 @@ export default async function separationWorkflowRoutes(fastify: FastifyInstance)
       .eq('tenant_id', req.tenantId)
       .select()
       .single()
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to approve separation')
 
     await fastify.supabase
       .from('employees')
@@ -708,7 +709,7 @@ export default async function separationWorkflowRoutes(fastify: FastifyInstance)
       .eq('tenant_id', req.tenantId)
       .select()
       .single()
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to advance separation stage')
 
     await logAction(fastify.supabase, {
       tenantId: req.tenantId, tableName: 'employee_separation', recordId: sep.id,
@@ -764,7 +765,7 @@ export default async function separationWorkflowRoutes(fastify: FastifyInstance)
       .eq('tenant_id', req.tenantId)
       .select()
       .single()
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to relieve employee')
 
     await fastify.supabase
       .from('employees')
@@ -816,7 +817,7 @@ export default async function separationWorkflowRoutes(fastify: FastifyInstance)
       .eq('tenant_id', req.tenantId)
       .select()
       .single()
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to archive separation')
 
     await logAction(fastify.supabase, {
       tenantId: req.tenantId, tableName: 'employee_separation', recordId: sep.id,
@@ -865,7 +866,7 @@ export default async function separationWorkflowRoutes(fastify: FastifyInstance)
       .upsert({ tenant_id: req.tenantId, ...parsed.data, updated_at: new Date().toISOString(), updated_by: req.userId }, { onConflict: 'tenant_id' })
       .select()
       .single()
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to save gratuity configuration')
 
     await logAction(fastify.supabase, {
       tenantId: req.tenantId, tableName: 'gratuity_config', recordId: (data as any).id,
@@ -888,7 +889,12 @@ export default async function separationWorkflowRoutes(fastify: FastifyInstance)
       .from('clearance_departments')
       .insert({ tenant_id: req.tenantId, code, label: parsed.data.label, display_order: parsed.data.display_order ?? 99 })
       .select().single()
-    if (error) return reply.code(error.code === '23505' ? 409 : 500).send({ error: 'DB_ERROR', message: error.code === '23505' ? 'A department with this code already exists' : error.message })
+    if (error) {
+      if (error.code === '23505') {
+        return reply.code(409).send({ error: 'DUPLICATE', message: 'A department with this code already exists' })
+      }
+      return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create clearance department')
+    }
     return reply.code(201).send({ data })
   })
 
@@ -897,7 +903,7 @@ export default async function separationWorkflowRoutes(fastify: FastifyInstance)
     if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION', message: parsed.error.issues[0].message })
     const { data, error } = await fastify.supabase
       .from('clearance_departments').update(parsed.data).eq('id', req.params.id).eq('tenant_id', req.tenantId).select().single()
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update clearance department')
     if (!data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Department not found' })
     return reply.send({ data })
   })
@@ -905,7 +911,7 @@ export default async function separationWorkflowRoutes(fastify: FastifyInstance)
   fastify.delete('/settlement/clearance-departments/:id', hrAdminAuth, async (req: any, reply) => {
     const { error } = await fastify.supabase
       .from('clearance_departments').delete().eq('id', req.params.id).eq('tenant_id', req.tenantId)
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.DELETE_FAILED, 'Failed to delete clearance department')
     return reply.code(204).send()
   })
 }

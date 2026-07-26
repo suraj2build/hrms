@@ -28,6 +28,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 const STORAGE_BUCKET  = 'employee-files'
 const SIGNED_URL_TTL  = 3600   // 1 hour
@@ -126,7 +127,7 @@ export default async function uploadSessionRoutes(fastify: FastifyInstance) {
     if (reference_id) query = query.eq('reference_id', reference_id)
 
     const { data, error } = await query
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch upload sessions')
 
     return reply.send({ data: data ?? [] })
   })
@@ -178,7 +179,7 @@ export default async function uploadSessionRoutes(fastify: FastifyInstance) {
       )
       .single()
 
-    if (error) return reply.code(500).send({ error: 'INSERT_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create upload session')
 
     // If we already have a storage path, attach a signed download URL immediately
     const signed_url = data.storage_path
@@ -256,7 +257,7 @@ export default async function uploadSessionRoutes(fastify: FastifyInstance) {
       .select('id, upload_type, status, storage_path, file_size, result_summary, updated_at')
       .single()
 
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to complete upload session')
 
     const signed_url = data.storage_path
       ? await createSignedUrl(fastify, data.storage_path)
@@ -315,7 +316,7 @@ export default async function uploadSessionRoutes(fastify: FastifyInstance) {
       .select('id, upload_type, status, error_message, updated_at')
       .single()
 
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to mark upload session as failed')
     return reply.send({ data })
   })
 

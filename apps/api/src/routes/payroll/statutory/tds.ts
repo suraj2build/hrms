@@ -15,6 +15,7 @@ import { logAction } from '../../../lib/audit-service.js'
 import { HR_ADMIN_ROLES } from '../../../lib/rbac.js'
 import { fetchTenantTz } from '../../../lib/attendance-engine.js'
 import { getLocalDate } from '../../../lib/org-context.js'
+import { serverError, ErrorCode } from '../../../lib/api-errors.js'
 
 // DB enum values — must match migration 098_tds_foundation.sql CHECK constraint
 const DECLARATION_CATEGORIES = [
@@ -168,7 +169,7 @@ export default async function tdsRoutes(fastify: FastifyInstance) {
       .limit(1)
       .maybeSingle()
 
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch tax regime election')
     return reply.send({ data: data ?? null })
   })
 
@@ -196,7 +197,7 @@ export default async function tdsRoutes(fastify: FastifyInstance) {
       .select()
       .single()
 
-    if (error) return reply.code(500).send({ error: 'UPSERT_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to save tax regime election')
     await logAction(fastify.supabase, {
       tenantId:    req.tenantId,
       tableName:   'tax_regime_elections',
@@ -229,7 +230,7 @@ export default async function tdsRoutes(fastify: FastifyInstance) {
     if (qs.data?.financial_year) q = q.eq('financial_year', qs.data.financial_year)
 
     const { data, error } = await q
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch declarations')
     return reply.send({ data: data ?? [] })
   })
 
@@ -262,7 +263,7 @@ export default async function tdsRoutes(fastify: FastifyInstance) {
       .select()
       .single()
 
-    if (error) return reply.code(500).send({ error: 'INSERT_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create declaration')
 
     await writeAuditLog(fastify, req.tenantId, (data as any).id, req.userId, null, 'declared', 'Declaration created by employee')
 
@@ -326,7 +327,7 @@ export default async function tdsRoutes(fastify: FastifyInstance) {
       .select()
       .single()
 
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update declaration')
     await logAction(fastify.supabase, {
       tenantId:    req.tenantId,
       tableName:   'tax_declarations',
@@ -375,7 +376,7 @@ export default async function tdsRoutes(fastify: FastifyInstance) {
       .select()
       .single()
 
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to submit declaration')
 
     await writeAuditLog(fastify, req.tenantId, id, req.userId, fromStatus, 'submitted', 'Submitted for review by employee')
 
@@ -553,7 +554,7 @@ ${section('Part D — Loss from House Property (Home Loan Interest)', hlDecls,
     if (qs.data?.financial_year) q = q.eq('financial_year', qs.data.financial_year)
 
     const { data, error } = await q
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch TDS projections')
     return reply.send({ data: data ?? [] })
   })
 
@@ -577,7 +578,7 @@ ${section('Part D — Loss from House Property (Home Loan Interest)', hlDecls,
       .limit(1)
       .maybeSingle()
 
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch tax regime election')
     return reply.send({ data: data ?? null })
   })
 
@@ -604,7 +605,7 @@ ${section('Part D — Loss from House Property (Home Loan Interest)', hlDecls,
       .select()
       .single()
 
-    if (error) return reply.code(500).send({ error: 'UPSERT_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to save tax regime election')
     return reply.send({ data })
   })
 
@@ -638,7 +639,7 @@ ${section('Part D — Loss from House Property (Home Loan Interest)', hlDecls,
     if (qs.data?.status)         q = q.eq('status', qs.data.status)
 
     const { data, error } = await q
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch declarations')
     return reply.send({ data: data ?? [] })
   })
 
@@ -665,7 +666,7 @@ ${section('Part D — Loss from House Property (Home Loan Interest)', hlDecls,
     if (qs.data?.financial_year) q = q.eq('financial_year', qs.data.financial_year)
 
     const { data, error } = await q
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch declarations')
     return reply.send({ data: data ?? [] })
   })
 
@@ -692,7 +693,7 @@ ${section('Part D — Loss from House Property (Home Loan Interest)', hlDecls,
       .select()
       .single()
 
-    if (error) return reply.code(500).send({ error: 'INSERT_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create declaration')
 
     await writeAuditLog(fastify, req.tenantId, (data as any).id, req.userId, null, 'declared', 'Declaration created by HR admin')
 
@@ -740,7 +741,7 @@ ${section('Part D — Loss from House Property (Home Loan Interest)', hlDecls,
       .select()
       .single()
 
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update declaration')
     await logAction(fastify.supabase, {
       tenantId:    req.tenantId,
       tableName:   'tax_declarations',
@@ -796,7 +797,7 @@ ${section('Part D — Loss from House Property (Home Loan Interest)', hlDecls,
       .select()
       .single()
 
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to approve declaration')
 
     await writeAuditLog(fastify, req.tenantId, id, req.userId, fromStatus, 'approved', parsed.data.notes, {
       approved_amount: parsed.data.approved_amount,
@@ -857,7 +858,7 @@ ${section('Part D — Loss from House Property (Home Loan Interest)', hlDecls,
       .select()
       .single()
 
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to reject declaration')
 
     await writeAuditLog(fastify, req.tenantId, id, req.userId, fromStatus, 'rejected', parsed.data.rejection_reason)
 
@@ -910,7 +911,7 @@ ${section('Part D — Loss from House Property (Home Loan Interest)', hlDecls,
       .select()
       .single()
 
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update declaration status')
 
     await writeAuditLog(fastify, req.tenantId, id, req.userId, fromStatus, 'revision_requested', parsed.data.notes)
 
@@ -957,7 +958,7 @@ ${section('Part D — Loss from House Property (Home Loan Interest)', hlDecls,
       .eq('is_superseded', false)
       .order('uploaded_at', { ascending: false })
 
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch declaration proofs')
     return reply.send({ data: data ?? [] })
   })
 
@@ -1021,7 +1022,7 @@ ${section('Part D — Loss from House Property (Home Loan Interest)', hlDecls,
       .select('id, file_name, storage_path, mime_type, file_size_bytes, uploaded_at, document_state')
       .single()
 
-    if (error) return reply.code(500).send({ error: 'INSERT_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to upload declaration proof')
     await logAction(fastify.supabase, {
       tenantId:    req.tenantId,
       tableName:   'declaration_proofs',
@@ -1065,7 +1066,7 @@ ${section('Part D — Loss from House Property (Home Loan Interest)', hlDecls,
     }
 
     const { data, error } = await q
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch declaration proofs')
     return reply.send({ data: data ?? [] })
   })
 
@@ -1107,7 +1108,7 @@ ${section('Part D — Loss from House Property (Home Loan Interest)', hlDecls,
       .select()
       .single()
 
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to verify proof')
     await logAction(fastify.supabase, {
       tenantId:    req.tenantId,
       tableName:   'declaration_proofs',
@@ -1152,7 +1153,7 @@ ${section('Part D — Loss from House Property (Home Loan Interest)', hlDecls,
       .select()
       .single()
 
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to reject proof')
     await logAction(fastify.supabase, {
       tenantId:    req.tenantId,
       tableName:   'declaration_proofs',
@@ -1191,7 +1192,7 @@ ${section('Part D — Loss from House Property (Home Loan Interest)', hlDecls,
     if (qs.data?.financial_year) q = q.eq('financial_year', qs.data.financial_year)
 
     const { data, error } = await q
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch TDS projections')
     return reply.send({ data: data ?? [] })
   })
 
@@ -1216,7 +1217,7 @@ ${section('Part D — Loss from House Property (Home Loan Interest)', hlDecls,
     if (qs.data?.financial_year) q = q.eq('financial_year', qs.data.financial_year)
 
     const { data, error } = await q
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch TDS projections')
     return reply.send({ data: data ?? [] })
   })
 
@@ -1305,7 +1306,7 @@ ${section('Part D — Loss from House Property (Home Loan Interest)', hlDecls,
       .from('tds_monthly_projections')
       .upsert(projections, { onConflict: 'tenant_id,employee_id,financial_year,projection_month' })
 
-    if (upsertErr) return reply.code(500).send({ error: 'UPSERT_FAILED', message: upsertErr.message })
+    if (upsertErr) return serverError(req, reply, upsertErr, ErrorCode.UPDATE_FAILED, 'Failed to save TDS projections')
 
     return reply.send({
       months_computed:        projections.length,
@@ -1359,7 +1360,7 @@ ${section('Part D — Loss from House Property (Home Loan Interest)', hlDecls,
       .eq('financial_year', parsed.data.financial_year)
       .eq('status', 'approved')
 
-    if (declErr) return reply.code(500).send({ error: 'QUERY_FAILED', message: declErr.message })
+    if (declErr) return serverError(req, reply, declErr, ErrorCode.QUERY_FAILED, 'Failed to fetch approved declarations')
 
     const items = (approvedDecls ?? []) as any[]
     const totalDeclared = items.reduce((sum: number, d: any) => sum + (d.declared_amount ?? 0), 0)
@@ -1381,7 +1382,7 @@ ${section('Part D — Loss from House Property (Home Loan Interest)', hlDecls,
       .select()
       .single()
 
-    if (snapErr) return reply.code(500).send({ error: 'INSERT_FAILED', message: snapErr.message })
+    if (snapErr) return serverError(req, reply, snapErr, ErrorCode.INSERT_FAILED, 'Failed to create TDS snapshot')
 
     await logAction(fastify.supabase, {
       tenantId:    req.tenantId,
@@ -1420,7 +1421,7 @@ ${section('Part D — Loss from House Property (Home Loan Interest)', hlDecls,
     if (qs.data?.financial_year) q = q.eq('financial_year', qs.data.financial_year)
 
     const { data, error } = await q
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch TDS snapshots')
     return reply.send({ data: data ?? [] })
   })
 
@@ -1435,7 +1436,7 @@ ${section('Part D — Loss from House Property (Home Loan Interest)', hlDecls,
       .eq('tenant_id', req.tenantId)
       .order('changed_at', { ascending: false })
 
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch declaration audit log')
     return reply.send({ data: data ?? [] })
   })
 }

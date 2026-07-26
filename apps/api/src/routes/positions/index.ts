@@ -23,6 +23,7 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { generateUniqueCode } from '../../lib/generate-code.js'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 const positionSchema = z.object({
   code:             z.string().trim().optional(),
@@ -117,7 +118,7 @@ export default async function positionsRoutes(fastify: FastifyInstance) {
     if (q.site_id)       query = query.eq('site_id', q.site_id)
 
     const { data, error } = await query
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch positions')
 
     const rows = (data ?? []) as any[]
     const filled = await fillCounts(tid, rows.map(r => r.id))
@@ -143,7 +144,7 @@ export default async function positionsRoutes(fastify: FastifyInstance) {
       .select('id, sanctioned_count, status, department_id, effective_date, departments(name)')
       .eq('tenant_id', tid)
       .eq('status', 'active')
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch position summary')
 
     const positions = (posData ?? []) as any[]
     const filled = await fillCounts(tid, positions.map(p => p.id))
@@ -201,8 +202,8 @@ export default async function positionsRoutes(fastify: FastifyInstance) {
       fastify.supabase.from('job_history').select('*', { count: 'exact', head: true })
         .eq('position_id', id).eq('tenant_id', tid).eq('is_current', true),
     ])
-    if (reqRes.error) return reply.code(500).send({ error: 'DB_ERROR', message: reqRes.error.message })
-    if (jhRes.error)  return reply.code(500).send({ error: 'DB_ERROR', message: jhRes.error.message })
+    if (reqRes.error) return serverError(req, reply, reqRes.error, ErrorCode.QUERY_FAILED, 'Failed to fetch position usage')
+    if (jhRes.error)  return serverError(req, reply, jhRes.error, ErrorCode.QUERY_FAILED, 'Failed to fetch position usage')
 
     const requisitions = reqRes.count ?? 0
     const occupants    = jhRes.count ?? 0
@@ -232,7 +233,7 @@ export default async function positionsRoutes(fastify: FastifyInstance) {
       if (error.code === '23505') {
         return reply.code(409).send({ error: 'DUPLICATE', message: `A position with code "${code}" already exists` })
       }
-      return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+      return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create position')
     }
     return reply.code(201).send(data)
   })
@@ -255,7 +256,7 @@ export default async function positionsRoutes(fastify: FastifyInstance) {
       .from('positions').update(patch).eq('id', id).eq('tenant_id', req.tenantId).select().single()
     if (error) {
       if (error.code === '23505') return reply.code(409).send({ error: 'DUPLICATE', message: 'Position code already exists' })
-      return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+      return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update position')
     }
     return reply.send(data)
   })
@@ -272,8 +273,8 @@ export default async function positionsRoutes(fastify: FastifyInstance) {
       fastify.supabase.from('job_history').select('*', { count: 'exact', head: true })
         .eq('position_id', id).eq('tenant_id', tid).eq('is_current', true),
     ])
-    if (reqRes.error) return reply.code(500).send({ error: 'DB_ERROR', message: reqRes.error.message })
-    if (jhRes.error)  return reply.code(500).send({ error: 'DB_ERROR', message: jhRes.error.message })
+    if (reqRes.error) return serverError(req, reply, reqRes.error, ErrorCode.QUERY_FAILED, 'Failed to check position usage')
+    if (jhRes.error)  return serverError(req, reply, jhRes.error, ErrorCode.QUERY_FAILED, 'Failed to check position usage')
 
     const usageCount = (reqRes.count ?? 0) + (jhRes.count ?? 0)
 
@@ -292,13 +293,13 @@ export default async function positionsRoutes(fastify: FastifyInstance) {
         .from('positions')
         .update({ status: 'abolished', abolished_date: new Date().toISOString().slice(0, 10) })
         .eq('id', id).eq('tenant_id', tid)
-      if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+      if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to abolish position')
       return reply.code(200).send({ data: { abolished: true } })
     }
 
     const { error } = await fastify.supabase
       .from('positions').delete().eq('id', id).eq('tenant_id', tid)
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.DELETE_FAILED, 'Failed to delete position')
     return reply.code(204).send()
   })
 }

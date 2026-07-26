@@ -26,6 +26,7 @@ import { notifyHrAdmins } from '../../lib/notify.js'
 import { logAction } from '../../lib/audit-service.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 export default async function payrollAdjustmentsRoutes(fastify: FastifyInstance) {
   const auth      = { preHandler: [fastify.authenticate] }
@@ -50,7 +51,7 @@ export default async function payrollAdjustmentsRoutes(fastify: FastifyInstance)
           .range(from, to)
       ) as any[]
     } catch (err: any) {
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: err.message })
+      return serverError(req, reply, err, ErrorCode.QUERY_FAILED, 'Failed to fetch adjustment summary')
     }
     const byStatus: Record<string, number> = {}
     const byType:   Record<string, number> = {}
@@ -108,7 +109,7 @@ export default async function payrollAdjustmentsRoutes(fastify: FastifyInstance)
     if (parsed.data.employee_id)     q = q.eq('employee_id', parsed.data.employee_id)
 
     const { data, error, count } = await q
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch payroll adjustments')
     return reply.send({ data: data ?? [], total: count ?? 0 })
   })
 
@@ -173,7 +174,7 @@ export default async function payrollAdjustmentsRoutes(fastify: FastifyInstance)
       .select()
       .single()
 
-    if (error) return reply.code(500).send({ error: 'INSERT_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create payroll adjustment')
 
     await logAction(fastify.supabase, {
       tenantId:    req.tenantId,
@@ -229,7 +230,7 @@ export default async function payrollAdjustmentsRoutes(fastify: FastifyInstance)
       .select()
       .single()
 
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to approve payroll adjustment')
 
     await logAction(fastify.supabase, {
       tenantId:    req.tenantId,
@@ -340,7 +341,7 @@ export default async function payrollAdjustmentsRoutes(fastify: FastifyInstance)
       .eq('status', 'approved')
       .select()
 
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to apply payroll adjustment')
     if (!updatedRows?.length) return reply.code(409).send({ error: 'ALREADY_APPLIED', message: 'This adjustment was already applied by another request' })
     const data = updatedRows[0]
 

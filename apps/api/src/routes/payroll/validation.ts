@@ -7,6 +7,7 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 // payroll_validation_rules.category CHECK constraint (migration 105) — the
 // ground truth for valid categories.
@@ -68,7 +69,7 @@ export default async function validationRoutes(fastify: FastifyInstance) {
     if (parsed.data.is_active !== undefined) q = q.eq('is_active', parsed.data.is_active === 'true')
 
     const { data, error } = await q
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch validation rules')
     return reply.send({ data: data ?? [] })
   })
 
@@ -95,7 +96,7 @@ export default async function validationRoutes(fastify: FastifyInstance) {
       .select()
       .single()
 
-    if (error) return reply.code(500).send({ error: 'INSERT_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create validation rule')
     return reply.code(201).send({ data })
   })
 
@@ -127,7 +128,7 @@ export default async function validationRoutes(fastify: FastifyInstance) {
       .select()
       .single()
 
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update validation rule')
     if (!data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Rule not found' })
 
     return reply.send({ data })
@@ -316,7 +317,7 @@ export default async function validationRoutes(fastify: FastifyInstance) {
     if (parsed.data.validation_month) q = q.eq('validation_month', parsed.data.validation_month)
 
     const { data, error } = await q
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch validation runs')
     return reply.send({ data: data ?? [] })
   })
 
@@ -375,7 +376,7 @@ export default async function validationRoutes(fastify: FastifyInstance) {
       .eq('validation_run_id', id)
       .eq('tenant_id', req.tenantId)
 
-    if (updateErr) return reply.code(500).send({ error: 'UPDATE_FAILED', message: updateErr.message })
+    if (updateErr) return serverError(req, reply, updateErr, ErrorCode.UPDATE_FAILED, 'Failed to resolve validation result')
 
     // Check if all errors are now resolved for this run
     const { count: unresolvedErrors } = await fastify.supabase
@@ -472,7 +473,7 @@ export default async function validationRoutes(fastify: FastifyInstance) {
     if (parsed.data.reconciliation_month) q = q.eq('reconciliation_month', parsed.data.reconciliation_month)
 
     const { data, error } = await q
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch reconciliation runs')
     return reply.send({ data: data ?? [] })
   })
 }
