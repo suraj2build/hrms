@@ -302,7 +302,7 @@ export default async function rostersRoutes(fastify: FastifyInstance) {
   })
 
   // ── GET /masters/rosters/:id/impact ──────────────────────────────────────
-  fastify.get('/:id/impact', auth, async (req: any, reply) => {
+  fastify.get('/:id/impact', adminAuth, async (req: any, reply) => {
     const rosterId  = (req.params as any).id
 
     // Paginated — a widely-used roster (e.g. the standard shift) can plausibly

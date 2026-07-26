@@ -201,6 +201,15 @@ export default async function rotationPoliciesRoutes(fastify: FastifyInstance) {
 
     const { rules, ...meta } = parsed.data
 
+    // The metadata UPDATE below is the only place that normally checks the
+    // policy id belongs to this tenant, but it's skipped when the body is
+    // rules-only. Without this check, a caller could attach new rule rows
+    // (via the insert further down) to another tenant's rotation policy by
+    // supplying its id in the URL — a cross-tenant write, not just a read.
+    const { data: owned } = await fastify.supabase
+      .from('rotation_policies').select('id').eq('id', req.params.id).eq('tenant_id', req.tenantId).maybeSingle()
+    if (!owned) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Policy not found' })
+
     // Update metadata
     if (Object.keys(meta).length > 0) {
       const { data, error } = await fastify.supabase
@@ -312,7 +321,7 @@ export default async function rotationPoliciesRoutes(fastify: FastifyInstance) {
 
   // ── GET /:id/impact ────────────────────────────────────────────────────────────
 
-  fastify.get('/:id/impact', auth, async (req: any, reply) => {
+  fastify.get('/:id/impact', hrAdminAuth, async (req: any, reply) => {
     const pid = req.params.id as string
 
     // Paginated — a widely-used rotation policy's true employee list can
