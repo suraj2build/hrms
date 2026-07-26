@@ -163,7 +163,6 @@ export default async function orchestrationRoutes(fastify: FastifyInstance) {
     }
 
     const querySchema = z.object({
-      tenant_id:  z.string().uuid().optional(),
       queue_name: z.string().max(200).optional(),
     })
     const parsed = querySchema.safeParse(req.query)
@@ -171,17 +170,16 @@ export default async function orchestrationRoutes(fastify: FastifyInstance) {
       return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
     }
 
-    const { tenant_id, queue_name } = parsed.data
+    const { queue_name } = parsed.data
 
-    // Scope to requesting tenant unless super_admin overrides with explicit tenant_id
-    const scopedTenantId = req.userRole === 'super_admin' && tenant_id
-      ? tenant_id
-      : req.tenantId
-
+    // super_admin is a per-tenant role (see the PUT .../pressure route below),
+    // so a client-supplied tenant_id must never override the caller's own
+    // tenant — otherwise any tenant's super_admin could read another
+    // tenant's queue_partitions rows by passing ?tenant_id=<other-tenant>.
     let q = fastify.supabase
       .from('queue_partitions')
       .select('*')
-      .eq('tenant_id', scopedTenantId)
+      .eq('tenant_id', req.tenantId)
       .order('current_depth', { ascending: false })
 
     if (queue_name) q = q.eq('queue_name', queue_name)

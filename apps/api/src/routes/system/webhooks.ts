@@ -383,6 +383,9 @@ export default async function webhooksRoutes(fastify: FastifyInstance) {
 
   // ── GET /system/webhooks/:id/deliveries ───────────────────────────────────
   fastify.get('/system/webhooks/:id/deliveries', auth, async (req: any, reply) => {
+    if (!isAdmin(req.userRole)) {
+      return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
+    }
     const { id } = req.params as { id: string }
 
     const parsed = deliveriesQuerySchema.safeParse(req.query)
