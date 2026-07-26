@@ -59,6 +59,9 @@ export default async function webhooksRoutes(fastify: FastifyInstance) {
 
   // ── GET /system/webhooks ──────────────────────────────────────────────────
   fastify.get('/system/webhooks', auth, async (req: any, reply) => {
+    if (!isAdmin(req.userRole)) {
+      return reply.code(403).send({ error: 'FORBIDDEN', message: 'Admin access required' })
+    }
     const parsed = listQuerySchema.safeParse(req.query)
     if (!parsed.success) {
       return reply.code(400).send({
@@ -87,11 +90,18 @@ export default async function webhooksRoutes(fastify: FastifyInstance) {
       return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch webhooks' })
     }
 
-    return reply.send({ data: data ?? [], total: count ?? 0, limit })
+    // Never re-serialize the HMAC signing secret, even to an admin — it's
+    // write-only once set (same pattern as an API key), and this is the
+    // secret used to sign every outbound webhook payload.
+    const safeData = (data ?? []).map(({ secret, ...w }: any) => w)
+    return reply.send({ data: safeData, total: count ?? 0, limit })
   })
 
   // ── GET /system/webhooks/:id ──────────────────────────────────────────────
   fastify.get('/system/webhooks/:id', auth, async (req: any, reply) => {
+    if (!isAdmin(req.userRole)) {
+      return reply.code(403).send({ error: 'FORBIDDEN', message: 'Admin access required' })
+    }
     const { id } = req.params as { id: string }
 
     const { data: webhook, error: webhookError } = await fastify.supabase
@@ -116,9 +126,12 @@ export default async function webhooksRoutes(fastify: FastifyInstance) {
       req.log.error({ err: deliveryError }, 'webhook deliveries fetch failed')
     }
 
+    // Never re-serialize the HMAC signing secret — see GET / above.
+    const { secret, ...safeWebhook } = webhook as any
+
     return reply.send({
       data: {
-        ...webhook,
+        ...safeWebhook,
         recent_deliveries: deliveries ?? [],
       },
     })
