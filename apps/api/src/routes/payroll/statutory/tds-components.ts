@@ -16,6 +16,16 @@ import { z } from 'zod'
 import { logAction } from '../../../lib/audit-service.js'
 import { HR_ADMIN_ROLES } from '../../../lib/rbac.js'
 
+// tax_declaration_components.parent_group / .declaration_type CHECK
+// constraints (migration 168) — the ground truth for valid values.
+const TAX_COMPONENT_PARENT_GROUPS = [
+  'chapter_via', 'hra', 'house_property', 'lta', 'other_income',
+  'tds_tcs', 'previous_employment', 'perquisites', 'exemptions',
+] as const
+const TAX_COMPONENT_DECLARATION_TYPES = [
+  'amount', 'percentage', 'text', 'property', 'hra', 'deduction', 'exemption',
+] as const
+
 // ── Admin guard ───────────────────────────────────────────────────────────────
 
 function requireHrAdmin(req: any, reply: any, done: () => void) {
@@ -133,9 +143,9 @@ export default async function tdsComponentsRoute(fastify: FastifyInstance) {
       sub_section:        z.string().max(100).nullable().optional(),
       display_name:       z.string().min(1).max(255),
       description:        z.string().optional().nullable(),
-      parent_group:       z.string().min(1).max(100),
+      parent_group:       z.enum(TAX_COMPONENT_PARENT_GROUPS),
       regime_eligibility: z.enum(['old', 'new', 'both']).default('both'),
-      declaration_type:   z.enum(['amount', 'boolean', 'document']).default('amount'),
+      declaration_type:   z.enum(TAX_COMPONENT_DECLARATION_TYPES).default('amount'),
       max_limit:          z.number().nonnegative().nullable().optional(),
       proof_required:     z.boolean().default(false),
       display_order:      z.number().int().nonnegative().optional().default(999),
@@ -200,7 +210,7 @@ export default async function tdsComponentsRoute(fastify: FastifyInstance) {
       display_name:       z.string().min(1).max(255).optional(),
       description:        z.string().nullable().optional(),
       regime_eligibility: z.enum(['old', 'new', 'both']).optional(),
-      declaration_type:   z.enum(['amount', 'boolean', 'document']).optional(),
+      declaration_type:   z.enum(TAX_COMPONENT_DECLARATION_TYPES).optional(),
       max_limit:          z.number().nonnegative().nullable().optional(),
       proof_required:     z.boolean().optional(),
       display_order:      z.number().int().nonnegative().optional(),
