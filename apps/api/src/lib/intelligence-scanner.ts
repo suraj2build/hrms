@@ -94,8 +94,10 @@ function lookbackFrom(): string {
 }
 
 async function fetchTenantIds(supabase: SupabaseClient): Promise<string[]> {
-  const { data } = await supabase.from('tenants').select('id')
-  return (data ?? []).map((t: { id: string }) => t.id)
+  const rows = await fetchAllRows<{ id: string }>((from, to) =>
+    supabase.from('tenants').select('id').range(from, to),
+  )
+  return rows.map(t => t.id)
 }
 
 // ── Scanner 1 — Repeated Late Pattern ────────────────────────────────────────

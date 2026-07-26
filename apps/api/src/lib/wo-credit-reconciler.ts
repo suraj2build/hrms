@@ -462,8 +462,10 @@ export async function tick(supabase: SupabaseClient): Promise<void> {
   const priorMonth = month === 1 ? 12 : month - 1
   const priorYear  = month === 1 ? year - 1 : year
 
-  const { data: tenants } = await supabase.from('tenants').select('id')
-  for (const t of (tenants ?? []) as any[]) {
+  const tenants = await fetchAllRows<{ id: string }>((from, to) =>
+    supabase.from('tenants').select('id').range(from, to),
+  )
+  for (const t of tenants) {
     try {
       const res = await reconcileTenantMonth(supabase, t.id, year, month)
       const applied = res.reduce((s, r) => s + r.auto_applied, 0)

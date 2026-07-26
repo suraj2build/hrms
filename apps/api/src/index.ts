@@ -42,6 +42,7 @@ import { jobQueue }                      from './lib/job-queue.js'
 import { eventBus }                      from './lib/event-bus.js'
 import type { HrmsEventType }            from './lib/event-bus.js'
 import { durableQueue }                  from './lib/durable-queue.js'
+import { fetchAllRows }                  from './lib/supabase-paginate.js'
 import { WebhookService }                from './lib/webhook-service.js'
 // Note: registerNotificationHandlers(supabase) and registerAnomalyHandlers(supabase)
 // are called below inside start(), AFTER the supabase plugin is registered,
@@ -572,9 +573,10 @@ async function start() {
   })
   durableQueue.register('detect-absconding', async (_payload, _job) => {
     const { scanAndEscalate } = await import('./lib/absconding-engine.js')
-    const { data: tenants } = await fastify.supabase
-      .from('tenants').select('id').in('status', ['active', 'trial'])
-    for (const t of (tenants ?? []) as { id: string }[]) {
+    const tenants = await fetchAllRows<{ id: string }>((from, to) =>
+      fastify.supabase.from('tenants').select('id').in('status', ['active', 'trial']).range(from, to),
+    )
+    for (const t of tenants) {
       try { await scanAndEscalate(fastify.supabase, t.id) }
       catch (e) { fastify.log.error({ tenant: t.id, err: e }, 'absconding scan failed') }
     }

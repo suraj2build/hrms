@@ -25,6 +25,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { buildDigest, periodKey, type DigestFrequency } from './digest-builder.js'
 import { sendEmail, digestEmail, APP_PUBLIC_URL } from './email-service.js'
 import { durableQueue }       from './durable-queue.js'
+import { fetchAllRows }       from './supabase-paginate.js'
 
 const TICK_MS    = 60 * 60 * 1_000   // hourly
 const WARMUP_MS  = 5 * 60 * 1_000    // 5-minute startup delay
@@ -58,17 +59,25 @@ async function getHrAdmins(
   return result
 }
 
-/** Reserve an idempotency slot. Returns true if this call owns the send. */
+/**
+ * Reserve an idempotency slot. Returns { owned: true } if this call owns the
+ * send. A unique-violation (23505) means another call already reserved this
+ * slot — that's the expected dedup path, not a failure. Any other insert
+ * error is a real failure and must NOT be silently treated as "already
+ * sent" — it's surfaced via `error` so the caller can log and count it.
+ */
 async function reserve(
   supabase: SupabaseClient,
   tenantId: string, recipientId: string,
   frequency: DigestFrequency, channel: 'in_app' | 'email', pkey: string,
-): Promise<boolean> {
+): Promise<{ owned: boolean; error?: { message: string } }> {
   const { error } = await supabase.from('digest_send_log').insert({
     tenant_id: tenantId, recipient_id: recipientId,
     frequency, channel, period_key: pkey, status: 'sent',
   })
-  return !error  // unique-violation = already sent = not our slot
+  if (!error) return { owned: true }
+  if ((error as { code?: string }).code === '23505') return { owned: false }  // already sent
+  return { owned: false, error }
 }
 
 function writeAuditLog(
@@ -136,7 +145,14 @@ export async function runDigestForTenant(
 
   for (const admin of admins) {
     // ── In-app ──────────────────────────────────────────────────────────────
-    if (await reserve(supabase, tenantId, admin.id, frequency, 'in_app', pkey)) {
+    const inAppSlot = await reserve(supabase, tenantId, admin.id, frequency, 'in_app', pkey)
+    if (inAppSlot.error) {
+      result.failed++
+      await writeAuditLog(supabase, tenantId, 'DIGEST_FAILED', {
+        frequency, channel: 'in_app', period_key: pkey,
+        recipient_id: admin.id, error: inAppSlot.error.message, stage: 'reserve',
+      })
+    } else if (inAppSlot.owned) {
       const { error } = await supabase.from('notifications').insert({
         tenant_id:    tenantId,
         recipient_id: admin.id,
@@ -158,7 +174,14 @@ export async function runDigestForTenant(
 
     // ── Email ────────────────────────────────────────────────────────────────
     if (admin.email) {
-      if (await reserve(supabase, tenantId, admin.id, frequency, 'email', pkey)) {
+      const emailSlot = await reserve(supabase, tenantId, admin.id, frequency, 'email', pkey)
+      if (emailSlot.error) {
+        result.failed++
+        await writeAuditLog(supabase, tenantId, 'DIGEST_FAILED', {
+          frequency, channel: 'email', period_key: pkey,
+          recipient_id: admin.id, error: emailSlot.error.message, stage: 'reserve',
+        })
+      } else if (emailSlot.owned) {
         const { subject, html } = digestEmail({
           frequency,
           periodLabel:  digest.period_label,
@@ -202,8 +225,10 @@ export async function tick(supabase: SupabaseClient): Promise<void> {
   const due = ALL_FREQ.filter(f => isDue(f, now))
   if (!due.length) return
 
-  const { data: tenants } = await supabase.from('tenants').select('id, name')
-  for (const t of (tenants ?? []) as any[]) {
+  const tenants = await fetchAllRows<{ id: string; name: string }>((from, to) =>
+    supabase.from('tenants').select('id, name').range(from, to),
+  )
+  for (const t of tenants) {
     for (const f of due) {
       try {
         const r = await runDigestForTenant(supabase, t.id, f, t.name)

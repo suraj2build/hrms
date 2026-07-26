@@ -38,6 +38,7 @@ import { runMonthlyAccrual, processCarryForward } from './accrual-engine.js'
 import { runEventGrantsForTenant }                from './leave-event-engine.js'
 import { runLeaveReconciliation }                  from './leave-reconciliation.js'
 import { durableQueue }                            from './durable-queue.js'
+import { fetchAllRows }                            from './supabase-paginate.js'
 
 // Suppress unused-import warning — processCarryForward is re-exported for
 // callers that need it directly (e.g. admin one-shot endpoints).
@@ -106,12 +107,15 @@ async function writeHeartbeat(
 }
 
 async function fetchAllTenantIds(supabase: SupabaseClient, log: FastifyBaseLogger): Promise<string[]> {
-  const { data, error } = await supabase.from('tenants').select('id')
-  if (error) {
+  try {
+    const rows = await fetchAllRows<{ id: string }>((from, to) =>
+      supabase.from('tenants').select('id').range(from, to),
+    )
+    return rows.map(r => r.id)
+  } catch (error) {
     log.error({ err: error }, '[leave-scheduler] Failed to fetch tenants')
     return []
   }
-  return (data ?? []).map((r: { id: string }) => r.id)
 }
 
 /**

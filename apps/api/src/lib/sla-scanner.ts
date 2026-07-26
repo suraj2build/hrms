@@ -22,6 +22,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { eventBus }           from './event-bus.js'
 import { ENTITY_WORKFLOW_MAP, type EntityType } from './workflow-service.js'
 import { durableQueue }       from './durable-queue.js'
+import { fetchAllRows }       from './supabase-paginate.js'
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -182,8 +183,10 @@ export async function scan(supabase: SupabaseClient): Promise<void> {
   const cutoffCorrection = new Date(Date.now() - CORRECTION_SLA_HOURS * 3_600_000).toISOString()
 
   // All active tenants
-  const { data: tenants } = await supabase.from('tenants').select('id')
-  const tenantIds = (tenants ?? []).map((t: { id: string }) => t.id)
+  const tenants = await fetchAllRows<{ id: string }>((from, to) =>
+    supabase.from('tenants').select('id').range(from, to),
+  )
+  const tenantIds = tenants.map(t => t.id)
 
   for (const tenantId of tenantIds) {
     const hrProfileIds = await fetchHrProfileIds(supabase, tenantId).catch(() => [] as string[])

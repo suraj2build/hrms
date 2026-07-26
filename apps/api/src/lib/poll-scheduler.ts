@@ -26,17 +26,22 @@ export async function runPollTick(supabase: SupabaseClient): Promise<void> {
   // Monday = 1 (getDay()), 09:00–09:59
   if (now.getDay() !== 1 || now.getHours() !== 9) return
 
+  let tenants: { id: string }[]
   try {
-    const { data: tenants } = await supabase
-      .from('tenants')
-      .select('id')
-      .in('status', ['active', 'trial'])
-
-    for (const tenant of (tenants ?? []) as { id: string }[]) {
-      await dispatchWeeklyPoll(supabase, tenant.id)
-    }
+    tenants = await fetchAllRows<{ id: string }>((from, to) =>
+      supabase.from('tenants').select('id').in('status', ['active', 'trial']).range(from, to),
+    )
   } catch (err) {
-    console.error('[poll-scheduler] error:', err)
+    console.error('[poll-scheduler] failed to fetch tenants:', err)
+    return
+  }
+
+  for (const tenant of tenants) {
+    try {
+      await dispatchWeeklyPoll(supabase, tenant.id)
+    } catch (err) {
+      console.error(`[poll-scheduler] tenant=${tenant.id} error:`, err)
+    }
   }
 }
 
