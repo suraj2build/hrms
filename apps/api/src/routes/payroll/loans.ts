@@ -415,33 +415,50 @@ export default async function loansRoutes(fastify: FastifyInstance) {
       return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
     }
 
+    // Idempotency: a network-retried request would otherwise re-apply the
+    // foreclosure update (harmless — it just re-sets the same values) but
+    // surface a confusing response; replay the original response instead.
+    const iKey = (req.headers['idempotency-key'] as string | undefined)?.trim()
+    if (iKey) {
+      const cached = await checkIdempotency(fastify.supabase, req.tenantId, iKey, 'loan-foreclose')
+      if (cached) {
+        reply.header('Idempotency-Replayed', 'true')
+        return reply.code(cached.status_code).send(cached.response)
+      }
+    }
+
     const now = new Date().toISOString()
 
-    const [{ error: loanErr }, { error: schedErr }] = await Promise.all([
-      fastify.supabase
-        .from('employee_loans')
-        .update({
-          status: 'foreclosed',
-          foreclosed_at: now,
-          foreclosure_amount: parsed.data.foreclosure_amount,
-          foreclosure_notes: parsed.data.notes ?? null,
-          outstanding_balance: 0,
-          updated_at: now,
-        })
-        .eq('id', id)
-        .eq('tenant_id', req.tenantId),
-      fastify.supabase
-        .from('loan_schedules')
-        .update({ status: 'adjusted' })
-        .eq('loan_id', id)
-        .eq('tenant_id', req.tenantId)
-        .eq('status', 'pending'),
-    ])
+    const { data: foreclosed, error: loanErr } = await fastify.supabase
+      .from('employee_loans')
+      .update({
+        status: 'foreclosed',
+        foreclosed_at: now,
+        foreclosure_amount: parsed.data.foreclosure_amount,
+        foreclosure_notes: parsed.data.notes ?? null,
+        outstanding_balance: 0,
+        updated_at: now,
+      })
+      .eq('id', id)
+      .eq('tenant_id', req.tenantId)
+      .neq('status', 'foreclosed')
+      .select('id')
+      .maybeSingle()
 
     if (loanErr) return reply.code(500).send({ error: 'UPDATE_FAILED', message: loanErr.message })
+    if (!foreclosed) return reply.code(409).send({ error: 'INVALID_STATE', message: 'Loan not found or already foreclosed' })
+
+    const { error: schedErr } = await fastify.supabase
+      .from('loan_schedules')
+      .update({ status: 'adjusted' })
+      .eq('loan_id', id)
+      .eq('tenant_id', req.tenantId)
+      .eq('status', 'pending')
     if (schedErr) req.log.warn({ err: schedErr }, 'Failed to adjust loan schedules')
 
-    return reply.send({ message: 'Loan foreclosed' })
+    const responseBody = { message: 'Loan foreclosed' }
+    if (iKey) await storeIdempotency(fastify.supabase, req.tenantId, iKey, 'loan-foreclose', 200, responseBody)
+    return reply.send(responseBody)
   })
 
   // ── GET /payroll/loans/active-emis/:month ─────────────────────────────────────

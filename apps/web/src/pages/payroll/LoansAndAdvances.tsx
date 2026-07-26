@@ -659,13 +659,19 @@ function ForecloseDialog({
   const qc = useQueryClient()
   const [amount, setAmount] = useState('')
   const [notes, setNotes] = useState('')
+  // Sent as Idempotency-Key on foreclose — settles the loan's outstanding
+  // balance. A network-retried request would otherwise re-apply the same
+  // update and surface a confusing "already foreclosed" error; this makes
+  // the retry replay the original success response instead.
+  const idempotencyKey = useRef(crypto.randomUUID())
 
   const mutation = useMutation({
     mutationFn: () => api.post(`/payroll/loans/${loan!.id}/foreclose`, {
       foreclosure_amount: Number(amount),
       notes,
-    }),
+    }, { headers: { 'Idempotency-Key': idempotencyKey.current } }),
     onSuccess: () => {
+      idempotencyKey.current = crypto.randomUUID()
       qc.invalidateQueries({ queryKey: ['loans'] })
       qc.invalidateQueries({ queryKey: ['ess-loans'] })
       onClose()
