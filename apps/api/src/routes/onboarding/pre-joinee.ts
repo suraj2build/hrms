@@ -10,6 +10,7 @@ import { reopenInvitationForReupload } from '../../lib/onboarding/reopen-invitat
 import { logAction } from '../../lib/audit-service.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 // ── Schemas ───────────────────────────────────────────────────────────────────
 
@@ -544,18 +545,19 @@ export default async function preJoineeRoutes(fastify: FastifyInstance) {
     }
     const tenantId: string = req.tenantId
 
-    const { data, error } = await fastify.supabase
-      .from('pre_joinee_invitations')
-      .select('*')
-      .eq('tenant_id', tenantId)
-      .order('created_at', { ascending: false })
-
-    if (error) {
-      fastify.log.error({ event: 'pre_joinee.list', tenant_id: tenantId, err: error })
-      return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    let invitations: any[]
+    try {
+      invitations = await fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('pre_joinee_invitations')
+          .select('*')
+          .eq('tenant_id', tenantId)
+          .order('created_at', { ascending: false })
+          .range(from, to),
+      )
+    } catch (error) {
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch invitations')
     }
-
-    const invitations = data ?? []
 
     // Fetch submissions for any submitted/approved invitations so the HR table
     // can show submitted_at and the review drawer can render details.
@@ -1000,6 +1002,29 @@ export default async function preJoineeRoutes(fastify: FastifyInstance) {
       }
     }
 
+    // ── Atomically claim the invitation ──────────────────────────────────────
+    // From here on we're about to create (or reactivate) an employee record.
+    // Folding the 'submitted' precondition into this UPDATE — instead of only
+    // checking it once via the read above — closes the race where a
+    // double-click or a retried approve request passes the earlier check
+    // twice and both create a separate employee record for the same
+    // candidate. Losing the race returns 409 before any mutation happens.
+    const { data: claim, error: claimErr } = await fastify.supabase
+      .from('pre_joinee_invitations')
+      .update({ status: 'approved', updated_at: new Date().toISOString() })
+      .eq('id', id)
+      .eq('tenant_id', tenantId)
+      .eq('status', 'submitted')
+      .select('id')
+      .maybeSingle()
+    if (claimErr) return serverError(req, reply, claimErr, ErrorCode.UPDATE_FAILED, 'Failed to claim invitation for approval')
+    if (!claim) {
+      return reply.code(409).send({
+        error:   'INVALID_STATE',
+        message: 'Invitation was already approved/rejected by another request',
+      })
+    }
+
     // ── RH-01: Rehire path — reactivate existing employee ───────────────────
     if (action === 'rehire') {
       if (!rehireEmpId) {
@@ -1050,6 +1075,11 @@ export default async function preJoineeRoutes(fastify: FastifyInstance) {
     const { data: generatedCode, error: codeErr } = await fastify.supabase
       .rpc('generate_employee_code', { p_tenant_id: tenantId })
     if (codeErr || !generatedCode) {
+      // Revert the claim above so HR can retry — otherwise this failure would
+      // leave the invitation permanently stuck 'approved' with no employee.
+      await fastify.supabase.from('pre_joinee_invitations')
+        .update({ status: 'submitted', updated_at: new Date().toISOString() })
+        .eq('id', id).eq('tenant_id', tenantId).eq('status', 'approved')
       return reply.code(500).send({ error: 'CODE_GEN_ERROR', message: `Failed to generate employee code: ${codeErr?.message ?? 'unknown'}` })
     }
     const employeeCode = generatedCode as string
@@ -1073,6 +1103,11 @@ export default async function preJoineeRoutes(fastify: FastifyInstance) {
 
     if (empErr || !employee) {
       fastify.log.error({ event: 'pre_joinee.approve.emp_insert', tenant_id: tenantId, err: empErr })
+      // Same revert as above — the employee row was never created, so the
+      // invitation must not be left stuck 'approved'.
+      await fastify.supabase.from('pre_joinee_invitations')
+        .update({ status: 'submitted', updated_at: new Date().toISOString() })
+        .eq('id', id).eq('tenant_id', tenantId).eq('status', 'approved')
       return reply.code(500).send({ error: 'DB_ERROR', message: empErr?.message ?? 'Failed to create employee' })
     }
 

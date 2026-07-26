@@ -14,7 +14,8 @@ import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { logAction } from '../../lib/audit-service.js'
 import { eventBus } from '../../lib/event-bus.js'
 import { sanitizeOrFilterTerm } from '../../lib/postgrest-filter.js'
-import { resolveCallerEmployeeId } from '../../lib/manager-scope.js'
+import { resolveCallerEmployeeId, isHrAdmin, isDirectReport } from '../../lib/manager-scope.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
 
 // ── Schemas ──────────────────────────────────────────────────────────────────
@@ -312,6 +313,21 @@ export default async function assetsRoutes(fastify: FastifyInstance) {
   fastify.get('/employees/:id/assets', auth, async (req: any, reply) => {
     const { id } = req.params as { id: string }
 
+    // Any authenticated employee could previously view any coworker's
+    // assigned-asset list and full ledger history (including condition_notes
+    // — e.g. why an asset was marked damaged/lost) just by guessing a UUID.
+    // Restrict to self, direct manager, or HR admin, matching the pattern in
+    // attendance/fetch.ts.
+    if (!isHrAdmin(req.userRole)) {
+      const callerEmpId = await resolveCallerEmployeeId(fastify.supabase, req.userId, req.tenantId)
+      const isSelf = !!callerEmpId && callerEmpId === id
+      const isManagerOfTarget = !isSelf && !!callerEmpId
+        && await isDirectReport(fastify.supabase, req.tenantId, callerEmpId, id)
+      if (!isSelf && !isManagerOfTarget) {
+        return reply.code(403).send({ error: 'FORBIDDEN', message: 'You can only view your own or your team’s assets' })
+      }
+    }
+
     // Resilient: a missing assets/asset_categories relationship on a drifted DB
     // must not break the whole profile — degrade to an empty list instead of 500.
     const assigned = await fetchAllRows((from, to) =>
@@ -359,13 +375,24 @@ export default async function assetsRoutes(fastify: FastifyInstance) {
   // ── GET /employees/:id/assets/outstanding-count ────────────────────────────
   fastify.get('/employees/:id/assets/outstanding-count', auth, async (req: any, reply) => {
     const { id } = req.params as { id: string }
+
+    if (!isHrAdmin(req.userRole)) {
+      const callerEmpId = await resolveCallerEmployeeId(fastify.supabase, req.userId, req.tenantId)
+      const isSelf = !!callerEmpId && callerEmpId === id
+      const isManagerOfTarget = !isSelf && !!callerEmpId
+        && await isDirectReport(fastify.supabase, req.tenantId, callerEmpId, id)
+      if (!isSelf && !isManagerOfTarget) {
+        return reply.code(403).send({ error: 'FORBIDDEN', message: 'You can only view your own or your team’s assets' })
+      }
+    }
+
     const { count, error } = await fastify.supabase
       .from('assets')
       .select('id', { count: 'exact', head: true })
       .eq('tenant_id', req.tenantId)
       .eq('assigned_to', id)
       .eq('status', 'assigned')
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch outstanding asset count')
     return reply.send({ data: { count: count ?? 0 } })
   })
 
@@ -485,11 +512,17 @@ export default async function assetsRoutes(fastify: FastifyInstance) {
       payload: { tenantId: req.tenantId, assetId: asset.id, employeeId: reqRow.employee_id, assetCode: asset.asset_code },
     })
 
+    // Fold the 'approved' precondition into this UPDATE too — otherwise two
+    // concurrent fulfill calls (each assigning a different available asset,
+    // both passing the earlier read-check) would both succeed here, leaving
+    // the employee assigned two physical assets for one request with only
+    // one traceable via fulfilled_asset_id.
     const { data, error } = await fastify.supabase
       .from('asset_requests')
       .update({ status: 'fulfilled', fulfilled_asset_id: asset.id, updated_at: new Date().toISOString() })
-      .eq('id', id).eq('tenant_id', req.tenantId).select().single()
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+      .eq('id', id).eq('tenant_id', req.tenantId).eq('status', 'approved').select().maybeSingle()
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to fulfill asset request')
+    if (!data) return reply.code(409).send({ error: 'ALREADY_FULFILLED', message: 'Request was already fulfilled by another request' })
     return reply.send({ data })
   })
 }
