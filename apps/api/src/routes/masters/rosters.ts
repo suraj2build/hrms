@@ -34,6 +34,7 @@ import { z }                    from 'zod'
 import { generateUniqueCode }   from '../../lib/generate-code.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { fetchAllRows }   from '../../lib/supabase-paginate.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 // ── Schemas ───────────────────────────────────────────────────────────────────
 
@@ -134,7 +135,7 @@ export default async function rostersRoutes(fastify: FastifyInstance) {
       .order('name')
 
     if (error) {
-      return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch roster policies')
     }
 
     const rosters = data ?? []
@@ -244,7 +245,7 @@ export default async function rostersRoutes(fastify: FastifyInstance) {
             : `A roster policy named "${parsed.data.name}" already exists`,
         })
       }
-      return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+      return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create roster policy')
     }
 
     return reply.code(201).send({ data })
@@ -278,7 +279,7 @@ export default async function rostersRoutes(fastify: FastifyInstance) {
       .single()
 
     if (error) {
-      return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+      return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update roster policy')
     }
     if (!data) {
       return reply.code(404).send({ error: 'NOT_FOUND', message: 'Roster policy not found' })
@@ -296,7 +297,7 @@ export default async function rostersRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', req.tenantId)
 
     if (error) {
-      return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+      return serverError(req, reply, error, ErrorCode.DELETE_FAILED, 'Failed to delete roster policy')
     }
     return reply.code(204).send()
   })
@@ -332,7 +333,7 @@ export default async function rostersRoutes(fastify: FastifyInstance) {
         ),
       ])
     } catch (err: any) {
-      return reply.code(500).send({ error: 'DB_ERROR', message: err.message })
+      return serverError(req, reply, err, ErrorCode.QUERY_FAILED, 'Failed to fetch roster policy impact')
     }
 
     const siteIds = sites.map((s: any) => s.id)
@@ -409,7 +410,7 @@ export default async function rostersRoutes(fastify: FastifyInstance) {
       .single()
 
     if (insertErr) {
-      return reply.code(500).send({ error: 'DB_ERROR', message: insertErr.message })
+      return serverError(req, reply, insertErr, ErrorCode.INSERT_FAILED, 'Failed to duplicate roster policy')
     }
 
     return reply.code(201).send({ data: newRoster })

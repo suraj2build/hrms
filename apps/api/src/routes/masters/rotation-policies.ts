@@ -18,6 +18,7 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 // ── Zod schemas ───────────────────────────────────────────────────────────────
 
@@ -66,7 +67,7 @@ export default async function rotationPoliciesRoutes(fastify: FastifyInstance) {
     if (show_inactive !== 'true') q = q.eq('is_active', true)
 
     const { data: policies, error } = await q
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch rotation policies')
 
     if (!policies || policies.length === 0) return reply.send({ data: [] })
 
@@ -145,7 +146,7 @@ export default async function rotationPoliciesRoutes(fastify: FastifyInstance) {
     if (pe) {
       if (pe.code === '23505')
         return reply.code(409).send({ error: 'DUPLICATE', message: 'A policy with this name already exists' })
-      return reply.code(500).send({ error: 'DB_ERROR', message: pe.message })
+      return serverError(req, reply, pe, ErrorCode.INSERT_FAILED, 'Failed to create rotation policy')
     }
 
     // Insert rules if provided
@@ -158,7 +159,7 @@ export default async function rotationPoliciesRoutes(fastify: FastifyInstance) {
       const { error: re } = await fastify.supabase
         .from('rotation_policy_rules')
         .insert(ruleRows)
-      if (re) return reply.code(500).send({ error: 'DB_ERROR', message: re.message })
+      if (re) return serverError(req, reply, re, ErrorCode.INSERT_FAILED, 'Failed to create rotation policy rules')
     }
 
     return reply.code(201).send(policy)
@@ -174,7 +175,7 @@ export default async function rotationPoliciesRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', req.tenantId)
       .maybeSingle()
 
-    if (pe) return reply.code(500).send({ error: 'DB_ERROR', message: pe.message })
+    if (pe) return serverError(req, reply, pe, ErrorCode.QUERY_FAILED, 'Failed to fetch rotation policy')
     if (!policy) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Policy not found' })
 
     const { data: rules } = await fastify.supabase
@@ -222,7 +223,7 @@ export default async function rotationPoliciesRoutes(fastify: FastifyInstance) {
       if (error) {
         if (error.code === '23505')
           return reply.code(409).send({ error: 'DUPLICATE', message: 'A policy with this name already exists' })
-        return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+        return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update rotation policy')
       }
       if (!data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Policy not found' })
     }
@@ -246,7 +247,7 @@ export default async function rotationPoliciesRoutes(fastify: FastifyInstance) {
         // tenant so it can't close another tenant's open rule versions.
         .eq('tenant_id', req.tenantId)
         .is('effective_to', null)
-      if (closeErr) return reply.code(500).send({ error: 'DB_ERROR', message: closeErr.message })
+      if (closeErr) return serverError(req, reply, closeErr, ErrorCode.UPDATE_FAILED, 'Failed to close previous rotation policy rule versions')
 
       if (rules.length > 0) {
         const ruleRows = rules.map((r) => ({
@@ -259,7 +260,7 @@ export default async function rotationPoliciesRoutes(fastify: FastifyInstance) {
         const { error: re } = await fastify.supabase
           .from('rotation_policy_rules')
           .insert(ruleRows)
-        if (re) return reply.code(500).send({ error: 'DB_ERROR', message: re.message })
+        if (re) return serverError(req, reply, re, ErrorCode.INSERT_FAILED, 'Failed to create updated rotation policy rules')
       }
     }
 
@@ -315,7 +316,7 @@ export default async function rotationPoliciesRoutes(fastify: FastifyInstance) {
       .eq('id', req.params.id)
       .eq('tenant_id', req.tenantId)
 
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.DELETE_FAILED, 'Failed to delete rotation policy')
     return reply.code(204).send()
   })
 
@@ -373,7 +374,7 @@ export default async function rotationPoliciesRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', req.tenantId)
       .maybeSingle()
 
-    if (se) return reply.code(500).send({ error: 'DB_ERROR', message: se.message })
+    if (se) return serverError(req, reply, se, ErrorCode.QUERY_FAILED, 'Failed to fetch source rotation policy')
     if (!source) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Source policy not found' })
 
     const s = source as {
@@ -396,7 +397,7 @@ export default async function rotationPoliciesRoutes(fastify: FastifyInstance) {
     if (ce) {
       if (ce.code === '23505')
         return reply.code(409).send({ error: 'DUPLICATE', message: '"(Copy)" name already exists — rename the original first' })
-      return reply.code(500).send({ error: 'DB_ERROR', message: ce.message })
+      return serverError(req, reply, ce, ErrorCode.INSERT_FAILED, 'Failed to duplicate rotation policy')
     }
 
     // Copy rules

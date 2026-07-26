@@ -418,7 +418,7 @@ export default async function rosterCalendarRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', tenantId)
       .order('name')
 
-    if (error) return reply.code(500).send({ error: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch holiday groups')
     return reply.send({ data })
   })
 
@@ -432,7 +432,7 @@ export default async function rosterCalendarRoutes(fastify: FastifyInstance) {
       .select()
       .single()
 
-    if (error) return reply.code(400).send({ error: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create holiday group')
     return reply.code(201).send({ data })
   })
 
@@ -449,7 +449,7 @@ export default async function rosterCalendarRoutes(fastify: FastifyInstance) {
       .select()
       .single()
 
-    if (error) return reply.code(400).send({ error: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update holiday group')
     if (!data) return reply.code(404).send({ error: 'Holiday group not found' })
     return reply.send({ data })
   })
@@ -539,7 +539,7 @@ export default async function rosterCalendarRoutes(fastify: FastifyInstance) {
         return q.range(from, to)
       })
     } catch (err: any) {
-      return reply.code(500).send({ error: err.message })
+      return serverError(req, reply, err, ErrorCode.QUERY_FAILED, 'Failed to fetch employees for roster coverage analytics')
     }
 
     // Build calendars for all employees (parallel, batched)
