@@ -102,7 +102,7 @@ const AddCandidateSchema = z.object({
 
 const UpdateCandidateSchema = z.object({
   readiness_level: z.enum(READINESS_LEVELS).optional(),
-  readiness_score: z.number().optional().nullable(),
+  readiness_score: z.number().min(0).max(100).optional().nullable(),
   strengths: z.string().optional().nullable(),
   gaps: z.string().optional().nullable(),
   development_plan: z.string().optional().nullable(),
@@ -383,7 +383,10 @@ export default async function successionRoutes(fastify: FastifyInstance) {
     if (Object.keys(update).length === 0) return reply.status(400).send({ error: 'No fields to update' })
 
     const { error } = await supabase.from('succession_candidates').update(update).eq('tenant_id', tenantId).eq('id', cid)
-    if (error) return reply.status(500).send({ error: error.message })
+    if (error) {
+      if (error.code === '23514') return reply.status(400).send({ error: 'VALIDATION_ERROR', message: error.message })
+      return reply.status(500).send({ error: error.message })
+    }
     return reply.send({ data: { updated: true } })
   })
 
