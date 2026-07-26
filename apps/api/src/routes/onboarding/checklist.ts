@@ -325,6 +325,17 @@ export default async function onboardingChecklistRoutes(fastify: FastifyInstance
 
     const { template_id, start_date } = parsed.data
 
+    // Fresh audit finding (cross-tenant IDOR): employeeId came straight from
+    // the URL with no tenant check, then got echoed back unfiltered via
+    // GET /onboarding/checklists' employees:employee_id join — leaking a
+    // foreign tenant's employee identity. The alias route POST /checklists
+    // already carries this exact fix; apply it here too.
+    const { data: checklistEmp } = await fastify.supabase
+      .from('employees').select('id').eq('id', employeeId).eq('tenant_id', tenantId).maybeSingle()
+    if (!checklistEmp) {
+      return reply.code(404).send({ error: 'NOT_FOUND', message: 'Employee not found in your organisation' })
+    }
+
     // Compute target_completion_date = start_date + 30 days
     let targetCompletionDate: string | null = null
     if (start_date) {
