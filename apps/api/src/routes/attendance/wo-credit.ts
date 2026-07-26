@@ -12,6 +12,7 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { reconcileTenantMonth, finalizeTenantMonth } from '../../lib/wo-credit-reconciler.js'
+import { serverError, notFound, ErrorCode } from '../../lib/api-errors.js'
 
 const ladderRowSchema = z.object({
   present_days: z.number().int().min(1).max(31),
@@ -50,13 +51,23 @@ export default async function woCreditRoutes(fastify: FastifyInstance) {
     return map
   }
 
-  async function replaceLadder(structureId: string, ladder: { present_days: number; wo_credit: number }[]) {
-    await fastify.supabase.from('wo_credit_ladder').delete().eq('structure_id', structureId)
+  // Returns the raw Supabase error (from either step) so callers can react —
+  // instead of silently leaving the structure's ladder empty or half-replaced.
+  // The caller is responsible for converting this to a safe response via
+  // serverError(); this helper never sends a reply itself.
+  async function replaceLadder(
+    structureId: string,
+    ladder: { present_days: number; wo_credit: number }[],
+  ): Promise<{ code: typeof ErrorCode.DELETE_FAILED | typeof ErrorCode.INSERT_FAILED; error: unknown } | null> {
+    const { error: delError } = await fastify.supabase.from('wo_credit_ladder').delete().eq('structure_id', structureId)
+    if (delError) return { code: ErrorCode.DELETE_FAILED, error: delError }
     if (ladder.length) {
-      await fastify.supabase.from('wo_credit_ladder').insert(
+      const { error: insError } = await fastify.supabase.from('wo_credit_ladder').insert(
         ladder.map(l => ({ structure_id: structureId, present_days: l.present_days, wo_credit: l.wo_credit })),
       )
+      if (insError) return { code: ErrorCode.INSERT_FAILED, error: insError }
     }
+    return null
   }
 
   // ── GET /structures ─────────────────────────────────────────────────────────
@@ -66,7 +77,7 @@ export default async function woCreditRoutes(fastify: FastifyInstance) {
       .select('*')
       .eq('tenant_id', req.tenantId)
       .order('name', { ascending: true })
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch WO credit structures')
 
     const structs = (data ?? []) as any[]
     const ladders = await loadLadders(structs.map(s => s.id))
@@ -108,9 +119,12 @@ export default async function woCreditRoutes(fastify: FastifyInstance) {
       .single()
     if (error) {
       if (error.code === '23505') return reply.code(409).send({ error: 'DUPLICATE_NAME', message: 'A structure with this name already exists' })
-      return reply.code(500).send({ error: 'INSERT_FAILED', message: error.message })
+      return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create WO credit structure')
     }
-    if (ladder) await replaceLadder((data as any).id, ladder)
+    if (ladder) {
+      const ladderErr = await replaceLadder((data as any).id, ladder)
+      if (ladderErr) return serverError(req, reply, ladderErr.error, ladderErr.code, 'Failed to save WO credit ladder')
+    }
     return reply.code(201).send({ data: { ...data, ladder: ladder ?? [] } })
   })
 
@@ -132,16 +146,19 @@ export default async function woCreditRoutes(fastify: FastifyInstance) {
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
       .maybeSingle()
-    if (!owned) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Structure not found' })
+    if (!owned) return notFound(reply, 'NOT_FOUND', 'Structure not found')
 
     if (Object.keys(fields).length) {
       const { error } = await fastify.supabase
         .from('wo_credit_structure')
         .update({ ...fields, updated_at: new Date().toISOString() })
         .eq('id', id).eq('tenant_id', req.tenantId)
-      if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+      if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update WO credit structure')
     }
-    if (ladder) await replaceLadder(id, ladder)
+    if (ladder) {
+      const ladderErr = await replaceLadder(id, ladder)
+      if (ladderErr) return serverError(req, reply, ladderErr.error, ladderErr.code, 'Failed to save WO credit ladder')
+    }
 
     const { data } = await fastify.supabase
       .from('wo_credit_structure').select('*').eq('id', id).eq('tenant_id', req.tenantId).single()
@@ -154,7 +171,7 @@ export default async function woCreditRoutes(fastify: FastifyInstance) {
     const { id } = req.params as { id: string }
     const { error } = await fastify.supabase
       .from('wo_credit_structure').delete().eq('id', id).eq('tenant_id', req.tenantId)
-    if (error) return reply.code(500).send({ error: 'DELETE_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.DELETE_FAILED, 'Failed to delete WO credit structure')
     return reply.code(204).send()
   })
 
@@ -206,8 +223,7 @@ export default async function woCreditRoutes(fastify: FastifyInstance) {
       }
       return reply.send({ data: summary })
     } catch (err: unknown) {
-      fastify.log.error({ err }, 'wo-credit/reconcile error')
-      return reply.code(500).send({ error: 'RECONCILE_ERROR', message: err instanceof Error ? err.message : 'Unknown error' })
+      return serverError(req, reply, err, ErrorCode.COMPUTE_FAILED, 'Failed to reconcile WO credit for the month')
     }
   })
 
@@ -229,8 +245,7 @@ export default async function woCreditRoutes(fastify: FastifyInstance) {
       }
       return reply.send({ data: summary })
     } catch (err: unknown) {
-      fastify.log.error({ err }, 'wo-credit/finalize error')
-      return reply.code(500).send({ error: 'FINALIZE_ERROR', message: err instanceof Error ? err.message : 'Unknown error' })
+      return serverError(req, reply, err, ErrorCode.COMPUTE_FAILED, 'Failed to finalize WO credit for the month')
     }
   })
 }

@@ -553,7 +553,9 @@ export async function yearlyAccrualJob(
 
             if (existing) { skipped++; continue }
 
-            await supabase.from('employee_leave_balance').insert({
+            // Supabase-js resolves { error } rather than throwing, so the
+            // surrounding try/catch alone would never observe a DB failure here.
+            const { error: balInsErr } = await supabase.from('employee_leave_balance').insert({
               tenant_id:     tenantId,
               employee_id:   emp.id,
               leave_type_id: policy.leave_type_id,
@@ -561,6 +563,16 @@ export async function yearlyAccrualJob(
               balance:       days,
               updated_at:    new Date().toISOString(),
             })
+            if (balInsErr) {
+              // A missing accrual balance row silently manifests to the employee
+              // as "0 entitlement" with no trace of why — make it discoverable.
+              errors.push(`Emp ${emp.id} leaveType ${policy.leave_type_id} year ${leaveYear}: employee_leave_balance insert failed — ${balInsErr.message}`)
+              console.warn(
+                `[leave-jobs] employee_leave_balance insert failed employee=${emp.id} leaveType=${policy.leave_type_id} year=${leaveYear}:`,
+                balInsErr.message,
+              )
+              continue
+            }
 
             const yearStartStr = asOf ?? `${leaveYear}-01-01`
             // Deterministic cycle key — idempotency guard for replay
@@ -997,13 +1009,22 @@ export async function policyRecalculateJob(
             .eq('leave_type_id', leaveTypeId)
             .eq('year', year)
         } else if (newBalance > 0) {
-          await supabase.from('employee_leave_balance').insert({
+          const { error: balInsErr } = await supabase.from('employee_leave_balance').insert({
             tenant_id:     tenantId,
             employee_id:   emp.id,
             leave_type_id: leaveTypeId,
             year,
             balance:       newBalance,
           })
+          if (balInsErr) {
+            // A missing initial balance row silently manifests to the employee
+            // as "0 entitlement" with no trace of why — make it discoverable.
+            errors.push(`Emp ${emp.id} leaveType ${leaveTypeId} year ${year}: employee_leave_balance insert failed — ${balInsErr.message}`)
+            console.warn(
+              `[leave-jobs] employee_leave_balance insert failed employee=${emp.id} leaveType=${leaveTypeId} year=${year}:`,
+              balInsErr.message,
+            )
+          }
         }
 
         // ── Write adjustment ledger entry ─────────────────────────────────

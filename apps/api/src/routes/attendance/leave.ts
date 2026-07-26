@@ -634,7 +634,9 @@ export default async function leaveRoute(fastify: FastifyInstance) {
         .is('unfrozen_at', null)
       const frozenSet = new Set((frozenRows ?? []).map((r: { freeze_month: string }) => r.freeze_month))
       if (frozenSet.size > 0) {
-        await fastify.supabase.from('payroll_adjustments').insert(
+        // Supabase-js resolves { error } rather than throwing, so the surrounding
+        // try/catch alone would never observe a DB failure here — check explicitly.
+        const { error: adjError } = await fastify.supabase.from('payroll_adjustments').insert(
           [...frozenSet].map(month => ({
             tenant_id:       req.tenantId,
             employee_id:     app.employee_id,
@@ -647,6 +649,15 @@ export default async function leaveRoute(fastify: FastifyInstance) {
             created_by:      req.userId,
           }))
         )
+        if (adjError) {
+          // Approval already committed — do not block/revert it. Log loudly so
+          // ops can discover and manually create the LOP adjustment; otherwise
+          // this employee is silently overpaid for the locked period.
+          req.log.warn(
+            { err: adjError, employeeId: app.employee_id, frozenMonths: [...frozenSet], leaveRequestId: app.id, tenantId: req.tenantId },
+            '[leave] failed to create LOP payroll_adjustments row for leave approval over a frozen period',
+          )
+        }
       }
     } catch (err) {
       req.log.warn({ err }, 'payroll freeze guard check failed — approval committed')

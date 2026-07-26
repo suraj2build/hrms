@@ -749,15 +749,23 @@ export async function buildPayrollFinancialLedger(
     journal_reference:    e.journal_reference ?? null,
   }))
 
-  // Delete old draft entries if regenerating
+  // Delete old draft entries if regenerating. Must succeed before we insert the
+  // regenerated set, or the old rows would sit alongside the new ones under the
+  // same ledger_id and duplicate the ledger.
   if (existing) {
-    await supabase.from('payroll_ledger_entries').delete().eq('ledger_id', ledgerId)
+    const { error: delEntriesErr } = await supabase.from('payroll_ledger_entries').delete().eq('ledger_id', ledgerId)
+    if (delEntriesErr) {
+      return { error: `Failed to clear old ledger entries before regenerating: ${delEntriesErr.message}`, code: 'DELETE_FAILED' }
+    }
   }
 
   const CHUNK = 100
   for (let i = 0; i < entryRows.length; i += CHUNK) {
     const { error: chunkErr } = await supabase.from('payroll_ledger_entries').insert(entryRows.slice(i, i + CHUNK))
-    if (chunkErr) console.warn(`accounting-engine: entry chunk ${i / CHUNK} insert failed: ${chunkErr.message}`)
+    if (chunkErr) {
+      console.warn(`accounting-engine: entry chunk ${i / CHUNK} insert failed: ${chunkErr.message}`)
+      return { error: `Failed to insert ledger entries (chunk ${i / CHUNK}): ${chunkErr.message}`, code: 'INSERT_FAILED' }
+    }
   }
 
   // 11. Update ledger header with totals + hash + status
@@ -787,9 +795,13 @@ export async function buildPayrollFinancialLedger(
   })
   const allocations = buildCostCenterAllocations(allocInputs)
 
-  // Delete old allocations if regenerating
+  // Delete old allocations if regenerating. Same reasoning as the ledger entries
+  // above — must succeed before inserting the regenerated set.
   if (existing) {
-    await supabase.from('payroll_cost_allocations').delete().eq('ledger_id', ledgerId)
+    const { error: delAllocErr } = await supabase.from('payroll_cost_allocations').delete().eq('ledger_id', ledgerId)
+    if (delAllocErr) {
+      return { error: `Failed to clear old cost allocations before regenerating: ${delAllocErr.message}`, code: 'DELETE_FAILED' }
+    }
   }
 
   const allocRows = allocations.map(a => ({
@@ -811,7 +823,14 @@ export async function buildPayrollFinancialLedger(
   }))
 
   for (let i = 0; i < allocRows.length; i += CHUNK) {
-    await supabase.from('payroll_cost_allocations').insert(allocRows.slice(i, i + CHUNK))
+    const { error: allocErr } = await supabase.from('payroll_cost_allocations').insert(allocRows.slice(i, i + CHUNK))
+    if (allocErr) {
+      // payroll_financial_ledgers.total_debit/credit was computed from allEntries
+      // above and would not reconcile against actual cost-allocation rows if this
+      // silently returned success — surface the failure instead.
+      console.warn(`accounting-engine: cost-allocation chunk ${i / CHUNK} insert failed: ${allocErr.message}`)
+      return { error: `Failed to insert cost allocations (chunk ${i / CHUNK}): ${allocErr.message}`, code: 'INSERT_FAILED' }
+    }
   }
 
   return {

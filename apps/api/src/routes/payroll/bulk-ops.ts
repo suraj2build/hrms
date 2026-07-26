@@ -315,7 +315,7 @@ export default async function bulkOpsRoutes(fastify: FastifyInstance) {
           .maybeSingle()
 
         if (freeze) {
-          await fastify.supabase.from('payroll_adjustments').insert({
+          const { error: adjError } = await fastify.supabase.from('payroll_adjustments').insert({
             tenant_id:       req.tenantId,
             employee_id:     app.employee_id,
             locked_month:    month,
@@ -326,6 +326,15 @@ export default async function bulkOpsRoutes(fastify: FastifyInstance) {
             status:          'pending',
             created_by:      req.userId,
           })
+          if (adjError) {
+            // Leave approval already committed — do not block/revert it. Log loudly
+            // so ops can discover and manually create the LOP adjustment; otherwise
+            // this employee is silently overpaid for the locked period with no trace.
+            req.log.warn(
+              { err: adjError, employeeId: app.employee_id, lockedMonth: month, leaveRequestId: app.id, tenantId: req.tenantId },
+              '[payroll] failed to create LOP payroll_adjustments row for bulk-approved leave over a frozen period',
+            )
+          }
         }
       }
 

@@ -407,7 +407,9 @@ export async function finalizeEmployeeMonth(
 
       if (extraPayAmount > 0) {
         const lockedMonth = `${year}-${String(month).padStart(2, '0')}`
-        await supabase.from('payroll_adjustments').insert({
+        // Supabase-js resolves { error } rather than throwing, so the surrounding
+        // try/catch alone would never observe a DB failure here — check explicitly.
+        const { error: adjError } = await supabase.from('payroll_adjustments').insert({
           tenant_id:       tenantId,
           employee_id:     emp.employeeId,
           locked_month:    lockedMonth,
@@ -418,6 +420,15 @@ export async function finalizeEmployeeMonth(
           source_type:     'manual',
           status:          'pending',
         })
+        if (adjError) {
+          // Don't block the rest of the reconciliation loop for other employees —
+          // just make the failure loudly discoverable (silent failure here means
+          // this employee is never paid for holiday work, with no audit trail).
+          console.error(
+            `[wo-credit] extra-pay payroll_adjustments insert failed employee=${emp.employeeId} month=${lockedMonth} amount=${extraPayAmount}:`,
+            adjError.message,
+          )
+        }
       }
     } catch (e) {
       console.error(`[wo-credit] extra-pay adjustment employee=${emp.employeeId} error:`, (e as Error).message)

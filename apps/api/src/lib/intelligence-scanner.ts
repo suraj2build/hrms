@@ -550,7 +550,14 @@ async function scanLifecycleExpiry(supabase: SupabaseClient, tenantId: string): 
     .eq('tenant_id', tenantId).eq('status', 'active')
     .not('end_date', 'is', null).lt('end_date', todayIso)
   for (const c of (lapsed ?? []) as any[]) {
-    await supabase.from('employee_contracts').update({ status: 'expired' }).eq('id', c.id).eq('tenant_id', tenantId)
+    const { error: expireErr } = await supabase.from('employee_contracts').update({ status: 'expired' }).eq('id', c.id).eq('tenant_id', tenantId)
+    if (expireErr) {
+      // Don't emit contract.expired if the state transition didn't actually
+      // happen — otherwise the scanner re-detects the same lapsed contract
+      // (still 'active' in the DB) and re-emits the event every cycle.
+      console.warn('[intelligence-scanner] failed to mark contract expired:', c.id, expireErr.message)
+      continue
+    }
     eventBus.emit({ type: 'contract.expired', tenantId, payload: { tenantId, contractId: c.id } } as any)
   }
 }
@@ -895,7 +902,13 @@ async function scanBenefitsEnrolment(supabase: SupabaseClient, tenantId: string)
   for (const plan of (toOpen ?? []) as any[]) {
     const key = `benefits-enrolment-open:${tenantId}:${plan.id}`
     if (!shouldEmit(key)) continue
-    await supabase.from('benefit_plans').update({ status: 'open' }).eq('id', plan.id)
+    const { error: openErr } = await supabase.from('benefit_plans').update({ status: 'open' }).eq('id', plan.id)
+    if (openErr) {
+      // Don't tell HR/employees enrolment opened if the status write failed —
+      // the portal's actual enrolment gate never changed.
+      console.warn('[intelligence-scanner] failed to open benefit plan enrolment:', plan.id, openErr.message)
+      continue
+    }
     await notifyHrAdmins(supabase, {
       tenantId, item_type: 'general', severity: 'info',
       title:    `Benefits enrolment opened: ${plan.name}`,
@@ -912,7 +925,13 @@ async function scanBenefitsEnrolment(supabase: SupabaseClient, tenantId: string)
   for (const plan of (toClose ?? []) as any[]) {
     const key = `benefits-enrolment-close:${tenantId}:${plan.id}`
     if (!shouldEmit(key)) continue
-    await supabase.from('benefit_plans').update({ status: 'active' }).eq('id', plan.id)
+    const { error: closeErr } = await supabase.from('benefit_plans').update({ status: 'active' }).eq('id', plan.id)
+    if (closeErr) {
+      // Same reasoning as the open branch above — don't send a misleading
+      // "enrolment closed" notification if the status write failed.
+      console.warn('[intelligence-scanner] failed to close benefit plan enrolment:', plan.id, closeErr.message)
+      continue
+    }
     await notifyHrAdmins(supabase, {
       tenantId, item_type: 'general', severity: 'info',
       title:    `Benefits enrolment closed: ${plan.name}`,

@@ -232,7 +232,7 @@ export default async function exitInterviewRoutes(fastify: FastifyInstance) {
 
     const overall  = parsed.success ? parsed.data.overall_comments : undefined
     const wouldRec = parsed.success ? parsed.data.would_recommend : undefined
-    await fastify.supabase.from('employee_separation').update({
+    const { error: submitErr } = await fastify.supabase.from('employee_separation').update({
       exit_interview_status:      'submitted',
       exit_interview_done:        true,
       exit_interview_date:        new Date().toISOString().slice(0, 10),
@@ -242,6 +242,10 @@ export default async function exitInterviewRoutes(fastify: FastifyInstance) {
       ...(wouldRec !== undefined ? { exit_interview_would_recommend: wouldRec } : {}),
       updated_at: new Date().toISOString(),
     }).eq('id', sep.id).eq('tenant_id', req.tenantId)
+    // If this fails, exit_interview_status silently stays 'draft' forever — the
+    // candidate would be told submission succeeded, and the ALREADY_SUBMITTED
+    // guard above would never trigger, leaving resubmission unprotected.
+    if (submitErr) return serverError(req, reply, submitErr, ErrorCode.UPDATE_FAILED, 'Failed to mark exit interview as submitted')
 
     await logAction(fastify.supabase, {
       tenantId: req.tenantId, tableName: 'employee_separation', recordId: sep.id,

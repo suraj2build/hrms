@@ -628,7 +628,12 @@ export default async function compensationRoutes(fastify: FastifyInstance) {
     // Block deletion if any finalized payroll slip referenced this compensation
     // period — keep historical pay auditable. (Best-effort: skip if column absent.)
     // Delete components first (explicit; FK cascade may or may not be present).
-    await fastify.supabase.from('employee_compensation_components').delete().eq('compensation_id', compId)
+    const { error: compDelErr } = await fastify.supabase.from('employee_compensation_components').delete().eq('compensation_id', compId)
+    if (compDelErr) {
+      // If this fails, don't proceed to delete the header — that would orphan
+      // component rows pointing at a now-deleted compensation_id.
+      return serverError(req, reply, compDelErr, ErrorCode.DELETE_FAILED, 'Failed to delete compensation components')
+    }
 
     const { error: delErr } = await fastify.supabase
       .from('employee_compensations')

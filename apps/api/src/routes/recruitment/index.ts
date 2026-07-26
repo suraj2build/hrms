@@ -2061,13 +2061,22 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
         offered_amount: amount, joining_date: jdate, valid_until: valid_until || null,
         status: 'sent', html_content: letter_html, updated_at: new Date().toISOString(),
       }
-      if (existing) await fastify.supabase.from('recruitment_offer_letters').update(row).eq('id', existing.id)
-      else          await fastify.supabase.from('recruitment_offer_letters').insert(row)
+      const { error: offerLetterError } = existing
+        ? await fastify.supabase.from('recruitment_offer_letters').update(row).eq('id', existing.id)
+        : await fastify.supabase.from('recruitment_offer_letters').insert(row)
+      if (offerLetterError) {
+        req.log.error({ err: offerLetterError, tenantId: req.tenantId, applicationId: appId }, '[recruitment] failed to persist offer letter after send')
+        return serverError(req, reply, offerLetterError, ErrorCode.UPDATE_FAILED, 'Offer email sent, but failed to persist the offer letter record')
+      }
 
-      await fastify.supabase
+      const { error: appStatusError } = await fastify.supabase
         .from('applications')
         .update({ status: 'offer', offer_amount: amount, expected_joining: jdate, offer_date: new Date().toISOString().slice(0, 10) })
         .eq('id', appId).eq('tenant_id', req.tenantId)
+      if (appStatusError) {
+        req.log.error({ err: appStatusError, tenantId: req.tenantId, applicationId: appId }, '[recruitment] failed to flip application status to offer after send')
+        return serverError(req, reply, appStatusError, ErrorCode.UPDATE_FAILED, 'Offer email sent, but failed to update the application status')
+      }
     }
 
     await logAction(fastify.supabase, {

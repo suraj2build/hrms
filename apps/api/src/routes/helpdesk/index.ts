@@ -386,7 +386,11 @@ export default async function helpdeskRoutes(fastify: FastifyInstance) {
       if ((ticket as any).status === 'open') patch.status = 'in_progress'
     }
     if (Object.keys(patch).length > 0) {
-      await fastify.supabase.from('helpdesk_tickets').update(patch).eq('id', id).eq('tenant_id', req.tenantId)
+      const { error: patchErr } = await fastify.supabase.from('helpdesk_tickets').update(patch).eq('id', id).eq('tenant_id', req.tenantId)
+      // sla-scanner.ts reads first_response_at for SLA breach detection — if this
+      // write fails, the ticket would keep looking never-responded even though a
+      // reply was posted. Surface the failure instead of a success response.
+      if (patchErr) return serverError(req, reply, patchErr, ErrorCode.UPDATE_FAILED, 'Comment saved, but failed to update ticket status')
     }
 
     // Notify the other party (skip for internal notes).

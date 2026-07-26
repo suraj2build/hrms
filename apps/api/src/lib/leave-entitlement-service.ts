@@ -485,7 +485,9 @@ export async function runYearlyCredit(
           continue
         }
 
-        await supabase.from('employee_leave_balance').insert({
+        // Supabase-js resolves { error } rather than throwing, so the
+        // surrounding try/catch alone would never observe a DB failure here.
+        const { error: balInsErr } = await supabase.from('employee_leave_balance').insert({
           tenant_id:     tenantId,
           employee_id:   emp.id,
           leave_type_id: leaveTypeId,
@@ -493,6 +495,16 @@ export async function runYearlyCredit(
           balance:       days,
           updated_at:    new Date().toISOString(),
         })
+        if (balInsErr) {
+          // A missing initial balance row silently manifests to the employee
+          // as "0 entitlement" with no trace of why — make it discoverable.
+          result.errors.push(`emp ${emp.id} / type ${leaveTypeId}: employee_leave_balance insert failed — ${balInsErr.message}`)
+          console.warn(
+            `[leave-entitlement-service] employee_leave_balance insert failed employee=${emp.id} leaveType=${leaveTypeId} year=${leaveYear}:`,
+            balInsErr.message,
+          )
+          continue
+        }
 
         result.employees_processed++
         result.total_days_credited = round1(result.total_days_credited + days)
@@ -591,7 +603,7 @@ export async function runCarryForward(
 
         if (!existing) {
           // No toYear row yet — insert with carry-forward amount
-          await supabase.from('employee_leave_balance').insert({
+          const { error: balInsErr } = await supabase.from('employee_leave_balance').insert({
             tenant_id:     tenantId,
             employee_id:   b.employee_id,
             leave_type_id: leaveTypeId,
@@ -599,6 +611,16 @@ export async function runCarryForward(
             balance:       round1(carryAmt),
             updated_at:    new Date().toISOString(),
           })
+          if (balInsErr) {
+            // A missing carry-forward balance row silently manifests to the
+            // employee as "0 entitlement" with no trace of why.
+            result.errors.push(`emp ${b.employee_id} / type ${leaveTypeId}: employee_leave_balance insert failed — ${balInsErr.message}`)
+            console.warn(
+              `[leave-entitlement-service] carry-forward employee_leave_balance insert failed employee=${b.employee_id} leaveType=${leaveTypeId} year=${toYear}:`,
+              balInsErr.message,
+            )
+            continue
+          }
         } else {
           // Add carry-forward on top of existing toYear balance (e.g. yearly credit)
           const newBal = round1(Number(existing.balance) + carryAmt)
@@ -696,7 +718,7 @@ async function writeLedgerEntry(
       .maybeSingle()
     if (existing) return { skipped: true }
 
-    await supabase.from('leave_accrual_ledger').upsert(
+    const { error: upsertErr } = await supabase.from('leave_accrual_ledger').upsert(
       {
         tenant_id:     tenantId,
         employee_id:   employeeId,
@@ -714,6 +736,17 @@ async function writeLedgerEntry(
         ignoreDuplicates: true,
       },
     )
+    if (upsertErr) {
+      // The balance-cache write (creditEmployeeDays / an RPC) is the primary
+      // source of truth and has already committed by the time callers act on
+      // this — don't revert it. But a missing ledger row means a later
+      // reconciliation/carry-forward run rebuilding balances from this ledger
+      // would silently diverge from the cache, so make it discoverable.
+      console.warn(
+        `[leave-entitlement-service] leave_accrual_ledger upsert failed for employee=${employeeId} leaveType=${leaveTypeId} accrualType=${accrualType} year=${year} days=${days}:`,
+        upsertErr.message,
+      )
+    }
     return { skipped: false }
   } catch {
     // swallow — ledger write is supplemental; balance update is primary
@@ -1115,7 +1148,7 @@ export async function runEngineYearlyCredit(
 
         if (existing) { result.skipped++; continue }
 
-        await supabase.from('employee_leave_balance').insert({
+        const { error: balInsErr } = await supabase.from('employee_leave_balance').insert({
           tenant_id:     tenantId,
           employee_id:   assignment.employee_id,
           leave_type_id: leaveTypeId,
@@ -1123,6 +1156,16 @@ export async function runEngineYearlyCredit(
           balance:       days,
           updated_at:    new Date().toISOString(),
         })
+        if (balInsErr) {
+          // A missing initial balance row silently manifests to the employee
+          // as "0 entitlement" with no trace of why — make it discoverable.
+          result.errors.push(`emp ${assignment.employee_id} / type ${leaveTypeId}: employee_leave_balance insert failed — ${balInsErr.message}`)
+          console.warn(
+            `[leave-entitlement-service] employee_leave_balance insert failed employee=${assignment.employee_id} leaveType=${leaveTypeId} year=${leaveYear}:`,
+            balInsErr.message,
+          )
+          continue
+        }
 
         // Write expiring ledger entry if expiry_days is set
         let expiresOn: string | null = null

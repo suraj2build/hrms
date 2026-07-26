@@ -2181,11 +2181,14 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       if (dualControl) {
         if (!pending) {
           // Maker step — record the proposal and stop. A different user approves.
-          await fastify.supabase.from('maker_checker_log').insert({
+          const { error: mcInsertError } = await fastify.supabase.from('maker_checker_log').insert({
             tenant_id: tenantId, entity_type: 'payroll_run', entity_id: id,
             action: 'finalize', maker_id: req.userId, status: 'pending',
             maker_data: { month: run.month, force_finalize, override_reason: override_reason ?? null },
           })
+          if (mcInsertError) {
+            return serverError(req, reply, mcInsertError, ErrorCode.INSERT_FAILED, 'Failed to record four-eyes finalize proposal')
+          }
           return reply.code(202).send({
             status:  'PENDING_CHECKER',
             message: 'Finalize submitted for four-eyes approval. A different authorised user must approve to seal this run.',
@@ -2206,7 +2209,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
         // When the preparer themselves approved via super_admin override, record that
         // fact distinctly so an auditor can tell it from a clean four-eyes approval.
         const preparerOverride = (run as any).created_by === req.userId
-        await fastify.supabase.from('maker_checker_log')
+        const { error: mcApproveError } = await fastify.supabase.from('maker_checker_log')
           .update({
             checker_id:   req.userId,
             status:       'approved',
@@ -2214,15 +2217,21 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
             ...(preparerOverride ? { checker_notes: 'PREPARER_SELF_APPROVED_OVERRIDE (super_admin)' } : {}),
           })
           .eq('id', (pending as any).id)
+        if (mcApproveError) {
+          return serverError(req, reply, mcApproveError, ErrorCode.UPDATE_FAILED, 'Failed to record four-eyes finalize approval')
+        }
       } else {
         // Dual control off — record an auto-approved entry (real audit trail) and
         // proceed exactly as before: single operator, immediate finalize.
-        await fastify.supabase.from('maker_checker_log').insert({
+        const { error: mcAutoError } = await fastify.supabase.from('maker_checker_log').insert({
           tenant_id: tenantId, entity_type: 'payroll_run', entity_id: id,
           action: 'finalize', maker_id: req.userId, checker_id: req.userId,
           status: 'auto_approved', reviewed_at: new Date().toISOString(),
           maker_data: { month: run.month, force_finalize, override_reason: override_reason ?? null },
         })
+        if (mcAutoError) {
+          return serverError(req, reply, mcAutoError, ErrorCode.INSERT_FAILED, 'Failed to record four-eyes finalize audit entry')
+        }
       }
     }
 

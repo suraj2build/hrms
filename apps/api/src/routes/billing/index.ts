@@ -129,7 +129,12 @@ export default async function billingRoutes(fastify: FastifyInstance) {
           break
       }
       if (Object.keys(updates).length) {
-        await fastify.supabase.from('tenants').update(updates).eq('id', tenantId)
+        const { error: tenantUpdateError } = await fastify.supabase.from('tenants').update(updates).eq('id', tenantId)
+        if (tenantUpdateError) {
+          // Do NOT report success to Razorpay — a 5xx makes Razorpay retry
+          // delivery, which is the only way this update gets another chance.
+          return serverError(req, reply, tenantUpdateError, ErrorCode.UPDATE_FAILED, 'Failed to apply subscription status update')
+        }
       }
     }
 

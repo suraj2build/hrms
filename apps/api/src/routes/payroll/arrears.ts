@@ -256,19 +256,21 @@ export default async function arrearsRoutes(fastify: FastifyInstance) {
       .filter((rec: any) => rec.new_amount !== rec.old_amount)
 
     // Recompute: clear prior records for the batch, insert fresh
-    await fastify.supabase.from('arrear_records').delete().eq('tenant_id', req.tenantId).eq('batch_id', id)
+    const { error: delErr } = await fastify.supabase.from('arrear_records').delete().eq('tenant_id', req.tenantId).eq('batch_id', id)
+    if (delErr) return serverError(req, reply, delErr, ErrorCode.DELETE_FAILED, 'Failed to clear prior arrear records before recompute')
     if (records.length) {
       const { error: insErr } = await fastify.supabase.from('arrear_records').insert(records)
       if (insErr) return serverError(req, reply, insErr, ErrorCode.INSERT_FAILED, 'Failed to create arrear records')
     }
 
     const total = records.reduce((s, r) => s + Math.abs(r.arrear_amount), 0)
-    await fastify.supabase.from('arrear_batches').update({
+    const { error: statusErr } = await fastify.supabase.from('arrear_batches').update({
       status:              'calculated',
       employee_count:      new Set(records.map(r => r.employee_id)).size,
       total_arrear_amount: Math.round(total * 100) / 100,
       updated_at:          new Date().toISOString(),
     }).eq('id', id).eq('tenant_id', req.tenantId)
+    if (statusErr) return serverError(req, reply, statusErr, ErrorCode.UPDATE_FAILED, 'Arrear records were recalculated, but failed to update batch status')
 
     return reply.send({ data: { batch_id: id, records_created: records.length, total_arrear_amount: Math.round(total * 100) / 100 } })
   })

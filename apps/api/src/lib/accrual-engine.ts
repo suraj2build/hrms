@@ -348,15 +348,35 @@ export async function processCarryForward(
     // Batch write: 3 calls per rule regardless of employee count
     // (was 3 × N_employees sequential calls)
     if (cfBalUpserts.length) {
-      await supabase
+      const { error: cfBalErr } = await supabase
         .from('employee_leave_balance')
         .upsert(cfBalUpserts, { onConflict: 'tenant_id,employee_id,leave_type_id,year' })
+      if (cfBalErr) {
+        // A missing/failed carry-forward balance write manifests to the employee
+        // as "0 entitlement" with no trace of why — log loudly so it's discoverable.
+        console.warn(
+          `[accrual-engine] carry-forward employee_leave_balance upsert failed leaveType=${rule.leave_type_id} year=${toYear}:`,
+          cfBalErr.message,
+        )
+      }
 
-      await supabase.from('leave_balance_ledger').insert(cfLedInserts)
+      const { error: cfLedErr } = await supabase.from('leave_balance_ledger').insert(cfLedInserts)
+      if (cfLedErr) {
+        console.warn(
+          `[accrual-engine] carry-forward leave_balance_ledger insert failed leaveType=${rule.leave_type_id} year=${toYear}:`,
+          cfLedErr.message,
+        )
+      }
 
-      await supabase
+      const { error: cfAlErr } = await supabase
         .from('leave_accrual_ledger')
         .upsert(cfAlUpserts, { onConflict: 'tenant_id,employee_id,leave_type_id,year,accrual_type,accrued_on', ignoreDuplicates: true })
+      if (cfAlErr) {
+        console.warn(
+          `[accrual-engine] carry-forward leave_accrual_ledger upsert failed leaveType=${rule.leave_type_id} year=${toYear}:`,
+          cfAlErr.message,
+        )
+      }
     }
   }
 

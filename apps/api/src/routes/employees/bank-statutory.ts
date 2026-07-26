@@ -115,25 +115,34 @@ export default async function bankStatutoryRoutes(fastify: FastifyInstance) {
 
     // Write PT state to ptax_state_config (idempotent).
     if (ptStateCode !== undefined) {
-      await fastify.supabase.from('ptax_state_config').delete()
+      const { error: ptDelErr } = await fastify.supabase.from('ptax_state_config').delete()
         .eq('employee_id', req.params.id).eq('tenant_id', req.tenantId).is('effective_to', null)
+      if (ptDelErr) return serverError(req, reply, ptDelErr, ErrorCode.DELETE_FAILED, 'Failed to clear prior PT state config')
       if (ptStateCode) {
-        await fastify.supabase.from('ptax_state_config').insert({
+        const { error: ptInsErr } = await fastify.supabase.from('ptax_state_config').insert({
           employee_id: req.params.id, tenant_id: req.tenantId,
           state_code: ptStateCode, effective_from: today, override_reason: 'Set from employee master',
         })
+        // Delete already succeeded — if the insert fails now, the employee has
+        // zero active PT state config and the payroll statutory engine will
+        // silently skip PT deduction. Surface this rather than reporting success.
+        if (ptInsErr) return serverError(req, reply, ptInsErr, ErrorCode.INSERT_FAILED, 'State transfer incomplete: failed to set new PT state config')
       }
     }
 
     // Write LWF state to lwf_state_config (idempotent).
     if (lwfStateCode !== undefined) {
-      await fastify.supabase.from('lwf_state_config').delete()
+      const { error: lwfDelErr } = await fastify.supabase.from('lwf_state_config').delete()
         .eq('employee_id', req.params.id).eq('tenant_id', req.tenantId).is('effective_to', null)
+      if (lwfDelErr) return serverError(req, reply, lwfDelErr, ErrorCode.DELETE_FAILED, 'Failed to clear prior LWF state config')
       if (lwfStateCode) {
-        await fastify.supabase.from('lwf_state_config').insert({
+        const { error: lwfInsErr } = await fastify.supabase.from('lwf_state_config').insert({
           employee_id: req.params.id, tenant_id: req.tenantId,
           state_code: lwfStateCode, effective_from: today, override_reason: 'Set from employee master',
         })
+        // Same reasoning as PT above — a missing LWF config means the payroll
+        // engine silently skips LWF deduction for this employee.
+        if (lwfInsErr) return serverError(req, reply, lwfInsErr, ErrorCode.INSERT_FAILED, 'State transfer incomplete: failed to set new LWF state config')
       }
     }
 
