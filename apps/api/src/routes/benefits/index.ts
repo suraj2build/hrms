@@ -161,9 +161,26 @@ export default async function benefitsRoutes(fastify: FastifyInstance) {
     }
 
     // Dependents only allowed when the plan permits them.
-    const dependentIds = (plan as any).allows_dependents && parsed.data.status === 'enrolled'
+    let dependentIds = (plan as any).allows_dependents && parsed.data.status === 'enrolled'
       ? parsed.data.dependent_ids
       : []
+
+    // dependent_ids are raw UUIDs from the request body — verify each is
+    // actually one of the caller's own employee_family rows, or a caller
+    // could enrol another tenant's (or employee's) dependent record onto
+    // their own coverage, which then ships to the insurer via
+    // InsuranceProvider.syncEnrolment() as part of this enrolment.
+    if (dependentIds.length > 0) {
+      const { data: ownDeps } = await fastify.supabase
+        .from('employee_family')
+        .select('id')
+        .in('id', dependentIds)
+        .eq('tenant_id', req.tenantId)
+        .eq('employee_id', employeeId)
+        .eq('is_dependent', true)
+      const ownDepIds = new Set(((ownDeps ?? []) as any[]).map(d => d.id))
+      dependentIds = dependentIds.filter((id: string) => ownDepIds.has(id))
+    }
 
     const { data, error } = await fastify.supabase
       .from('benefit_enrollments')
