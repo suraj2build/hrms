@@ -658,16 +658,31 @@ export async function cancelLeaveRequest(
     }
   }
 
+  // Fold the PENDING precondition into the WHERE clause — every other
+  // canonical mutation (approve/reject/reverse) routes through a FOR
+  // UPDATE-locked, status-rechecked RPC; this plain read-then-write could
+  // otherwise clobber a request a concurrent approve had already locked and
+  // advanced (approve_leave_request_atomic correctly deducts balance/writes
+  // the ledger under its own lock, but this UPDATE — reading a stale
+  // PENDING snapshot — would still overwrite it to CANCELLED with no
+  // reversal, leaving the ledger/balance out of sync with the visible status).
   const { data, error } = await supabase
     .from('leave_requests')
     .update({ status: 'CANCELLED' })
     .eq('id', requestId)
     .eq('tenant_id', tenantId)
+    .eq('status', 'PENDING')
     .select(SELECT_FIELDS)
-    .single()
+    .maybeSingle()
 
   if (error) {
     return { ok: false, error: { type: 'DB_ERROR', message: 'Failed to cancel leave request' } }
+  }
+  if (!data) {
+    return {
+      ok:    false,
+      error: { type: 'CONFLICT', message: 'Request was already actioned by another request' },
+    }
   }
 
   const cancelled = data as unknown as LeaveRequestRow

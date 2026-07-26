@@ -722,14 +722,24 @@ export default async function leaveRoute(fastify: FastifyInstance) {
       return conflictError(reply, 'ALREADY_ACTIONED', `Application is already ${app.status}`)
     }
 
-    const { error } = await fastify.supabase
+    // Fold the precondition into the WHERE clause — unlike the approve handler
+    // in this same file, this UPDATE had no .eq('status','pending') guard, so
+    // a concurrent approve that commits first would still get silently
+    // clobbered to 'rejected' here (the reject request read a stale 'pending'
+    // snapshot above). Checking affected rows makes this TOCTOU-safe.
+    const { data: rejectedRows, error } = await fastify.supabase
       .from('leave_applications')
       .update({ status: 'rejected' })
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
+      .eq('status', 'pending')
+      .select('id')
 
     if (error) {
       return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to reject application')
+    }
+    if (!rejectedRows?.length) {
+      return conflictError(reply, 'ALREADY_ACTIONED', 'Application was already actioned by another request')
     }
 
     // DB-level event (non-blocking)
@@ -834,15 +844,24 @@ export default async function leaveRoute(fastify: FastifyInstance) {
       }
     }
 
-    // Mark as cancelled
-    const { error: cancelErr } = await fastify.supabase
+    // Mark as cancelled. Fold the precondition into the WHERE clause — this
+    // UPDATE had no .eq('status','approved') guard, so a concurrent approve
+    // (which correctly locks/rechecks status) or reject that lands between
+    // our fetch above and this write would otherwise be silently clobbered to
+    // 'cancelled' with no balance/ledger reconciliation on that other path.
+    const { data: cancelledRows, error: cancelErr } = await fastify.supabase
       .from('leave_applications')
       .update({ status: 'cancelled' })
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
+      .eq('status', 'approved')
+      .select('id')
 
     if (cancelErr) {
       return serverError(req, reply, cancelErr, ErrorCode.UPDATE_FAILED, 'Failed to cancel application')
+    }
+    if (!cancelledRows?.length) {
+      return conflictError(reply, 'ALREADY_ACTIONED', 'Application was already actioned by another request')
     }
 
     // Reverse attendance_daily rows that were created by this leave approval.
@@ -867,7 +886,10 @@ export default async function leaveRoute(fastify: FastifyInstance) {
 
       // C6: idempotent reversal row in leave_accrual_ledger.
       // source_request_id = original leave application id, accrual_type = 'reversal'
-      // ensures at most one reversal per leave.
+      // ensures at most one reversal per leave. This block is now reachable
+      // at most once per application — the cancel UPDATE above only succeeds
+      // once (folded status='approved' precondition) — so credit_leave_balance
+      // (which is not itself idempotent) can't be double-invoked via a retry.
       const { error: ledgerErr } = await fastify.supabase
         .from('leave_accrual_ledger')
         .upsert({
