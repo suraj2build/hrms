@@ -181,7 +181,13 @@ export async function resolveEmployeeStatutoryParams(
       .limit(1)
       .maybeSingle(),
 
-    // ESI exemption override — latest row wins (same reason as EPF above).
+    // ESI exemption override — latest row wins, but only if still active for
+    // this payroll month. Fresh audit finding: this previously had no
+    // effective_to filter, so "reinstating" an employee (which sets
+    // effective_to on the exemption row rather than inserting an
+    // is_exempt=false row) never actually took effect — the resolver kept
+    // finding the same closed-out exempt row forever and ESI was never
+    // deducted/remitted again.
     supabase
       .from('employee_statutory_overrides')
       .select('*')
@@ -189,11 +195,13 @@ export async function resolveEmployeeStatutoryParams(
       .eq('tenant_id', tenantId)
       .eq('statutory_type', 'esi')
       .eq('is_exempt', true)
+      .lte('effective_from', monthDate)
+      .or(`effective_to.is.null,effective_to.gte.${monthDate}`)
       .order('effective_from', { ascending: false })
       .limit(1)
       .maybeSingle(),
 
-    // PTax exemption override — latest row wins.
+    // PTax exemption override — latest row wins, same effective_to guard as ESI.
     supabase
       .from('employee_statutory_overrides')
       .select('*')
@@ -201,6 +209,8 @@ export async function resolveEmployeeStatutoryParams(
       .eq('tenant_id', tenantId)
       .eq('statutory_type', 'ptax')
       .eq('is_exempt', true)
+      .lte('effective_from', monthDate)
+      .or(`effective_to.is.null,effective_to.gte.${monthDate}`)
       .order('effective_from', { ascending: false })
       .limit(1)
       .maybeSingle(),
@@ -424,6 +434,8 @@ export async function resolveEmployeeStatutoryParams(
     if (lwfErr) throw new Error(`resolveEmployeeStatutoryParams: failed to fetch LWF state settings: ${lwfErr.message}`)
 
     // LWF exemption override (employee_statutory_overrides, type='lwf').
+    // Same effective_to guard as ESI/PTax above — without it, "reinstating"
+    // an employee never took effect once any exemption row existed.
     const { data: lwfExemptRow, error: lwfExemptErr } = await supabase
       .from('employee_statutory_overrides')
       .select('is_exempt, exemption_reason')
@@ -431,6 +443,8 @@ export async function resolveEmployeeStatutoryParams(
       .eq('tenant_id', tenantId)
       .eq('statutory_type', 'lwf')
       .eq('is_exempt', true)
+      .lte('effective_from', monthDate)
+      .or(`effective_to.is.null,effective_to.gte.${monthDate}`)
       .order('effective_from', { ascending: false })
       .limit(1)
       .maybeSingle()
