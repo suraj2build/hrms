@@ -7,6 +7,7 @@ import { createHash } from 'crypto'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { DuplicateDetectionResult, DuplicateType } from '../types/trust-types.js'
 import { explainabilityService } from '../../ai/services/explainability.service.js'
+import { fetchAllRows } from '../../../lib/supabase-paginate.js'
 
 function hash(value: string): string {
   return createHash('sha256').update(value.trim().toLowerCase()).digest('hex')
@@ -46,13 +47,23 @@ export class DuplicateDetectorService {
   }): Promise<DuplicateDetectionResult | null> {
     // Match on normalized account number (remove spaces/dashes)
     const normalized = params.account_number.replace(/[\s\-]/g, '')
-    const { data, error } = await supabase
-      .from('employee_bank_statutory')
-      .select('employee_id, account_number')
-      .eq('tenant_id', params.tenant_id)
-      .neq('employee_id', params.employee_id)
-
-    if (error || !data) return null
+    // Account numbers are masked in the DB, so this can't be filtered
+    // server-side — it must scan every other employee's row for this tenant
+    // and match client-side. Paginated so a large tenant doesn't silently
+    // miss duplicate-account matches past PostgREST's 1000-row cap.
+    let data: any[]
+    try {
+      data = await fetchAllRows<any>((from, to) =>
+        supabase
+          .from('employee_bank_statutory')
+          .select('employee_id, account_number')
+          .eq('tenant_id', params.tenant_id)
+          .neq('employee_id', params.employee_id)
+          .range(from, to),
+      )
+    } catch {
+      return null
+    }
 
     // Client-side normalize match (DB stores masked values)
     const matches = (data as any[]).filter(r =>
