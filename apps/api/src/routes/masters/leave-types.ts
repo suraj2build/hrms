@@ -21,7 +21,7 @@ const schema = z.object({
   allow_sandwich:    z.boolean().default(false),
   allow_half_day:    z.boolean().default(false),
   allow_hourly:      z.boolean().default(false),
-  max_hours_per_day: z.number().min(0).max(24).nullable().optional(),
+  max_hours_per_day: z.number().positive().max(24).nullable().optional(),
   is_active:         z.boolean().default(true),
 })
 

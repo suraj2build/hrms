@@ -1132,14 +1132,20 @@ export default async function executiveRoutes(fastify: FastifyInstance) {
         .gte('detected_at', `${from30}T00:00:00`)
         .limit(200),
 
-      // O5.9 — workforce_trust_scores avg + distribution
-      fastify.supabase
-        .from('workforce_trust_scores')
-        .select('score, severity, computed_at')
-        .eq('tenant_id', req.tenantId)
-        .eq('score_type', 'employee')
-        .order('computed_at', { ascending: false })
-        .limit(500),
+      // O5.9 — workforce_trust_scores avg + distribution. workforce_trust_scores
+      // is UNIQUE(org_id, entity_id, score_type) — one row per employee, not a
+      // log — so a hardcoded .limit(500) silently drops employees past 500 for
+      // larger tenants, and (ordered by computed_at DESC) biases the sample
+      // toward whichever employees were most recently rescored. This average
+      // feeds the CHRO/CEO-facing Risk Posture Index composite.
+      fetchAllRows<{ score: number; severity: string; computed_at: string }>((from, to2) =>
+        fastify.supabase
+          .from('workforce_trust_scores')
+          .select('score, severity, computed_at')
+          .eq('tenant_id', req.tenantId)
+          .eq('score_type', 'employee')
+          .range(from, to2)
+      ),
     ])
 
     const open_incidents         = incOpenRes.count     ?? 0
@@ -1163,7 +1169,7 @@ export default async function executiveRoutes(fastify: FastifyInstance) {
     }, {})
 
     // O5.9 — trust metrics from workforce_trust_scores
-    const wfScores: Array<{ score: number; severity: string; computed_at: string }> = wfTrustRes?.data ?? []
+    const wfScores: Array<{ score: number; severity: string; computed_at: string }> = wfTrustRes ?? []
     const avg_trust_score = wfScores.length > 0
       ? Math.round(wfScores.reduce((sum, r) => sum + (r.score ?? 0), 0) / wfScores.length)
       : null
