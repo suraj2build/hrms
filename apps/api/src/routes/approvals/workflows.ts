@@ -20,12 +20,25 @@ import {
   getChainForEntity,
 }                               from '../../lib/workflow-service.js'
 
-import { HR_ADMIN_ROLES, MANAGER_ROLES } from '../../lib/rbac.js'
-const ALLOW_ROLES = MANAGER_ROLES
+import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { isHrAdmin, resolveCallerEmployeeId, isDirectReport } from '../../lib/manager-scope.js'
 
 // Workflow types the engine drives (must match the 053 enum + migrations 313/314).
 const WORKFLOW_TYPES = ['leave', 'correction', 'regularisation', 'overtime', 'comp_off', 'reimbursement', 'loan', 'advance'] as const
 const ENTITY_TYPES   = ['leave_request', 'attendance_correction', 'attendance_regularisation', 'overtime_request', 'comp_off_request', 'reimbursement_claim', 'employee_loan', 'advance_salary'] as const
+
+// entity_type -> underlying request table, all of which carry employee_id.
+// Used to resolve chain-read ownership for the self-or-manager-or-hr-admin check.
+const ENTITY_TABLE_MAP: Record<(typeof ENTITY_TYPES)[number], string> = {
+  leave_request:             'leave_requests',
+  attendance_correction:     'attendance_corrections',
+  attendance_regularisation: 'attendance_regularisation',
+  overtime_request:          'overtime_requests',
+  comp_off_request:          'comp_off_requests',
+  reimbursement_claim:       'reimbursement_claims',
+  employee_loan:             'employee_loans',
+  advance_salary:            'advance_salary_requests',
+}
 
 export default async function workflowsRoute(fastify: FastifyInstance) {
   const auth = { preHandler: [fastify.authenticate] }
@@ -107,9 +120,15 @@ export default async function workflowsRoute(fastify: FastifyInstance) {
   })
 
   // ── GET /approvals/workflows/instances ───────────────────────────────────────
+  // hr_admin only (fresh audit finding — this was MANAGER_ROLES, but the only
+  // real caller is the admin-only Approval Workflows settings page, and the
+  // underlying getPendingWorkflowInstances() query is tenant-wide with no
+  // per-manager scoping — a regular manager could otherwise see every open
+  // leave/loan/overtime/reimbursement request across the whole tenant, not
+  // just their own reports').
   fastify.get('/approvals/workflows/instances', auth, async (req: any, reply) => {
-    if (!ALLOW_ROLES.includes(req.userRole)) {
-      return reply.code(403).send({ error: 'FORBIDDEN', message: 'Manager or HR access required' })
+    if (!HR_ADMIN_ROLES.includes(req.userRole)) {
+      return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
     }
 
     const querySchema = z.object({
@@ -127,8 +146,8 @@ export default async function workflowsRoute(fastify: FastifyInstance) {
 
   // ── GET /approvals/workflows/instances/:instanceId ───────────────────────────
   fastify.get('/approvals/workflows/instances/:instanceId', auth, async (req: any, reply) => {
-    if (!ALLOW_ROLES.includes(req.userRole)) {
-      return reply.code(403).send({ error: 'FORBIDDEN', message: 'Manager or HR access required' })
+    if (!HR_ADMIN_ROLES.includes(req.userRole)) {
+      return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
     }
 
     const { instanceId } = req.params as { instanceId: string }
@@ -156,9 +175,23 @@ export default async function workflowsRoute(fastify: FastifyInstance) {
   })
 
   // ── POST /approvals/workflows/instances/:instanceId/action ───────────────────
+  // hr_admin only (CRITICAL fresh audit finding). processWorkflowAction() only
+  // checks that the actor isn't the submitter and holds a manager-tier role —
+  // it does NOT verify the actor is the assigned approver for this instance's
+  // current level (no direct_manager/specific_role match against
+  // approval_workflow_config, unlike lib/approval-orchestrator.ts's
+  // gateApprove/gateReject, which domain routes like payroll/loans.ts and
+  // attendance/overtime.ts correctly use). Under MANAGER_ROLES, any manager
+  // in the tenant — with no reporting relationship to the requester — could
+  // approve/reject/close ANY other team's pending request by discovering its
+  // instanceId via the (also tenant-wide) GET /instances list. Restricting to
+  // hr_admin closes the bypass; hr_admin already has blanket approval
+  // authority in the per-level model (direct_manager levels explicitly allow
+  // hr_admin/super_admin to stand in), and the only real caller of this route
+  // is the admin-only Approval Workflows settings page.
   fastify.post('/approvals/workflows/instances/:instanceId/action', auth, async (req: any, reply) => {
-    if (!ALLOW_ROLES.includes(req.userRole)) {
-      return reply.code(403).send({ error: 'FORBIDDEN', message: 'Manager or HR access required' })
+    if (!HR_ADMIN_ROLES.includes(req.userRole)) {
+      return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
     }
 
     const { instanceId } = req.params as { instanceId: string }
@@ -192,9 +225,12 @@ export default async function workflowsRoute(fastify: FastifyInstance) {
   })
 
   // ── GET /approvals/chain/:entityType/:entityId ───────────────────────────────
-  // Chain state for ONE entity — drives the inbox/detail stepper. Any authenticated
-  // user may read the chain of a request they can already see. `configured:false`
-  // means the entity follows the legacy single-step path (render the simple state).
+  // Chain state for ONE entity — drives the inbox/detail stepper. Self, HR admin,
+  // or a manager whose direct report owns the request may read its chain — any
+  // other authenticated user is blocked. (Fresh audit finding: previously any
+  // authenticated user could read another employee's approval chain — including
+  // approver names and free-text comments on loan/advance/reimbursement
+  // requests — by supplying/guessing an entityId that wasn't theirs.)
   fastify.get('/approvals/chain/:entityType/:entityId', auth, async (req: any, reply) => {
     const paramsSchema = z.object({
       entityType: z.enum(ENTITY_TYPES),
@@ -202,6 +238,25 @@ export default async function workflowsRoute(fastify: FastifyInstance) {
     })
     const parsed = paramsSchema.safeParse(req.params)
     if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+
+    if (!isHrAdmin(req.userRole)) {
+      const { data: entityRow } = await fastify.supabase
+        .from(ENTITY_TABLE_MAP[parsed.data.entityType])
+        .select('employee_id')
+        .eq('id', parsed.data.entityId)
+        .eq('tenant_id', req.tenantId)
+        .maybeSingle()
+      const targetEmployeeId = (entityRow as { employee_id: string } | null)?.employee_id
+      if (!targetEmployeeId) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Request not found' })
+
+      const myEmployeeId = await resolveCallerEmployeeId(fastify.supabase, req.userId, req.tenantId)
+      const isSelf = !!myEmployeeId && myEmployeeId === targetEmployeeId
+      let isManagerOfTarget = false
+      if (!isSelf && req.userRole === 'manager' && myEmployeeId) {
+        isManagerOfTarget = await isDirectReport(fastify.supabase, req.tenantId, myEmployeeId, targetEmployeeId)
+      }
+      if (!isSelf && !isManagerOfTarget) return reply.code(403).send({ error: 'FORBIDDEN', message: 'Access denied' })
+    }
 
     const chain = await getChainForEntity(
       fastify.supabase, req.tenantId, parsed.data.entityType, parsed.data.entityId,

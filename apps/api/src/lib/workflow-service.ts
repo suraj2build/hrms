@@ -173,7 +173,41 @@ export async function processWorkflowAction(
   const finalApproved   = shouldClose ? (isApproval) : null
   const advancedTo      = (!shouldClose && isApproval) ? i.current_level + 1 : null
 
-  // Write the action row
+  // Update the instance FIRST, folding the precondition (still open, still at
+  // the level we read) into the WHERE clause and checking the returned row —
+  // a plain SELECT-then-UPDATE let two concurrent actions (double-click/retry)
+  // both pass the earlier `final_approved !== null` check and both insert an
+  // approval_actions row, racing on which write actually lands. Only record
+  // the action once the state transition is confirmed to have happened.
+  const updatePayload: Record<string, unknown> = {}
+  if (shouldClose) {
+    updatePayload.final_approved = finalApproved
+    updatePayload.closed_at      = new Date().toISOString()
+  } else if (advancedTo) {
+    updatePayload.current_level  = advancedTo
+  }
+
+  if (Object.keys(updatePayload).length) {
+    const { data: updated, error: updateErr } = await supabase
+      .from('approval_instances')
+      .update(updatePayload)
+      .eq('id', instanceId)
+      .eq('tenant_id', tenantId)
+      .is('final_approved', null)
+      .eq('current_level', i.current_level)
+      .select('id')
+      .maybeSingle()
+
+    if (updateErr) {
+      return { ok: false, error: { type: 'DB_ERROR', message: 'Failed to update approval instance' } }
+    }
+    if (!updated) {
+      return { ok: false, error: { type: 'CONFLICT', message: 'This request was already actioned by another request' } }
+    }
+  }
+
+  // Write the action row (no-op actions like 'escalated' skip the guarded
+  // update above and always record, since they don't mutate instance state).
   const { error: actionErr } = await supabase
     .from('approval_actions')
     .insert({
@@ -187,27 +221,6 @@ export async function processWorkflowAction(
 
   if (actionErr) {
     return { ok: false, error: { type: 'DB_ERROR', message: 'Failed to record approval action' } }
-  }
-
-  // Update the instance
-  const updatePayload: Record<string, unknown> = {}
-  if (shouldClose) {
-    updatePayload.final_approved = finalApproved
-    updatePayload.closed_at      = new Date().toISOString()
-  } else if (advancedTo) {
-    updatePayload.current_level  = advancedTo
-  }
-
-  if (Object.keys(updatePayload).length) {
-    const { error: updateErr } = await supabase
-      .from('approval_instances')
-      .update(updatePayload)
-      .eq('id', instanceId)
-      .eq('tenant_id', tenantId)
-
-    if (updateErr) {
-      return { ok: false, error: { type: 'DB_ERROR', message: 'Failed to update approval instance' } }
-    }
   }
 
   return {
