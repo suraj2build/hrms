@@ -180,6 +180,16 @@ export default async function certificationRoutes(fastify: FastifyInstance) {
     const parsed = schema.safeParse(req.body)
     if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
 
+    // employee_id is a raw UUID from the request body — the FK only requires
+    // the employee to exist somewhere, not in this tenant. Without this check
+    // an HR admin who obtains a foreign tenant's employee UUID could attach a
+    // certification to it; the tenant-scoped GET routes below join `employees`
+    // unfiltered, so that employee's name/code would then leak back on every
+    // subsequent list/expiring/stats call for this tenant.
+    const { data: emp } = await fastify.supabase
+      .from('employees').select('id').eq('id', parsed.data.employee_id).eq('tenant_id', req.tenantId).maybeSingle()
+    if (!emp) return reply.code(404).send({ error: 'EMPLOYEE_NOT_FOUND', message: 'Employee not found for this tenant' })
+
     const now = new Date().toISOString().split('T')[0]
     let status = parsed.data.status
     if (status === 'active' && parsed.data.expiry_date && parsed.data.expiry_date < now) {
