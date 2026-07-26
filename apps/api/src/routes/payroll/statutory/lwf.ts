@@ -167,6 +167,12 @@ export default async function lwfRoutes(fastify: FastifyInstance) {
 
     const effectiveFrom = parsed.data.effective_from || new Date().toISOString().slice(0, 10)
 
+    // employeeId is a raw URL param, never checked against this tenant before
+    // being used to write a state-config row.
+    const { data: emp } = await fastify.supabase
+      .from('employees').select('id').eq('id', employeeId).eq('tenant_id', req.tenantId).maybeSingle()
+    if (!emp) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Employee not found in your organisation' })
+
     // Idempotent: delete open rows then insert
     await fastify.supabase
       .from('lwf_state_config')

@@ -691,6 +691,12 @@ ${section('Part D — Loss from House Property (Home Loan Interest)', hlDecls,
     const parsed = schema.safeParse(req.body)
     if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
 
+    // employee_id is a client-supplied body field, never checked against this
+    // tenant before being used to create a declaration.
+    const { data: emp } = await fastify.supabase
+      .from('employees').select('id').eq('id', parsed.data.employee_id).eq('tenant_id', req.tenantId).maybeSingle()
+    if (!emp) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Employee not found in your organisation' })
+
     const { data, error } = await fastify.supabase
       .from('tax_declarations')
       .insert({
@@ -1374,6 +1380,12 @@ ${section('Part D — Loss from House Property (Home Loan Interest)', hlDecls,
     })
     const parsed = schema.safeParse(req.body)
     if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+
+    // employee_id is a client-supplied body field, never checked against this
+    // tenant before being used to create a snapshot.
+    const { data: emp } = await fastify.supabase
+      .from('employees').select('id').eq('id', parsed.data.employee_id).eq('tenant_id', req.tenantId).maybeSingle()
+    if (!emp) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Employee not found in your organisation' })
 
     // Fetch regime election
     const { data: regime } = await fastify.supabase

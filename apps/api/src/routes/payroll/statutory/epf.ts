@@ -162,6 +162,12 @@ export default async function epfRoutes(fastify: FastifyInstance) {
       return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
     }
 
+    // employeeId is a raw URL param, never checked against this tenant before
+    // being used to write an eligibility override.
+    const { data: emp } = await fastify.supabase
+      .from('employees').select('id').eq('id', employeeId).eq('tenant_id', req.tenantId).maybeSingle()
+    if (!emp) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Employee not found in your organisation' })
+
     const { data, error } = await fastify.supabase
       .from('epf_eligibility_overrides')
       .upsert({

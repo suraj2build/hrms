@@ -187,6 +187,13 @@ export default async function esiRoutes(fastify: FastifyInstance) {
     }
     const effectiveFrom = parsed.data.effective_from || new Date().toISOString().slice(0, 10)
 
+    // employeeId is a raw URL param, never checked against this tenant before
+    // being used to write eligibility rows — without this, an admin could
+    // plant/overwrite ESI eligibility for another tenant's employee UUID.
+    const { data: emp } = await fastify.supabase
+      .from('employees').select('id').eq('id', employeeId).eq('tenant_id', req.tenantId).maybeSingle()
+    if (!emp) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Employee not found in your organisation' })
+
     // Remove existing open-ended rows for this employee, then insert the current one.
     await fastify.supabase
       .from('esi_eligibility_timeline')
