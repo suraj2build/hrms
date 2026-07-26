@@ -16,6 +16,7 @@
 
 import type { FastifyInstance } from 'fastify'
 import { z }                    from 'zod'
+import { createHmac }           from 'crypto'
 import { ssrfCheck }            from '../../lib/ssrf-guard.js'
 import { WebhookService }       from '../../lib/webhook-service.js'
 
@@ -305,8 +306,14 @@ export default async function webhooksRoutes(fastify: FastifyInstance) {
       ...((webhook.headers as Record<string, string>) ?? {}),
     }
 
+    // Sign with HMAC-SHA256 like production delivery (webhook-service.ts) —
+    // this previously forwarded the raw long-lived signing secret in plain
+    // text to the externally-registered URL on every test click, and wasn't
+    // representative of what a correctly-implemented receiver checks
+    // (X-HRMS-Signature, never a raw secret header).
     if (webhook.secret) {
-      headers['X-Webhook-Secret'] = webhook.secret
+      const sig = createHmac('sha256', webhook.secret).update(requestBody).digest('hex')
+      headers['X-HRMS-Signature'] = `sha256=${sig}`
     }
 
     // Create delivery row with status 'pending'
@@ -340,17 +347,23 @@ export default async function webhooksRoutes(fastify: FastifyInstance) {
       const controller  = new AbortController()
       const timer       = setTimeout(() => controller.abort(), timeout)
 
+      // redirect: 'manual' — see webhook-service.ts's _attemptHttpDelivery
+      // for why redirects must not be followed (SSRF via a 3xx pointing at
+      // a private/metadata host).
       const response = await fetch(webhook.url, {
         method:  'POST',
         headers,
         body:    requestBody,
         signal:  controller.signal,
+        redirect: 'manual',
       }).finally(() => clearTimeout(timer))
 
       httpStatus = response.status
       success    = response.ok
       if (!response.ok) {
-        errorMessage = `HTTP ${response.status} ${response.statusText}`
+        errorMessage = (response.type === 'opaqueredirect' || (response.status >= 300 && response.status < 400))
+          ? 'Destination returned a redirect — redirects are not followed for security reasons'
+          : `HTTP ${response.status} ${response.statusText}`
       }
     } catch (err: any) {
       errorMessage = err?.name === 'AbortError'

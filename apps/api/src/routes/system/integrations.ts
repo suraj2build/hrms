@@ -94,7 +94,14 @@ export default async function integrationsRoutes(fastify: FastifyInstance) {
 
     if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch integrations')
 
-    return reply.send({ data: data ?? [], total: count ?? 0 })
+    // Never re-serialize the credential blob — config carries the live
+    // API key/OAuth secret/basic-auth password/HMAC shared secret for
+    // whatever auth_type this integration uses. Redact to a boolean so the
+    // UI can still show "configured" without exposing the secret, matching
+    // the same fix already applied to webhooks.secret.
+    const safeData = (data ?? []).map(({ config, ...i }: any) => ({ ...i, config_set: !!config && Object.keys(config).length > 0 }))
+
+    return reply.send({ data: safeData, total: count ?? 0 })
   })
 
   // ── GET /system/integrations/:id ──────────────────────────────────────────
@@ -123,9 +130,13 @@ export default async function integrationsRoutes(fastify: FastifyInstance) {
       req.log.error({ err: auditError }, 'integration audit log fetch failed')
     }
 
+    // Never re-serialize the credential blob — see GET / above.
+    const { config, ...safeIntegration } = integration as any
+
     return reply.send({
       data: {
-        ...integration,
+        ...safeIntegration,
+        config_set:   !!config && Object.keys(config).length > 0,
         recent_audit: auditLog ?? [],
       },
     })
@@ -163,7 +174,7 @@ export default async function integrationsRoutes(fastify: FastifyInstance) {
 
     if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create integration')
 
-    // Audit log entry
+    // Audit log entry — deliberately excludes `config` (see redaction below)
     await fastify.supabase
       .from('audit_logs')
       .insert({
@@ -176,7 +187,9 @@ export default async function integrationsRoutes(fastify: FastifyInstance) {
         created_at:   new Date().toISOString(),
       })
 
-    return reply.code(201).send({ data })
+    // Never re-serialize the credential blob — see GET / above.
+    const { config: _config, ...safeData } = data as any
+    return reply.code(201).send({ data: { ...safeData, config_set: !!config && Object.keys(config).length > 0 } })
   })
 
   // ── PUT /system/integrations/:id ──────────────────────────────────────────
@@ -210,7 +223,10 @@ export default async function integrationsRoutes(fastify: FastifyInstance) {
       return notFound(reply, 'NOT_FOUND', 'Integration not found')
     }
 
-    // Audit log entry
+    // Audit log entry — `config` is deliberately excluded from new_data so
+    // the credential blob doesn't land in plaintext in the audit trail
+    // (previously readable via GET /system/integrations/:id/audit).
+    const { config: _updatedConfig, ...auditSafeUpdate } = parsed.data as any
     await fastify.supabase
       .from('audit_logs')
       .insert({
@@ -219,11 +235,13 @@ export default async function integrationsRoutes(fastify: FastifyInstance) {
         record_id:    id,
         action:       'updated',
         performed_by: req.userId,
-        new_data:     parsed.data,
+        new_data:     { ...auditSafeUpdate, config_updated: 'config' in parsed.data },
         created_at:   new Date().toISOString(),
       })
 
-    return reply.send({ data })
+    // Never re-serialize the credential blob — see GET / above.
+    const { config, ...safeData } = data as any
+    return reply.send({ data: { ...safeData, config_set: !!config && Object.keys(config).length > 0 } })
   })
 
   // ── DELETE /system/integrations/:id ──────────────────────────────────────

@@ -5,6 +5,7 @@ import { fetchFullProfile } from '../../lib/employee-profile.js'
 import { SLOW_THRESHOLD_MS } from '../../lib/constants.js'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { notify } from '../../lib/notify.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 // ── Request schema ─────────────────────────────────────────────────────────────
 const fullCreateSchema = z.object({
@@ -111,6 +112,15 @@ export default async function fullCreateRoute(fastify: FastifyInstance) {
         .maybeSingle()
 
       if (cached) {
+        // status_code 0 is the "claimed but still processing" placeholder
+        // inserted below — a concurrent request landed in the narrow window
+        // between another request's claim and its final result.
+        if (cached.status_code === 0) {
+          return reply.code(409).send({
+            error:   'REQUEST_IN_PROGRESS',
+            message: 'A request with this Idempotency-Key is already being processed',
+          })
+        }
         // Generate a fresh request_id for the replay — the stored body does NOT
         // contain request_id so we inject one here, making each replay uniquely
         // traceable even though the payload is otherwise identical.
@@ -124,6 +134,28 @@ export default async function fullCreateRoute(fastify: FastifyInstance) {
           .code(cached.status_code)
           .header('Idempotency-Replayed', 'true')
           .send({ request_id: replayId, ...cached.response })
+      }
+
+      // Claim the key with a placeholder row *before* calling the RPC below —
+      // without this, two concurrent requests with the same key both see "no
+      // cached row" above and both proceed; the employees unique-email index
+      // stops the actual duplicate row, but the second request then gets a
+      // spurious 409 CONFLICT ("employee already exists") instead of the
+      // intended idempotent 201 replay, breaking a client that assumes
+      // idempotency-keyed requests are always safe to retry. The row's
+      // (tenant_id, key) primary key makes this claim atomic: a 23505 here
+      // means another request already owns this key right now.
+      const { error: claimErr } = await fastify.supabase
+        .from('idempotency_keys')
+        .insert({ key: idempotencyKey, tenant_id: tenantId, status_code: 0, response: {} })
+      if (claimErr) {
+        if (claimErr.code === '23505') {
+          return reply.code(409).send({
+            error:   'REQUEST_IN_PROGRESS',
+            message: 'A request with this Idempotency-Key is already being processed',
+          })
+        }
+        fastify.log.warn({ ...ctx, outcome: 'idempotency_claim_failed', pg_code: claimErr.code }, 'POST /employees/full-create — failed to claim idempotency key, proceeding without it')
       }
     }
 
@@ -254,20 +286,28 @@ export default async function fullCreateRoute(fastify: FastifyInstance) {
 
     if (rpcError) {
       if (rpcError.code === '23505') {
+        // employees has separate UNIQUE(tenant_id, email) and
+        // UNIQUE(tenant_id, employee_code) constraints — this endpoint also
+        // accepts an optional employee_code for legacy-system migration, so
+        // a duplicate code (distinct, non-conflicting email) can hit this
+        // same branch. Distinguish by which column the violated constraint
+        // actually names instead of always reporting an email conflict.
+        const isCodeConflict = /employee_code/i.test(rpcError.message ?? '') || /employee_code/i.test((rpcError as any).details ?? '')
         logExit(
-          { outcome: 'duplicate_email', pg_code: rpcError.code },
-          'POST /employees/full-create — duplicate email rejected',
+          { outcome: isCodeConflict ? 'duplicate_employee_code' : 'duplicate_email', pg_code: rpcError.code },
+          `POST /employees/full-create — duplicate ${isCodeConflict ? 'employee_code' : 'email'} rejected`,
         )
-        return reply.code(409).send({
-          error:   'CONFLICT',
-          message: 'An employee with this email already exists in your organisation',
-        })
+        return reply.code(409).send(
+          isCodeConflict
+            ? { error: 'CONFLICT', message: 'An employee with this employee code already exists in your organisation', field: 'employee_code' }
+            : { error: 'CONFLICT', message: 'An employee with this email already exists in your organisation', field: 'email' },
+        )
       }
       logExit(
         { outcome: 'rpc_error', pg_code: rpcError.code, pg_message: rpcError.message },
         'POST /employees/full-create — create_employee_with_job RPC failed',
       )
-      return reply.code(500).send({ error: 'DB_ERROR', message: rpcError.message })
+      return serverError(request, reply, rpcError, ErrorCode.COMPUTE_FAILED, 'Failed to create employee')
     }
 
     // ── 4. Fetch full profile ───────────────────────────────────────────────
@@ -329,12 +369,14 @@ export default async function fullCreateRoute(fastify: FastifyInstance) {
 
     // ── 5. Persist idempotency key (fire-and-forget) ────────────────────────
     // Store responseBody WITHOUT request_id so each replay gets a fresh ID.
+    // upsert (not insert) — step 1 above already claimed this key with a
+    // status_code=0 placeholder row, so this resolves it to the real result.
     if (idempotencyKey) {
       fastify.supabase
         .from('idempotency_keys')
-        .insert({ key: idempotencyKey, tenant_id: tenantId, status_code: 201, response: responseBody })
+        .upsert({ key: idempotencyKey, tenant_id: tenantId, status_code: 201, response: responseBody }, { onConflict: 'tenant_id,key' })
         .then(({ error }) => {
-          if (error && error.code !== '23505') {
+          if (error) {
             fastify.log.warn(
               { ...ctx, outcome: 'idempotency_store_failed', pg_code: error.code },
               'POST /employees/full-create — failed to persist idempotency key',

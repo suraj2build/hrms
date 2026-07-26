@@ -341,11 +341,18 @@ export class WebhookService {
     const startAt = Date.now()
 
     try {
+      // redirect: 'manual' — don't follow redirects. ssrfCheck() above only
+      // inspects the literal registered URL; a destination that responds
+      // with a 3xx to a private/metadata host (e.g. 169.254.169.254) would
+      // otherwise have that redirect silently followed on every delivery,
+      // bypassing the SSRF guard entirely. Same pattern already used for
+      // the integration health-check probe.
       const response = await fetch(webhook.url, {
         method:  'POST',
         headers,
         body:    bodyStr,
         signal:  controller.signal,
+        redirect: 'manual',
       })
 
       const duration_ms = Date.now() - startAt
@@ -353,6 +360,15 @@ export class WebhookService {
 
       if (response.ok) {
         return { success: true, http_status: response.status, duration_ms }
+      }
+
+      if (response.type === 'opaqueredirect' || (response.status >= 300 && response.status < 400)) {
+        return {
+          success:     false,
+          http_status: response.status,
+          duration_ms,
+          error:       'Destination returned a redirect — redirects are not followed for security reasons',
+        }
       }
 
       return {
