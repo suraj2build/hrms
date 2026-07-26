@@ -30,6 +30,7 @@ import {
 import { computeReadiness } from '../../lib/readiness-engine.js'
 import { notifyHrAdmins } from '../../lib/notify.js'
 import { resolveManagerEmployeeId, resolveCallerEmployeeId, isDirectReport } from '../../lib/manager-scope.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 const NEW_JOINER_WINDOW_DAYS = 90
 
@@ -58,7 +59,7 @@ export default async function managerTeamLifecycleRoute(fastify: FastifyInstance
       .select('id, first_name, last_name, employee_code, joining_date, status')
       .eq('tenant_id', req.tenantId)
       .eq('manager_id', managerId)
-    if (repErr) return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch team' })
+    if (repErr) return serverError(req, reply, repErr, ErrorCode.QUERY_FAILED, 'Failed to fetch team')
     if (!reports?.length) return reply.send(emptyLifecycle(managerId))
 
     const teamIds  = reports.map((e: any) => e.id as string)
@@ -69,7 +70,7 @@ export default async function managerTeamLifecycleRoute(fastify: FastifyInstance
 
     // ── Parallel reads — every source already exists ────────────────────────────
     const joinerCutoff = isoDaysAgo(NEW_JOINER_WINDOW_DAYS)
-    const [lifecycleAll, jobHistory, separations, trustScores] = await Promise.all([
+    const [lifecycleAll, jobHistoryRes, separationsRes, trustScoresRes] = await Promise.all([
       // Program 3A — the single expiry source, then filter to the team.
       computeLifecycleRisks(fastify.supabase, req.tenantId, { withinDays: 90 }),
       // Probation status from current job_history rows.
@@ -77,23 +78,30 @@ export default async function managerTeamLifecycleRoute(fastify: FastifyInstance
         .from('job_history')
         .select('employee_id, employment_type, confirmation_date')
         .eq('tenant_id', req.tenantId).eq('is_current', true)
-        .in('employee_id', teamIds)
-        .then(r => r.data ?? []),
+        .in('employee_id', teamIds),
       // Active separations for the team.
       fastify.supabase
         .from('employee_separation')
         .select('id, employee_id, separation_type, notice_date, last_working_date, exit_reason, clearance_done, lifecycle_stage, approval_status')
         .eq('tenant_id', req.tenantId)
-        .in('employee_id', teamIds)
-        .then(r => r.data ?? []),
+        .in('employee_id', teamIds),
       // Trust risk for the team (lowest scores / high-severity first).
       fastify.supabase
         .from('workforce_trust_scores')
         .select('entity_id, score, severity, factors, computed_at')
         .eq('tenant_id', req.tenantId).eq('score_type', 'employee')
-        .in('entity_id', teamIds)
-        .then(r => r.data ?? []),
+        .in('entity_id', teamIds),
     ])
+    // Each of these previously used `.then(r => r.data ?? [])`, silently
+    // discarding r.error and turning a genuine DB failure into "this team has
+    // no probation/separation/trust-risk items" — indistinguishable from a
+    // real empty result on this manager-facing lifecycle dashboard.
+    if (jobHistoryRes.error)    return serverError(req, reply, jobHistoryRes.error, ErrorCode.QUERY_FAILED, 'Failed to fetch job history')
+    if (separationsRes.error)  return serverError(req, reply, separationsRes.error, ErrorCode.QUERY_FAILED, 'Failed to fetch separations')
+    if (trustScoresRes.error) return serverError(req, reply, trustScoresRes.error, ErrorCode.QUERY_FAILED, 'Failed to fetch trust scores')
+    const jobHistory   = jobHistoryRes.data ?? []
+    const separations  = separationsRes.data ?? []
+    const trustScores  = trustScoresRes.data ?? []
 
     const teamLifecycle = lifecycleAll.filter((i: LifecycleRiskItem) => teamIdSet.has(i.employee_id))
 

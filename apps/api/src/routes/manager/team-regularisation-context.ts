@@ -19,8 +19,9 @@
  */
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
-import { isHrAdmin, resolveCallerEmployeeId, isDirectReport } from '../../lib/manager-scope.js'
+import { isHrAdmin, resolveCallerEmployeeId, getDirectReportIds } from '../../lib/manager-scope.js'
 import { fetchAttendanceTrend } from '../../lib/attendance-trend.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 const dateRe = /^\d{4}-\d{2}-\d{2}$/
 
@@ -39,25 +40,34 @@ export default async function managerTeamRegularisationContextRoute(fastify: Fas
     const tenantId = req.tenantId as string
 
     // ── Authorise ─────────────────────────────────────────────────────────────
+    // Previously used isDirectReport() (literal one-level manager_id match),
+    // while the actual approve/reject endpoint this drawer supports
+    // (attendance/regularisation.ts) authorises via getDirectReportIds()'s
+    // recursive get_all_subordinates() RPC (migration 357) — a skip-level
+    // manager could approve a Level-4 report's regularisation but then 403 on
+    // this context drawer for that same employee. Fixed to use the same
+    // subtree-aware check.
     if (!isHrAdmin(req.userRole)) {
       const callerEmpId = await resolveCallerEmployeeId(fastify.supabase, req.userId, tenantId)
       if (!callerEmpId) {
         return reply.code(403).send({ error: 'NO_EMPLOYEE_LINK', message: 'Profile not linked to an employee record' })
       }
-      if (!(await isDirectReport(fastify.supabase, tenantId, callerEmpId, employee_id))) {
+      const subordinateIds = await getDirectReportIds(fastify.supabase, tenantId, callerEmpId)
+      if (!subordinateIds.includes(employee_id)) {
         return reply.code(403).send({ error: 'FORBIDDEN', message: 'Employee is not one of your direct reports' })
       }
     }
 
-    const { data: emp } = await fastify.supabase
+    const { data: emp, error: empError } = await fastify.supabase
       .from('employees')
       .select('id, first_name, last_name, employee_code')
       .eq('id', employee_id)
       .eq('tenant_id', tenantId)
       .maybeSingle()
+    if (empError) return serverError(req, reply, empError, ErrorCode.QUERY_FAILED, 'Failed to fetch employee')
     if (!emp) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Employee not found' })
 
-    const [attendance, { data: current }, { data: history }] = await Promise.all([
+    const [attendance, { data: current, error: curError }, { data: history, error: histError }] = await Promise.all([
       fetchAttendanceTrend(fastify.supabase, tenantId, employee_id, 30),
 
       fastify.supabase
@@ -76,6 +86,11 @@ export default async function managerTeamRegularisationContextRoute(fastify: Fas
         .order('created_at', { ascending: false })
         .limit(6),
     ])
+    // Silent failure previously fell back to `current: null` / `history: []`,
+    // which reads as "no existing attendance record" / "no prior requests" —
+    // could bias the approver's decision with no signal the query failed.
+    if (curError)  return serverError(req, reply, curError, ErrorCode.QUERY_FAILED, 'Failed to fetch current attendance record')
+    if (histError) return serverError(req, reply, histError, ErrorCode.QUERY_FAILED, 'Failed to fetch regularisation history')
 
     return reply.send({
       employee: {

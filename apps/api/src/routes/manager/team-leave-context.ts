@@ -20,9 +20,10 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import {
-  isHrAdmin, resolveCallerEmployeeId, isDirectReport, getDirectReportIds,
+  isHrAdmin, resolveCallerEmployeeId, getDirectReportIds,
 } from '../../lib/manager-scope.js'
 import { fetchAttendanceTrend } from '../../lib/attendance-trend.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 const dateRe = /^\d{4}-\d{2}-\d{2}$/
 
@@ -42,34 +43,53 @@ export default async function managerTeamLeaveContextRoute(fastify: FastifyInsta
     const tenantId = req.tenantId as string
     const year = new Date().getFullYear()
 
-    // ── Authorise: HR admin, or the employee is a direct report of the caller ──
+    // ── Authorise: HR admin, or the employee is anywhere in the caller's org
+    // subtree ── Previously used isDirectReport() (literal one-level manager_id
+    // match), while the actual approval endpoints this drawer supports
+    // (leave-requests.ts, regularisation.ts) authorise via getDirectReportIds()'s
+    // recursive get_all_subordinates() RPC (migration 357). A skip-level
+    // manager could approve a Level-4 report's request but then 403 on this
+    // drawer for that same employee — fixed by using the same subtree check.
     if (!isHrAdmin(req.userRole)) {
       const callerEmpId = await resolveCallerEmployeeId(fastify.supabase, req.userId, tenantId)
       if (!callerEmpId) {
         return reply.code(403).send({ error: 'NO_EMPLOYEE_LINK', message: 'Profile not linked to an employee record' })
       }
-      const ok = await isDirectReport(fastify.supabase, tenantId, callerEmpId, employee_id)
-      if (!ok) {
+      const subordinateIds = await getDirectReportIds(fastify.supabase, tenantId, callerEmpId)
+      if (!subordinateIds.includes(employee_id)) {
         return reply.code(403).send({ error: 'FORBIDDEN', message: 'Employee is not one of your direct reports' })
       }
     }
 
     // ── Target employee (also gives us the team via manager_id) ───────────────
-    const { data: emp } = await fastify.supabase
+    const { data: emp, error: empError } = await fastify.supabase
       .from('employees')
       .select('id, first_name, last_name, employee_code, manager_id')
       .eq('id', employee_id)
       .eq('tenant_id', tenantId)
       .maybeSingle()
+    if (empError) return serverError(req, reply, empError, ErrorCode.QUERY_FAILED, 'Failed to fetch employee')
     if (!emp) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Employee not found' })
 
-    // Teammates = other direct reports of the same manager (coverage cohort).
-    const teammateIds = emp.manager_id
-      ? (await getDirectReportIds(fastify.supabase, tenantId, emp.manager_id)).filter(id => id !== employee_id)
-      : []
+    // Teammates = other DIRECT reports sharing the same manager_id (coverage
+    // cohort) — previously called getDirectReportIds(emp.manager_id), which
+    // returns that manager's ENTIRE subtree at any depth, pulling in nested
+    // reports of sibling managers who are not actually emp's peers and
+    // misrepresenting the coverage-risk signal shown to the approver.
+    let teammateIds: string[] = []
+    if (emp.manager_id) {
+      const { data: siblings, error: sibError } = await fastify.supabase
+        .from('employees')
+        .select('id')
+        .eq('tenant_id', tenantId)
+        .eq('manager_id', emp.manager_id)
+        .neq('id', employee_id)
+      if (sibError) return serverError(req, reply, sibError, ErrorCode.QUERY_FAILED, 'Failed to fetch team overlap')
+      teammateIds = (siblings ?? []).map((s: { id: string }) => s.id)
+    }
 
     // ── Parallel reads: balances, overlapping team leave, history, trend ──────
-    const [{ data: balances }, { data: overlap }, { data: history }, attendance] = await Promise.all([
+    const [{ data: balances, error: balError }, { data: overlap, error: overlapError }, { data: history, error: histError }, attendance] = await Promise.all([
       fastify.supabase
         .from('employee_leave_balance')
         .select('leave_type_id, balance, leave_types(id, name, is_paid)')
@@ -87,7 +107,7 @@ export default async function managerTeamLeaveContextRoute(fastify: FastifyInsta
             .lte('from_date', to)
             .gte('to_date', from)
             .order('from_date', { ascending: true })
-        : Promise.resolve({ data: [] as any[] }),
+        : Promise.resolve({ data: [] as any[], error: null }),
 
       fastify.supabase
         .from('leave_requests')
@@ -99,6 +119,13 @@ export default async function managerTeamLeaveContextRoute(fastify: FastifyInsta
 
       fetchAttendanceTrend(fastify.supabase, tenantId, employee_id, 30),
     ])
+    // A silent failure here previously fell back to `?? []`, returning 200
+    // with an empty team_overlap that reads as "no coverage conflict" —
+    // actively misleading for an approver deciding whether to approve leave
+    // during an actually-booked-out period. Surface the failure instead.
+    if (balError)    return serverError(req, reply, balError, ErrorCode.QUERY_FAILED, 'Failed to fetch leave balances')
+    if (overlapError) return serverError(req, reply, overlapError, ErrorCode.QUERY_FAILED, 'Failed to fetch team leave overlap')
+    if (histError)   return serverError(req, reply, histError, ErrorCode.QUERY_FAILED, 'Failed to fetch leave history')
 
     const flat = (rel: any) => (Array.isArray(rel) ? rel[0] : rel)
 
