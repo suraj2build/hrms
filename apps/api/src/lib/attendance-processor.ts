@@ -584,16 +584,26 @@ export async function processAttendanceForDate(
   // ── 2. Map employee_code → employee_id ────────────────────────────────────
   const uniqueCodes = [...new Set((rawLogs as RawLog[]).map((r) => r.employee_code))]
 
-  const { data: employees, error: empError } = await supabase
-    .from('employees')
-    .select('id, employee_code')
-    .eq('tenant_id', tenantId)
-    .in('employee_code', uniqueCodes)
+  // Chunked: a large day's raw punches can span well over 1000 distinct
+  // employee_codes for a large tenant. A single .in() would both build an
+  // oversized request URL and hit PostgREST's max-rows=1000 response cap —
+  // codes past row 1000 would resolve to nothing and their punches would be
+  // silently left unprocessed (see skippedCodes below).
+  const CODE_CHUNK = 100
+  const employees: Array<{ id: string; employee_code: string }> = []
+  for (let i = 0; i < uniqueCodes.length; i += CODE_CHUNK) {
+    const { data: empChunk, error: empError } = await supabase
+      .from('employees')
+      .select('id, employee_code')
+      .eq('tenant_id', tenantId)
+      .in('employee_code', uniqueCodes.slice(i, i + CODE_CHUNK))
 
-  if (empError) throw new Error(`Failed to load employees: ${empError.message}`)
+    if (empError) throw new Error(`Failed to load employees: ${empError.message}`)
+    if (empChunk) employees.push(...empChunk)
+  }
 
   const codeToId = new Map<string, string>(
-    (employees ?? []).map((e: { id: string; employee_code: string }) => [e.employee_code, e.id])
+    employees.map((e: { id: string; employee_code: string }) => [e.employee_code, e.id])
   )
 
   // Step 3: collect skipped codes + their raw log IDs (kept unprocessed)
