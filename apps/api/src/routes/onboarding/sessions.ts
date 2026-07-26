@@ -550,7 +550,7 @@ export default async function sessionRoutes(fastify: FastifyInstance) {
               docErrors.push({ docId: doc.id, step: 'identity', reason })
               await fastify.supabase
                 .from('onboarding_documents')
-                .update({ extraction_status: 'rejected', extraction_error: reason })
+                .update({ extraction_status: 'rejected', extraction_error: reason, review_status: 'rejected' })
                 .eq('id', doc.id)
               emitOnboardingDocumentRejected({
                 tenantId: req.tenantId, sessionId, documentId: doc.id,
@@ -576,7 +576,7 @@ export default async function sessionRoutes(fastify: FastifyInstance) {
                 docErrors.push({ docId: doc.id, step: 'identity', reason })
                 await fastify.supabase
                   .from('onboarding_documents')
-                  .update({ extraction_status: 'rejected', extraction_error: reason })
+                  .update({ extraction_status: 'rejected', extraction_error: reason, review_status: 'rejected' })
                   .eq('id', doc.id)
                 emitOnboardingDocumentRejected({
                   tenantId: req.tenantId, sessionId, documentId: doc.id,
@@ -588,7 +588,16 @@ export default async function sessionRoutes(fastify: FastifyInstance) {
             }
           }
 
-          // 7. Collect for merge (only docs that passed identity check reach here)
+          // 7. Collect for merge (only docs that passed identity check reach here).
+          // review_status was stuck on the 'pending' DB default forever — nothing
+          // ever wrote 'approved'/'rejected' — which meant the readiness engine's
+          // verification dimension could never score above 0 (fresh audit finding).
+          // Passing extraction + identity check is this system's actual document
+          // verification step, so record it here.
+          await fastify.supabase
+            .from('onboarding_documents')
+            .update({ review_status: 'approved' })
+            .eq('id', doc.id)
           extractionResults.push({
             documentId: doc.id,
             documentType: doc.document_type,
