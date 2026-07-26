@@ -110,6 +110,10 @@ export default async function jobQueueRoutes(fastify: FastifyInstance) {
   // ── GET /system/jobs ────────────────────────────────────────────────────────
   // Returns a real-time snapshot of the job queue state.
   fastify.get('/system/jobs', auth, async (req: any, reply) => {
+    if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
+      return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
+    }
+
     const snapshot     = jobQueue.getQueueSnapshot()
     const busMetrics   = eventBus.getMetrics()
     const busHandlers  = eventBus.getHandlerCount()
@@ -150,7 +154,11 @@ export default async function jobQueueRoutes(fastify: FastifyInstance) {
 
   // ── GET /system/jobs/automations ───────────────────────────────────────────
   // Returns the static automation registry enriched with live queue metrics.
-  fastify.get('/system/jobs/automations', auth, async (_req: any, reply) => {
+  fastify.get('/system/jobs/automations', auth, async (req: any, reply) => {
+    if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
+      return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
+    }
+
     const snapshot = jobQueue.getQueueSnapshot()
 
     const jobs = AUTOMATION_REGISTRY.map(job => {
@@ -444,7 +452,11 @@ export default async function jobQueueRoutes(fastify: FastifyInstance) {
   // Live counts queried directly from background_jobs.
   // Includes stuck_running_count: jobs that have been in 'running' state longer
   // than the stale threshold (5 min) — indicates crashed workers or hung handlers.
-  fastify.get('/system/jobs/durable', auth, async (_req: any, reply) => {
+  fastify.get('/system/jobs/durable', auth, async (req: any, reply) => {
+    if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
+      return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
+    }
+
     const metrics = await durableQueue.getMetrics(fastify.supabase)
 
     // Detect jobs stuck in 'running' longer than the stale recovery threshold (5 min).
@@ -457,7 +469,7 @@ export default async function jobQueueRoutes(fastify: FastifyInstance) {
     const { data: stuckJobs, error: stuckErr } = await fastify.supabase
       .from('background_jobs')
       .select('id, job_type, attempt, max_retries, started_at, tenant_id, error')
-      .eq('tenant_id', (_req as any).tenantId)
+      .eq('tenant_id', (req as any).tenantId)
       .eq('status', 'running')
       .lt('started_at', staleThreshold)
       .order('started_at', { ascending: true })
