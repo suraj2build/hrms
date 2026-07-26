@@ -185,7 +185,11 @@ export default async function attendancePoliciesRoutes(fastify: FastifyInstance)
       .eq('tenant_id', req.tenantId)
       .eq('is_default', true)
 
-    // Set new default
+    // Set new default. idx_attendance_policies_one_default (migration 401)
+    // guards against two concurrent set-default calls both clearing the old
+    // default before either sets the new one, which would otherwise leave
+    // two rows simultaneously is_default=true — the loser of that race hits
+    // a 23505 here instead.
     const { data, error } = await fastify.supabase
       .from('attendance_policies')
       .update({ is_default: true, updated_at: new Date().toISOString() })
@@ -194,7 +198,12 @@ export default async function attendancePoliciesRoutes(fastify: FastifyInstance)
       .select()
       .single()
 
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    if (error) {
+      if (error.code === '23505') {
+        return reply.code(409).send({ error: 'CONFLICT', message: 'Another request just changed the default policy — please retry' })
+      }
+      return reply.code(500).send({ error: 'UPDATE_FAILED', message: 'Failed to set default policy' })
+    }
 
     policyService.clearTenantCache(req.tenantId)
     return reply.send({ data })

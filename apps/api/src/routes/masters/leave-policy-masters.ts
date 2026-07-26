@@ -161,12 +161,24 @@ export default async function leavePolicyMastersRoutes(fastify: FastifyInstance)
 
     if (error) {
       if (error.code === '23505') {
+        // idx_leave_policy_masters_one_default (migration 054) guards
+        // against two concurrent is_default=true requests both clearing
+        // the old default before either sets the new one — disambiguate
+        // that race from an actual duplicate name so the message isn't
+        // misleading (a name violation and a default-flag violation hit
+        // the same 23505 code but are different constraints).
+        if (error.message?.includes('idx_leave_policy_masters_one_default')) {
+          return reply.code(409).send({
+            error:   'CONFLICT',
+            message: 'Another request just changed the default policy — please retry',
+          })
+        }
         return reply.code(409).send({
           error:   'DUPLICATE',
           message: `A policy named "${parsed.data.name}" already exists`,
         })
       }
-      return reply.code(500).send({ error: 'INSERT_FAILED', message: error.message })
+      return reply.code(500).send({ error: 'INSERT_FAILED', message: 'Failed to create policy' })
     }
 
     await logAction(fastify.supabase, {
@@ -225,7 +237,16 @@ export default async function leavePolicyMastersRoutes(fastify: FastifyInstance)
       .single()
 
     if (error) {
-      return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+      if (error.code === '23505') {
+        if (error.message?.includes('idx_leave_policy_masters_one_default')) {
+          return reply.code(409).send({
+            error:   'CONFLICT',
+            message: 'Another request just changed the default policy — please retry',
+          })
+        }
+        return reply.code(409).send({ error: 'DUPLICATE', message: 'A policy with that name already exists' })
+      }
+      return reply.code(500).send({ error: 'UPDATE_FAILED', message: 'Failed to update policy' })
     }
     if (!data) {
       return reply.code(404).send({ error: 'NOT_FOUND', message: 'Policy not found' })
