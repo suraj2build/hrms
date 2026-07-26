@@ -217,27 +217,35 @@ export default async function moodRoutes(fastify: FastifyInstance) {
     since30d.setDate(since30d.getDate() - 7)
     const since7dStr = since30d.toISOString().split('T')[0]
 
-    const [checkinResult, activeResult, sentimentResult] = await Promise.all([
-      supabase
-        .from('mood_checkins')
-        .select('mood, checkin_date')
-        .eq('tenant_id', tenantId)
-        .gte('checkin_date', days[0]),
+    // mood_checkins can easily exceed 1000 rows within a 7-day window for a
+    // tenant with a few hundred daily-active employees (fresh audit finding)
+    // — a plain unranged select silently truncated trend/distribution/
+    // total_checkins_7d with no error surfaced.
+    const [checkins, activeResult, sentimentRows] = await Promise.all([
+      fetchAllRows((from, to) =>
+        supabase
+          .from('mood_checkins')
+          .select('mood, checkin_date')
+          .eq('tenant_id', tenantId)
+          .gte('checkin_date', days[0])
+          .range(from, to)
+      ) as Promise<any[]>,
       supabase
         .from('pulse_questions')
         .select('id, question, options, status, created_at')
         .eq('tenant_id', tenantId)
         .eq('status', 'active')
         .order('created_at', { ascending: false }),
-      supabase
-        .from('mood_checkins')
-        .select('sentiment_label')
-        .eq('tenant_id', tenantId)
-        .gte('checkin_date', since7dStr)
-        .not('sentiment_label', 'is', null),
+      fetchAllRows((from, to) =>
+        supabase
+          .from('mood_checkins')
+          .select('sentiment_label')
+          .eq('tenant_id', tenantId)
+          .gte('checkin_date', since7dStr)
+          .not('sentiment_label', 'is', null)
+          .range(from, to)
+      ) as Promise<any[]>,
     ])
-
-    const checkins = checkinResult.data ?? []
 
     // 7-day trend: daily average mood
     const trendMap: Record<string, { total: number; count: number }> = {}
@@ -276,7 +284,6 @@ export default async function moodRoutes(fastify: FastifyInstance) {
     )
 
     // Sentiment summary for last 7 days
-    const sentimentRows = sentimentResult.data ?? []
     const sentCounts = { positive: 0, neutral: 0, negative: 0, total_with_notes: sentimentRows.length }
     for (const r of sentimentRows) {
       if (r.sentiment_label === 'positive') sentCounts.positive++
