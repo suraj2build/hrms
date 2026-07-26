@@ -270,6 +270,7 @@ export default async function governanceEvolutionRoutes(fastify: FastifyInstance
 
   // ── POST /approvals/governance/delegations ────────────────────────────────
   fastify.post('/approvals/governance/delegations', auth, async (req: any, reply) => {
+    if (!requireAdmin(req, reply)) return
     const schema = z.object({
       delegate_id:  z.string().uuid(),
       entity_types: z.array(z.string().min(1)).min(1, 'At least one entity type is required'),
@@ -462,6 +463,7 @@ export default async function governanceEvolutionRoutes(fastify: FastifyInstance
 
   // ── POST /approvals/governance/simulate ───────────────────────────────────
   fastify.post('/approvals/governance/simulate', auth, async (req: any, reply) => {
+    if (!requireAdmin(req, reply)) return
     const schema = z.object({
       entity_type:     z.string().min(1).max(100),
       payroll_amount:  z.number().min(0).optional().nullable(),
