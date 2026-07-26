@@ -181,6 +181,19 @@ export default async function workLocationsRoutes(fastify: FastifyInstance) {
       return reply.code(400).send({ error: 'VALIDATION', message: 'merge_to must be a valid UUID' })
     }
 
+    // merge_to must resolve to a work location in this tenant — without this,
+    // job_history rows could be repointed at another tenant's work location.
+    if (mergeTo) {
+      const { data: mergeTarget, error: mergeCheckErr } = await fastify.supabase
+        .from('work_locations')
+        .select('id')
+        .eq('id', mergeTo)
+        .eq('tenant_id', req.tenantId)
+        .maybeSingle()
+      if (mergeCheckErr) return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to verify merge target' })
+      if (!mergeTarget) return reply.code(400).send({ error: 'VALIDATION', message: 'merge_to must reference a work location in your organisation' })
+    }
+
     const { count, error: countErr } = await fastify.supabase
       .from('job_history')
       .select('id', { count: 'exact', head: true })

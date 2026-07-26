@@ -140,6 +140,19 @@ export default async function statesRoutes(fastify: FastifyInstance) {
     if (mergeTo && !UUID_RE.test(mergeTo))
       return reply.code(400).send({ error: 'VALIDATION', message: 'merge_to must be a valid UUID' })
 
+    // merge_to must resolve to a state in this tenant — without this,
+    // sites rows could be repointed at another tenant's state.
+    if (mergeTo) {
+      const { data: mergeTarget, error: mergeCheckErr } = await fastify.supabase
+        .from('states')
+        .select('id')
+        .eq('id', mergeTo)
+        .eq('tenant_id', req.tenantId)
+        .maybeSingle()
+      if (mergeCheckErr) return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to verify merge target' })
+      if (!mergeTarget) return reply.code(400).send({ error: 'VALIDATION', message: 'merge_to must reference a state in your organisation' })
+    }
+
     const { count, error: countErr } = await fastify.supabase
       .from('sites')
       .select('id', { count: 'exact', head: true })

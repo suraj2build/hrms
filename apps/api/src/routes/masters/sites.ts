@@ -438,6 +438,19 @@ export default async function sitesRoutes(fastify: FastifyInstance) {
       return reply.code(400).send({ error: 'VALIDATION', message: 'merge_to must be a valid UUID' })
     }
 
+    // merge_to must resolve to a site in this tenant — without this,
+    // work_locations rows could be repointed at another tenant's site.
+    if (mergeTo) {
+      const { data: mergeTarget, error: mergeCheckErr } = await fastify.supabase
+        .from('sites')
+        .select('id')
+        .eq('id', mergeTo)
+        .eq('tenant_id', req.tenantId)
+        .maybeSingle()
+      if (mergeCheckErr) return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to verify merge target' })
+      if (!mergeTarget) return reply.code(400).send({ error: 'VALIDATION', message: 'merge_to must reference a site in your organisation' })
+    }
+
     const { count, error: countErr } = await fastify.supabase
       .from('work_locations')
       .select('id', { count: 'exact', head: true })
