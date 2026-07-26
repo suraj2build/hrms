@@ -50,9 +50,10 @@ function StatusBadge({ status }: { status: string }) {
   )
 }
 
-function CoRow({ req, onAction }: {
+function CoRow({ req, onAction, busy }: {
   req: CoRequest
   onAction: (id: string, action: 'approve' | 'reject') => void
+  busy: boolean
 }) {
   const [expanded, setExpanded] = useState(false)
   const isPending = req.status === 'pending'
@@ -85,10 +86,12 @@ function CoRow({ req, onAction }: {
           {isPending && (
             <div className="flex gap-2 pt-2">
               <Button size="sm" className="h-7 gap-1 bg-success hover:bg-success/90"
+                disabled={busy}
                 onClick={e => { e.stopPropagation(); onAction(req.id, 'approve') }}>
                 <Check className="h-3 w-3" /> Approve
               </Button>
               <Button size="sm" variant="destructive" className="h-7 gap-1"
+                disabled={busy}
                 onClick={e => { e.stopPropagation(); onAction(req.id, 'reject') }}>
                 <X className="h-3 w-3" /> Reject
               </Button>
@@ -144,6 +147,9 @@ export function ManagerTeamCompOff({ embedded = false }: { embedded?: boolean })
 
   const rows = data?.data ?? []
   const pendingCount = rows.filter(r => r.status === 'pending').length
+  const actioningId = approveMut.isPending ? approveMut.variables
+    : rejectMut.isPending ? rejectMut.variables
+    : null
 
   const body = (
     <>
@@ -176,6 +182,7 @@ export function ManagerTeamCompOff({ embedded = false }: { embedded?: boolean })
               key={r.id}
               req={r}
               onAction={(id, action) => action === 'approve' ? approveMut.mutate(id) : rejectMut.mutate(id)}
+              busy={actioningId === r.id}
             />
           ))
         )}

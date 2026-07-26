@@ -62,9 +62,10 @@ function StatusBadge({ status }: { status: string }) {
 
 // ── Row component ─────────────────────────────────────────────────────────────
 
-function OtRow({ req, onAction }: {
+function OtRow({ req, onAction, busy }: {
   req: OtRequest
   onAction: (id: string, action: 'approve' | 'reject') => void
+  busy: boolean
 }) {
   const [expanded, setExpanded] = useState(false)
   const isPending = req.status === 'PENDING'
@@ -99,10 +100,12 @@ function OtRow({ req, onAction }: {
           {isPending && (
             <div className="flex gap-2 pt-2">
               <Button size="sm" variant="default" className="h-7 gap-1 bg-success hover:bg-success/90"
+                disabled={busy}
                 onClick={e => { e.stopPropagation(); onAction(req.id, 'approve') }}>
                 <Check className="h-3 w-3" /> Approve
               </Button>
               <Button size="sm" variant="destructive" className="h-7 gap-1"
+                disabled={busy}
                 onClick={e => { e.stopPropagation(); onAction(req.id, 'reject') }}>
                 <X className="h-3 w-3" /> Reject
               </Button>
@@ -155,6 +158,10 @@ export function ManagerTeamOvertimeRequests({ embedded = false }: { embedded?: b
     else rejectMut.mutate(id)
   }
 
+  const actioningId = approveMut.isPending ? approveMut.variables
+    : rejectMut.isPending ? rejectMut.variables
+    : null
+
   const rows = data?.data ?? []
   const pending = rows.filter(r => r.status === 'PENDING')
 
@@ -188,7 +195,7 @@ export function ManagerTeamOvertimeRequests({ embedded = false }: { embedded?: b
           </div>
         ) : (
           <div className="divide-y-0">
-            {rows.map(r => <OtRow key={r.id} req={r} onAction={onAction} />)}
+            {rows.map(r => <OtRow key={r.id} req={r} onAction={onAction} busy={actioningId === r.id} />)}
           </div>
         )}
       </SectionCard>
