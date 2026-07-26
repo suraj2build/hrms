@@ -190,10 +190,12 @@ export default async function reimbursementsRoutes(fastify: FastifyInstance) {
       .update({ ...parsed.data, updated_at: new Date().toISOString() })
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
+      .eq('status', 'draft')
       .select('*, reimbursement_categories(id, name, code, category_type)')
-      .single()
+      .maybeSingle()
 
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update reimbursement claim')
+    if (!data) return reply.code(409).send({ error: 'INVALID_STATUS', message: 'This claim is no longer a draft' })
     return reply.send({ data })
   })
 
@@ -237,10 +239,12 @@ export default async function reimbursementsRoutes(fastify: FastifyInstance) {
       .update({ status: 'submitted', submitted_at: now, updated_at: now })
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
+      .eq('status', 'draft')
       .select('id, status, submitted_at')
-      .single()
+      .maybeSingle()
 
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to submit reimbursement claim')
+    if (!data) return reply.code(409).send({ error: 'INVALID_STATUS', message: 'This claim is no longer a draft' })
     return reply.send({ message: 'Claim submitted for approval', data })
   })
 
@@ -278,13 +282,17 @@ export default async function reimbursementsRoutes(fastify: FastifyInstance) {
       return reply.code(409).send({ error: 'INVALID_STATUS', message: 'Only draft claims can be deleted' })
     }
 
-    const { error } = await fastify.supabase
+    const { data: deleted, error } = await fastify.supabase
       .from('reimbursement_claims')
       .delete()
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
+      .eq('status', 'draft')
+      .select('id')
+      .maybeSingle()
 
     if (error) return serverError(req, reply, error, ErrorCode.DELETE_FAILED, 'Failed to delete reimbursement claim')
+    if (!deleted) return reply.code(409).send({ error: 'INVALID_STATUS', message: 'This claim is no longer a draft' })
     return reply.code(204).send()
   })
 
@@ -493,6 +501,32 @@ export default async function reimbursementsRoutes(fastify: FastifyInstance) {
       return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
     }
 
+    // Verify employee_id and category_id both belong to this tenant — unlike
+    // POST /my (which derives employee_id server-side from the caller's own
+    // profile), this admin-facing endpoint takes both as caller-supplied
+    // IDs with no FK-level tenant check, so an unverified foreign-tenant
+    // employee_id would otherwise insert a claim row whose tenant_id and
+    // employee_id point at different tenants.
+    const { data: employee } = await fastify.supabase
+      .from('employees')
+      .select('id')
+      .eq('id', parsed.data.employee_id)
+      .eq('tenant_id', req.tenantId)
+      .maybeSingle()
+    if (!employee) {
+      return reply.code(404).send({ error: 'EMPLOYEE_NOT_FOUND', message: 'Employee not found in your organisation' })
+    }
+
+    const { data: category } = await fastify.supabase
+      .from('reimbursement_categories')
+      .select('id')
+      .eq('id', parsed.data.category_id)
+      .eq('tenant_id', req.tenantId)
+      .maybeSingle()
+    if (!category) {
+      return reply.code(404).send({ error: 'CATEGORY_NOT_FOUND', message: 'Reimbursement category not found' })
+    }
+
     const { data, error } = await fastify.supabase
       .from('reimbursement_claims')
       .insert({
@@ -627,6 +661,10 @@ export default async function reimbursementsRoutes(fastify: FastifyInstance) {
 
     const now = new Date().toISOString()
 
+    // Fold the 'submitted' precondition into this UPDATE's own WHERE clause
+    // too — the async gateApprove() call above opens a window where a
+    // concurrent/retried request can race this one; without the guard both
+    // could pass the earlier read-check and both succeed here.
     const { data, error } = await fastify.supabase
       .from('reimbursement_claims')
       .update({
@@ -638,11 +676,12 @@ export default async function reimbursementsRoutes(fastify: FastifyInstance) {
       })
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
+      .eq('status', 'submitted')
       .select()
-      .single()
+      .maybeSingle()
 
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to approve reimbursement claim')
-    if (!data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Claim not found' })
+    if (!data) return reply.code(409).send({ error: 'ALREADY_ACTIONED', message: 'Claim was already actioned by another request' })
 
     await logAction(fastify.supabase, {
       tenantId:    req.tenantId,
@@ -708,6 +747,12 @@ export default async function reimbursementsRoutes(fastify: FastifyInstance) {
 
     const now = new Date().toISOString()
 
+    // Fold the 'submitted' precondition into this UPDATE's own WHERE clause
+    // too — the async gateReject() call above opens a window where a
+    // concurrent/retried request (e.g. the sibling approve) can race this
+    // one; without the guard both could pass the earlier read-check and
+    // this write would silently flip an already-approved claim back to
+    // 'rejected'.
     const { data, error } = await fastify.supabase
       .from('reimbursement_claims')
       .update({
@@ -719,11 +764,12 @@ export default async function reimbursementsRoutes(fastify: FastifyInstance) {
       })
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
+      .eq('status', 'submitted')
       .select()
-      .single()
+      .maybeSingle()
 
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to reject reimbursement claim')
-    if (!data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Claim not found' })
+    if (!data) return reply.code(409).send({ error: 'ALREADY_ACTIONED', message: 'Claim was already actioned by another request' })
 
     await logAction(fastify.supabase, {
       tenantId:    req.tenantId,
@@ -907,12 +953,16 @@ export default async function reimbursementsRoutes(fastify: FastifyInstance) {
     }
 
     const now = new Date().toISOString()
+    // Fold the reviewable-status precondition into the UPDATE itself — a
+    // concurrent/retried request against this or a sibling approve/reject
+    // route could otherwise both pass the earlier read-check.
     const { data, error } = await fastify.supabase
       .from('reimbursement_claims')
       .update({ status: 'approved', approved_amount: parsed.data.approved_amount, reviewed_by: req.userId, reviewed_at: now, updated_at: now })
-      .eq('id', id).eq('tenant_id', req.tenantId).select().single()
+      .eq('id', id).eq('tenant_id', req.tenantId).in('status', ['submitted', 'under_review']).select().maybeSingle()
 
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to review reimbursement claim')
+    if (!data) return reply.code(409).send({ error: 'ALREADY_ACTIONED', message: 'Claim was already actioned by another request' })
     await logAction(fastify.supabase, { tenantId: req.tenantId, tableName: 'reimbursement_claims', recordId: id, action: 'UPDATE', performedBy: req.userId, onBehalfOf: (existing as any).employee_id ?? null, newData: { status: 'approved', approved_amount: parsed.data.approved_amount } })
     return reply.send({ data })
   })
@@ -1023,12 +1073,19 @@ export default async function reimbursementsRoutes(fastify: FastifyInstance) {
     }
 
     const now = new Date().toISOString()
+    // Fold the rejectable-status precondition into this UPDATE's own WHERE
+    // clause too — the async gateReject() call above opens a window where a
+    // concurrent/retried request (e.g. the sibling /:id/approve) can race
+    // this one; without the guard both could pass the earlier read-check
+    // and this write would silently flip an already-approved claim back to
+    // 'rejected'.
     const { data, error } = await fastify.supabase
       .from('reimbursement_claims')
       .update({ status: 'rejected', rejection_reason: parsed.data.rejection_reason, reviewed_by: req.userId, reviewed_at: now, updated_at: now })
-      .eq('id', id).eq('tenant_id', req.tenantId).select().single()
+      .eq('id', id).eq('tenant_id', req.tenantId).in('status', ['submitted', 'under_review', 'approved']).select().maybeSingle()
 
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to reject reimbursement claim')
+    if (!data) return reply.code(409).send({ error: 'ALREADY_ACTIONED', message: 'Claim was already actioned by another request' })
     await logAction(fastify.supabase, { tenantId: req.tenantId, tableName: 'reimbursement_claims', recordId: id, action: 'UPDATE', performedBy: req.userId, onBehalfOf: (existing as any).employee_id ?? null, newData: { status: 'rejected', rejection_reason: parsed.data.rejection_reason } })
     return reply.send({ data })
   })

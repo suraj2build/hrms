@@ -748,13 +748,17 @@ export default async function helpdeskRoutes(fastify: FastifyInstance) {
     if (!['resolved', 'closed'].includes((ticket as any).status)) return reply.code(422).send({ error: 'NOT_RESOLVED', message: 'CSAT is only available after resolution' })
     if ((ticket as any).csat_submitted_at) return conflictError(reply, 'ALREADY_RATED', 'You already rated this ticket')
 
-    const { error } = await fastify.supabase
+    const { data: updated, error } = await fastify.supabase
       .from('helpdesk_tickets')
       .update({ csat_rating: parsed.data.rating, csat_comment: parsed.data.comment ?? null, csat_submitted_at: new Date().toISOString() })
       .eq('id', req.params.id)
       .eq('tenant_id', req.tenantId)
+      .is('csat_submitted_at', null)
+      .select('id')
+      .maybeSingle()
 
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to submit CSAT rating')
+    if (!updated) return conflictError(reply, 'ALREADY_RATED', 'You already rated this ticket')
     return reply.code(201).send({ success: true })
   })
 
