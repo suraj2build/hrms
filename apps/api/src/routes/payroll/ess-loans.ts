@@ -14,6 +14,7 @@
 
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 const LOAN_TYPES = ['personal', 'housing', 'vehicle', 'education', 'emergency', 'other'] as const
 
@@ -49,7 +50,7 @@ export default async function essLoansRoutes(fastify: FastifyInstance) {
       .eq('employee_id', empId)
       .order('created_at', { ascending: false })
 
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch advance requests')
     return reply.send({ data: data ?? [] })
   })
 
@@ -84,7 +85,7 @@ export default async function essLoansRoutes(fastify: FastifyInstance) {
       .select()
       .single()
 
-    if (error) return reply.code(500).send({ error: 'INSERT_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create advance request')
     return reply.code(201).send({ data })
   })
 
@@ -100,7 +101,7 @@ export default async function essLoansRoutes(fastify: FastifyInstance) {
       .eq('employee_id', empId)
       .order('created_at', { ascending: false })
 
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch loans')
     return reply.send({ data: data ?? [] })
   })
 
@@ -118,7 +119,7 @@ export default async function essLoansRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', req.tenantId)
       .order('installment_number', { ascending: true })
 
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch loan schedule')
     return reply.send({ data: data ?? [] })
   })
 
@@ -136,7 +137,7 @@ export default async function essLoansRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', req.tenantId)
       .order('recovery_month', { ascending: true })
 
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch advance recovery schedule')
     return reply.send({ data: data ?? [] })
   })
 
@@ -176,7 +177,7 @@ export default async function essLoansRoutes(fastify: FastifyInstance) {
       .select()
       .single()
 
-    if (error) return reply.code(500).send({ error: 'INSERT_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create loan request')
     return reply.code(201).send({ data })
   })
 
@@ -257,7 +258,7 @@ export default async function essLoansRoutes(fastify: FastifyInstance) {
       .select('id')
       .maybeSingle()
 
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to approve advance request')
     if (!updated) return reply.code(409).send({ error: 'INVALID_STATUS', message: 'Request is no longer pending manager approval' })
     return reply.send({ message: 'Approved — forwarded to HR for final approval' })
   })
@@ -295,7 +296,7 @@ export default async function essLoansRoutes(fastify: FastifyInstance) {
       .select('id')
       .maybeSingle()
 
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to reject advance request')
     if (!updated) return reply.code(409).send({ error: 'INVALID_STATUS', message: 'Request is no longer pending manager approval' })
     return reply.send({ message: 'Advance request rejected' })
   })
@@ -330,7 +331,7 @@ export default async function essLoansRoutes(fastify: FastifyInstance) {
       .select('id')
       .maybeSingle()
 
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to approve loan request')
     if (!updated) return reply.code(409).send({ error: 'INVALID_STATUS', message: 'Loan is no longer pending manager approval' })
     return reply.send({ message: 'Approved — forwarded to HR for final approval' })
   })
@@ -366,7 +367,7 @@ export default async function essLoansRoutes(fastify: FastifyInstance) {
       .select('id')
       .maybeSingle()
 
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to reject loan request')
     if (!updated) return reply.code(409).send({ error: 'INVALID_STATUS', message: 'Loan is no longer pending manager approval' })
     return reply.send({ message: 'Loan request rejected' })
   })

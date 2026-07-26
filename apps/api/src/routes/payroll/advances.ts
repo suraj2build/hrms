@@ -9,6 +9,7 @@ import { logAction } from '../../lib/audit-service.js'
 import { gateApprove, gateReject } from '../../lib/approval-orchestrator.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { checkIdempotency, storeIdempotency } from '../../lib/idempotency.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 const RECOVERY_TYPES = ['payroll_deduction', 'manual_payment', 'adjustment'] as const
 
@@ -65,7 +66,7 @@ export default async function advancesRoutes(fastify: FastifyInstance) {
     if (parsed.data.status) q = q.eq('status', parsed.data.status)
 
     const { data, error } = await q
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch advance requests')
     return reply.send({ data: data ?? [] })
   })
 
@@ -108,7 +109,7 @@ export default async function advancesRoutes(fastify: FastifyInstance) {
       .select()
       .single()
 
-    if (error) return reply.code(500).send({ error: 'INSERT_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create advance request')
 
     await logAction(fastify.supabase, {
       tenantId:    req.tenantId,
@@ -189,7 +190,7 @@ export default async function advancesRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', req.tenantId)
       .in('status', ['pending', 'pending_hr'])
 
-    if (updateErr) return reply.code(500).send({ error: 'UPDATE_FAILED', message: updateErr.message })
+    if (updateErr) return serverError(req, reply, updateErr, ErrorCode.UPDATE_FAILED, 'Failed to approve advance')
 
     await logAction(fastify.supabase, {
       tenantId:    req.tenantId,
@@ -255,7 +256,7 @@ export default async function advancesRoutes(fastify: FastifyInstance) {
       .select('id')
       .maybeSingle()
 
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to reject advance')
     if (!rejected) return reply.code(409).send({ error: 'INVALID_STATE', message: 'Advance not found or not in a pending state' })
 
     await logAction(fastify.supabase, {
@@ -311,7 +312,7 @@ export default async function advancesRoutes(fastify: FastifyInstance) {
       .select('id, employee_id, recovery_months')
       .maybeSingle()
 
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to disburse advance')
     if (!disbursed) return reply.code(409).send({ error: 'INVALID_STATE', message: 'Advance not found or not in an approved state' })
 
     // Generate the recovery schedule now, on disbursement — never at approval —
@@ -378,7 +379,7 @@ export default async function advancesRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', req.tenantId)
       .order('recovery_month', { ascending: true }).limit(100)
 
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch advance recovery schedule')
     return reply.send({ data: data ?? [] })
   })
 
@@ -405,7 +406,7 @@ export default async function advancesRoutes(fastify: FastifyInstance) {
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
 
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to pause advance recovery')
     return reply.send({ message: 'Recovery paused' })
   })
 
@@ -423,7 +424,7 @@ export default async function advancesRoutes(fastify: FastifyInstance) {
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
 
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to resume advance recovery')
     return reply.send({ message: 'Recovery resumed' })
   })
 
@@ -488,7 +489,7 @@ export default async function advancesRoutes(fastify: FastifyInstance) {
       .select()
       .single()
 
-    if (recoveryErr) return reply.code(500).send({ error: 'INSERT_FAILED', message: recoveryErr.message })
+    if (recoveryErr) return serverError(req, reply, recoveryErr, ErrorCode.INSERT_FAILED, 'Failed to record advance recovery')
 
     // Update schedule status if provided
     if (parsed.data.schedule_id) {

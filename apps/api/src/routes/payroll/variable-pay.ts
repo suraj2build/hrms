@@ -7,6 +7,7 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 const TEMPLATE_TYPES = [
   'performance_bonus',
@@ -50,7 +51,7 @@ export default async function variablePayRoutes(fastify: FastifyInstance) {
     }
 
     const { data, error } = await q
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch incentive templates')
     return reply.send({ data: data ?? [] })
   })
 
@@ -80,7 +81,7 @@ export default async function variablePayRoutes(fastify: FastifyInstance) {
       if (error.code === '23505') {
         return reply.code(409).send({ error: 'DUPLICATE_CODE', message: 'A template with this code already exists' })
       }
-      return reply.code(500).send({ error: 'INSERT_FAILED', message: error.message })
+      return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create incentive template')
     }
 
     return reply.code(201).send({ data })
@@ -113,7 +114,7 @@ export default async function variablePayRoutes(fastify: FastifyInstance) {
       .select()
       .single()
 
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update incentive template')
     if (!data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Template not found' })
 
     return reply.send({ data })
@@ -140,7 +141,7 @@ export default async function variablePayRoutes(fastify: FastifyInstance) {
     if (parsed.data.status) q = q.eq('status', parsed.data.status)
 
     const { data, error } = await q
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch payout batches')
     return reply.send({ data: data ?? [] })
   })
 
@@ -171,7 +172,7 @@ export default async function variablePayRoutes(fastify: FastifyInstance) {
       .select()
       .single()
 
-    if (error) return reply.code(500).send({ error: 'INSERT_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create payout batch')
     return reply.code(201).send({ data })
   })
 
@@ -208,7 +209,7 @@ export default async function variablePayRoutes(fastify: FastifyInstance) {
       .insert(payoutRows)
       .select()
 
-    if (payErr) return reply.code(500).send({ error: 'INSERT_FAILED', message: payErr.message })
+    if (payErr) return serverError(req, reply, payErr, ErrorCode.INSERT_FAILED, 'Failed to create variable payouts')
 
     // Update batch total_amount and employee_count
     const totalAmount = parsed.data.payouts.reduce((sum, p) => sum + p.amount, 0)
@@ -254,7 +255,7 @@ export default async function variablePayRoutes(fastify: FastifyInstance) {
           .range(from, to),
       )
     } catch (err: any) {
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: err.message })
+      return serverError(req, reply, err, ErrorCode.QUERY_FAILED, 'Failed to fetch batch payouts')
     }
     return reply.send({ data })
   })
@@ -269,7 +270,7 @@ export default async function variablePayRoutes(fastify: FastifyInstance) {
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
 
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to submit payout batch')
     return reply.send({ message: 'Batch submitted for review' })
   })
 
@@ -296,7 +297,7 @@ export default async function variablePayRoutes(fastify: FastifyInstance) {
         .eq('tenant_id', req.tenantId),
     ])
 
-    if (batchErr) return reply.code(500).send({ error: 'UPDATE_FAILED', message: batchErr.message })
+    if (batchErr) return serverError(req, reply, batchErr, ErrorCode.UPDATE_FAILED, 'Failed to approve payout batch')
     if (payoutsErr) req.log.warn({ err: payoutsErr }, 'Failed to update payout statuses')
 
     return reply.send({ message: 'Batch approved' })
@@ -320,7 +321,7 @@ export default async function variablePayRoutes(fastify: FastifyInstance) {
         .eq('tenant_id', req.tenantId),
     ])
 
-    if (batchErr) return reply.code(500).send({ error: 'UPDATE_FAILED', message: batchErr.message })
+    if (batchErr) return serverError(req, reply, batchErr, ErrorCode.UPDATE_FAILED, 'Failed to cancel payout batch')
     if (payoutsErr) req.log.warn({ err: payoutsErr }, 'Failed to cancel payouts')
 
     return reply.send({ message: 'Batch cancelled' })
@@ -356,7 +357,7 @@ export default async function variablePayRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', req.tenantId)
       .eq('variable_payout_batches.status', 'approved').limit(100)
 
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch variable pay awards')
 
     const rows = (data ?? []).map((p: any) => {
       const batch = p.variable_payout_batches
@@ -395,7 +396,7 @@ export default async function variablePayRoutes(fastify: FastifyInstance) {
       .eq('employee_id', employeeId)
       .eq('tenant_id', req.tenantId).limit(200)
 
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch employee variable pay')
     return reply.send({ data: data ?? [] })
   })
 }

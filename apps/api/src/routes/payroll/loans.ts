@@ -8,6 +8,7 @@ import { z } from 'zod'
 import { gateApprove, gateReject } from '../../lib/approval-orchestrator.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { checkIdempotency, storeIdempotency } from '../../lib/idempotency.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 const LOAN_TYPES = ['personal', 'housing', 'vehicle', 'education', 'emergency', 'other'] as const
 const PAYMENT_TYPES = ['emi', 'prepayment', 'foreclosure', 'adjustment'] as const
@@ -52,7 +53,7 @@ export default async function loansRoutes(fastify: FastifyInstance) {
     if (parsed.data.status) q = q.eq('status', parsed.data.status)
 
     const { data, error } = await q
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch loans')
     return reply.send({ data: data ?? [] })
   })
 
@@ -111,7 +112,7 @@ export default async function loansRoutes(fastify: FastifyInstance) {
       .select()
       .single()
 
-    if (error) return reply.code(500).send({ error: 'INSERT_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create loan request')
     return reply.code(201).send({ data })
   })
 
@@ -166,7 +167,7 @@ export default async function loansRoutes(fastify: FastifyInstance) {
       .select()
       .maybeSingle()
 
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to approve loan')
     if (!data) return reply.code(409).send({ error: 'INVALID_STATE', message: 'Loan not found or not in a pending/pending_hr state' })
 
     return reply.send({ data })
@@ -223,7 +224,7 @@ export default async function loansRoutes(fastify: FastifyInstance) {
       .select('id')
       .maybeSingle()
 
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to reject loan')
     if (!rejected) return reply.code(409).send({ error: 'INVALID_STATE', message: 'Loan not found or not in a pending state' })
     return reply.send({ message: 'Loan rejected' })
   })
@@ -295,7 +296,7 @@ export default async function loansRoutes(fastify: FastifyInstance) {
       .eq('status', 'approved')
       .select('id')
 
-    if (updateErr) return reply.code(500).send({ error: 'UPDATE_FAILED', message: updateErr.message })
+    if (updateErr) return serverError(req, reply, updateErr, ErrorCode.UPDATE_FAILED, 'Failed to disburse loan')
     if (!updatedLoan?.length) return reply.code(409).send({ error: 'ALREADY_DISBURSED', message: 'This loan was already disbursed by another request' })
 
     // Generate amortization schedule
@@ -363,7 +364,7 @@ export default async function loansRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', req.tenantId)
       .order('installment_number', { ascending: true }).limit(200)
 
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch loan schedule')
     return reply.send({ data: data ?? [] })
   })
 
@@ -383,7 +384,7 @@ export default async function loansRoutes(fastify: FastifyInstance) {
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
 
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to pause EMI')
     return reply.send({ message: 'EMI paused' })
   })
 
@@ -397,7 +398,7 @@ export default async function loansRoutes(fastify: FastifyInstance) {
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
 
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to resume EMI')
     return reply.send({ message: 'EMI resumed' })
   })
 
@@ -445,7 +446,7 @@ export default async function loansRoutes(fastify: FastifyInstance) {
       .select('id')
       .maybeSingle()
 
-    if (loanErr) return reply.code(500).send({ error: 'UPDATE_FAILED', message: loanErr.message })
+    if (loanErr) return serverError(req, reply, loanErr, ErrorCode.UPDATE_FAILED, 'Failed to foreclose loan')
     if (!foreclosed) return reply.code(409).send({ error: 'INVALID_STATE', message: 'Loan not found or already foreclosed' })
 
     const { error: schedErr } = await fastify.supabase
@@ -538,7 +539,7 @@ export default async function loansRoutes(fastify: FastifyInstance) {
       .select()
       .single()
 
-    if (payErr) return reply.code(500).send({ error: 'INSERT_FAILED', message: payErr.message })
+    if (payErr) return serverError(req, reply, payErr, ErrorCode.INSERT_FAILED, 'Failed to record loan payment')
 
     // Update schedule if provided — guarded to 'pending' so a duplicate/racing
     // record-payment call for the same installment can't re-stamp an

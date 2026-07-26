@@ -61,7 +61,7 @@ export default async function ptaxRoutes(fastify: FastifyInstance) {
       .select('state_code, enabled, registration_number, registration_date')
       .eq('tenant_id', req.tenantId)
 
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch P-Tax state settings')
 
     // Build a lookup map: state_code → settings row
     const settingsMap = new Map<string, { enabled: boolean; registration_number: string | null; registration_date: string | null }>()
@@ -149,7 +149,7 @@ export default async function ptaxRoutes(fastify: FastifyInstance) {
       .from('ptax_state_settings')
       .upsert(upsertPayload, { onConflict: 'tenant_id,state_code' })
 
-    if (error) return reply.code(500).send({ error: 'UPSERT_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update P-Tax state settings')
 
     await logAction(fastify.supabase, {
       tenantId:    req.tenantId,
@@ -192,7 +192,7 @@ export default async function ptaxRoutes(fastify: FastifyInstance) {
     if (parsed.data.financial_year) q = q.eq('financial_year', parsed.data.financial_year)
 
     const { data, error } = await q
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch P-Tax slabs')
     return reply.send({ data: data ?? [] })
   })
 
@@ -224,7 +224,7 @@ export default async function ptaxRoutes(fastify: FastifyInstance) {
       if (error.code === '23505') {
         return reply.code(409).send({ error: 'DUPLICATE_SLAB', message: 'A slab with these parameters already exists' })
       }
-      return reply.code(500).send({ error: 'INSERT_FAILED', message: error.message })
+      return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create P-Tax slab')
     }
 
     await logAction(fastify.supabase, {
@@ -250,7 +250,7 @@ export default async function ptaxRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', req.tenantId)
       .select('id')
 
-    if (error) return reply.code(500).send({ error: 'DELETE_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.DELETE_FAILED, 'Failed to delete P-Tax slab')
     if (!deleted || deleted.length === 0) {
       return reply.code(404).send({ error: 'NOT_FOUND', message: 'Slab not found' })
     }
@@ -283,7 +283,7 @@ export default async function ptaxRoutes(fastify: FastifyInstance) {
     if (parsed.data.employee_id) q = q.eq('employee_id', parsed.data.employee_id)
 
     const { data, error } = await q
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch P-Tax state config')
     return reply.send({ data: data ?? [] })
   })
 
@@ -326,7 +326,7 @@ export default async function ptaxRoutes(fastify: FastifyInstance) {
       .select()
       .single()
 
-    if (error) return reply.code(500).send({ error: 'UPSERT_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to set employee P-Tax state')
     await logAction(fastify.supabase, {
       tenantId:    req.tenantId,
       tableName:   'ptax_state_config',
@@ -360,7 +360,7 @@ export default async function ptaxRoutes(fastify: FastifyInstance) {
     if (parsed.data.employee_id) q = q.eq('employee_id', parsed.data.employee_id)
 
     const { data, error } = await q
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch P-Tax contributions')
     return reply.send({ data: data ?? [] })
   })
 
@@ -628,7 +628,7 @@ export default async function ptaxRoutes(fastify: FastifyInstance) {
         .eq('contribution_month', month)
       if (keepIds.length > 0) delQ = delQ.not('employee_id', 'in', `(${keepIds.join(',')})`)
       const { error: delErr } = await delQ
-      if (delErr) return reply.code(500).send({ error: 'STALE_CLEANUP_FAILED', message: delErr.message })
+      if (delErr) return serverError(req, reply, delErr, ErrorCode.DELETE_FAILED, 'Failed to clean up stale P-Tax contributions')
     }
 
     if (contributions.length > 0) {
@@ -636,7 +636,7 @@ export default async function ptaxRoutes(fastify: FastifyInstance) {
         .from('ptax_contributions')
         .upsert(contributions, { onConflict: 'tenant_id,employee_id,contribution_month' })
 
-      if (upsertErr) return reply.code(500).send({ error: 'UPSERT_FAILED', message: upsertErr.message })
+      if (upsertErr) return serverError(req, reply, upsertErr, ErrorCode.UPDATE_FAILED, 'Failed to save P-Tax contributions')
     }
 
     return reply.send({

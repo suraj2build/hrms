@@ -22,6 +22,7 @@ import { z } from 'zod'
 import { computeTaxWithDB } from '../../../lib/statutory/tax-computation-engine.js'
 import { logAction } from '../../../lib/audit-service.js'
 import { checkDeclarationWindow } from './tds.js'
+import { serverError, ErrorCode } from '../../../lib/api-errors.js'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -165,7 +166,7 @@ export default async function tdsPlansRoute(fastify: FastifyInstance) {
       .eq('employee_id', employeeId)
       .eq('tenant_id', req.tenantId)
 
-    if (plansErr) return reply.code(500).send({ error: 'QUERY_FAILED', message: plansErr.message })
+    if (plansErr) return serverError(req, reply, plansErr, ErrorCode.QUERY_FAILED, 'Failed to fetch plans for comparison')
     if (!plans || (plans as any[]).length === 0) {
       return reply.code(404).send({ error: 'NOT_FOUND', message: 'No matching plans found' })
     }
@@ -268,7 +269,7 @@ export default async function tdsPlansRoute(fastify: FastifyInstance) {
       .eq('financial_year', fy)
       .order('created_at', { ascending: false })
 
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch tax declaration plans')
     return reply.send({ data: data ?? [] })
   })
 
@@ -305,7 +306,7 @@ export default async function tdsPlansRoute(fastify: FastifyInstance) {
       .select()
       .single()
 
-    if (error) return reply.code(500).send({ error: 'INSERT_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create tax declaration plan')
     await logAction(fastify.supabase, {
       tenantId:    req.tenantId,
       tableName:   'tax_declaration_plans',
@@ -361,7 +362,7 @@ export default async function tdsPlansRoute(fastify: FastifyInstance) {
       .select()
       .single()
 
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update tax declaration plan')
     await logAction(fastify.supabase, {
       tenantId:    req.tenantId,
       tableName:   'tax_declaration_plans',
@@ -406,7 +407,7 @@ export default async function tdsPlansRoute(fastify: FastifyInstance) {
       .eq('id', planId)
       .eq('tenant_id', req.tenantId)
 
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to archive tax declaration plan')
     await logAction(fastify.supabase, {
       tenantId:    req.tenantId,
       tableName:   'tax_declaration_plans',
@@ -456,7 +457,7 @@ export default async function tdsPlansRoute(fastify: FastifyInstance) {
       .eq('plan_id', planId)
       .order('created_at', { ascending: true })
 
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch plan items')
     return reply.send({ data: data ?? [] })
   })
 
@@ -516,7 +517,7 @@ export default async function tdsPlansRoute(fastify: FastifyInstance) {
       .upsert(records, { onConflict: 'plan_id,component_id' })
       .select()
 
-    if (error) return reply.code(500).send({ error: 'UPSERT_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to save plan items')
     return reply.send({ data: data ?? [], upserted: records.length })
   })
 
@@ -554,7 +555,7 @@ export default async function tdsPlansRoute(fastify: FastifyInstance) {
       `)
       .eq('plan_id', planId)
 
-    if (itemErr) return reply.code(500).send({ error: 'QUERY_FAILED', message: itemErr.message })
+    if (itemErr) return serverError(req, reply, itemErr, ErrorCode.QUERY_FAILED, 'Failed to fetch plan items')
 
     const planItems  = (items as any[]) ?? []
     const components = planItems.map((i: any) => i.tax_declaration_components).filter(Boolean)
@@ -666,7 +667,7 @@ export default async function tdsPlansRoute(fastify: FastifyInstance) {
       `)
       .eq('plan_id', planId)
 
-    if (itemErr) return reply.code(500).send({ error: 'QUERY_FAILED', message: itemErr.message })
+    if (itemErr) return serverError(req, reply, itemErr, ErrorCode.QUERY_FAILED, 'Failed to fetch plan items')
 
     const planItems  = (items as any[]) ?? []
     const components = planItems.map((i: any) => i.tax_declaration_components).filter(Boolean)
@@ -740,7 +741,7 @@ export default async function tdsPlansRoute(fastify: FastifyInstance) {
         .from('tax_declarations')
         .upsert(declRecords, { onConflict: 'tenant_id,employee_id,financial_year,declaration_category,section' })
 
-      if (declErr) return reply.code(500).send({ error: 'DECLARATION_UPSERT_FAILED', message: declErr.message })
+      if (declErr) return serverError(req, reply, declErr, ErrorCode.UPDATE_FAILED, 'Failed to save tax declarations')
     }
 
     // Mark all other plans for this FY as non-primary
@@ -769,7 +770,7 @@ export default async function tdsPlansRoute(fastify: FastifyInstance) {
       .select()
       .single()
 
-    if (updateErr) return reply.code(500).send({ error: 'UPDATE_FAILED', message: updateErr.message })
+    if (updateErr) return serverError(req, reply, updateErr, ErrorCode.UPDATE_FAILED, 'Failed to update tax declaration plan')
 
     // Sync regime election — plan submission is the source of truth for regime
     await fastify.supabase

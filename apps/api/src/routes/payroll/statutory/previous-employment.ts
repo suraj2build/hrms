@@ -11,6 +11,7 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { checkDeclarationWindow } from './tds.js'
 import { HR_ADMIN_ROLES } from '../../../lib/rbac.js'
+import { serverError, ErrorCode } from '../../../lib/api-errors.js'
 
 // ── Zod schemas ───────────────────────────────────────────────────────────────
 
@@ -84,7 +85,7 @@ export default async function previousEmploymentTdsRoutes(fastify: FastifyInstan
     }
 
     const { data, error } = await q
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch previous employment tax details')
     return reply.send({ data: data ?? [] })
   })
 
@@ -116,7 +117,7 @@ export default async function previousEmploymentTdsRoutes(fastify: FastifyInstan
       .select()
       .single()
 
-    if (error) return reply.code(500).send({ error: 'INSERT_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create previous employment tax record')
     return reply.code(201).send({ data })
   })
 
@@ -145,7 +146,7 @@ export default async function previousEmploymentTdsRoutes(fastify: FastifyInstan
       .eq('tenant_id', req.tenantId)
       .maybeSingle()
 
-    if (fetchErr) return reply.code(500).send({ error: 'QUERY_FAILED', message: fetchErr.message })
+    if (fetchErr) return serverError(req, reply, fetchErr, ErrorCode.QUERY_FAILED, 'Failed to fetch previous employment tax record')
     if (!existing) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Record not found' })
 
     const rec = existing as any
@@ -167,7 +168,7 @@ export default async function previousEmploymentTdsRoutes(fastify: FastifyInstan
       .select()
       .single()
 
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update previous employment tax record')
     return reply.send({ data })
   })
 
@@ -185,7 +186,7 @@ export default async function previousEmploymentTdsRoutes(fastify: FastifyInstan
       .eq('tenant_id', req.tenantId)
       .maybeSingle()
 
-    if (fetchErr) return reply.code(500).send({ error: 'QUERY_FAILED', message: fetchErr.message })
+    if (fetchErr) return serverError(req, reply, fetchErr, ErrorCode.QUERY_FAILED, 'Failed to fetch previous employment tax record')
     if (!existing) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Record not found' })
 
     const rec = existing as any
@@ -210,7 +211,7 @@ export default async function previousEmploymentTdsRoutes(fastify: FastifyInstan
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
 
-    if (error) return reply.code(500).send({ error: 'DELETE_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.DELETE_FAILED, 'Failed to delete previous employment tax record')
     return reply.code(204).send()
   })
 
@@ -241,7 +242,7 @@ export default async function previousEmploymentTdsRoutes(fastify: FastifyInstan
 
       const { data, error } = await q
 
-      if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+      if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch previous employment tax details')
 
       // Map DB shape → frontend PrevEmployerAdmin shape
       const result = (data ?? []).map((r: any) => ({
@@ -293,7 +294,7 @@ export default async function previousEmploymentTdsRoutes(fastify: FastifyInstan
       }
 
       const { data, error } = await q
-      if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+      if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch previous employment tax details')
       return reply.send({ data: data ?? [] })
     },
   )
@@ -335,7 +336,7 @@ export default async function previousEmploymentTdsRoutes(fastify: FastifyInstan
         .select()
         .maybeSingle()
 
-      if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+      if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update verification status')
       // No row matched the precondition: either not found, or already decided.
       if (!data) return reply.code(409).send({ error: 'INVALID_STATE', message: 'Record not found or already decided' })
 

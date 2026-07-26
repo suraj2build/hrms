@@ -13,6 +13,7 @@ import {
   computeQuarterReconciliation, lockQuarterReconciliation,
 } from '../../lib/fbp-service.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 const FY_RE = /^\d{4}-\d{2}$/   // e.g. 2026-27
 
@@ -51,7 +52,7 @@ export default async function fbpRoutes(fastify: FastifyInstance) {
     if (qs.success && qs.data.quarter) q = q.eq('quarter', qs.data.quarter)
 
     const { data, error } = await q
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch FBP submissions')
     return reply.send({ data: data ?? [] })
   })
 
@@ -74,7 +75,7 @@ export default async function fbpRoutes(fastify: FastifyInstance) {
     if (qs.success && qs.data.quarter) q = q.eq('quarter', qs.data.quarter)
 
     const { data, error } = await q
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch FBP reconciliation')
     const rows = data ?? []
     const total_taxable = Math.round(rows.reduce((s: number, r: any) => s + Number(r.taxable_amount ?? 0), 0) * 100) / 100
     return reply.send({ data: { rows, total_taxable } })
@@ -108,7 +109,7 @@ export default async function fbpRoutes(fastify: FastifyInstance) {
       .insert({ tenant_id: req.tenantId, employee_id: empId, ...parsed.data, status: 'draft' })
       .select('*, salary_components(id, name, code)')
       .single()
-    if (error) return reply.code(500).send({ error: 'INSERT_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create FBP submission')
     return reply.code(201).send({ data })
   })
 
@@ -137,7 +138,7 @@ export default async function fbpRoutes(fastify: FastifyInstance) {
       .update({ ...parsed.data, updated_at: new Date().toISOString() })
       .eq('id', id).eq('tenant_id', req.tenantId)
       .select('*, salary_components(id, name, code)').single()
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update FBP submission')
     return reply.send({ data })
   })
 
@@ -158,7 +159,7 @@ export default async function fbpRoutes(fastify: FastifyInstance) {
       .from('fbp_bill_submissions')
       .update({ status: 'submitted', submitted_at: new Date().toISOString(), updated_at: new Date().toISOString() })
       .eq('id', id).eq('tenant_id', req.tenantId)
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to submit FBP submission')
     return reply.send({ message: 'Submitted for approval' })
   })
 
@@ -186,7 +187,7 @@ export default async function fbpRoutes(fastify: FastifyInstance) {
       .from('fbp_bill_attachments')
       .insert({ tenant_id: req.tenantId, submission_id: id, ...parsed.data, uploaded_by: req.userId })
       .select().single()
-    if (error) return reply.code(500).send({ error: 'INSERT_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to save FBP attachment')
     return reply.code(201).send({ data })
   })
 
@@ -216,7 +217,7 @@ export default async function fbpRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', req.tenantId)
       .eq('submission_id', id)
       .order('uploaded_at', { ascending: false }).limit(50)
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch FBP attachments')
     return reply.send({ data: data ?? [] })
   })
 
@@ -244,7 +245,7 @@ export default async function fbpRoutes(fastify: FastifyInstance) {
     q = q.range(offset, offset + limit - 1)
 
     const { data, count, error } = await q
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch FBP submissions')
     return reply.send({ data: data ?? [], total: count ?? 0, limit, offset })
   })
 
@@ -267,7 +268,7 @@ export default async function fbpRoutes(fastify: FastifyInstance) {
       .from('fbp_bill_submissions')
       .update({ status: 'approved', approved_amount: parsed.data.approved_amount, reviewed_by: req.userId, reviewed_at: now, updated_at: now })
       .eq('id', id).eq('tenant_id', req.tenantId).select().single()
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to approve FBP submission')
 
     await logAction(fastify.supabase, {
       tenantId: req.tenantId, tableName: 'fbp_bill_submissions', recordId: id,
@@ -296,7 +297,7 @@ export default async function fbpRoutes(fastify: FastifyInstance) {
       .from('fbp_bill_submissions')
       .update({ status: 'rejected', rejection_reason: parsed.data.rejection_reason, reviewed_by: req.userId, reviewed_at: now, updated_at: now })
       .eq('id', id).eq('tenant_id', req.tenantId).select().single()
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to reject FBP submission')
     return reply.send({ data })
   })
 
@@ -313,7 +314,7 @@ export default async function fbpRoutes(fastify: FastifyInstance) {
       const total_taxable = rows.reduce((s, r) => s + r.taxable_amount, 0)
       return reply.send({ data: { rows, total_taxable: Math.round(total_taxable * 100) / 100 } })
     } catch (e: any) {
-      return reply.code(500).send({ error: 'RECONCILE_FAILED', message: e?.message ?? 'Reconciliation failed' })
+      return serverError(req, reply, e, ErrorCode.COMPUTE_FAILED, 'Failed to compute FBP quarter reconciliation')
     }
   })
 
@@ -337,7 +338,7 @@ export default async function fbpRoutes(fastify: FastifyInstance) {
       })
       return reply.send({ data: { locked } })
     } catch (e: any) {
-      return reply.code(500).send({ error: 'LOCK_FAILED', message: e?.message ?? 'Lock failed' })
+      return serverError(req, reply, e, ErrorCode.COMPUTE_FAILED, 'Failed to lock FBP quarter reconciliation')
     }
   })
 }

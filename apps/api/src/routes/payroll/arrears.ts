@@ -7,6 +7,7 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 const ARREAR_TYPES = ['salary_revision', 'bonus_revision', 'component_change', 'correction', 'other'] as const
 
@@ -43,7 +44,7 @@ export default async function arrearsRoutes(fastify: FastifyInstance) {
     if (parsed.data.from_period) q = q.gte('from_period', parsed.data.from_period)
 
     const { data, error } = await q
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch arrear batches')
     return reply.send({ data: data ?? [] })
   })
 
@@ -76,7 +77,7 @@ export default async function arrearsRoutes(fastify: FastifyInstance) {
       .select()
       .single()
 
-    if (error) return reply.code(500).send({ error: 'INSERT_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create arrear batch')
     return reply.code(201).send({ data })
   })
 
@@ -131,7 +132,7 @@ export default async function arrearsRoutes(fastify: FastifyInstance) {
       .insert(recordRows)
       .select()
 
-    if (insertErr) return reply.code(500).send({ error: 'INSERT_FAILED', message: insertErr.message })
+    if (insertErr) return serverError(req, reply, insertErr, ErrorCode.INSERT_FAILED, 'Failed to create arrear records')
 
     // Update batch totals
     const totalArrear = recordRows.reduce((sum, r) => sum + Math.abs(r.arrear_amount), 0)
@@ -173,7 +174,7 @@ export default async function arrearsRoutes(fastify: FastifyInstance) {
           .range(from, to),
       )
     } catch (err: any) {
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: err.message })
+      return serverError(req, reply, err, ErrorCode.QUERY_FAILED, 'Failed to fetch arrear records')
     }
 
     const empIds = [...new Set(records.map((r: any) => r.employee_id))]
@@ -228,7 +229,7 @@ export default async function arrearsRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', req.tenantId)
       .gte('effective_date', from)
       .lte('effective_date', to)
-    if (revErr) return reply.code(500).send({ error: 'QUERY_FAILED', message: revErr.message })
+    if (revErr) return serverError(req, reply, revErr, ErrorCode.QUERY_FAILED, 'Failed to fetch compensation revisions')
 
     // compensation_revisions stores the new CTC annually (new_ctc_annual); the
     // monthly figure is derived as /12. before_ctc_monthly is stored directly.
@@ -258,7 +259,7 @@ export default async function arrearsRoutes(fastify: FastifyInstance) {
     await fastify.supabase.from('arrear_records').delete().eq('tenant_id', req.tenantId).eq('batch_id', id)
     if (records.length) {
       const { error: insErr } = await fastify.supabase.from('arrear_records').insert(records)
-      if (insErr) return reply.code(500).send({ error: 'INSERT_FAILED', message: insErr.message })
+      if (insErr) return serverError(req, reply, insErr, ErrorCode.INSERT_FAILED, 'Failed to create arrear records')
     }
 
     const total = records.reduce((s, r) => s + Math.abs(r.arrear_amount), 0)
@@ -288,7 +289,7 @@ export default async function arrearsRoutes(fastify: FastifyInstance) {
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
 
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to approve arrear batch')
     return reply.send({ message: 'Arrear batch approved' })
   })
 
@@ -302,7 +303,7 @@ export default async function arrearsRoutes(fastify: FastifyInstance) {
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
 
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to cancel arrear batch')
     return reply.send({ message: 'Arrear batch cancelled' })
   })
 
@@ -317,7 +318,7 @@ export default async function arrearsRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', req.tenantId)
       .order('period_month', { ascending: false }).limit(200)
 
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch employee arrears')
     return reply.send({ data: data ?? [] })
   })
 }

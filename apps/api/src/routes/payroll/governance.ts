@@ -6,6 +6,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 export default async function governanceRoutes(fastify: FastifyInstance) {
   const auth = { preHandler: [fastify.authenticate] }
@@ -45,7 +46,7 @@ export default async function governanceRoutes(fastify: FastifyInstance) {
       // PostgREST 500. Fall back to raw rows (no joined name) so the page loads.
       req.log.warn({ err: error }, 'governance/freeze embed failed — serving raw rows')
       ;({ data, error } = await build('*'))
-      if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+      if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch freeze log')
     }
     return reply.send({ data: data ?? [] })
   })
@@ -94,7 +95,7 @@ export default async function governanceRoutes(fastify: FastifyInstance) {
       .select()
       .single()
 
-    if (error) return reply.code(500).send({ error: 'INSERT_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create freeze record')
     return reply.code(201).send({ data })
   })
 
@@ -223,7 +224,7 @@ export default async function governanceRoutes(fastify: FastifyInstance) {
       // profiles!maker_id FK may be missing on a drifted DB → 500. Serve raw rows.
       req.log.warn({ err: error }, 'governance/maker-checker embed failed — serving raw rows')
       ;({ data, error } = await build('*'))
-      if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+      if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch maker-checker log')
     }
     return reply.send({ data: data ?? [] })
   })
@@ -259,7 +260,7 @@ export default async function governanceRoutes(fastify: FastifyInstance) {
       .select()
       .single()
 
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to approve maker-checker entry')
     if (!data) return reply.code(409).send({ error: 'ALREADY_ACTIONED', message: 'This entry has already been approved or rejected' })
 
     return reply.send({ data })
@@ -295,7 +296,7 @@ export default async function governanceRoutes(fastify: FastifyInstance) {
       .select()
       .single()
 
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to reject maker-checker entry')
     if (!data) return reply.code(409).send({ error: 'ALREADY_ACTIONED', message: 'This entry has already been approved or rejected' })
 
     return reply.send({ data })
@@ -322,7 +323,7 @@ export default async function governanceRoutes(fastify: FastifyInstance) {
     if (parsed.data.status) q = q.eq('status', parsed.data.status)
 
     const { data, error } = await q
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch variance approvals')
     return reply.send({ data: data ?? [] })
   })
 
@@ -345,7 +346,7 @@ export default async function governanceRoutes(fastify: FastifyInstance) {
       .select()
       .single()
 
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to approve variance')
     if (!data) return reply.code(409).send({ error: 'ALREADY_ACTIONED', message: 'This variance has already been approved or rejected' })
 
     return reply.send({ data })
@@ -381,7 +382,7 @@ export default async function governanceRoutes(fastify: FastifyInstance) {
       .select()
       .single()
 
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to reject variance')
     if (!data) return reply.code(409).send({ error: 'ALREADY_ACTIONED', message: 'This variance has already been approved or rejected' })
 
     return reply.send({ data })
@@ -402,7 +403,7 @@ export default async function governanceRoutes(fastify: FastifyInstance) {
       .limit(1)
       .maybeSingle()
 
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to check payroll freeze status')
 
     return reply.send({
       is_frozen: !!data,

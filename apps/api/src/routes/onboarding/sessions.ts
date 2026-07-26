@@ -10,6 +10,7 @@ import {
   emitOnboardingDocumentVerified,
   emitOnboardingDocumentRejected,
 } from '../../lib/onboarding-orchestrator.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 // ─── Validation schemas ────────────────────────────────────────────────────
 
@@ -66,7 +67,7 @@ export default async function sessionRoutes(fastify: FastifyInstance) {
       .select()
       .single()
 
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create onboarding session')
 
     emitOnboardingSessionCreated({
       tenantId:      req.tenantId,
@@ -117,7 +118,7 @@ export default async function sessionRoutes(fastify: FastifyInstance) {
       if ((error as any).code === '42P01' || error.message?.includes('does not exist')) {
         return reply.send({ data: [], total: 0 })
       }
-      return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch onboarding sessions')
     }
 
     // Normalise: map document array → count, keep draft profile summary
@@ -199,7 +200,7 @@ export default async function sessionRoutes(fastify: FastifyInstance) {
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
 
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to archive session')
 
     return reply.send({ data: { id, status: 'archived' } })
   })
@@ -247,7 +248,7 @@ export default async function sessionRoutes(fastify: FastifyInstance) {
       .select()
       .single()
 
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create document record')
 
     emitOnboardingDocumentUploaded({
       tenantId:      req.tenantId,
@@ -277,10 +278,9 @@ export default async function sessionRoutes(fastify: FastifyInstance) {
       .order('uploaded_at', { ascending: true })
 
     if (error) {
-      fastify.log.error({ error, sessionId: id }, 'Failed to fetch onboarding documents')
       // Gracefully return empty list if table doesn't exist yet (migration pending)
       if ((error as any).code === '42P01') return reply.send({ data: [] })
-      return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch onboarding documents')
     }
 
     return reply.send({ data: data ?? [] })
@@ -319,7 +319,7 @@ export default async function sessionRoutes(fastify: FastifyInstance) {
       .eq('id', docId)
       .eq('tenant_id', req.tenantId)
 
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.DELETE_FAILED, 'Failed to delete document')
 
     return reply.send({ data: { id: docId, deleted: true } })
   })
@@ -366,7 +366,7 @@ export default async function sessionRoutes(fastify: FastifyInstance) {
 
     const { data: documents, error: docsError } = await docsQuery
 
-    if (docsError) return reply.code(500).send({ error: 'DB_ERROR', message: docsError.message })
+    if (docsError) return serverError(req, reply, docsError, ErrorCode.QUERY_FAILED, 'Failed to fetch onboarding documents')
     if (!documents || documents.length === 0) {
       return reply.code(400).send({ error: 'NO_DOCUMENTS', message: 'No documents to extract' })
     }

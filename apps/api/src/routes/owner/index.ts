@@ -1103,7 +1103,7 @@ export default async function ownerRoutes(fastify: FastifyInstance) {
       })
 
     if (inviteErr) {
-      return reply.code(500).send({ error: 'INVITE_ERROR', message: inviteErr.message })
+      return serverError(req, reply, inviteErr, ErrorCode.INSERT_FAILED, 'Failed to send admin invitation')
     }
 
     const userId = inviteData?.user?.id
@@ -1125,7 +1125,7 @@ export default async function ownerRoutes(fastify: FastifyInstance) {
       .select()
       .single()
 
-    if (adminErr) return reply.code(500).send({ error: 'DB_ERROR', message: adminErr.message })
+    if (adminErr) return serverError(req, reply, adminErr, ErrorCode.INSERT_FAILED, 'Failed to create platform admin')
 
     return reply.code(201).send({ data: admin, message: `Invitation email sent to ${email}` })
   })
@@ -1497,7 +1497,7 @@ export default async function ownerRoutes(fastify: FastifyInstance) {
     }
     const { error } = await fastify.supabase
       .from('ai_price_table').upsert(payload, { onConflict: 'provider,model' })
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to save AI price table')
     return reply.send({ data: { ok: true, count: payload.length } })
   })
 }

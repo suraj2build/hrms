@@ -38,7 +38,7 @@ export default async function epfRoutes(fastify: FastifyInstance) {
       .limit(1)
       .maybeSingle()
 
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch EPF config')
     return reply.send({ data: data ?? null })
   })
 
@@ -106,7 +106,7 @@ export default async function epfRoutes(fastify: FastifyInstance) {
           .eq('tenant_id', req.tenantId)
           .select()
           .single()
-        if (updErr) return reply.code(500).send({ error: 'UPDATE_FAILED', message: updErr.message })
+        if (updErr) return serverError(req, reply, updErr, ErrorCode.UPDATE_FAILED, 'Failed to update EPF config')
         await logAction(fastify.supabase, {
           tenantId:    req.tenantId,
           tableName:   'epf_config',
@@ -117,7 +117,7 @@ export default async function epfRoutes(fastify: FastifyInstance) {
         })
         return reply.send({ data: upd })
       }
-      return reply.code(500).send({ error: 'INSERT_FAILED', message: error.message })
+      return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to save EPF config')
     }
     await logAction(fastify.supabase, {
       tenantId:    req.tenantId,
@@ -137,7 +137,7 @@ export default async function epfRoutes(fastify: FastifyInstance) {
       .select('*, employees(id, first_name, last_name, employee_code)')
       .eq('tenant_id', req.tenantId)
 
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch EPF eligibility')
     return reply.send({ data: data ?? [] })
   })
 
@@ -172,7 +172,7 @@ export default async function epfRoutes(fastify: FastifyInstance) {
       .select()
       .single()
 
-    if (error) return reply.code(500).send({ error: 'UPSERT_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update EPF eligibility')
     await logAction(fastify.supabase, {
       tenantId:    req.tenantId,
       tableName:   'epf_eligibility_overrides',
@@ -207,7 +207,7 @@ export default async function epfRoutes(fastify: FastifyInstance) {
     if (parsed.data.employee_id) q = q.eq('employee_id', parsed.data.employee_id)
 
     const { data, error } = await q
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch EPF contributions')
     return reply.send({ data: data ?? [] })
   })
 
@@ -533,7 +533,7 @@ export default async function epfRoutes(fastify: FastifyInstance) {
         .from('epf_contributions')
         .upsert(contributions, { onConflict: 'tenant_id,employee_id,contribution_month' })
 
-      if (upsertErr) return reply.code(500).send({ error: 'UPSERT_FAILED', message: upsertErr.message })
+      if (upsertErr) return serverError(req, reply, upsertErr, ErrorCode.UPDATE_FAILED, 'Failed to save EPF contributions')
     }
 
     return reply.send({
@@ -557,7 +557,7 @@ export default async function epfRoutes(fastify: FastifyInstance) {
       .order('is_default', { ascending: false })
       .order('effective_from', { ascending: false })
 
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch EPF registrations')
     return reply.send({ data: data ?? [] })
   })
 
@@ -605,7 +605,7 @@ export default async function epfRoutes(fastify: FastifyInstance) {
       .select()
       .single()
 
-    if (error) return reply.code(500).send({ error: 'INSERT_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create EPF registration')
     await logAction(fastify.supabase, {
       tenantId:    req.tenantId,
       tableName:   'statutory_registrations',
@@ -654,7 +654,7 @@ export default async function epfRoutes(fastify: FastifyInstance) {
       .select()
       .single()
 
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update EPF registration')
     await logAction(fastify.supabase, {
       tenantId:    req.tenantId,
       tableName:   'statutory_registrations',
@@ -677,7 +677,7 @@ export default async function epfRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', req.tenantId)
       .eq('statutory_type', 'epf')
 
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to delete EPF registration')
     await logAction(fastify.supabase, {
       tenantId:    req.tenantId,
       tableName:   'statutory_registrations',
@@ -699,7 +699,7 @@ export default async function epfRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', req.tenantId)
       .eq('contribution_month', month)
 
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch EPF export data')
 
     const ecr = (data ?? []).map((row: any) => ({
       uan: null,

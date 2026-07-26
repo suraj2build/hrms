@@ -11,6 +11,7 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { checkDeclarationWindow } from './tds.js'
 import { HR_ADMIN_ROLES } from '../../../lib/rbac.js'
+import { serverError, ErrorCode } from '../../../lib/api-errors.js'
 
 // ── Zod schemas ───────────────────────────────────────────────────────────────
 
@@ -160,7 +161,7 @@ export default async function hraDeclarationsRoutes(fastify: FastifyInstance) {
     }
 
     const { data, error } = await q
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch HRA declarations')
     return reply.send({ data: data ?? [] })
   })
 
@@ -199,7 +200,7 @@ export default async function hraDeclarationsRoutes(fastify: FastifyInstance) {
       .select()
       .single()
 
-    if (error) return reply.code(500).send({ error: 'INSERT_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create HRA declaration')
     return reply.code(201).send({ data })
   })
 
@@ -228,7 +229,7 @@ export default async function hraDeclarationsRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', req.tenantId)
       .maybeSingle()
 
-    if (fetchErr) return reply.code(500).send({ error: 'QUERY_FAILED', message: fetchErr.message })
+    if (fetchErr) return serverError(req, reply, fetchErr, ErrorCode.QUERY_FAILED, 'Failed to fetch HRA declaration')
     if (!existing) return reply.code(404).send({ error: 'NOT_FOUND', message: 'HRA declaration not found' })
 
     const rec = existing as any
@@ -268,7 +269,7 @@ export default async function hraDeclarationsRoutes(fastify: FastifyInstance) {
       .select()
       .single()
 
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update HRA declaration')
     return reply.send({ data })
   })
 
@@ -286,7 +287,7 @@ export default async function hraDeclarationsRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', req.tenantId)
       .maybeSingle()
 
-    if (fetchErr) return reply.code(500).send({ error: 'QUERY_FAILED', message: fetchErr.message })
+    if (fetchErr) return serverError(req, reply, fetchErr, ErrorCode.QUERY_FAILED, 'Failed to fetch HRA declaration')
     if (!existing) return reply.code(404).send({ error: 'NOT_FOUND', message: 'HRA declaration not found' })
 
     const rec = existing as any
@@ -310,7 +311,7 @@ export default async function hraDeclarationsRoutes(fastify: FastifyInstance) {
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
 
-    if (error) return reply.code(500).send({ error: 'DELETE_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.DELETE_FAILED, 'Failed to delete HRA declaration')
     return reply.code(204).send()
   })
 
@@ -340,7 +341,7 @@ export default async function hraDeclarationsRoutes(fastify: FastifyInstance) {
 
       const { data, error } = await q
 
-      if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+      if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch HRA declarations')
 
       // Map DB shape → frontend HRAAdmin shape
       const result = (data ?? []).map((r: any) => ({
@@ -399,7 +400,7 @@ export default async function hraDeclarationsRoutes(fastify: FastifyInstance) {
         .select()
         .maybeSingle()
 
-      if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+      if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update HRA declaration verification status')
       // No row matched the precondition: either not found, or already decided.
       if (!data) return reply.code(409).send({ error: 'INVALID_STATE', message: 'HRA declaration not found or already decided' })
 

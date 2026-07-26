@@ -128,7 +128,7 @@ export default async function lwfRoutes(fastify: FastifyInstance) {
       .from('lwf_state_settings')
       .upsert(upsertPayload, { onConflict: 'tenant_id,state_code' })
 
-    if (error) return reply.code(500).send({ error: 'UPSERT_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update LWF state settings')
     await logAction(fastify.supabase, {
       tenantId:    req.tenantId,
       tableName:   'lwf_state_settings',
@@ -150,7 +150,7 @@ export default async function lwfRoutes(fastify: FastifyInstance) {
       .order('effective_from', { ascending: false })
     if (employee_id) q = q.eq('employee_id', employee_id)
     const { data, error } = await q
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch LWF state config')
     return reply.send({ data: data ?? [] })
   })
 
@@ -186,7 +186,7 @@ export default async function lwfRoutes(fastify: FastifyInstance) {
       })
       .select().single()
 
-    if (error) return reply.code(500).send({ error: 'UPSERT_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to set employee LWF state')
     await logAction(fastify.supabase, {
       tenantId:    req.tenantId,
       tableName:   'lwf_state_config',
@@ -210,7 +210,7 @@ export default async function lwfRoutes(fastify: FastifyInstance) {
     if (month)       q = q.eq('contribution_month', month)
     if (employee_id) q = q.eq('employee_id', employee_id)
     const { data, error } = await q
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch LWF contributions')
     return reply.send({ data: data ?? [] })
   })
 
@@ -382,14 +382,14 @@ export default async function lwfRoutes(fastify: FastifyInstance) {
         .eq('contribution_month', month)
       if (keepIds.length > 0) delQ = delQ.not('employee_id', 'in', `(${keepIds.join(',')})`)
       const { error: delErr } = await delQ
-      if (delErr) return reply.code(500).send({ error: 'STALE_CLEANUP_FAILED', message: delErr.message })
+      if (delErr) return serverError(req, reply, delErr, ErrorCode.DELETE_FAILED, 'Failed to clean up stale LWF contributions')
     }
 
     if (contributions.length > 0) {
       const { error: upsertErr } = await fastify.supabase
         .from('lwf_contributions')
         .upsert(contributions, { onConflict: 'tenant_id,employee_id,contribution_month' })
-      if (upsertErr) return reply.code(500).send({ error: 'UPSERT_FAILED', message: upsertErr.message })
+      if (upsertErr) return serverError(req, reply, upsertErr, ErrorCode.UPDATE_FAILED, 'Failed to save LWF contributions')
     }
 
     return reply.send({

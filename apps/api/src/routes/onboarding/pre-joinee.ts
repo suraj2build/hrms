@@ -473,6 +473,7 @@ export default async function preJoineeRoutes(fastify: FastifyInstance) {
   // Look up an invitation by token. Returns the invitation row, or sends an
   // appropriate error reply and returns null. Mirrors the GET token validation.
   async function resolveInvitationByToken(
+    req: any,
     token: string,
     reply: any,
   ): Promise<{ id: string; tenant_id: string; status: string; expires_at: string | null } | null> {
@@ -483,8 +484,7 @@ export default async function preJoineeRoutes(fastify: FastifyInstance) {
       .maybeSingle()
 
     if (error) {
-      fastify.log.error({ event: 'pre_joinee.token.resolve', token, err: error })
-      reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+      serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to resolve invitation token')
       return null
     }
     if (!invitation) {
@@ -524,8 +524,7 @@ export default async function preJoineeRoutes(fastify: FastifyInstance) {
           .range(from, to)
       ) as any[]
     } catch (err: any) {
-      fastify.log.error({ event: 'pre_joinee.stats', tenant_id: tenantId, err })
-      return reply.code(500).send({ error: 'DB_ERROR', message: err.message })
+      return serverError(req, reply, err, ErrorCode.QUERY_FAILED, 'Failed to fetch invitation stats')
     }
     let pending = 0, submitted = 0, approved = 0
     for (const r of rows) {
@@ -661,8 +660,7 @@ export default async function preJoineeRoutes(fastify: FastifyInstance) {
     }
 
     if (error) {
-      fastify.log.error({ event: 'pre_joinee.create', tenant_id: tenantId, err: error })
-      return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+      return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create invitation')
     }
 
     await logAction(fastify.supabase, {
@@ -723,7 +721,7 @@ export default async function preJoineeRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', tenantId)
       .maybeSingle()
 
-    if (fetchErr) return reply.code(500).send({ error: 'DB_ERROR', message: fetchErr.message })
+    if (fetchErr) return serverError(req, reply, fetchErr, ErrorCode.QUERY_FAILED, 'Failed to fetch invitation')
     if (!inv)     return reply.code(404).send({ error: 'NOT_FOUND', message: 'Invitation not found' })
 
     // Only resend while the candidate still has work to do.
@@ -742,7 +740,7 @@ export default async function preJoineeRoutes(fastify: FastifyInstance) {
       .eq('id', id)
       .eq('tenant_id', tenantId)
 
-    if (updErr) return reply.code(500).send({ error: 'DB_ERROR', message: updErr.message })
+    if (updErr) return serverError(req, reply, updErr, ErrorCode.UPDATE_FAILED, 'Failed to update invitation')
 
     const fullInviteUrl = `${APP_PUBLIC_URL}/pre-join/${inv.token}`
     let emailResult: SendEmailResult = { sent: false, skipped: true }
@@ -792,8 +790,7 @@ export default async function preJoineeRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', tenantId)
 
     if (error) {
-      fastify.log.error({ event: 'pre_joinee.delete', tenant_id: tenantId, id, err: error })
-      return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+      return serverError(req, reply, error, ErrorCode.DELETE_FAILED, 'Failed to delete invitation')
     }
 
     await logAction(fastify.supabase, {
@@ -843,8 +840,7 @@ export default async function preJoineeRoutes(fastify: FastifyInstance) {
       .maybeSingle()
 
     if (subErr) {
-      fastify.log.error({ event: 'pre_joinee.push_to_review.submission', tenant_id: tenantId, id, err: subErr })
-      return reply.code(500).send({ error: 'DB_ERROR', message: subErr.message })
+      return serverError(req, reply, subErr, ErrorCode.QUERY_FAILED, 'Failed to fetch submission')
     }
     if (!subRow) {
       return reply.code(400).send({ error: 'NO_SUBMISSION', message: 'Candidate has not submitted yet' })
@@ -1080,7 +1076,7 @@ export default async function preJoineeRoutes(fastify: FastifyInstance) {
       await fastify.supabase.from('pre_joinee_invitations')
         .update({ status: 'submitted', updated_at: new Date().toISOString() })
         .eq('id', id).eq('tenant_id', tenantId).eq('status', 'approved')
-      return reply.code(500).send({ error: 'CODE_GEN_ERROR', message: `Failed to generate employee code: ${codeErr?.message ?? 'unknown'}` })
+      return serverError(req, reply, codeErr ?? new Error('generate_employee_code returned no code'), ErrorCode.QUERY_FAILED, 'Failed to generate employee code')
     }
     const employeeCode = generatedCode as string
 
@@ -1102,13 +1098,12 @@ export default async function preJoineeRoutes(fastify: FastifyInstance) {
       .single()
 
     if (empErr || !employee) {
-      fastify.log.error({ event: 'pre_joinee.approve.emp_insert', tenant_id: tenantId, err: empErr })
       // Same revert as above — the employee row was never created, so the
       // invitation must not be left stuck 'approved'.
       await fastify.supabase.from('pre_joinee_invitations')
         .update({ status: 'submitted', updated_at: new Date().toISOString() })
         .eq('id', id).eq('tenant_id', tenantId).eq('status', 'approved')
-      return reply.code(500).send({ error: 'DB_ERROR', message: empErr?.message ?? 'Failed to create employee' })
+      return serverError(req, reply, empErr ?? new Error('employee insert returned no row'), ErrorCode.INSERT_FAILED, 'Failed to create employee')
     }
 
     const employeeId: string = employee.id
@@ -1352,8 +1347,7 @@ export default async function preJoineeRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', tenantId)
 
     if (error) {
-      fastify.log.error({ event: 'pre_joinee.reject', tenant_id: tenantId, id, err: error })
-      return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+      return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to reject invitation')
     }
 
     await logAction(fastify.supabase, {
@@ -1432,8 +1426,7 @@ export default async function preJoineeRoutes(fastify: FastifyInstance) {
       .maybeSingle()
 
     if (subErr) {
-      fastify.log.error({ event: 'pre_joinee.submission.fetch', tenant_id: tenantId, id, err: subErr })
-      return reply.code(500).send({ error: 'DB_ERROR', message: subErr.message })
+      return serverError(req, reply, subErr, ErrorCode.QUERY_FAILED, 'Failed to fetch submission')
     }
 
     return reply.send({
@@ -1465,8 +1458,7 @@ export default async function preJoineeRoutes(fastify: FastifyInstance) {
       .maybeSingle()
 
     if (error) {
-      fastify.log.error({ event: 'pre_joinee.token.validate', token, err: error })
-      return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to validate invitation token')
     }
 
     if (!invitation) {
@@ -1599,7 +1591,7 @@ export default async function preJoineeRoutes(fastify: FastifyInstance) {
       return reply.code(400).send({ error: 'VALIDATION_ERROR', details: parsed.error.flatten() })
     }
 
-    const invitation = await resolveInvitationByToken(token, reply)
+    const invitation = await resolveInvitationByToken(req, token, reply)
     if (!invitation) return // reply already sent
 
     const { document_type, file_name } = parsed.data
@@ -1611,8 +1603,7 @@ export default async function preJoineeRoutes(fastify: FastifyInstance) {
       .createSignedUploadUrl(path)
 
     if (error || !data) {
-      fastify.log.error({ event: 'pre_joinee.upload_url', invitation_id: invitation.id, err: error })
-      return reply.code(500).send({ error: 'STORAGE_ERROR', message: error?.message ?? 'Failed to create upload URL' })
+      return serverError(req, reply, error ?? new Error('createSignedUploadUrl returned no data'), ErrorCode.INSERT_FAILED, 'Failed to create upload URL')
     }
 
     return reply.send({
@@ -1630,7 +1621,7 @@ export default async function preJoineeRoutes(fastify: FastifyInstance) {
       return reply.code(400).send({ error: 'VALIDATION_ERROR', details: parsed.error.flatten() })
     }
 
-    const invitation = await resolveInvitationByToken(token, reply)
+    const invitation = await resolveInvitationByToken(req, token, reply)
     if (!invitation) return // reply already sent
 
     const { document_type, file_name, storage_path, mime_type, file_size } = parsed.data
@@ -1664,8 +1655,7 @@ export default async function preJoineeRoutes(fastify: FastifyInstance) {
       )
 
     if (error) {
-      fastify.log.error({ event: 'pre_joinee.documents.upsert', invitation_id: invitation.id, err: error })
-      return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+      return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to register document')
     }
 
     return reply.send({ data: { document_type, storage_path } })
@@ -1699,8 +1689,7 @@ export default async function preJoineeRoutes(fastify: FastifyInstance) {
       .maybeSingle()
 
     if (invErr) {
-      fastify.log.error({ event: 'pre_joinee.submit.token_lookup', token, err: invErr })
-      return reply.code(500).send({ error: 'DB_ERROR', message: invErr.message })
+      return serverError(req, reply, invErr, ErrorCode.QUERY_FAILED, 'Failed to validate invitation token')
     }
 
     if (!invitation) {
@@ -1730,8 +1719,7 @@ export default async function preJoineeRoutes(fastify: FastifyInstance) {
       .eq('invitation_id', invitation.id)
 
     if (docsErr) {
-      fastify.log.error({ event: 'pre_joinee.submit.docs_check', invitation_id: invitation.id, err: docsErr })
-      return reply.code(500).send({ error: 'DB_ERROR', message: docsErr.message })
+      return serverError(req, reply, docsErr, ErrorCode.QUERY_FAILED, 'Failed to check uploaded documents')
     }
 
     const have = new Set((docs ?? []).map((d: any) => d.document_type))
@@ -1789,8 +1777,7 @@ export default async function preJoineeRoutes(fastify: FastifyInstance) {
       )
 
     if (subErr) {
-      fastify.log.error({ event: 'pre_joinee.submit.upsert', tenant_id: tenantId, invitation_id: invitation.id, err: subErr })
-      return reply.code(500).send({ error: 'DB_ERROR', message: subErr.message })
+      return serverError(req, reply, subErr, ErrorCode.INSERT_FAILED, 'Failed to save submission')
     }
 
     // Update invitation status to 'submitted'
@@ -1844,7 +1831,7 @@ export default async function preJoineeRoutes(fastify: FastifyInstance) {
       .eq('id', id)
       .eq('tenant_id', tenantId)
 
-    if (updErr) return reply.code(500).send({ error: updErr.message })
+    if (updErr) return serverError(req, reply, updErr, ErrorCode.UPDATE_FAILED, 'Failed to update buddy assignment')
 
     await logAction(fastify.supabase, {
       tenantId,
