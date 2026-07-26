@@ -119,6 +119,13 @@ export default async function analyticsRoutes(fastify: FastifyInstance) {
       return reply.code(404).send({ error: 'NOT_FOUND', message: 'User not found.' })
     }
 
+    // Cannot touch other super_admins — the docstring above already claims
+    // this, but only self-modification was actually blocked; a super_admin
+    // could otherwise demote/promote any other super_admin in the tenant.
+    if ((target as any).role === 'super_admin') {
+      return reply.code(403).send({ error: 'FORBIDDEN', message: 'Cannot change another super admin’s role.' })
+    }
+
     const { data: updated, error: updateErr } = await fastify.supabase
       .from('profiles')
       .update({ role: parsed.data.role })
