@@ -485,19 +485,26 @@ export default async function helpdeskRoutes(fastify: FastifyInstance) {
         .select('*', { count: 'exact', head: true })
         .eq('tenant_id', req.tenantId)
 
-    const [totalRes, openRes, breachedRes, resBreachedRes, statusRes] = await Promise.all([
-      countBase(),
-      countBase().in('status', liveStatuses),
-      countBase().in('status', liveStatuses).not('sla_breached_at', 'is', null),
-      countBase().in('status', liveStatuses).not('resolution_breached_at', 'is', null),
-      fastify.supabase.from('helpdesk_tickets').select('status').eq('tenant_id', req.tenantId),
-    ])
+    let totalRes: any, openRes: any, breachedRes: any, resBreachedRes: any, statusRows: { status: string }[]
+    try {
+      ;[totalRes, openRes, breachedRes, resBreachedRes, statusRows] = await Promise.all([
+        countBase(),
+        countBase().in('status', liveStatuses),
+        countBase().in('status', liveStatuses).not('sla_breached_at', 'is', null),
+        countBase().in('status', liveStatuses).not('resolution_breached_at', 'is', null),
+        // Tenant-wide, all-time ticket count can exceed 1000 — must paginate.
+        fetchAllRows<{ status: string }>((from, to) =>
+          fastify.supabase.from('helpdesk_tickets').select('status').eq('tenant_id', req.tenantId).range(from, to)),
+      ])
+    } catch (fetchErr) {
+      return serverError(req, reply, fetchErr, ErrorCode.QUERY_FAILED, 'Failed to fetch stats')
+    }
 
-    const fetchErr = totalRes.error ?? openRes.error ?? breachedRes.error ?? resBreachedRes.error ?? statusRes.error
+    const fetchErr = totalRes.error ?? openRes.error ?? breachedRes.error ?? resBreachedRes.error
     if (fetchErr) return serverError(req, reply, fetchErr, ErrorCode.QUERY_FAILED, 'Failed to fetch stats')
 
     const byStatus: Record<string, number> = {}
-    for (const r of (statusRes.data ?? []) as { status: string }[]) {
+    for (const r of statusRows) {
       byStatus[r.status] = (byStatus[r.status] ?? 0) + 1
     }
 
@@ -858,13 +865,20 @@ Write a helpful, professional HR reply to address the employee's concern:`
 
     if (!target) return notFound(reply, 'TARGET_NOT_FOUND')
 
-    const { error } = await fastify.supabase
+    // Fresh audit finding: the source ticket was never fetched/verified —
+    // only the target was. A typo'd or already-deleted source id matched 0
+    // rows here with no error, yet the code still added a merge comment to
+    // the target and returned { success: true } as if a merge happened.
+    const { data: source, error } = await fastify.supabase
       .from('helpdesk_tickets')
       .update({ merged_into: parsed.data.merge_into, status: 'closed' })
       .eq('id', req.params.id)
       .eq('tenant_id', req.tenantId)
+      .select('id')
+      .maybeSingle()
 
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to merge ticket')
+    if (!source) return notFound(reply, 'SOURCE_NOT_FOUND')
 
     // Add a system note on the target ticket
     await fastify.supabase.from('helpdesk_ticket_comments').insert({
@@ -1124,8 +1138,14 @@ Write a helpful, professional HR reply to address the employee's concern:`
       kbSummary = llmResult.content?.trim() ?? kbSummary
     } catch { /* use raw resolution note as fallback */ }
 
-    // Insert into hr_policies as an FAQ entry
-    await fastify.supabase.from('hr_policies').insert({
+    // Insert into hr_policies as an FAQ entry. Neither this insert nor the
+    // ticket update below had its error checked — if the ticket update
+    // failed after this insert succeeded, kb_promoted would stay false
+    // (so the ALREADY_PROMOTED guard above never engages) and a retry
+    // would insert a second, duplicate FAQ entry for the same ticket. If
+    // the insert itself failed, the endpoint still returned kb_summary as
+    // if a KB entry had been created.
+    const { error: kbInsertErr } = await fastify.supabase.from('hr_policies').insert({
       tenant_id:    req.tenantId,
       title:        (ticket as any).subject,
       content:      kbSummary,
@@ -1134,13 +1154,15 @@ Write a helpful, professional HR reply to address the employee's concern:`
       created_by:   req.userId,
       is_mandatory: false,
     })
+    if (kbInsertErr) return serverError(req, reply, kbInsertErr, ErrorCode.INSERT_FAILED, 'Failed to create KB entry')
 
     // Mark the ticket as promoted
-    await fastify.supabase.from('helpdesk_tickets').update({
+    const { error: promoteErr } = await fastify.supabase.from('helpdesk_tickets').update({
       kb_promoted:    true,
       kb_promoted_at: new Date().toISOString(),
       kb_summary:     kbSummary,
     }).eq('id', id).eq('tenant_id', req.tenantId)
+    if (promoteErr) return serverError(req, reply, promoteErr, ErrorCode.UPDATE_FAILED, 'KB entry created but failed to mark ticket as promoted')
 
     return reply.send({ data: { kb_summary: kbSummary } })
   })
