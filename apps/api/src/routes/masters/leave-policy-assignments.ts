@@ -24,6 +24,7 @@ import type { FastifyInstance } from 'fastify'
 import { z }                    from 'zod'
 import { logAction }            from '../../lib/audit-service.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { serverError, notFound, ErrorCode } from '../../lib/api-errors.js'
 
 const assignmentSchema = z.discriminatedUnion('scope_type', [
   z.object({
@@ -87,7 +88,7 @@ export default async function leavePolicyAssignmentsRoutes(fastify: FastifyInsta
       .order('scope_type')
 
     if (error) {
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch leave policy assignments')
     }
 
     // Enrich scope labels with names (employees, departments, work_locations)
@@ -238,7 +239,7 @@ export default async function leavePolicyAssignmentsRoutes(fastify: FastifyInsta
           message: `An assignment already exists for this ${scope_type}. Remove it first.`,
         })
       }
-      return reply.code(500).send({ error: 'INSERT_FAILED', message: error.message })
+      return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create leave policy assignment')
     }
 
     await logAction(fastify.supabase, {
@@ -267,6 +268,10 @@ export default async function leavePolicyAssignmentsRoutes(fastify: FastifyInsta
       .eq('tenant_id', req.tenantId)
       .maybeSingle()
 
+    if (!beforeDelete) {
+      return notFound(reply, 'ASSIGNMENT_NOT_FOUND', 'Assignment not found')
+    }
+
     const { error } = await fastify.supabase
       .from('leave_policy_assignments')
       .delete()
@@ -274,7 +279,7 @@ export default async function leavePolicyAssignmentsRoutes(fastify: FastifyInsta
       .eq('tenant_id', req.tenantId)
 
     if (error) {
-      return reply.code(500).send({ error: 'DELETE_FAILED', message: error.message })
+      return serverError(req, reply, error, ErrorCode.DELETE_FAILED, 'Failed to delete leave policy assignment')
     }
 
     await logAction(fastify.supabase, {

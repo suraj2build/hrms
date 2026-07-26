@@ -8,6 +8,7 @@
  */
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
+import { serverError, notFound, ErrorCode } from '../../lib/api-errors.js'
 
 const patchSchema = z.object({
   status:     z.enum(['new', 'triaged', 'resolved', 'dismissed']).optional(),
@@ -28,7 +29,7 @@ export default async function ownerErrorReportRoutes(fastify: FastifyInstance) {
     if (q.status && q.status !== 'all') query = query.eq('status', q.status)
 
     const { data, error } = await query
-    if (error) return reply.code(500).send({ error: 'DB', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch error reports')
 
     // Lightweight open-count summary for the nav badge / header.
     const { count } = await fastify.supabase
@@ -44,8 +45,9 @@ export default async function ownerErrorReportRoutes(fastify: FastifyInstance) {
       .from('error_reports')
       .select('*, tenants(name, slug)')
       .eq('id', id)
-      .single()
-    if (error) return reply.code(404).send({ error: 'NOT_FOUND', message: error.message })
+      .maybeSingle()
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch error report')
+    if (!data) return notFound(reply, 'ERROR_REPORT_NOT_FOUND', 'Error report not found')
     return reply.send({ data })
   })
 
@@ -63,8 +65,9 @@ export default async function ownerErrorReportRoutes(fastify: FastifyInstance) {
     }
 
     const { data, error } = await fastify.supabase
-      .from('error_reports').update(updates).eq('id', id).select('id, status').single()
-    if (error) return reply.code(500).send({ error: 'DB', message: error.message })
+      .from('error_reports').update(updates).eq('id', id).select('id, status').maybeSingle()
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update error report')
+    if (!data) return notFound(reply, 'ERROR_REPORT_NOT_FOUND', 'Error report not found')
     return reply.send({ data })
   })
 }

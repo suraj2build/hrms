@@ -15,6 +15,7 @@ import type { FastifyInstance } from 'fastify'
 import { z }                    from 'zod'
 import { durableQueue }         from '../../lib/durable-queue.js'
 import { HR_ADMIN_ROLES }       from '../../lib/rbac.js'
+import { conflictError, serverError, ErrorCode } from '../../lib/api-errors.js'
 import {
   createImportJob,
   getImportJob,
@@ -235,12 +236,35 @@ export default async function importsRoutes(fastify: FastifyInstance) {
       return reply.code(404).send({ error: 'NOT_FOUND', message: 'Import job not found' })
     }
 
-    const RETRYABLE = new Set(['failed', 'partial_failed'])
-    if (!RETRYABLE.has(job.status)) {
+    const RETRYABLE = ['failed', 'partial_failed']
+    if (!RETRYABLE.includes(job.status)) {
       return reply.code(409).send({
         error:   'NOT_RETRYABLE',
         message: `Job with status '${job.status}' cannot be retried. Only failed or partial_failed jobs are retryable.`,
       })
+    }
+
+    // Atomically claim the job before touching its chunks/errors — the check
+    // above is advisory only. Without this, two concurrent retry clicks both
+    // read a retryable status, and resetJobForRetry's chunk reset
+    // (`.neq('status','completed')`) would then run twice: the second call
+    // resets chunks the first retry's worker has already moved to
+    // 'processing' back to 'pending', letting two workers process the same
+    // chunk concurrently and double-write the imported rows.
+    const { data: claimed, error: claimErr } = await fastify.supabase
+      .from('import_jobs')
+      .update({ status: 'queued' })
+      .eq('id', jobId)
+      .eq('tenant_id', tenantId)
+      .in('status', RETRYABLE)
+      .select('id')
+      .maybeSingle()
+
+    if (claimErr) {
+      return serverError(req, reply, claimErr, ErrorCode.UPDATE_FAILED, 'Failed to retry import job')
+    }
+    if (!claimed) {
+      return conflictError(reply, 'NOT_RETRYABLE', 'This job was already retried or its status changed — refresh and try again')
     }
 
     await resetJobForRetry(fastify.supabase, job)
@@ -273,18 +297,32 @@ export default async function importsRoutes(fastify: FastifyInstance) {
       return reply.code(404).send({ error: 'NOT_FOUND', message: 'Import job not found' })
     }
 
-    const CANCELLABLE = new Set(['uploaded', 'queued', 'parsing', 'validating', 'processing'])
-    if (!CANCELLABLE.has(job.status)) {
+    const CANCELLABLE = ['uploaded', 'queued', 'parsing', 'validating', 'processing']
+    if (!CANCELLABLE.includes(job.status)) {
       return reply.code(409).send({
         error:   'NOT_CANCELLABLE',
         message: `Job with status '${job.status}' cannot be cancelled.`,
       })
     }
 
-    await updateJobProgress(fastify.supabase, jobId, {
-      status:       'cancelled',
-      completed_at: new Date().toISOString(),
-    })
+    // Fold the cancellable-status precondition into the update itself —
+    // same race as retry (e.g. a concurrent cancel racing the worker moving
+    // the job to 'completed').
+    const { data: cancelled, error: cancelErr } = await fastify.supabase
+      .from('import_jobs')
+      .update({ status: 'cancelled', completed_at: new Date().toISOString() })
+      .eq('id', jobId)
+      .eq('tenant_id', req.tenantId)
+      .in('status', CANCELLABLE)
+      .select('id')
+      .maybeSingle()
+
+    if (cancelErr) {
+      return serverError(req, reply, cancelErr, ErrorCode.UPDATE_FAILED, 'Failed to cancel import job')
+    }
+    if (!cancelled) {
+      return conflictError(reply, 'NOT_CANCELLABLE', 'This job already finished or its status changed — refresh and try again')
+    }
 
     const updated = await getImportJob(fastify.supabase, jobId, req.tenantId)
     return reply.send({ job: updated })
