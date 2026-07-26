@@ -7,11 +7,26 @@
  */
 
 import type { FastifyInstance } from 'fastify'
+import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+
+function requireHrAdmin(req: any, reply: any, done: () => void) {
+  if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
+    reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
+    return
+  }
+  done()
+}
 
 export default async function intelligenceRoutes(fastify: FastifyInstance) {
+  // These are company-wide governance/compliance feeds (platform events,
+  // risk scores, open incidents across all employees) — contrast with
+  // sibling governance/privacy.ts, which already gates to HR admin. Was
+  // previously authenticate-only, letting any employee read tenant-wide
+  // compliance alerts and incident details.
+  const adminAuth = { preHandler: [fastify.authenticate, requireHrAdmin] }
 
   // ── GET /governance/events ────────────────────────────────────────────────
-  fastify.get('/events', { preHandler: [fastify.authenticate] }, async (req, reply) => {
+  fastify.get('/events', adminAuth, async (req, reply) => {
     const { limit = '30', offset = '0' } = req.query as Record<string, string>
     const tenantId = (req as any).tenantId
     const { data, error, count } = await fastify.supabase
@@ -25,7 +40,7 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
   })
 
   // ── GET /governance/compliance/alerts ─────────────────────────────────────
-  fastify.get('/compliance/alerts', { preHandler: [fastify.authenticate] }, async (req, reply) => {
+  fastify.get('/compliance/alerts', adminAuth, async (req, reply) => {
     const tenantId = (req as any).tenantId
     const { data, error } = await fastify.supabase
       .from('platform_events')
@@ -39,7 +54,7 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
   })
 
   // ── GET /governance/risk/summary ──────────────────────────────────────────
-  fastify.get('/risk/summary', { preHandler: [fastify.authenticate] }, async (req, reply) => {
+  fastify.get('/risk/summary', adminAuth, async (req, reply) => {
     const tenantId = (req as any).tenantId
     const { data, error } = await fastify.supabase
       .from('platform_events')
@@ -79,7 +94,7 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
   })
 
   // ── GET /governance/incidents ─────────────────────────────────────────────
-  fastify.get('/incidents', { preHandler: [fastify.authenticate] }, async (req, reply) => {
+  fastify.get('/incidents', adminAuth, async (req, reply) => {
     const { limit = '20' } = req.query as Record<string, string>
     const tenantId = (req as any).tenantId
     const { data, error } = await fastify.supabase

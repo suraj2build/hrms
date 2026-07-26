@@ -14,6 +14,15 @@ import { aadhaarVerificationService }  from '../../platform/trust/verification/a
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 
 export default async function trustIntelligenceRoutes(fastify: FastifyInstance) {
+  // Almost every route below is tenant-wide or takes an arbitrary
+  // employeeId with no ownership check — trust scores, duplicate-detection
+  // events, PAN/bank verification results, and compliance revision
+  // create/approve/reject were all previously gated to authenticate-only,
+  // letting any authenticated employee read colleagues' fraud/trust scores
+  // and (worse) create or approve/reject regulatory revisions despite the
+  // docstrings below already saying "HR admin only".
+  const adminAuth = { preHandler: [fastify.authenticate, requireRole(...HR_ADMIN_ROLES)] }
+
   /**
    * POST /trust/evaluate
    * Run trust evaluation for an employee (on-demand).
@@ -27,7 +36,7 @@ export default async function trustIntelligenceRoutes(fastify: FastifyInstance) 
     phone:          z.string().optional().nullable(),
   })
 
-  fastify.post('/trust/evaluate', { preHandler: [fastify.authenticate] }, async (req, reply) => {
+  fastify.post('/trust/evaluate', adminAuth, async (req, reply) => {
     const parsed = EvaluateSchema.safeParse(req.body)
     if (!parsed.success) return reply.status(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message ?? 'Invalid request body' })
     const tenantId = (req as any).tenantId
@@ -50,7 +59,7 @@ export default async function trustIntelligenceRoutes(fastify: FastifyInstance) 
    * GET /trust/graph/:employeeId
    * Get workforce graph edges for an employee.
    */
-  fastify.get('/trust/graph/:employeeId', { preHandler: [fastify.authenticate] }, async (req, reply) => {
+  fastify.get('/trust/graph/:employeeId', adminAuth, async (req, reply) => {
     const { employeeId } = req.params as any
     const tenantId = (req as any).tenantId
     const edges = await workforceGraphService.getEmployeeEdges(fastify.supabase, employeeId, tenantId)
@@ -61,7 +70,7 @@ export default async function trustIntelligenceRoutes(fastify: FastifyInstance) 
    * GET /trust/duplicates
    * Query duplicate detection events for the tenant.
    */
-  fastify.get('/trust/duplicates', { preHandler: [fastify.authenticate] }, async (req, reply) => {
+  fastify.get('/trust/duplicates', adminAuth, async (req, reply) => {
     const tenantId = (req as any).tenantId
     const { limit = '50' } = req.query as any
     const { data, error } = await fastify.supabase
@@ -78,7 +87,7 @@ export default async function trustIntelligenceRoutes(fastify: FastifyInstance) 
    * GET /trust/verifications
    * Query verification events for the tenant.
    */
-  fastify.get('/trust/verifications', { preHandler: [fastify.authenticate] }, async (req, reply) => {
+  fastify.get('/trust/verifications', adminAuth, async (req, reply) => {
     const tenantId = (req as any).tenantId
     const { limit = '50', employee_id } = req.query as any
     let q = fastify.supabase
@@ -98,7 +107,7 @@ export default async function trustIntelligenceRoutes(fastify: FastifyInstance) 
    * Get trust scores for the tenant, enriched with employee name/code for
    * score_type='employee' rows so UI can show a real name rather than a UUID.
    */
-  fastify.get('/trust/scores', { preHandler: [fastify.authenticate] }, async (req, reply) => {
+  fastify.get('/trust/scores', adminAuth, async (req, reply) => {
     const tenantId = (req as any).tenantId
     const { limit = '50', score_type } = req.query as any
 
@@ -151,7 +160,7 @@ export default async function trustIntelligenceRoutes(fastify: FastifyInstance) 
    * (not 404) when no score has been computed yet, so the Insights panel simply
    * hides the row instead of erroring.
    */
-  fastify.get('/trust/scores/employee/:employeeId', { preHandler: [fastify.authenticate] }, async (req, reply) => {
+  fastify.get('/trust/scores/employee/:employeeId', adminAuth, async (req, reply) => {
     const { employeeId } = req.params as { employeeId: string }
     const tenantId = (req as any).tenantId
     const { data, error } = await fastify.supabase
@@ -175,7 +184,7 @@ export default async function trustIntelligenceRoutes(fastify: FastifyInstance) 
    * GET /trust/regulatory/revisions
    * List compliance revision events (pending or all).
    */
-  fastify.get('/trust/regulatory/revisions', { preHandler: [fastify.authenticate] }, async (req, reply) => {
+  fastify.get('/trust/regulatory/revisions', adminAuth, async (req, reply) => {
     const { status } = req.query as any
     let q = fastify.supabase
       .from('compliance_revision_events')
@@ -207,7 +216,7 @@ export default async function trustIntelligenceRoutes(fastify: FastifyInstance) 
     source_reference: z.string().optional(),
   })
 
-  fastify.post('/trust/regulatory/revisions', { preHandler: [fastify.authenticate] }, async (req, reply) => {
+  fastify.post('/trust/regulatory/revisions', adminAuth, async (req, reply) => {
     const parsed = CreateRevisionSchema.safeParse(req.body)
     if (!parsed.success) return reply.status(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message ?? 'Invalid request body' })
     const tenantId = (req as any).tenantId
@@ -237,7 +246,7 @@ export default async function trustIntelligenceRoutes(fastify: FastifyInstance) 
    * POST /trust/regulatory/revisions/:id/approve
    * Approve a revision after human review.
    */
-  fastify.post('/trust/regulatory/revisions/:id/approve', { preHandler: [fastify.authenticate] }, async (req, reply) => {
+  fastify.post('/trust/regulatory/revisions/:id/approve', adminAuth, async (req, reply) => {
     const { id } = req.params as any
     await regulatoryIngestionService.approve(fastify.supabase, id, (req as any).userId)
     return { success: true }
@@ -247,7 +256,7 @@ export default async function trustIntelligenceRoutes(fastify: FastifyInstance) 
    * POST /trust/regulatory/revisions/:id/reject
    * Reject a revision.
    */
-  fastify.post('/trust/regulatory/revisions/:id/reject', { preHandler: [fastify.authenticate] }, async (req, reply) => {
+  fastify.post('/trust/regulatory/revisions/:id/reject', adminAuth, async (req, reply) => {
     const { id } = req.params as any
     await regulatoryIngestionService.reject(fastify.supabase, id, (req as any).userId)
     return { success: true }
@@ -255,11 +264,26 @@ export default async function trustIntelligenceRoutes(fastify: FastifyInstance) 
 
   /**
    * GET /trust/verifications/employee/:employeeId
-   * Get all verification records for an employee.
+   * Get all verification records for an employee. Used by AadhaarVerifyCard
+   * in both HR admin views (EmployeeProfile) and ESS self-service
+   * (EssMyProfile, self=true) — so this is self-or-HR-admin, not HR-admin-only.
    */
   fastify.get('/trust/verifications/employee/:employeeId', { preHandler: [fastify.authenticate] }, async (req, reply) => {
     const { employeeId } = req.params as { employeeId: string }
     const tenantId = (req as any).tenantId
+
+    if (!(HR_ADMIN_ROLES as readonly string[]).includes((req as any).userRole)) {
+      const { data: prof } = await fastify.supabase
+        .from('profiles')
+        .select('employee_id')
+        .eq('id', (req as any).userId)
+        .eq('tenant_id', tenantId)
+        .single()
+      if ((prof as any)?.employee_id !== employeeId) {
+        return reply.status(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
+      }
+    }
+
     const { data, error } = await fastify.supabase
       .from('verification_records')
       .select('id, verification_type, status, provider, source, score, name_match_confidence, explanation, last_error, verified_at, updated_at, retry_count')
@@ -274,7 +298,7 @@ export default async function trustIntelligenceRoutes(fastify: FastifyInstance) 
    * POST /trust/verifications/retry/:employeeId
    * Trigger a verification retry for an employee (fire-and-forget).
    */
-  fastify.post('/trust/verifications/retry/:employeeId', { preHandler: [fastify.authenticate] }, async (req, reply) => {
+  fastify.post('/trust/verifications/retry/:employeeId', adminAuth, async (req, reply) => {
     const { employeeId } = req.params as { employeeId: string }
     const tenantId = (req as any).tenantId
 
@@ -413,7 +437,7 @@ export default async function trustIntelligenceRoutes(fastify: FastifyInstance) 
    * GET /trust/verifications/stats
    * Get verification statistics for the tenant.
    */
-  fastify.get('/trust/verifications/stats', { preHandler: [fastify.authenticate] }, async (req, reply) => {
+  fastify.get('/trust/verifications/stats', adminAuth, async (req, reply) => {
     const tenantId = (req as any).tenantId
     const { data, error } = await fastify.supabase
       .from('verification_records')
