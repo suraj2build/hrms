@@ -42,7 +42,10 @@ const policySchema = z.object({
   fractional_rounding_mode:     z.enum(['half_up', 'half_down', 'ceil', 'floor', 'nearest_0_5', 'nearest_0_25']).default('nearest_0_5'),
   maximum_fractional_precision: z.number().default(0.5),
   hours_per_shift:              z.number().min(1).max(24).default(8),
-  max_hours_per_day:            z.number().min(0).max(24).nullable().optional(),
+  // DB CHECK (migration 158) requires strictly > 0 when set — NULL means "no
+  // limit", but 0 is not a valid way to express that and would fail the
+  // CHECK constraint.
+  max_hours_per_day:            z.number().positive().max(24).nullable().optional(),
   // ── Application window governance (migration 161) ───────────────────────────
   allow_past_dated_leave:               z.boolean().default(false),
   maximum_past_days:                    z.number().int().min(0).default(0),

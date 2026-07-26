@@ -534,12 +534,14 @@ function SessionsTab({
             <FormField label="Max Hours Per Day" htmlFor="max-hours" description="Blank = shift hours limit">
               <Input
                 id="max-hours"
-                type="number" min={0} max={24} step={0.5}
+                type="number" min={0.5} max={24} step={0.5}
                 value={form.max_hours_per_day ?? ''}
-                onChange={e => setForm(f => ({
-                  ...f,
-                  max_hours_per_day: e.target.value === '' ? null : parseFloat(e.target.value),
-                }))}
+                onChange={e => {
+                  // 0 must map to null ("unlimited") — the DB requires
+                  // max_hours_per_day to be strictly > 0 when set.
+                  const raw = e.target.value === '' ? null : parseFloat(e.target.value)
+                  setForm(f => ({ ...f, max_hours_per_day: raw && raw > 0 ? raw : null }))
+                }}
                 placeholder="Unlimited"
               />
             </FormField>
