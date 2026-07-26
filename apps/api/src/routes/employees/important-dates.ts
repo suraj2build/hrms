@@ -11,8 +11,7 @@
  *   DELETE /employees/employees/:employeeId/important-dates/:dateId  — remove a specific date
  *
  * Protected:
- *   GET  — any authenticated user
- *   POST / DELETE — hr_admin or super_admin only
+ *   GET / POST / DELETE — hr_admin or super_admin only
  */
 
 import type { FastifyInstance } from 'fastify'
@@ -56,6 +55,7 @@ export default async function employeeImportantDatesRoutes(fastify: FastifyInsta
 
   // ── GET /employees/employees/:employeeId/important-dates ─────────────────────────────
   fastify.get('/employees/:employeeId/important-dates', auth, async (req: any, reply) => {
+    if (!requireAdmin(req, reply)) return
     const { employeeId } = req.params as { employeeId: string }
 
     if (!(await resolveEmployee(employeeId, req.tenantId))) {

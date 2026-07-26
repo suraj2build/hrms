@@ -6,9 +6,13 @@
  * Returns all shift assignments for an employee, newest first,
  * with the related shift details (name, code, start/end time).
  *
- * Protected: any authenticated user (same as job-history).
+ * Protected: hr_admin or super_admin (only caller is the admin Employee
+ * Profile console). The docstring previously claimed "same as job-history"
+ * but job-history.ts actually enforces self-or-HR-admin — this route had
+ * no check at all.
  */
 import type { FastifyInstance } from 'fastify'
+import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 
 async function verifyEmployee(fastify: any, employeeId: string, tenantId: string) {
   const { data } = await fastify.supabase
@@ -17,7 +21,7 @@ async function verifyEmployee(fastify: any, employeeId: string, tenantId: string
 }
 
 export default async function shiftHistoryRoutes(fastify: FastifyInstance) {
-  const auth = { preHandler: [fastify.authenticate] }
+  const auth = { preHandler: [fastify.authenticate, requireRole(...HR_ADMIN_ROLES)] }
 
   // GET /employees/:id/shift-history
   fastify.get('/employees/:id/shift-history', auth, async (req: any, reply) => {

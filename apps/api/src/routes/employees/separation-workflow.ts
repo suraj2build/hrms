@@ -92,9 +92,10 @@ const advanceSchema = z.object({
 
 export default async function separationWorkflowRoutes(fastify: FastifyInstance) {
   const auth        = { preHandler: [fastify.authenticate] }
+  const hrAdminAuth = { preHandler: [fastify.authenticate, requireRole(...HR_ADMIN_ROLES)] }
 
   // ── GET /separations — list all separations with clearances + F&F for tenant ──
-  fastify.get('/separations', auth, async (req: any, reply) => {
+  fastify.get('/separations', hrAdminAuth, async (req: any, reply) => {
     const { data: seps, error } = await fastify.supabase
       .from('employee_separation')
       .select(`
@@ -149,11 +150,10 @@ export default async function separationWorkflowRoutes(fastify: FastifyInstance)
 
     return reply.send({ data: result })
   })
-  const hrAdminAuth = { preHandler: [fastify.authenticate, requireRole(...HR_ADMIN_ROLES)] }
 
   // ── GET /employees/:id/separation-clearances ──────────────────────────────
 
-  fastify.get('/employees/:id/separation-clearances', auth, async (req: any, reply) => {
+  fastify.get('/employees/:id/separation-clearances', hrAdminAuth, async (req: any, reply) => {
     if (!await verifyEmployee(fastify, req.params.id, req.tenantId))
       return reply.code(404).send({ error: 'NOT_FOUND', message: 'Employee not found' })
 
@@ -343,7 +343,7 @@ export default async function separationWorkflowRoutes(fastify: FastifyInstance)
 
   // ── GET /employees/:id/separation-ff ─────────────────────────────────────
 
-  fastify.get('/employees/:id/separation-ff', auth, async (req: any, reply) => {
+  fastify.get('/employees/:id/separation-ff', hrAdminAuth, async (req: any, reply) => {
     if (!await verifyEmployee(fastify, req.params.id, req.tenantId))
       return reply.code(404).send({ error: 'NOT_FOUND', message: 'Employee not found' })
 

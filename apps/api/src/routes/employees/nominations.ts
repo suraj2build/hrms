@@ -85,7 +85,7 @@ export default async function nominationsRoutes(fastify: FastifyInstance) {
     if (parsed.data.share_percentage) {
       // Fetch current scheme for this nomination
       const { data: existing } = await fastify.supabase
-        .from('employee_nominations').select('scheme').eq('id', req.params.nomId).single()
+        .from('employee_nominations').select('scheme').eq('id', req.params.nomId).eq('tenant_id', req.tenantId).single()
       const scheme = parsed.data.scheme ?? existing?.scheme
       const valid = await validateShareTotal(fastify, req.params.id, req.tenantId, scheme, parsed.data.share_percentage, req.params.nomId)
       if (!valid)

@@ -20,10 +20,9 @@ async function verifyEmployee(fastify: any, employeeId: string, tenantId: string
 }
 
 export default async function addressesRoutes(fastify: FastifyInstance) {
-  const auth        = { preHandler: [fastify.authenticate] }
   const hrAdminAuth = { preHandler: [fastify.authenticate, requireRole(...HR_ADMIN_ROLES)] }
 
-  fastify.get('/employees/:id/addresses', auth, async (req: any, reply) => {
+  fastify.get('/employees/:id/addresses', hrAdminAuth, async (req: any, reply) => {
     if (!await verifyEmployee(fastify, req.params.id, req.tenantId))
       return reply.code(404).send({ error: 'NOT_FOUND', message: 'Employee not found' })
     const { data, error } = await fastify.supabase

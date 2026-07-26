@@ -9,9 +9,14 @@
  *
  * Returns { data: null } when no onboarding draft is linked.
  *
- * Protected: any authenticated user.
+ * Protected: self-or-HR-admin. Used both by the ESS sidebar/onboarding
+ * widget (employee viewing their own status) and the admin Employee
+ * Profile console — was previously any authenticated user with no
+ * ownership check, letting any employee read a colleague's onboarding
+ * draft/document extraction status.
  */
 import type { FastifyInstance } from 'fastify'
+import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 
 async function verifyEmployee(fastify: any, employeeId: string, tenantId: string) {
   const { data } = await fastify.supabase
@@ -19,10 +24,23 @@ async function verifyEmployee(fastify: any, employeeId: string, tenantId: string
   return !!data
 }
 
+async function resolveCallerEmployeeId(fastify: any, userId: string, tenantId: string): Promise<string | null> {
+  const { data } = await fastify.supabase
+    .from('profiles').select('employee_id').eq('id', userId).eq('tenant_id', tenantId).maybeSingle()
+  return (data as any)?.employee_id ?? null
+}
+
 export default async function onboardingStatusRoutes(fastify: FastifyInstance) {
   const auth = { preHandler: [fastify.authenticate] }
 
   fastify.get('/employees/:id/onboarding-status', auth, async (req: any, reply) => {
+    if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
+      const callerEmpId = await resolveCallerEmployeeId(fastify, req.userId, req.tenantId)
+      if (!callerEmpId || callerEmpId !== req.params.id) {
+        return reply.code(403).send({ error: 'FORBIDDEN', message: 'You can only view your own onboarding status' })
+      }
+    }
+
     if (!await verifyEmployee(fastify, req.params.id, req.tenantId))
       return reply.code(404).send({ error: 'NOT_FOUND', message: 'Employee not found' })
 

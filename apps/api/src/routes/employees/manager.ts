@@ -18,11 +18,10 @@ import { logAction } from '../../lib/audit-service.js'
 const MAX_DEPTH = 20   // maximum manager-chain depth before aborting cycle check
 
 export default async function employeeManagerRoutes(fastify: FastifyInstance) {
-  const auth        = { preHandler: [fastify.authenticate] }
   const hrAdminAuth = { preHandler: [fastify.authenticate, requireRole(...HR_ADMIN_ROLES)] }
 
   // ── GET /employees/:id/manager ──────────────────────────────────────────────
-  fastify.get('/employees/:id/manager', auth, async (req: any, reply) => {
+  fastify.get('/employees/:id/manager', hrAdminAuth, async (req: any, reply) => {
     const { id } = req.params as { id: string }
 
     // Verify employee belongs to tenant

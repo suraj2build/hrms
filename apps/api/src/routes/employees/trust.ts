@@ -12,15 +12,18 @@
 
 import type { FastifyInstance } from 'fastify'
 import { trustScoreService }    from '../../platform/trust/scoring/trust-score.service.js'
+import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import type {
   VerificationResult, VerificationStatus, VerificationType,
   DuplicateDetectionResult, DuplicateType,
 } from '../../platform/trust/types/trust-types.js'
 
 export default async function employeeTrustRoutes(fastify: FastifyInstance) {
-  const auth = { preHandler: [fastify.authenticate] }
+  const auth = { preHandler: [fastify.authenticate, requireRole(...HR_ADMIN_ROLES)] }
 
   // ── GET /employees/:id/trust ──────────────────────────────────────────────
+  // Reputational/fraud-signal data — was previously authenticate-only,
+  // letting any employee read a colleague's fraud/trust breakdown.
 
   fastify.get('/employees/:id/trust', auth, async (req: any, reply) => {
     const employeeId: string = req.params.id

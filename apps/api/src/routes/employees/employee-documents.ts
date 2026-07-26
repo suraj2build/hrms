@@ -8,9 +8,8 @@
  * DELETE /employees/:id/documents/:docId  — delete metadata + storage file (hr_admin+)
  *
  * RBAC:
- *   GET  — any authenticated user (tenant-scoped, employee must exist)
- *   POST — hr_admin / super_admin only
- *   DELETE — hr_admin / super_admin only
+ *   GET / POST / DELETE — hr_admin / super_admin only (admin Employee
+ *   Profile console; ESS self-service reads go through a separate route)
  */
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
@@ -62,13 +61,12 @@ async function createSignedUrl(fastify: FastifyInstance, storagePath: string): P
 }
 
 export default async function employeeDocumentsRoutes(fastify: FastifyInstance) {
-  const auth      = { preHandler: [fastify.authenticate] }
   const adminAuth = { preHandler: [fastify.authenticate, requireRole(...HR_ADMIN_ROLES)] }
 
   // ── GET /employees/:id/documents ─────────────────────────────────────────────
-  // Any authenticated user (tenant-scoped). Returns signed URLs for all files
-  // so the client can display documents without additional API calls.
-  fastify.get('/employees/:id/documents', auth, async (req: any, reply) => {
+  // hr_admin+ only — previously any authenticated user, returning signed
+  // download URLs for another employee's Aadhaar/PAN/contract scans.
+  fastify.get('/employees/:id/documents', adminAuth, async (req: any, reply) => {
     if (!await verifyEmployee(fastify, req.params.id, req.tenantId))
       return notFound(reply, 'NOT_FOUND', 'Employee not found')
 

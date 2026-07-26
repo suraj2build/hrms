@@ -25,6 +25,9 @@ export default async function employeeOrgContextRoutes(fastify: FastifyInstance)
 
   // ── GET /employees/employees/:id/org-context ────────────────────────────────────────
   fastify.get('/employees/:id/org-context', auth, async (req: any, reply) => {
+    if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
+      return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
+    }
     const employeeId = (req.params as any).id
     const today      = new Date().toISOString().slice(0, 10)
 
