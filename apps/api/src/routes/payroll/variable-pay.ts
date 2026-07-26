@@ -383,7 +383,7 @@ export default async function variablePayRoutes(fastify: FastifyInstance) {
   })
 
   // ── GET /payroll/variable-pay/employee/:employeeId ────────────────────────────
-  fastify.get('/employee/:employeeId', auth, async (req: any, reply) => {
+  fastify.get('/employee/:employeeId', { preHandler: [fastify.authenticate, requireHrAdmin] }, async (req: any, reply) => {
     const { employeeId } = req.params as { employeeId: string }
 
     const { data, error } = await fastify.supabase

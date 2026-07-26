@@ -562,7 +562,7 @@ ${section('Part D — Loss from House Property (Home Loan Interest)', hlDecls,
   // ===========================================================================
 
   // GET /payroll/statutory/tds/regime/:employeeId
-  fastify.get('/regime/:employeeId', auth, async (req: any, reply) => {
+  fastify.get('/regime/:employeeId', { preHandler: [fastify.authenticate, requireHrAdmin] }, async (req: any, reply) => {
     const { employeeId } = req.params as { employeeId: string }
     const qs = z.object({ financial_year: z.string().optional() }).safeParse(req.query)
     const fy = qs.data?.financial_year ?? currentFinancialYear()
@@ -1406,7 +1406,7 @@ ${section('Part D — Loss from House Property (Home Loan Interest)', hlDecls,
   })
 
   // GET /payroll/statutory/tds/snapshots/:employeeId — latest snapshot for an employee
-  fastify.get('/snapshots/:employeeId', auth, async (req: any, reply) => {
+  fastify.get('/snapshots/:employeeId', { preHandler: [fastify.authenticate, requireHrAdmin] }, async (req: any, reply) => {
     const { employeeId } = req.params as { employeeId: string }
     const qs = z.object({ financial_year: z.string().optional() }).safeParse(req.query)
 
