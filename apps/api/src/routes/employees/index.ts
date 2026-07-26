@@ -417,19 +417,25 @@ export default async function employeeRoutes(fastify: FastifyInstance) {
   })
 
   // PUT /employees/:id — HR admin / super_admin only
+  // employees.status CHECK constraint (migration 004) — the ground truth.
+  const EMPLOYEE_STATUSES = ['active', 'inactive', 'on_notice', 'separated'] as const
   const PutEmployeeSchema = z.object({
     first_name:           z.string().min(1).optional(),
     last_name:            z.string().min(1).optional(),
     email:                z.string().email().optional().nullable(),
     phone:                z.string().optional().nullable(),
-    status:               z.string().optional(),
-    date_of_joining:      z.string().optional().nullable(),
+    status:               z.enum(EMPLOYEE_STATUSES).optional(),
     joining_date:         z.string().optional().nullable(),
     work_location_id:     z.string().uuid().optional().nullable(),
     manager_id:           z.string().uuid().optional().nullable(),
     reporting_manager_id: z.string().uuid().optional().nullable(),
-    employment_type:      z.string().optional().nullable(),
-  }).passthrough()
+    // NOTE: employment_type is NOT a column on employees (dropped by
+    // migration 016 — it now only lives on job_history, edited via
+    // job-history.ts). date_of_joining was never a real column either
+    // (the real one is joining_date, above) — both previously would have
+    // failed with "column does not exist" if ever submitted. Neither is
+    // sent by the live caller (EmployeeProfile.tsx profileMutation).
+  })
 
   fastify.put('/employees/:id', hrAdminAuth, async (request, reply) => {
     const { id } = request.params as { id: string }
