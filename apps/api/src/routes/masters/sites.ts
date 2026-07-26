@@ -109,6 +109,8 @@ const EXPANSION_KEYS = [
   'contact_person', 'contact_phone', 'contact_email', 'sanctioned_headcount',
 ] as const
 
+const MAX_PARENT_DEPTH = 20   // maximum parent_site_id chain depth before aborting cycle check
+
 export default async function sitesRoutes(fastify: FastifyInstance) {
   const auth      = { preHandler: [fastify.authenticate] }
   const adminAuth = {
@@ -152,6 +154,26 @@ export default async function sitesRoutes(fastify: FastifyInstance) {
         .eq('tenant_id', tenantId)
         .maybeSingle()
       if (!row) return { field, message: `${label} not found in your organisation` }
+
+      // Ancestor-chain walk (same gap class as departments/index.ts's
+      // parent_id) — the direct self-parent check above only catches a
+      // 1-hop cycle; without this, a longer cycle (set A's parent to B,
+      // then B's parent to A) silently corrupts the site hierarchy.
+      if (field === 'parent_site_id' && selfId) {
+        let cursor: string | null = id
+        let depth = 0
+        while (cursor && depth < MAX_PARENT_DEPTH) {
+          const { data: node } = await fastify.supabase
+            .from('sites').select('parent_site_id').eq('id', cursor).eq('tenant_id', tenantId).maybeSingle()
+          const nodeRow = node as { parent_site_id: string | null } | null
+          if (!nodeRow) break
+          cursor = nodeRow.parent_site_id
+          depth++
+          if (cursor === selfId) {
+            return { field, message: 'Setting this parent would create a circular site hierarchy' }
+          }
+        }
+      }
     }
     return null
   }

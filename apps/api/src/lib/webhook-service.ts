@@ -146,27 +146,10 @@ export class WebhookService {
         })
         .eq('id', deliveryId)
 
-      // Update webhook aggregate counters — select-then-update, matching
-      // _deliverToWebhook's success branch. There is no increment_webhook_success
-      // RPC in this schema (the fallback below used to unconditionally fire and
-      // itself assigned an un-awaited Promise as total_deliveries, corrupting
-      // the column on every successful manual retry).
-      const { data: wh } = await this.supabase
-        .from('webhooks')
-        .select('total_deliveries, successful_deliveries')
-        .eq('id', webhook.id)
-        .eq('tenant_id', tenantId)
-        .single()
-
-      await this.supabase
-        .from('webhooks')
-        .update({
-          last_success_at:       new Date().toISOString(),
-          total_deliveries:      ((wh?.total_deliveries      as number) ?? 0) + 1,
-          successful_deliveries: ((wh?.successful_deliveries as number) ?? 0) + 1,
-        })
-        .eq('id', webhook.id)
-        .eq('tenant_id', tenantId)
+      // Update webhook aggregate counters — shared with _deliverToWebhook's
+      // success branch so a manual retry's stats stay consistent with a
+      // fresh delivery's.
+      await this._updateWebhookStats(webhook.id, tenantId, true)
 
       return { success: true, http_status: result.http_status }
     } else {
@@ -183,8 +166,49 @@ export class WebhookService {
         })
         .eq('id', deliveryId)
 
+      // Update webhook aggregate counters — previously only _deliverToWebhook's
+      // failure branch did this, so a webhook that only ever failed via manual
+      // retry never accumulated failed_deliveries/last_failure_at and could
+      // look healthy in the registry despite every retry failing.
+      await this._updateWebhookStats(webhook.id, tenantId, false)
+
       return { success: false, http_status: result.http_status, error: result.error }
     }
+  }
+
+  // ── Private: update webhook aggregate delivery counters ────────────────────
+  // Shared by _deliverToWebhook and retryDelivery so both code paths keep the
+  // registry's total/successful/failed counters and last_success_at/
+  // last_failure_at consistent. Select-then-update (not an atomic increment)
+  // — under concurrent deliveries to the same webhook this can lose an
+  // update, but these are advisory health stats, not billing/accounting data.
+  private async _updateWebhookStats(webhookId: string, tenantId: string, success: boolean): Promise<void> {
+    const { data: wh } = await this.supabase
+      .from('webhooks')
+      .select('total_deliveries, successful_deliveries, failed_deliveries')
+      .eq('id', webhookId)
+      .eq('tenant_id', tenantId)
+      .single()
+
+    const totalDeliveries = ((wh?.total_deliveries as number) ?? 0) + 1
+
+    await this.supabase
+      .from('webhooks')
+      .update(
+        success
+          ? {
+              last_success_at:       new Date().toISOString(),
+              total_deliveries:      totalDeliveries,
+              successful_deliveries: ((wh?.successful_deliveries as number) ?? 0) + 1,
+            }
+          : {
+              last_failure_at:   new Date().toISOString(),
+              total_deliveries:  totalDeliveries,
+              failed_deliveries: ((wh?.failed_deliveries as number) ?? 0) + 1,
+            },
+      )
+      .eq('id', webhookId)
+      .eq('tenant_id', tenantId)
   }
 
   // ── Private: orchestrate one webhook delivery ──────────────────────────────
@@ -243,24 +267,7 @@ export class WebhookService {
         })
         .eq('id', deliveryId)
 
-      // Update webhook statistics — use raw SQL increment via RPC where possible,
-      // otherwise fall back to a safe select-then-update pattern.
-      const { data: wh } = await this.supabase
-        .from('webhooks')
-        .select('total_deliveries, successful_deliveries')
-        .eq('id', webhook.id)
-        .eq('tenant_id', tenantId)
-        .single()
-
-      await this.supabase
-        .from('webhooks')
-        .update({
-          last_success_at:       new Date().toISOString(),
-          total_deliveries:      ((wh?.total_deliveries      as number) ?? 0) + 1,
-          successful_deliveries: ((wh?.successful_deliveries as number) ?? 0) + 1,
-        })
-        .eq('id', webhook.id)
-        .eq('tenant_id', tenantId)
+      await this._updateWebhookStats(webhook.id, tenantId, true)
     } else {
       // 3b. Mark failed
       const retryDelaySec = webhook.retry_delay_seconds ?? 300
@@ -277,23 +284,7 @@ export class WebhookService {
         })
         .eq('id', deliveryId)
 
-      // Update webhook failure statistics
-      const { data: wh } = await this.supabase
-        .from('webhooks')
-        .select('total_deliveries, failed_deliveries')
-        .eq('id', webhook.id)
-        .eq('tenant_id', tenantId)
-        .single()
-
-      await this.supabase
-        .from('webhooks')
-        .update({
-          last_failure_at:  new Date().toISOString(),
-          total_deliveries: ((wh?.total_deliveries  as number) ?? 0) + 1,
-          failed_deliveries: ((wh?.failed_deliveries as number) ?? 0) + 1,
-        })
-        .eq('id', webhook.id)
-        .eq('tenant_id', tenantId)
+      await this._updateWebhookStats(webhook.id, tenantId, false)
     }
   }
 

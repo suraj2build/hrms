@@ -34,6 +34,8 @@ const schema = z.object({
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
+const MAX_PARENT_DEPTH = 20   // maximum parent_cluster_id chain depth before aborting cycle check
+
 export default async function clustersRoutes(fastify: FastifyInstance) {
   const auth      = { preHandler: [fastify.authenticate] }
   const adminAuth = {
@@ -144,6 +146,24 @@ export default async function clustersRoutes(fastify: FastifyInstance) {
         return reply.code(400).send({ error: 'VALIDATION', message: 'A cluster cannot be its own parent', field: 'parent_cluster_id' })
       if (!(await belongsToTenant('clusters', parsed.data.parent_cluster_id, req.tenantId)))
         return reply.code(400).send({ error: 'VALIDATION', message: 'Parent cluster not found in your organisation', field: 'parent_cluster_id' })
+
+      // Ancestor-chain walk (same gap class as departments/index.ts's
+      // parent_id — direct self-parent was checked above, but nothing
+      // stopped a longer cycle, e.g. set A's parent to B, then B's parent
+      // to A).
+      let cursor: string | null = parsed.data.parent_cluster_id
+      let depth = 0
+      while (cursor && depth < MAX_PARENT_DEPTH) {
+        const { data: node } = await fastify.supabase
+          .from('clusters').select('parent_cluster_id').eq('id', cursor).eq('tenant_id', req.tenantId).maybeSingle()
+        const nodeRow = node as { parent_cluster_id: string | null } | null
+        if (!nodeRow) break
+        cursor = nodeRow.parent_cluster_id
+        depth++
+        if (cursor === id) {
+          return reply.code(422).send({ error: 'CIRCULAR_REFERENCE', message: 'Setting this parent would create a circular cluster hierarchy.' })
+        }
+      }
     }
 
     const { data, error } = await fastify.supabase
