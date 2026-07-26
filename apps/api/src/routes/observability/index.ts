@@ -3,13 +3,21 @@ import { EventStreamService }        from '../../platform/observability/event-st
 import { eventTraceService }         from '../../platform/observability/trace/event-trace.service.js'
 import { observabilityIntelligenceService } from '../../platform/observability/intelligence/observability-intelligence.service.js'
 import type { ResolvedPlatformEvent }        from '../../platform/events/types/platform-event.js'
+import { requireRole, HR_ADMIN_ROLES }       from '../../lib/rbac.js'
 
 export default async function observabilityRoutes(fastify: FastifyInstance) {
+  // Every route here exposes tenant-wide event traces/clusters (compensation
+  // revisions, payroll finalizations, trust-score updates, etc.) with no
+  // per-employee ownership scoping. The only frontend caller is
+  // EnterpriseControlCenter.tsx under the admin-only /admin/* shell, so the
+  // API must enforce the same restriction rather than relying on the UI gate.
+  const adminAuth = { preHandler: [fastify.authenticate, requireRole(...HR_ADMIN_ROLES)] }
+
   /**
    * GET /observability/trace/:correlationId
    * Fetch and build a structured event trace for a correlation chain.
    */
-  fastify.get('/observability/trace/:correlationId', { preHandler: [fastify.authenticate] }, async (req, reply) => {
+  fastify.get('/observability/trace/:correlationId', adminAuth, async (req, reply) => {
     // Always scope to the authenticated tenant — never trust a client-supplied tenant_id.
     const orgId: string = (req as any).tenantId
     const { correlationId } = req.params as { correlationId: string }
@@ -26,7 +34,7 @@ export default async function observabilityRoutes(fastify: FastifyInstance) {
    * Aggregate events into an operational summary.
    * Accepts body.events directly OR fetches via tenant_id + from + to query params.
    */
-  fastify.post('/observability/summary', { preHandler: [fastify.authenticate] }, async (req, reply) => {
+  fastify.post('/observability/summary', adminAuth, async (req, reply) => {
     // Always scope to the authenticated tenant — never trust a client-supplied tenant_id.
     const orgId: string = (req as any).tenantId
     const body          = req.body as {
@@ -57,7 +65,7 @@ export default async function observabilityRoutes(fastify: FastifyInstance) {
    * Build a heatmap of event activity by UTC hour + event_type.
    * Accepts body.events directly OR auto-fetches last 24h.
    */
-  fastify.post('/observability/heatmap', { preHandler: [fastify.authenticate] }, async (req, reply) => {
+  fastify.post('/observability/heatmap', adminAuth, async (req, reply) => {
     // Always scope to the authenticated tenant — never trust a client-supplied tenant_id.
     const orgId: string = (req as any).tenantId
     const body          = req.body as { events?: ResolvedPlatformEvent[] } | undefined
@@ -81,7 +89,7 @@ export default async function observabilityRoutes(fastify: FastifyInstance) {
    * GET /observability/clusters
    * Returns event clusters from the observability intelligence service.
    */
-  fastify.get('/observability/clusters', { preHandler: [fastify.authenticate] }, async (req, reply) => {
+  fastify.get('/observability/clusters', adminAuth, async (req, reply) => {
     // Always scope to the authenticated tenant — never trust a client-supplied tenant_id.
     const orgId: string = (req as any).tenantId
 
