@@ -21,12 +21,14 @@
  * inserting a new row with is_current=true automatically sets is_current=false on the prior row.
  *
  * Protected:
- *   GET  — any authenticated user
- *   POST / DELETE — hr_admin or super_admin only
+ *   GET /               — hr_admin or super_admin only (admin console list)
+ *   GET /:id/history     — self-or-hr_admin (ESS reads its own shift schedule too)
+ *   POST / DELETE        — hr_admin or super_admin only
  */
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { resolveCallerEmployeeId } from '../../lib/manager-scope.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
 
 const assignSchema = z.object({
@@ -54,6 +56,7 @@ export default async function employeeShiftsRoutes(fastify: FastifyInstance) {
   // Returns all active employees, each decorated with their current standing shift
   // (null when no shift has been assigned yet) and their current work location.
   fastify.get('/', auth, async (req: any, reply) => {
+    if (!requireAdmin(req, reply)) return
     // employees is paginated — an unbounded .select() truncates at
     // PostgREST's 1,000-row ceiling for a large tenant, silently dropping
     // employees from the shift-override list.
@@ -185,6 +188,16 @@ export default async function employeeShiftsRoutes(fastify: FastifyInstance) {
   // Must be registered BEFORE /:id to avoid route shadowing.
   fastify.get('/:employeeId/history', auth, async (req: any, reply) => {
     const { employeeId } = req.params as { employeeId: string }
+
+    // Self-or-HR-admin — MyAttendance.tsx (ESS) reads this for the caller's
+    // own upcoming shift, and the admin console reads it for any employee.
+    // Was previously any authenticated user with no ownership check.
+    if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
+      const callerEmpId = await resolveCallerEmployeeId(fastify.supabase, req.userId, req.tenantId)
+      if (!callerEmpId || callerEmpId !== employeeId) {
+        return reply.code(403).send({ error: 'FORBIDDEN', message: 'You can only view your own shift history' })
+      }
+    }
 
     // Verify employee belongs to tenant
     const { data: emp } = await fastify.supabase
