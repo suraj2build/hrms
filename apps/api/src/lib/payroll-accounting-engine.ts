@@ -412,6 +412,20 @@ export function buildCostCenterAllocations(
     const overtimeCost  = round2(otComp?.monthly_amount ?? (e.overtime_hours > 0 ? e.overtime_hours * 100 : 0))
     const totalEmpCost  = round2(e.gross_pay + employerBurden)
 
+    // e.deductions is the actual computed total_deductions for the month
+    // (LOP + statutory), and net_pay = gross_pay - total_deductions always
+    // holds — so gross_pay - net_pay - e.deductions was structurally always
+    // 0 (fresh audit finding: this field silently read 0 for every employee,
+    // every run, hiding LOP impact from cost-center reporting entirely).
+    // compensation_snapshot.components is the employee's standing salary
+    // STRUCTURE (not the computed slip), so its configured deduction lines
+    // are a different, generally smaller figure than e.deductions — using
+    // that as the subtrahend instead recovers an actual LOP estimate,
+    // matching the same formula generateLedgerEntries already uses
+    // correctly for GL journal entries elsewhere in this file.
+    const structureDeductions = round2(comps.filter(c => c.component_type === 'deduction').reduce((s, c) => s + c.monthly_amount, 0))
+    const lopRecovery = round2(Math.max(0, e.gross_pay - e.net_pay - structureDeductions))
+
     return {
       employee_id:       e.employee_id,
       department_id:     e.department_id ?? null,
@@ -420,7 +434,7 @@ export function buildCostCenterAllocations(
       cost_center_name:  e.cost_center_name ?? null,
       gross_pay:         e.gross_pay,
       net_pay:           e.net_pay,
-      lop_recovery:      round2(e.gross_pay - e.net_pay - e.deductions),
+      lop_recovery:      lopRecovery,
       employer_burden:   employerBurden,
       statutory_burden:  statutoryBurden,
       overtime_cost:     overtimeCost,
