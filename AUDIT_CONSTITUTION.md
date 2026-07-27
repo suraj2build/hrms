@@ -703,7 +703,200 @@ have been successfully re-run.
 
 ---
 
-*Last updated: 2026-07-25.*
+## 14. Continuous Autonomous Bug-Hunt Sessions (2026-07-27 — ongoing)
+
+Distinct from §13 (live user-reported incidents): this is a standing, user-authorized loop —
+"keep going, find more bugs to fix" — where *I* proactively dispatch research agents at unaudited
+code, verify every finding myself, and fix. No user report triggers each round; the standing
+directive does. **This section is the playbook — read it before starting a new round so the method
+and the taxonomy don't have to be reinvented.** Append to it each round; don't close it.
+
+### 14.1 The repeatable method
+
+Each round is the same five-step loop:
+
+1. **Dispatch 1 research agent per unaudited module cluster** (Agent tool, `run_in_background: true`,
+   several in parallel). Give each agent: the bug taxonomy (§14.2 verbatim), the specific
+   directories/files to inspect, and an explicit instruction to *verify by reading the real file*
+   before reporting a finding — never report from pattern-matching alone. Ask for findings ranked
+   by severity, capped (e.g. "10 most important") so reports stay reviewable.
+2. **Pick unaudited surface by checking git history first**: `git log --oneline -- <dir>` — a
+   directory with zero commits from this session's date range, or where only 1-2 files out of many
+   were touched, is the next target. Grep for prior "fresh audit finding"/"TOCTOU"/"IDOR" comments
+   as a second signal — their absence means the file hasn't been through this loop yet.
+3. **Verify every finding myself** by reading the actual file (and migration SQL if a DB constraint
+   is claimed) before writing any fix. Agents over-claim and occasionally mis-scope severity or miss
+   that a "bug" is actually working as designed — see §14.4 for concrete examples this round where
+   verification caught this.
+4. **Fix using the established patterns** (§14.3), matching each file's existing conventions
+   (helper names, import style, comment density). One coherent commit per logical batch (2-6 files
+   that share a theme), not one giant commit.
+5. **Per batch: typecheck → ratchet-check → review the diff → commit → push → fast-forward-merge to
+   `main`.** Exact commands:
+   ```
+   cd apps/api && npx tsc --noEmit        # must be silent
+   cd /home/user/hrms && node scripts/check-manual-500s.mjs   # must not regress
+   node scripts/check-console-error.mjs   # must not regress — see §14.5, this WAS missed for a while
+   git diff <files>                        # read every hunk before staging
+   git add <specific files>                # never -A
+   git commit -m "$(cat <<'EOF' ... EOF)"  # heredoc, Co-Authored-By footer
+   git push -u origin claude/cool-planck-k749sn
+   git checkout main && git pull origin main && git merge --ff-only claude/cool-planck-k749sn \
+     && git push origin main && git checkout claude/cool-planck-k749sn
+   git rev-parse main claude/cool-planck-k749sn   # confirm both SHAs match
+   ```
+   Then immediately dispatch the next round's agents — don't wait for user prompting between rounds
+   unless explicitly told to pause.
+
+### 14.2 Bug taxonomy (paste verbatim into every research-agent dispatch prompt)
+
+1. **Cross-tenant/cross-employee IDOR** — a route accepts a caller-supplied ID and uses it in a
+   write or sensitive read WITHOUT verifying `.eq('id', suppliedId).eq('tenant_id', req.tenantId)`
+   returns a row first. Also: a GET route missing an ownership/role check that a sibling route in
+   the same file has.
+2. **TOCTOU races** — read-check-then-write where the precondition should be folded into the
+   UPDATE's own WHERE clause (`.eq('status','X')` on the UPDATE + `.maybeSingle()` + 409 if `!data`)
+   instead of a separate SELECT then a separate UPDATE.
+3. **Unpaginated Supabase queries** — any `.select()` on a tenant-scoped table that can exceed 1000
+   rows without `fetchAllRows()` from `lib/supabase-paginate.js` (PostgREST silently caps at 1000).
+4. **Raw error leaks** — `reply.code(500 or 404).send({error, message: error.message})` instead of
+   the typed helpers in `lib/api-errors.ts` (`serverError`, `notFound`, `forbidden`,
+   `validationError`, `conflictError`).
+5. **Secret/credential/PII leaks** — a response that echoes a secret/token/password/API-key
+   instead of redacting it, or a GET route missing an RBAC/ownership gate a sibling route has.
+6. **zod schema vs DB CHECK constraint mismatches** — a validator that allows a value the DB's
+   CHECK constraint rejects (silent insert failure) or vice versa.
+7. **Fabricated success** — an UPDATE/DELETE-by-id endpoint that never checks whether the write
+   actually matched a row before returning 200/204.
+8. **Circular-reference gaps** — hierarchical/tree data (`parent_id`-style self-references) with no
+   ancestor-chain cycle guard.
+
+### 14.3 New durable fix patterns this round (add to §5's approved-approaches set)
+
+**Fold a TOCTOU precondition into the UPDATE itself, don't SELECT-then-UPDATE:**
+```typescript
+const { data, error } = await supabase
+  .from('table')
+  .update({ status: 'approved', ... })
+  .eq('id', id).eq('tenant_id', tenantId)
+  .eq('status', 'pending')          // ← the precondition, folded into the WHERE
+  .select().maybeSingle()
+if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, '...')
+if (!data) return reply.code(409).send({ error: 'ALREADY_ACTIONED', message: '...' })
+```
+For an `upsert(...)` (no WHERE clause available), a plain pre-check SELECT is the fallback — it
+leaves a narrow race window but still closes the common case (see `period-locks.ts` `/lock`).
+
+**Chunked + paginated fetch for `.in('employee_id', ids)` at scale** — a plain `.in()` with an
+unbounded id list risks both PostgREST's 1000-row cap *and* URL-length limits once the id list
+itself is large (e.g. "compute for all employees" on a >1000-employee tenant):
+```typescript
+const EMP_ID_BATCH = 400   // matches upload.ts's existing CODE_BATCH convention
+async function fetchAllRowsForEmployees<T>(
+  employeeIds: string[],
+  queryFn: (batchIds: string[], from: number, to: number) => PromiseLike<{ data: T[] | null; error: unknown }>,
+): Promise<T[]> {
+  const rows: T[] = []
+  for (let i = 0; i < employeeIds.length; i += EMP_ID_BATCH) {
+    const batch = employeeIds.slice(i, i + EMP_ID_BATCH)
+    rows.push(...await fetchAllRows((from, to) => queryFn(batch, from, to)))
+  }
+  return rows
+}
+// usage: fetchAllRowsForEmployees(targetIds, (batch, from, to) =>
+//   supabase.from('t').select('...').eq('tenant_id', tid).in('employee_id', batch).range(from, to))
+```
+Applied this round in `attendance/risk.ts` and `attendance/who-is-in.ts`; copy verbatim into any
+other route that does `.in('employee_id', <unbounded list>)`.
+
+**Self-or-HR-admin gate for an employee-visible GET whose sibling writes are already HR-only** —
+before assuming a missing role check should become HR-admin-only, **grep the frontend first**
+(`grep -rn '/route/path' apps/web/src`). If an ESS/self-service page calls the same endpoint for
+the caller's own record, gating to HR-admin-only breaks a real feature (this happened and was
+caught mid-fix on `employees/contracts.ts` — `EssDocuments.tsx` depends on self-access). The
+correct gate:
+```typescript
+if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
+  const callerEmpId = await resolveCallerEmployeeId(fastify, req.userId, req.tenantId) // profiles.employee_id
+  if (!callerEmpId || callerEmpId !== req.params.id) {
+    return forbidden(reply, 'FORBIDDEN', 'You can only view your own <resource>')
+  }
+}
+```
+Conversely, if grep shows **zero** ESS callers and every consumer is an admin-only page
+(`ExceptionGovernance.tsx`, `ComplianceView.tsx`, etc.), a flat `HR_ADMIN_ROLES` gate is correct and
+simpler — don't add self-access plumbing nothing will ever use.
+
+**Sanitizing DB errors from a pure library function with no `req`/`reply`** (extends §5.5, which
+assumes route-handler context) — e.g. a shared "store" module (`salary-config-store.ts`) that
+returns `{status, error}` to multiple route files rather than writing to a reply directly:
+```typescript
+function dbFail(error: { message: string; code?: string }): StoreResult {
+  // No req.log here — can't call serverError(). Do NOT add console.error() to "compensate";
+  // see §14.5 — every lib-layer console.error() is a permanent ratchet regression with no
+  // req-scoped logger to graduate to. Return a fixed safe message and stop there.
+  return fail(500, 'DB_ERROR', 'A database error occurred. Please try again or contact support.')
+}
+```
+
+### 14.4 Verification catches this round (why step 3 of §14.1 is not optional)
+
+- An agent reported `attendance/leave-employee.ts`'s `GET /leave/requests` and
+  `employees/contracts.ts`'s `GET /:id/contracts` as the same bug class (missing role gate →
+  "gate to HR-admin"). Grepping the frontend showed they were *not* the same: `/leave/requests` has
+  zero ESS callers (correct fix: flat `MANAGER_ROLES` gate), but `/contracts` is read by
+  `EssDocuments.tsx` for the caller's own contracts (correct fix: self-or-HR-admin, not flat
+  HR-admin-only — a flat gate would have shipped a regression that breaks a real ESS feature while
+  "fixing" a real IDOR).
+- An agent characterized `recognition/index.ts`'s generic nominations PATCH (an earlier round) as
+  bypassing a two-level approval workflow. Grep across `apps/web/src` showed the two-level
+  `/approve` endpoint has zero frontend callers — the PATCH *is* the only workflow in active use.
+  The correct fix was a narrower guard (block reverting a declared winner), not disabling the PATCH.
+
+### 14.5 Process gap this round — the console.error ratchet
+
+`scripts/check-console-error.mjs` (referenced in CLAUDE.md, "console.error may only decrease") was
+**not run at all for a long stretch of this session** — only `check-manual-500s.mjs` was checked
+per commit. By the time it was run, the count had silently drifted 38 → 44, including 2 new
+`console.error(` calls added by this session's own earlier scheduler-bug-fix commit
+(`3023b6f`, in `attendance-api-scheduler.ts` / `digest-scheduler.ts`) plus ~35 pre-existing
+occurrences across background-job/library files (`webhook-service.ts`, `ot-engine.ts`,
+`wo-credit-reconciler.ts`, `poll-scheduler.ts`, `email-service.ts`, and others) that were never
+caught because this ratchet was never run against them either. **Run both ratchet scripts every
+commit, not just the manual-500 one** — they're independent checks, not substitutes for each other.
+Fixing the pre-existing 35-occurrence backlog needs a shared background-job logger abstraction
+(these files have no `req`/`fastify.log` in scope, only a bare `supabase` client) — that's a
+distinct, larger task, tracked as PENDING-1 below, not folded into this round's fixes.
+
+### 14.6 Pending — found but NOT fixed this round
+
+Anything in this table is a **verified-real finding that has not been remediated**. Do not assume
+it's handled because it's documented here — documentation is not remediation. Pick from this list
+first when a new round starts, in the order listed (roughly severity-then-effort order).
+
+| ID | File(s) | Finding | Severity | Why deferred |
+|----|---------|---------|----------|---------------|
+| PEND-1 | `attendance/work-sessions.ts` | 5 GET routes (`missing-punches`, `cross-midnight`, `locks`, `ot-heatmap`, `compliance-risks`) unpaginated `.select()` on tenant-wide monthly data; 11 handlers raw-error-leak (`{error: error.message}`, worse than usual — no code field at all); `/sessions/:id/lock` and `/unlock` TOCTOU (read-check status then update with no WHERE precondition) | HIGH | Large single file, needs a full pass like `risk.ts`/`who-is-in.ts` got — sequenced next |
+| PEND-2 | `attendance/regularisation-policy.ts` (`POST /breach-check`) | SLA breach-scan reads pending+unbreached IDs, then does `UPDATE ... .in('id', ids)` with no `.eq('status','pending')` in the WHERE — a concurrent approve between scan and write gets silently overwritten back to `rejected` | HIGH | Not yet reached |
+| PEND-3 | `attendance/leave-accrual-lifecycle.ts` (`POST /leave/lifecycle/release`) | The `leave_entitlement_releases` audit-trail insert's `{error}` is never checked (and the surrounding try/catch can't catch it either, since supabase-js doesn't throw) — if the audit insert fails, the code still unlocks the ledger entry and reports it as released with zero audit record | HIGH | Not yet reached |
+| PEND-4 | `attendance/leave-accrual-lifecycle.ts` (`POST /leave/lifecycle/freeze`) | `employee_id` from the request body is never verified to belong to `req.tenantId` before inserting a freeze row (contrast: the sibling `/tiers/:policyRuleId` route does verify) | MEDIUM | Not yet reached |
+| PEND-5 | `attendance/leave-accrual-lifecycle.ts` (`POST /freeze/:freezeId/lift`) | Same TOCTOU shape as PEND-2: reads `status==='active'` then updates without folding it into the WHERE; also the update's `{error}` is never checked | MEDIUM | Not yet reached |
+| PEND-6 | `attendance/workforce-optimization.ts` (`GET /fairness-balance`) | The only endpoint in this file not yet converted to `fetchAllRows()` — `workforce_shift_balance` and `workforce_optimization_hints` queries silently truncate past 1000 rows, unlike every sibling endpoint in the same file (which already carry "fresh audit finding" fix comments) | HIGH | Not yet reached |
+| PEND-7 | `attendance/workforce-optimization.ts` (`POST /hints/:id/resolve`) | Same TOCTOU shape as PEND-2/5: checks `resolved` via SELECT, updates without `.eq('resolved', false)` in the WHERE, and doesn't re-verify a row was actually changed | MEDIUM | Not yet reached |
+| PEND-8 | `employees/job-history.ts` (`POST /employees/:id/job-history`) | The route manually flips the prior row's `is_current` to `false` **before** the insert that's supposed to trigger `fn_close_prev_job_history` (migration `013_job_history.sql`) — by the time the AFTER-INSERT trigger runs, it finds no row matching `is_current=true`, so `effective_to` is **never set** on any job-history supersession (promotion/transfer), corrupting every as-of-date tenure/reporting-structure query. Real data-integrity bug, not a security issue. | HIGH | Needs careful fix — either drop the manual pre-update and let the trigger run, or compute `effective_to` manually to match trigger semantics exactly; wanted a dedicated pass rather than a rushed edit |
+| PEND-9 | `employees/education.ts`, `family.ts`, `previous-employment.ts` | Raw `{error: 'DB_ERROR', message: error.message}` leaks (multiple sites each); DELETE handlers in all 3 (+`job-history.ts`) check only `if (error)` and unconditionally return 204 — a wrong/foreign id still reports success (fabricated success) | MEDIUM | Mechanical batch, not yet reached |
+| PEND-10 | `import/index.ts` (`DELETE /jobs/:id`) | Setting `status='cancelled'` doesn't actually stop the already-dispatched background `runImport`/`runSalaryUploadJob` promise — `importer.ts`/`chunk-executor.ts` have zero `cancelled`-status checks anywhere, so all remaining chunks still get written and the job's final status silently flips back to `completed`, erasing the evidence a cancel was ever requested | HIGH | Needs a cancellation-token plumbed through the chunk-executor loop — bigger change than a single-file patch |
+| PEND-11 | `absconding/index.ts` | `OPEN_STATUSES`/`ALL_STATUSES` (route layer) don't include `'second_escalation'`, `'open'`, `'rejoined'` even though migration `389` added them to the live CHECK constraint and `absconding-engine.ts`'s `scanAndEscalate()` actively uses `second_escalation`. Effect: dashboard "Open Cases" undercounts, `GET /cases?status=second_escalation` 400s, and the route's own hand-rolled `/run-auto-escalation` (a duplicate of `scanAndEscalate()`) has no branch for `second_escalation` so those cases silently never advance | HIGH | Needs a decision: extend the vocabulary in 3 places, or delete the duplicated `/run-auto-escalation` route in favor of the single-source `scanAndEscalate()` — worth a product/architecture call, not a blind patch |
+| PEND-12 | Many files, ~35 pre-existing occurrences | `console.error(` calls in background-job/library code with no `req`/`fastify.log` in scope (`webhook-service.ts`, `ot-engine.ts`, `wo-credit-reconciler.ts`, `poll-scheduler.ts`, `digest-scheduler.ts`, `sla-scanner.ts`, `intelligence-scanner.ts`, `email-service.ts`, `event-emitter.ts`, `whatsapp-provider.ts`, `insurance-provider.ts`, `policy-governance.ts`, `intelligence-engine.ts`, `community-celebrations.ts`, `attendance-reconciliation.ts`, `leave-reconciliation.ts`, `workforce-reconciliation-service.ts`, `anomaly-handler.ts`, `event-service.ts`) — fails `check-console-error.mjs`'s ratchet (see §14.5) | LOW (CI hygiene, not a functional/security bug) | Needs a shared background-job logger abstraction threaded through many unrelated files — a distinct, larger refactor, not a quick fix |
+| PEND-13 | `compliance/index.ts` | `category` filter noted by an earlier round as missing `'certification'` from the allowed enum, and the route silently falls back to `{}` (ignoring ALL filters, not just category) on any zod validation failure instead of 400ing | MEDIUM | Deprioritized behind PEND-1 through PEND-11 |
+
+When a PEND item is fixed, delete its row from this table (git history + the commit message are the
+permanent record — don't leave a stale "FIXED" row here to rot). When a new round finds something
+and doesn't fix it immediately, add a row here before ending the round.
+
+---
+
+*Last updated: 2026-07-27.*
 
 **Audit remediation complete** (117 numbered issues, closed 2026-07-03: 62 explicitly remediated, 55
 administratively closed). All four phases closed. No open *numbered audit* issues remain.
