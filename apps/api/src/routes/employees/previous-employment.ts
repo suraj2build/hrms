@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { serverError, notFound, ErrorCode } from '../../lib/api-errors.js'
 
 const schema = z.object({
   company_name:       z.string().min(1, 'Company name is required'),
@@ -35,7 +36,7 @@ export default async function previousEmploymentRoutes(fastify: FastifyInstance)
       .eq('employee_id', req.params.id)
       .eq('tenant_id', req.tenantId)
       .order('to_date', { ascending: false })
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch previous employment records')
     return reply.send({ data })
   })
 
@@ -49,7 +50,7 @@ export default async function previousEmploymentRoutes(fastify: FastifyInstance)
       .from('previous_employment')
       .insert({ ...parsed.data, employee_id: req.params.id, tenant_id: req.tenantId })
       .select().single()
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create previous employment record')
     return reply.code(201).send(data)
   })
 
@@ -57,26 +58,30 @@ export default async function previousEmploymentRoutes(fastify: FastifyInstance)
     const parsed = schema.partial().safeParse(req.body)
     if (!parsed.success)
       return reply.code(400).send({ error: 'VALIDATION', message: parsed.error.issues[0].message })
+    // .maybeSingle() (not .single()) — a wrong/foreign prevId must fall
+    // through to the 404 below, not surface as a PGRST116 500.
     const { data, error } = await fastify.supabase
       .from('previous_employment')
       .update(parsed.data)
       .eq('id', req.params.prevId)
       .eq('employee_id', req.params.id)
       .eq('tenant_id', req.tenantId)
-      .select().single()
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
-    if (!data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Record not found' })
+      .select().maybeSingle()
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update previous employment record')
+    if (!data) return notFound(reply, 'NOT_FOUND', 'Record not found')
     return reply.send(data)
   })
 
   fastify.delete('/employees/:id/previous-employment/:prevId', hrAdminAuth, async (req: any, reply) => {
-    const { error } = await fastify.supabase
+    const { data, error } = await fastify.supabase
       .from('previous_employment')
       .delete()
       .eq('id', req.params.prevId)
       .eq('employee_id', req.params.id)
       .eq('tenant_id', req.tenantId)
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+      .select('id')
+    if (error) return serverError(req, reply, error, ErrorCode.DELETE_FAILED, 'Failed to delete previous employment record')
+    if (!data || data.length === 0) return notFound(reply, 'NOT_FOUND', 'Record not found')
     return reply.code(204).send()
   })
 }

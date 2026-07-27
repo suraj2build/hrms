@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { serverError, notFound, ErrorCode } from '../../lib/api-errors.js'
 
 const STORAGE_BUCKET = 'employee-files'
 const SIGNED_URL_TTL = 3600 // 1 hour
@@ -42,7 +43,7 @@ export default async function educationRoutes(fastify: FastifyInstance) {
       .eq('employee_id', req.params.id)
       .eq('tenant_id', req.tenantId)
       .order('year_of_completion', { ascending: false, nullsFirst: false })
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch education records')
     // Attach short-lived signed URLs for the certificate documents.
     const rows = await Promise.all(
       (data ?? []).map(async (r: any) => ({ ...r, document_url: await signUrl(fastify, r.document_path) })),
@@ -60,7 +61,7 @@ export default async function educationRoutes(fastify: FastifyInstance) {
       .from('employee_education')
       .insert({ ...parsed.data, employee_id: req.params.id, tenant_id: req.tenantId })
       .select().single()
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create education record')
     return reply.code(201).send({ ...data, document_url: await signUrl(fastify, data.document_path) })
   })
 
@@ -68,15 +69,17 @@ export default async function educationRoutes(fastify: FastifyInstance) {
     const parsed = schema.partial().safeParse(req.body)
     if (!parsed.success)
       return reply.code(400).send({ error: 'VALIDATION', message: parsed.error.issues[0].message })
+    // .maybeSingle() (not .single()) — a wrong/foreign eduId must fall
+    // through to the 404 below, not surface as a PGRST116 500.
     const { data, error } = await fastify.supabase
       .from('employee_education')
       .update(parsed.data)
       .eq('id', req.params.eduId)
       .eq('employee_id', req.params.id)
       .eq('tenant_id', req.tenantId)
-      .select().single()
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
-    if (!data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Education record not found' })
+      .select().maybeSingle()
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update education record')
+    if (!data) return notFound(reply, 'NOT_FOUND', 'Education record not found')
     return reply.send({ ...data, document_url: await signUrl(fastify, data.document_path) })
   })
 
@@ -90,13 +93,15 @@ export default async function educationRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', req.tenantId)
       .maybeSingle()
 
-    const { error } = await fastify.supabase
+    const { data: deleted, error } = await fastify.supabase
       .from('employee_education')
       .delete()
       .eq('id', req.params.eduId)
       .eq('employee_id', req.params.id)
       .eq('tenant_id', req.tenantId)
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+      .select('id')
+    if (error) return serverError(req, reply, error, ErrorCode.DELETE_FAILED, 'Failed to delete education record')
+    if (!deleted || deleted.length === 0) return notFound(reply, 'NOT_FOUND', 'Education record not found')
 
     if (row?.document_path) {
       await fastify.supabase.storage.from(STORAGE_BUCKET).remove([row.document_path])

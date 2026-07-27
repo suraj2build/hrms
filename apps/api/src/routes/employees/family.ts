@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { optStr, optDate, optEnum } from '../../lib/zod-form.js'
+import { serverError, notFound, ErrorCode } from '../../lib/api-errors.js'
 
 const schema = z.object({
   relationship_type_id: z.string().uuid('Invalid relationship type'),
@@ -34,7 +35,7 @@ export default async function familyRoutes(fastify: FastifyInstance) {
       .eq('employee_id', req.params.id)
       .eq('tenant_id', req.tenantId)
       .order('name')
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch family records')
     return reply.send({ data })
   })
 
@@ -48,7 +49,7 @@ export default async function familyRoutes(fastify: FastifyInstance) {
       .from('employee_family')
       .insert({ ...parsed.data, employee_id: req.params.id, tenant_id: req.tenantId })
       .select('*, relationship_types(id, name)').single()
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create family record')
     return reply.code(201).send(data)
   })
 
@@ -56,26 +57,30 @@ export default async function familyRoutes(fastify: FastifyInstance) {
     const parsed = schema.partial().safeParse(req.body)
     if (!parsed.success)
       return reply.code(400).send({ error: 'VALIDATION', message: parsed.error.issues[0].message })
+    // .maybeSingle() (not .single()) — a wrong/foreign memberId must fall
+    // through to the 404 below, not surface as a PGRST116 500.
     const { data, error } = await fastify.supabase
       .from('employee_family')
       .update(parsed.data)
       .eq('id', req.params.memberId)
       .eq('employee_id', req.params.id)
       .eq('tenant_id', req.tenantId)
-      .select('*, relationship_types(id, name)').single()
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
-    if (!data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Family member not found' })
+      .select('*, relationship_types(id, name)').maybeSingle()
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update family record')
+    if (!data) return notFound(reply, 'NOT_FOUND', 'Family member not found')
     return reply.send(data)
   })
 
   fastify.delete('/employees/:id/family/:memberId', hrAdminAuth, async (req: any, reply) => {
-    const { error } = await fastify.supabase
+    const { data, error } = await fastify.supabase
       .from('employee_family')
       .delete()
       .eq('id', req.params.memberId)
       .eq('employee_id', req.params.id)
       .eq('tenant_id', req.tenantId)
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+      .select('id')
+    if (error) return serverError(req, reply, error, ErrorCode.DELETE_FAILED, 'Failed to delete family record')
+    if (!data || data.length === 0) return notFound(reply, 'NOT_FOUND', 'Family member not found')
     return reply.code(204).send()
   })
 }
