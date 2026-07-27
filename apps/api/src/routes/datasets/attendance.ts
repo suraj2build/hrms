@@ -94,9 +94,26 @@ export default async function attendanceDataset(fastify: FastifyInstance) {
       .eq('job_history.is_current', true)
       .neq('status', 'separated')
 
-    if (deptFilter) empQuery = empQuery.eq('job_history.department_id', deptFilter)
+    let allEmployees: any[]
+    try {
+      allEmployees = await fetchAllRows((from, to) => (empQuery as any).range(from, to))
+    } catch (err: any) {
+      return serverError(req, reply, err, ErrorCode.QUERY_FAILED, 'Failed to fetch employees for attendance dataset')
+    }
 
-    const employees = await fetchAllRows((from, to) => (empQuery as any).range(from, to))
+    // Fresh audit finding: department_id was previously applied here as
+    // .eq('job_history.department_id', deptFilter) against an embedded
+    // resource with no !inner — per PostgREST semantics that only nulls out
+    // the non-matching embed, it never removes the parent row, so this
+    // filter silently had no effect on which employees were included (the
+    // summary/by_department totals never shrank to the filtered department).
+    // Applying it in JS instead, after fetch.
+    const employees = deptFilter
+      ? (allEmployees as any[]).filter((emp) => {
+          const jh = Array.isArray(emp.job_history) ? emp.job_history[0] : emp.job_history
+          return jh?.department_id === deptFilter
+        })
+      : allEmployees
 
     // ── Build employee map ──────────────────────────────────────────────────────
     const empMap: Record<string, { code: string; name: string; dept: string; deptId: string; type: string }> = {}

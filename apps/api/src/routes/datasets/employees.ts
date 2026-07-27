@@ -97,11 +97,16 @@ export default async function employeesDataset(fastify: FastifyInstance) {
       .neq('status', 'separated')
       .eq('job_history.is_current', true) as any
 
-    if (filterDeptId)  empQuery = empQuery.eq('job_history.department_id', filterDeptId)
-    if (filterLocId)   empQuery = empQuery.eq('job_history.work_location_id', filterLocId)
-    if (filterGradeId) empQuery = empQuery.eq('job_history.grade_id', filterGradeId)
-    if (filterGender)  empQuery = empQuery.eq('employee_personal_info.gender', filterGender)
-    if (filterSiteId)  empQuery = empQuery.eq('site_id', filterSiteId)
+    // Fresh audit finding: filter_department_id/location_id/grade_id/gender
+    // were applied here as .eq('job_history.department_id', ...) etc. against
+    // an embedded resource with no !inner — per PostgREST semantics that only
+    // nulls out the non-matching embed, it never removes the parent row. So
+    // every drill-down by department/location/grade/gender silently returned
+    // the FULL unfiltered employee set (summary totals never shrank), while
+    // only the label grouping reclassified non-matches into "Unassigned".
+    // filter_site_id is the one filter here that's actually safe at the DB
+    // layer, since site_id lives directly on `employees`, not an embed.
+    if (filterSiteId) empQuery = empQuery.eq('site_id', filterSiteId)
 
     let empData: any[]
     try {
@@ -134,10 +139,17 @@ export default async function employeesDataset(fastify: FastifyInstance) {
       return { id: emp.site_id ?? null, name: s?.name ?? null, region: s?.region ?? null, zone: s?.zone ?? null, site_type: s?.site_type ?? null }
     }
 
-    // R5 — region/zone filters live on the embedded site, so apply them in JS
-    // after fetch (PostgREST embedded-resource equality can't null-safely filter
-    // the parent here). site_id is already filtered at the DB layer above.
-    const siteFilter = (emp: any): boolean => {
+    // Drill-down filters on embedded resources (job_history.department_id,
+    // work_location_id, grade_id; employee_personal_info.gender; sites.region,
+    // sites.zone) can't be applied at the DB layer without !inner (see the
+    // comment above empQuery), so all of them are applied here in JS after
+    // fetch. filter_site_id is already redundantly applied at the DB layer
+    // too (site_id is a direct column), but re-checking it here is harmless.
+    const passesFilters = (emp: any): boolean => {
+      if (filterDeptId  && jh(emp).department_id     !== filterDeptId)  return false
+      if (filterLocId   && jh(emp).work_location_id  !== filterLocId)   return false
+      if (filterGradeId && jh(emp).grade_id          !== filterGradeId) return false
+      if (filterGender  && genderOf(emp)             !== filterGender)  return false
       if (!filterRegion && !filterZone && !filterSiteId) return true
       const s = siteOf(emp)
       if (filterSiteId && s.id     !== filterSiteId) return false
@@ -146,8 +158,8 @@ export default async function employeesDataset(fastify: FastifyInstance) {
       return true
     }
 
-    const employees = (empData as any[]).filter(siteFilter)
-    const joiners   = (joinerData as any[]).filter(siteFilter)
+    const employees = (empData as any[]).filter(passesFilters)
+    const joiners   = (joinerData as any[]).filter(passesFilters)
 
     function getGroupKey(emp: any): { key: string; label: string } {
       const h = jh(emp)

@@ -88,12 +88,6 @@ export default async function headcountDataset(fastify: FastifyInstance) {
       .eq('tenant_id', tid)
       .eq('job_history.is_current', true)
 
-    if (deptFilter)      empQuery = empQuery.eq('job_history.department_id', deptFilter)
-    if (filterDeptId)  empQuery = empQuery.eq('job_history.department_id', filterDeptId)
-    if (filterLocId)   empQuery = empQuery.eq('job_history.work_location_id', filterLocId)
-    if (filterGradeId) empQuery = empQuery.eq('job_history.grade_id', filterGradeId)
-    if (filterGender)  empQuery = empQuery.eq('employee_personal_info.gender', filterGender)
-
     // 2) Separations in range (for exits + monthly trend)
     let sepQuery = fastify.supabase
       .from('employees')
@@ -109,13 +103,36 @@ export default async function headcountDataset(fastify: FastifyInstance) {
       // separated employees may no longer have is_current=true job_history
     }
 
-    let allEmployees: any[]
+    let fetchedEmployees: any[]
+    let allSeps: any[]
     try {
-      allEmployees = await fetchAllRows((from, to) => (empQuery as any).range(from, to))
+      fetchedEmployees = await fetchAllRows((from, to) => (empQuery as any).range(from, to))
+      allSeps          = await fetchAllRows((from, to) => (sepQuery as any).range(from, to))
     } catch (err: any) {
       return serverError(req, reply, err, ErrorCode.QUERY_FAILED, 'Failed to fetch headcount dataset')
     }
-    const allSeps: any[] = await fetchAllRows((from, to) => (sepQuery as any).range(from, to))
+
+    // Fresh audit finding: deptFilter/filterDeptId/filterLocId/filterGradeId/
+    // filterGender were previously applied at the DB layer as
+    // .eq('job_history.department_id', ...) etc. against embedded resources
+    // with no !inner — per PostgREST semantics that only nulls out the
+    // non-matching embed, it never removes the parent row, so these filters
+    // silently had no effect on the snapshot/by_department/by_group totals.
+    // Applying them in JS instead, after fetch.
+    const genderOfEmp = (emp: any): string | null => {
+      const pi = emp.employee_personal_info
+      const rec = Array.isArray(pi) ? pi[0] : pi
+      return rec?.gender ?? null
+    }
+    const allEmployees = fetchedEmployees.filter((emp) => {
+      const jh = Array.isArray(emp.job_history) ? emp.job_history[0] : emp.job_history
+      if (deptFilter    && jh?.department_id    !== deptFilter)    return false
+      if (filterDeptId  && jh?.department_id    !== filterDeptId)  return false
+      if (filterLocId   && jh?.work_location_id !== filterLocId)   return false
+      if (filterGradeId && jh?.grade_id         !== filterGradeId) return false
+      if (filterGender  && genderOfEmp(emp)     !== filterGender)  return false
+      return true
+    })
 
     // ── Snapshot counts ─────────────────────────────────────────────────────────
     const activeCount    = allEmployees.filter(e => e.status === 'active').length

@@ -176,19 +176,36 @@ export default async function payrollCostDataset(fastify: FastifyInstance) {
       slipsQuery = slipsQuery.eq('month', month).in('status', FINAL_SLIP_STATUSES)
     }
 
-    if (deptFilter) {
-      slipsQuery = slipsQuery.eq('employees.job_history.department_id', deptFilter)
-    }
-    if (filterDeptId)  slipsQuery = slipsQuery.eq('employees.job_history.department_id', filterDeptId)
-    if (filterLocId)   slipsQuery = slipsQuery.eq('employees.job_history.work_location_id', filterLocId)
-    if (filterGradeId) slipsQuery = slipsQuery.eq('employees.job_history.grade_id', filterGradeId)
-    if (filterDesgId)  slipsQuery = slipsQuery.eq('employees.job_history.designation_id', filterDesgId)
-    let slips: any[]
+    let fetchedSlips: any[]
     try {
-      slips = await fetchAllRows((from, to) => (slipsQuery as any).range(from, to))
+      fetchedSlips = await fetchAllRows((from, to) => (slipsQuery as any).range(from, to))
     } catch (err: any) {
       return serverError(req, reply, err, ErrorCode.QUERY_FAILED, 'Failed to fetch payroll cost dataset')
     }
+
+    // Fresh audit finding: department_id/filter_department_id/location_id/
+    // grade_id/designation_id were previously applied as
+    // .eq('employees.job_history.department_id', ...) etc. — two levels of
+    // embedded resource (payroll_slips -> employees!inner -> job_history, the
+    // last hop without !inner). Per PostgREST semantics that only nulls out
+    // the non-matching embed, it never removes the parent payroll_slips row,
+    // so drilling into a department/location/grade/designation silently
+    // returned the FULL unfiltered payroll cost for the month — every
+    // total_gross/total_net/total_deductions figure in the summary never
+    // shrank to the filtered dimension. Applying them in JS instead.
+    const jhOf = (slip: any) => {
+      const jhArr = slip.employees?.job_history ?? []
+      return Array.isArray(jhArr) ? jhArr.find((j: any) => j.is_current) ?? jhArr[0] ?? {} : jhArr ?? {}
+    }
+    const slips = fetchedSlips.filter((slip) => {
+      const jh = jhOf(slip)
+      if (deptFilter    && jh.department_id    !== deptFilter)    return false
+      if (filterDeptId  && jh.department_id    !== filterDeptId)  return false
+      if (filterLocId   && jh.work_location_id !== filterLocId)   return false
+      if (filterGradeId && jh.grade_id         !== filterGradeId) return false
+      if (filterDesgId  && jh.designation_id   !== filterDesgId)  return false
+      return true
+    })
 
     // ── Per-department aggregation ──────────────────────────────────────────────
     type DeptAgg = {

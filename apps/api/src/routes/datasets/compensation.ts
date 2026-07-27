@@ -70,14 +70,9 @@ export default async function compensationDataset(fastify: FastifyInstance) {
       .eq('tenant_id', tid)
       .eq('employees.status', 'active') as any
 
-    if (filterDeptId)  compQuery = compQuery.eq('employees.job_history.department_id', filterDeptId)
-    if (filterLocId)   compQuery = compQuery.eq('employees.job_history.work_location_id', filterLocId)
-    if (filterGradeId) compQuery = compQuery.eq('employees.job_history.grade_id', filterGradeId)
-    if (filterDesgId)  compQuery = compQuery.eq('employees.job_history.designation_id', filterDesgId)
-
-    let comps: any[]
+    let fetchedComps: any[]
     try {
-      comps = await fetchAllRows((from, to) => (compQuery as any).range(from, to))
+      fetchedComps = await fetchAllRows((from, to) => (compQuery as any).range(from, to))
     } catch (err: any) {
       return serverError(req, reply, err, ErrorCode.QUERY_FAILED, 'Failed to fetch compensation dataset')
     }
@@ -88,6 +83,25 @@ export default async function compensationDataset(fastify: FastifyInstance) {
       const arr = emp?.job_history
       return (Array.isArray(arr) ? arr.find((j: any) => j.is_current) ?? arr[0] : arr) ?? {}
     }
+
+    // Fresh audit finding: filter_department_id/location_id/grade_id/
+    // designation_id were previously applied as
+    // .eq('employees.job_history.department_id', ...) etc. — two levels of
+    // embedded resource (employee_compensations -> employees!inner ->
+    // job_history, the last hop without !inner). Per PostgREST semantics
+    // that only nulls out the non-matching embed, it never removes the
+    // parent employee_compensations row, so drilling into a department/
+    // location/grade/designation silently returned the FULL unfiltered
+    // compensation set — total_ctc_annual and headcount never shrank.
+    // Applying them in JS instead, after fetch.
+    const comps = fetchedComps.filter((comp) => {
+      const h = jh(comp)
+      if (filterDeptId  && h.department_id    !== filterDeptId)  return false
+      if (filterLocId   && h.work_location_id !== filterLocId)   return false
+      if (filterGradeId && h.grade_id         !== filterGradeId) return false
+      if (filterDesgId  && h.designation_id   !== filterDesgId)  return false
+      return true
+    })
 
     function getGroupKey(comp: any): { key: string; label: string } {
       const h   = jh(comp)

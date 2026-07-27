@@ -80,12 +80,9 @@ export default async function separationDataset(fastify: FastifyInstance) {
       .gte('last_working_date', fromFirst)
       .lte('last_working_date', toLast) as any
 
-    if (filterDeptId) sepQuery = sepQuery.eq('employees.job_history.department_id', filterDeptId)
-    if (filterLocId)  sepQuery = sepQuery.eq('employees.job_history.work_location_id', filterLocId)
-
-    let separations: any[]
+    let fetchedSeparations: any[]
     try {
-      separations = await fetchAllRows((from, to) => (sepQuery as any).range(from, to))
+      fetchedSeparations = await fetchAllRows((from, to) => (sepQuery as any).range(from, to))
     } catch (err: any) {
       return serverError(req, reply, err, ErrorCode.QUERY_FAILED, 'Failed to fetch separation dataset')
     }
@@ -96,6 +93,20 @@ export default async function separationDataset(fastify: FastifyInstance) {
       const arr = emp?.job_history
       return (Array.isArray(arr) ? arr.find((j: any) => j.is_current) ?? arr[0] : arr) ?? {}
     }
+
+    // Fresh audit finding: filter_department_id/location_id were previously
+    // applied as .eq('employees.job_history.department_id', ...) etc. — an
+    // embedded resource with no !inner — per PostgREST semantics that only
+    // nulls out the non-matching embed, it never removes the parent
+    // employee_separation row, so drilling into a department/location
+    // silently returned the FULL unfiltered exit set. Applying it in JS
+    // instead, after fetch.
+    const separations = fetchedSeparations.filter((sep) => {
+      const h = jh(sep)
+      if (filterDeptId && h.department_id    !== filterDeptId) return false
+      if (filterLocId  && h.work_location_id !== filterLocId)  return false
+      return true
+    })
 
     function getGroupKey(sep: any): { key: string; label: string } {
       const h = jh(sep)

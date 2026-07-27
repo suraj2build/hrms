@@ -76,15 +76,18 @@ export default async function leaveDataset(fastify: FastifyInstance) {
         )
       `)
       .eq('tenant_id', tid)
-      .eq('status', 'approved')
+      // Fresh audit finding: leave_requests.status is uppercase-only per its
+      // CHECK constraint (migration 041: PENDING/APPROVED/REJECTED/CANCELLED).
+      // This queried lowercase 'approved', which never matches — the entire
+      // /datasets/leave endpoint (Reports page's canonical leave analytics)
+      // has always returned zero rows.
+      .eq('status', 'APPROVED')
       .gte('from_date', fromFirst)
       .lte('from_date', toLast) as any
 
-    if (filterDeptId) leaveQuery = leaveQuery.eq('employees.job_history.department_id', filterDeptId)
-
-    let leaves: any[]
+    let fetchedLeaves: any[]
     try {
-      leaves = await fetchAllRows((from, to) => (leaveQuery as any).range(from, to))
+      fetchedLeaves = await fetchAllRows((from, to) => (leaveQuery as any).range(from, to))
     } catch (err: any) {
       return serverError(req, reply, err, ErrorCode.QUERY_FAILED, 'Failed to fetch leave dataset')
     }
@@ -95,6 +98,16 @@ export default async function leaveDataset(fastify: FastifyInstance) {
       const arr = emp?.job_history
       return (Array.isArray(arr) ? arr.find((j: any) => j.is_current) ?? arr[0] : arr) ?? {}
     }
+
+    // Fresh audit finding: filter_department_id was previously applied as
+    // .eq('employees.job_history.department_id', ...) against an embedded
+    // resource with no !inner — per PostgREST semantics that only nulls out
+    // the non-matching embed, it never removes the parent leave_requests
+    // row, so drilling into a department silently returned the FULL
+    // unfiltered leave set. Applying it in JS instead, after fetch.
+    const leaves = filterDeptId
+      ? fetchedLeaves.filter((leave) => jh(leave).department_id === filterDeptId)
+      : fetchedLeaves
 
     function getGroupKey(leave: any): { key: string; label: string } {
       const h = jh(leave)
