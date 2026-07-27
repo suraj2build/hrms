@@ -1,6 +1,14 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { serverError, notFound, ErrorCode } from '../../lib/api-errors.js'
+
+/** One calendar day before the given YYYY-MM-DD date, as YYYY-MM-DD. */
+function dayBefore(dateStr: string): string {
+  const d = new Date(`${dateStr}T00:00:00Z`)
+  d.setUTCDate(d.getUTCDate() - 1)
+  return d.toISOString().slice(0, 10)
+}
 
 // Empty/None selections arrive as '' or null from the form — coerce both to
 // undefined so optional uuid fields validate instead of 400-ing the whole save.
@@ -80,7 +88,7 @@ export default async function jobHistoryRoutes(fastify: FastifyInstance) {
       .eq('is_current', true)
       .single()
     if (error && error.code !== 'PGRST116')
-      return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch job info')
     return reply.send({ data: data ?? null })
   })
 
@@ -125,7 +133,7 @@ export default async function jobHistoryRoutes(fastify: FastifyInstance) {
         .eq('employee_id', req.params.id)
         .eq('tenant_id', req.tenantId)
         .order('effective_from', { ascending: false })
-      if (rawErr) return reply.code(500).send({ error: 'DB_ERROR', message: rawErr.message })
+      if (rawErr) return serverError(req, reply, rawErr, ErrorCode.QUERY_FAILED, 'Failed to fetch job history')
       return reply.send({ data: raw ?? [] })
     }
     return reply.send({ data })
@@ -140,18 +148,29 @@ export default async function jobHistoryRoutes(fastify: FastifyInstance) {
     if (!parsed.success)
       return reply.code(400).send({ error: 'VALIDATION', message: parsed.error.issues[0].message })
 
-    // Supersede the prior current row BEFORE inserting. A DB trigger is supposed
-    // to auto-close the previous current entry, but on drifted DBs it may be
-    // absent — then the new is_current=true row collides with
-    // uidx_job_history_one_current (500). Closing it here makes the insert safe
-    // regardless of whether the trigger exists.
+    // Supersede the prior current row BEFORE inserting, replicating exactly
+    // what fn_close_prev_job_history's AFTER INSERT trigger (migration 013)
+    // does: is_current=false AND effective_to=effective_from-1day. Closing
+    // is_current here (regardless of the trigger's presence) makes the
+    // insert safe from the uidx_job_history_one_current collision on
+    // drifted DBs — but a bare is_current=false pre-update also means that
+    // by the time the trigger runs, its own `WHERE is_current = true` finds
+    // nothing to close, so effective_to is never set even when the trigger
+    // IS present. Setting effective_to here too closes that gap.
     if (parsed.data.is_current !== false) {
-      await fastify.supabase
+      const { error: closeErr } = await fastify.supabase
         .from('job_history')
-        .update({ is_current: false })
+        .update({
+          is_current:   false,
+          effective_to: dayBefore(parsed.data.effective_from),
+        })
         .eq('employee_id', req.params.id)
         .eq('tenant_id', req.tenantId)
         .eq('is_current', true)
+
+      if (closeErr) {
+        return serverError(req, reply, closeErr, ErrorCode.UPDATE_FAILED, 'Failed to close previous job history entry')
+      }
     }
 
     // Insert + return the RAW row (no FK embeds). Embedding here previously made
@@ -168,7 +187,7 @@ export default async function jobHistoryRoutes(fastify: FastifyInstance) {
       })
       .select('*')
       .single()
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create job history entry')
 
     // Sync employees.manager_id when a new current job row carries a manager_id.
     // This keeps the live reporting FK in sync with job_history automatically.
@@ -187,13 +206,15 @@ export default async function jobHistoryRoutes(fastify: FastifyInstance) {
   fastify.delete('/employees/:id/job-history/:rowId', hrAdminAuth, async (req: any, reply) => {
     if (!await verifyEmployee(fastify, req.params.id, req.tenantId))
       return reply.code(404).send({ error: 'NOT_FOUND', message: 'Employee not found' })
-    const { error } = await fastify.supabase
+    const { data, error } = await fastify.supabase
       .from('job_history')
       .delete()
       .eq('id', req.params.rowId)
       .eq('employee_id', req.params.id)
       .eq('tenant_id', req.tenantId)
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+      .select('id')
+    if (error) return serverError(req, reply, error, ErrorCode.DELETE_FAILED, 'Failed to delete job history entry')
+    if (!data || data.length === 0) return notFound(reply, 'NOT_FOUND', 'Job history entry not found')
     return reply.code(204).send()
   })
 }
