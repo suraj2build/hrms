@@ -11,13 +11,16 @@
  * PATCH /security/detection-rules/:id    — enable/disable or edit rule
  * GET  /security/health                  — KPI summary
  *
- * Access: super_admin only (security events contain platform-level data).
+ * Access: hr_admin/super_admin, tenant-scoped (plus platform/null-tenant
+ * events they can already see). /detection-rules is the exception — that
+ * table is platform-global with no tenant filter, so both its routes are
+ * locked to super_admin only (see the comments at those two routes).
  */
 
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
-import { serverError, ErrorCode } from '../../lib/api-errors.js'
+import { serverError, notFound, ErrorCode } from '../../lib/api-errors.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
 
 function requireAdmin(req: any, reply: any, done: () => void) {
@@ -161,9 +164,10 @@ export default async function securityRoutes(fastify: FastifyInstance) {
     if (req.userRole !== 'super_admin') {
       upd = upd.or(`tenant_id.eq.${req.tenantId},tenant_id.is.null`)
     }
-    const { error } = await upd
+    const { data, error } = await upd.select('id').maybeSingle()
 
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update alert')
+    if (!data) return notFound(reply, 'ALERT_NOT_FOUND', 'Alert not found')
     return reply.send({ message: `Alert ${parsed.data.status}` })
   })
 
@@ -213,12 +217,15 @@ export default async function securityRoutes(fastify: FastifyInstance) {
       return reply.code(403).send({ error: 'FORBIDDEN', message: 'Only super admins can modify detection rules' })
     }
 
-    const { error } = await fastify.supabase
+    const { data, error } = await fastify.supabase
       .from('security_detection_rules')
       .update(parsed.data)
       .eq('id', id)
+      .select('id')
+      .maybeSingle()
 
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update detection rule')
+    if (!data) return notFound(reply, 'RULE_NOT_FOUND', 'Detection rule not found')
     return reply.send({ message: 'Rule updated' })
   })
 
