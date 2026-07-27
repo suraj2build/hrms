@@ -53,7 +53,7 @@ const createBodySchema = z.object({
 })
 
 const updateBodySchema = z.object({
-  status:                z.enum(['open', 'in_progress', 'escalated', 'resolved', 'closed']).optional(),
+  status:                z.enum(INCIDENT_STATUSES).optional(),
   severity:              z.enum(['low', 'medium', 'high', 'critical']).optional(),
   assigned_to:           z.string().uuid().optional(),
   resolution_note:       z.string().optional(),
