@@ -335,21 +335,24 @@ export default async function moodRoutes(fastify: FastifyInstance) {
     const nextMonthDate = new Date(new Date(targetMonth).getTime() + 32 * 86400000)
     const nextMonthStr = nextMonthDate.toISOString().slice(0, 7) + '-01'
 
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('mood_store_monthly')
       .select('work_location_id, score_month, avg_score_100, response_count')
       .eq('tenant_id', tenantId)
       .gte('score_month', targetMonth)
       .lt('score_month', nextMonthStr)
 
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch store breakdown')
+
     // Get location names
     const locIds = [...new Set((data ?? []).map((r: any) => r.work_location_id).filter(Boolean))]
     const locationNames: Record<string, string> = {}
     if (locIds.length > 0) {
-      const { data: locs } = await supabase
+      const { data: locs, error: locError } = await supabase
         .from('work_locations')
         .select('id, name')
         .in('id', locIds)
+      if (locError) return serverError(req, reply, locError, ErrorCode.QUERY_FAILED, 'Failed to fetch store breakdown')
       ;(locs ?? []).forEach((l: any) => { locationNames[l.id] = l.name })
     }
 

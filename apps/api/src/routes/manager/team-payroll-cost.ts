@@ -71,12 +71,14 @@ export default async function managerTeamPayrollCostRoute(fastify: FastifyInstan
     }
 
     // Find the payroll run for this month
-    const { data: run } = await fastify.supabase
+    const { data: run, error: runError } = await fastify.supabase
       .from('payroll_runs')
       .select('id, status')
       .eq('tenant_id', req.tenantId)
       .eq('month', month)
       .maybeSingle()
+
+    if (runError) return serverError(req, reply, runError, ErrorCode.QUERY_FAILED, 'Failed to fetch team payroll cost')
 
     if (!run) {
       return reply.send({ data: [], month, run_status: null, total: null, note: 'No payroll run for this month' })
@@ -107,19 +109,21 @@ export default async function managerTeamPayrollCostRoute(fastify: FastifyInstan
 
     // Prior-month net pay per employee → volatility = |net − prior| / prior × 100
     const priorNet = new Map<string, number>()
-    const { data: priorRun } = await fastify.supabase
+    const { data: priorRun, error: priorRunError } = await fastify.supabase
       .from('payroll_runs')
       .select('id')
       .eq('tenant_id', req.tenantId)
       .eq('month', prevMonth(month))
       .maybeSingle()
+    if (priorRunError) return serverError(req, reply, priorRunError, ErrorCode.QUERY_FAILED, 'Failed to fetch team payroll cost')
     if (priorRun) {
-      const { data: priorSlips } = await fastify.supabase
+      const { data: priorSlips, error: priorSlipsError } = await fastify.supabase
         .from('payroll_slips')
         .select('employee_id, net_pay')
         .eq('tenant_id', req.tenantId)
         .eq('run_id', (priorRun as any).id)
         .in('employee_id', employeeIds)
+      if (priorSlipsError) return serverError(req, reply, priorSlipsError, ErrorCode.QUERY_FAILED, 'Failed to fetch team payroll cost')
       for (const s of (priorSlips ?? []) as any[]) priorNet.set(s.employee_id, Number(s.net_pay ?? 0))
     }
 
