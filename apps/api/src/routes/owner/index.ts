@@ -189,20 +189,27 @@ export default async function ownerRoutes(fastify: FastifyInstance) {
   // ══════════════════════════════════════════════════════════════════════════════
 
   fastify.get('/owner/dashboard', ownerAuth, async (_req, reply) => {
-    const [tenantsRes, requestsRes, keysRes, billingRes] = await Promise.all([
-      fastify.supabase.from('tenants').select('id, status, plan, per_employee_rate, trial_ends_at'),
-      fastify.supabase.from('tenant_signup_requests').select('id, status'),
-      fastify.supabase.from('tenant_api_keys').select('id, is_active').eq('is_active', true),
-      fastify.supabase
-        .from('tenant_billing_snapshots')
-        .select('amount_due')
-        .gte('created_at', new Date(Date.now() - 30 * 86400_000).toISOString()),
+    // Paginated — a plain .select() truncates at PostgREST's 1,000-row
+    // ceiling once the platform crosses that many tenants/requests/keys/
+    // billing snapshots, silently under-reporting the counts and MRR below.
+    const [tenants, requests, keys, billing] = await Promise.all([
+      fetchAllRows<{ id: string; status: string; plan: string; per_employee_rate: number; trial_ends_at: string | null }>((from, to) =>
+        fastify.supabase.from('tenants').select('id, status, plan, per_employee_rate, trial_ends_at').range(from, to),
+      ),
+      fetchAllRows<{ id: string; status: string }>((from, to) =>
+        fastify.supabase.from('tenant_signup_requests').select('id, status').range(from, to),
+      ),
+      fetchAllRows<{ id: string; is_active: boolean }>((from, to) =>
+        fastify.supabase.from('tenant_api_keys').select('id, is_active').eq('is_active', true).range(from, to),
+      ),
+      fetchAllRows<{ amount_due: number }>((from, to) =>
+        fastify.supabase
+          .from('tenant_billing_snapshots')
+          .select('amount_due')
+          .gte('created_at', new Date(Date.now() - 30 * 86400_000).toISOString())
+          .range(from, to),
+      ),
     ])
-
-    const tenants  = tenantsRes.data  ?? []
-    const requests = requestsRes.data ?? []
-    const keys     = keysRes.data     ?? []
-    const billing  = billingRes.data  ?? []
 
     const mrr = billing.reduce((s, b) => s + Number(b.amount_due ?? 0), 0)
 
@@ -771,23 +778,42 @@ export default async function ownerRoutes(fastify: FastifyInstance) {
       .single()
 
     if (reqErr || !reqData) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Request not found' })
-    if (reqData.status !== 'pending') {
-      return reply.code(409).send({ error: 'CONFLICT', message: `Request is already ${reqData.status}` })
-    }
+
+    // Atomically claim the request before creating the tenant — folding the
+    // pending-status guard into this UPDATE's own WHERE clause (not just the
+    // read above) prevents two concurrent approvals (double-click, two
+    // admins, retry-after-timeout) from both passing their read-time check:
+    // previously each would create its own tenant row, and whichever final
+    // update ran last would silently overwrite the other's tenant_id,
+    // leaving an orphaned tenant occupying a billing/license slot.
+    const { data: claimed, error: claimErr } = await fastify.supabase
+      .from('tenant_signup_requests')
+      .update({
+        status:      'approved',
+        reviewed_by: req.platformAdminId,
+        reviewed_at: new Date().toISOString(),
+      })
+      .eq('id', id)
+      .eq('status', 'pending')
+      .select('*')
+      .maybeSingle()
+
+    if (claimErr) return serverError(req, reply, claimErr, ErrorCode.UPDATE_FAILED, 'Failed to claim signup request')
+    if (!claimed) return reply.code(409).send({ error: 'CONFLICT', message: `Request is already ${reqData.status}` })
 
     // Create tenant
-    const slug = slugify(reqData.company_name) + '-' + Date.now().toString(36)
+    const slug = slugify(claimed.company_name) + '-' + Date.now().toString(36)
     const { plan, per_employee_rate } = parsed.data
 
     const { data: tenant, error: tenantErr } = await fastify.supabase
       .from('tenants')
       .insert({
-        name:               reqData.company_name,
+        name:               claimed.company_name,
         slug,
         plan,
         per_employee_rate,
-        billing_email:      reqData.contact_email,
-        country:            reqData.country,
+        billing_email:      claimed.contact_email,
+        country:            claimed.country,
         status:             'trial',
         trial_ends_at:      new Date(Date.now() + 30 * 86400_000).toISOString(),
         onboarded_by:       req.platformAdminId,
@@ -798,16 +824,14 @@ export default async function ownerRoutes(fastify: FastifyInstance) {
 
     if (tenantErr) return serverError(req, reply, tenantErr, ErrorCode.INSERT_FAILED, 'Failed to create tenant from signup request')
 
-    // Update request status
-    await fastify.supabase
+    // Link tenant_id onto the already-approved request. If this fails, the
+    // request stays approved without a linked tenant_id — recoverable
+    // manually, and strictly better than the duplicate-tenant race above.
+    const { error: linkErr } = await fastify.supabase
       .from('tenant_signup_requests')
-      .update({
-        status:      'approved',
-        reviewed_by: req.platformAdminId,
-        reviewed_at: new Date().toISOString(),
-        tenant_id:   tenant.id,
-      })
+      .update({ tenant_id: tenant.id })
       .eq('id', id)
+    if (linkErr) req.log.error({ err: linkErr, requestId: id, tenantId: tenant.id }, 'failed to link tenant_id onto approved signup request')
 
     return reply.code(201).send({ data: { request_id: id, tenant } })
   })
@@ -849,20 +873,28 @@ export default async function ownerRoutes(fastify: FastifyInstance) {
     const tenantId  = q.tenant_id ?? null
     const activeOnly = q.active !== 'false'
 
-    let query = fastify.supabase
-      .from('tenant_api_keys')
-      .select(`
-        id, tenant_id, name, key_prefix, scopes, last_used_at,
-        expires_at, is_active, created_at,
-        created_by (id, name)
-      `)
-      .order('created_at', { ascending: false })
+    let data: any[]
+    try {
+      // Paginated — a plain .select() truncates at PostgREST's 1,000-row
+      // ceiling once the platform has issued more than 1,000 API keys.
+      data = await fetchAllRows((from, to) => {
+        let query = fastify.supabase
+          .from('tenant_api_keys')
+          .select(`
+            id, tenant_id, name, key_prefix, scopes, last_used_at,
+            expires_at, is_active, created_at,
+            created_by (id, name)
+          `)
+          .order('created_at', { ascending: false })
 
-    if (tenantId)  query = query.eq('tenant_id', tenantId)
-    if (activeOnly) query = query.eq('is_active', true)
+        if (tenantId)   query = query.eq('tenant_id', tenantId)
+        if (activeOnly) query = query.eq('is_active', true)
 
-    const { data, error } = await query
-    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch API keys')
+        return query.range(from, to)
+      })
+    } catch (error: any) {
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch API keys')
+    }
 
     return reply.send({ data })
   })
@@ -1219,19 +1251,20 @@ export default async function ownerRoutes(fastify: FastifyInstance) {
   // Returns live running stats for every tenant:
   //   employee_count, active_users, last_payroll_run (date + status), last_activity
   fastify.get('/owner/tenant-health', ownerAuth, async (_req, reply) => {
-    // Fetch in parallel
-    const [employeesRes, profilesRes, payrollRes] = await Promise.all([
-      // Active employee counts per tenant
-      fastify.supabase
-        .from('employees')
-        .select('tenant_id')
-        .eq('status', 'active'),
-
-      // Active profile (user) counts per tenant
-      fastify.supabase
-        .from('profiles')
-        .select('tenant_id')
-        .eq('is_active', true),
+    // employees/profiles are paginated — a plain .select() spans ALL tenants
+    // combined here (no per-tenant scoping), so PostgREST's 1,000-row
+    // ceiling is reached even sooner than a single-tenant query; some
+    // active tenants would otherwise silently show employee_count/
+    // active_users of 0. payroll_runs keeps its bounded top-500 (a
+    // separate, lower-severity "not truly per-tenant" issue, not the
+    // truncation class this fixes).
+    const [employees, profiles, payrollRes] = await Promise.all([
+      fetchAllRows<{ tenant_id: string }>((from, to) =>
+        fastify.supabase.from('employees').select('tenant_id').eq('status', 'active').range(from, to),
+      ),
+      fetchAllRows<{ tenant_id: string; last_sign_in_at?: string | null }>((from, to) =>
+        fastify.supabase.from('profiles').select('tenant_id').eq('is_active', true).range(from, to),
+      ),
 
       // Latest payroll run per tenant (most recent created_at)
       fastify.supabase
@@ -1243,13 +1276,13 @@ export default async function ownerRoutes(fastify: FastifyInstance) {
 
     // Build per-tenant stats maps
     const empCount: Record<string, number>   = {}
-    for (const e of (employeesRes.data ?? [])) {
+    for (const e of employees) {
       empCount[e.tenant_id] = (empCount[e.tenant_id] ?? 0) + 1
     }
 
     const userCount: Record<string, number>     = {}
     const lastLogin: Record<string, string|null> = {}
-    for (const p of ((profilesRes.data ?? []) as any[])) {
+    for (const p of (profiles as any[])) {
       userCount[p.tenant_id] = (userCount[p.tenant_id] ?? 0) + 1
       // last_sign_in_at is not tracked on profiles (lives in auth.users) → null
       const existing = lastLogin[p.tenant_id]
