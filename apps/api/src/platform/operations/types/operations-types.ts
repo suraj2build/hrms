@@ -88,7 +88,7 @@ export interface SlaBreachEvent {
   explainability?: ExplainabilityResult
 }
 
-export type SimulationType = 'payroll_impact' | 'compliance_threshold' | 'workforce_overtime' | 'policy_change'
+export type SimulationType = 'payroll_impact' | 'compliance_threshold' | 'workforce_overtime' | 'policy_change' | 'governance_drift_projection'
 
 export interface SimulationRun {
   id?:              string

@@ -82,7 +82,7 @@ export class UnifiedSimulationService {
 
     return {
       tenant_id:          params.tenant_id,
-      simulation_type: 'policy_change',
+      simulation_type: 'governance_drift_projection',
       label:           `Governance drift projection: ${params.weeks_ahead} weeks (${params.trend_direction})`,
       input_params:    params as unknown as Record<string, unknown>,
       result_summary: {
