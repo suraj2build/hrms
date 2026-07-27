@@ -30,6 +30,7 @@ import {
   type ActiveFreeze,
 } from '../../lib/leave-accrual-lifecycle-engine.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { serverError, notFound, conflictError, ErrorCode } from '../../lib/api-errors.js'
 
 const dateRe = /^\d{4}-\d{2}-\d{2}$/
 
@@ -141,6 +142,33 @@ export default async function leaveAccrualLifecycleRoutes(fastify: FastifyInstan
       return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
     }
 
+    // employee_id/leave_type_id come from the request body — verify both
+    // belong to this tenant before inserting, so a caller can't freeze
+    // accrual for an employee (or reference a leave type) in another tenant.
+    const { data: emp } = await fastify.supabase
+      .from('employees')
+      .select('id')
+      .eq('id', parsed.data.employee_id)
+      .eq('tenant_id', req.tenantId)
+      .maybeSingle()
+
+    if (!emp) {
+      return notFound(reply, 'EMPLOYEE_NOT_FOUND', 'Employee not found')
+    }
+
+    if (parsed.data.leave_type_id) {
+      const { data: leaveType } = await fastify.supabase
+        .from('leave_types')
+        .select('id')
+        .eq('id', parsed.data.leave_type_id)
+        .eq('tenant_id', req.tenantId)
+        .maybeSingle()
+
+      if (!leaveType) {
+        return notFound(reply, 'LEAVE_TYPE_NOT_FOUND', 'Leave type not found')
+      }
+    }
+
     const { data: freeze, error } = await fastify.supabase
       .from('leave_accrual_freezes')
       .insert({
@@ -157,7 +185,7 @@ export default async function leaveAccrualLifecycleRoutes(fastify: FastifyInstan
       .single()
 
     if (error) {
-      return reply.code(500).send({ error: 'DB_ERROR', message: 'Failed to create freeze' })
+      return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create freeze')
     }
 
     return reply.code(201).send({ data: freeze })
@@ -207,13 +235,13 @@ export default async function leaveAccrualLifecycleRoutes(fastify: FastifyInstan
       .maybeSingle()
 
     if (!freeze) {
-      return reply.code(404).send({ error: 'NOT_FOUND', message: 'Freeze not found' })
-    }
-    if ((freeze as any).status !== 'active') {
-      return reply.code(409).send({ error: 'CONFLICT', message: 'Freeze is not active' })
+      return notFound(reply, 'NOT_FOUND', 'Freeze not found')
     }
 
-    const { data: updated } = await fastify.supabase
+    // Fold status='active' into the UPDATE's own WHERE clause — the read
+    // above is only for a friendly 404 vs 409 distinction; a concurrent
+    // lift request can't race past this and double-lift the same freeze.
+    const { data: updated, error } = await fastify.supabase
       .from('leave_accrual_freezes')
       .update({
         status:    'lifted',
@@ -223,8 +251,16 @@ export default async function leaveAccrualLifecycleRoutes(fastify: FastifyInstan
       })
       .eq('id', freezeId)
       .eq('tenant_id', req.tenantId)
+      .eq('status', 'active')
       .select()
-      .single()
+      .maybeSingle()
+
+    if (error) {
+      return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to lift freeze')
+    }
+    if (!updated) {
+      return conflictError(reply, 'CONFLICT', 'Freeze is not active')
+    }
 
     return reply.send({ data: updated })
   })
@@ -293,7 +329,7 @@ export default async function leaveAccrualLifecycleRoutes(fastify: FastifyInstan
       .single()
 
     if (error) {
-      return reply.code(500).send({ error: 'DB_ERROR', message: 'Failed to create tier' })
+      return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create tier')
     }
 
     return reply.code(201).send({ data: tier })
@@ -349,7 +385,7 @@ export default async function leaveAccrualLifecycleRoutes(fastify: FastifyInstan
       .eq('tenant_id', req.tenantId)
 
     if (error) {
-      return reply.code(500).send({ error: 'DB_ERROR', message: 'Failed to delete tier' })
+      return serverError(req, reply, error, ErrorCode.DELETE_FAILED, 'Failed to delete tier')
     }
 
     return reply.code(204).send()
@@ -497,32 +533,43 @@ export default async function leaveAccrualLifecycleRoutes(fastify: FastifyInstan
     const errors   = []
 
     for (const entry of entries as any[]) {
-      try {
-        // Insert release event
-        await fastify.supabase.from('leave_entitlement_releases').insert({
-          tenant_id:         req.tenantId,
-          employee_id:       entry.employee_id,
-          leave_type_id:     entry.leave_type_id,
-          ledger_entry_id:   entry.id,
-          cycle_period:      entry.cycle_period ?? `${entry.year}`,
-          days_released:     entry.days,
-          release_trigger:   'manual_release',
-          trigger_reference: parsed.data.trigger_reference ?? null,
-          released_at:       new Date().toISOString(),
-          released_by:       req.userId,
-          notes:             parsed.data.notes ?? null,
-        })
+      // Insert release event — checked explicitly because supabase-js
+      // never throws on a DB error, so the surrounding try/catch alone
+      // can't catch a failed audit-trail insert. Without this check, a
+      // failed insert still fell through to clearing the hold date below,
+      // reporting the credit as released with zero audit record.
+      const { error: releaseErr } = await fastify.supabase.from('leave_entitlement_releases').insert({
+        tenant_id:         req.tenantId,
+        employee_id:       entry.employee_id,
+        leave_type_id:     entry.leave_type_id,
+        ledger_entry_id:   entry.id,
+        cycle_period:      entry.cycle_period ?? `${entry.year}`,
+        days_released:     entry.days,
+        release_trigger:   'manual_release',
+        trigger_reference: parsed.data.trigger_reference ?? null,
+        released_at:       new Date().toISOString(),
+        released_by:       req.userId,
+        notes:             parsed.data.notes ?? null,
+      })
 
-        // Clear the hold date
-        await fastify.supabase
-          .from('leave_accrual_ledger')
-          .update({ consumption_eligible_from: null })
-          .eq('id', entry.id)
-
-        released.push(entry.id)
-      } catch (err: any) {
-        errors.push(`Entry ${entry.id}: ${err?.message ?? 'unknown'}`)
+      if (releaseErr) {
+        errors.push(`Entry ${entry.id}: failed to record release audit trail`)
+        continue
       }
+
+      // Clear the hold date
+      const { error: clearErr } = await fastify.supabase
+        .from('leave_accrual_ledger')
+        .update({ consumption_eligible_from: null })
+        .eq('id', entry.id)
+        .eq('tenant_id', req.tenantId)
+
+      if (clearErr) {
+        errors.push(`Entry ${entry.id}: failed to clear hold date`)
+        continue
+      }
+
+      released.push(entry.id)
     }
 
     return reply.send({
