@@ -71,7 +71,7 @@ export default async function companySettingsRoutes(fastify: FastifyInstance) {
     industry:   z.string().optional(),
     size_range: z.string().optional(),
     country:    z.string().optional(),
-    timezone:   z.string().optional(),
+    timezone:   z.string().min(1, 'timezone must not be empty').optional(),
     logo_url:   z.string().optional().nullable(),
     settings:   z.record(z.unknown()).optional(),
   }).passthrough()
