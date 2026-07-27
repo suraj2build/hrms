@@ -581,9 +581,19 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
   fastify.get('/employee/:id/insights', { preHandler: [fastify.authenticate] }, async (req: any, reply) => {
     const tenantId: string = req.tenantId
     const { id: employeeId } = req.params as { id: string }
-    if (req.userRole === 'employee') {
-      const { data: prof } = await fastify.supabase.from('profiles').select('employee_id').eq('id', req.userId).eq('tenant_id', tenantId).maybeSingle()
-      if (!prof || prof.employee_id !== employeeId) return reply.code(403).send({ error: 'FORBIDDEN' })
+    // Self, HR admin, or a manager viewing one of their own direct reports —
+    // any other role (including 'manager' targeting a non-report) is blocked.
+    // Matches the fix already applied to the sibling /employee/:id/360 route:
+    // only checking req.userRole === 'employee' let any manager pull any
+    // employee's separation stage/probation status/assigned-asset count by id.
+    if (!isHrAdmin(req.userRole)) {
+      const myEmployeeId = await resolveCallerEmployeeId(fastify.supabase, req.userId, tenantId)
+      const isSelf = !!myEmployeeId && myEmployeeId === employeeId
+      let isManagerOfTarget = false
+      if (!isSelf && req.userRole === 'manager' && myEmployeeId) {
+        isManagerOfTarget = await isDirectReport(fastify.supabase, tenantId, myEmployeeId, employeeId)
+      }
+      if (!isSelf && !isManagerOfTarget) return reply.code(403).send({ error: 'FORBIDDEN' })
     }
     try {
       const now           = new Date()

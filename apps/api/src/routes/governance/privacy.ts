@@ -210,13 +210,16 @@ export default async function privacyRoutes(fastify: FastifyInstance) {
       update.completed_by = req.userId
     }
 
-    const { error } = await fastify.supabase
+    const { data, error } = await fastify.supabase
       .from('erasure_requests')
       .update(update)
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
+      .select('id')
+      .maybeSingle()
 
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update erasure request')
+    if (!data) return notFound(reply, 'ERASURE_REQUEST_NOT_FOUND', 'Erasure request not found')
     return reply.send({ message: 'Erasure request updated' })
   })
 

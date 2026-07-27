@@ -205,9 +205,10 @@ export default async function trustIntelligenceRoutes(fastify: FastifyInstance) 
       .order('ingested_at', { ascending: false })
       .limit(100)
     if (status) q = q.eq('status', status)
-    // Scope to this tenant's events plus platform-wide (org_id IS NULL) entries
+    // Scope to this tenant's events plus platform-wide (tenant_id IS NULL) entries.
+    // Column was org_id → renamed to tenant_id by migration 350.
     const tenantId = (req as any).tenantId
-    q = q.or(`org_id.eq.${tenantId},org_id.is.null`)
+    q = q.or(`tenant_id.eq.${tenantId},tenant_id.is.null`)
     const { data, error } = await q
     if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch regulatory revisions')
     return { revisions: data ?? [], total: (data ?? []).length }
