@@ -17,6 +17,8 @@ import {
   pairPunches,
   resolveAttendanceBusinessDate,
 } from '../../lib/work-session-engine.js'
+import { fetchAllRows } from '../../lib/supabase-paginate.js'
+import { serverError, notFound, conflictError, ErrorCode } from '../../lib/api-errors.js'
 
 // ── Body schemas ─────────────────────────────────────────────────────────────
 
@@ -111,7 +113,7 @@ export default async function workSessionRoutes(fastify: FastifyInstance) {
       .order('attendance_date', { ascending: true })
       .order('session_start', { ascending: true })
 
-    if (error) return reply.code(500).send({ error: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch work sessions')
     return reply.send({ data })
   })
 
@@ -130,8 +132,7 @@ export default async function workSessionRoutes(fastify: FastifyInstance) {
       const report = await buildDaySessionReport(supabase, tenantId, employeeId, date)
       return reply.send({ data: report })
     } catch (err: unknown) {
-      req.log.error({ err, tenantId, employeeId, date }, '[work-sessions] failed to build day session report')
-      return reply.code(500).send({ error: 'SESSION_REPORT_ERROR', message: 'Failed to build day session report' })
+      return serverError(req, reply, err, ErrorCode.COMPUTE_FAILED, 'Failed to build day session report')
     }
   })
 
@@ -147,24 +148,30 @@ export default async function workSessionRoutes(fastify: FastifyInstance) {
 
     const { start, end } = monthRange(month)
 
-    const { data: sessions, error } = await supabase
-      .from('work_sessions')
-      .select(`
-        id,
-        employee_id,
-        attendance_date,
-        session_start,
-        session_end,
-        source,
-        employees!inner ( first_name, last_name, employee_code )
-      `)
-      .eq('tenant_id', tenantId)
-      .gte('attendance_date', start)
-      .lte('attendance_date', end)
-      .is('session_end', null)
-      .order('attendance_date', { ascending: true })
-
-    if (error) return reply.code(500).send({ error: error.message })
+    let sessions: any[]
+    try {
+      sessions = await fetchAllRows((from, to) =>
+        supabase
+          .from('work_sessions')
+          .select(`
+            id,
+            employee_id,
+            attendance_date,
+            session_start,
+            session_end,
+            source,
+            employees!inner ( first_name, last_name, employee_code )
+          `)
+          .eq('tenant_id', tenantId)
+          .gte('attendance_date', start)
+          .lte('attendance_date', end)
+          .is('session_end', null)
+          .order('attendance_date', { ascending: true })
+          .range(from, to),
+      )
+    } catch (error) {
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch missing-punch sessions')
+    }
 
     const result = (sessions ?? []).map((s: any) => ({
       employee_id:    s.employee_id,
@@ -191,16 +198,22 @@ export default async function workSessionRoutes(fastify: FastifyInstance) {
 
     const { start, end } = monthRange(month)
 
-    const { data, error } = await supabase
-      .from('work_sessions')
-      .select('*')
-      .eq('tenant_id', tenantId)
-      .eq('is_cross_midnight', true)
-      .gte('attendance_date', start)
-      .lte('attendance_date', end)
-      .order('session_start', { ascending: true })
-
-    if (error) return reply.code(500).send({ error: error.message })
+    let data: any[]
+    try {
+      data = await fetchAllRows((from, to) =>
+        supabase
+          .from('work_sessions')
+          .select('*')
+          .eq('tenant_id', tenantId)
+          .eq('is_cross_midnight', true)
+          .gte('attendance_date', start)
+          .lte('attendance_date', end)
+          .order('session_start', { ascending: true })
+          .range(from, to),
+      )
+    } catch (error) {
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch cross-midnight sessions')
+    }
     return reply.send({ data: await attachEmployeeLabels(supabase, tenantId, data) })
   })
 
@@ -216,16 +229,22 @@ export default async function workSessionRoutes(fastify: FastifyInstance) {
 
     const { start, end } = monthRange(month)
 
-    const { data, error } = await supabase
-      .from('work_sessions')
-      .select('*')
-      .eq('tenant_id', tenantId)
-      .eq('payroll_locked', true)
-      .gte('attendance_date', start)
-      .lte('attendance_date', end)
-      .order('attendance_date', { ascending: true })
-
-    if (error) return reply.code(500).send({ error: error.message })
+    let data: any[]
+    try {
+      data = await fetchAllRows((from, to) =>
+        supabase
+          .from('work_sessions')
+          .select('*')
+          .eq('tenant_id', tenantId)
+          .eq('payroll_locked', true)
+          .gte('attendance_date', start)
+          .lte('attendance_date', end)
+          .order('attendance_date', { ascending: true })
+          .range(from, to),
+      )
+    } catch (error) {
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch locked sessions')
+    }
     return reply.send({ data: await attachEmployeeLabels(supabase, tenantId, data) })
   })
 
@@ -241,20 +260,26 @@ export default async function workSessionRoutes(fastify: FastifyInstance) {
 
     const { start, end } = monthRange(month)
 
-    const { data: sessions, error } = await supabase
-      .from('work_sessions')
-      .select(`
-        employee_id,
-        attendance_date,
-        overtime_minutes,
-        employees!inner ( first_name, last_name, employee_code )
-      `)
-      .eq('tenant_id', tenantId)
-      .gte('attendance_date', start)
-      .lte('attendance_date', end)
-      .order('attendance_date', { ascending: true })
-
-    if (error) return reply.code(500).send({ error: error.message })
+    let sessions: any[]
+    try {
+      sessions = await fetchAllRows((from, to) =>
+        supabase
+          .from('work_sessions')
+          .select(`
+            employee_id,
+            attendance_date,
+            overtime_minutes,
+            employees!inner ( first_name, last_name, employee_code )
+          `)
+          .eq('tenant_id', tenantId)
+          .gte('attendance_date', start)
+          .lte('attendance_date', end)
+          .order('attendance_date', { ascending: true })
+          .range(from, to),
+      )
+    } catch (error) {
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch OT heatmap sessions')
+    }
 
     // Aggregate per employee
     const map = new Map<string, {
@@ -299,27 +324,33 @@ export default async function workSessionRoutes(fastify: FastifyInstance) {
 
     const { start, end } = monthRange(month)
 
-    const { data: anomalies, error } = await supabase
-      .from('work_session_anomalies')
-      .select(`
-        id,
-        employee_id,
-        anomaly_type,
-        severity,
-        session_id,
-        punch_ids,
-        detail,
-        created_at,
-        resolved,
-        employees!inner ( first_name, last_name, employee_code )
-      `)
-      .eq('tenant_id', tenantId)
-      .eq('resolved', false)
-      .gte('created_at', `${start}T00:00:00.000Z`)
-      .lte('created_at', `${end}T23:59:59.999Z`)
-      .order('created_at', { ascending: false })
-
-    if (error) return reply.code(500).send({ error: error.message })
+    let anomalies: any[]
+    try {
+      anomalies = await fetchAllRows((from, to) =>
+        supabase
+          .from('work_session_anomalies')
+          .select(`
+            id,
+            employee_id,
+            anomaly_type,
+            severity,
+            session_id,
+            punch_ids,
+            detail,
+            created_at,
+            resolved,
+            employees!inner ( first_name, last_name, employee_code )
+          `)
+          .eq('tenant_id', tenantId)
+          .eq('resolved', false)
+          .gte('created_at', `${start}T00:00:00.000Z`)
+          .lte('created_at', `${end}T23:59:59.999Z`)
+          .order('created_at', { ascending: false })
+          .range(from, to),
+      )
+    } catch (error) {
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch compliance-risk anomalies')
+    }
 
     const map = new Map<string, {
       employee_id: string
@@ -362,8 +393,7 @@ export default async function workSessionRoutes(fastify: FastifyInstance) {
     try {
       report = await buildDaySessionReport(supabase, tenantId, employee_id, date)
     } catch (err: unknown) {
-      req.log.error({ err, tenantId, employee_id, date }, '[work-sessions] failed to build day session report for pairing')
-      return reply.code(500).send({ error: 'SESSION_REPORT_ERROR', message: 'Failed to build day session report' })
+      return serverError(req, reply, err, ErrorCode.COMPUTE_FAILED, 'Failed to build day session report')
     }
 
     // Build upsert payload from the day report's sessions
@@ -399,7 +429,7 @@ export default async function workSessionRoutes(fastify: FastifyInstance) {
       upsertError = error
     }
 
-    if (upsertError) return reply.code(500).send({ error: upsertError.message })
+    if (upsertError) return serverError(req, reply, upsertError, ErrorCode.UPDATE_FAILED, 'Failed to save work sessions')
 
     return reply.send({
       data: {
@@ -420,16 +450,19 @@ export default async function workSessionRoutes(fastify: FastifyInstance) {
     const { payroll_run_id } = parsed.data
     const tenantId = req.tenantId as string
 
-    // Check current state
+    // Check current state for a friendly 404 vs 409 distinction — the
+    // authoritative guard is the .eq('payroll_locked', false) folded into
+    // the UPDATE's own WHERE clause below, so a concurrent lock request
+    // can't race this pre-check and still land.
     const { data: existing, error: fetchError } = await supabase
       .from('work_sessions')
       .select('id, payroll_locked')
       .eq('id', sessionId)
       .eq('tenant_id', tenantId)
-      .single()
+      .maybeSingle()
 
-    if (fetchError || !existing) return reply.code(404).send({ error: 'Session not found' })
-    if (existing.payroll_locked) return reply.code(409).send({ error: 'Session already locked' })
+    if (fetchError) return serverError(req, reply, fetchError, ErrorCode.QUERY_FAILED, 'Failed to fetch session')
+    if (!existing) return notFound(reply, 'SESSION_NOT_FOUND', 'Session not found')
 
     const updatePayload: Record<string, unknown> = {
       payroll_locked:    true,
@@ -437,13 +470,17 @@ export default async function workSessionRoutes(fastify: FastifyInstance) {
     }
     if (payroll_run_id !== undefined) updatePayload.payroll_run_id = payroll_run_id
 
-    const { error: updateError } = await supabase
+    const { data: updated, error: updateError } = await supabase
       .from('work_sessions')
       .update(updatePayload)
       .eq('id', sessionId)
       .eq('tenant_id', tenantId)
+      .eq('payroll_locked', false)
+      .select('id')
+      .maybeSingle()
 
-    if (updateError) return reply.code(500).send({ error: updateError.message })
+    if (updateError) return serverError(req, reply, updateError, ErrorCode.UPDATE_FAILED, 'Failed to lock session')
+    if (!updated) return conflictError(reply, 'ALREADY_LOCKED', 'Session already locked')
     return reply.send({ data: { locked: true } })
   })
 
@@ -455,18 +492,20 @@ export default async function workSessionRoutes(fastify: FastifyInstance) {
     const { sessionId } = req.params as { sessionId: string }
     const tenantId = req.tenantId as string
 
-    // Check current state
+    // Check current state for a friendly 404 vs 409 distinction — the
+    // authoritative guard is the .eq('payroll_locked', true) folded into
+    // the UPDATE's own WHERE clause below.
     const { data: existing, error: fetchError } = await supabase
       .from('work_sessions')
       .select('id, payroll_locked')
       .eq('id', sessionId)
       .eq('tenant_id', tenantId)
-      .single()
+      .maybeSingle()
 
-    if (fetchError || !existing) return reply.code(404).send({ error: 'Session not found' })
-    if (!existing.payroll_locked) return reply.code(400).send({ error: 'Session is not locked' })
+    if (fetchError) return serverError(req, reply, fetchError, ErrorCode.QUERY_FAILED, 'Failed to fetch session')
+    if (!existing) return notFound(reply, 'SESSION_NOT_FOUND', 'Session not found')
 
-    const { error: updateError } = await supabase
+    const { data: updated, error: updateError } = await supabase
       .from('work_sessions')
       .update({
         payroll_locked:    false,
@@ -475,8 +514,12 @@ export default async function workSessionRoutes(fastify: FastifyInstance) {
       })
       .eq('id', sessionId)
       .eq('tenant_id', tenantId)
+      .eq('payroll_locked', true)
+      .select('id')
+      .maybeSingle()
 
-    if (updateError) return reply.code(500).send({ error: updateError.message })
+    if (updateError) return serverError(req, reply, updateError, ErrorCode.UPDATE_FAILED, 'Failed to unlock session')
+    if (!updated) return conflictError(reply, 'NOT_LOCKED', 'Session is not locked')
     return reply.send({ data: { unlocked: true } })
   })
 
@@ -545,7 +588,7 @@ export default async function workSessionRoutes(fastify: FastifyInstance) {
     }
 
     const { data, error } = await query
-    if (error) return reply.code(500).send({ error: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch work session anomalies')
 
     // Always enrich with employee name + code so the UI shows a human identifier
     // (name · CODE) rather than a raw UUID. work_session_anomalies does not store
@@ -597,13 +640,16 @@ export default async function workSessionRoutes(fastify: FastifyInstance) {
     }
     if (resolution_note !== undefined) updatePayload.resolution_note = resolution_note
 
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from('work_session_anomalies')
       .update(updatePayload)
       .eq('id', id)
       .eq('tenant_id', tenantId)
+      .select('id')
+      .maybeSingle()
 
-    if (error) return reply.code(500).send({ error: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to resolve anomaly')
+    if (!data) return notFound(reply, 'ANOMALY_NOT_FOUND', 'Work session anomaly not found')
     return reply.send({ data: { resolved: true } })
   })
 }
