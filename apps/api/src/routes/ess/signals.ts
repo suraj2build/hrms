@@ -86,8 +86,11 @@ export default async function essSignalsRoutes(fastify: FastifyInstance) {
               .then(r => r.data as any), null)
           : Promise.resolve(null),
         employeeId
+          // Fresh audit finding: leave_requests.status is uppercase-only per
+          // its CHECK constraint (migration 041) — this compared against
+          // lowercase 'pending', so this signal always read 0.
           ? safe(fastify.supabase.from('leave_requests').select('id', { count: 'exact', head: true })
-              .eq('employee_id', employeeId).eq('tenant_id', tenantId).eq('status', 'pending')
+              .eq('employee_id', employeeId).eq('tenant_id', tenantId).eq('status', 'PENDING')
               .then(r => r.count ?? 0), 0)
           : Promise.resolve(0),
         employeeId
@@ -115,9 +118,10 @@ export default async function essSignalsRoutes(fastify: FastifyInstance) {
                 ids = await getDirectReportIds(fastify.supabase, tenantId, employeeId)
                 if (!ids.length) return [] as any[]
               }
+              // Fresh audit finding: same uppercase-only status fix as above.
               let q = fastify.supabase.from('leave_requests')
                 .select('id, employee_id, from_date, to_date, leave_types(name)')
-                .eq('tenant_id', tenantId).eq('status', 'pending').order('from_date').limit(6)
+                .eq('tenant_id', tenantId).eq('status', 'PENDING').order('from_date').limit(6)
               if (ids) q = q.in('employee_id', ids)
               const { data } = await q
               return (data ?? []) as any[]

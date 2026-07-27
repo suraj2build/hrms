@@ -172,11 +172,13 @@ export default async function essHomeRoutes(fastify: FastifyInstance) {
         .order('created_at', { ascending: false })
         .limit(3),
 
-      // 9. My pending leave count
+      // 9. My pending leave count. Fresh audit finding: leave_requests.status
+      // is uppercase-only per its CHECK constraint (migration 041) — this
+      // compared against lowercase 'pending', so this KPI always read 0.
       employeeId
         ? fastify.supabase.from('leave_requests')
             .select('id', { count: 'exact', head: true })
-            .eq('employee_id', employeeId).eq('tenant_id', tenantId).eq('status', 'pending')
+            .eq('employee_id', employeeId).eq('tenant_id', tenantId).eq('status', 'PENDING')
         : Promise.resolve({ count: 0 }),
 
       // 10. My pending regularisation count
@@ -260,7 +262,7 @@ export default async function essHomeRoutes(fastify: FastifyInstance) {
         if (reportIds.length > 0) {
           const [la, ra] = await Promise.all([
             fastify.supabase.from('leave_requests').select('id', { count: 'exact', head: true })
-              .eq('tenant_id', tenantId).eq('status', 'pending').in('employee_id', reportIds),
+              .eq('tenant_id', tenantId).eq('status', 'PENDING').in('employee_id', reportIds),
             fastify.supabase.from('attendance_regularisation').select('id', { count: 'exact', head: true })
               .eq('tenant_id', tenantId).eq('status', 'pending').in('employee_id', reportIds),
           ])
@@ -270,7 +272,7 @@ export default async function essHomeRoutes(fastify: FastifyInstance) {
         // hr_admin / super_admin: tenant-wide count is appropriate
         const [la, ra] = await Promise.all([
           fastify.supabase.from('leave_requests').select('id', { count: 'exact', head: true })
-            .eq('tenant_id', tenantId).eq('status', 'pending'),
+            .eq('tenant_id', tenantId).eq('status', 'PENDING'),
           fastify.supabase.from('attendance_regularisation').select('id', { count: 'exact', head: true })
             .eq('tenant_id', tenantId).eq('status', 'pending'),
         ])
