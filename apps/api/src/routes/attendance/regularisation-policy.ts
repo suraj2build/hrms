@@ -9,6 +9,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 const policySchema = z.object({
   submission_window_days:   z.number().int().min(1).max(90).optional(),
@@ -37,7 +38,7 @@ export default async function regularisationPolicyRoutes(fastify: FastifyInstanc
       .maybeSingle()
 
     if (error) {
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch policy' })
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch policy')
     }
 
     if (existing) {
@@ -59,7 +60,7 @@ export default async function regularisationPolicyRoutes(fastify: FastifyInstanc
       .single()
 
     if (createErr) {
-      return reply.code(500).send({ error: 'INSERT_FAILED', message: 'Failed to create default policy' })
+      return serverError(req, reply, createErr, ErrorCode.INSERT_FAILED, 'Failed to create default policy')
     }
 
     return reply.send({ data: created })
@@ -99,7 +100,7 @@ export default async function regularisationPolicyRoutes(fastify: FastifyInstanc
     }
 
     if (error) {
-      return reply.code(500).send({ error: 'UPSERT_FAILED', message: 'Failed to save policy' })
+      return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to save policy')
     }
 
     return reply.send({ data })
@@ -135,7 +136,7 @@ export default async function regularisationPolicyRoutes(fastify: FastifyInstanc
       .range(Number(offset), Number(offset) + Number(limit) - 1)
 
     if (error) {
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch SLA report' })
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch SLA report')
     }
 
     const rows = (data ?? []).map((r: any) => {
@@ -200,7 +201,7 @@ export default async function regularisationPolicyRoutes(fastify: FastifyInstanc
       .lt('created_at', cutoff)
 
     if (fetchErr) {
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to scan for breaches' })
+      return serverError(req, reply, fetchErr, ErrorCode.QUERY_FAILED, 'Failed to scan for breaches')
     }
 
     if (!breached?.length) {
@@ -209,17 +210,29 @@ export default async function regularisationPolicyRoutes(fastify: FastifyInstanc
 
     const ids = breached.map((r: { id: string }) => r.id)
 
-    // Mark as breached
-    await fastify.supabase
+    // Mark as breached — fold status='pending' into the WHERE so a request
+    // that got approved/rejected between the scan above and this write
+    // isn't touched (sla_breached is otherwise harmless to flip, but this
+    // keeps the flag meaningful only for requests still actually pending).
+    const { data: markedBreached, error: markErr } = await fastify.supabase
       .from('attendance_regularisation')
       .update({ sla_breached: true })
       .in('id', ids)
       .eq('tenant_id', req.tenantId)
+      .eq('status', 'pending')
+      .select('id')
+
+    if (markErr) {
+      return serverError(req, reply, markErr, ErrorCode.UPDATE_FAILED, 'Failed to mark breached requests')
+    }
 
     let autoRejectedCount = 0
 
     if (autoReject) {
-      const { data: rejected } = await fastify.supabase
+      // Same fold: status='pending' in the WHERE means a request a manager
+      // just approved/rejected in the race window can't be silently
+      // overwritten back to 'rejected' by this scan.
+      const { data: rejected, error: rejectErr } = await fastify.supabase
         .from('attendance_regularisation')
         .update({
           status:           'rejected',
@@ -229,13 +242,18 @@ export default async function regularisationPolicyRoutes(fastify: FastifyInstanc
         })
         .in('id', ids)
         .eq('tenant_id', req.tenantId)
+        .eq('status', 'pending')
         .select('id')
+
+      if (rejectErr) {
+        return serverError(req, reply, rejectErr, ErrorCode.UPDATE_FAILED, 'Failed to auto-reject breached requests')
+      }
 
       autoRejectedCount = rejected?.length ?? 0
     }
 
     return reply.send({
-      breached_count:      ids.length,
+      breached_count:      markedBreached?.length ?? 0,
       auto_rejected_count: autoRejectedCount,
       sla_hours:           slaHours,
     })

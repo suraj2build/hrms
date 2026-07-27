@@ -876,7 +876,6 @@ first when a new round starts, in the order listed (roughly severity-then-effort
 
 | ID | File(s) | Finding | Severity | Why deferred |
 |----|---------|---------|----------|---------------|
-| PEND-2 | `attendance/regularisation-policy.ts` (`POST /breach-check`) | SLA breach-scan reads pending+unbreached IDs, then does `UPDATE ... .in('id', ids)` with no `.eq('status','pending')` in the WHERE — a concurrent approve between scan and write gets silently overwritten back to `rejected` | HIGH | Not yet reached |
 | PEND-3 | `attendance/leave-accrual-lifecycle.ts` (`POST /leave/lifecycle/release`) | The `leave_entitlement_releases` audit-trail insert's `{error}` is never checked (and the surrounding try/catch can't catch it either, since supabase-js doesn't throw) — if the audit insert fails, the code still unlocks the ledger entry and reports it as released with zero audit record | HIGH | Not yet reached |
 | PEND-4 | `attendance/leave-accrual-lifecycle.ts` (`POST /leave/lifecycle/freeze`) | `employee_id` from the request body is never verified to belong to `req.tenantId` before inserting a freeze row (contrast: the sibling `/tiers/:policyRuleId` route does verify) | MEDIUM | Not yet reached |
 | PEND-5 | `attendance/leave-accrual-lifecycle.ts` (`POST /freeze/:freezeId/lift`) | Same TOCTOU shape as PEND-2: reads `status==='active'` then updates without folding it into the WHERE; also the update's `{error}` is never checked | MEDIUM | Not yet reached |
