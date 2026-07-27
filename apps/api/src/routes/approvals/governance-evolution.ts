@@ -28,6 +28,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z }                    from 'zod'
 import { HR_ADMIN_ROLES }       from '../../lib/rbac.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 const SUPER_ADMIN = ['super_admin']             as const
 
 // Fresh audit finding: entity_type/override_type were previously
@@ -92,10 +93,7 @@ export default async function governanceEvolutionRoutes(fastify: FastifyInstance
 
     const { data, error } = await q
 
-    if (error) {
-      req.log.error({ err: error }, 'approval matrices query failed')
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch approval matrices' })
-    }
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch approval matrices')
 
     return reply.send({ data: data ?? [] })
   })
@@ -113,10 +111,7 @@ export default async function governanceEvolutionRoutes(fastify: FastifyInstance
       .eq('tenant_id', req.tenantId)
       .maybeSingle()
 
-    if (error) {
-      req.log.error({ err: error }, 'approval matrix fetch failed')
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch approval matrix' })
-    }
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch approval matrix')
     if (!data) {
       return reply.code(404).send({ error: 'NOT_FOUND', message: 'Approval matrix not found' })
     }
@@ -165,10 +160,7 @@ export default async function governanceEvolutionRoutes(fastify: FastifyInstance
       .select('*')
       .single()
 
-    if (error) {
-      req.log.error({ err: error }, 'approval matrix insert failed')
-      return reply.code(500).send({ error: 'INSERT_FAILED', message: 'Failed to create approval matrix' })
-    }
+    if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create approval matrix')
 
     return reply.code(201).send({ data })
   })
@@ -218,10 +210,7 @@ export default async function governanceEvolutionRoutes(fastify: FastifyInstance
       .select('*')
       .single()
 
-    if (error) {
-      req.log.error({ err: error }, 'approval matrix update failed')
-      return reply.code(500).send({ error: 'UPDATE_FAILED', message: 'Failed to update approval matrix' })
-    }
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update approval matrix')
     if (!data) {
       return reply.code(404).send({ error: 'NOT_FOUND', message: 'Approval matrix not found' })
     }
@@ -243,10 +232,7 @@ export default async function governanceEvolutionRoutes(fastify: FastifyInstance
       .select('id, is_active')
       .single()
 
-    if (error) {
-      req.log.error({ err: error }, 'approval matrix soft-delete failed')
-      return reply.code(500).send({ error: 'UPDATE_FAILED', message: 'Failed to deactivate approval matrix' })
-    }
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to deactivate approval matrix')
     if (!data) {
       return reply.code(404).send({ error: 'NOT_FOUND', message: 'Approval matrix not found' })
     }
@@ -315,10 +301,7 @@ export default async function governanceEvolutionRoutes(fastify: FastifyInstance
       .select('*')
       .single()
 
-    if (error) {
-      req.log.error({ err: error }, 'delegation insert failed')
-      return reply.code(500).send({ error: 'INSERT_FAILED', message: 'Failed to create delegation' })
-    }
+    if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create delegation')
 
     return reply.code(201).send({ data })
   })
@@ -335,9 +318,7 @@ export default async function governanceEvolutionRoutes(fastify: FastifyInstance
       .eq('tenant_id', req.tenantId)
       .maybeSingle()
 
-    if (fetchError) {
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch delegation' })
-    }
+    if (fetchError) return serverError(req, reply, fetchError, ErrorCode.QUERY_FAILED, 'Failed to fetch delegation')
     if (!existing) {
       return reply.code(404).send({ error: 'NOT_FOUND', message: 'Delegation not found' })
     }
@@ -359,10 +340,7 @@ export default async function governanceEvolutionRoutes(fastify: FastifyInstance
       .select('id, is_active')
       .single()
 
-    if (error) {
-      req.log.error({ err: error }, 'delegation revoke failed')
-      return reply.code(500).send({ error: 'UPDATE_FAILED', message: 'Failed to revoke delegation' })
-    }
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to revoke delegation')
 
     return reply.send({ data })
   })
@@ -386,10 +364,7 @@ export default async function governanceEvolutionRoutes(fastify: FastifyInstance
       .eq('is_active', parsed.data.is_active === 'true')
       .order('created_at', { ascending: false })
 
-    if (error) {
-      req.log.error({ err: error }, 'operational overrides query failed')
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch overrides' })
-    }
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch overrides')
 
     return reply.send({ data: data ?? [] })
   })
@@ -431,10 +406,7 @@ export default async function governanceEvolutionRoutes(fastify: FastifyInstance
       .select('*')
       .single()
 
-    if (error) {
-      req.log.error({ err: error }, 'operational override insert failed')
-      return reply.code(500).send({ error: 'INSERT_FAILED', message: 'Failed to grant override' })
-    }
+    if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to grant override')
 
     return reply.code(201).send({ data })
   })
@@ -466,10 +438,7 @@ export default async function governanceEvolutionRoutes(fastify: FastifyInstance
       .select('id, is_active, revoked_at, revoked_by, revoke_reason')
       .single()
 
-    if (error) {
-      req.log.error({ err: error }, 'override revoke failed')
-      return reply.code(500).send({ error: 'UPDATE_FAILED', message: 'Failed to revoke override' })
-    }
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to revoke override')
     if (!data) {
       return reply.code(404).send({ error: 'NOT_FOUND', message: 'Override not found' })
     }
@@ -505,10 +474,7 @@ export default async function governanceEvolutionRoutes(fastify: FastifyInstance
 
     const { data: matrices, error: matrixError } = await q
 
-    if (matrixError) {
-      req.log.error({ err: matrixError }, 'governance simulate matrix query failed')
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch approval matrices' })
-    }
+    if (matrixError) return serverError(req, reply, matrixError, ErrorCode.QUERY_FAILED, 'Failed to fetch approval matrices')
 
     const allMatrices = matrices ?? []
 
@@ -595,10 +561,7 @@ export default async function governanceEvolutionRoutes(fastify: FastifyInstance
 
     const { data, error } = await q
 
-    if (error) {
-      req.log.error({ err: error }, 'governance rollbacks query failed')
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch rollbacks' })
-    }
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch rollbacks')
 
     return reply.send({ data: data ?? [] })
   })
@@ -637,10 +600,7 @@ export default async function governanceEvolutionRoutes(fastify: FastifyInstance
       .select('*')
       .single()
 
-    if (error) {
-      req.log.error({ err: error }, 'governance rollback insert failed')
-      return reply.code(500).send({ error: 'INSERT_FAILED', message: 'Failed to log rollback' })
-    }
+    if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to log rollback')
 
     return reply.code(201).send({ data })
   })
