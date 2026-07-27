@@ -137,53 +137,66 @@ export default async function workforceOptimizationRoute(fastify: FastifyInstanc
 
     const { from, to, department_id } = parsed.data
 
-    // Fetch shift balance records for the period
-    let balanceQuery = fastify.supabase
-      .from('workforce_shift_balance')
-      .select(
-        `
-          id, employee_id, period_start, period_end,
-          ot_fairness_score, weekend_fairness_score, night_fairness_score:night_shift_fairness_score,
-          total_ot_hours, weekend_shifts_count, night_shifts_count,
-          max_consecutive_days, rest_gap_violations, computed_at,
-          employees!inner(id, first_name, last_name, employee_code,
-            job_history!job_history_employee_id_fkey(department_id))
-        `,
-      )
-      .eq('tenant_id', req.tenantId)
-      .gte('period_start', from)
-      .lte('period_end', to)
-      .order('ot_fairness_score', { ascending: true })
+    // Fetch shift balance records for the period. fetchAllRows() — fresh
+    // audit finding: this was the only endpoint in the file still using a
+    // plain query, so it silently truncated at PostgREST's 1,000-row
+    // ceiling at real scale while every sibling endpoint here already
+    // paginates.
+    let balanceRows: any[]
+    try {
+      balanceRows = await fetchAllRows((rangeFrom, rangeTo) => {
+        let q = fastify.supabase
+          .from('workforce_shift_balance')
+          .select(
+            `
+              id, employee_id, period_start, period_end,
+              ot_fairness_score, weekend_fairness_score, night_fairness_score:night_shift_fairness_score,
+              total_ot_hours, weekend_shifts_count, night_shifts_count,
+              max_consecutive_days, rest_gap_violations, computed_at,
+              employees!inner(id, first_name, last_name, employee_code,
+                job_history!job_history_employee_id_fkey(department_id))
+            `,
+          )
+          .eq('tenant_id', req.tenantId)
+          .gte('period_start', from)
+          .lte('period_end', to)
+          .order('ot_fairness_score', { ascending: true })
 
-    if (department_id) {
-      balanceQuery = balanceQuery.eq('employees.job_history.department_id', department_id)
-    }
+        if (department_id) {
+          q = q.eq('employees.job_history.department_id', department_id)
+        }
 
-    const { data: balanceRows, error: balanceErr } = await balanceQuery
-
-    if (balanceErr) {
+        return q.range(rangeFrom, rangeTo)
+      })
+    } catch (balanceErr) {
       // Table may not exist yet — return empty gracefully
       req.log.warn({ err: balanceErr }, 'workforce_shift_balance fetch failed — returning empty')
       return reply.send({ avg_ot_fairness: 0, avg_weekend_fairness: 0, avg_night_fairness: 0, violations_count: 0, employees: [], hints: [] })
     }
 
     // Fetch open hints for the period
-    const { data: hintRows, error: hintsErr } = await fastify.supabase
-      .from('workforce_optimization_hints')
-      .select('id, employee_id, hint_type, severity, message:explanation, hint_date:created_at, resolved')
-      .eq('tenant_id', req.tenantId)
-      .gte('created_at', from)
-      .lte('created_at', to)
-      .eq('resolved', false)
-      .order('created_at', { ascending: false })
-
-    if (hintsErr) {
+    let hintRows: any[] = []
+    let hintsFailed = false
+    try {
+      hintRows = await fetchAllRows((rangeFrom, rangeTo) =>
+        fastify.supabase
+          .from('workforce_optimization_hints')
+          .select('id, employee_id, hint_type, severity, message:explanation, hint_date:created_at, resolved')
+          .eq('tenant_id', req.tenantId)
+          .gte('created_at', from)
+          .lte('created_at', to)
+          .eq('resolved', false)
+          .order('created_at', { ascending: false })
+          .range(rangeFrom, rangeTo),
+      )
+    } catch (hintsErr) {
       // Table may not exist yet — continue with empty hints rather than 500
       req.log.warn({ err: hintsErr }, 'workforce_optimization_hints fetch failed — continuing with empty hints')
+      hintsFailed = true
     }
 
-    const rows  = ((balanceRows ?? []) as any[])
-    const hints = hintsErr ? [] : ((hintRows ?? []) as any[])
+    const rows  = balanceRows as any[]
+    const hints = hintsFailed ? [] : hintRows
 
     // Build per-employee list with frontend-expected field names
     const employees = rows.map((r) => {
@@ -783,12 +796,11 @@ export default async function workforceOptimizationRoute(fastify: FastifyInstanc
         return reply.code(404).send({ error: 'NOT_FOUND', message: 'Hint not found' })
       }
 
-      if ((existing as any).resolved) {
-        return reply.code(409).send({ error: 'ALREADY_RESOLVED', message: 'Hint is already resolved' })
-      }
-
+      // Fold resolved=false into the UPDATE's own WHERE clause — the read
+      // above is only for a friendly 404 vs 409 distinction; a concurrent
+      // resolve request can't race past this and double-resolve the hint.
       const now = new Date().toISOString()
-      const { error: updateErr } = await fastify.supabase
+      const { data: updated, error: updateErr } = await fastify.supabase
         .from('workforce_optimization_hints')
         .update({
           resolved:    true,
@@ -796,10 +808,16 @@ export default async function workforceOptimizationRoute(fastify: FastifyInstanc
         })
         .eq('id', id)
         .eq('tenant_id', req.tenantId)
+        .eq('resolved', false)
+        .select('id')
+        .maybeSingle()
 
       if (updateErr) {
         req.log.error({ err: updateErr }, 'workforce_optimization_hints resolve update failed')
         return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to resolve hint' })
+      }
+      if (!updated) {
+        return reply.code(409).send({ error: 'ALREADY_RESOLVED', message: 'Hint is already resolved' })
       }
 
       return reply.send({ id, resolved: true, resolved_at: now, resolved_by: req.userId })
