@@ -43,7 +43,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { logAction } from '../../lib/audit-service.js'
 import { z } from 'zod'
-import { serverError, ErrorCode } from '../../lib/api-errors.js'
+import { serverError, notFound, ErrorCode } from '../../lib/api-errors.js'
 
 // ── Embedded-employee normaliser ──────────────────────────────────────────────
 // employees has no `full_name` / `designation` columns (name is first+last,
@@ -457,13 +457,16 @@ export default async function lettersRoutes(fastify: FastifyInstance) {
     const { tenantId } = req as any
     const { id }       = req.params as any
 
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from('letter_templates')
       .update({ is_active: false })
       .eq('id', id)
       .eq('tenant_id', tenantId)
+      .select('id')
+      .maybeSingle()
 
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to delete letter template')
+    if (!data) return notFound(reply, 'TEMPLATE_NOT_FOUND', 'Letter template not found')
     return { success: true }
   })
 
@@ -626,14 +629,17 @@ export default async function lettersRoutes(fastify: FastifyInstance) {
     const { tenantId, userId } = req as any
     const { letterId } = req.params as any
 
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from('generated_letters')
       .update({ approval_status: 'pending_approval', current_level: 1 })
       .eq('id', letterId)
       .eq('tenant_id', tenantId)
       .eq('approval_status', 'draft')
+      .select('id')
+      .maybeSingle()
 
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to submit letter for approval')
+    if (!data) return reply.code(409).send({ error: 'INVALID_STATE', message: 'Letter not found or not in draft state' })
 
     await logAction(supabase, {
       tenantId,
@@ -818,7 +824,7 @@ export default async function lettersRoutes(fastify: FastifyInstance) {
     const { data: actor } = await supabase
       .from('profiles').select('id:employee_id').eq('id', userId).eq('tenant_id', tenantId).single()
 
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from('generated_letters')
       .update({
         approval_status: 'issued',
@@ -828,8 +834,11 @@ export default async function lettersRoutes(fastify: FastifyInstance) {
       .eq('id', letterId)
       .eq('tenant_id', tenantId)
       .in('approval_status', ['approved', 'draft'])   // can issue approved or approval-exempt drafts
+      .select('id')
+      .maybeSingle()
 
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to issue letter')
+    if (!data) return reply.code(409).send({ error: 'INVALID_STATE', message: 'Letter not found or not in an issuable state' })
 
     await logAction(supabase, {
       tenantId,
@@ -848,14 +857,17 @@ export default async function lettersRoutes(fastify: FastifyInstance) {
     const { tenantId, userId } = req as any
     const { letterId } = req.params as any
 
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from('generated_letters')
       .delete()
       .eq('id', letterId)
       .eq('tenant_id', tenantId)
       .eq('approval_status', 'draft')
+      .select('id')
+      .maybeSingle()
 
     if (error) return serverError(req, reply, error, ErrorCode.DELETE_FAILED, 'Failed to delete letter')
+    if (!data) return reply.code(409).send({ error: 'INVALID_STATE', message: 'Letter not found or not in draft state' })
 
     await logAction(supabase, {
       tenantId,

@@ -17,7 +17,7 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
-import { serverError, ErrorCode } from '../../lib/api-errors.js'
+import { serverError, notFound, ErrorCode } from '../../lib/api-errors.js'
 
 export default async function certificationRoutes(fastify: FastifyInstance) {
   const auth = { preHandler: [fastify.authenticate] }
@@ -233,13 +233,16 @@ export default async function certificationRoutes(fastify: FastifyInstance) {
     const parsed = schema.safeParse(req.body)
     if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
 
-    const { error } = await fastify.supabase
+    const { data, error } = await fastify.supabase
       .from('employee_certifications')
       .update(parsed.data)
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
+      .select('id')
+      .maybeSingle()
 
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update certification')
+    if (!data) return notFound(reply, 'CERTIFICATION_NOT_FOUND', 'Certification not found')
     return reply.send({ message: 'Certification updated' })
   })
 
@@ -247,13 +250,16 @@ export default async function certificationRoutes(fastify: FastifyInstance) {
 
   fastify.delete('/certifications/:id', hrAuth, async (req: any, reply) => {
     const { id } = req.params as { id: string }
-    const { error } = await fastify.supabase
+    const { data, error } = await fastify.supabase
       .from('employee_certifications')
       .delete()
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
+      .select('id')
+      .maybeSingle()
 
     if (error) return serverError(req, reply, error, ErrorCode.DELETE_FAILED, 'Failed to delete certification')
+    if (!data) return notFound(reply, 'CERTIFICATION_NOT_FOUND', 'Certification not found')
     return reply.send({ message: 'Certification deleted' })
   })
 }
