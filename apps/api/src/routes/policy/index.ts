@@ -28,7 +28,7 @@ import { logAction }                   from '../../lib/audit-service.js'
 import { notify }                      from '../../lib/notify.js'
 import { fetchAllRows }                from '../../lib/supabase-paginate.js'
 import { WhatsAppProvider }            from '../../lib/whatsapp-provider.js'
-import { serverError, ErrorCode }      from '../../lib/api-errors.js'
+import { serverError, notFound, ErrorCode } from '../../lib/api-errors.js'
 
 // ── Body schemas ─────────────────────────────────────────────────────────────
 
@@ -241,12 +241,18 @@ export default async function policyRoutes(fastify: FastifyInstance) {
     const publishedIds = data.filter(p => p.status === 'published').map(p => p.id)
     const ackCounts: Record<string, number> = {}
     if (publishedIds.length > 0) {
-      const { data: counts } = await supabase
-        .from('policy_acknowledgements')
-        .select('policy_id')
-        .eq('tenant_id', tenantId)
-        .in('policy_id', publishedIds)
-      ;(counts ?? []).forEach(c => {
+      // Paginated — a plain .select() truncates at PostgREST's 1,000-row
+      // ceiling once a mandatory-ack policy has been acked by more than
+      // 1,000 employees, understating ack_count for large tenants.
+      const counts = await fetchAllRows<{ policy_id: string }>((from, to) =>
+        supabase
+          .from('policy_acknowledgements')
+          .select('policy_id')
+          .eq('tenant_id', tenantId)
+          .in('policy_id', publishedIds)
+          .range(from, to),
+      )
+      counts.forEach(c => {
         ackCounts[c.policy_id] = (ackCounts[c.policy_id] ?? 0) + 1
       })
     }
@@ -286,10 +292,11 @@ export default async function policyRoutes(fastify: FastifyInstance) {
     const tenantId = req.tenantId
     const { id } = req.params as { id: string }
 
-    // employees is paginated — an unbounded .select() truncates at
-    // PostgREST's 1,000-row ceiling for a large tenant, understating both
-    // total and acknowledged counts in the ack-stats panel.
-    const [empRows, ackResult] = await Promise.all([
+    // employees and policy_acknowledgements are both paginated — an
+    // unbounded .select() truncates at PostgREST's 1,000-row ceiling for a
+    // large tenant, understating both total and acknowledged counts in the
+    // ack-stats panel.
+    const [empRows, ackRows] = await Promise.all([
       fetchAllRows<{ id: string; employee_code: string; first_name: string; last_name: string; work_location_id: string | null }>((from, to) =>
         supabase
           .from('employees')
@@ -298,15 +305,18 @@ export default async function policyRoutes(fastify: FastifyInstance) {
           .in('status', ['active', 'on_leave'])
           .range(from, to),
       ),
-      supabase
-        .from('policy_acknowledgements')
-        .select('employee_id, acknowledged_at')
-        .eq('tenant_id', tenantId)
-        .eq('policy_id', id),
+      fetchAllRows<{ employee_id: string; acknowledged_at: string }>((from, to) =>
+        supabase
+          .from('policy_acknowledgements')
+          .select('employee_id, acknowledged_at')
+          .eq('tenant_id', tenantId)
+          .eq('policy_id', id)
+          .range(from, to),
+      ),
     ])
 
     const ackMap = new Map(
-      (ackResult.data ?? []).map(a => [a.employee_id, a.acknowledged_at]),
+      ackRows.map(a => [a.employee_id, a.acknowledged_at]),
     )
 
     const employees = empRows.map(e => ({
@@ -517,13 +527,20 @@ export default async function policyRoutes(fastify: FastifyInstance) {
 
     // Notify all active employees if acknowledgement is required
     if (policy.requires_acknowledgement) {
-      const { data: profiles } = await supabase
-        .from('profiles')
-        .select('id')
-        .eq('tenant_id', tenantId)
-        .in('role', ['employee', 'manager', 'hr_admin', 'super_admin'])
+      // Paginated — an unbounded .select() truncates at PostgREST's 1,000-row
+      // ceiling, silently excluding profiles past that cutoff from the
+      // in-app notification (same class of bug already fixed for the
+      // WhatsApp broadcast below).
+      const profiles = await fetchAllRows<{ id: string }>((from, to) =>
+        supabase
+          .from('profiles')
+          .select('id')
+          .eq('tenant_id', tenantId)
+          .in('role', ['employee', 'manager', 'hr_admin', 'super_admin'])
+          .range(from, to),
+      )
 
-      for (const p of profiles ?? []) {
+      for (const p of profiles) {
         await notify(supabase, {
           tenantId,
           recipientId: p.id,
@@ -586,13 +603,16 @@ export default async function policyRoutes(fastify: FastifyInstance) {
     const tenantId = req.tenantId
     const { id }   = req.params as { id: string }
 
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from('hr_policies')
       .update({ status: 'archived' })
       .eq('tenant_id', tenantId)
       .eq('id', id)
+      .select('id')
+      .maybeSingle()
 
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to archive policy')
+    if (!data) return notFound(reply, 'POLICY_NOT_FOUND', 'Policy not found')
 
     await logAction(supabase, {
       tenantId,
