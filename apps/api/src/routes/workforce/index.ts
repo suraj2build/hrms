@@ -14,7 +14,13 @@ import {
   type LifecycleCategory, type ExpiryBucket,
 } from '../../lib/lifecycle-expiry.js'
 
-const CATEGORIES: LifecycleCategory[] = ['document', 'identity', 'passport', 'visa', 'contract', 'probation']
+// Fresh audit finding: 'certification' was missing here even though it's a
+// valid LifecycleCategory that computeLifecycleRisks actively generates
+// (employee_certifications rows) — filtering by ?category=certification
+// failed zod validation, which (before the fix below) silently dropped ALL
+// filters rather than 400ing, so the certification risk register was
+// unreachable through this filter and the failure was invisible to callers.
+const CATEGORIES: LifecycleCategory[] = ['document', 'identity', 'passport', 'visa', 'contract', 'probation', 'certification']
 const BUCKETS: ExpiryBucket[] = ['overdue', 'due_7', 'due_30', 'due_90']
 
 export default async function workforceRoutes(fastify: FastifyInstance) {
@@ -30,7 +36,14 @@ export default async function workforceRoutes(fastify: FastifyInstance) {
       department_id: z.string().uuid().optional(),
       employee_id:   z.string().uuid().optional(),
     }).safeParse(req.query)
-    const f = qs.success ? qs.data : {}
+    // Fresh audit finding: this used to fall back to `{}` on ANY validation
+    // failure, silently ignoring every filter (not just the invalid one) —
+    // a typo'd department_id or an out-of-range within_days would return
+    // the full unfiltered register with a 200, not a 400.
+    if (!qs.success) {
+      return reply.code(400).send({ error: 'VALIDATION_ERROR', message: qs.error.issues[0]?.message ?? 'Invalid query parameters' })
+    }
+    const f = qs.data
 
     // Compute the full register once (single source), then apply UI filters.
     let items = await computeLifecycleRisks(fastify.supabase, req.tenantId, {
