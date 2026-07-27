@@ -601,13 +601,20 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
   fastify.post('/requisitions/:id/hold', hrAdminAuth, async (req: any, reply) => {
     const { id } = req.params as { id: string }
 
-    const { error } = await fastify.supabase
+    // Fresh audit finding: the status precondition was already folded into
+    // the WHERE, but the affected-row count was never checked — a wrong id
+    // or a requisition already in 'on_hold'/'filled'/'cancelled' still got
+    // a 200 "put on hold" with no actual change and a false audit entry.
+    const { data: updated, error } = await fastify.supabase
       .from('job_requisitions')
       .update({ status: 'on_hold' })
       .eq('id', id).eq('tenant_id', req.tenantId)
       .in('status', ['open', 'draft'])
+      .select('id')
+      .maybeSingle()
 
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to put requisition on hold')
+    if (!updated) return reply.code(409).send({ error: 'INVALID_STATE', message: 'Only open or draft requisitions can be put on hold' })
     await logAction(fastify.supabase, { tenantId: req.tenantId, tableName: 'job_requisitions', recordId: id, action: 'UPDATE', performedBy: req.userId, newData: { status: 'on_hold' } })
     return reply.send({ message: 'Requisition put on hold' })
   })
@@ -615,13 +622,16 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
   fastify.post('/requisitions/:id/reopen', hrAdminAuth, async (req: any, reply) => {
     const { id } = req.params as { id: string }
 
-    const { error } = await fastify.supabase
+    const { data: updated, error } = await fastify.supabase
       .from('job_requisitions')
       .update({ status: 'open' })
       .eq('id', id).eq('tenant_id', req.tenantId)
       .in('status', ['on_hold', 'filled'])
+      .select('id')
+      .maybeSingle()
 
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to reopen requisition')
+    if (!updated) return reply.code(409).send({ error: 'INVALID_STATE', message: 'Only on-hold or filled requisitions can be reopened' })
     await logAction(fastify.supabase, { tenantId: req.tenantId, tableName: 'job_requisitions', recordId: id, action: 'UPDATE', performedBy: req.userId, newData: { status: 'open' } })
     return reply.send({ message: 'Requisition reopened' })
   })
@@ -629,12 +639,19 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
   fastify.post('/requisitions/:id/cancel', hrAdminAuth, async (req: any, reply) => {
     const { id } = req.params as { id: string }
 
-    const { error } = await fastify.supabase
+    // Fresh audit finding: this had no status precondition at all (unlike
+    // its siblings above), so it also silently "succeeded" against a
+    // nonexistent id.
+    const { data: updated, error } = await fastify.supabase
       .from('job_requisitions')
       .update({ status: 'cancelled' })
       .eq('id', id).eq('tenant_id', req.tenantId)
+      .neq('status', 'cancelled')
+      .select('id')
+      .maybeSingle()
 
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to cancel requisition')
+    if (!updated) return reply.code(409).send({ error: 'INVALID_STATE', message: 'Requisition not found or already cancelled' })
     await logAction(fastify.supabase, { tenantId: req.tenantId, tableName: 'job_requisitions', recordId: id, action: 'UPDATE', performedBy: req.userId, newData: { status: 'cancelled' } })
     return reply.send({ message: 'Requisition cancelled' })
   })
@@ -1382,7 +1399,11 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
         .eq('candidate_id', parsed.data.candidate_id)
       const appIds = (apps ?? []).map((a: any) => a.id)
       if (appIds.length === 0) return reply.send({ data: [], total: 0 })
-      q = q.in('id', appIds)
+      // interview_rounds.id is the round's own PK — the filter must match
+      // it against application_id, not against its own id column (which
+      // would never match an applications.id and silently returned zero
+      // rows for every candidate_id filter).
+      q = q.in('application_id', appIds)
     }
 
     if (parsed.data.requisition_id) {
@@ -1393,7 +1414,7 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
         .eq('requisition_id', parsed.data.requisition_id)
       const appIds = (apps ?? []).map((a: any) => a.id)
       if (appIds.length === 0) return reply.send({ data: [], total: 0 })
-      q = q.in('id', appIds)
+      q = q.in('application_id', appIds)
     }
 
     q = q.range(parsed.data.offset, parsed.data.offset + parsed.data.limit - 1)
@@ -2077,7 +2098,6 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
         ? await fastify.supabase.from('recruitment_offer_letters').update(row).eq('id', existing.id)
         : await fastify.supabase.from('recruitment_offer_letters').insert(row)
       if (offerLetterError) {
-        req.log.error({ err: offerLetterError, tenantId: req.tenantId, applicationId: appId }, '[recruitment] failed to persist offer letter after send')
         return serverError(req, reply, offerLetterError, ErrorCode.UPDATE_FAILED, 'Offer email sent, but failed to persist the offer letter record')
       }
 
