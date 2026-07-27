@@ -26,6 +26,7 @@ import {
   getOrchestrationChain,
 }                                   from '../../lib/workforce-orchestrator.js'
 import { HR_ADMIN_ROLES }           from '../../lib/rbac.js'
+import { serverError, ErrorCode }   from '../../lib/api-errors.js'
 const SUPER_ADMIN = ['super_admin']             as const
 
 const dateRe = /^\d{4}-\d{2}-\d{2}$/
@@ -414,8 +415,7 @@ export default async function orchestrationRoutes(fastify: FastifyInstance) {
         },
       })
     } catch (err: any) {
-      req.log.error({ err, employee_id, from_date }, 'manual rebuild orchestration failed')
-      return reply.code(500).send({ error: 'ORCHESTRATION_FAILED', message: err?.message ?? 'Failed to initiate rebuild' })
+      return serverError(req, reply, err, ErrorCode.COMPUTE_FAILED, 'Failed to initiate rebuild')
     }
   })
 

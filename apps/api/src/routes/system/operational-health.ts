@@ -26,6 +26,7 @@ import { z }                    from 'zod'
 import { scanAttendanceFreshness, getFreshnessHistory } from '../../lib/attendance-freshness.js'
 import { durableQueue }         from '../../lib/durable-queue.js'
 import { platformHealth }       from '../../lib/startup-health.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 
 export default async function operationalHealthRoutes(fastify: FastifyInstance) {
@@ -62,8 +63,7 @@ export default async function operationalHealthRoutes(fastify: FastifyInstance) 
       )
       return reply.send({ data: report })
     } catch (err: any) {
-      req.log.error({ err, module: 'freshness' }, 'freshness scan failed')
-      return reply.code(500).send({ error: 'SCAN_FAILED', message: err.message })
+      return serverError(req, reply, err, ErrorCode.COMPUTE_FAILED, 'Failed to scan attendance freshness')
     }
   })
 
@@ -83,7 +83,7 @@ export default async function operationalHealthRoutes(fastify: FastifyInstance) 
       const history = await getFreshnessHistory(fastify.supabase, req.tenantId, parsed.data.days)
       return reply.send({ data: history, total: history.length })
     } catch (err: any) {
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: err.message })
+      return serverError(req, reply, err, ErrorCode.QUERY_FAILED, 'Failed to fetch attendance freshness history')
     }
   })
 

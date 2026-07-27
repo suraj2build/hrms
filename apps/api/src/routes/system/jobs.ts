@@ -34,6 +34,7 @@ import { jobQueue }             from '../../lib/job-queue.js'
 import { durableQueue }         from '../../lib/durable-queue.js'
 import { eventBus }             from '../../lib/event-bus.js'
 import { platformHealth }       from '../../lib/startup-health.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 import { HR_ADMIN_ROLES }       from '../../lib/rbac.js'
 // ── Automation Job Registry ──────────────────────────────────────────────────
 
@@ -220,8 +221,7 @@ export default async function jobQueueRoutes(fastify: FastifyInstance) {
         jobId:   enqueuedId,
       })
     } catch (err: any) {
-      fastify.log.error({ err, automationId: jobId }, 'manual trigger failed')
-      return reply.code(500).send({ error: 'TRIGGER_FAILED', message: err?.message ?? 'Failed to trigger automation' })
+      return serverError(req, reply, err, ErrorCode.COMPUTE_FAILED, 'Failed to trigger automation')
     }
   })
 
@@ -640,9 +640,7 @@ export default async function jobQueueRoutes(fastify: FastifyInstance) {
       .select('module_name, status, instance_id, started_at, last_updated_at, error_message, error_count, metadata')
       .order('module_name')
 
-    if (error) {
-      return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
-    }
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch module health')
 
     const rows = modules ?? []
     const failed   = rows.filter((m: any) => m.status === 'failed').length
@@ -682,8 +680,7 @@ export default async function jobQueueRoutes(fastify: FastifyInstance) {
         fastify.log.warn({ error }, 'scheduler_heartbeats table missing — run migration 182')
         return reply.send({ data: [], total: 0, stale_count: 0, healthy: true })
       }
-      fastify.log.error({ error }, 'scheduler-health: failed to query heartbeats')
-      return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch scheduler health')
     }
 
     const now = Date.now()
