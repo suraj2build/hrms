@@ -97,7 +97,7 @@ const whatsappRoutes: FastifyPluginAsync = async (fastify) => {
         const mood = MOOD_MAP[text]
         const today = new Date().toISOString().slice(0, 10)
 
-        await supabase.from('mood_checkins').upsert(
+        const { error: moodErr } = await supabase.from('mood_checkins').upsert(
           {
             tenant_id:    tenantId,
             employee_id:  employeeId,
@@ -107,6 +107,12 @@ const whatsappRoutes: FastifyPluginAsync = async (fastify) => {
           { onConflict: 'tenant_id,employee_id,checkin_date' },
         )
 
+        if (moodErr) {
+          req.log.error({ err: moodErr, tenantId, employeeId }, '[whatsapp] mood check-in upsert failed')
+          await wa.sendText(tenantId, from, `Sorry, something went wrong recording your mood. Please try again later.`)
+          return reply.code(200).send('ok')
+        }
+
         await wa.sendText(tenantId, from, `Thank you! Your mood has been recorded. Take care! 😊`)
         return reply.code(200).send('ok')
       }
@@ -115,7 +121,27 @@ const whatsappRoutes: FastifyPluginAsync = async (fastify) => {
       const ackMatch = text.match(/^ACK\s+([0-9a-f-]{36})/i)
       if (ackMatch) {
         const policyId = ackMatch[1]
-        await supabase.from('policy_acknowledgements').upsert(
+
+        // policy_acknowledgements.policy_id only has a bare FK to hr_policies(id)
+        // (no composite FK on tenant_id) and fastify.supabase runs with the
+        // service-role key, bypassing RLS — without this lookup, a UUID typed
+        // into the free-text message body (guessed, enumerated, or leaked from
+        // another tenant) would be upserted verbatim, corrupting this tenant's
+        // ack register with a reference to a policy that isn't even theirs.
+        const { data: policy } = await supabase
+          .from('hr_policies')
+          .select('id')
+          .eq('id', policyId)
+          .eq('tenant_id', tenantId)
+          .eq('status', 'published')
+          .maybeSingle()
+
+        if (!policy) {
+          await wa.sendText(tenantId, from, `Sorry, we couldn't find that policy. Please check the link and try again.`)
+          return reply.code(200).send('ok')
+        }
+
+        const { error: ackErr } = await supabase.from('policy_acknowledgements').upsert(
           {
             tenant_id:    tenantId,
             policy_id:    policyId,
@@ -124,6 +150,12 @@ const whatsappRoutes: FastifyPluginAsync = async (fastify) => {
           },
           { onConflict: 'tenant_id,policy_id,employee_id' },
         )
+
+        if (ackErr) {
+          req.log.error({ err: ackErr, tenantId, employeeId, policyId }, '[whatsapp] policy acknowledgement upsert failed')
+          await wa.sendText(tenantId, from, `Sorry, something went wrong acknowledging the policy. Please try again later.`)
+          return reply.code(200).send('ok')
+        }
 
         await wa.sendText(tenantId, from, `Policy acknowledged. Thank you!`)
         return reply.code(200).send('ok')
@@ -141,19 +173,24 @@ const whatsappRoutes: FastifyPluginAsync = async (fastify) => {
           .maybeSingle()
 
         if (existing) {
-          await supabase
+          const { error: noteErr } = await supabase
             .from('mood_checkins')
             .update({ note: text.slice(0, 1000) })
             .eq('id', (existing as { id: string }).id)
 
-          await wa.sendText(tenantId, from, `Your note has been saved. Thank you!`)
+          if (noteErr) {
+            req.log.error({ err: noteErr, tenantId, employeeId }, '[whatsapp] mood check-in note update failed')
+            await wa.sendText(tenantId, from, `Sorry, something went wrong saving your note. Please try again later.`)
+          } else {
+            await wa.sendText(tenantId, from, `Your note has been saved. Thank you!`)
+          }
         } else {
           await wa.sendText(tenantId, from, `Hi! To log your mood, reply with 1 (Great), 2 (OK), or 3 (Not Good).`)
         }
       }
 
     } catch (err) {
-      console.error('[whatsapp-webhook] error:', err)
+      req.log.error({ err }, '[whatsapp-webhook] error')
     }
 
     return reply.code(200).send('ok')
