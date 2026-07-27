@@ -351,13 +351,16 @@ export default async function benefitsRoutes(fastify: FastifyInstance) {
   fastify.delete('/admin/plans/:id', hrAdminAuth, async (req: any, reply) => {
     const { id } = req.params as { id: string }
 
-    const { error } = await fastify.supabase
+    const { data, error } = await fastify.supabase
       .from('benefit_plans')
       .update({ is_active: false, updated_at: new Date().toISOString() })
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
+      .select('id')
+      .maybeSingle()
 
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to deactivate benefit plan')
+    if (!data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Plan not found' })
 
     await logAction(fastify.supabase, {
       tenantId:    req.tenantId,

@@ -114,15 +114,20 @@ export default async function employeesDataset(fastify: FastifyInstance) {
     } catch (err: any) {
       return serverError(req, reply, err, ErrorCode.QUERY_FAILED, 'Failed to fetch employees dataset')
     }
-    const joinerData = await fetchAllRows((from, to) =>
-      fastify.supabase
-        .from('employees')
-        .select(EMP_SELECT)
-        .eq('tenant_id', tid)
-        .gte('joining_date', fromFirst)
-        .lte('joining_date', toLast)
-        .range(from, to),
-    )
+    let joinerData: any[]
+    try {
+      joinerData = await fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('employees')
+          .select(EMP_SELECT)
+          .eq('tenant_id', tid)
+          .gte('joining_date', fromFirst)
+          .lte('joining_date', toLast)
+          .range(from, to),
+      )
+    } catch (err: any) {
+      return serverError(req, reply, err, ErrorCode.QUERY_FAILED, 'Failed to fetch joiners for employees dataset')
+    }
 
     // ── Group helpers ─────────────────────────────────────────────────────────
     function jh(emp: any) {

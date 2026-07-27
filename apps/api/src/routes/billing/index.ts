@@ -52,7 +52,16 @@ export default async function billingRoutes(fastify: FastifyInstance) {
     }
 
     const { data: tenant } = await fastify.supabase
-      .from('tenants').select('name, billing_email').eq('id', req.tenantId).single()
+      .from('tenants').select('name, billing_email, subscription_status').eq('id', req.tenantId).single()
+
+    // Fresh audit finding: no precondition check meant a double-click or a
+    // retried network timeout created two live Razorpay subscriptions for
+    // the same tenant (both billing it), but the DB only ever remembered
+    // the latest razorpay_subscription_id — the first was silently
+    // orphaned. Reject re-checkout while already active.
+    if ((tenant as any)?.subscription_status === 'active') {
+      return reply.code(409).send({ error: 'ALREADY_SUBSCRIBED', message: 'Tenant already has an active subscription' })
+    }
 
     try {
       const sub = await getRazorpay().subscriptions.create({
@@ -71,7 +80,7 @@ export default async function billingRoutes(fastify: FastifyInstance) {
       return reply.send({ configured: true, subscriptionId: sub.id, keyId: PUBLIC_KEY_ID })
     } catch (e: any) {
       req.log.error({ err: e }, '[billing] checkout failed')
-      return reply.code(502).send({ error: 'RAZORPAY', message: e?.message ?? 'Checkout failed' })
+      return reply.code(502).send({ error: 'RAZORPAY', message: 'Failed to create subscription. Please try again or contact support.' })
     }
   })
 

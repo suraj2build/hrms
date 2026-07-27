@@ -30,6 +30,22 @@ import { z }                    from 'zod'
 import { HR_ADMIN_ROLES }       from '../../lib/rbac.js'
 const SUPER_ADMIN = ['super_admin']             as const
 
+// Fresh audit finding: entity_type/override_type were previously
+// z.string().min(1).max(100) — any string accepted — while the DB CHECK
+// constraints (migration 089_governance_evolution.sql) restrict both to
+// fixed enums. A bad value passed validation and failed at the DB layer as
+// a generic 500 instead of a clean 400.
+const ENTITY_TYPES = [
+  'leave_request', 'correction', 'overtime', 'comp_off',
+  'separation', 'payroll_run', 'policy_change', 'roster_override',
+  'expense', 'general',
+] as const
+const OVERRIDE_TYPES = [
+  'bypass_approval', 'extend_sla', 'unlock_period',
+  'force_process', 'grant_balance', 'roster_freeze_lift',
+  'policy_exception',
+] as const
+
 export default async function governanceEvolutionRoutes(fastify: FastifyInstance) {
   const auth = { preHandler: [fastify.authenticate] }
 
@@ -54,7 +70,7 @@ export default async function governanceEvolutionRoutes(fastify: FastifyInstance
     if (!requireAdmin(req, reply)) return
 
     const querySchema = z.object({
-      entity_type: z.string().max(100).optional(),
+      entity_type: z.enum(ENTITY_TYPES).optional(),
       is_active:   z.enum(['true', 'false']).optional(),
     })
     const parsed = querySchema.safeParse(req.query)
@@ -123,7 +139,7 @@ export default async function governanceEvolutionRoutes(fastify: FastifyInstance
 
     const schema = z.object({
       name:               z.string().min(1).max(200),
-      entity_type:        z.string().min(1).max(100),
+      entity_type:        z.enum(ENTITY_TYPES),
       stages:             z.array(stageSchema).min(1, 'At least one stage is required'),
       description:        z.string().max(1000).optional().nullable(),
       payroll_threshold:  z.number().min(0).optional().nullable(),
@@ -174,7 +190,7 @@ export default async function governanceEvolutionRoutes(fastify: FastifyInstance
 
     const schema = z.object({
       name:              z.string().min(1).max(200).optional(),
-      entity_type:       z.string().min(1).max(100).optional(),
+      entity_type:       z.enum(ENTITY_TYPES).optional(),
       stages:            z.array(stageSchema).min(1).optional(),
       description:       z.string().max(1000).optional().nullable(),
       payroll_threshold: z.number().min(0).optional().nullable(),
@@ -383,7 +399,7 @@ export default async function governanceEvolutionRoutes(fastify: FastifyInstance
     if (!requireSuperAdmin(req, reply)) return
 
     const schema = z.object({
-      override_type: z.string().min(1).max(100),
+      override_type: z.enum(OVERRIDE_TYPES),
       granted_to:    z.string().uuid(),
       scope:         z.record(z.unknown()),
       reason:        z.string().min(1).max(1000),
@@ -465,7 +481,7 @@ export default async function governanceEvolutionRoutes(fastify: FastifyInstance
   fastify.post('/approvals/governance/simulate', auth, async (req: any, reply) => {
     if (!requireAdmin(req, reply)) return
     const schema = z.object({
-      entity_type:     z.string().min(1).max(100),
+      entity_type:     z.enum(ENTITY_TYPES),
       payroll_amount:  z.number().min(0).optional().nullable(),
       department_id:   z.string().uuid().optional().nullable(),
       employee_id:     z.string().uuid().optional().nullable(),
