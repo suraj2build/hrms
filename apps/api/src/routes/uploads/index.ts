@@ -16,14 +16,16 @@
  *   4. Client can call GET /uploads/sessions/:id/url     → get fresh signed URL
  *
  * RBAC:
- *   All write operations — hr_admin / super_admin only
- *   GET (list + url refresh) — any authenticated user (tenant-scoped)
+ *   All write operations and the list endpoint — hr_admin / super_admin only
+ *   GET .../url — any authenticated user, but scoped: hr_admin+ may fetch any
+ *     session in the tenant; anyone else only a session referencing their own
+ *     employee record
  *
  * GET    /uploads/sessions               — list sessions (hr_admin+, with filters)
  * POST   /uploads/sessions               — create a new upload session (hr_admin+)
  * PATCH  /uploads/sessions/:id/complete  — mark session completed (hr_admin+)
  * PATCH  /uploads/sessions/:id/fail      — mark session failed (hr_admin+)
- * GET    /uploads/sessions/:id/url       — get fresh signed download URL (any auth)
+ * GET    /uploads/sessions/:id/url       — get fresh signed download URL (self or hr_admin+)
  */
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
@@ -242,6 +244,9 @@ export default async function uploadSessionRoutes(fastify: FastifyInstance) {
 
     const now = new Date().toISOString()
 
+    // Guard is re-asserted in the UPDATE's own WHERE clause (not just the SELECT
+    // above) so a concurrent /complete or /fail on the same session can't both
+    // pass their read-time check and clobber each other's write.
     const { data, error } = await (fastify as any).supabase
       .from('upload_sessions')
       .update({
@@ -254,10 +259,17 @@ export default async function uploadSessionRoutes(fastify: FastifyInstance) {
       })
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
+      .in('status', Array.from(COMPLETABLE))
       .select('id, upload_type, status, storage_path, file_size, result_summary, updated_at')
-      .single()
+      .maybeSingle()
 
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to complete upload session')
+    if (!data) {
+      return reply.code(409).send({
+        error:   'INVALID_STATE',
+        message: 'Session state changed concurrently — it is no longer completable',
+      })
+    }
 
     const signed_url = data.storage_path
       ? await createSignedUrl(fastify, data.storage_path)
@@ -304,6 +316,9 @@ export default async function uploadSessionRoutes(fastify: FastifyInstance) {
       })
     }
 
+    // Guard is re-asserted in the UPDATE's own WHERE clause (not just the SELECT
+    // above) so a concurrent /complete or /fail on the same session can't both
+    // pass their read-time check and clobber each other's write.
     const { data, error } = await (fastify as any).supabase
       .from('upload_sessions')
       .update({
@@ -313,29 +328,50 @@ export default async function uploadSessionRoutes(fastify: FastifyInstance) {
       })
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
+      .not('status', 'in', `(${Array.from(TERMINAL).map(s => `"${s}"`).join(',')})`)
       .select('id, upload_type, status, error_message, updated_at')
-      .single()
+      .maybeSingle()
 
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to mark upload session as failed')
+    if (!data) {
+      return reply.code(409).send({
+        error:   'INVALID_STATE',
+        message: 'Session state changed concurrently — it is already in a terminal state',
+      })
+    }
     return reply.send({ data })
   })
 
   // ── GET /uploads/sessions/:id/url ─────────────────────────────────────────────
-  // Any authenticated user (tenant-scoped). Returns a fresh signed download URL
-  // for the storage file associated with this session. Useful when the 1-hour
-  // signed URL from the POST response has expired.
+  // hr_admin+ may fetch any session in their tenant. A non-admin caller may only
+  // fetch a session that references their own employee record — otherwise any
+  // employee could pull a signed download URL for another employee's documents
+  // (upload_type 'employee_document'/'onboarding_document') just by knowing/
+  // guessing an upload_sessions id, since fastify.supabase runs with the
+  // service-role key and bypasses RLS.
   fastify.get('/uploads/sessions/:id/url', auth, async (req: any, reply) => {
     const { id } = req.params as { id: string }
 
     const { data: session, error } = await (fastify as any).supabase
       .from('upload_sessions')
-      .select('id, status, storage_path, bucket')
+      .select('id, status, storage_path, bucket, reference_id, reference_type')
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
       .single()
 
     if (error || !session) {
       return reply.code(404).send({ error: 'NOT_FOUND', message: 'Upload session not found' })
+    }
+
+    if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
+      const { data: prof } = await (fastify as any).supabase
+        .from('profiles').select('employee_id')
+        .eq('id', req.userId).eq('tenant_id', req.tenantId).maybeSingle()
+      const ownEmployeeId = prof?.employee_id ?? null
+      const isOwnSession = session.reference_type === 'employee' && session.reference_id === ownEmployeeId
+      if (!ownEmployeeId || !isOwnSession) {
+        return reply.code(403).send({ error: 'FORBIDDEN', message: 'You may only access your own upload sessions' })
+      }
     }
 
     if (!session.storage_path) {
