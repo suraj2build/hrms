@@ -287,7 +287,7 @@ export default async function executiveRoutes(fastify: FastifyInstance) {
   // ── GET /executive/chro ───────────────────────────────────────────────────
   // CHRO composite: workforce distribution, leave/attendance, compensation, trust.
   // Source: employees, job_history, departments, attendance_daily, leave_requests,
-  //         compensation_revisions, employee_trust_profiles
+  //         compensation_revisions, workforce_trust_scores
   fastify.get('/executive/chro', auth, async (req: any, reply) => {
     if (!requireExec(req, reply)) return
 
@@ -296,7 +296,7 @@ export default async function executiveRoutes(fastify: FastifyInstance) {
 
     const [
       employees, daily, leaveRows,
-      pendingRevRes, approvedRevRes,
+      pendingRevisions, approvedRevRes,
       trustHighRiskRes, trustVerifiedRes, trustTotalRes,
       deptRows,
     ] = await Promise.all([
@@ -335,13 +335,19 @@ export default async function executiveRoutes(fastify: FastifyInstance) {
           .range(from, to2),
       ),
 
-      // Pending revisions
-      fastify.supabase
-        .from('compensation_revisions')
-        .select('id, revision_type', { count: 'exact' })
-        .eq('tenant_id', req.tenantId)
-        .eq('status', 'pending')
-        .limit(50),
+      // Pending revisions. Fresh audit finding: pending_revisions (below)
+      // came from this query's exact count, but pending_revisions_by_type
+      // was built from only the first 50 rows (no .order()) — for a tenant
+      // with >50 pending revisions the by-type breakdown silently didn't sum
+      // to the reported total. fetchAllRows() so both are exhaustive.
+      fetchAllRows<{ id: string; revision_type: string }>((from, to2) =>
+        fastify.supabase
+          .from('compensation_revisions')
+          .select('id, revision_type')
+          .eq('tenant_id', req.tenantId)
+          .eq('status', 'pending')
+          .range(from, to2),
+      ),
 
       // Approved revisions last 30d
       fastify.supabase
@@ -351,25 +357,39 @@ export default async function executiveRoutes(fastify: FastifyInstance) {
         .eq('status', 'approved')
         .gte('updated_at', `${from30}T00:00:00`),
 
-      // Trust high-risk employees
+      // Trust high-risk employees. Adds score_type='employee' to match the
+      // verified/total siblings just below — without it this count also
+      // included onboarding/payroll/document score rows, not just employee
+      // scores.
       fastify.supabase
         .from('workforce_trust_scores')
         .select('id', { count: 'exact', head: true })
         .eq('tenant_id', req.tenantId)
+        .eq('score_type', 'employee')
         .eq('severity', 'high'),
 
-      // Trust verified employees
+      // Trust verified employees. Fresh audit finding: this queried
+      // 'employee_trust_profiles', a table that does not exist anywhere in
+      // supabase/migrations/ — the real table is workforce_trust_scores
+      // (see the O5.9 fix a few hundred lines below in /executive/compliance
+      // for the same table). Since count:exact/head:true swallows a "relation
+      // does not exist" error via `?? 0`, this silently returned 0 forever.
+      // 'severity' (low/medium/high/critical) is the closest real proxy for
+      // "verified" — a low-risk trust score, same as trust_medium_risk below
+      // uses severity='medium'.
       fastify.supabase
-        .from('employee_trust_profiles')
+        .from('workforce_trust_scores')
         .select('id', { count: 'exact', head: true })
         .eq('tenant_id', req.tenantId)
-        .eq('is_verified', true),
+        .eq('score_type', 'employee')
+        .eq('severity', 'low'),
 
       // Trust total profiles
       fastify.supabase
-        .from('employee_trust_profiles')
+        .from('workforce_trust_scores')
         .select('id', { count: 'exact', head: true })
-        .eq('tenant_id', req.tenantId),
+        .eq('tenant_id', req.tenantId)
+        .eq('score_type', 'employee'),
 
       // Department distribution via job_history. Paginated for the same reason.
       fetchAllRows((from, to2) =>
@@ -402,19 +422,23 @@ export default async function executiveRoutes(fastify: FastifyInstance) {
     const attendance_rate = safeRate(present, daily.length)
     const absence_rate    = safeRate(absent,  daily.length)
 
-    // Leave
+    // Leave — leave_requests.status is uppercase-only per its CHECK
+    // constraint (migration 041). Fresh audit finding: these were comparing
+    // against lowercase 'approved'/'pending', so leave_approved, leave_pending,
+    // and total_days_taken (and the derived leave_utilization_pct) were
+    // always 0.
     const leave_applied    = leaveRows.length
-    const leave_approved   = leaveRows.filter((r: any) => r.status === 'approved').length
-    const leave_pending    = leaveRows.filter((r: any) => r.status === 'pending').length
+    const leave_approved   = leaveRows.filter((r: any) => r.status === 'APPROVED').length
+    const leave_pending    = leaveRows.filter((r: any) => r.status === 'PENDING').length
     const total_days_taken = leaveRows
-      .filter((r: any) => r.status === 'approved')
+      .filter((r: any) => r.status === 'APPROVED')
       .reduce((s: number, r: any) => s + (Number(r.total_days) || 0), 0)
 
     // Compensation revisions
-    const pending_revisions  = pendingRevRes.count ?? 0
+    const pending_revisions  = pendingRevisions.length
     const approved_revisions = approvedRevRes.count ?? 0
     const pendingByType = new Map<string, number>()
-    for (const r of (pendingRevRes.data ?? []) as any[]) {
+    for (const r of pendingRevisions as any[]) {
       const t = r.revision_type ?? 'other'
       pendingByType.set(t, (pendingByType.get(t) ?? 0) + 1)
     }
@@ -1031,7 +1055,7 @@ export default async function executiveRoutes(fastify: FastifyInstance) {
 
   // ── GET /executive/compliance ─────────────────────────────────────────────
   // Compliance & risk: governance, SLA breaches, trust risks, verification.
-  // Source: operational_incidents, attendance_exceptions, employee_trust_profiles,
+  // Source: operational_incidents, attendance_exceptions, workforce_trust_scores,
   //         governance_events, duplicate_detection_events
   fastify.get('/executive/compliance', auth, async (req: any, reply) => {
     if (!requireExec(req, reply)) return
@@ -1044,7 +1068,7 @@ export default async function executiveRoutes(fastify: FastifyInstance) {
       excOpenRes, excBreachedRes, excTotalRes,
       trustHighRes, trustMedRes, trustTotalRes,
       trustVerifiedRes,
-      dupRes, govRes,
+      dupRes, govEvents,
       wfTrustRes,
     ] = await Promise.all([
       // Open incidents
@@ -1091,32 +1115,43 @@ export default async function executiveRoutes(fastify: FastifyInstance) {
         .eq('tenant_id', req.tenantId)
         .gte('created_at', `${from30}T00:00:00`),
 
-      // High-risk trust profiles
+      // High-risk trust profiles. Adds score_type='employee' to match the
+      // medium/total/verified siblings just below — without it, this count
+      // was scoped differently from the others (it also included
+      // onboarding/payroll/document score rows, not just employee scores).
       fastify.supabase
         .from('workforce_trust_scores')
         .select('id', { count: 'exact', head: true })
         .eq('tenant_id', req.tenantId)
+        .eq('score_type', 'employee')
         .eq('severity', 'high'),
 
-      // Medium-risk trust profiles
+      // Medium-risk trust profiles. Fresh audit finding: queried
+      // 'employee_trust_profiles' (doesn't exist — see O5.9 comment below)
+      // with a 'risk_level' column that doesn't exist either. Real table is
+      // workforce_trust_scores, real column is 'severity'.
       fastify.supabase
-        .from('employee_trust_profiles')
+        .from('workforce_trust_scores')
         .select('id', { count: 'exact', head: true })
         .eq('tenant_id', req.tenantId)
-        .eq('risk_level', 'medium'),
+        .eq('score_type', 'employee')
+        .eq('severity', 'medium'),
 
       // Total trust profiles
       fastify.supabase
-        .from('employee_trust_profiles')
-        .select('id', { count: 'exact', head: true })
-        .eq('tenant_id', req.tenantId),
-
-      // Verified employees
-      fastify.supabase
-        .from('employee_trust_profiles')
+        .from('workforce_trust_scores')
         .select('id', { count: 'exact', head: true })
         .eq('tenant_id', req.tenantId)
-        .eq('is_verified', true),
+        .eq('score_type', 'employee'),
+
+      // Verified employees — severity='low' is the closest real proxy for
+      // "verified" on workforce_trust_scores (no boolean verified flag exists).
+      fastify.supabase
+        .from('workforce_trust_scores')
+        .select('id', { count: 'exact', head: true })
+        .eq('tenant_id', req.tenantId)
+        .eq('score_type', 'employee')
+        .eq('severity', 'low'),
 
       // Duplicate detection events (recent)
       fastify.supabase
@@ -1124,13 +1159,21 @@ export default async function executiveRoutes(fastify: FastifyInstance) {
         .select('id', { count: 'exact', head: true })
         .eq('tenant_id', req.tenantId),
 
-      // Governance events 30d
-      fastify.supabase
-        .from('governance_drift_events')
-        .select('id, severity', { count: 'exact' })
-        .eq('tenant_id', req.tenantId)
-        .gte('detected_at', `${from30}T00:00:00`)
-        .limit(200),
+      // Governance events 30d. Fresh audit finding: this used count:exact
+      // (correct, exhaustive) for the total but built the severity breakdown
+      // from only the first 200 rows with no .order() — the same anti-pattern
+      // the O5.9 fix just below (workforce_trust_scores) was deliberately
+      // written to avoid. A tenant with >200 governance drift events in 30
+      // days got a severity breakdown that silently didn't sum to the
+      // reported total, feeding governance_risk in the Risk Posture Index.
+      fetchAllRows<{ id: string; severity: string }>((from, to2) =>
+        fastify.supabase
+          .from('governance_drift_events')
+          .select('id, severity')
+          .eq('tenant_id', req.tenantId)
+          .gte('detected_at', `${from30}T00:00:00`)
+          .range(from, to2),
+      ),
 
       // O5.9 — workforce_trust_scores avg + distribution. workforce_trust_scores
       // is UNIQUE(org_id, entity_id, score_type) — one row per employee, not a
@@ -1160,8 +1203,7 @@ export default async function executiveRoutes(fastify: FastifyInstance) {
     const trust_verified         = trustVerifiedRes.count ?? 0
     const open_duplicates        = dupRes.count         ?? 0
 
-    const govEvents      = govRes.data ?? []
-    const gov_total_30d  = govRes.count ?? 0
+    const gov_total_30d  = govEvents.length
     const govBySeverity  = govEvents.reduce((acc: Record<string, number>, e: any) => {
       const s = e.severity ?? 'unknown'
       acc[s] = (acc[s] ?? 0) + 1
@@ -1399,13 +1441,16 @@ export default async function executiveRoutes(fastify: FastifyInstance) {
         .gte('month', oldestMonth)
         .order('month', { ascending: true }),
 
-      // Leave approvals for period
+      // Leave approvals for period. Fresh audit finding: leave_requests.status
+      // is uppercase-only per its CHECK constraint (migration 041) — 'approved'
+      // never matched any row, so leave_days_approved was always 0 in every
+      // /executive/trends response.
       fetchAllRows((from, to) =>
         fastify.supabase
           .from('leave_requests')
           .select('created_at, status, total_days:computed_days')
           .eq('tenant_id', req.tenantId)
-          .eq('status', 'approved')
+          .eq('status', 'APPROVED')
           .gte('created_at', `${oldestDate}T00:00:00`)
           .range(from, to),
       ),
