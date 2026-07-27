@@ -146,6 +146,16 @@ export default async function payrollCostDataset(fastify: FastifyInstance) {
         .maybeSingle(),
     ])
 
+    // Errors are checked before falling back to "no matching row" — otherwise
+    // a genuine query failure (RLS hiccup, transient error) is silently
+    // treated identically to "no run for this month" (finalized: false,
+    // run_status: null, mom_variance: null), with no signal that a query
+    // actually failed vs. legitimately found nothing, on a financial-
+    // reporting endpoint.
+    if (runRes.error)      return serverError(req, reply, runRes.error, ErrorCode.QUERY_FAILED, 'Failed to fetch payroll run')
+    if (priorRunRes.error) return serverError(req, reply, priorRunRes.error, ErrorCode.QUERY_FAILED, 'Failed to fetch prior payroll run')
+    if (finalRunRes.error) return serverError(req, reply, finalRunRes.error, ErrorCode.QUERY_FAILED, 'Failed to fetch finalized payroll run')
+
     const run        = (runRes.data      as any) ?? null
     const priorRun   = (priorRunRes.data as any) ?? null
     const finalRunId = (finalRunRes.data as any)?.id ?? null
@@ -347,12 +357,14 @@ export default async function payrollCostDataset(fastify: FastifyInstance) {
     if (includeTrends) {
       const trendMonths = lastNMonths(month, 6)
 
-      const { data: trendRuns } = await fastify.supabase
+      const { data: trendRuns, error: trendErr } = await fastify.supabase
         .from('payroll_runs')
         .select('month, total_gross, total_net, employee_count')
         .eq('tenant_id', tid)
         .in('month', trendMonths)
         .order('month', { ascending: true })
+
+      if (trendErr) return serverError(req, reply, trendErr, ErrorCode.QUERY_FAILED, 'Failed to fetch payroll trends')
 
       const trendMap = new Map<string, { gross: number; net: number; headcount: number }>()
       for (const r of (trendRuns ?? []) as any[]) {
