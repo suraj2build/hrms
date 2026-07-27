@@ -81,7 +81,12 @@ export default async function operationsRoutes(fastify: FastifyInstance) {
   })
 
   // POST /operations/simulate/payroll — payroll impact simulation
-  fastify.post('/operations/simulate/payroll', { preHandler: [fastify.authenticate] }, async (req, _reply) => {
+  // Fresh audit finding: gated only on fastify.authenticate, so any employee
+  // could trigger and read company-wide payroll-impact simulations (CTC
+  // increase deltas, aggregate cost projections). The equivalent endpoint
+  // (payroll/simulate.ts) already requires HR_ADMIN_ROLES — apply the same
+  // gate here and to its three siblings below.
+  fastify.post('/operations/simulate/payroll', { preHandler: [fastify.authenticate, requireRole(...HR_ADMIN_ROLES)] }, async (req, _reply) => {
     const body = req.body as any
     const tenantId = (req as any).tenantId
     const run = simulationService.simulatePayrollImpact({
@@ -91,7 +96,7 @@ export default async function operationsRoutes(fastify: FastifyInstance) {
       months_in_period:  Number(body.months_in_period) || 1,
       created_by:        (req as any).userId,
     })
-    // Persist simulation run (fire-and-forget)
+    // Persist simulation run (fire-and-forget — result is still returned on failure)
     fastify.supabase.from('simulation_runs').insert({
       tenant_id:           run.tenant_id,
       simulation_type:  run.simulation_type,
@@ -100,12 +105,12 @@ export default async function operationsRoutes(fastify: FastifyInstance) {
       result_summary:   run.result_summary,
       created_at:       run.created_at,
       created_by:       run.created_by ?? null,
-    }).then(undefined, () => {})
+    }).then(undefined, (err: any) => fastify.log.warn({ err }, 'simulation_runs insert failed (payroll)'))
     return run
   })
 
   // POST /operations/simulate/compliance — compliance threshold simulation
-  fastify.post('/operations/simulate/compliance', { preHandler: [fastify.authenticate] }, async (req, _reply) => {
+  fastify.post('/operations/simulate/compliance', { preHandler: [fastify.authenticate, requireRole(...HR_ADMIN_ROLES)] }, async (req, _reply) => {
     const body = req.body as any
     const tenantId = (req as any).tenantId
     const run = simulationService.simulateComplianceThreshold({
@@ -120,12 +125,12 @@ export default async function operationsRoutes(fastify: FastifyInstance) {
       tenant_id: run.tenant_id, simulation_type: run.simulation_type, label: run.label,
       input_params: run.input_params, result_summary: run.result_summary,
       created_at: run.created_at, created_by: run.created_by ?? null,
-    }).then(undefined, () => {})
+    }).then(undefined, (err: any) => fastify.log.warn({ err }, 'simulation_runs insert failed (compliance)'))
     return run
   })
 
   // POST /operations/simulate/overtime — overtime growth simulation
-  fastify.post('/operations/simulate/overtime', { preHandler: [fastify.authenticate] }, async (req, _reply) => {
+  fastify.post('/operations/simulate/overtime', { preHandler: [fastify.authenticate, requireRole(...HR_ADMIN_ROLES)] }, async (req, _reply) => {
     const body = req.body as any
     const tenantId = (req as any).tenantId
     const run = simulationService.simulateOvertimeGrowth({
@@ -140,12 +145,12 @@ export default async function operationsRoutes(fastify: FastifyInstance) {
       tenant_id: run.tenant_id, simulation_type: run.simulation_type, label: run.label,
       input_params: run.input_params, result_summary: run.result_summary,
       created_at: run.created_at, created_by: run.created_by ?? null,
-    }).then(undefined, () => {})
+    }).then(undefined, (err: any) => fastify.log.warn({ err }, 'simulation_runs insert failed (overtime)'))
     return run
   })
 
   // GET /operations/simulate/history — past simulation runs
-  fastify.get('/operations/simulate/history', { preHandler: [fastify.authenticate] }, async (req, reply) => {
+  fastify.get('/operations/simulate/history', { preHandler: [fastify.authenticate, requireRole(...HR_ADMIN_ROLES)] }, async (req, reply) => {
     const tenantId = (req as any).tenantId
     const { limit = '20' } = req.query as any
     const { data, error } = await fastify.supabase
