@@ -270,12 +270,7 @@ async function recordAndAdvance(
   close:      boolean,
   finalApproved: boolean | null,
   nextLevel:  number | null,
-): Promise<{ ok: true } | { ok: false; message: string }> {
-  const { error: actionErr } = await supabase
-    .from('approval_actions')
-    .insert({ tenant_id: tenantId, instance_id: instanceId, level, action, actor_id: actorId, comments: comments ?? null })
-  if (actionErr) return { ok: false, message: 'Failed to record approval action' }
-
+): Promise<{ ok: true } | { ok: false; type: 'CONFLICT' | 'DB_ERROR'; message: string }> {
   const patch: Record<string, unknown> = {}
   if (close) {
     patch.final_approved = finalApproved
@@ -283,14 +278,39 @@ async function recordAndAdvance(
   } else if (nextLevel) {
     patch.current_level = nextLevel
   }
+
+  // Update the instance FIRST, folding the precondition (still open, still at
+  // the level the caller read) into the WHERE clause and checking the
+  // returned row — mirrors the fix already applied to the sibling
+  // processWorkflowAction in workflow-service.ts. Previously the action row
+  // was inserted before this unguarded update ran, so two concurrent actions
+  // on the same instance (double-click/retry, or a genuine approve/reject
+  // race between two authorized approvers) could both pass the caller's
+  // earlier `final_approved !== null` read-time check, both insert an
+  // approval_actions row (duplicate/contradictory audit trail), and both
+  // blindly overwrite approval_instances — last write wins with no error,
+  // leaving the chain's recorded outcome inconsistent with the actual
+  // entity status. Only record the action once the transition is confirmed.
   if (Object.keys(patch).length) {
-    const { error: updErr } = await supabase
+    const { data: updated, error: updErr } = await supabase
       .from('approval_instances')
       .update(patch)
       .eq('id', instanceId)
       .eq('tenant_id', tenantId)
-    if (updErr) return { ok: false, message: 'Failed to update approval instance' }
+      .is('final_approved', null)
+      .eq('current_level', level)
+      .select('id')
+      .maybeSingle()
+
+    if (updErr) return { ok: false, type: 'DB_ERROR', message: 'Failed to update approval instance' }
+    if (!updated) return { ok: false, type: 'CONFLICT', message: 'This request was already actioned by another request' }
   }
+
+  const { error: actionErr } = await supabase
+    .from('approval_actions')
+    .insert({ tenant_id: tenantId, instance_id: instanceId, level, action, actor_id: actorId, comments: comments ?? null })
+  if (actionErr) return { ok: false, type: 'DB_ERROR', message: 'Failed to record approval action' }
+
   return { ok: true }
 }
 
@@ -347,7 +367,7 @@ export async function gateApprove(supabase: SupabaseClient, input: GateInput): P
       supabase, input.tenantId, instance.id, instance.current_level,
       'approved', input.actorId, input.comments, true, true, null,
     )
-    if (!rec.ok) return { kind: 'error', error: { type: 'DB_ERROR', message: rec.message } }
+    if (!rec.ok) return { kind: 'error', error: { type: rec.type, message: rec.message } }
     return { kind: 'finalize', authorized: true }
   }
 
@@ -357,7 +377,7 @@ export async function gateApprove(supabase: SupabaseClient, input: GateInput): P
     supabase, input.tenantId, instance.id, instance.current_level,
     'approved', input.actorId, input.comments, false, null, nextLevel,
   )
-  if (!rec.ok) return { kind: 'error', error: { type: 'DB_ERROR', message: rec.message } }
+  if (!rec.ok) return { kind: 'error', error: { type: rec.type, message: rec.message } }
   return { kind: 'advanced', level: instance.current_level, nextLevel, totalLevels: applicable.length }
 }
 
@@ -402,6 +422,6 @@ export async function gateReject(supabase: SupabaseClient, input: GateInput): Pr
     supabase, input.tenantId, instance.id, instance.current_level,
     'rejected', input.actorId, input.comments, true, false, null,
   )
-  if (!rec.ok) return { kind: 'error', error: { type: 'DB_ERROR', message: rec.message } }
+  if (!rec.ok) return { kind: 'error', error: { type: rec.type, message: rec.message } }
   return { kind: 'finalize', authorized: true }
 }
