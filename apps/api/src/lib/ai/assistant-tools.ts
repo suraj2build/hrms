@@ -907,7 +907,7 @@ async function cancelLeaveRequest(ctx: ToolCtx, args: { request_id: string }): P
     .select('id')
     .maybeSingle()
 
-  if (error) return `Failed to cancel: ${error.message}`
+  if (error) return 'Failed to cancel your leave request. Please try again.'
   if (!updated) return 'This request can no longer be cancelled — its status changed (e.g. it was just approved or rejected) before the cancellation went through.'
   const typeName = (req.leave_types as any)?.name ?? 'leave'
   return `✅ ${typeName} request (${req.from_date} → ${req.to_date}) has been cancelled.`
@@ -946,7 +946,7 @@ async function createHelpdeskTicket(ctx: ToolCtx, args: { subject: string; descr
     .select('id, ticket_number')
     .single()
 
-  if (error) return `Failed to create ticket: ${error.message}`
+  if (error) return 'Failed to create the helpdesk ticket. Please try again.'
   const ticketRef = (data as any).ticket_number ?? data.id.slice(0, 8)
   return `✅ Helpdesk ticket #${ticketRef} created. Subject: "${args.subject}". Category: ${category}, Priority: ${priority}. HR will respond shortly.`
 }
@@ -1057,7 +1057,7 @@ async function updateContactInfo(ctx: ToolCtx, args: { phone: string }): Promise
     .eq('tenant_id', ctx.caller.tenantId)
     .eq('id', ctx.employeeId)
 
-  if (error) return `Failed to update phone number: ${error.message}`
+  if (error) return 'Failed to update your phone number. Please try again.'
   return `✅ Your phone number has been updated to ${phone}. This will be reflected in your employee profile.`
 }
 
@@ -1163,7 +1163,7 @@ async function updateBankDetails(ctx: ToolCtx, args: { account_number?: string; 
       bank_name:      args.bank_name ?? null,
     }, { onConflict: 'tenant_id,employee_id' })
 
-  if (error) return `Failed to update bank details: ${error.message}`
+  if (error) return 'Failed to update your bank details. Please try again.'
   return `Bank account updated: ${accountNum} (${ifsc.toUpperCase()}). Changes will be reflected in your next payroll.`
 }
 
@@ -1183,7 +1183,7 @@ async function updateEmergencyContact(ctx: ToolCtx, args: { name?: string; relat
     .eq('tenant_id', ctx.caller.tenantId)
     .eq('is_primary', true)
     .maybeSingle()
-  if (findErr) return `Failed to update emergency contact: ${findErr.message}`
+  if (findErr) return 'Failed to update your emergency contact. Please try again.'
 
   const payload = {
     employee_id:  ctx.employeeId,
@@ -1197,7 +1197,7 @@ async function updateEmergencyContact(ctx: ToolCtx, args: { name?: string; relat
     ? await ctx.supabase.from('emergency_contacts').update(payload).eq('id', (existing as any).id).eq('tenant_id', ctx.caller.tenantId)
     : await ctx.supabase.from('emergency_contacts').insert(payload)
 
-  if (error) return `Failed to update emergency contact: ${error.message}`
+  if (error) return 'Failed to update your emergency contact. Please try again.'
   return `Emergency contact updated: ${args.name} (${args.relationship ?? 'N/A'}) — ${args.phone}.`
 }
 

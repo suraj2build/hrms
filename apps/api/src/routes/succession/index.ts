@@ -233,12 +233,19 @@ export default async function successionRoutes(fastify: FastifyInstance) {
     const planIds = data.map(p => p.id)
     const countMap: Record<string, number> = {}
     if (planIds.length > 0) {
-      const { data: counts } = await supabase
-        .from('succession_candidates')
-        .select('plan_id')
-        .eq('tenant_id', tenantId)
-        .in('plan_id', planIds)
-      ;(counts ?? []).forEach(c => { countMap[c.plan_id] = (countMap[c.plan_id] ?? 0) + 1 })
+      let counts: any[]
+      try {
+        counts = await fetchAllRows<any>((from, to) =>
+          supabase
+            .from('succession_candidates')
+            .select('plan_id')
+            .eq('tenant_id', tenantId)
+            .in('plan_id', planIds)
+            .range(from, to))
+      } catch (err: any) {
+        return serverError(req, reply, err, ErrorCode.QUERY_FAILED, 'Failed to fetch candidate counts')
+      }
+      counts.forEach(c => { countMap[c.plan_id] = (countMap[c.plan_id] ?? 0) + 1 })
     }
 
     return reply.send({ data: data.map(p => ({ ...p, candidate_count: countMap[p.id] ?? 0 })) })
@@ -327,8 +334,9 @@ export default async function successionRoutes(fastify: FastifyInstance) {
       if (!incumbent) return reply.status(400).send({ error: 'VALIDATION_ERROR', message: 'Incumbent not found in your organisation' })
     }
 
-    const { error } = await supabase.from('succession_plans').update(update).eq('tenant_id', tenantId).eq('id', id)
+    const { data: updated, error } = await supabase.from('succession_plans').update(update).eq('tenant_id', tenantId).eq('id', id).select('id').maybeSingle()
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update succession plan')
+    if (!updated) return notFound(reply, 'PLAN_NOT_FOUND', 'Succession plan not found')
     await logAction(supabase, { tenantId, tableName: 'succession_plans', recordId: id, action: 'UPDATE', performedBy: req.userId, newData: update })
     return reply.send({ data: { updated: true } })
   })
@@ -338,8 +346,9 @@ export default async function successionRoutes(fastify: FastifyInstance) {
   fastify.post('/plans/:id/archive', hrAuth, async (req: any, reply) => {
     const tenantId = req.tenantId
     const { id } = req.params as { id: string }
-    const { error } = await supabase.from('succession_plans').update({ status: 'archived' }).eq('tenant_id', tenantId).eq('id', id)
+    const { data: archived, error } = await supabase.from('succession_plans').update({ status: 'archived' }).eq('tenant_id', tenantId).eq('id', id).select('id').maybeSingle()
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to archive succession plan')
+    if (!archived) return notFound(reply, 'PLAN_NOT_FOUND', 'Succession plan not found')
     await logAction(supabase, { tenantId, tableName: 'succession_plans', recordId: id, action: 'UPDATE', performedBy: req.userId, newData: { status: 'archived' } })
     return reply.send({ data: { archived: true } })
   })
@@ -359,6 +368,13 @@ export default async function successionRoutes(fastify: FastifyInstance) {
     const { data: candidateEmp } = await supabase
       .from('employees').select('id').eq('id', employee_id).eq('tenant_id', tenantId).maybeSingle()
     if (!candidateEmp) return reply.status(400).send({ error: 'VALIDATION_ERROR', message: 'Employee not found in your organisation' })
+
+    // Fresh audit finding (cross-tenant IDOR): plan_id comes straight from the
+    // URL with no check that the plan belongs to this tenant — a guessed
+    // foreign-tenant plan UUID would silently attach this candidate to it.
+    const { data: plan } = await supabase
+      .from('succession_plans').select('id').eq('id', plan_id).eq('tenant_id', tenantId).maybeSingle()
+    if (!plan) return notFound(reply, 'PLAN_NOT_FOUND', 'Succession plan not found')
 
     const { data, error } = await supabase
       .from('succession_candidates')
@@ -394,11 +410,12 @@ export default async function successionRoutes(fastify: FastifyInstance) {
     for (const k of allowed) { if (body[k] !== undefined) update[k] = body[k] }
     if (Object.keys(update).length === 0) return reply.status(400).send({ error: 'No fields to update' })
 
-    const { error } = await supabase.from('succession_candidates').update(update).eq('tenant_id', tenantId).eq('id', cid)
+    const { data: updated, error } = await supabase.from('succession_candidates').update(update).eq('tenant_id', tenantId).eq('id', cid).select('id').maybeSingle()
     if (error) {
       if (error.code === '23514') return validationError(reply, ErrorCode.VALIDATION_ERROR, 'Invalid value for one or more scorecard fields')
       return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update succession candidate')
     }
+    if (!updated) return notFound(reply, 'CANDIDATE_NOT_FOUND', 'Succession candidate not found')
     return reply.send({ data: { updated: true } })
   })
 
@@ -407,8 +424,9 @@ export default async function successionRoutes(fastify: FastifyInstance) {
   fastify.delete('/plans/:id/candidates/:cid', hrAuth, async (req: any, reply) => {
     const tenantId = req.tenantId
     const { cid } = req.params as { id: string; cid: string }
-    const { error } = await supabase.from('succession_candidates').delete().eq('tenant_id', tenantId).eq('id', cid)
+    const { data: deleted, error } = await supabase.from('succession_candidates').delete().eq('tenant_id', tenantId).eq('id', cid).select('id').maybeSingle()
     if (error) return serverError(req, reply, error, ErrorCode.DELETE_FAILED, 'Failed to remove succession candidate')
+    if (!deleted) return notFound(reply, 'CANDIDATE_NOT_FOUND', 'Succession candidate not found')
     return reply.send({ data: { deleted: true } })
   })
 
@@ -544,6 +562,14 @@ export default async function successionRoutes(fastify: FastifyInstance) {
     if (!parsed.success) return validationError(reply, ErrorCode.VALIDATION_ERROR, parsed.error.issues[0]?.message ?? 'Invalid request body')
     const { action_type = 'course', description, target_date } = parsed.data
 
+    // Fresh audit finding (cross-tenant IDOR): cid comes straight from the URL
+    // with no check that the succession_candidates row belongs to this tenant
+    // — a guessed foreign-tenant candidate id would silently attach this IDP
+    // action to it.
+    const { data: candidate } = await supabase
+      .from('succession_candidates').select('id').eq('id', cid).eq('tenant_id', tenantId).maybeSingle()
+    if (!candidate) return notFound(reply, 'CANDIDATE_NOT_FOUND', 'Succession candidate not found')
+
     const { data, error } = await supabase
       .from('succession_idp_actions')
       .insert({
@@ -574,13 +600,16 @@ export default async function successionRoutes(fastify: FastifyInstance) {
     for (const k of allowed) { if (body[k] !== undefined) update[k] = body[k] }
     if (Object.keys(update).length === 0) return validationError(reply, ErrorCode.VALIDATION_ERROR, 'No fields to update')
 
-    const { error } = await supabase
+    const { data: updated, error } = await supabase
       .from('succession_idp_actions')
       .update(update)
       .eq('tenant_id', tenantId)
       .eq('id', aid)
+      .select('id')
+      .maybeSingle()
 
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update IDP action')
+    if (!updated) return notFound(reply, 'IDP_ACTION_NOT_FOUND', 'IDP action not found')
     return reply.send({ data: { updated: true } })
   })
 
@@ -590,13 +619,16 @@ export default async function successionRoutes(fastify: FastifyInstance) {
     const tenantId = req.tenantId
     const { aid } = req.params as { id: string; cid: string; aid: string }
 
-    const { error } = await supabase
+    const { data: deleted, error } = await supabase
       .from('succession_idp_actions')
       .delete()
       .eq('tenant_id', tenantId)
       .eq('id', aid)
+      .select('id')
+      .maybeSingle()
 
     if (error) return serverError(req, reply, error, ErrorCode.DELETE_FAILED, 'Failed to delete IDP action')
+    if (!deleted) return notFound(reply, 'IDP_ACTION_NOT_FOUND', 'IDP action not found')
     return reply.send({ data: { deleted: true } })
   })
 
@@ -858,11 +890,14 @@ export default async function successionRoutes(fastify: FastifyInstance) {
 
   fastify.patch('/calibration/:sessionId/close', hrAuth, async (req: any, reply) => {
     const { sessionId } = req.params as { sessionId: string }
-    const { error } = await supabase
+    const { data: closed, error } = await supabase
       .from('calibration_sessions')
       .update({ status: 'closed', closed_at: new Date().toISOString() })
       .eq('id', sessionId).eq('tenant_id', req.tenantId)
+      .select('id')
+      .maybeSingle()
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to close calibration session')
+    if (!closed) return notFound(reply, 'SESSION_NOT_FOUND', 'Calibration session not found')
     return reply.send({ data: { closed: true } })
   })
 
@@ -932,10 +967,10 @@ export default async function successionRoutes(fastify: FastifyInstance) {
       const perf      = Math.min(3, Math.max(1, Math.ceil(((appraisal as any).final_rating ?? 3) / (10 / 3))))
       const potential = Math.min(3, Math.max(1, Math.ceil(((appraisal as any).potential_rating ?? 2) / (10 / 3))))
 
-      await supabase.from('succession_candidates')
+      const { error: updateErr } = await supabase.from('succession_candidates')
         .update({ nine_box_performance: perf, nine_box_potential: potential })
         .eq('id', c.id).eq('tenant_id', tenantId)
-      plotted++
+      if (!updateErr) plotted++
     }
 
     return reply.send({ data: { plotted } })
