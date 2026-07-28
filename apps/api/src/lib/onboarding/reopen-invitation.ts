@@ -41,7 +41,7 @@ export async function reopenInvitationForReupload(
   }
 
   const expiresAt = new Date(Date.now() + REOPEN_DAYS * 86400_000).toISOString()
-  const { error: updErr } = await (fastify as any).supabase
+  const { data: updated, error: updErr } = await (fastify as any).supabase
     .from('pre_joinee_invitations')
     .update({
       status:            'changes_requested',
@@ -52,8 +52,12 @@ export async function reopenInvitationForReupload(
     })
     .eq('id', invitationId)
     .eq('tenant_id', tenantId)
+    .eq('status', 'submitted')
+    .select('id')
+    .maybeSingle()
 
   if (updErr) return { ok: false, code: 500, error: 'DB_ERROR', message: updErr.message }
+  if (!updated) return { ok: false, code: 409, error: 'INVALID_STATE', message: `Cannot request re-upload while the invitation is ${inv.status}` }
 
   // Notify the candidate (best-effort — never blocks the state change).
   try {

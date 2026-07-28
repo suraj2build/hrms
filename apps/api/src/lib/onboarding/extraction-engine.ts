@@ -53,6 +53,12 @@ const DOCUMENT_FIELDS: Record<string, string[]> = {
     'full_name', 'previous_employer', 'previous_designation',
     'from_date', 'to_date', 'reason_for_leaving',
   ],
+  joining_letter: [
+    'full_name', 'employee_code', 'joining_date', 'designation', 'department', 'ctc_annual',
+  ],
+  tax_document: [
+    'full_name', 'pan_number', 'assessment_year', 'total_income', 'tax_paid',
+  ],
   salary_slip: [
     'full_name', 'employee_code', 'month_year', 'gross_salary', 'net_salary',
     'basic_salary', 'hra', 'pf_deduction', 'esi_deduction', 'pan_number',

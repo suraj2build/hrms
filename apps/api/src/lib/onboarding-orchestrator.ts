@@ -354,12 +354,13 @@ async function trustAdminInboxItemExists(
 async function dispatchTrustAdminInboxItem(opts: TrustAdminInboxOpts): Promise<void> {
   try {
     // Fetch all HR-admin profiles in the tenant
-    const { data: admins } = await opts.supabase
+    const { data: admins, error: adminsErr } = await opts.supabase
       .from('profiles')
       .select('id')
       .eq('tenant_id', opts.tenantId)
       .in('role', ['hr_admin', 'super_admin', 'owner'])
 
+    if (adminsErr) { logWarn('trust_admin_inbox_admins_query_failed', opts.entityId, adminsErr); return }
     if (!admins || admins.length === 0) return
 
     const rows = admins.map((a: any) => ({
@@ -499,7 +500,7 @@ export function registerOnboardingHandlers(supabase: SupabaseClient): void {
     const { tenantId, employeeId, employeeCode, joiningDate } = event.payload
 
     // Fetch employee and tenant in parallel
-    const [{ data: emp }, { data: tenant }] = await Promise.all([
+    const [{ data: emp, error: empErr }, { data: tenant, error: tenantErr }] = await Promise.all([
       supabase
         .from('employees')
         .select('first_name, last_name, email, job_history!job_history_employee_id_fkey(manager_id, is_current)')
@@ -512,6 +513,8 @@ export function registerOnboardingHandlers(supabase: SupabaseClient): void {
         .eq('id', tenantId)
         .maybeSingle(),
     ])
+    if (empErr) logWarn('welcome_email_employee_fetch_failed', employeeId, empErr)
+    if (tenantErr) logWarn('welcome_email_tenant_fetch_failed', employeeId, tenantErr)
     if (emp) {
       const _jh = ((emp as any).job_history ?? []).find((j: any) => j.is_current) ?? ((emp as any).job_history ?? [])[0] ?? null
       ;(emp as any).reporting_manager_id = _jh?.manager_id ?? null
@@ -555,18 +558,28 @@ export function registerOnboardingHandlers(supabase: SupabaseClient): void {
     // ONB-05: IT provisioning notification to HR admins
     // (Profiles has no email col — fetch emails via Supabase Auth Admin API)
     try {
-      const { data: admins } = await supabase
+      const { data: admins, error: adminsErr } = await supabase
         .from('profiles')
         .select('id')
         .eq('tenant_id', tenantId)
         .in('role', ['hr_admin', 'super_admin'])
 
+      if (adminsErr) logWarn('it_provisioning_admins_query_failed', employeeId, adminsErr)
+
       if (admins && admins.length > 0) {
         const emailMap: Record<string, string> = {}
         try {
-          const { data: authList } = await (supabase.auth as any).admin.listUsers({ perPage: 1000, page: 1 })
-          for (const u of (authList?.users ?? [])) {
-            emailMap[u.id] = u.email ?? ''
+          // listUsers is platform-wide, not tenant-scoped — a single page (max
+          // 1000) can miss this tenant's admins once enough other tenants'
+          // users exist. Page through until exhausted so every admin resolved
+          // above actually gets an email.
+          let page = 1
+          for (;;) {
+            const { data: authList } = await (supabase.auth as any).admin.listUsers({ perPage: 1000, page })
+            const users = authList?.users ?? []
+            for (const u of users) emailMap[u.id] = u.email ?? ''
+            if (users.length < 1000) break
+            page += 1
           }
         } catch (_) { /* email enrichment best-effort */ }
 
