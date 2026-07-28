@@ -20,7 +20,7 @@ export type DigestFrequency = 'daily' | 'weekly' | 'monthly'
 // between 00:00-05:29 IST the UTC calendar date is still yesterday, which
 // shifted "new joiners today"/"this month" calculations by a day right at
 // every day/month boundary (ISSUE-154 class).
-async function tenantTodayStr(supabase: SupabaseClient, tenantId: string): Promise<string> {
+export async function tenantTodayStr(supabase: SupabaseClient, tenantId: string): Promise<string> {
   const tz = await fetchTenantTz(supabase, tenantId)
   return getLocalDate(new Date().toISOString(), tz)
 }
@@ -49,14 +49,16 @@ async function count(
   table: string,
   build: (q: any) => any,
 ): Promise<number> {
-  try {
-    const { count } = await build(
-      supabase.from(table).select('id', { count: 'exact', head: true }),
-    )
-    return count ?? 0
-  } catch {
-    return 0
-  }
+  // A failed query must not be reported as "0" — that's indistinguishable
+  // from a genuine zero and would ship a digest claiming e.g. "no pending
+  // approvals" when the read actually errored. Let it propagate; both
+  // callers (the on-demand routes and the scheduler's per-tenant loop)
+  // already catch and surface/log failures rather than silently continuing.
+  const { count, error } = await build(
+    supabase.from(table).select('id', { count: 'exact', head: true }),
+  )
+  if (error) throw new Error(`digest count query failed on ${table}: ${error.message}`)
+  return count ?? 0
 }
 
 // ── Daily ──────────────────────────────────────────────────────────────────
@@ -173,15 +175,23 @@ export function buildDigest(supabase: SupabaseClient, tenantId: string, frequenc
   return buildMonthlyDigest(supabase, tenantId)
 }
 
-/** Period key for idempotency: daily=YYYY-MM-DD, weekly=YYYY-Www, monthly=YYYY-MM. */
-export function periodKey(frequency: DigestFrequency, when: Date = new Date()): string {
-  if (frequency === 'daily') return when.toISOString().slice(0, 10)
-  if (frequency === 'monthly') return `${when.getUTCFullYear()}-${String(when.getUTCMonth() + 1).padStart(2, '0')}`
+/**
+ * Period key for idempotency: daily=YYYY-MM-DD, weekly=YYYY-Www, monthly=YYYY-MM.
+ * Takes the tenant-local "today" as a YYYY-MM-DD string (see `tenantTodayStr`)
+ * rather than a bare `Date` — the digest content this key is stamped against
+ * is itself built from the tenant's local calendar, so deriving the key from
+ * the server's UTC clock instead would let the two silently disagree for any
+ * non-UTC tenant (ISSUE-154 class).
+ */
+export function periodKey(frequency: DigestFrequency, localDateStr: string): string {
+  if (frequency === 'daily') return localDateStr
+  const [y, m, d] = localDateStr.split('-').map(Number)
+  if (frequency === 'monthly') return `${y}-${String(m).padStart(2, '0')}`
   // ISO week number
-  const d = new Date(Date.UTC(when.getUTCFullYear(), when.getUTCMonth(), when.getUTCDate()))
-  const dayNum = d.getUTCDay() === 0 ? 7 : d.getUTCDay()
-  d.setUTCDate(d.getUTCDate() + 4 - dayNum)
-  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1))
-  const week = Math.ceil((((d.getTime() - yearStart.getTime()) / 86_400_000) + 1) / 7)
-  return `${d.getUTCFullYear()}-W${String(week).padStart(2, '0')}`
+  const dt = new Date(Date.UTC(y, m - 1, d))
+  const dayNum = dt.getUTCDay() === 0 ? 7 : dt.getUTCDay()
+  dt.setUTCDate(dt.getUTCDate() + 4 - dayNum)
+  const yearStart = new Date(Date.UTC(dt.getUTCFullYear(), 0, 1))
+  const week = Math.ceil((((dt.getTime() - yearStart.getTime()) / 86_400_000) + 1) / 7)
+  return `${dt.getUTCFullYear()}-W${String(week).padStart(2, '0')}`
 }

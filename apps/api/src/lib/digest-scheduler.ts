@@ -22,7 +22,7 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { buildDigest, periodKey, type DigestFrequency } from './digest-builder.js'
+import { buildDigest, periodKey, tenantTodayStr, type DigestFrequency } from './digest-builder.js'
 import { sendEmail, digestEmail, APP_PUBLIC_URL } from './email-service.js'
 import { durableQueue }       from './durable-queue.js'
 import { fetchAllRows }       from './supabase-paginate.js'
@@ -135,7 +135,10 @@ export async function runDigestForTenant(
   result.recipients = admins.length
 
   const digest = await buildDigest(supabase, tenantId, frequency)
-  const pkey   = periodKey(frequency)
+  // Derive the key from the same tenant-local calendar the digest content
+  // itself was built from — deriving it from the server's UTC clock instead
+  // could disagree with digest.period_label for any non-UTC tenant.
+  const pkey   = periodKey(frequency, await tenantTodayStr(supabase, tenantId))
 
   // For monthly: also grab the executive narrative (may be null if not yet generated)
   let execNarrative: string | null = null
