@@ -242,7 +242,8 @@ export default async function notificationInboxRoutes(fastify: FastifyInstance) 
   })
 
   // ── GET /notifications/inbox/escalation-rules ────────────────────────────────
-  fastify.get('/escalation-rules', auth, async (req: any, reply) => {
+  // HR-admin only — exposes internal escalation configuration tenant-wide.
+  fastify.get('/escalation-rules', { preHandler: [fastify.authenticate, requireHrAdmin] }, async (req: any, reply) => {
     const { data, error } = await fastify.supabase
       .from('escalation_rules')
       .select('*')
@@ -281,7 +282,8 @@ export default async function notificationInboxRoutes(fastify: FastifyInstance) 
   })
 
   // ── GET /notifications/inbox/escalations ─────────────────────────────────────
-  fastify.get('/escalations', auth, async (req: any, reply) => {
+  // HR-admin only — joins other employees' inbox_items titles/status tenant-wide.
+  fastify.get('/escalations', { preHandler: [fastify.authenticate, requireHrAdmin] }, async (req: any, reply) => {
     const querySchema = z.object({
       inbox_item_id: z.string().uuid().optional(),
     })

@@ -273,6 +273,19 @@ export default async function notificationTemplatesRoutes(fastify: FastifyInstan
       subject = (template as any).subject ?? null
     }
 
+    // Fresh audit finding: recipient ids were persisted from client input with
+    // no check they belong to this tenant (unlike inbox.ts's POST / guard).
+    if (parsed.data.recipient_employee_id) {
+      const { data: emp } = await fastify.supabase
+        .from('employees').select('id').eq('id', parsed.data.recipient_employee_id).eq('tenant_id', req.tenantId).maybeSingle()
+      if (!emp) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: 'Recipient employee not found in your organisation' })
+    }
+    if (parsed.data.recipient_profile_id) {
+      const { data: prof } = await fastify.supabase
+        .from('profiles').select('id').eq('id', parsed.data.recipient_profile_id).eq('tenant_id', req.tenantId).maybeSingle()
+      if (!prof) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: 'Recipient profile not found in your organisation' })
+    }
+
     // Substitute {{variables}} using the catalog resolver. Event-specific values
     // (status, leave_type, …) can be passed in `metadata`; employee/company/date
     // are resolved from the recipient + tenant.

@@ -231,12 +231,29 @@ export function registerNotificationHandlers(supabase: SupabaseClient): void {
 
   // ── leave.cancelled ──────────────────────────────────────────────────────────
   eventService.registerHandler('leave.cancelled', async (payload: LeaveCancelledPayload) => {
+    if (!_supabase) return
+    // Self-cancellation: the actor is the employee themselves. actorId must be
+    // a profiles.id per ApprovalNotificationPayload's documented contract —
+    // payload.employee_id is an employees.id, and dispatch() forwards actorId
+    // straight into notify()'s senderId (inbox_items.sender_id REFERENCES
+    // profiles(id)) with no resolution of its own, unlike recipientId. Passing
+    // the raw employees.id there failed the FK constraint and silently
+    // dropped every self-cancellation notification (notify() swallows insert
+    // errors).
+    const { data: prof } = await _supabase
+      .from('profiles')
+      .select('id')
+      .eq('employee_id', payload.employee_id)
+      .eq('tenant_id',   payload.tenant_id)
+      .maybeSingle()
+    if (!prof) return
+
     await notifyApprovalDecision({
       type:       'leave_cancelled',
       tenantId:   payload.tenant_id,
       employeeId: payload.employee_id,
       requestId:  payload.request_id,
-      actorId:    payload.employee_id,  // canceller is the employee themselves
+      actorId:    (prof as any).id,
       metadata: {
         leave_type: payload.leave_type,
         from_date:  payload.from_date,

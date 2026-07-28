@@ -13,27 +13,40 @@
  */
 
 import type { FastifyInstance } from 'fastify'
+import type { SupabaseClient }  from '@supabase/supabase-js'
+import { fetchTenantTz } from '../../lib/attendance-engine.js'
+import { getLocalDate }  from '../../lib/org-context.js'
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
-/** Returns { year, month } and ISO range strings for the current calendar month. */
-function currentMonthRange(): { from: string; to: string; year: number; month: number } {
-  const now   = new Date()
-  const year  = now.getFullYear()
-  const month = now.getMonth() + 1               // 1-based
-  const pad   = (n: number) => String(n).padStart(2, '0')
-  const from  = `${year}-${pad(month)}-01`
-  // last day of month: day 0 of next month
-  const lastDay = new Date(year, month, 0).getDate()
-  const to      = `${year}-${pad(month)}-${pad(lastDay)}`
-  return { from, to, year, month }
+/**
+ * "Today" in the tenant's own timezone, not the server's (UTC) clock — every
+ * "this month"/"last N days" boundary below is derived from this, so it must
+ * agree with what the tenant actually considers today (ISSUE-154 class).
+ */
+async function tenantTodayStr(supabase: SupabaseClient, tenantId: string): Promise<string> {
+  const tz = await fetchTenantTz(supabase, tenantId)
+  return getLocalDate(new Date().toISOString(), tz)
 }
 
-/** Returns the ISO date string for N days ago. */
-function daysAgo(n: number): string {
-  const d = new Date()
-  d.setDate(d.getDate() - n)
-  return d.toISOString().slice(0, 10)
+/** Returns { year, month } and ISO range strings for the calendar month containing todayStr. */
+function currentMonthRange(todayStr: string): { from: string; to: string; year: number; month: number; dayOfMonth: number } {
+  const [yearStr, monthStr, dayStr] = todayStr.split('-')
+  const year  = Number(yearStr)
+  const month = Number(monthStr)               // 1-based
+  const dayOfMonth = Number(dayStr)
+  const pad   = (n: number) => String(n).padStart(2, '0')
+  const from  = `${year}-${pad(month)}-01`
+  // last day of month: day 0 of next month, anchored at UTC noon to sidestep DST edge cases
+  const lastDay = new Date(Date.UTC(year, month, 0, 12)).getUTCDate()
+  const to      = `${year}-${pad(month)}-${pad(lastDay)}`
+  return { from, to, year, month, dayOfMonth }
+}
+
+/** Returns the ISO date string for N days before todayStr. */
+function daysAgo(n: number, todayStr: string): string {
+  const anchor = new Date(`${todayStr}T12:00:00Z`)
+  return new Date(anchor.getTime() - n * 86_400_000).toISOString().slice(0, 10)
 }
 
 /** Parses HH:MM:SS or HH:MM duration strings to total minutes (0 on error). */
@@ -78,7 +91,8 @@ export default async function essOperationalRoutes(fastify: FastifyInstance) {
     if (profileErr || !profile?.employee_id) return noEmployeeRecord(reply)
     const employeeId = profile.employee_id as string
 
-    const { from, to, year, month } = currentMonthRange()
+    const todayStr = await tenantTodayStr(fastify.supabase, req.tenantId)
+    const { from, to, year, month } = currentMonthRange(todayStr)
 
     // Attendance for current month
     const { data: attendance } = await fastify.supabase
@@ -178,6 +192,7 @@ export default async function essOperationalRoutes(fastify: FastifyInstance) {
 
     if (profileErr || !profile?.employee_id) return noEmployeeRecord(reply)
     const employeeId = profile.employee_id as string
+    const todayStr = await tenantTodayStr(fastify.supabase, req.tenantId)
 
     const notifications: Array<{
       type:        string
@@ -246,7 +261,7 @@ export default async function essOperationalRoutes(fastify: FastifyInstance) {
     }
 
     // c. Attendance risk: absent_rate > 20% in last 30 days
-    const thirtyDaysAgo = daysAgo(30)
+    const thirtyDaysAgo = daysAgo(30, todayStr)
     const { data: recentAttendance } = await fastify.supabase
       .from('attendance_daily')
       .select('status')
@@ -271,7 +286,7 @@ export default async function essOperationalRoutes(fastify: FastifyInstance) {
     }
 
     // d. Incomplete punches: no check_out in last 7 days
-    const sevenDaysAgo = daysAgo(7)
+    const sevenDaysAgo = daysAgo(7, todayStr)
     const { data: incompleteSessions } = await fastify.supabase
       .from('attendance_logs')
       .select('check_in, check_out, created_at')
@@ -309,7 +324,8 @@ export default async function essOperationalRoutes(fastify: FastifyInstance) {
     if (profileErr || !profile?.employee_id) return noEmployeeRecord(reply)
     const employeeId = profile.employee_id as string
 
-    const thirtyDaysAgo = daysAgo(30)
+    const todayStr = await tenantTodayStr(fastify.supabase, req.tenantId)
+    const thirtyDaysAgo = daysAgo(30, todayStr)
 
     // Fetch latest shift balance record for this employee
     const { data: shiftBalance } = await fastify.supabase
@@ -337,7 +353,7 @@ export default async function essOperationalRoutes(fastify: FastifyInstance) {
       below_team_average,
       period: {
         from: shiftBalance?.period_from ?? thirtyDaysAgo,
-        to:   shiftBalance?.period_to   ?? new Date().toISOString().slice(0, 10),
+        to:   shiftBalance?.period_to   ?? todayStr,
       },
     })
   })
@@ -355,7 +371,8 @@ export default async function essOperationalRoutes(fastify: FastifyInstance) {
     if (profileErr || !profile?.employee_id) return noEmployeeRecord(reply)
     const employeeId = profile.employee_id as string
 
-    const { from, to, year, month } = currentMonthRange()
+    const todayStr = await tenantTodayStr(fastify.supabase, req.tenantId)
+    const { from, to, year, month, dayOfMonth } = currentMonthRange(todayStr)
 
     // Attendance for current month
     const { data: attendance } = await fastify.supabase
@@ -371,8 +388,6 @@ export default async function essOperationalRoutes(fastify: FastifyInstance) {
     // Current LOP: absent rows where is_payable = false (or absent with no pay)
     let current_lop_days = 0
     let current_ot_hours = 0
-    const today = new Date()
-    const dayOfMonth = today.getDate()
 
     // Count actual absent+non-payable days so far
     for (const r of rows) {
@@ -388,7 +403,7 @@ export default async function essOperationalRoutes(fastify: FastifyInstance) {
     current_lop_days = Math.max(current_lop_days, rows.filter((r) => r.status === 'absent').length)
 
     // Projected LOP: extrapolate current rate to end of month
-    const totalMonthDays = new Date(year, month, 0).getDate()
+    const totalMonthDays = new Date(Date.UTC(year, month, 0, 12)).getUTCDate()
     const remainingDays  = Math.max(0, totalMonthDays - dayOfMonth)
     const dailyLopRate   = safeDivide(current_lop_days, dayOfMonth)
     const projected_lop_days = Math.round(current_lop_days + dailyLopRate * remainingDays)
@@ -420,7 +435,8 @@ export default async function essOperationalRoutes(fastify: FastifyInstance) {
     if (profileErr || !profile?.employee_id) return noEmployeeRecord(reply)
     const employeeId = profile.employee_id as string
 
-    const thirtyDaysAgo = daysAgo(30)
+    const todayStr = await tenantTodayStr(fastify.supabase, req.tenantId)
+    const thirtyDaysAgo = daysAgo(30, todayStr)
 
     const { data: attendance } = await fastify.supabase
       .from('attendance_daily')

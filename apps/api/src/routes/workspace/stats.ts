@@ -19,9 +19,23 @@
  */
 
 import type { FastifyInstance } from 'fastify'
+import type { SupabaseClient }  from '@supabase/supabase-js'
 import { buildActivePeriodSummary, buildLatestDaySnapshot } from '../../lib/attendance-read-model.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
+import { fetchTenantTz } from '../../lib/attendance-engine.js'
+import { getLocalDate }  from '../../lib/org-context.js'
+
+/**
+ * "Today" in the tenant's own timezone, not the server's (UTC) clock —
+ * otherwise near local midnight these HR-admin dashboards report the wrong
+ * calendar day/month for staffing pressure, overnight issues, and payroll
+ * variance/reconciliation default views (ISSUE-154 class).
+ */
+async function tenantTodayStr(supabase: SupabaseClient, tenantId: string): Promise<string> {
+  const tz = await fetchTenantTz(supabase, tenantId)
+  return getLocalDate(new Date().toISOString(), tz)
+}
 
 // `${month}-31` is an invalid date literal for the 5 of 12 months with fewer
 // than 31 days (Feb, Apr, Jun, Sep, Nov) — Postgres has no lenient date
@@ -237,7 +251,7 @@ export default async function workspaceStatsRoutes(fastify: FastifyInstance) {
     if (!requireHR(req, reply)) return
     const tenantId: string = req.tenantId
 
-    const today        = new Date().toISOString().slice(0, 10)
+    const today        = await tenantTodayStr(fastify.supabase, tenantId)
     const recentCutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
 
     const [
@@ -439,10 +453,11 @@ export default async function workspaceStatsRoutes(fastify: FastifyInstance) {
     if (!requireHR(req, reply)) return
     const tenantId: string = req.tenantId
 
-    const now          = new Date()
-    const currentMonth = now.toISOString().slice(0, 7)
+    const todayStr     = await tenantTodayStr(fastify.supabase, tenantId)
+    const currentMonth = todayStr.slice(0, 7)
     // Previous month for variance comparison
-    const prevDate     = new Date(now.getFullYear(), now.getMonth() - 1, 1)
+    const [curY, curM] = currentMonth.split('-').map(Number)
+    const prevDate     = new Date(Date.UTC(curY, curM - 2, 1, 12))
     const prevMonth    = prevDate.toISOString().slice(0, 7)
 
     const [
@@ -742,7 +757,7 @@ export default async function workspaceStatsRoutes(fastify: FastifyInstance) {
   fastify.get('/payroll/reconciliation', auth, async (req: any, reply) => {
     if (!requireHR(req, reply)) return
     const tenantId: string = req.tenantId
-    const month = ((req.query as any).month as string) ?? new Date().toISOString().slice(0, 7)
+    const month = ((req.query as any).month as string) ?? (await tenantTodayStr(fastify.supabase, tenantId)).slice(0, 7)
 
     // All five tables can exceed 1000 rows at scale — use fetchAllRows throughout.
     const [slips, attRows, otRows, statRows, actionRows] = await Promise.all([
