@@ -11,6 +11,7 @@ import {
   emitOnboardingDocumentRejected,
 } from '../../lib/onboarding-orchestrator.js'
 import { serverError, ErrorCode } from '../../lib/api-errors.js'
+import { checkIdempotency, storeIdempotency } from '../../lib/idempotency.js'
 
 // ─── Validation schemas ────────────────────────────────────────────────────
 
@@ -55,6 +56,18 @@ export default async function sessionRoutes(fastify: FastifyInstance) {
 
     const { candidate_name, assigned_to } = parsed.data
 
+    // No unique constraint prevents two onboarding_sessions rows for the same
+    // candidate — a double-click or network-retried request would otherwise
+    // silently create a duplicate, disconnected onboarding workflow.
+    const iKey = (req.headers['idempotency-key'] as string | undefined)?.trim()
+    if (iKey) {
+      const cached = await checkIdempotency(fastify.supabase, req.tenantId, iKey, 'onboarding-session-create')
+      if (cached) {
+        reply.header('Idempotency-Replayed', 'true')
+        return reply.code(cached.status_code).send(cached.response)
+      }
+    }
+
     const { data, error } = await fastify.supabase
       .from('onboarding_sessions')
       .insert({
@@ -77,7 +90,9 @@ export default async function sessionRoutes(fastify: FastifyInstance) {
       correlationId: (req as any).correlationId,
     })
 
-    return reply.code(201).send({ data })
+    const responseBody = { data }
+    if (iKey) await storeIdempotency(fastify.supabase, req.tenantId, iKey, 'onboarding-session-create', 201, responseBody)
+    return reply.code(201).send(responseBody)
   })
 
   // ── GET /onboarding/sessions ───────────────────────────────────────────────

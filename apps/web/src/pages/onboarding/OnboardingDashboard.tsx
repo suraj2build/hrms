@@ -1,4 +1,4 @@
-import { useState, Fragment } from 'react'
+import { useState, useRef, Fragment } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
@@ -161,12 +161,21 @@ interface NewOnboardingDialogProps {
 function NewOnboardingDialog({ open, onOpenChange, onCreated }: NewOnboardingDialogProps) {
   const [candidateName, setCandidateName] = useState('')
 
+  // Sent as Idempotency-Key on create, mirroring HRReviewWorkspace.tsx's
+  // approve pattern — a double-click or network retry must not create two
+  // disconnected onboarding_sessions rows for the same candidate. Rotated
+  // only after a successful create.
+  const createIdempotencyKey = useRef(crypto.randomUUID())
+
   const { mutate, isPending } = useMutation({
     mutationFn: () =>
-      api.post<CreateSessionResponse>('/onboarding/sessions', {
-        candidate_name: candidateName.trim() || null,
-      }),
+      api.post<CreateSessionResponse>(
+        '/onboarding/sessions',
+        { candidate_name: candidateName.trim() || null },
+        { headers: { 'Idempotency-Key': createIdempotencyKey.current } },
+      ),
     onSuccess: (resp) => {
+      createIdempotencyKey.current = crypto.randomUUID()
       onCreated(resp.data.id)
       setCandidateName('')
       onOpenChange(false)
