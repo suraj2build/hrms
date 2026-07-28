@@ -157,6 +157,9 @@ export default async function previousEmploymentTdsRoutes(fastify: FastifyInstan
       return reply.code(409).send({ error: 'NOT_EDITABLE', message: 'Only pending or under_review records can be edited' })
     }
 
+    // Fold the ownership/status precondition into the UPDATE's own WHERE clause
+    // (not just the earlier read) so a concurrent admin verify landing between
+    // the read above and this write can't be raced.
     const { data, error } = await fastify.supabase
       .from('previous_employment_tax_details')
       .update({
@@ -165,10 +168,15 @@ export default async function previousEmploymentTdsRoutes(fastify: FastifyInstan
       })
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
+      .eq('employee_id', employeeId)
+      .in('verification_status', ['pending', 'under_review'])
       .select()
-      .single()
+      .maybeSingle()
 
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update previous employment tax record')
+    if (!data) {
+      return reply.code(409).send({ error: 'NOT_EDITABLE', message: 'This record is no longer editable (it may have just been verified)' })
+    }
     return reply.send({ data })
   })
 
@@ -190,10 +198,11 @@ export default async function previousEmploymentTdsRoutes(fastify: FastifyInstan
     if (!existing) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Record not found' })
 
     const rec = existing as any
+    let employeeId: string | null = null
 
     if (!isAdmin) {
       // Employee path: must own the record and it must still be pending
-      const employeeId = await resolveCallerEmployeeId(fastify, req)
+      employeeId = await resolveCallerEmployeeId(fastify, req)
       if (!employeeId) {
         return reply.code(404).send({ error: 'EMPLOYEE_NOT_FOUND', message: 'No employee record linked to this account' })
       }
@@ -205,13 +214,16 @@ export default async function previousEmploymentTdsRoutes(fastify: FastifyInstan
       }
     }
 
-    const { error } = await fastify.supabase
-      .from('previous_employment_tax_details')
-      .delete()
-      .eq('id', id)
-      .eq('tenant_id', req.tenantId)
+    // Fold the ownership/status precondition into the DELETE's own WHERE clause
+    // for the self-service path — see the same fix in hra-declarations.ts.
+    let delQuery = fastify.supabase.from('previous_employment_tax_details').delete().eq('id', id).eq('tenant_id', req.tenantId)
+    if (!isAdmin) delQuery = delQuery.eq('employee_id', employeeId as string).eq('verification_status', 'pending')
+    const { data: deletedRows, error } = await delQuery.select('id')
 
     if (error) return serverError(req, reply, error, ErrorCode.DELETE_FAILED, 'Failed to delete previous employment tax record')
+    if (!isAdmin && (!deletedRows || deletedRows.length === 0)) {
+      return reply.code(409).send({ error: 'NOT_DELETABLE', message: 'This record is no longer deletable (it may have just been verified)' })
+    }
     return reply.code(204).send()
   })
 

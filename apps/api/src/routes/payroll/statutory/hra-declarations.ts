@@ -258,6 +258,11 @@ export default async function hraDeclarationsRoutes(fastify: FastifyInstance) {
       return reply.code(validationError.code).send({ error: validationError.error, message: validationError.message })
     }
 
+    // Fold the ownership/status precondition into the UPDATE's own WHERE clause
+    // (not just the earlier read) so a concurrent admin verify landing between
+    // the read above and this write can't be raced — the write itself now only
+    // succeeds if the record is still owned by this employee and still
+    // draft/submitted at the moment of the update.
     const { data, error } = await fastify.supabase
       .from('hra_declarations')
       .update({
@@ -266,10 +271,15 @@ export default async function hraDeclarationsRoutes(fastify: FastifyInstance) {
       })
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
+      .eq('employee_id', employeeId)
+      .in('status', ['draft', 'submitted'])
       .select()
-      .single()
+      .maybeSingle()
 
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update HRA declaration')
+    if (!data) {
+      return reply.code(409).send({ error: 'NOT_EDITABLE', message: 'This declaration is no longer editable (it may have just been verified)' })
+    }
     return reply.send({ data })
   })
 
@@ -291,9 +301,10 @@ export default async function hraDeclarationsRoutes(fastify: FastifyInstance) {
     if (!existing) return reply.code(404).send({ error: 'NOT_FOUND', message: 'HRA declaration not found' })
 
     const rec = existing as any
+    let employeeId: string | null = null
 
     if (!isAdmin) {
-      const employeeId = await resolveCallerEmployeeId(fastify, req)
+      employeeId = await resolveCallerEmployeeId(fastify, req)
       if (!employeeId) {
         return reply.code(404).send({ error: 'EMPLOYEE_NOT_FOUND', message: 'No employee record linked to this account' })
       }
@@ -305,13 +316,18 @@ export default async function hraDeclarationsRoutes(fastify: FastifyInstance) {
       }
     }
 
-    const { error } = await fastify.supabase
-      .from('hra_declarations')
-      .delete()
-      .eq('id', id)
-      .eq('tenant_id', req.tenantId)
+    // Fold the ownership/status precondition into the DELETE's own WHERE clause
+    // for the self-service path — a concurrent admin verify landing between the
+    // read above and this delete could otherwise let an employee delete a
+    // record that just became verified/locked.
+    let delQuery = fastify.supabase.from('hra_declarations').delete().eq('id', id).eq('tenant_id', req.tenantId)
+    if (!isAdmin) delQuery = delQuery.eq('employee_id', employeeId as string).eq('status', 'draft')
+    const { data: deletedRows, error } = await delQuery.select('id')
 
     if (error) return serverError(req, reply, error, ErrorCode.DELETE_FAILED, 'Failed to delete HRA declaration')
+    if (!isAdmin && (!deletedRows || deletedRows.length === 0)) {
+      return reply.code(409).send({ error: 'NOT_DELETABLE', message: 'This declaration is no longer deletable (it may have just been verified)' })
+    }
     return reply.code(204).send()
   })
 
