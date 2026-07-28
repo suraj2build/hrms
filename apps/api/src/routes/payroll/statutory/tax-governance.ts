@@ -17,6 +17,7 @@ import { z } from 'zod'
 import { logAction } from '../../../lib/audit-service.js'
 import { HR_ADMIN_ROLES } from '../../../lib/rbac.js'
 import { serverError, ErrorCode } from '../../../lib/api-errors.js'
+import { fetchAllRows } from '../../../lib/supabase-paginate.js'
 
 // ── Admin guard ───────────────────────────────────────────────────────────────
 
@@ -111,52 +112,63 @@ export default async function taxGovernanceRoute(fastify: FastifyInstance) {
     const qs = z.object({ financial_year: z.string().optional() }).safeParse(req.query)
     const fy = qs.data?.financial_year ?? currentFinancialYear()
 
-    // Parallel queries for compliance metrics
-    const [
-      activeEmpResult,
-      declResult,
-      proofResult,
-      regimeResult,
-    ] = await Promise.all([
-      // Total active employees
-      fastify.supabase
-        .from('employees')
-        .select('id', { count: 'exact', head: true })
-        .eq('tenant_id', req.tenantId)
-        .eq('status', 'active'),
+    // Parallel queries for compliance metrics.
+    // declarations/pendingProofs use fetchAllRows() — a tenant-wide, plain
+    // .select() with no .range() silently truncates at PostgREST's 1,000-row
+    // ceiling, which a mid-size tenant's FY declarations can exceed easily,
+    // understating every metric derived from these arrays below.
+    let activeEmpResult: any, regimeResult: any, declarations: any[], pendingProofs: any[]
+    try {
+      [activeEmpResult, regimeResult, declarations, pendingProofs] = await Promise.all([
+        // Total active employees
+        fastify.supabase
+          .from('employees')
+          .select('id', { count: 'exact', head: true })
+          .eq('tenant_id', req.tenantId)
+          .eq('status', 'active'),
 
-      // All declarations for this FY grouped by status
-      fastify.supabase
-        .from('tax_declarations')
-        .select('id, employee_id, status, declaration_category, declared_amount, approved_amount')
-        .eq('tenant_id', req.tenantId)
-        .eq('financial_year', fy),
+        // Regime elections for FY
+        fastify.supabase
+          .from('tax_regime_elections')
+          .select('employee_id', { count: 'exact', head: true })
+          .eq('tenant_id', req.tenantId)
+          .eq('financial_year', fy),
 
-      // Proofs not yet verified
-      fastify.supabase
-        .from('declaration_proofs')
-        .select(`
-          id, document_state, uploaded_at,
-          tax_declarations!inner (
-            id, employee_id, financial_year, declaration_category
-          )
-        `)
-        .eq('tenant_id', req.tenantId)
-        .eq('is_superseded', false)
-        .eq('tax_declarations.financial_year', fy)
-        .not('document_state', 'eq', 'verified'),
+        // All declarations for this FY grouped by status
+        fetchAllRows((from, to) =>
+          fastify.supabase
+            .from('tax_declarations')
+            .select('id, employee_id, status, declaration_category, declared_amount, approved_amount')
+            .eq('tenant_id', req.tenantId)
+            .eq('financial_year', fy)
+            .range(from, to),
+        ),
 
-      // Regime elections for FY
-      fastify.supabase
-        .from('tax_regime_elections')
-        .select('employee_id', { count: 'exact', head: true })
-        .eq('tenant_id', req.tenantId)
-        .eq('financial_year', fy),
-    ])
+        // Proofs not yet verified
+        fetchAllRows((from, to) =>
+          fastify.supabase
+            .from('declaration_proofs')
+            .select(`
+              id, document_state, uploaded_at,
+              tax_declarations!inner (
+                id, employee_id, financial_year, declaration_category
+              )
+            `)
+            .eq('tenant_id', req.tenantId)
+            .eq('is_superseded', false)
+            .eq('tax_declarations.financial_year', fy)
+            .not('document_state', 'eq', 'verified')
+            .range(from, to),
+        ),
+      ])
+    } catch (fetchErr) {
+      return serverError(req, reply, fetchErr, ErrorCode.QUERY_FAILED, 'Failed to fetch compliance data')
+    }
+
+    if (activeEmpResult.error) return serverError(req, reply, activeEmpResult.error, ErrorCode.QUERY_FAILED, 'Failed to fetch active employee count')
+    if (regimeResult.error)    return serverError(req, reply, regimeResult.error, ErrorCode.QUERY_FAILED, 'Failed to fetch regime elections')
 
     const totalEmployees         = activeEmpResult.count ?? 0
-    const declarations           = (declResult.data as any[]) ?? []
-    const pendingProofs          = (proofResult.data as any[]) ?? []
     const employeesWithRegime    = regimeResult.count ?? 0
 
     // Unique employee IDs who have submitted declarations
