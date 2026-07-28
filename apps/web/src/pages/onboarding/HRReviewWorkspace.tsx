@@ -1694,6 +1694,8 @@ export function HRReviewWorkspace() {
           draftId={draftProfileId}
           onRejected={() => {
             qc.invalidateQueries({ queryKey: ['onboarding-session', sessionId] })
+            qc.invalidateQueries({ queryKey: ['onboarding-sessions'] })
+            qc.invalidateQueries({ queryKey: ['onboarding-dashboard'] })
           }}
         />
       )}

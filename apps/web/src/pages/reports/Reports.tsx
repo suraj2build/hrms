@@ -230,7 +230,14 @@ function firstOfMonth() {
   return `${currentMonth()}-01`
 }
 function today() {
-  return new Date().toISOString().slice(0, 10)
+  // Local calendar date, NOT toISOString().slice(0,10) — that converts to
+  // UTC, so between 00:00-05:29 IST this would return YESTERDAY's date while
+  // firstOfMonth() (below) already rolls to the new month via local date
+  // parts. On the 1st of a month in that window the default report range
+  // became from=<new month>-01, to=<last day of previous month> — an
+  // inverted range that silently matched zero rows with no error shown.
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 function monthMinus(n: number) {
   const d = new Date()
