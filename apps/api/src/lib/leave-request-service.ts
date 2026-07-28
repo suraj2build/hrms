@@ -23,7 +23,8 @@ import {
   type DayContext,
   type LeaveSessionSpan,
 } from './leave-duration-engine.js'
-import { resolveEmployeeOrgContext, getWeeklyOffDays, getLocalDayOfWeek } from './org-context.js'
+import { resolveEmployeeOrgContext, getWeeklyOffDays, getLocalDayOfWeek, getLocalDate } from './org-context.js'
+import { fetchTenantTz }   from './attendance-engine.js'
 import { eventService }    from './event-service.js'
 import {
   captureRuleSnapshot,
@@ -285,9 +286,12 @@ export async function createLeaveRequest(
   }
 
   // ── Application window enforcement ──────────────────────────────────────────
-  // Calendar-date comparison in server-local time (YYYY-MM-DD string compare is safe
-  // since both sides are ISO date strings with no timezone component).
-  const todayStr = new Date().toISOString().slice(0, 10)
+  // "today" is resolved in the tenant's own timezone, not the server's (UTC)
+  // clock — otherwise isPast/isSameDay/isFuture and the past/future-day window
+  // checks below shift by up to a day near the tenant's local midnight (the
+  // same bug class fixed elsewhere under ISSUE-154).
+  const tenantTz = await fetchTenantTz(supabase, tenantId)
+  const todayStr = getLocalDate(new Date().toISOString(), tenantTz)
 
   // Derive defaults when no policy is configured: allow everything
   const windowGov = gov ?? {

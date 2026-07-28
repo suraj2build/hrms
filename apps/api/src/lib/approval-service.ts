@@ -360,6 +360,17 @@ export async function reverseApprovedLeaveRequest(
   }
 
   // ── 3. Authorise (same approver chain as approve) ────────────────────────────
+  // Segregation of duties — an HR admin/manager who is also linked to an
+  // employee record must not be able to reverse their OWN approved leave and
+  // restore their own balance. Mirrors the same guard on approveLeaveRequest
+  // above (fresh audit finding — this path had validateApprover's unconditional
+  // super_admin/hr_admin authorization with no ownership check, unlike approve).
+  if (await isSelfApproval(supabase, tenantId, ctx.approverId, req.employee_id)) {
+    return {
+      ok:    false,
+      error: { type: 'FORBIDDEN', message: 'You cannot reverse your own leave approval.' },
+    }
+  }
   const authResult = await validateApprover(supabase, ctx, req.employee_id)
   if (!authResult.ok) return authResult
 
