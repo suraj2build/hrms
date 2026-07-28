@@ -12,6 +12,7 @@ import { toast } from 'sonner'
 import { PartyPopper, Send, Check, Loader2, X } from 'lucide-react'
 import { api } from '@/lib/api/client'
 import { glossy } from '../glossy'
+import { invalidateCommunityFeeds } from '@/lib/community-feed-cache'
 
 export type WishKind = 'birthday' | 'anniversary'
 
@@ -22,16 +23,6 @@ function defaultWish(name: string, kind: WishKind, years?: number) {
   return kind === 'birthday'
     ? `🎂 Happy birthday, ${who}! Wishing you a fantastic year ahead. 🎉`
     : `🎉 Congratulations ${who} on ${years} year${years === 1 ? '' : 's'} with the team! Thank you for everything you do. 🙌`
-}
-
-/** Invalidate every feed surface (home + community, mobile + desktop). */
-function invalidateFeeds(qc: ReturnType<typeof useQueryClient>) {
-  qc.invalidateQueries({
-    predicate: (q) => {
-      const k = q.queryKey[0]
-      return typeof k === 'string' && (k.includes('community') || k.includes('feed') || k.includes('home'))
-    },
-  })
 }
 
 export function MobileWishButton({ subjectEmployeeId, name, kind, years }: {
@@ -47,7 +38,7 @@ export function MobileWishButton({ subjectEmployeeId, name, kind, years }: {
     onSuccess: () => {
       setDone(true); setOpen(false)
       toast.success('Wish posted', { description: `${firstNameOf(name)} will see it in the feed.` })
-      invalidateFeeds(qc)
+      invalidateCommunityFeeds(qc)
     },
     onError: (e: Error) => toast.error('Could not post your wish', { description: e.message }),
   })

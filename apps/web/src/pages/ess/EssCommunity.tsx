@@ -9,6 +9,7 @@ import { toast } from 'sonner'
 import { Megaphone, Pin, PinOff, MessageCircle, Send, MoreHorizontal, Flag, EyeOff, Trash2 } from 'lucide-react'
 import { api } from '@/lib/api/client'
 import { useAuthStore } from '@/stores/authStore'
+import { invalidateCommunityFeeds } from '@/lib/community-feed-cache'
 import { PageContainer } from '@/components/layout/PageContainer'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { SectionCard } from '@/components/layout/SectionCard'
@@ -65,12 +66,7 @@ function CommentThread({ postId }: { postId: string }) {
   const add = useMutation({
     mutationFn: () => api.post(`/community/posts/${postId}/comments`, { body: text.trim() }),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['community-comments', postId] })
-      qc.invalidateQueries({ queryKey: ['community-feed'] })
-      // Mobile (MobileCommunity.tsx) reads the same /community/feed endpoint
-      // under different query keys — invalidate both so it doesn't go stale.
-      qc.invalidateQueries({ queryKey: ['mobile-community-comments', postId] })
-      qc.invalidateQueries({ queryKey: ['mobile-community-feed'] })
+      invalidateCommunityFeeds(qc)
       setText('')
     },
     onError: (e: Error) => toast.error('Could not comment', { description: e.message }),
@@ -118,7 +114,7 @@ function ModerationMenu({ p }: { p: FeedPost }) {
   const { profile } = useAuthStore()
   const isHr = profile?.role === 'hr_admin' || profile?.role === 'super_admin'
 
-  const refetch = () => { qc.invalidateQueries({ queryKey: ['community-feed'] }); qc.invalidateQueries({ queryKey: ['mobile-community-feed'] }) }
+  const refetch = () => invalidateCommunityFeeds(qc)
 
   const report = useMutation({
     mutationFn: () => api.post(`/community/posts/${p.id}/report`, {}),
@@ -165,7 +161,7 @@ function PostCard({ p }: { p: FeedPost }) {
   const [showComments, setShowComments] = useState(false)
   const react = useMutation({
     mutationFn: (reaction: string) => api.post(`/community/posts/${p.id}/react`, { reaction }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['community-feed'] }); qc.invalidateQueries({ queryKey: ['mobile-community-feed'] }) },
+    onSuccess: () => invalidateCommunityFeeds(qc),
     onError: (e: Error) => toast.error('Could not react', { description: e.message }),
   })
   const isAnnouncement = p.type === 'announcement'
@@ -242,8 +238,7 @@ function Composer() {
       pinned: announce,
     }),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['community-feed'] })
-      qc.invalidateQueries({ queryKey: ['mobile-community-feed'] })
+      invalidateCommunityFeeds(qc)
       toast.success('Posted')
       setBody(''); setAnnounce(false)
     },

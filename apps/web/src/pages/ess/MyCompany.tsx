@@ -20,6 +20,7 @@ import { useMutation, useQueryClient, useQuery } from '@tanstack/react-query'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { Award } from 'lucide-react'
 import { api } from '@/lib/api/client'
+import { invalidateCommunityFeeds } from '@/lib/community-feed-cache'
 import { PersonAvatar } from '@/components/experience/PersonAvatar'
 import { CelebrationCard } from '@/components/experience/CelebrationCard'
 import { ActivityItem } from '@/components/experience/ActivityItem'
@@ -66,6 +67,7 @@ export function MyCompany() {
     onSuccess: (_d, c) => {
       setWished(w => ({ ...w, [c.id]: true }))
       void qc.invalidateQueries({ queryKey: ['ess-company'] })
+      invalidateCommunityFeeds(qc)
     },
   })
 

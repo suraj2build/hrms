@@ -35,6 +35,7 @@ import {
 import { api } from '@/lib/api/client'
 import { useAuthStore } from '@/stores/authStore'
 import { useUIStore } from '@/stores/uiStore'
+import { invalidateCommunityFeeds } from '@/lib/community-feed-cache'
 import { PersonAvatar } from '@/components/experience/PersonAvatar'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
@@ -133,7 +134,7 @@ function WishButton({ employeeId, name, kind, years }: {
     onSuccess: () => {
       setDone(true); setOpen(false)
       toast.success('Wish posted to Community', { description: `${firstNameOf(name)} will see it in the feed.` })
-      qc.invalidateQueries({ queryKey: ['community-feed'] })
+      invalidateCommunityFeeds(qc)
     },
     onError: () => toast.error('Could not post your wish', { description: 'Please try again in a moment.' }),
   })

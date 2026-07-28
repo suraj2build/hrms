@@ -6,6 +6,7 @@ import { api } from '@/lib/api/client'
 import { useAuthStore } from '@/stores/authStore'
 import { glossy } from '../glossy'
 import { MobileWishButton, type WishKind } from './MobileWish'
+import { invalidateCommunityFeeds } from '@/lib/community-feed-cache'
 
 type Reaction = 'like' | 'celebrate' | 'appreciate' | 'support'
 interface Post {
@@ -59,16 +60,13 @@ export function MobileCommunity({ base: _base }: { base: string }) {
       type: isHr && announce ? 'announcement' : 'update',
       pinned: isHr && announce ? true : undefined,
     }),
-    // Mobile and desktop (EssCommunity.tsx) read the same /community/feed
-    // endpoint under different query keys — invalidate both so posting from
-    // one surface doesn't leave the other showing a stale feed.
-    onSuccess: () => { setBody(''); setAnnounce(false); toast.success('Posted'); qc.invalidateQueries({ queryKey: ['mobile-community-feed'] }); qc.invalidateQueries({ queryKey: ['community-feed'] }) },
+    onSuccess: () => { setBody(''); setAnnounce(false); toast.success('Posted'); invalidateCommunityFeeds(qc) },
     onError: (e: Error) => toast.error('Could not post', { description: e.message }),
   })
 
   const react = useMutation({
     mutationFn: ({ id, reaction }: { id: string; reaction: Reaction }) => api.post(`/community/posts/${id}/react`, { reaction }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['mobile-community-feed'] }); qc.invalidateQueries({ queryKey: ['community-feed'] }) },
+    onSuccess: () => invalidateCommunityFeeds(qc),
     onError: (e: Error) => toast.error('Could not react', { description: e.message }),
   })
 
@@ -186,10 +184,7 @@ function Comments({ postId }: { postId: string }) {
     mutationFn: () => api.post(`/community/posts/${postId}/comments`, { body: text.trim() }),
     onSuccess: () => {
       setText('')
-      qc.invalidateQueries({ queryKey: ['mobile-community-comments', postId] })
-      qc.invalidateQueries({ queryKey: ['mobile-community-feed'] })
-      qc.invalidateQueries({ queryKey: ['community-comments', postId] })
-      qc.invalidateQueries({ queryKey: ['community-feed'] })
+      invalidateCommunityFeeds(qc)
     },
     onError: (e: Error) => toast.error('Could not comment', { description: e.message }),
   })

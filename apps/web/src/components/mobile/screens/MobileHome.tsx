@@ -15,6 +15,7 @@ import { glossy } from '../glossy'
 import { UpcomingHolidays } from './parts'
 import { MobileWishButton, type WishKind } from './MobileWish'
 import { timeAgo, initials } from '../format'
+import { invalidateCommunityFeeds } from '@/lib/community-feed-cache'
 
 type Reaction = 'like' | 'celebrate' | 'appreciate' | 'support'
 interface CommunityPost {
@@ -96,7 +97,7 @@ export function MobileHome({ base }: { base: string }) {
 
   const react = useMutation({
     mutationFn: ({ id, reaction }: { id: string; reaction: Reaction }) => api.post(`/community/posts/${id}/react`, { reaction }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['mobile-home-community'] }),
+    onSuccess: () => invalidateCommunityFeeds(qc),
     onError: (e: Error) => toast.error('Could not react', { description: e.message }),
   })
 
