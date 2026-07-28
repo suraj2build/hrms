@@ -26,18 +26,25 @@ export function isHrAdmin(role: string | null | undefined): boolean {
   return role === 'super_admin' || role === 'hr_admin'
 }
 
-/** Resolve the caller's own employee_id from their profile (null if unlinked). */
+/**
+ * Resolve the caller's own employee_id from their profile (null if unlinked).
+ * Throws on a DB error rather than returning null — several callers (notably
+ * isSelfApproval in approval-guards.ts) treat a null result as "no self to
+ * collide with" and fail OPEN; silently returning null on a transient query
+ * error would be indistinguishable from that and let a self-approval through.
+ */
 export async function resolveCallerEmployeeId(
   supabase: SupabaseClient,
   userId:   string,
   tenantId: string,
 ): Promise<string | null> {
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from('profiles')
     .select('employee_id')
     .eq('id', userId)
     .eq('tenant_id', tenantId)
     .maybeSingle()
+  if (error) throw error
   return (data as { employee_id: string | null } | null)?.employee_id ?? null
 }
 

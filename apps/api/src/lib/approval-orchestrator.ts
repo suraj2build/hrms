@@ -156,12 +156,16 @@ async function actorSatisfiesLevel(
   workflowType:     WorkflowType,
 ): Promise<{ ok: true; viaDelegation?: boolean } | { ok: false; message: string }> {
   // Resolve the actor's own employee record (for self-approval + manager checks).
-  const { data: actorProfile } = await supabase
+  // A DB error here must NOT be treated the same as "no employee record" — that
+  // would leave actorEmployeeId null, skip the self-approval guard below, and
+  // fail OPEN on a transient query error.
+  const { data: actorProfile, error: actorProfileErr } = await supabase
     .from('profiles')
     .select('employee_id')
     .eq('id', actorId)
     .eq('tenant_id', tenantId)
     .maybeSingle()
+  if (actorProfileErr) return { ok: false, message: 'Unable to verify approver identity — please retry' }
   const actorEmployeeId = (actorProfile as { employee_id: string | null } | null)?.employee_id ?? null
 
   // Self-approval guard (segregation of duties) — applies at every level.
