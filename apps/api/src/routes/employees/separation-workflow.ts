@@ -543,6 +543,10 @@ export default async function separationWorkflowRoutes(fastify: FastifyInstance)
     if (ff.status === 'approved' || ff.status === 'paid')
       return reply.code(409).send({ error: 'INVALID_STATE', message: `Cannot approve: current status is '${ff.status}'` })
 
+    // Fold the 'draft' precondition into the WHERE clause — the earlier
+    // SELECT is a separate query, so two concurrent approve requests could
+    // both pass it before either writes, mirroring the fix already applied
+    // to /separation/approve, /advance, /relieve, /archive in this file.
     const { data, error } = await fastify.supabase
       .from('separation_ff_summary')
       .update({
@@ -554,11 +558,14 @@ export default async function separationWorkflowRoutes(fastify: FastifyInstance)
       })
       .eq('id', ff.id)
       .eq('tenant_id', req.tenantId)
+      .eq('status', 'draft')
       .select()
-      .single()
+      .maybeSingle()
 
     if (error)
       return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to approve F&F settlement')
+    if (!data)
+      return reply.code(409).send({ error: 'ALREADY_DECIDED', message: 'This F&F settlement has already been approved or paid' })
 
     await logAction(fastify.supabase, {
       tenantId:    req.tenantId,
@@ -593,6 +600,8 @@ export default async function separationWorkflowRoutes(fastify: FastifyInstance)
     if (ff.status !== 'approved')
       return reply.code(409).send({ error: 'INVALID_STATE', message: `Cannot mark as paid: F&F must be approved first (current: '${ff.status}')` })
 
+    // Fold the 'approved' precondition into the WHERE clause — see the same
+    // fix on the approve endpoint above.
     const { data, error } = await fastify.supabase
       .from('separation_ff_summary')
       .update({
@@ -604,11 +613,14 @@ export default async function separationWorkflowRoutes(fastify: FastifyInstance)
       })
       .eq('id', ff.id)
       .eq('tenant_id', req.tenantId)
+      .eq('status', 'approved')
       .select()
-      .single()
+      .maybeSingle()
 
     if (error)
       return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to mark F&F settlement as paid')
+    if (!data)
+      return reply.code(409).send({ error: 'ALREADY_DECIDED', message: 'This F&F settlement is no longer in approved status' })
 
     await logAction(fastify.supabase, {
       tenantId:    req.tenantId,
