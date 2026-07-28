@@ -65,15 +65,16 @@ export async function runDueSources(supabase: SupabaseClient): Promise<void> {
 
 async function processSingleSource(supabase: SupabaseClient, source: any): Promise<void> {
   // Mark as running
-  await supabase
+  const { error: runningErr } = await supabase
     .from('attendance_api_sources')
     .update({ last_fetch_status: 'running' })
     .eq('id', source.id)
+  if (runningErr) console.warn(`[att-api-scheduler] source ${source.id} failed to mark running:`, runningErr.message)
 
   const result = await fetchSourceData(source)
 
   if (!result.ok) {
-    await supabase
+    const { error: errStatusErr } = await supabase
       .from('attendance_api_sources')
       .update({
         last_fetch_status: 'error',
@@ -81,6 +82,11 @@ async function processSingleSource(supabase: SupabaseClient, source: any): Promi
         last_fetched_at:   new Date().toISOString(),
       })
       .eq('id', source.id)
+    // If this write itself fails, last_fetch_status is stuck at 'running' from
+    // above, and the scheduler's `due` filter treats 'running' as already
+    // in-flight — silently excluding this source from every future poll until
+    // an operator manually resets the row.
+    if (errStatusErr) console.warn(`[att-api-scheduler] source ${source.id} failed to record fetch error:`, errStatusErr.message)
 
     console.warn(`[att-api-scheduler] source ${source.id} (${source.name}) fetch failed:`, result.error)
     return
@@ -141,7 +147,7 @@ async function processSingleSource(supabase: SupabaseClient, source: any): Promi
     }
   }
 
-  await supabase
+  const { error: successErr } = await supabase
     .from('attendance_api_sources')
     .update({
       last_fetch_status: 'success',
@@ -150,6 +156,8 @@ async function processSingleSource(supabase: SupabaseClient, source: any): Promi
       last_fetched_at:   new Date().toISOString(),
     })
     .eq('id', source.id)
+  // Same stuck-at-'running' risk as the error-status write above.
+  if (successErr) console.warn(`[att-api-scheduler] source ${source.id} failed to record fetch success:`, successErr.message)
 
   console.log(`[att-api-scheduler] source ${source.id} (${source.name}) ingested=${ingested} total_records=${records.length}`)
 }

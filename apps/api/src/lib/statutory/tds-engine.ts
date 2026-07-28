@@ -174,10 +174,21 @@ function computeSurcharge(taxableIncome: number, tax: number): number {
 // ── Internal: Standard deduction ─────────────────────────────────────────────
 
 /**
- * Standard deduction from FY 2023-24: ₹50,000 for salaried individuals,
- * applicable in both old and new regimes (Section 16(ia) + 115BAC amendment).
+ * Standard deduction (Section 16(ia)):
+ *  - FY 2023-24: ₹50,000, both regimes.
+ *  - FY 2024-25 onwards (Finance Act 2024): new regime raised to ₹75,000;
+ *    old regime stays ₹50,000. This engine previously hardcoded ₹50,000 for
+ *    both regimes regardless of financial year — the sibling DB-driven
+ *    tax-computation-engine.ts was updated for this change but this one
+ *    wasn't, so its only live caller (payroll/statutory/tds.ts's monthly
+ *    projection recompute) was under-applying the new-regime deduction by
+ *    ₹25,000 for FY24-25+, over-withholding TDS on every recompute.
  */
-const STANDARD_DEDUCTION = 50_000
+function standardDeductionFor(regime: 'old' | 'new', financialYear: string): number {
+  const fyStart = parseInt(financialYear.split('-')[0], 10)
+  if (regime === 'new' && Number.isFinite(fyStart) && fyStart >= 2024) return 75_000
+  return 50_000
+}
 
 // ── Internal: 87A Rebate ─────────────────────────────────────────────────────
 
@@ -205,7 +216,7 @@ function compute87ARebate(regime: 'old' | 'new', taxableIncome: number, taxBefor
  * @param config Financial year config (controls slab selection)
  * @returns      Full TDS breakdown with traceSteps for explainability
  */
-export function computeTDS(input: TDSInput, _config: TDSConfig): TDSResult {
+export function computeTDS(input: TDSInput, config: TDSConfig): TDSResult {
   const {
     grossAnnualIncome,
     regime,
@@ -224,10 +235,12 @@ export function computeTDS(input: TDSInput, _config: TDSConfig): TDSResult {
   })
 
   // Step 2 — Standard deduction
-  const standardDeduction = STANDARD_DEDUCTION
+  const standardDeduction = standardDeductionFor(regime, config.financialYear)
   trace.push({
     step: '2. Standard Deduction',
-    description: 'Section 16(ia) standard deduction — applicable to both regimes from FY 2023-24',
+    description: regime === 'new' && standardDeduction === 75_000
+      ? 'Section 16(ia) standard deduction — ₹75,000 (new regime, Finance Act 2024, FY24-25+)'
+      : 'Section 16(ia) standard deduction — ₹50,000 (Finance Act 2023)',
     value: standardDeduction,
   })
 
