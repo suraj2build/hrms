@@ -37,7 +37,8 @@ export type AnomalyNotificationType = 'missing_out' | 'no_punch' | 'late' | 'exc
 export interface AnomalyNotificationPayload {
   /** Who is being notified */
   recipientRole:  'employee' | 'manager'
-  /** Employee UUID of the notification recipient */
+  /** Profile UUID of the notification recipient — notify()/inbox_items.recipient_id
+   *  is a hard FK to profiles(id), NOT employees(id). */
   recipientId:    string
   /** Employee UUID of the person whose attendance triggered the anomaly */
   employeeId:     string
@@ -154,6 +155,33 @@ async function fetchManagerEmployeeId(
   return (data as { manager_id: string | null } | null)?.manager_id ?? null
 }
 
+/**
+ * Map employees.id -> profiles.id for a set of employees in this tenant.
+ * inbox_items.recipient_id is a hard FK to profiles(id) (not employees(id)) —
+ * without this translation every insert in notify() fails the FK constraint,
+ * which notify()'s own try/catch swallows, so the entire attendance-anomaly
+ * notification pipeline silently delivers nothing.
+ */
+async function resolveProfileIds(
+  supabase:    SupabaseClient,
+  tenantId:    string,
+  employeeIds: string[],
+): Promise<Map<string, string>> {
+  const map = new Map<string, string>()
+  if (employeeIds.length === 0) return map
+
+  const { data } = await supabase
+    .from('profiles')
+    .select('id, employee_id')
+    .eq('tenant_id', tenantId)
+    .in('employee_id', employeeIds)
+
+  for (const row of (data as any[]) ?? []) {
+    if (row.employee_id) map.set(row.employee_id, row.id)
+  }
+  return map
+}
+
 // ── Main handler logic ─────────────────────────────────────────────────────────
 
 /**
@@ -176,6 +204,13 @@ async function handleAttendanceUpdated(
 
   if (anomalies.length === 0) return   // nothing to notify
 
+  // Translate employees.id -> profiles.id for every potential recipient
+  // before dispatching — see resolveProfileIds()'s comment.
+  const recipientEmployeeIds = managerEmployeeId ? [employee_id, managerEmployeeId] : [employee_id]
+  const profileIdByEmployeeId = await resolveProfileIds(supabase, tenant_id, recipientEmployeeIds)
+  const employeeProfileId = profileIdByEmployeeId.get(employee_id)
+  const managerProfileId  = managerEmployeeId ? profileIdByEmployeeId.get(managerEmployeeId) : undefined
+
   // Dispatch one notification per anomaly, per recipient (employee + manager)
   const notifyPs: Promise<void>[] = []
 
@@ -184,26 +219,28 @@ async function handleAttendanceUpdated(
     const severity = anomaly.severity as 'low' | 'medium' | 'high'
     const message  = anomaly.message
 
-    // Notify the employee themselves
-    notifyPs.push(
-      dispatchAnomalyNotification(supabase, {
-        recipientRole: 'employee',
-        recipientId:   employee_id,
-        employeeId:    employee_id,
-        tenantId:      tenant_id,
-        date,
-        type,
-        severity,
-        message,
-      }),
-    )
+    // Notify the employee themselves (only if they have a linked profile/account)
+    if (employeeProfileId) {
+      notifyPs.push(
+        dispatchAnomalyNotification(supabase, {
+          recipientRole: 'employee',
+          recipientId:   employeeProfileId,
+          employeeId:    employee_id,
+          tenantId:      tenant_id,
+          date,
+          type,
+          severity,
+          message,
+        }),
+      )
+    }
 
-    // Notify the manager (if one is configured)
-    if (managerEmployeeId) {
+    // Notify the manager (if one is configured and has a linked profile)
+    if (managerProfileId) {
       notifyPs.push(
         dispatchAnomalyNotification(supabase, {
           recipientRole: 'manager',
-          recipientId:   managerEmployeeId,
+          recipientId:   managerProfileId,
           employeeId:    employee_id,
           tenantId:      tenant_id,
           date,
