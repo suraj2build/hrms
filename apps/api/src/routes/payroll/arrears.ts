@@ -276,11 +276,14 @@ export default async function arrearsRoutes(fastify: FastifyInstance) {
   })
 
   // ── POST /payroll/arrears/batches/:id/approve ─────────────────────────────────
+  // Fresh audit finding: this endpoint had no status precondition at all —
+  // unlike the rest of this codebase's universal TOCTOU-guard pattern — and
+  // unconditionally set status='approved' regardless of current state.
   fastify.post('/batches/:id/approve', { preHandler: [fastify.authenticate, requireHrAdmin] }, async (req: any, reply) => {
     const { id } = req.params as { id: string }
     const now = new Date().toISOString()
 
-    const { error } = await fastify.supabase
+    const { data, error } = await fastify.supabase
       .from('arrear_batches')
       .update({
         status: 'approved',
@@ -290,22 +293,32 @@ export default async function arrearsRoutes(fastify: FastifyInstance) {
       })
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
+      .eq('status', 'calculated')
+      .select('id')
+      .maybeSingle()
 
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to approve arrear batch')
+    if (!data) return reply.code(409).send({ error: 'INVALID_STATUS', message: 'Only calculated batches can be approved' })
     return reply.send({ message: 'Arrear batch approved' })
   })
 
   // ── POST /payroll/arrears/batches/:id/cancel ──────────────────────────────────
+  // Fresh audit finding: same missing-precondition issue — this let an
+  // already-processed batch be reset to 'cancelled' after arrears were paid.
   fastify.post('/batches/:id/cancel', { preHandler: [fastify.authenticate, requireHrAdmin] }, async (req: any, reply) => {
     const { id } = req.params as { id: string }
 
-    const { error } = await fastify.supabase
+    const { data, error } = await fastify.supabase
       .from('arrear_batches')
       .update({ status: 'cancelled', updated_at: new Date().toISOString() })
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
+      .in('status', ['draft', 'calculated', 'approved'])
+      .select('id')
+      .maybeSingle()
 
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to cancel arrear batch')
+    if (!data) return reply.code(409).send({ error: 'INVALID_STATUS', message: 'Processed or already-cancelled batches cannot be cancelled' })
     return reply.send({ message: 'Arrear batch cancelled' })
   })
 

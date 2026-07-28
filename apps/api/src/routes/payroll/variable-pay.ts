@@ -261,67 +261,84 @@ export default async function variablePayRoutes(fastify: FastifyInstance) {
   })
 
   // ── POST /payroll/variable-pay/batches/:id/submit ────────────────────────────
+  // Fresh audit finding: this endpoint had no status precondition at all —
+  // unlike the rest of this codebase's universal TOCTOU-guard pattern — and
+  // unconditionally set status='in_review' regardless of current state.
   fastify.post('/batches/:id/submit', { preHandler: [fastify.authenticate, requireHrAdmin] }, async (req: any, reply) => {
     const { id } = req.params as { id: string }
 
-    const { error } = await fastify.supabase
+    const { data, error } = await fastify.supabase
       .from('variable_payout_batches')
       .update({ status: 'in_review', updated_at: new Date().toISOString() })
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
+      .eq('status', 'draft')
+      .select('id')
+      .maybeSingle()
 
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to submit payout batch')
+    if (!data) return reply.code(409).send({ error: 'INVALID_STATUS', message: 'Only draft batches can be submitted' })
     return reply.send({ message: 'Batch submitted for review' })
   })
 
   // ── POST /payroll/variable-pay/batches/:id/approve ───────────────────────────
+  // Fresh audit finding: same missing-precondition issue as /submit above —
+  // this let an already-approved/cancelled batch be re-approved.
   fastify.post('/batches/:id/approve', { preHandler: [fastify.authenticate, requireHrAdmin] }, async (req: any, reply) => {
     const { id } = req.params as { id: string }
     const now = new Date().toISOString()
 
-    const [{ error: batchErr }, { error: payoutsErr }] = await Promise.all([
-      fastify.supabase
-        .from('variable_payout_batches')
-        .update({
-          status: 'approved',
-          approved_by: req.userId,
-          approved_at: now,
-          updated_at: now,
-        })
-        .eq('id', id)
-        .eq('tenant_id', req.tenantId),
-      fastify.supabase
-        .from('variable_payouts')
-        .update({ status: 'approved' })
-        .eq('batch_id', id)
-        .eq('tenant_id', req.tenantId),
-    ])
+    const { data: batch, error: batchErr } = await fastify.supabase
+      .from('variable_payout_batches')
+      .update({
+        status: 'approved',
+        approved_by: req.userId,
+        approved_at: now,
+        updated_at: now,
+      })
+      .eq('id', id)
+      .eq('tenant_id', req.tenantId)
+      .eq('status', 'in_review')
+      .select('id')
+      .maybeSingle()
 
     if (batchErr) return serverError(req, reply, batchErr, ErrorCode.UPDATE_FAILED, 'Failed to approve payout batch')
+    if (!batch) return reply.code(409).send({ error: 'INVALID_STATUS', message: 'Only batches in review can be approved' })
+
+    const { error: payoutsErr } = await fastify.supabase
+      .from('variable_payouts')
+      .update({ status: 'approved' })
+      .eq('batch_id', id)
+      .eq('tenant_id', req.tenantId)
     if (payoutsErr) req.log.warn({ err: payoutsErr }, 'Failed to update payout statuses')
 
     return reply.send({ message: 'Batch approved' })
   })
 
   // ── POST /payroll/variable-pay/batches/:id/cancel ────────────────────────────
+  // Fresh audit finding: same missing-precondition issue — this let an
+  // already-processed batch be reset to 'cancelled' after payouts were paid.
   fastify.post('/batches/:id/cancel', { preHandler: [fastify.authenticate, requireHrAdmin] }, async (req: any, reply) => {
     const { id } = req.params as { id: string }
     const now = new Date().toISOString()
 
-    const [{ error: batchErr }, { error: payoutsErr }] = await Promise.all([
-      fastify.supabase
-        .from('variable_payout_batches')
-        .update({ status: 'cancelled', updated_at: now })
-        .eq('id', id)
-        .eq('tenant_id', req.tenantId),
-      fastify.supabase
-        .from('variable_payouts')
-        .update({ status: 'cancelled' })
-        .eq('batch_id', id)
-        .eq('tenant_id', req.tenantId),
-    ])
+    const { data: batch, error: batchErr } = await fastify.supabase
+      .from('variable_payout_batches')
+      .update({ status: 'cancelled', updated_at: now })
+      .eq('id', id)
+      .eq('tenant_id', req.tenantId)
+      .in('status', ['draft', 'in_review', 'approved'])
+      .select('id')
+      .maybeSingle()
 
     if (batchErr) return serverError(req, reply, batchErr, ErrorCode.UPDATE_FAILED, 'Failed to cancel payout batch')
+    if (!batch) return reply.code(409).send({ error: 'INVALID_STATUS', message: 'Processed or already-cancelled batches cannot be cancelled' })
+
+    const { error: payoutsErr } = await fastify.supabase
+      .from('variable_payouts')
+      .update({ status: 'cancelled' })
+      .eq('batch_id', id)
+      .eq('tenant_id', req.tenantId)
     if (payoutsErr) req.log.warn({ err: payoutsErr }, 'Failed to cancel payouts')
 
     return reply.send({ message: 'Batch cancelled' })

@@ -17,6 +17,7 @@ import { z } from 'zod'
 import { notifyHrAdmins, notify } from '../../lib/notify.js'
 import { approveLeaveRequest } from '../../lib/approval-service.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 export default async function bulkOpsRoutes(fastify: FastifyInstance) {
   const adminAuth = { preHandler: [fastify.authenticate, (req: any, reply: any, done: () => void) => {
@@ -519,10 +520,11 @@ export default async function bulkOpsRoutes(fastify: FastifyInstance) {
 
         const existingIds = ((existing ?? []) as any[]).map(r => r.id)
         if (existingIds.length > 0) {
-          await fastify.supabase
+          const { error: reinstateErr } = await fastify.supabase
             .from('employee_statutory_overrides')
             .update({ effective_to: effective_from })
             .in('id', existingIds)
+          if (reinstateErr) return serverError(req, reply, reinstateErr, ErrorCode.UPDATE_FAILED, 'Failed to reinstate statutory applicability')
         }
         updatedCount = existingIds.length
       }

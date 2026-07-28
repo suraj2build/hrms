@@ -217,6 +217,11 @@ export default async function payrollAdjustmentsRoutes(fastify: FastifyInstance)
       return reply.code(409).send({ error: 'INVALID_STATUS', message: `Adjustment is ${(existing as any).status}` })
     }
 
+    // Re-assert tenant_id + status='pending' in the UPDATE's own WHERE clause —
+    // the earlier SELECT is only for the 404/409 fast-path; without this, a
+    // concurrent reject/apply between the SELECT and this UPDATE would still
+    // be silently overwritten back to 'approved'. Mirrors the guard already
+    // used by the sibling /:id/reject endpoint below.
     const { data, error } = await fastify.supabase
       .from('payroll_adjustments')
       .update({
@@ -227,10 +232,13 @@ export default async function payrollAdjustmentsRoutes(fastify: FastifyInstance)
         notes:          parsed.data.notes          ?? null,
       })
       .eq('id', id)
+      .eq('tenant_id', req.tenantId)
+      .eq('status', 'pending')
       .select()
-      .single()
+      .maybeSingle()
 
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to approve payroll adjustment')
+    if (!data) return reply.code(409).send({ error: 'INVALID_STATUS', message: 'Adjustment is no longer pending' })
 
     await logAction(fastify.supabase, {
       tenantId:    req.tenantId,

@@ -18,6 +18,7 @@ import {
   cloneStructure, seedStandardComponents,
 } from '../../lib/salary-config-store.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 export default async function compensationMasterRoutes(fastify: FastifyInstance) {
   const auth        = { preHandler: [fastify.authenticate] }
@@ -270,12 +271,27 @@ export default async function compensationMasterRoutes(fastify: FastifyInstance)
     const { components, ...compensationData } = parsed.data
 
     // ── Safe activation order ──────────────────────────────────────────────────
-    // IMPORTANT: Insert the new compensation FIRST, then deactivate the old one.
-    // Reversing this order (deactivate-then-insert) leaves the employee with zero
-    // active compensation if the insert fails, which would cause phantom LOP on
-    // the next payroll run.
+    // Deactivate the current active record FIRST, then insert the new one.
+    // employee_compensations has a partial unique index uidx_comp_one_active on
+    // (tenant_id, employee_id) WHERE is_active=true (migration 014) — inserting
+    // a second active row while the old one is still active hits a 23505
+    // unique-violation immediately (the AFTER INSERT trigger that auto-closes
+    // the previous row runs too late to avoid it). Fresh audit finding: this
+    // endpoint previously inserted-then-deactivated, the reverse order, which
+    // made it 500 for any employee who already has active compensation.
+    // Mirrors the deactivate-then-insert pattern used by the sibling endpoints
+    // compensation-revisions.ts and employees/compensation.ts.
+    const { error: supersedeErr } = await fastify.supabase
+      .from('employee_compensations')
+      .update({ is_active: false, effective_to: compensationData.effective_from })
+      .eq('tenant_id',   req.tenantId)
+      .eq('employee_id', employeeId)
+      .eq('is_active',   true)
+    if (supersedeErr) {
+      return serverError(req, reply, supersedeErr, ErrorCode.UPDATE_FAILED, 'Failed to supersede prior compensation')
+    }
 
-    // Step 1: Insert new compensation (employee has two active records briefly)
+    // Step 1: Insert new compensation
     const { data: newComp, error: compError } = await fastify.supabase
       .from('employee_compensations')
       .insert({
@@ -292,7 +308,7 @@ export default async function compensationMasterRoutes(fastify: FastifyInstance)
       return reply.code(500).send({ error: 'INSERT_FAILED', message: compError?.message ?? 'Failed to insert compensation' })
     }
 
-    // Step 2: Insert components (while new comp exists but old is still active)
+    // Step 2: Insert components
     if (components.length > 0) {
       const componentRows = components.map(c => ({
         ...c,
@@ -325,19 +341,6 @@ export default async function compensationMasterRoutes(fastify: FastifyInstance)
         return reply.code(500).send({ error: 'COMPONENT_INSERT_FAILED', message: cmpErr.message })
       }
     }
-
-    // Step 3: Only now deactivate the previous compensation (new record is safely persisted)
-    await fastify.supabase
-      .from('employee_compensations')
-      .update({
-        is_active: false,
-        effective_to: compensationData.effective_from,
-      })
-      .eq('employee_id', employeeId)
-      .eq('tenant_id', req.tenantId)
-      .eq('is_active', true)
-      // Exclude the newly inserted record so we don't immediately deactivate it
-      .neq('id', (newComp as any).id)
 
     return reply.code(201).send({ data: newComp })
   })

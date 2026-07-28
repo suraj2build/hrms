@@ -572,15 +572,22 @@ export default async function reimbursementsRoutes(fastify: FastifyInstance) {
       return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
     }
 
+    // Re-assert status='draft' in the UPDATE's own WHERE clause — the earlier
+    // SELECT is only for the 404/409 fast-path; without this a race with a
+    // concurrent submit/approve could let this silently edit claimed_amount/
+    // expense_date on a claim that's no longer a draft. Mirrors the guard
+    // already used by the ESS sibling PUT /my/:id above.
     const { data, error } = await fastify.supabase
       .from('reimbursement_claims')
       .update({ ...parsed.data, updated_at: new Date().toISOString() })
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
+      .eq('status', 'draft')
       .select()
-      .single()
+      .maybeSingle()
 
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update reimbursement claim')
+    if (!data) return reply.code(409).send({ error: 'INVALID_STATUS', message: 'This claim is no longer a draft' })
     return reply.send({ data })
   })
 
@@ -590,14 +597,24 @@ export default async function reimbursementsRoutes(fastify: FastifyInstance) {
     const { id } = req.params as { id: string }
     const now = new Date().toISOString()
 
-    const { error } = await fastify.supabase
+    // Fresh audit finding: this endpoint previously had NO status precondition
+    // at all, unlike every other transition in this file — it unconditionally
+    // set status='submitted' regardless of current state, which let an
+    // already-approved/paid claim be reset to 'submitted' and then
+    // re-approved/re-paid (a double-payment path). Mirrors the guard already
+    // used by the ESS sibling POST /my/:id/submit above.
+    const { data, error } = await fastify.supabase
       .from('reimbursement_claims')
       .update({ status: 'submitted', submitted_at: now, updated_at: now })
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
+      .eq('status', 'draft')
+      .select('id, status, submitted_at')
+      .maybeSingle()
 
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to submit reimbursement claim')
-    return reply.send({ message: 'Claim submitted' })
+    if (!data) return reply.code(409).send({ error: 'INVALID_STATUS', message: 'Only draft claims can be submitted' })
+    return reply.send({ message: 'Claim submitted', data })
   })
 
   // ── POST /payroll/reimbursements/claims/:id/approve ───────────────────────────
