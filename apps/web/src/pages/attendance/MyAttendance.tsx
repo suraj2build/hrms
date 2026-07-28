@@ -706,6 +706,7 @@ export function MyAttendance() {
       setRegError('')
       refetchReg()
       queryClient.invalidateQueries({ queryKey: ['my-attendance', employeeId, from, to] })
+      queryClient.invalidateQueries({ queryKey: ['ess-approvals-corrections'] })
     },
     onError: (e: Error) => setRegError(e.message ?? 'Failed to submit'),
   })
@@ -715,6 +716,7 @@ export function MyAttendance() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['regularisation-all', employeeId] })
       queryClient.invalidateQueries({ queryKey: ['regularisation-my', employeeId] })
+      queryClient.invalidateQueries({ queryKey: ['ess-approvals-corrections'] })
       setCancellingId(null)
       toast.success('Request withdrawn')
     },

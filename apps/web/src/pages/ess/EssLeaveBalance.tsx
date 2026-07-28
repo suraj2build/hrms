@@ -255,6 +255,16 @@ function buildYears(): number[] {
   return [cur + 1, cur, cur - 1, cur - 2, cur - 3]
 }
 
+/**
+ * Local calendar date, NOT toISOString().slice(0,10) — that converts to UTC,
+ * so between 00:00-05:29 IST this would return YESTERDAY's date, silently
+ * shifting the held-credits lock badge and upcoming-holidays filter by a day.
+ */
+function localToday(): string {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
 function getDaysUntil(dateStr: string) {
   const today = new Date()
   today.setHours(0, 0, 0, 0)
@@ -365,8 +375,7 @@ const LEDGER_COLUMNS: DataTableColumn<LedgerRow>[] = [
     header:   'Available From',
     minWidth: '110px',
     cell: (row) => {
-      const today = new Date().toISOString().slice(0, 10)
-      const held  = row.consumption_eligible_from && row.consumption_eligible_from > today
+      const held  = row.consumption_eligible_from && row.consumption_eligible_from > localToday()
       return held ? (
         <div className="flex items-center gap-1 text-xs text-warning">
           <Lock className="h-3 w-3" />
@@ -514,6 +523,7 @@ export function EssLeaveBalance() {
       toast.success('Leave request cancelled')
       queryClient.invalidateQueries({ queryKey: ['ess-leave-history', employeeId] })
       queryClient.invalidateQueries({ queryKey: ['ess-leave-balance', employeeId] })
+      queryClient.invalidateQueries({ queryKey: ['ess-approvals-leave'] })
     },
     onError: () => toast.error('Failed to cancel leave request'),
   })
@@ -558,7 +568,7 @@ export function EssLeaveBalance() {
   )
 
   // Upcoming holidays (non-optional, from today onwards, next 6)
-  const today = new Date().toISOString().slice(0, 10)
+  const today = localToday()
   const upcomingHolidays = useMemo(() => {
     const all = holidaysData?.data ?? []
     return all
@@ -1443,6 +1453,7 @@ export function EssLeaveBalance() {
                   setTab('overview')
                   queryClient.invalidateQueries({ queryKey: ['ess-leave-balance', employeeId] })
                   queryClient.invalidateQueries({ queryKey: ['ess-leave-history', employeeId] })
+                  queryClient.invalidateQueries({ queryKey: ['ess-approvals-leave'] })
                 }}
                 onClose={() => setTab('overview')}
               />

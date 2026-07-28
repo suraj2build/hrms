@@ -163,7 +163,12 @@ interface DocRowProps {
 function daysUntil(dateStr: string | null): number | null {
   if (!dateStr) return null
   const due = Date.parse(dateStr.slice(0, 10) + 'T00:00:00Z')
-  const now = Date.parse(new Date().toISOString().slice(0, 10) + 'T00:00:00Z')
+  // Local calendar date, NOT toISOString().slice(0,10) — that converts to
+  // UTC, so between 00:00-05:29 IST "now" would silently read as yesterday,
+  // shifting every expiry badge by a day.
+  const d = new Date()
+  const localToday = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  const now = Date.parse(localToday + 'T00:00:00Z')
   return Math.round((due - now) / 86_400_000)
 }
 

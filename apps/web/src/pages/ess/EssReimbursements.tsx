@@ -103,6 +103,7 @@ export function EssReimbursements() {
       api.post('/payroll/reimbursements/my', body),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['reimbursements', 'my'] })
+      qc.invalidateQueries({ queryKey: ['ess-approvals-reimb'] })
       closeDialog()
       toast.success('Reimbursement claim created')
     },
@@ -113,6 +114,7 @@ export function EssReimbursements() {
     mutationFn: (id: string) => api.post(`/payroll/reimbursements/my/${id}/submit`, {}),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['reimbursements', 'my'] })
+      qc.invalidateQueries({ queryKey: ['ess-approvals-reimb'] })
       toast.success('Claim submitted for approval')
     },
     onError: (e: Error) => toast.error('Submission failed', { description: e.message }),
@@ -122,6 +124,7 @@ export function EssReimbursements() {
     mutationFn: (id: string) => api.delete(`/payroll/reimbursements/my/${id}`),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['reimbursements', 'my'] })
+      qc.invalidateQueries({ queryKey: ['ess-approvals-reimb'] })
       toast.success('Claim cancelled')
     },
     onError: (e: Error) => toast.error('Failed to cancel claim', { description: e.message }),

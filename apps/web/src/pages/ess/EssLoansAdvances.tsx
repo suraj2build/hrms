@@ -159,6 +159,8 @@ function NewAdvanceForm({ onClose }: { onClose: () => void }) {
   const [purpose, setPurpose]   = useState('')
 
   const monthly = amount && months ? fmtINR(Math.round(Number(amount) / Number(months))) : '—'
+  const monthsNum = Number(months)
+  const monthsInvalid = months !== '' && (!Number.isInteger(monthsNum) || monthsNum < 1 || monthsNum > 12)
 
   const mutation = useMutation({
     mutationFn: () => api.post('/payroll/ess/advances', {
@@ -189,6 +191,9 @@ function NewAdvanceForm({ onClose }: { onClose: () => void }) {
         <div>
           <label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Recovery months (1–12)</label>
           <Input type="number" min={1} max={12} value={months} onChange={e => setMonths(e.target.value)} className="mt-0.5" />
+          {monthsInvalid && (
+            <p className="text-[10px] text-destructive mt-0.5">Must be between 1 and 12 months</p>
+          )}
         </div>
       </div>
 
@@ -206,7 +211,7 @@ function NewAdvanceForm({ onClose }: { onClose: () => void }) {
       <div className="flex gap-2 pt-1">
         <Button
           onClick={() => mutation.mutate()}
-          disabled={!amount || !months || !purpose || mutation.isPending}
+          disabled={!amount || !months || monthsInvalid || !purpose || mutation.isPending}
           size="sm"
           className="flex-1"
         >
