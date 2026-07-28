@@ -315,6 +315,7 @@ export async function resolveShiftBatch(
       const { data: siteRows } = await supabase
         .from('sites')
         .select('id, default_shift_id')
+        .eq('tenant_id', tenantId)
         .in('id', siteIds)
         .not('default_shift_id', 'is', null)
 
@@ -343,6 +344,7 @@ export async function resolveShiftBatch(
     const { data: shifts } = await supabase
       .from('shifts')
       .select('id, name, start_time, end_time, grace_minutes, is_night_shift')
+      .eq('tenant_id', tenantId)
       .in('id', [...allShiftIds])
 
     for (const s of (shifts ?? []) as RawShift[]) {

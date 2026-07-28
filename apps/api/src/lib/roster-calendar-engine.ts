@@ -335,7 +335,7 @@ async function _fetchWeeklyOffRules(
   rosterId:  string,
   dateStr:   string,
 ): Promise<WeeklyOffRule[]> {
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from('roster_weekly_off_rules')
     .select('*')
     .eq('tenant_id', tenantId)
@@ -344,6 +344,12 @@ async function _fetchWeeklyOffRules(
     .or(`effective_to.is.null,effective_to.gte.${dateStr}`)
     .order('priority', { ascending: false })
 
+  // A failed query previously fell through to "no advanced rule", which
+  // computeWeeklyOffStatus treats as "fall back to legacy weekly_off_days" —
+  // silently reclassifying a rostered weekly-off day as a working day.
+  if (error) {
+    throw new Error(`_fetchWeeklyOffRules: DB query failed — ${error.message}`)
+  }
   return (data ?? []) as WeeklyOffRule[]
 }
 
@@ -380,12 +386,12 @@ async function _fetchRotationMembership(
   employeeId: string,
   dateStr:    string,
 ): Promise<{ group_id: string; cohort_index: number; config: RotationGroupConfig } | null> {
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from('roster_rotation_members')
     .select(`
       cohort_index,
       rotation_group_id,
-      grp:roster_rotation_groups!rotation_group_id(rotation_config)
+      grp:roster_rotation_groups!rotation_group_id(rotation_config, is_active)
     `)
     .eq('tenant_id', tenantId)
     .eq('employee_id', employeeId)
@@ -394,8 +400,17 @@ async function _fetchRotationMembership(
     .limit(1)
     .maybeSingle()
 
+  if (error) {
+    throw new Error(`_fetchRotationMembership: DB query failed — ${error.message}`)
+  }
   if (!data) return null
-  const grp = (data as Record<string, unknown>).grp as { rotation_config: RotationGroupConfig } | null
+  const grp = (data as Record<string, unknown>).grp as { rotation_config: RotationGroupConfig; is_active: boolean } | null
+  // A deactivated rotation group must not keep driving shift assignment —
+  // members should fall back to their standing/site-default shift instead
+  // (fresh audit finding: this query previously had no is_active filter at
+  // all, so ending a rotation program via is_active=false silently had no
+  // effect on already-existing membership rows).
+  if (grp && grp.is_active === false) return null
   return {
     group_id:     data.rotation_group_id as string,
     cohort_index: data.cohort_index as number,
@@ -433,7 +448,7 @@ async function _fetchEmpRosterCtx(
   tenantId:   string,
   employeeId: string,
 ): Promise<EmpRosterCtx> {
-  const { data: emp } = await supabase
+  const { data: emp, error } = await supabase
     .from('employees')
     .select(`
       roster_id, site_id,
@@ -445,6 +460,9 @@ async function _fetchEmpRosterCtx(
     .eq('tenant_id', tenantId)
     .maybeSingle()
 
+  if (error) {
+    throw new Error(`_fetchEmpRosterCtx: DB query failed — ${error.message}`)
+  }
   if (!emp) return { roster_id: null, roster_weekly_off: [], holiday_group_id: null, fatigue_rules: null, site_default_shift_id: null }
 
   type RosterSnap = { pattern_json: { weekly_off_days: number[] }; fatigue_rules: unknown; holiday_group_id: string | null }
@@ -471,26 +489,28 @@ async function _resolveShiftId(
   rotationShiftId:  string | null,
 ): Promise<string | null> {
   // Priority 1: date-specific shift_roster override
-  const { data: override } = await supabase
+  const { data: override, error: overrideErr } = await supabase
     .from('shift_roster')
     .select('shift_id')
     .eq('tenant_id', tenantId)
     .eq('employee_id', employeeId)
     .eq('date', dateStr)
     .maybeSingle()
+  if (overrideErr) throw new Error(`_resolveShiftId: shift_roster query failed — ${overrideErr.message}`)
   if (override?.shift_id) return override.shift_id as string
 
   // Priority 2: rotation group result
   if (rotationShiftId) return rotationShiftId
 
   // Priority 3: standing employee shift
-  const { data: standing } = await supabase
+  const { data: standing, error: standingErr } = await supabase
     .from('employee_shifts')
     .select('shift_id')
     .eq('tenant_id', tenantId)
     .eq('employee_id', employeeId)
     .eq('is_current', true)
     .maybeSingle()
+  if (standingErr) throw new Error(`_resolveShiftId: employee_shifts query failed — ${standingErr.message}`)
   if (standing?.shift_id) return standing.shift_id as string
 
   // Priority 4: site default
@@ -510,12 +530,13 @@ async function _fetchShiftWithSegments(
   flex_policy:   unknown
   segments:      ShiftSegment[]
 } | null> {
-  const { data: shift } = await supabase
+  const { data: shift, error: shiftErr } = await supabase
     .from('shifts')
     .select('id, name, start_time, end_time, grace_minutes, flex_policy')
     .eq('id', shiftId)
     .eq('tenant_id', tenantId)
     .maybeSingle()
+  if (shiftErr) throw new Error(`_fetchShiftWithSegments: shifts query failed — ${shiftErr.message}`)
   if (!shift) return null
 
   // shift_segments carries its own tenant_id (migration 147) — without this
@@ -523,12 +544,13 @@ async function _fetchShiftWithSegments(
   // shift_id (e.g. via an unvalidated FK write elsewhere) would be picked up
   // here, flipping is_split_shift and corrupting this tenant's OT/split-shift
   // computation with a foreign tenant's segment data.
-  const { data: segs } = await supabase
+  const { data: segs, error: segsErr } = await supabase
     .from('shift_segments')
     .select('*')
     .eq('shift_id', shiftId)
     .eq('tenant_id', tenantId)
     .order('segment_order')
+  if (segsErr) throw new Error(`_fetchShiftWithSegments: shift_segments query failed — ${segsErr.message}`)
 
   return {
     shift_id:      shift.id as string,
@@ -753,23 +775,29 @@ export async function buildEmployeeRosterCalendar(
   )
 
   // Pre-fetch shift_roster overrides for the month
-  const { data: overrides } = await supabase
+  const { data: overrides, error: overridesErr } = await supabase
     .from('shift_roster')
     .select('date, shift_id')
     .eq('tenant_id', tenantId)
     .eq('employee_id', employeeId)
     .gte('date', monthStart)
     .lte('date', monthEnd)
+  if (overridesErr) {
+    throw new Error(`buildEmployeeRosterCalendar: shift_roster overrides query failed — ${overridesErr.message}`)
+  }
   const overrideMap = new Map((overrides ?? []).map(r => [r.date as string, r.shift_id as string]))
 
   // Pre-fetch standing shift
-  const { data: standing } = await supabase
+  const { data: standing, error: standingErr } = await supabase
     .from('employee_shifts')
     .select('shift_id')
     .eq('tenant_id', tenantId)
     .eq('employee_id', employeeId)
     .eq('is_current', true)
     .maybeSingle()
+  if (standingErr) {
+    throw new Error(`buildEmployeeRosterCalendar: employee_shifts query failed — ${standingErr.message}`)
+  }
   const standingShiftId = (standing?.shift_id as string) ?? ctx.site_default_shift_id ?? null
 
   // Pre-fetch rotation membership

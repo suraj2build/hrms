@@ -194,7 +194,7 @@ async function sumPriorOtMinutes(
   excludeDate: string,
   policy:      OtPolicy,
 ): Promise<number> {
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from('overtime_requests')
     .select('raw_ot_minutes, approved_minutes, attendance_date')
     .eq('tenant_id', tenantId)
@@ -203,6 +203,11 @@ async function sumPriorOtMinutes(
     .lte('attendance_date', toDate)
     .neq('attendance_date', excludeDate)
     .neq('status', 'REJECTED')
+
+  // A failed query must not silently read as "no prior OT this period" — that
+  // would fail the weekly/monthly cap open, re-granting the full budget for
+  // a period that may already have OT recorded against it.
+  if (error) throw new Error(`sumPriorOtMinutes: DB query failed — ${error.message}`)
 
   let total = 0
   for (const row of (data ?? []) as any[]) {
