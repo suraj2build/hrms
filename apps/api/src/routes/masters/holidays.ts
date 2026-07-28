@@ -193,6 +193,10 @@ export default async function holidaysRoutes(fastify: FastifyInstance) {
         .eq('tenant_id', req.tenantId),
     ])
 
+    if (hResult.error) return serverError(req, reply, hResult.error, ErrorCode.QUERY_FAILED, 'Failed to fetch holidays')
+    if (gResult.error) return serverError(req, reply, gResult.error, ErrorCode.QUERY_FAILED, 'Failed to fetch holiday groups')
+    if (aResult.error) return serverError(req, reply, aResult.error, ErrorCode.QUERY_FAILED, 'Failed to fetch group assignments')
+
     return reply.send({
       holidays:    hResult.data   ?? [],
       groups:      gResult.data   ?? [],
@@ -242,11 +246,12 @@ export default async function holidaysRoutes(fastify: FastifyInstance) {
     }
 
     // Delete existing assignments for this holiday, then insert the new set
-    await fastify.supabase
+    const { error: deleteErr } = await fastify.supabase
       .from('holiday_group_assignments')
       .delete()
       .eq('holiday_id', holiday_id)
       .eq('tenant_id', req.tenantId)
+    if (deleteErr) return serverError(req, reply, deleteErr, ErrorCode.DELETE_FAILED, 'Failed to clear previous holiday group assignments')
 
     if (group_ids.length > 0) {
       const rows = group_ids.map(gid => ({ tenant_id: req.tenantId, holiday_id, group_id: gid }))
@@ -257,11 +262,12 @@ export default async function holidaysRoutes(fastify: FastifyInstance) {
     }
 
     // Sync legacy single-FK for backward compat (first group or NULL)
-    await fastify.supabase
+    const { error: syncErr } = await fastify.supabase
       .from('holiday_calendar')
       .update({ holiday_group_id: group_ids[0] ?? null })
       .eq('id', holiday_id)
       .eq('tenant_id', req.tenantId)
+    if (syncErr) return serverError(req, reply, syncErr, ErrorCode.UPDATE_FAILED, 'Groups saved but failed to sync legacy holiday_group_id')
 
     return reply.send({ holiday_id, group_ids })
   })
