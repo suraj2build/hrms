@@ -10,6 +10,7 @@
 
 import type { FastifyInstance } from 'fastify'
 import { computeReadiness } from '../../lib/readiness-engine.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 export default async function readinessRoutes(fastify: FastifyInstance) {
   const auth = { preHandler: [fastify.authenticate] }
@@ -43,8 +44,7 @@ export default async function readinessRoutes(fastify: FastifyInstance) {
       const result = await computeReadiness(fastify.supabase, { tenantId, sessionId })
       return reply.send({ data: result })
     } catch (err: any) {
-      req.log.error({ err }, 'readiness_compute_failed')
-      return reply.code(500).send({ error: 'INTERNAL_ERROR', message: err.message })
+      return serverError(req, reply, err, ErrorCode.COMPUTE_FAILED, 'Failed to compute onboarding readiness')
     }
   })
 
@@ -66,8 +66,7 @@ export default async function readinessRoutes(fastify: FastifyInstance) {
       const result = await computeReadiness(fastify.supabase, { tenantId, employeeId })
       return reply.send({ data: result })
     } catch (err: any) {
-      req.log.error({ err }, 'readiness_compute_failed')
-      return reply.code(500).send({ error: 'INTERNAL_ERROR', message: err.message })
+      return serverError(req, reply, err, ErrorCode.COMPUTE_FAILED, 'Failed to compute onboarding readiness')
     }
   })
 }

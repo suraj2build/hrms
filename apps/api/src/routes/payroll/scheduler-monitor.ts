@@ -13,6 +13,7 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { logJobStart } from '../../lib/notify.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 export default async function schedulerMonitorRoutes(fastify: FastifyInstance) {
   const adminAuth = { preHandler: [fastify.authenticate, (req: any, reply: any, done: () => void) => {
@@ -56,7 +57,7 @@ export default async function schedulerMonitorRoutes(fastify: FastifyInstance) {
     if (to)       q = q.lte('started_at', to)
 
     const { data, error, count } = await q
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch scheduler job log')
 
     return reply.send({ data: data ?? [], total: count ?? 0, limit, offset })
   })
@@ -75,7 +76,7 @@ export default async function schedulerMonitorRoutes(fastify: FastifyInstance) {
       .gte('started_at', new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString())
       .order('started_at', { ascending: false })
 
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch scheduler status')
 
     // Group by job_type, keep last run per type
     const byType: Record<string, {
@@ -187,10 +188,13 @@ export default async function schedulerMonitorRoutes(fastify: FastifyInstance) {
     }
 
     // Increment retry_count on original
-    await fastify.supabase
+    const { error: incrErr } = await fastify.supabase
       .from('scheduler_job_log')
       .update({ retry_count: (orig.retry_count ?? 0) + 1 })
       .eq('id', jobId)
+    if (incrErr) {
+      req.log.error({ err: incrErr, jobId }, 'scheduler-monitor: retry job log created but failed to increment original retry_count')
+    }
 
     return reply.code(201).send({
       retried:    true,

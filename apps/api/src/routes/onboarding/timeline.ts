@@ -9,6 +9,7 @@
 
 import type { FastifyInstance } from 'fastify'
 import { fetchTimeline } from '../../lib/timeline-aggregator.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 export default async function timelineRoutes(fastify: FastifyInstance) {
   const auth = { preHandler: [fastify.authenticate] }
@@ -50,8 +51,7 @@ export default async function timelineRoutes(fastify: FastifyInstance) {
       })
       return reply.send({ data: result })
     } catch (err: any) {
-      req.log.error({ err }, 'timeline_fetch_failed')
-      return reply.code(500).send({ error: 'INTERNAL_ERROR', message: err.message })
+      return serverError(req, reply, err, ErrorCode.QUERY_FAILED, 'Failed to fetch onboarding timeline')
     }
   })
 
@@ -81,8 +81,7 @@ export default async function timelineRoutes(fastify: FastifyInstance) {
       })
       return reply.send({ data: result })
     } catch (err: any) {
-      req.log.error({ err }, 'timeline_fetch_failed')
-      return reply.code(500).send({ error: 'INTERNAL_ERROR', message: err.message })
+      return serverError(req, reply, err, ErrorCode.QUERY_FAILED, 'Failed to fetch onboarding timeline')
     }
   })
 }

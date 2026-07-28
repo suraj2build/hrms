@@ -136,6 +136,17 @@ export async function computeReadiness(
       : Promise.resolve({ data: null }),
   ])
 
+  // A failed source must not silently read as "employee has none of this" —
+  // that fabricates a low/blocked readiness score from a transient DB error
+  // rather than real onboarding state.
+  for (const [label, result] of [
+    ['session', sessionRow], ['documents', documents], ['checklist', checklistData],
+    ['lifecycle events', lifecycleEvents], ['trust score', trustRow],
+  ] as const) {
+    const err = (result as any).error
+    if (err) throw new Error(`readiness_engine: failed to fetch ${label}: ${err.message}`)
+  }
+
   const session      = (sessionRow as any).data
   const docs         = ((documents as any).data ?? []) as DocRow[]
   const checklist    = (checklistData as any).data as ChecklistRow | null

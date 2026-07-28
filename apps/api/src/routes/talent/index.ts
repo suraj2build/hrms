@@ -264,21 +264,46 @@ export default async function talentRoutes(fastify: FastifyInstance) {
     if (!role.is_open) return reply.code(409).send({ error: 'This role is no longer accepting interest' })
 
     const VALID_AVAIL = ['immediate', '1_month', '3_months', 'open']
+    const rowFields = {
+      cover_note:  cover_note   ?? null,
+      skills:      skills        ?? [],
+      availability: availability != null && VALID_AVAIL.includes(availability) ? availability : 'open',
+      status:      'interested',
+    }
+
+    // An existing row that HR has already reviewed (shortlisted/selected/
+    // not_selected) must not be silently reset to 'interested' by the
+    // applicant re-registering — the RLS UPDATE policy only checks
+    // employee_id ownership, not status, so the app layer is the only gate.
+    const { data: existing } = await supabase
+      .from('talent_interests')
+      .select('id, status')
+      .eq('tenant_id', req.tenantId).eq('role_id', role_id).eq('employee_id', employeeId)
+      .maybeSingle()
+
+    if (existing) {
+      if (!['interested', 'withdrawn'].includes(existing.status)) {
+        return reply.code(409).send({ error: 'ALREADY_REVIEWED', message: 'This role has already been reviewed for you — your interest can no longer be edited.' })
+      }
+      const { data, error } = await supabase
+        .from('talent_interests')
+        .update(rowFields)
+        .eq('id', existing.id)
+        .in('status', ['interested', 'withdrawn'])
+        .select('id')
+        .maybeSingle()
+      if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to register interest')
+      if (!data) return reply.code(409).send({ error: 'ALREADY_REVIEWED', message: 'This role has already been reviewed for you — your interest can no longer be edited.' })
+      return reply.code(201).send({ data })
+    }
+
     const { data, error } = await supabase
       .from('talent_interests')
-      .upsert({
-        tenant_id:   req.tenantId,
-        role_id,
-        employee_id: employeeId,
-        cover_note:  cover_note   ?? null,
-        skills:      skills        ?? [],
-        availability: availability != null && VALID_AVAIL.includes(availability) ? availability : 'open',
-        status:      'interested',
-      }, { onConflict: 'role_id,employee_id' })
+      .insert({ tenant_id: req.tenantId, role_id, employee_id: employeeId, ...rowFields })
       .select('id')
       .single()
 
-    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to register interest')
+    if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to register interest')
     return reply.code(201).send({ data })
   })
 

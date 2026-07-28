@@ -20,6 +20,9 @@
 import type { FastifyInstance } from 'fastify'
 import { z }                    from 'zod'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
+import { fetchTenantTz } from '../../lib/attendance-engine.js'
+import { getLocalDate } from '../../lib/org-context.js'
 
 // ── Zod schemas ───────────────────────────────────────────────────────────────
 
@@ -63,14 +66,6 @@ const simulateBodySchema = z.object({
 
 type Scenario = z.infer<typeof scenarioSchema>
 
-// ── Helper ────────────────────────────────────────────────────────────────────
-
-function monthStr(offset = 0): string {
-  const d = new Date()
-  d.setMonth(d.getMonth() + offset)
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
-}
-
 interface DeptBase {
   id:        string
   name:      string
@@ -104,12 +99,17 @@ export default async function payrollSimulateRoute(fastify: FastifyInstance) {
     }
 
     const { base_month: bm, scenarios } = parsed.data
-    const baseMonth = bm ?? monthStr(0)
     const { tenantId } = req
+    // Tenant-local month default — a bare server-UTC clock would default to
+    // the wrong month during the first ~5.5 hours of a new tenant-local
+    // month for an IST tenant (the same bug class already fixed in
+    // tds.ts/it-statement.ts/ytd-statement.ts).
+    const tz = await fetchTenantTz(fastify.supabase, tenantId)
+    const baseMonth = bm ?? getLocalDate(new Date().toISOString(), tz).slice(0, 7)
 
     // ── 1. Load base payroll data ─────────────────────────────────────────
     // Primary: active compensations (real-time base)
-    const { data: comps } = await fastify.supabase
+    const { data: comps, error: compsErr } = await fastify.supabase
       .from('employee_compensations')
       .select(`
         id, employee_id, ctc_monthly, ctc_annual,
@@ -117,6 +117,7 @@ export default async function payrollSimulateRoute(fastify: FastifyInstance) {
       `)
       .eq('tenant_id', tenantId)
       .eq('is_active', true)
+    if (compsErr) return serverError(req, reply, compsErr, ErrorCode.QUERY_FAILED, 'Failed to load compensation data for simulation')
 
     const activeComps = ((comps ?? []) as any[]).filter(
       (c) => c.employees?.status === 'active',
@@ -149,11 +150,12 @@ export default async function payrollSimulateRoute(fastify: FastifyInstance) {
       prior3.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`)
     }
 
-    const { data: otSnaps } = await fastify.supabase
+    const { data: otSnaps, error: otSnapsErr } = await fastify.supabase
       .from('payroll_dept_snapshots')
       .select('department_id, total_ot_cost')
       .eq('tenant_id', tenantId)
       .in('month', prior3)
+    if (otSnapsErr) return serverError(req, reply, otSnapsErr, ErrorCode.QUERY_FAILED, 'Failed to load OT snapshot data for simulation')
 
     // Average OT per dept across snapshot months
     const otAccum = new Map<string, { sum: number; count: number }>()

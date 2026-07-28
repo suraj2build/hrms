@@ -11,6 +11,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z }                    from 'zod'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 const monthRe = /^\d{4}-\d{2}$/
 
@@ -59,7 +60,7 @@ export default async function payrollLedgerRoute(fastify: FastifyInstance) {
     if (qs.data.employee_id) q = q.eq('employee_id', qs.data.employee_id)
     if (qs.data.month)       q = q.eq('month', qs.data.month)
     const { data: rows, error } = await q
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch ledger')
 
     const empIds = [...new Set((rows ?? []).map((r: any) => r.employee_id))]
     const { data: emps } = empIds.length
