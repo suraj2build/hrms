@@ -24,6 +24,7 @@ import { Badge }         from '@/components/ui/badge'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { api }                from '@/lib/api/client'
 import { cn }                from '@/lib/utils'
+import { isSafeHref }        from '@/lib/sanitize'
 import { PolicyAssistant }   from '@/components/policies/PolicyAssistant'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -272,7 +273,7 @@ export function EssPolicies() {
               </div>
 
               {/* External document link */}
-              {detail.file_url && (
+              {detail.file_url && isSafeHref(detail.file_url) && (
                 <a
                   href={detail.file_url}
                   target="_blank"

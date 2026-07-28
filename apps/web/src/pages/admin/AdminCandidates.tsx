@@ -35,6 +35,7 @@ import {
 import { api, ApiError }      from '@/lib/api/client'
 import { useAuthStore }      from '@/stores/authStore'
 import { cn }                from '@/lib/utils'
+import { isSafeHref }        from '@/lib/sanitize'
 import { OfferLetterDialog } from './OfferLetterDialog'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -382,7 +383,7 @@ export function AdminCandidates() {
                               <Phone className="h-3.5 w-3.5" />
                             </a>
                           )}
-                          {c.linkedin_url && (
+                          {c.linkedin_url && isSafeHref(c.linkedin_url) && (
                             <a
                               href={c.linkedin_url}
                               target="_blank"
@@ -394,7 +395,7 @@ export function AdminCandidates() {
                               <Linkedin className="h-3.5 w-3.5" />
                             </a>
                           )}
-                          {c.resume_url && (
+                          {c.resume_url && isSafeHref(c.resume_url) && (
                             <a
                               href={c.resume_url}
                               target="_blank"
@@ -603,12 +604,12 @@ export function AdminCandidates() {
                     <span className={cn('text-[10px] font-medium rounded-full px-2 py-0.5', SOURCE_COLORS[detailCand.source] ?? SOURCE_COLORS.other)}>
                       {SOURCE_LABELS[detailCand.source] ?? detailCand.source}
                     </span>
-                    {detailCand.linkedin_url && (
+                    {detailCand.linkedin_url && isSafeHref(detailCand.linkedin_url) && (
                       <a href={detailCand.linkedin_url} target="_blank" rel="noreferrer" className="text-primary hover:underline flex items-center gap-1 text-xs">
                         <Linkedin className="h-3 w-3" />LinkedIn
                       </a>
                     )}
-                    {detailCand.resume_url && (
+                    {detailCand.resume_url && isSafeHref(detailCand.resume_url) && (
                       <a href={detailCand.resume_url} target="_blank" rel="noreferrer" className="text-muted-foreground hover:text-foreground flex items-center gap-1 text-xs">
                         <FileText className="h-3 w-3" />Resume
                       </a>

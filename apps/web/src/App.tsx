@@ -441,6 +441,17 @@ const queryClient = new QueryClient({
 
 // ── Auth provider ─────────────────────────────────────────────────────────────
 
+// Module-scoped (never persisted) — true only after a live GET /me has
+// succeeded in THIS page load. zustand's `persist` middleware rehydrates
+// `profile` (including `role`) from localStorage synchronously before this
+// module even runs, so on a fresh mount `already.profile` below can reflect
+// tampered localStorage rather than a server-verified value. Gating the
+// refetch-skip on this flag as well as the id match ensures every fresh page
+// load always does one real /me round-trip before trusting a persisted role,
+// while still preserving the skip for same-tab SIGNED_IN re-fires (tab
+// refocus / silent token rotation) once a live fetch has already happened.
+let hasFetchedProfileThisPageLoad = false
+
 function AuthProvider({ children }: { children: React.ReactNode }) {
   const { setProfile, setTenant, setLoading, setAccessToken, setBootstrapping } = useAuthStore()
 
@@ -506,7 +517,7 @@ function AuthProvider({ children }: { children: React.ReactNode }) {
             // with setLoading(true) remounts the app and wipes in-progress UI
             // state (active tab, in-flight upload, unsaved form input).
             const already = useAuthStore.getState()
-            if (already.profile && already.profile.id === session.user.id) {
+            if (already.profile && already.profile.id === session.user.id && hasFetchedProfileThisPageLoad) {
               setBootstrapping(false)
               setLoading(false)
               return
@@ -515,6 +526,7 @@ function AuthProvider({ children }: { children: React.ReactNode }) {
             setLoading(true)
             try {
               const data = await api.get<{ profile: Profile; tenant: Tenant }>('/me')
+              hasFetchedProfileThisPageLoad = true
               setProfile(data.profile)
               setTenant(data.tenant)
             } catch (err: unknown) {

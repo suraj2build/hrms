@@ -20,6 +20,7 @@ import {
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { api } from '@/lib/api/client'
+import { isSafeHref } from '@/lib/sanitize'
 import { PageContainer } from '@/components/layout/PageContainer'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { SectionCard } from '@/components/layout/SectionCard'
@@ -544,7 +545,7 @@ function ReviewDrawer({ joinee, open, onClose, onApprove, onReject, onRequestReu
                       <p className="text-xs text-muted-foreground">
                         {[ed.year_of_completion ? `Year ${ed.year_of_completion}` : null, ed.grade ? `Grade ${ed.grade}` : null].filter(Boolean).join(' · ')}
                       </p>
-                      {ed.document_url && (
+                      {ed.document_url && isSafeHref(ed.document_url) && (
                         <a href={ed.document_url} target="_blank" rel="noreferrer" className="text-xs text-primary hover:underline">
                           View certificate{ed.document_name ? ` (${ed.document_name})` : ''}
                         </a>

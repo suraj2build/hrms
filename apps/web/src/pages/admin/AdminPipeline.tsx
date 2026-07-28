@@ -30,6 +30,7 @@ import {
 import { api }           from '@/lib/api/client'
 import { useAuthStore }  from '@/stores/authStore'
 import { cn }            from '@/lib/utils'
+import { isSafeHref }    from '@/lib/sanitize'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -202,12 +203,12 @@ function PipelineCandidateDialog({ app, stages, onClose }: {
                 <Phone className="h-3.5 w-3.5" />{c.phone}
               </a>
             )}
-            {c.resume_url && (
+            {c.resume_url && isSafeHref(c.resume_url) && (
               <a href={c.resume_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 text-xs rounded-lg border border-border bg-background px-2.5 py-1.5 hover:border-primary/40 hover:text-primary transition-colors">
                 <FileText className="h-3.5 w-3.5" />Résumé
               </a>
             )}
-            {c.linkedin_url && (
+            {c.linkedin_url && isSafeHref(c.linkedin_url) && (
               <a href={c.linkedin_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 text-xs rounded-lg border border-border bg-background px-2.5 py-1.5 hover:border-primary/40 hover:text-primary transition-colors">
                 <Linkedin className="h-3.5 w-3.5" />LinkedIn
               </a>

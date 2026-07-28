@@ -36,6 +36,19 @@ function isUnsafeUrl(value: string): boolean {
     (v.startsWith('data:') && !v.startsWith('data:image/'))
 }
 
+/**
+ * True when a user-supplied URL is safe to put in an href/src — i.e. not an
+ * executable-scheme payload (javascript:/vbscript:/non-image data:). Use this
+ * to guard any <a href={freeTextField}> built from admin/HR-entered free text
+ * (policy document links, candidate LinkedIn/resume URLs, meeting links, etc.)
+ * before rendering it as a clickable link — the same class of stored-XSS this
+ * module already guards for dangerouslySetInnerHTML content.
+ */
+export function isSafeHref(value: string | null | undefined): boolean {
+  if (!value) return false
+  return !isUnsafeUrl(value)
+}
+
 export function sanitizeHtml(dirty: string | null | undefined): string {
   if (!dirty) return ''
   // SSR / non-DOM guard — return empty rather than inject unsanitized markup.

@@ -38,6 +38,7 @@ import {
 import { api }           from '@/lib/api/client'
 import { useAuthStore }  from '@/stores/authStore'
 import { cn }            from '@/lib/utils'
+import { isSafeHref }    from '@/lib/sanitize'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -466,7 +467,7 @@ export function AdminInterviews() {
                               <CalendarDays className="h-3 w-3 text-muted-foreground" />
                               {fmtDT(r.scheduled_at)}
                             </div>
-                            {r.meet_link && (
+                            {r.meet_link && isSafeHref(r.meet_link) && (
                               <a
                                 href={r.meet_link}
                                 target="_blank"
