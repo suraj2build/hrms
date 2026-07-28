@@ -32,6 +32,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from'@/components/ui/tabs'
 import { api } from'@/lib/api/client'
 import { cn } from'@/lib/utils'
+import { invalidateTalentMarketplace } from '@/lib/talent-marketplace-cache'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -248,8 +249,9 @@ export function EssTalentMarketplace() {
  onSuccess: () => {
  toast.success('Interest registered successfully')
  setApplyingRole(null)
- qc.invalidateQueries({ queryKey: ['talent-browse'] })
- qc.invalidateQueries({ queryKey: ['talent-my-interests'] })
+ // Also reaches admin's talent-roles interest_count — HR shouldn't need a
+ // manual refresh to see a new applicant.
+ invalidateTalentMarketplace(qc)
  },
  // eslint-disable-next-line @typescript-eslint/no-explicit-any
  onError: (e: any) => toast.error(e?.response?.data?.error ??'Failed to register interest'),
@@ -259,8 +261,7 @@ export function EssTalentMarketplace() {
  mutationFn: (iid: string) => api.delete(`/talent/interest/${iid}`),
  onSuccess: () => {
  toast.success('Interest withdrawn')
- qc.invalidateQueries({ queryKey: ['talent-browse'] })
- qc.invalidateQueries({ queryKey: ['talent-my-interests'] })
+ invalidateTalentMarketplace(qc)
  },
  onError: () => toast.error('Failed to withdraw interest'),
  })

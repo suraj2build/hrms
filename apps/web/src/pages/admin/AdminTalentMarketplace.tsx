@@ -34,6 +34,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { api } from '@/lib/api/client'
 import { cn } from '@/lib/utils'
+import { invalidateTalentMarketplace } from '@/lib/talent-marketplace-cache'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -229,12 +230,10 @@ function InterestPanel({ role, onClose }: { role: TalentRole; onClose: () => voi
       api.put(`/talent/interests/${iid}`, { status, reviewer_notes: notes }),
     onSuccess: () => {
       toast.success('Status updated')
-      qc.invalidateQueries({ queryKey: ['talent-interests', role.id] })
-      qc.invalidateQueries({ queryKey: ['talent-roles'] })
-      // ESS's "My Interests" tab reads the same interest row under
-      // ['talent-my-interests'] — invalidate so an employee sees HR's
-      // approve/shortlist/reject decision without a manual refresh.
-      qc.invalidateQueries({ queryKey: ['talent-my-interests'] })
+      // Invalidates talent-interests/talent-roles here plus ESS's
+      // talent-browse/talent-my-interests — an employee's application status
+      // and role visibility must reflect HR's decision without a manual refresh.
+      invalidateTalentMarketplace(qc)
     },
     onError: () => toast.error('Failed to update status'),
   })
@@ -343,13 +342,15 @@ export function AdminTalentMarketplace() {
     mutationFn: (id: string) => api.post(`/talent/roles/${id}/close`, {}),
     onSuccess: () => {
       toast.success('Role closed')
-      qc.invalidateQueries({ queryKey: ['talent-roles'] })
+      // Must reach ESS's talent-browse too — otherwise an employee with the
+      // marketplace open still sees this role as open and can apply to it.
+      invalidateTalentMarketplace(qc)
     },
     onError: () => toast.error('Failed to close role'),
   })
 
   function refreshRoles() {
-    qc.invalidateQueries({ queryKey: ['talent-roles'] })
+    invalidateTalentMarketplace(qc)
   }
 
   // Summary stats
