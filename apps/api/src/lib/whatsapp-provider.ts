@@ -25,12 +25,18 @@ const TEMPLATE_PREVIEWS: Record<string, (v: Record<string, string>) => string> =
 export class WhatsAppProvider {
   constructor(private supabase: SupabaseClient) {}
 
+  /**
+   * Returns whether the message was actually delivered (outbox status 'sent').
+   * This method never throws — a caller relying on promise rejection to detect
+   * failure (Promise.allSettled reading 'fulfilled') will incorrectly treat
+   * every call as a success; check the resolved boolean instead.
+   */
   async sendTemplate(
     tenantId: string,
     phone: string,
     template: string,
     variables: Record<string, string>,
-  ): Promise<void> {
+  ): Promise<boolean> {
     const preview = (TEMPLATE_PREVIEWS[template] ?? (() => template))(variables)
 
     // Always log to outbox
@@ -49,7 +55,7 @@ export class WhatsAppProvider {
 
     if (insertError) {
       console.error('[WhatsApp] outbox insert failed:', insertError.message)
-      return
+      return false
     }
 
     const apiToken    = process.env.WHATSAPP_API_TOKEN
@@ -58,7 +64,7 @@ export class WhatsAppProvider {
 
     if (!apiToken || !phoneNumId) {
       // Logged to outbox; no live delivery until credentials are set
-      return
+      return false
     }
 
     try {
@@ -96,12 +102,14 @@ export class WhatsAppProvider {
           .from('whatsapp_outbox')
           .update({ status: 'sent', sent_at: new Date().toISOString() })
           .eq('id', outboxId)
+        return true
       } else {
         const body = await res.text()
         await this.supabase
           .from('whatsapp_outbox')
           .update({ status: 'failed', error_message: body.slice(0, 500) })
           .eq('id', outboxId)
+        return false
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err)
@@ -109,6 +117,7 @@ export class WhatsAppProvider {
         .from('whatsapp_outbox')
         .update({ status: 'failed', error_message: msg.slice(0, 500) })
         .eq('id', outboxId)
+      return false
     }
   }
 

@@ -149,18 +149,23 @@ async function sendPollToEmployees(
   // C5a: send in parallel chunks
   for (let i = 0; i < pending.length; i += SEND_CHUNK_SIZE) {
     const chunk = pending.slice(i, i + SEND_CHUNK_SIZE)
+    // sendTemplate never throws (delivery failure is recorded in whatsapp_outbox,
+    // not surfaced as a rejection) — so Promise.allSettled's 'fulfilled' status
+    // said nothing about actual delivery. Read the resolved boolean instead;
+    // otherwise a genuinely-failed send got written to pulse_send_log anyway
+    // and would never be retried.
     const results = await Promise.allSettled(
       chunk.map(emp =>
         wa.sendTemplate(tenantId, emp.phone, 'mood_poll_weekly', {
           name: emp.first_name ?? 'there',
-        }).then(() => emp.id),
+        }).then(delivered => ({ id: emp.id, delivered })),
       ),
     )
 
     // C5b: record successful sends for dedup on retry
     const successIds = results
-      .filter((r): r is PromiseFulfilledResult<string> => r.status === 'fulfilled')
-      .map(r => r.value)
+      .filter((r): r is PromiseFulfilledResult<{ id: string; delivered: boolean }> => r.status === 'fulfilled' && r.value.delivered)
+      .map(r => r.value.id)
 
     if (successIds.length > 0) {
       await supabase
