@@ -224,38 +224,44 @@ export default async function variablePayRoutes(fastify: FastifyInstance) {
 
     if (payErr) return serverError(req, reply, payErr, ErrorCode.INSERT_FAILED, 'Failed to create variable payouts')
 
-    // Update batch total_amount and employee_count
-    const totalAmount = parsed.data.payouts.reduce((sum, p) => sum + p.amount, 0)
-    const employeeCount = new Set(parsed.data.payouts.map(p => p.employee_id)).size
-
-    const { data: batchRow, error: batchFetchErr } = await fastify.supabase
-      .from('variable_payout_batches')
-      .select('total_amount, employee_count')
-      .eq('id', id)
-      .eq('tenant_id', req.tenantId)
-      .single()
-
-    if (batchFetchErr) {
+    // Recompute batch total_amount/employee_count from the full payout set —
+    // reading the batch's current totals and adding this call's subtotal is a
+    // read-then-write race: two concurrent calls for the same batch (retry,
+    // parallel chunk upload) both read the same starting totals and the
+    // second write clobbers the first's increment. Recomputing from source
+    // is race-free and also correctly dedupes an employee appearing across
+    // multiple calls, which a running counter would double-count.
+    let allPayouts: Array<{ employee_id: string; amount: number }>
+    try {
+      allPayouts = await fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('variable_payouts')
+          .select('employee_id, amount')
+          .eq('batch_id', id)
+          .eq('tenant_id', req.tenantId)
+          .range(from, to),
+      )
+    } catch (err) {
       // The payouts above are already committed — surface this rather than
       // silently skipping the totals update, which would permanently
       // under-report total_amount/employee_count for a batch that does
       // have these payouts.
-      return serverError(req, reply, batchFetchErr, ErrorCode.QUERY_FAILED, 'Payouts created but failed to refresh batch totals')
+      return serverError(req, reply, err, ErrorCode.QUERY_FAILED, 'Payouts created but failed to refresh batch totals')
     }
+    const totalAmount = allPayouts.reduce((sum, p) => sum + p.amount, 0)
+    const employeeCount = new Set(allPayouts.map(p => p.employee_id)).size
 
-    if (batchRow) {
-      const currentTotal = (batchRow as any).total_amount ?? 0
-      const currentCount = (batchRow as any).employee_count ?? 0
-
-      await fastify.supabase
-        .from('variable_payout_batches')
-        .update({
-          total_amount: Math.round((currentTotal + totalAmount) * 100) / 100,
-          employee_count: currentCount + employeeCount,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', id)
-        .eq('tenant_id', req.tenantId)
+    const { error: batchUpdateErr } = await fastify.supabase
+      .from('variable_payout_batches')
+      .update({
+        total_amount: Math.round(totalAmount * 100) / 100,
+        employee_count: employeeCount,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', id)
+      .eq('tenant_id', req.tenantId)
+    if (batchUpdateErr) {
+      return serverError(req, reply, batchUpdateErr, ErrorCode.UPDATE_FAILED, 'Payouts created but failed to update batch totals')
     }
 
     return reply.code(201).send({ data: insertedPayouts })

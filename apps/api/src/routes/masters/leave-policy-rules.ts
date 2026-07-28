@@ -132,6 +132,23 @@ export default async function leavePolicyRulesRoutes(fastify: FastifyInstance) {
       })
     }
 
+    // event_trigger_date_type_id is a bare FK to important_date_types(id) with
+    // no tenant scoping at the DB level — verify it belongs to this tenant too.
+    if (parsed.data.event_trigger_date_type_id) {
+      const { data: dt } = await fastify.supabase
+        .from('important_date_types')
+        .select('id')
+        .eq('id', parsed.data.event_trigger_date_type_id)
+        .eq('tenant_id', req.tenantId)
+        .maybeSingle()
+      if (!dt) {
+        return reply.code(404).send({
+          error:   'DATE_TYPE_NOT_FOUND',
+          message: 'Event trigger date type not found in this tenant',
+        })
+      }
+    }
+
     const { data, error } = await fastify.supabase
       .from('leave_policy_rules')
       .insert({
@@ -224,6 +241,21 @@ export async function leavePolicyRulesMutationsRoutes(fastify: FastifyInstance) 
 
     if (!existing) {
       return reply.code(404).send({ error: 'NOT_FOUND', message: 'Rule not found' })
+    }
+
+    if (parsed.data.event_trigger_date_type_id) {
+      const { data: dt } = await fastify.supabase
+        .from('important_date_types')
+        .select('id')
+        .eq('id', parsed.data.event_trigger_date_type_id)
+        .eq('tenant_id', req.tenantId)
+        .maybeSingle()
+      if (!dt) {
+        return reply.code(404).send({
+          error:   'DATE_TYPE_NOT_FOUND',
+          message: 'Event trigger date type not found in this tenant',
+        })
+      }
     }
 
     const { data, error } = await fastify.supabase

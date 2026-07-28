@@ -147,11 +147,26 @@ export default async function arrearsRoutes(fastify: FastifyInstance) {
 
     if (insertErr) return serverError(req, reply, insertErr, ErrorCode.INSERT_FAILED, 'Failed to create arrear records')
 
-    // Update batch totals
-    const totalArrear = recordRows.reduce((sum, r) => sum + Math.abs(r.arrear_amount), 0)
-    const distinctEmployeeIds = new Set(parsed.data.records.map(r => r.employee_id))
+    // Recompute batch totals from the full record set — this endpoint only
+    // inserts (doesn't clear-and-replace), so a second call for the same
+    // batch must accumulate, not overwrite with just this call's subset.
+    let allRecords: Array<{ employee_id: string; arrear_amount: number }>
+    try {
+      allRecords = await fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('arrear_records')
+          .select('employee_id, arrear_amount')
+          .eq('batch_id', id)
+          .eq('tenant_id', req.tenantId)
+          .range(from, to),
+      )
+    } catch (err) {
+      return serverError(req, reply, err, ErrorCode.QUERY_FAILED, 'Failed to recompute batch totals')
+    }
+    const totalArrear = allRecords.reduce((sum, r) => sum + Math.abs(r.arrear_amount), 0)
+    const distinctEmployeeIds = new Set(allRecords.map(r => r.employee_id))
 
-    await fastify.supabase
+    const { error: updateErr } = await fastify.supabase
       .from('arrear_batches')
       .update({
         total_arrear_amount: Math.round(totalArrear * 100) / 100,
@@ -161,6 +176,7 @@ export default async function arrearsRoutes(fastify: FastifyInstance) {
       })
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
+    if (updateErr) return serverError(req, reply, updateErr, ErrorCode.UPDATE_FAILED, 'Records saved, but failed to update batch totals')
 
     return reply.code(201).send({ data: insertedRecords, records_inserted: recordRows.length })
   })

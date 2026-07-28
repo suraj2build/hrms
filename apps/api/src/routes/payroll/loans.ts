@@ -9,6 +9,7 @@ import { gateApprove, gateReject } from '../../lib/approval-orchestrator.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { checkIdempotency, storeIdempotency } from '../../lib/idempotency.js'
 import { serverError, ErrorCode } from '../../lib/api-errors.js'
+import { fetchAllRows } from '../../lib/supabase-paginate.js'
 
 const LOAN_TYPES = ['personal', 'housing', 'vehicle', 'education', 'emergency', 'other'] as const
 const PAYMENT_TYPES = ['emi', 'prepayment', 'foreclosure', 'adjustment'] as const
@@ -466,29 +467,41 @@ export default async function loansRoutes(fastify: FastifyInstance) {
   fastify.get('/active-emis/:month', { preHandler: [fastify.authenticate, requireHrAdmin] }, async (req: any, reply) => {
     const { month } = req.params as { month: string }
 
-    const [{ data: loans }, { data: schedules }] = await Promise.all([
-      fastify.supabase
-        .from('employee_loans')
-        .select('*, employees(id, first_name, last_name, employee_code)')
-        .eq('tenant_id', req.tenantId)
-        .eq('status', 'active')
-        .eq('is_emi_paused', false),
-      fastify.supabase
-        .from('loan_schedules')
-        .select('*')
-        .eq('tenant_id', req.tenantId)
-        .eq('due_month', month)
-        .eq('status', 'pending'),
-    ])
+    let loans: any[]
+    let schedules: any[]
+    try {
+      [loans, schedules] = await Promise.all([
+        fetchAllRows((from, to) =>
+          fastify.supabase
+            .from('employee_loans')
+            .select('*, employees(id, first_name, last_name, employee_code)')
+            .eq('tenant_id', req.tenantId)
+            .eq('status', 'active')
+            .eq('is_emi_paused', false)
+            .range(from, to),
+        ),
+        fetchAllRows((from, to) =>
+          fastify.supabase
+            .from('loan_schedules')
+            .select('*')
+            .eq('tenant_id', req.tenantId)
+            .eq('due_month', month)
+            .eq('status', 'pending')
+            .range(from, to),
+        ),
+      ])
+    } catch (err) {
+      return serverError(req, reply, err, ErrorCode.QUERY_FAILED, 'Failed to fetch active EMIs')
+    }
 
     const scheduleMap = new Map<string, any[]>()
-    for (const sched of (schedules ?? []) as any[]) {
+    for (const sched of schedules as any[]) {
       const existing = scheduleMap.get(sched.loan_id) ?? []
       existing.push(sched)
       scheduleMap.set(sched.loan_id, existing)
     }
 
-    const result = (loans ?? []).map((loan: any) => ({
+    const result = loans.map((loan: any) => ({
       ...loan,
       pending_emis: scheduleMap.get(loan.id) ?? [],
     }))
@@ -545,7 +558,7 @@ export default async function loansRoutes(fastify: FastifyInstance) {
     // record-payment call for the same installment can't re-stamp an
     // already-paid schedule row.
     if (parsed.data.schedule_id) {
-      await fastify.supabase
+      const { error: schedErr } = await fastify.supabase
         .from('loan_schedules')
         .update({
           status: 'paid',
@@ -555,6 +568,9 @@ export default async function loansRoutes(fastify: FastifyInstance) {
         .eq('id', parsed.data.schedule_id)
         .eq('tenant_id', req.tenantId)
         .eq('status', 'pending')
+      if (schedErr) {
+        req.log.error({ err: schedErr, schedule_id: parsed.data.schedule_id }, 'record-payment: failed to mark loan_schedules row paid — payment row was inserted but schedule was NOT updated')
+      }
     }
 
     // Update loan outstanding balance atomically (fresh audit finding): this
