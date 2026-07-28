@@ -786,6 +786,11 @@ export function PreOnboarding({ embedded = false }: { embedded?: boolean } = {})
       }
       qc.invalidateQueries({ queryKey: ['pre-joinee-list'] })
       qc.invalidateQueries({ queryKey: ['pre-joinee-stats'] })
+      // Approval creates (or reactivates) an employees row — Employee List and
+      // Org Chart read the same data under a separate key and won't otherwise
+      // show the new hire (same fix already applied to HRReviewWorkspace.tsx's
+      // sibling draft-approval endpoint).
+      qc.invalidateQueries({ queryKey: ['employees'] })
       setDrawerOpen(false)
       setRehireCheck(null)
       if (data?.rehired) {
@@ -874,6 +879,12 @@ export function PreOnboarding({ embedded = false }: { embedded?: boolean } = {})
       } catch { /* continue on individual failures */ }
     }
     qc.invalidateQueries({ queryKey: ['assets-available'] })
+    // Same underlying assignment AssetMaster.tsx's own assign action makes —
+    // its ESS/manager/profile views read this under separate keys and won't
+    // otherwise show the newly assigned asset.
+    qc.invalidateQueries({ queryKey: ['ess-me-assets'] })
+    qc.invalidateQueries({ queryKey: ['manager-team-assets'] })
+    qc.invalidateQueries({ queryKey: ['emp-assets'] })
     toast.success(`${success} asset${success !== 1 ? 's' : ''} assigned to ${assetTarget.first_name}`)
     setAssetTarget(null)
     setAssetPicked(new Set())

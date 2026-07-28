@@ -328,7 +328,7 @@ export function OfferLetterDialog({
         refNo,
         date: today,
       })
-      await api.post(`/recruitment/offers/${appId}/send`, {
+      const res = await api.post<{ status?: string; message?: string }>(`/recruitment/offers/${appId}/send`, {
         letter_html: html,
         recipient_email: offer.candidate_email,
         candidate_name:  offer.candidate_name,
@@ -338,11 +338,20 @@ export function OfferLetterDialog({
         joining_date:    joiningDate || undefined,
         valid_until:     validUntil || undefined,
       })
-      toast.success(
-        joiningDate && offeredAmount
-          ? `Offer sent to ${offer.candidate_email} — they can accept it from their candidate portal`
-          : `Offer letter sent to ${offer.candidate_email}`,
-      )
+      // Under OFFER_SIGNOFF_DUAL_CONTROL, the first send only records a pending
+      // sign-off (202 PENDING_CHECKER) — no email goes out yet. A different
+      // authorised user must send again to approve and actually dispatch it.
+      if (res?.status === 'PENDING_CHECKER') {
+        toast.success('Submitted for sign-off', {
+          description: res.message ?? 'A different authorised user must approve this before it is sent to the candidate.',
+        })
+      } else {
+        toast.success(
+          joiningDate && offeredAmount
+            ? `Offer sent to ${offer.candidate_email} — they can accept it from their candidate portal`
+            : `Offer letter sent to ${offer.candidate_email}`,
+        )
+      }
       qc.invalidateQueries({ queryKey: ['recruitment', 'offer', appId] })
       onOpenChange(false)
     } catch {

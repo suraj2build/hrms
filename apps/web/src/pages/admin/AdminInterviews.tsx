@@ -39,6 +39,7 @@ import { api }           from '@/lib/api/client'
 import { useAuthStore }  from '@/stores/authStore'
 import { cn }            from '@/lib/utils'
 import { isSafeHref }    from '@/lib/sanitize'
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -211,9 +212,11 @@ export function AdminInterviews() {
     }
   }
 
+  const [deleteTarget, setDeleteTarget] = useState<InterviewRound | null>(null)
+
   const deleteMut = useMutation({
     mutationFn: (id: string) => api.delete(`/recruitment/interviews/${id}`),
-    onSuccess:  () => { toast.success('Interview deleted'); invalidate() },
+    onSuccess:  () => { toast.success('Interview deleted'); setDeleteTarget(null); invalidate() },
     onError:    (e: unknown) => toast.error(e instanceof Error ? e.message : 'Delete failed'),
   })
 
@@ -532,7 +535,7 @@ export function AdminInterviews() {
                                     </DropdownMenuItem>
                                     <DropdownMenuItem
                                       className="text-destructive"
-                                      onClick={() => deleteMut.mutate(r.id)}
+                                      onClick={() => setDeleteTarget(r)}
                                     >Delete</DropdownMenuItem>
                                   </>
                                 )}
@@ -876,6 +879,16 @@ export function AdminInterviews() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <ConfirmDialog
+        open={!!deleteTarget}
+        title="Delete interview round?"
+        message={deleteTarget ? `This permanently removes ${deleteTarget.title ?? `Round ${deleteTarget.round_number}`} and any scorecards recorded for it. This cannot be undone.` : ''}
+        confirmLabel="Delete"
+        destructive
+        onConfirm={() => deleteTarget && deleteMut.mutate(deleteTarget.id)}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </PageContainer>
   )
 }
