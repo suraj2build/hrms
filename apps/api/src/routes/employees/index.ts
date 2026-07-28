@@ -479,6 +479,34 @@ export default async function employeeRoutes(fastify: FastifyInstance) {
       if (!fkRow) return validationError(reply, 'INVALID_REFERENCE', `${label} not found in your organisation`)
     }
 
+    // Circular-reference guard — same gap as above: the dedicated
+    // PUT /employees/:id/manager endpoint checks self-assignment and walks
+    // the manager chain for cycles, but this generic endpoint writes
+    // manager_id straight through with only the tenant-FK check just above.
+    if (parsed.data.manager_id) {
+      if (parsed.data.manager_id === id) {
+        return reply.code(422).send({ error: 'CIRCULAR_REFERENCE', message: 'An employee cannot be their own manager.' })
+      }
+      const MAX_DEPTH = 20
+      let cursor: string | null = parsed.data.manager_id
+      let depth = 0
+      while (cursor && depth < MAX_DEPTH) {
+        const { data: node } = await fastify.supabase
+          .from('employees')
+          .select('manager_id')
+          .eq('id', cursor)
+          .eq('tenant_id', request.tenantId)
+          .maybeSingle()
+        const nodeRow = node as { manager_id: string | null } | null
+        if (!nodeRow) break
+        cursor = nodeRow.manager_id
+        depth++
+        if (cursor === id) {
+          return reply.code(422).send({ error: 'CIRCULAR_REFERENCE', message: 'Setting this manager would create a circular reporting chain.' })
+        }
+      }
+    }
+
     // Strip fields the caller must never overwrite
     const {
       id: _id,

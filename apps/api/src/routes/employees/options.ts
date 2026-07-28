@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify'
 import { serverError, ErrorCode } from '../../lib/api-errors.js'
+import { sanitizeOrFilterTerm } from '../../lib/postgrest-filter.js'
 
 /**
  * GET /employees/options
@@ -44,7 +45,7 @@ export default async function employeeOptionsRoute(fastify: FastifyInstance) {
     }
 
     if (idList.length === 0 && search?.trim()) {
-      const term = `%${search.trim()}%`
+      const term = `%${sanitizeOrFilterTerm(search.trim())}%`
       // employee_code is the human-facing ID people actually search by (e.g.
       // "SK0001") — it must be matched here, not just names/email.
       query = query.or(

@@ -173,6 +173,36 @@ export default async function jobHistoryRoutes(fastify: FastifyInstance) {
       if (!fkRow) return validationError(reply, ErrorCode.VALIDATION_ERROR, `${label} not found in your organisation`)
     }
 
+    // Circular-reference guard — this endpoint also syncs employees.manager_id
+    // (below), a second write path to the same column that the dedicated
+    // PUT /employees/:id/manager route already guards against self-assignment
+    // and cycles. Without the same check here, reassigning via job history
+    // (the path the "Reassign Reporting Manager" UI actually uses) can create
+    // A→B→A with no rejection.
+    if (parsed.data.is_current !== false && parsed.data.manager_id) {
+      if (parsed.data.manager_id === req.params.id) {
+        return reply.code(422).send({ error: 'CIRCULAR_REFERENCE', message: 'An employee cannot be their own manager.' })
+      }
+      const MAX_DEPTH = 20
+      let cursor: string | null = parsed.data.manager_id
+      let depth = 0
+      while (cursor && depth < MAX_DEPTH) {
+        const { data: node } = await fastify.supabase
+          .from('employees')
+          .select('manager_id')
+          .eq('id', cursor)
+          .eq('tenant_id', req.tenantId)
+          .maybeSingle()
+        const nodeRow = node as { manager_id: string | null } | null
+        if (!nodeRow) break
+        cursor = nodeRow.manager_id
+        depth++
+        if (cursor === req.params.id) {
+          return reply.code(422).send({ error: 'CIRCULAR_REFERENCE', message: 'Setting this manager would create a circular reporting chain.' })
+        }
+      }
+    }
+
     // Supersede the prior current row BEFORE inserting, replicating exactly
     // what fn_close_prev_job_history's AFTER INSERT trigger (migration 013)
     // does: is_current=false AND effective_to=effective_from-1day. Closing
@@ -217,11 +247,14 @@ export default async function jobHistoryRoutes(fastify: FastifyInstance) {
     // Sync employees.manager_id when a new current job row carries a manager_id.
     // This keeps the live reporting FK in sync with job_history automatically.
     if (parsed.data.is_current !== false && 'manager_id' in parsed.data) {
-      await fastify.supabase
+      const { error: mgrSyncErr } = await fastify.supabase
         .from('employees')
         .update({ manager_id: parsed.data.manager_id ?? null, updated_at: new Date().toISOString() })
         .eq('id', req.params.id)
         .eq('tenant_id', req.tenantId)
+      if (mgrSyncErr) {
+        req.log.error({ err: mgrSyncErr, employeeId: req.params.id }, 'job-history: job entry created but failed to sync employees.manager_id')
+      }
     }
 
     return reply.code(201).send(data)
