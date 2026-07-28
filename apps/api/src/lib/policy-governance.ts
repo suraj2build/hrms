@@ -212,6 +212,12 @@ export async function publishPolicy(
   const today    = new Date().toISOString().slice(0, 10)
   const newVersion = m.version + 1
 
+  // Fold the status+version precondition into the UPDATE's own WHERE clause
+  // (TOCTOU-safe) — the SELECT above is a stale read, and newVersion is
+  // derived from it. Two concurrent publish calls that both pass the
+  // stale-read check would otherwise both compute the same newVersion,
+  // creating duplicate leave_policy_versions snapshots for the same version
+  // number.
   const { data: updated, error: updateErr } = await supabase
     .from('leave_policy_masters')
     .update({
@@ -226,11 +232,16 @@ export async function publishPolicy(
     })
     .eq('tenant_id', tenantId)
     .eq('id', policyId)
+    .eq('version', m.version)
+    .in('status', ['draft', 'review'])
     .select('*')
-    .single()
+    .maybeSingle()
 
-  if (updateErr || !updated) {
-    return { success: false, error: updateErr?.message ?? 'Update failed.' }
+  if (updateErr) {
+    return { success: false, error: updateErr.message }
+  }
+  if (!updated) {
+    return { success: false, error: 'Policy was modified concurrently — please refresh and try again.' }
   }
 
   const updatedMaster = updated as PolicyMaster
@@ -277,15 +288,19 @@ export async function requestReview(
   if (m.status === 'archived')  return { success: false, error: 'Archived policy cannot be sent for review. Rollback first.' }
   if (m.status === 'review')    return { success: false, error: 'Already in review.' }
 
+  // Fold the status precondition into the UPDATE's own WHERE clause
+  // (TOCTOU-safe) — the SELECT above is a stale read.
   const { data: updated, error } = await supabase
     .from('leave_policy_masters')
     .update({ status: 'review', updated_at: new Date().toISOString() })
     .eq('tenant_id', tenantId)
     .eq('id', policyId)
+    .eq('status', 'draft')
     .select('*')
-    .single()
+    .maybeSingle()
 
-  if (error || !updated) return { success: false, error: error?.message ?? 'Update failed.' }
+  if (error) return { success: false, error: error.message }
+  if (!updated) return { success: false, error: 'Policy was modified concurrently — please refresh and try again.' }
 
   await logPolicyChange(supabase, tenantId, {
     tableName:  'leave_policy_masters',
@@ -320,6 +335,8 @@ export async function archivePolicy(
 
   if (m.status === 'archived') return { success: false, error: 'Policy is already archived.' }
 
+  // Fold the status precondition into the UPDATE's own WHERE clause
+  // (TOCTOU-safe) — the SELECT above is a stale read.
   const { data: updated, error } = await supabase
     .from('leave_policy_masters')
     .update({
@@ -329,10 +346,12 @@ export async function archivePolicy(
     })
     .eq('tenant_id', tenantId)
     .eq('id', policyId)
+    .in('status', ['draft', 'review', 'published'])
     .select('*')
-    .single()
+    .maybeSingle()
 
-  if (error || !updated) return { success: false, error: error?.message ?? 'Update failed.' }
+  if (error) return { success: false, error: error.message }
+  if (!updated) return { success: false, error: 'Policy was modified concurrently — please refresh and try again.' }
 
   const updatedMaster = updated as PolicyMaster
 
@@ -396,7 +415,11 @@ export async function rollbackPolicyToVersion(
 
   const newVersion = c.version + 1
 
-  // Restore master to draft with bumped version
+  // Restore master to draft with bumped version. Fold an optimistic lock on
+  // the read `version` into the UPDATE's own WHERE clause (TOCTOU-safe) —
+  // newVersion is derived from the stale SELECT above, and a concurrent
+  // publish/archive/rollback on the same policy could otherwise also bump
+  // the version, producing two rows tagged with the same newVersion.
   const masterSnap = snapshot.master_snapshot as Record<string, unknown>
   const { data: updated, error: updateErr } = await supabase
     .from('leave_policy_masters')
@@ -411,11 +434,15 @@ export async function rollbackPolicyToVersion(
     })
     .eq('tenant_id', tenantId)
     .eq('id', policyId)
+    .eq('version', c.version)
     .select('*')
-    .single()
+    .maybeSingle()
 
-  if (updateErr || !updated) {
-    return { success: false, error: updateErr?.message ?? 'Update failed.' }
+  if (updateErr) {
+    return { success: false, error: updateErr.message }
+  }
+  if (!updated) {
+    return { success: false, error: 'Policy was modified concurrently — please refresh and try again.' }
   }
 
   // Restore rules: delete current rules, re-insert from snapshot

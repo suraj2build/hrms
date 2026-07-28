@@ -326,7 +326,7 @@ export async function computeIntelligence(
   }
 
   // ── Persist snapshot ─────────────────────────────────────────────────────────
-  await supabase
+  const { error: snapshotErr } = await supabase
     .from('attendance_intelligence_snapshot')
     .upsert({
       tenant_id:   tenantId,
@@ -338,6 +338,11 @@ export async function computeIntelligence(
       trends:      result.trends,
       patterns:    result.patterns,
     }, { onConflict: 'tenant_id' })
+  // A failed persist must not be reported as a successful compute — the
+  // caller (GET /attendance/intelligence) would otherwise believe this fresh
+  // result is now durably cached when the next request will recompute from
+  // whatever stale snapshot (or none) is actually on disk.
+  if (snapshotErr) throw snapshotErr
 
   // ── Upsert per-employee risk flags ───────────────────────────────────────────
   for (const emp of atRisk) {

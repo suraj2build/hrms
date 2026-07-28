@@ -289,9 +289,9 @@ export default async function privacyRoutes(fastify: FastifyInstance) {
     const today = new Date().toISOString().split('T')[0]
 
     const [
-      { data: erasureRows },
-      { data: flaggedRows },
-      { data: controlRows },
+      { data: erasureRows, error: erasureErr },
+      { data: flaggedRows, error: flaggedErr },
+      { data: controlRows, error: controlErr },
     ] = await Promise.all([
       fastify.supabase
         .from('erasure_requests')
@@ -307,6 +307,10 @@ export default async function privacyRoutes(fastify: FastifyInstance) {
         .from('compliance_controls')
         .select('status'),
     ])
+    // A failed query here must not be reported as all-zero KPIs — that reads
+    // as a clean compliance dashboard when the backend actually failed.
+    const queryErr = erasureErr ?? flaggedErr ?? controlErr
+    if (queryErr) return serverError(req, reply, queryErr, ErrorCode.QUERY_FAILED, 'Failed to compute privacy health KPIs')
 
     const erasure = (erasureRows ?? []) as any[]
     const openErasure    = erasure.filter(r => ['pending','in_progress','on_hold'].includes(r.status)).length

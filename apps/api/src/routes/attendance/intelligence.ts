@@ -13,6 +13,7 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { computeIntelligence } from '../../lib/intelligence-engine.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 export default async function attendanceIntelligenceRoute(fastify: FastifyInstance) {
   const auth = { preHandler: [fastify.authenticate] }
@@ -48,11 +49,7 @@ export default async function attendanceIntelligenceRoute(fastify: FastifyInstan
         const result = await computeIntelligence(fastify.supabase, req.tenantId)
         return reply.send({ data: result, cached: false })
       } catch (e: unknown) {
-        req.log.error({ err: e }, 'intelligence on-demand compute failed')
-        return reply.code(500).send({
-          error:   'COMPUTE_FAILED',
-          message: (e as Error).message ?? 'Failed to compute intelligence',
-        })
+        return serverError(req, reply, e, ErrorCode.COMPUTE_FAILED, 'Failed to compute intelligence')
       }
     }
 
@@ -77,11 +74,7 @@ export default async function attendanceIntelligenceRoute(fastify: FastifyInstan
       const result = await computeIntelligence(fastify.supabase, req.tenantId)
       return reply.send({ data: result, cached: false })
     } catch (e: unknown) {
-      req.log.error({ err: e }, 'intelligence compute failed')
-      return reply.code(500).send({
-        error:   'COMPUTE_FAILED',
-        message: (e as Error).message ?? 'Failed to compute intelligence',
-      })
+      return serverError(req, reply, e, ErrorCode.COMPUTE_FAILED, 'Failed to compute intelligence')
     }
   })
 
