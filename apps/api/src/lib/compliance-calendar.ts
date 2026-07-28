@@ -89,7 +89,11 @@ export async function computeComplianceCalendar(
     : getLocalDate(new Date().toISOString(), await fetchTenantTz(supabase, tenantId))
 
   // ── what's enabled + jurisdictions ─────────────────────────────────────────
-  const [{ data: settings }, { data: regs }, { data: lwfStates }] = await Promise.all([
+  const [
+    { data: settings, error: settingsErr },
+    { data: regs, error: regsErr },
+    { data: lwfStates, error: lwfErr },
+  ] = await Promise.all([
     supabase.from('payroll_statutory_settings')
       .select('pf_enabled, esi_enabled, pt_enabled, tds_enabled').eq('tenant_id', tenantId).maybeSingle(),
     supabase.from('statutory_registrations')
@@ -98,17 +102,26 @@ export async function computeComplianceCalendar(
       .select('state_code, state_name, frequency, deduction_months, registration_number')
       .eq('tenant_id', tenantId).eq('enabled', true),
   ])
+  // A failed query here must not be treated as "not enabled" / "no LWF
+  // states registered" — that silently drops entire deadline categories
+  // (PT, TDS, LWF) from the calendar with no error surfaced, hiding real
+  // compliance/legal exposure from HR rather than reporting the failure.
+  if (settingsErr) throw new Error(`computeComplianceCalendar: payroll_statutory_settings query failed — ${settingsErr.message}`)
+  if (regsErr)     throw new Error(`computeComplianceCalendar: statutory_registrations query failed — ${regsErr.message}`)
+  if (lwfErr)      throw new Error(`computeComplianceCalendar: lwf_state_settings query failed — ${lwfErr.message}`)
 
   const s = (settings as any) ?? { pf_enabled: true, esi_enabled: true, pt_enabled: false, tds_enabled: false }
   const ptStates = [...new Set(((regs ?? []) as any[]).filter(r => r.statutory_type === 'ptax').map(r => r.state_code).filter(Boolean))]
 
   // ── completion signals ─────────────────────────────────────────────────────
-  const [{ data: closures }, { data: artifacts }] = await Promise.all([
+  const [{ data: closures, error: closuresErr }, { data: artifacts, error: artifactsErr }] = await Promise.all([
     supabase.from('statutory_filing_closures')
       .select('month, statutory_type, filed_at, challan_number').eq('tenant_id', tenantId),
     supabase.from('statutory_filing_artifacts')
       .select('artifact_type, period_month, period_quarter, period_fy, status, acknowledged_at').eq('tenant_id', tenantId),
   ])
+  if (closuresErr)  throw new Error(`computeComplianceCalendar: statutory_filing_closures query failed — ${closuresErr.message}`)
+  if (artifactsErr) throw new Error(`computeComplianceCalendar: statutory_filing_artifacts query failed — ${artifactsErr.message}`)
   // closure key: `${type}:${month}` → { filed_at, ref }
   const closureMap = new Map<string, { filed_at: string | null; ref: string | null }>()
   for (const c of (closures ?? []) as any[]) closureMap.set(`${c.statutory_type}:${c.month}`, { filed_at: c.filed_at ?? null, ref: c.challan_number ?? null })

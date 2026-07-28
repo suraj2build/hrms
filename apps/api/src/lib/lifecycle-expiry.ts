@@ -21,6 +21,8 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { fetchAllRows } from './supabase-paginate.js'
+import { fetchTenantTz } from './attendance-engine.js'
+import { getLocalDate }  from './org-context.js'
 
 const ID_CHUNK = 200
 
@@ -112,8 +114,15 @@ export async function computeLifecycleRisks(
   options:  LifecycleOptions = {},
 ): Promise<LifecycleRiskItem[]> {
   const within   = options.withinDays ?? 90
-  const today    = options.today ?? new Date()
-  const todayIso = isoOf(today)
+  // Tenant-local "today", not the server's (UTC) clock — this is invoked from
+  // a background scanner with no per-request tenant context, so a bare
+  // `new Date()` misclassifies a document/passport/contract expiring exactly
+  // 7 tenant-local-days out as 6 or 8 days out for up to ~5.5 hours a day for
+  // IST tenants, silently missing (or early-firing) the due_7/HR-alert bucket
+  // (ISSUE-154 class).
+  const todayIso = options.today
+    ? isoOf(options.today)
+    : getLocalDate(new Date().toISOString(), await fetchTenantTz(supabase, tenantId))
   const horizon  = addDaysIso(todayIso, within)        // upper bound for the forward window
   const cats     = new Set(options.categories ?? ALL_CATEGORIES)
 
@@ -145,7 +154,11 @@ export async function computeLifecycleRisks(
           supabase.from('employee_contracts')
             .select('id, employee_id, contract_type, end_date, status')
             .eq('tenant_id', tenantId).not('end_date', 'is', null).lte('end_date', horizon)
-            .not('status', 'in', '("terminated")')
+            // 'draft' contracts (migration 012's status CHECK) were never
+            // signed/active — their end_date isn't a live commitment, so
+            // excluding only 'terminated' let an unsigned draft's end_date
+            // fire a false "expiring contract" HR alert.
+            .not('status', 'in', '("terminated","draft")')
             .range(from, to))
       : Promise.resolve([] as any[]),
     cats.has('probation')
