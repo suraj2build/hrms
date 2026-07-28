@@ -13,8 +13,18 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { HR_ADMIN_ROLES } from '../../../lib/rbac.js'
+import { serverError, ErrorCode } from '../../../lib/api-errors.js'
+import { fetchTenantTz } from '../../../lib/attendance-engine.js'
+import { getLocalDate } from '../../../lib/org-context.js'
 
 // ── FY helpers ────────────────────────────────────────────────────────────────
+
+// Resolve "today" in the tenant's own timezone, not the server's (UTC) clock —
+// matches the same fix already applied to tds.ts/tds-plans.ts (ISSUE-154 class).
+async function tenantTodayStr(fastify: FastifyInstance, tenantId: string): Promise<string> {
+  const tz = await fetchTenantTz(fastify.supabase, tenantId)
+  return getLocalDate(new Date().toISOString(), tz)
+}
 
 /**
  * Returns the list of YYYY-MM strings for an Indian financial year
@@ -29,9 +39,9 @@ import { HR_ADMIN_ROLES } from '../../../lib/rbac.js'
  * raw calendar year (as this route did) mislabels Jan–Mar and returns empty
  * recovery schedules for a quarter of the year.
  */
-function currentFinancialYear(): string {
-  const now = new Date()
-  const fyYear = now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1
+function currentFinancialYear(todayStr: string): string {
+  const [y, m] = todayStr.split('-').map(Number)
+  const fyYear = m >= 4 ? y : y - 1
   return `${fyYear}-${String(fyYear + 1).slice(2)}`
 }
 
@@ -86,7 +96,7 @@ const MONTH_LABELS: Record<string, string> = {
  *   payroll_cycles_remaining → cycles_left
  *   payroll_period (YYYY-MM) → month_key + month ("Apr 2025")
  */
-function shapeRecoveryResponse(rows: any[], financialYear: string) {
+function shapeRecoveryResponse(rows: any[], financialYear: string, todayStr: string) {
   const months = rows.map((r: any) => {
     const [year, mm] = (r.payroll_period as string).split('-')
     const label = `${MONTH_LABELS[mm] ?? mm} ${year}`
@@ -104,8 +114,7 @@ function shapeRecoveryResponse(rows: any[], financialYear: string) {
   })
 
   // Top-level summary from the current/latest row
-  const now   = new Date()
-  const curKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+  const curKey = todayStr.slice(0, 7)
   const cur   = months.find(m => m.month_key === curKey) ?? months[months.length - 1]
   const next  = months.find(m => m.month_key > curKey) ?? cur
 
@@ -227,14 +236,15 @@ export default async function tdsRecoveryRoutes(fastify: FastifyInstance) {
     }
 
     const { data, error } = await q
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch TDS recovery schedule')
 
-    const fy = parsed.data.financial_year ?? currentFinancialYear()
+    const todayStr = await tenantTodayStr(fastify, req.tenantId)
+    const fy = parsed.data.financial_year ?? currentFinancialYear(todayStr)
     if (!data || data.length === 0) {
       const fallback = await buildRecoveryFromSlips(fastify, req.tenantId, employeeId, fy)
       if (fallback) return reply.send(fallback)
     }
-    return reply.send(shapeRecoveryResponse(data ?? [], fy))
+    return reply.send(shapeRecoveryResponse(data ?? [], fy, todayStr))
   })
 
   // ── GET /recovery/:employeeId (admin only) ───────────────────────────────────
@@ -265,14 +275,15 @@ export default async function tdsRecoveryRoutes(fastify: FastifyInstance) {
       }
 
       const { data, error } = await q
-      if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+      if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch TDS recovery schedule')
 
-      const fy = parsed.data.financial_year ?? currentFinancialYear()
+      const todayStr = await tenantTodayStr(fastify, req.tenantId)
+      const fy = parsed.data.financial_year ?? currentFinancialYear(todayStr)
       if (!data || data.length === 0) {
         const fallback = await buildRecoveryFromSlips(fastify, req.tenantId, employeeId, fy)
         if (fallback) return reply.send(fallback)
       }
-      return reply.send(shapeRecoveryResponse(data ?? [], fy))
+      return reply.send(shapeRecoveryResponse(data ?? [], fy, todayStr))
     },
   )
 
