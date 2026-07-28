@@ -303,14 +303,22 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
     const ids = (data ?? []).map((r: any) => r.id)
     let appCounts: Record<string, number> = {}
     if (ids.length > 0) {
-      const { data: counts } = await fastify.supabase
-        .from('applications')
-        .select('requisition_id')
-        .eq('tenant_id', req.tenantId)
-        .in('requisition_id', ids)
-        .not('status', 'in', '("rejected","withdrawn")')
+      let counts: Array<{ requisition_id: string }>
+      try {
+        counts = await fetchAllRows((from, to) =>
+          fastify.supabase
+            .from('applications')
+            .select('requisition_id')
+            .eq('tenant_id', req.tenantId)
+            .in('requisition_id', ids)
+            .not('status', 'in', '("rejected","withdrawn")')
+            .range(from, to),
+        )
+      } catch (err) {
+        return serverError(req, reply, err, ErrorCode.QUERY_FAILED, 'Failed to fetch application counts')
+      }
 
-      for (const row of (counts ?? []) as any[]) {
+      for (const row of counts) {
         appCounts[row.requisition_id] = (appCounts[row.requisition_id] ?? 0) + 1
       }
     }
@@ -340,11 +348,12 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
 
     if (error || !data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Requisition not found' })
 
-    const { count: appCount } = await fastify.supabase
+    const { count: appCount, error: countErr } = await fastify.supabase
       .from('applications')
       .select('id', { count: 'exact', head: true })
       .eq('requisition_id', id)
       .eq('tenant_id', req.tenantId)
+    if (countErr) return serverError(req, reply, countErr, ErrorCode.QUERY_FAILED, 'Failed to fetch applicant count')
 
     return reply.send({ data: { ...(data as any), applicant_count: appCount ?? 0 } })
   })
@@ -366,6 +375,12 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
     })
     const parsed = schema.safeParse(req.body)
     if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+
+    if (parsed.data.department_id) {
+      const { data: dept } = await fastify.supabase
+        .from('departments').select('id').eq('id', parsed.data.department_id).eq('tenant_id', req.tenantId).maybeSingle()
+      if (!dept) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: 'Department not found' })
+    }
 
     const iKey = (req.headers['idempotency-key'] as string | undefined)?.trim()
     if (iKey) {
@@ -434,6 +449,12 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
     })
     const parsed = schema.safeParse(req.body)
     if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+
+    if (parsed.data.department_id) {
+      const { data: dept } = await fastify.supabase
+        .from('departments').select('id').eq('id', parsed.data.department_id).eq('tenant_id', req.tenantId).maybeSingle()
+      if (!dept) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: 'Department not found' })
+    }
 
     const { data: existing } = await fastify.supabase
       .from('job_requisitions')
@@ -1756,6 +1777,12 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
     const parsed = schema.safeParse(req.body)
     if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
 
+    if (parsed.data.department_id) {
+      const { data: dept } = await fastify.supabase
+        .from('departments').select('id').eq('id', parsed.data.department_id).eq('tenant_id', req.tenantId).maybeSingle()
+      if (!dept) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: 'Department not found' })
+    }
+
     const { data, error } = await fastify.supabase
       .from('qb_categories')
       .insert({ ...parsed.data, tenant_id: req.tenantId })
@@ -1778,6 +1805,12 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
     })
     const parsed = schema.safeParse(req.body)
     if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+
+    if (parsed.data.department_id) {
+      const { data: dept } = await fastify.supabase
+        .from('departments').select('id').eq('id', parsed.data.department_id).eq('tenant_id', req.tenantId).maybeSingle()
+      if (!dept) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: 'Department not found' })
+    }
 
     const { error } = await fastify.supabase
       .from('qb_categories')
@@ -2094,9 +2127,17 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
       if (md.joining_date   != null)  effJoining   = md.joining_date
       if (md.recipient_email)         effRecipient = md.recipient_email
 
-      await fastify.supabase.from('maker_checker_log')
+      const { data: approvedLog, error: approveErr } = await fastify.supabase
+        .from('maker_checker_log')
         .update({ checker_id: req.userId, status: 'approved', reviewed_at: new Date().toISOString() })
         .eq('id', (pending as any).id)
+        .eq('status', 'pending')
+        .select('id')
+        .maybeSingle()
+      if (approveErr) return serverError(req, reply, approveErr, ErrorCode.UPDATE_FAILED, 'Failed to record offer sign-off')
+      if (!approvedLog) {
+        return reply.code(409).send({ error: 'ALREADY_ACTIONED', message: 'This offer sign-off has already been approved by another reviewer.' })
+      }
     }
 
     const result = await sendEmail({
@@ -2118,6 +2159,7 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
         .from('recruitment_offer_letters')
         .select('id').eq('application_id', appId).eq('tenant_id', req.tenantId)
         .order('created_at', { ascending: false }).limit(1).maybeSingle()
+      const offerDate = await tenantTodayStr(fastify.supabase, req.tenantId)
       const row = {
         tenant_id: req.tenantId, application_id: appId,
         candidate_id: (app as any).candidate_id, requisition_id: (app as any).requisition_id,
@@ -2133,7 +2175,7 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
 
       const { error: appStatusError } = await fastify.supabase
         .from('applications')
-        .update({ status: 'offer', offer_amount: amount, expected_joining: jdate, offer_date: new Date().toISOString().slice(0, 10) })
+        .update({ status: 'offer', offer_amount: amount, expected_joining: jdate, offer_date: offerDate })
         .eq('id', appId).eq('tenant_id', req.tenantId)
       if (appStatusError) {
         req.log.error({ err: appStatusError, tenantId: req.tenantId, applicationId: appId }, '[recruitment] failed to flip application status to offer after send')
