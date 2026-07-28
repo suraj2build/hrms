@@ -22,6 +22,8 @@ import { computeLifecycleRisks, summariseLifecycle } from '../../lib/lifecycle-e
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
 import { serverError, ErrorCode } from '../../lib/api-errors.js'
+import { fetchTenantTz } from '../../lib/attendance-engine.js'
+import { getLocalDate } from '../../lib/org-context.js'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -29,30 +31,50 @@ import { serverError, ErrorCode } from '../../lib/api-errors.js'
 const monthRe    = /^\d{4}-\d{2}$/
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
+//
+// Every "today"/"this month" computation below is anchored to `todayStr` — the
+// tenant's own local calendar date, resolved once per request via
+// tenantTodayStr() — rather than the server process's UTC clock. Between
+// 00:00-05:29 IST the UTC calendar date is still yesterday, which would
+// otherwise shift every 30-day/monthly window in this file by a day right at
+// the boundary (the same bug class already fixed in digest-builder.ts / tds.ts
+// under ISSUE-154).
 
-function currentMonth(): string {
-  return new Date().toISOString().slice(0, 7)
+/** Resolve "today" in the tenant's own timezone, not the server's (UTC) clock. */
+async function tenantTodayStr(fastify: FastifyInstance, tenantId: string): Promise<string> {
+  const tz = await fetchTenantTz(fastify.supabase, tenantId)
+  return getLocalDate(new Date().toISOString(), tz)
 }
 
-function monthsAgo(n: number): string {
-  const d = new Date()
-  d.setMonth(d.getMonth() - n)
-  return d.toISOString().slice(0, 7)
+function currentMonthOf(todayStr: string): string {
+  return todayStr.slice(0, 7)
+}
+
+/** `n` calendar months before todayStr's month, as YYYY-MM (pure UTC arithmetic). */
+function monthsAgoOf(todayStr: string, n: number): string {
+  const [y, m] = todayStr.slice(0, 7).split('-').map(Number)
+  const d = new Date(Date.UTC(y, m - 1 - n, 1))
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`
 }
 
 function monthStart(m: string): string { return `${m}-01` }
 function monthEnd(m: string): string {
   const [y, mo] = m.split('-').map(Number)
-  return new Date(y, mo, 0).toISOString().slice(0, 10)
+  return new Date(Date.UTC(y, mo, 0)).toISOString().slice(0, 10)
 }
 
-function daysAgo(n: number): string {
-  const d = new Date()
-  d.setDate(d.getDate() - n)
-  return d.toISOString().slice(0, 10)
+/** `n` days before todayStr, as YYYY-MM-DD (pure UTC arithmetic). */
+function daysAgoOf(todayStr: string, n: number): string {
+  const [y, m, d] = todayStr.split('-').map(Number)
+  return new Date(Date.UTC(y, m - 1, d - n)).toISOString().slice(0, 10)
 }
 
-function today(): string { return new Date().toISOString().slice(0, 10) }
+/** The `count` months ending at todayStr's month, oldest first, as YYYY-MM. */
+function monthSeries(todayStr: string, count: number): string[] {
+  const out: string[] = []
+  for (let i = count - 1; i >= 0; i--) out.push(monthsAgoOf(todayStr, i))
+  return out
+}
 
 function safeRate(num: number, den: number, dec = 1): number {
   return den > 0 ? parseFloat(((num / den) * 100).toFixed(dec)) : 0
@@ -155,9 +177,10 @@ export default async function executiveRoutes(fastify: FastifyInstance) {
   fastify.get('/executive/ceo', auth, async (req: any, reply) => {
     if (!requireExec(req, reply)) return
 
-    const from30 = daysAgo(30)
-    const to     = today()
-    const month  = currentMonth()
+    const todayStr = await tenantTodayStr(fastify, req.tenantId)
+    const from30 = daysAgoOf(todayStr, 30)
+    const to     = todayStr
+    const month  = currentMonthOf(todayStr)
 
     const [
       activeEmpRes, joinersRes, exitsRes,
@@ -226,11 +249,19 @@ export default async function executiveRoutes(fastify: FastifyInstance) {
         .from('payroll_runs')
         .select('id, status, total_gross, total_net, employee_count, month')
         .eq('tenant_id', req.tenantId)
-        .in('status', ['completed', 'finalized'])
+        .in('status', ['finalized', 'frozen'])
         .order('created_at', { ascending: false })
         .limit(1)
         .maybeSingle(),
     ])
+
+    if (activeEmpRes.error)  return serverError(req, reply, activeEmpRes.error,  ErrorCode.QUERY_FAILED, 'Failed to fetch active headcount')
+    if (joinersRes.error)    return serverError(req, reply, joinersRes.error,    ErrorCode.QUERY_FAILED, 'Failed to fetch joiners')
+    if (exitsRes.error)      return serverError(req, reply, exitsRes.error,      ErrorCode.QUERY_FAILED, 'Failed to fetch exits')
+    if (excOpenRes.error)    return serverError(req, reply, excOpenRes.error,    ErrorCode.QUERY_FAILED, 'Failed to fetch open exceptions')
+    if (incOpenRes.error)    return serverError(req, reply, incOpenRes.error,    ErrorCode.QUERY_FAILED, 'Failed to fetch open incidents')
+    if (pendingRevRes.error) return serverError(req, reply, pendingRevRes.error, ErrorCode.QUERY_FAILED, 'Failed to fetch pending revisions')
+    if (payrollRunRes.error) return serverError(req, reply, payrollRunRes.error, ErrorCode.QUERY_FAILED, 'Failed to fetch payroll run')
 
     const employee_count      = activeEmpRes.count ?? 0
     const joiners_30d         = joinersRes.count ?? 0
@@ -291,8 +322,9 @@ export default async function executiveRoutes(fastify: FastifyInstance) {
   fastify.get('/executive/chro', auth, async (req: any, reply) => {
     if (!requireExec(req, reply)) return
 
-    const from30 = daysAgo(30)
-    const to     = today()
+    const todayStr = await tenantTodayStr(fastify, req.tenantId)
+    const from30 = daysAgoOf(todayStr, 30)
+    const to     = todayStr
 
     const [
       employees, daily, leaveRows,
@@ -402,6 +434,11 @@ export default async function executiveRoutes(fastify: FastifyInstance) {
       ),
     ])
 
+    if (approvedRevRes.error)    return serverError(req, reply, approvedRevRes.error,    ErrorCode.QUERY_FAILED, 'Failed to fetch approved revisions')
+    if (trustHighRiskRes.error)  return serverError(req, reply, trustHighRiskRes.error,  ErrorCode.QUERY_FAILED, 'Failed to fetch trust risk data')
+    if (trustVerifiedRes.error)  return serverError(req, reply, trustVerifiedRes.error,  ErrorCode.QUERY_FAILED, 'Failed to fetch trust risk data')
+    if (trustTotalRes.error)     return serverError(req, reply, trustTotalRes.error,     ErrorCode.QUERY_FAILED, 'Failed to fetch trust risk data')
+
     // Employment type distribution
     const employee_count  = employees.length
 
@@ -475,7 +512,7 @@ export default async function executiveRoutes(fastify: FastifyInstance) {
     let open_requisitions = 0
     let recruitment_active = false
     try {
-      const since = daysAgo(180)   // rolling 6-month window on application date
+      const since = daysAgoOf(todayStr, 180)   // rolling 6-month window on application date
       const apps = await fetchAllRows((from, to) =>
         fastify.supabase
           .from('applications')
@@ -578,6 +615,7 @@ export default async function executiveRoutes(fastify: FastifyInstance) {
       return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
     }
     const monthCount = parsed.data.months
+    const todayStr   = await tenantTodayStr(fastify, req.tenantId)
 
     // All four queries are paginated — row-returning .select() calls over the
     // whole tenant's employee history routinely exceed PostgREST's 1,000-row
@@ -611,7 +649,7 @@ export default async function executiveRoutes(fastify: FastifyInstance) {
           .select('id, employee_separation!inner(last_working_date)')
           .eq('tenant_id', req.tenantId)
           .eq('status', 'separated')
-          .gte('employee_separation.last_working_date', monthsAgo(monthCount + 1) + '-01')
+          .gte('employee_separation.last_working_date', monthsAgoOf(todayStr, monthCount + 1) + '-01')
           .range(from, to),
       ),
 
@@ -621,7 +659,7 @@ export default async function executiveRoutes(fastify: FastifyInstance) {
           .from('employees')
           .select('id, joining_date')
           .eq('tenant_id', req.tenantId)
-          .gte('joining_date', monthsAgo(monthCount + 1) + '-01')
+          .gte('joining_date', monthsAgoOf(todayStr, monthCount + 1) + '-01')
           .range(from, to),
       ),
     ])
@@ -632,14 +670,8 @@ export default async function executiveRoutes(fastify: FastifyInstance) {
     const separated = separationRows.map(_flattenSep)
 
     // Build month boundaries
-    const monthBoundaries: Array<{ month: string; from: string; to: string }> = []
-    for (let i = monthCount - 1; i >= 0; i--) {
-      const d = new Date()
-      d.setDate(1)
-      d.setMonth(d.getMonth() - i)
-      const m = d.toISOString().slice(0, 7)
-      monthBoundaries.push({ month: m, from: monthStart(m), to: monthEnd(m) })
-    }
+    const monthBoundaries = monthSeries(todayStr, monthCount)
+      .map((m) => ({ month: m, from: monthStart(m), to: monthEnd(m) }))
 
     // Monthly joiner/exit counts
     const monthly_trends = monthBoundaries.map(({ month, from, to }) => {
@@ -714,6 +746,7 @@ export default async function executiveRoutes(fastify: FastifyInstance) {
       return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
     }
     const { department, months: monthCount } = parsed.data
+    const todayStr = await tenantTodayStr(fastify, req.tenantId)
 
     // Paginated — both can exceed PostgREST's 1,000-row ceiling for a large
     // tenant, silently dropping employees/job history from the drill-down.
@@ -749,14 +782,8 @@ export default async function executiveRoutes(fastify: FastifyInstance) {
     const emp = empRows.map(flatten).filter((e: any) => deptOf(e.id) === department)
     const activeInDept = emp.filter(e => e.status === 'active').length
 
-    const monthBoundaries: Array<{ month: string; from: string; to: string }> = []
-    for (let i = monthCount - 1; i >= 0; i--) {
-      const d = new Date()
-      d.setDate(1)
-      d.setMonth(d.getMonth() - i)
-      const m = d.toISOString().slice(0, 7)
-      monthBoundaries.push({ month: m, from: monthStart(m), to: monthEnd(m) })
-    }
+    const monthBoundaries = monthSeries(todayStr, monthCount)
+      .map((m) => ({ month: m, from: monthStart(m), to: monthEnd(m) }))
 
     const trend = monthBoundaries.map(({ month, from, to }) => {
       const joiners = emp.filter(e => e.joining_date && e.joining_date >= from && e.joining_date <= to).length
@@ -782,7 +809,8 @@ export default async function executiveRoutes(fastify: FastifyInstance) {
       return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
     }
     const monthCount = parsed.data.months
-    const oldestMonth = monthsAgo(monthCount)
+    const todayStr = await tenantTodayStr(fastify, req.tenantId)
+    const oldestMonth = monthsAgoOf(todayStr, monthCount)
 
     // Phase 1A — payroll runs + queries independent of latestPayrollMonth, all in parallel.
     // revisionImpactRes and otTrendRes use only oldestMonth so they don't need to wait
@@ -792,7 +820,7 @@ export default async function executiveRoutes(fastify: FastifyInstance) {
         .from('payroll_runs')
         .select('id, month, status, total_gross, total_net, employee_count')
         .eq('tenant_id', req.tenantId)
-        .in('status', ['completed', 'finalized'])
+        .in('status', ['finalized', 'frozen'])
         .gte('month', oldestMonth)
         .order('month', { ascending: true }),
 
@@ -820,11 +848,14 @@ export default async function executiveRoutes(fastify: FastifyInstance) {
     if (payrollRunsRes.error) {
       return serverError(req, reply, payrollRunsRes.error, ErrorCode.QUERY_FAILED, 'Failed to load payroll runs')
     }
+    if (revisionImpactRes.error) {
+      return serverError(req, reply, revisionImpactRes.error, ErrorCode.QUERY_FAILED, 'Failed to load compensation revisions')
+    }
 
     const runs = payrollRunsRes.data ?? []
     const latestRun = runs[runs.length - 1] as any
     // Falls back to current calendar month only when no finalized runs exist yet.
-    const latestPayrollMonth = latestRun?.month ?? currentMonth()
+    const latestPayrollMonth = latestRun?.month ?? currentMonthOf(todayStr)
 
     // Phase 2 — queries that depend on latestPayrollMonth resolved above.
     const [currentMonthSlips, deptSnapshotRes, variableMonthRes] = await Promise.all([
@@ -859,6 +890,10 @@ export default async function executiveRoutes(fastify: FastifyInstance) {
           .range(from, to),
       ).catch(() => [] as any[]),
     ])
+
+    if (deptSnapshotRes.error) {
+      return serverError(req, reply, deptSnapshotRes.error, ErrorCode.QUERY_FAILED, 'Failed to load department cost breakdown')
+    }
 
     // Monthly payroll cost trend
     const payroll_cost_trend = runs.map((r: any) => ({
@@ -1060,8 +1095,9 @@ export default async function executiveRoutes(fastify: FastifyInstance) {
   fastify.get('/executive/compliance', auth, async (req: any, reply) => {
     if (!requireExec(req, reply)) return
 
-    const from30 = daysAgo(30)
-    const to     = today()
+    const todayStr = await tenantTodayStr(fastify, req.tenantId)
+    const from30 = daysAgoOf(todayStr, 30)
+    const to     = todayStr
 
     const [
       incOpenRes, incCriticalRes, incTotalRes,
@@ -1190,6 +1226,18 @@ export default async function executiveRoutes(fastify: FastifyInstance) {
           .range(from, to2)
       ),
     ])
+
+    if (incOpenRes.error)       return serverError(req, reply, incOpenRes.error,       ErrorCode.QUERY_FAILED, 'Failed to fetch incident data')
+    if (incCriticalRes.error)   return serverError(req, reply, incCriticalRes.error,   ErrorCode.QUERY_FAILED, 'Failed to fetch incident data')
+    if (incTotalRes.error)      return serverError(req, reply, incTotalRes.error,      ErrorCode.QUERY_FAILED, 'Failed to fetch incident data')
+    if (excOpenRes.error)       return serverError(req, reply, excOpenRes.error,       ErrorCode.QUERY_FAILED, 'Failed to fetch exception data')
+    if (excBreachedRes.error)   return serverError(req, reply, excBreachedRes.error,   ErrorCode.QUERY_FAILED, 'Failed to fetch exception data')
+    if (excTotalRes.error)      return serverError(req, reply, excTotalRes.error,      ErrorCode.QUERY_FAILED, 'Failed to fetch exception data')
+    if (trustHighRes.error)     return serverError(req, reply, trustHighRes.error,     ErrorCode.QUERY_FAILED, 'Failed to fetch trust risk data')
+    if (trustMedRes.error)      return serverError(req, reply, trustMedRes.error,      ErrorCode.QUERY_FAILED, 'Failed to fetch trust risk data')
+    if (trustTotalRes.error)    return serverError(req, reply, trustTotalRes.error,    ErrorCode.QUERY_FAILED, 'Failed to fetch trust risk data')
+    if (trustVerifiedRes.error) return serverError(req, reply, trustVerifiedRes.error, ErrorCode.QUERY_FAILED, 'Failed to fetch trust risk data')
+    if (dupRes.error)           return serverError(req, reply, dupRes.error,           ErrorCode.QUERY_FAILED, 'Failed to fetch duplicate detection data')
 
     const open_incidents         = incOpenRes.count     ?? 0
     const critical_incidents     = incCriticalRes.count ?? 0
@@ -1403,18 +1451,13 @@ export default async function executiveRoutes(fastify: FastifyInstance) {
       return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
     }
     const monthCount   = parsed.data.months
-    const oldestMonth  = monthsAgo(monthCount - 1)
+    const todayStr     = await tenantTodayStr(fastify, req.tenantId)
+    const oldestMonth  = monthsAgoOf(todayStr, monthCount - 1)
     const oldestDate   = monthStart(oldestMonth)
 
     // Build boundaries
-    const boundaries: Array<{ month: string; from: string; to: string }> = []
-    for (let i = monthCount - 1; i >= 0; i--) {
-      const d = new Date()
-      d.setDate(1)
-      d.setMonth(d.getMonth() - i)
-      const m = d.toISOString().slice(0, 7)
-      boundaries.push({ month: m, from: monthStart(m), to: monthEnd(m) })
-    }
+    const boundaries = monthSeries(todayStr, monthCount)
+      .map((m) => ({ month: m, from: monthStart(m), to: monthEnd(m) }))
 
     // attendance_daily/leave_requests/employees are paginated — full-period
     // fetches across the whole tenant routinely exceed PostgREST's 1,000-row
@@ -1428,7 +1471,7 @@ export default async function executiveRoutes(fastify: FastifyInstance) {
           .select('date, status')
           .eq('tenant_id', req.tenantId)
           .gte('date', oldestDate)
-          .lte('date', today())
+          .lte('date', todayStr)
           .range(from, to),
       ),
 
@@ -1437,7 +1480,7 @@ export default async function executiveRoutes(fastify: FastifyInstance) {
         .from('payroll_runs')
         .select('month, total_gross, total_net, employee_count, status')
         .eq('tenant_id', req.tenantId)
-        .in('status', ['completed', 'finalized'])
+        .in('status', ['finalized', 'frozen'])
         .gte('month', oldestMonth)
         .order('month', { ascending: true }),
 

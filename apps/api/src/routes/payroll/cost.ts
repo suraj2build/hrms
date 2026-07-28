@@ -196,7 +196,7 @@ export default async function payrollCostRoute(fastify: FastifyInstance) {
         .select('month, total_gross, total_net, employee_count')
         .eq('tenant_id', req.tenantId)
         .in('month', missingMonths)
-        .in('status', ['completed', 'finalized'])
+        .in('status', ['finalized', 'frozen'])
 
       for (const r of (runs ?? []) as any[]) {
         if (!snapByMonth.has(r.month)) {

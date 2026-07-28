@@ -115,7 +115,7 @@ async function generateForecast(
     .select('total_gross')
     .eq('tenant_id', tenantId)
     .eq('month', baseMonth)
-    .in('status', ['completed', 'finalized'])
+    .in('status', ['finalized', 'frozen'])
     .limit(1)
     .maybeSingle()
 
