@@ -5,6 +5,8 @@ import { validateImportRows }                    from './validator.js'
 import type { ValidatedRow }                     from './validator.js'
 import { executeInChunks, writeImportErrors }    from './chunk-executor.js'
 import type { ChunkProcessorFn }                 from './chunk-executor.js'
+import { fetchTenantTz }                         from '../attendance-engine.js'
+import { getLocalDate }                          from '../org-context.js'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -504,6 +506,12 @@ async function importEmployeeCompensation(
   let failed  = 0
   let skipped = 0
 
+  // Resolved once for the whole import run — every row closes out the prior
+  // active compensation with the same tenant-local "today", not the server's
+  // own UTC clock (the same ISSUE-154-class bug already fixed elsewhere).
+  const tenantTz = await fetchTenantTz(supabase, tenantId)
+  const today    = getLocalDate(new Date().toISOString(), tenantTz)
+
   for (const vr of validRows) {
     const norm = vr.normalizedData
 
@@ -546,7 +554,6 @@ async function importEmployeeCompensation(
       const newCompId = newComp.id as string
 
       // Step 2: Deactivate old active compensation rows (safe — new row is already active)
-      const today = new Date().toISOString().split('T')[0]
       await supabase
         .from('employee_compensations')
         .update({ is_active: false, effective_to: today })

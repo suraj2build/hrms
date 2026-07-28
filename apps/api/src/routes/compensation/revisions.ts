@@ -19,6 +19,7 @@ import { z }                    from 'zod'
 import { eventBus }             from '../../lib/event-bus.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 const dateRe = /^\d{4}-\d{2}-\d{2}$/
 
@@ -311,6 +312,29 @@ export default async function compensationRevisionsRoute(fastify: FastifyInstanc
       return reply.code(422).send({ error: 'INCOMPLETE', message: 'new_ctc_annual and new_salary_structure_id are required to approve' })
     }
 
+    // Atomically claim the revision before creating any downstream records.
+    // The status precondition above was only checked via a plain SELECT — two
+    // concurrent approve calls could both pass it and each insert their own
+    // `employee_compensations` row, leaving the employee with two is_active=true
+    // compensation records. Folding `status='pending'` into this UPDATE's own
+    // WHERE clause means only one caller can win the claim; the other gets a
+    // clean 409 before ever touching employee_compensations.
+    const { data: claimed, error: claimErr } = await fastify.supabase
+      .from('compensation_revisions')
+      .update({
+        status:      'approved',
+        approved_by: req.userId,
+        decided_at:  new Date().toISOString(),
+      })
+      .eq('id', id)
+      .eq('tenant_id', req.tenantId)
+      .eq('status', 'pending')
+      .select('id')
+      .maybeSingle()
+
+    if (claimErr) return serverError(req, reply, claimErr, ErrorCode.UPDATE_FAILED, 'Failed to claim revision')
+    if (!claimed) return reply.code(409).send({ error: 'INVALID_STATE', message: 'Revision is already actioned' })
+
     // Create the actual compensation record using existing compensation creation pattern
     const { data: newComp, error: compErr } = await fastify.supabase
       .from('employee_compensations')
@@ -329,6 +353,15 @@ export default async function compensationRevisionsRoute(fastify: FastifyInstanc
       .single()
 
     if (compErr) {
+      // Roll back the claim so the revision isn't left permanently stuck at
+      // 'approved' with no compensation record ever created — the caller (or
+      // another admin) can retry the approval.
+      await fastify.supabase
+        .from('compensation_revisions')
+        .update({ status: 'pending', approved_by: null, decided_at: null })
+        .eq('id', id)
+        .eq('tenant_id', req.tenantId)
+        .eq('status', 'approved')
       return reply.code(500).send({ error: 'COMP_CREATE_FAILED', message: 'Failed to create compensation record' })
     }
 
@@ -438,16 +471,13 @@ export default async function compensationRevisionsRoute(fastify: FastifyInstanc
       }
     }
 
-    // Update revision status
+    // Status/approved_by/decided_at were already set atomically in the claim
+    // step above — only the resulting compensation ID needs recording now.
     await fastify.supabase
       .from('compensation_revisions')
-      .update({
-        status:                   'approved',
-        approved_by:              req.userId,
-        decided_at:               new Date().toISOString(),
-        resulting_compensation_id: newComp.id,
-      })
+      .update({ resulting_compensation_id: newComp.id })
       .eq('id', id)
+      .eq('tenant_id', req.tenantId)
 
     // Emit compensation.revised event
     eventBus.emit({
@@ -497,7 +527,7 @@ export default async function compensationRevisionsRoute(fastify: FastifyInstanc
       return reply.code(409).send({ error: 'INVALID_STATE', message: `Revision is already ${rev.status}` })
     }
 
-    await fastify.supabase
+    const { data: rejected } = await fastify.supabase
       .from('compensation_revisions')
       .update({
         status:           'rejected',
@@ -506,6 +536,12 @@ export default async function compensationRevisionsRoute(fastify: FastifyInstanc
         rejection_reason: parsed.data.rejection_reason,
       })
       .eq('id', id)
+      .eq('tenant_id', req.tenantId)
+      .eq('status', 'pending')
+      .select('id')
+      .maybeSingle()
+
+    if (!rejected) return reply.code(409).send({ error: 'INVALID_STATE', message: 'Revision is already actioned' })
 
     return reply.send({ message: 'Revision rejected', revision_id: id })
   })
@@ -529,10 +565,16 @@ export default async function compensationRevisionsRoute(fastify: FastifyInstanc
       return reply.code(403).send({ error: 'FORBIDDEN', message: 'Cannot withdraw another user\'s revision' })
     }
 
-    await fastify.supabase
+    const { data: withdrawn } = await fastify.supabase
       .from('compensation_revisions')
       .update({ status: 'withdrawn', decided_at: new Date().toISOString() })
       .eq('id', id)
+      .eq('tenant_id', req.tenantId)
+      .eq('status', 'pending')
+      .select('id')
+      .maybeSingle()
+
+    if (!withdrawn) return reply.code(409).send({ error: 'INVALID_STATE', message: 'Only pending revisions can be withdrawn' })
 
     return reply.send({ message: 'Revision withdrawn', revision_id: id })
   })

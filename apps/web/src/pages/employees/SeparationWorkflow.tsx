@@ -318,7 +318,7 @@ function ClearancePanel({ row, onClose: _onClose }: { row: SeparationRow; onClos
       {allCleared && (
         <div className="flex items-center gap-2 rounded-lg bg-success/10 border border-success/20 px-4 py-3">
           <CheckCircle2 className="h-4 w-4 text-success flex-shrink-0" />
-          <span className="text-sm font-medium text-success">Clearance Complete — all 5 departments cleared</span>
+          <span className="text-sm font-medium text-success">Clearance Complete — all {row.clearances.length || CLEARANCE_DEPTS.length} departments cleared</span>
         </div>
       )}
 

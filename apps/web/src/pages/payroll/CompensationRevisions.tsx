@@ -221,12 +221,14 @@ function RevisionRow({
   onApprove,
   onReject,
   onWithdraw,
+  isMutating,
 }: {
   rev:        CompRevision
   isAdmin:    boolean
   onApprove:  (id: string) => void
   onReject:   (id: string) => void
   onWithdraw: (id: string) => void
+  isMutating: boolean
 }) {
   const [expanded, setExpanded] = useState(false)
 
@@ -328,16 +330,19 @@ function RevisionRow({
               {isAdmin && (
                 <>
                   <Button size="sm" variant="success" className="h-7 text-xs gap-1.5"
+                    disabled={isMutating}
                     onClick={() => onApprove(rev.id)}>
                     <CheckCircle2 className="h-3.5 w-3.5" />Approve
                   </Button>
                   <Button size="sm" variant="destructive" className="h-7 text-xs gap-1.5"
+                    disabled={isMutating}
                     onClick={() => onReject(rev.id)}>
                     <XCircle className="h-3.5 w-3.5" />Reject
                   </Button>
                 </>
               )}
               <Button size="sm" variant="outline" className="h-7 text-xs"
+                disabled={isMutating}
                 onClick={() => onWithdraw(rev.id)}>
                 Withdraw
               </Button>
@@ -521,6 +526,7 @@ export function CompensationRevisions() {
                 onApprove={(id) => approveMut.mutate(id)}
                 onReject={(id) => setRejectId(id)}
                 onWithdraw={(id) => withdrawMut.mutate(id)}
+                isMutating={approveMut.isPending || rejectMut.isPending || withdrawMut.isPending}
               />
             ))}
           </div>
