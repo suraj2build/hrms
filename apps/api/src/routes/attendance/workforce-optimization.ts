@@ -994,70 +994,79 @@ export default async function workforceOptimizationRoute(fastify: FastifyInstanc
       const nightFairness   = fairnessScore(m.nightShifts,   teamAvgNight)
 
       balanceUpserts.push({
-        tenant_id:              req.tenantId,
-        employee_id:            emp.id,
-        period_start:           from,
-        period_end:             to,
-        ot_fairness_score:      otFairness,
-        weekend_fairness_score: weekendFairness,
-        night_fairness_score:   nightFairness,
-        total_ot_hours:         totalOtHours,
-        weekend_shifts_count:   m.weekendShifts,
-        night_shifts_count:     m.nightShifts,
-        max_consecutive_days:   maxConsec,
-        rest_gap_violations:    m.restGapViolations,
-        computed_at:            now,
+        tenant_id:                  req.tenantId,
+        employee_id:                emp.id,
+        period_start:               from,
+        period_end:                 to,
+        ot_fairness_score:          otFairness,
+        weekend_fairness_score:     weekendFairness,
+        night_shift_fairness_score: nightFairness,
+        total_ot_hours:             totalOtHours,
+        weekend_shifts_count:       m.weekendShifts,
+        night_shifts_count:         m.nightShifts,
+        max_consecutive_days:       maxConsec,
+        rest_gap_violations:        m.restGapViolations,
+        computed_at:                now,
       })
 
-      // Generate hints for notable issues
-      const hintDate = to // hints are anchored to the period end
-
+      // Generate hints for notable issues. period_start/period_end/title/
+      // explanation are NOT NULL on workforce_optimization_hints, and
+      // hint_type is CHECK-constrained (migration 086) — using the wrong
+      // column names/values here previously made every insert fail.
       if (maxConsec >= CONSEC_MEDIUM) {
         const severity = consecutiveSeverity(maxConsec)
         hintsToInsert.push({
-          tenant_id:   req.tenantId,
-          employee_id: emp.id,
-          hint_type:   'consecutive_shifts',
+          tenant_id:    req.tenantId,
+          employee_id:  emp.id,
+          period_start: from,
+          period_end:   to,
+          hint_type:    'consecutive_shift_overload',
           severity,
-          message:     `${emp.first_name} ${emp.last_name} worked ${maxConsec} consecutive days (${from} to ${to}).`,
-          hint_date:   hintDate,
-          resolved:    false,
+          title:        `Consecutive shift overload — ${emp.first_name} ${emp.last_name}`,
+          explanation:  `${emp.first_name} ${emp.last_name} worked ${maxConsec} consecutive days (${from} to ${to}).`,
+          resolved:     false,
         })
       }
 
       if (m.restGapViolations > 0) {
         hintsToInsert.push({
-          tenant_id:   req.tenantId,
-          employee_id: emp.id,
-          hint_type:   'rest_gap_violation',
-          severity:    m.restGapViolations >= 3 ? 'high' : 'medium',
-          message:     `${emp.first_name} ${emp.last_name} had ${m.restGapViolations} rest-gap violation(s) (< ${MIN_REST_GAP_HOURS}h) in the period.`,
-          hint_date:   hintDate,
-          resolved:    false,
+          tenant_id:    req.tenantId,
+          employee_id:  emp.id,
+          period_start: from,
+          period_end:   to,
+          hint_type:    'rest_gap_violation',
+          severity:     m.restGapViolations >= 3 ? 'high' : 'medium',
+          title:        `Rest gap violation — ${emp.first_name} ${emp.last_name}`,
+          explanation:  `${emp.first_name} ${emp.last_name} had ${m.restGapViolations} rest-gap violation(s) (< ${MIN_REST_GAP_HOURS}h) in the period.`,
+          resolved:     false,
         })
       }
 
       if (otFairness < 40 && totalOtHours > 0) {
         hintsToInsert.push({
-          tenant_id:   req.tenantId,
-          employee_id: emp.id,
-          hint_type:   'ot_imbalance',
-          severity:    otFairness < 20 ? 'high' : 'medium',
-          message:     `${emp.first_name} ${emp.last_name} has an OT fairness score of ${otFairness}/100 (${totalOtHours}h OT vs team avg ${round2(teamAvgOt)}h).`,
-          hint_date:   hintDate,
-          resolved:    false,
+          tenant_id:    req.tenantId,
+          employee_id:  emp.id,
+          period_start: from,
+          period_end:   to,
+          hint_type:    'ot_concentration',
+          severity:     otFairness < 20 ? 'high' : 'medium',
+          title:        `Overtime imbalance — ${emp.first_name} ${emp.last_name}`,
+          explanation:  `${emp.first_name} ${emp.last_name} has an OT fairness score of ${otFairness}/100 (${totalOtHours}h OT vs team avg ${round2(teamAvgOt)}h).`,
+          resolved:     false,
         })
       }
 
       if (weekendFairness < 40 && m.weekendShifts > 0) {
         hintsToInsert.push({
-          tenant_id:   req.tenantId,
-          employee_id: emp.id,
-          hint_type:   'weekend_imbalance',
-          severity:    weekendFairness < 20 ? 'high' : 'medium',
-          message:     `${emp.first_name} ${emp.last_name} has a weekend-shift fairness score of ${weekendFairness}/100 (${m.weekendShifts} weekend shifts).`,
-          hint_date:   hintDate,
-          resolved:    false,
+          tenant_id:    req.tenantId,
+          employee_id:  emp.id,
+          period_start: from,
+          period_end:   to,
+          hint_type:    'weekend_imbalance',
+          severity:     weekendFairness < 20 ? 'high' : 'medium',
+          title:        `Weekend shift imbalance — ${emp.first_name} ${emp.last_name}`,
+          explanation:  `${emp.first_name} ${emp.last_name} has a weekend-shift fairness score of ${weekendFairness}/100 (${m.weekendShifts} weekend shifts).`,
+          resolved:     false,
         })
       }
     }
@@ -1081,16 +1090,21 @@ export default async function workforceOptimizationRoute(fastify: FastifyInstanc
 
     // ── Step 7: Insert hints (delete stale open hints first for this period) ─
     if (hintsToInsert.length > 0) {
-      // Remove existing unresolved hints for these employees in this period to avoid duplicates
+      // Match on period_start/period_end (the computed period), not created_at
+      // (row-insertion timestamp) — the two are unrelated, and comparing a
+      // timestamptz column against bare from/to DATE strings never matched
+      // the previous computation of this exact period, leaving stale hints
+      // behind indefinitely instead of de-duplicating them.
       await fastify.supabase
         .from('workforce_optimization_hints')
         .delete()
         .eq('tenant_id', req.tenantId)
         .in('employee_id', employeeIds)
-        .gte('created_at', from)
-        .lte('created_at', to)
+        .eq('period_start', from)
+        .eq('period_end', to)
         .eq('resolved', false)
 
+      let hintsInserted = 0
       for (let i = 0; i < hintsToInsert.length; i += BATCH) {
         const batch = hintsToInsert.slice(i, i + BATCH)
         const { error: hintErr } = await fastify.supabase
@@ -1103,12 +1117,18 @@ export default async function workforceOptimizationRoute(fastify: FastifyInstanc
           req.log.warn('Hint generation had errors; balance records were persisted successfully')
           break
         }
+        hintsInserted += batch.length
       }
+
+      return reply.send({
+        employees_computed: balanceUpserts.length,
+        hints_generated:    hintsInserted,
+      })
     }
 
     return reply.send({
       employees_computed: balanceUpserts.length,
-      hints_generated:    hintsToInsert.length,
+      hints_generated:    0,
     })
   })
 }
