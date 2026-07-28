@@ -215,7 +215,7 @@ export class TrustIntelligenceService {
     input:    TrustIntelligenceInput,
   ): Promise<VerificationResult[]> {
     // Resolve the session via the draft profile linked to this employee
-    const { data: draft } = await supabase
+    const { data: draft, error: draftErr } = await supabase
       .from('draft_employee_profiles')
       .select('session_id')
       .eq('linked_employee_id', input.employee_id)
@@ -223,14 +223,19 @@ export class TrustIntelligenceService {
       .order('created_at', { ascending: false })
       .limit(1)
       .maybeSingle()
+    if (draftErr) throw new Error(`trust_intelligence: failed to resolve draft profile: ${draftErr.message}`)
 
     if (!draft?.session_id) return []
 
-    const { data: docs } = await supabase
+    const { data: docs, error: docsErr } = await supabase
       .from('onboarding_documents')
       .select('id, document_type, extraction_status, created_at:uploaded_at')
       .eq('session_id', draft.session_id)
       .eq('tenant_id', input.tenant_id)
+    // A failed query must not silently score as "no documents" — that would
+    // inflate the trust score by omitting document-extraction risk signals
+    // rather than failing the evaluation.
+    if (docsErr) throw new Error(`trust_intelligence: failed to fetch onboarding documents: ${docsErr.message}`)
 
     if (!docs || docs.length === 0) return []
 
