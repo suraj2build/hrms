@@ -120,6 +120,19 @@ export default async function arrearsRoutes(fastify: FastifyInstance) {
       return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
     }
 
+    // batch_id comes from the URL param and is written onto every inserted
+    // record with no prior ownership check — verify it belongs to this
+    // tenant (and isn't already approved/processed) before writing, matching
+    // the guard the sibling /calculate endpoint already has.
+    const { data: batch } = await fastify.supabase
+      .from('arrear_batches')
+      .select('id, status')
+      .eq('id', id).eq('tenant_id', req.tenantId).maybeSingle()
+    if (!batch) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Batch not found' })
+    if ((batch as any).status === 'approved' || (batch as any).status === 'processed') {
+      return reply.code(409).send({ error: 'LOCKED', message: 'Batch already approved/processed' })
+    }
+
     const recordRows = parsed.data.records.map(r => ({
       ...r,
       batch_id: id,

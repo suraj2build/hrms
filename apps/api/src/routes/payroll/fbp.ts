@@ -128,17 +128,22 @@ export default async function fbpRoutes(fastify: FastifyInstance) {
 
     const { data: existing } = await fastify.supabase
       .from('fbp_bill_submissions').select('id, status')
-      .eq('id', id).eq('tenant_id', req.tenantId).eq('employee_id', empId).single()
+      .eq('id', id).eq('tenant_id', req.tenantId).eq('employee_id', empId).maybeSingle()
     if (!existing) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Submission not found' })
     if ((existing as any).status !== 'draft')
       return reply.code(409).send({ error: 'INVALID_STATUS', message: 'Only draft submissions can be edited' })
 
+    // Fold the 'draft' precondition into the WHERE — HR approving/rejecting
+    // this same submission concurrently (or the employee re-submitting from
+    // another tab) would otherwise both pass the separate check above and
+    // this write would silently reopen an already-decided bill.
     const { data, error } = await fastify.supabase
       .from('fbp_bill_submissions')
       .update({ ...parsed.data, updated_at: new Date().toISOString() })
-      .eq('id', id).eq('tenant_id', req.tenantId)
-      .select('*, salary_components(id, name, code)').single()
+      .eq('id', id).eq('tenant_id', req.tenantId).eq('status', 'draft')
+      .select('*, salary_components(id, name, code)').maybeSingle()
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update FBP submission')
+    if (!data) return reply.code(409).send({ error: 'INVALID_STATUS', message: 'Submission was modified before this edit could be applied' })
     return reply.send({ data })
   })
 
@@ -150,16 +155,19 @@ export default async function fbpRoutes(fastify: FastifyInstance) {
 
     const { data: existing } = await fastify.supabase
       .from('fbp_bill_submissions').select('id, status')
-      .eq('id', id).eq('tenant_id', req.tenantId).eq('employee_id', empId).single()
+      .eq('id', id).eq('tenant_id', req.tenantId).eq('employee_id', empId).maybeSingle()
     if (!existing) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Submission not found' })
     if ((existing as any).status !== 'draft')
       return reply.code(409).send({ error: 'INVALID_STATUS', message: `Cannot submit (status: ${(existing as any).status})` })
 
-    const { error } = await fastify.supabase
+    // Fold the 'draft' precondition into the WHERE — see PUT /my/:id above.
+    const { data: submitted, error } = await fastify.supabase
       .from('fbp_bill_submissions')
       .update({ status: 'submitted', submitted_at: new Date().toISOString(), updated_at: new Date().toISOString() })
-      .eq('id', id).eq('tenant_id', req.tenantId)
+      .eq('id', id).eq('tenant_id', req.tenantId).eq('status', 'draft')
+      .select('id').maybeSingle()
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to submit FBP submission')
+    if (!submitted) return reply.code(409).send({ error: 'INVALID_STATUS', message: 'Submission status changed before it could be submitted' })
     return reply.send({ message: 'Submitted for approval' })
   })
 
@@ -258,17 +266,23 @@ export default async function fbpRoutes(fastify: FastifyInstance) {
 
     const { data: existing } = await fastify.supabase
       .from('fbp_bill_submissions').select('id, status, employee_id')
-      .eq('id', id).eq('tenant_id', req.tenantId).single()
+      .eq('id', id).eq('tenant_id', req.tenantId).maybeSingle()
     if (!existing) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Submission not found' })
     if ((existing as any).status !== 'submitted')
       return reply.code(409).send({ error: 'INVALID_STATUS', message: `Only submitted bills can be approved (status: ${(existing as any).status})` })
 
+    // Fold the 'submitted' precondition into the WHERE — a concurrent reject
+    // (or the employee editing a draft that raced this same submission)
+    // would otherwise both pass the separate check above and this write
+    // would silently overwrite whichever decision landed first.
     const now = new Date().toISOString()
     const { data, error } = await fastify.supabase
       .from('fbp_bill_submissions')
       .update({ status: 'approved', approved_amount: parsed.data.approved_amount, reviewed_by: req.userId, reviewed_at: now, updated_at: now })
-      .eq('id', id).eq('tenant_id', req.tenantId).select().single()
+      .eq('id', id).eq('tenant_id', req.tenantId).eq('status', 'submitted')
+      .select().maybeSingle()
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to approve FBP submission')
+    if (!data) return reply.code(409).send({ error: 'INVALID_STATUS', message: 'Submission was decided before this approval could be applied' })
 
     await logAction(fastify.supabase, {
       tenantId: req.tenantId, tableName: 'fbp_bill_submissions', recordId: id,
@@ -287,17 +301,20 @@ export default async function fbpRoutes(fastify: FastifyInstance) {
 
     const { data: existing } = await fastify.supabase
       .from('fbp_bill_submissions').select('id, status')
-      .eq('id', id).eq('tenant_id', req.tenantId).single()
+      .eq('id', id).eq('tenant_id', req.tenantId).maybeSingle()
     if (!existing) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Submission not found' })
     if ((existing as any).status !== 'submitted')
       return reply.code(409).send({ error: 'INVALID_STATUS', message: `Only submitted bills can be rejected (status: ${(existing as any).status})` })
 
+    // Fold the 'submitted' precondition into the WHERE — see approve above.
     const now = new Date().toISOString()
     const { data, error } = await fastify.supabase
       .from('fbp_bill_submissions')
       .update({ status: 'rejected', rejection_reason: parsed.data.rejection_reason, reviewed_by: req.userId, reviewed_at: now, updated_at: now })
-      .eq('id', id).eq('tenant_id', req.tenantId).select().single()
+      .eq('id', id).eq('tenant_id', req.tenantId).eq('status', 'submitted')
+      .select().maybeSingle()
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to reject FBP submission')
+    if (!data) return reply.code(409).send({ error: 'INVALID_STATUS', message: 'Submission was decided before this rejection could be applied' })
     return reply.send({ data })
   })
 

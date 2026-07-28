@@ -196,6 +196,19 @@ export default async function variablePayRoutes(fastify: FastifyInstance) {
       return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
     }
 
+    // batch_id comes from the URL param and is written onto every inserted
+    // payout with no prior ownership check — verify it belongs to this
+    // tenant, and block once it's past the pre-approval stage, matching the
+    // sibling arrears batch's /records guard.
+    const { data: batch } = await fastify.supabase
+      .from('variable_payout_batches')
+      .select('id, status')
+      .eq('id', id).eq('tenant_id', req.tenantId).maybeSingle()
+    if (!batch) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Batch not found' })
+    if (!['draft', 'in_review'].includes((batch as any).status)) {
+      return reply.code(409).send({ error: 'LOCKED', message: 'Batch is no longer open for new payouts' })
+    }
+
     const payoutRows = parsed.data.payouts.map(p => ({
       ...p,
       batch_id: id,
@@ -215,12 +228,20 @@ export default async function variablePayRoutes(fastify: FastifyInstance) {
     const totalAmount = parsed.data.payouts.reduce((sum, p) => sum + p.amount, 0)
     const employeeCount = new Set(parsed.data.payouts.map(p => p.employee_id)).size
 
-    const { data: batchRow } = await fastify.supabase
+    const { data: batchRow, error: batchFetchErr } = await fastify.supabase
       .from('variable_payout_batches')
       .select('total_amount, employee_count')
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
       .single()
+
+    if (batchFetchErr) {
+      // The payouts above are already committed — surface this rather than
+      // silently skipping the totals update, which would permanently
+      // under-report total_amount/employee_count for a batch that does
+      // have these payouts.
+      return serverError(req, reply, batchFetchErr, ErrorCode.QUERY_FAILED, 'Payouts created but failed to refresh batch totals')
+    }
 
     if (batchRow) {
       const currentTotal = (batchRow as any).total_amount ?? 0
