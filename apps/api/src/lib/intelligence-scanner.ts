@@ -1180,7 +1180,7 @@ async function scanSuccessionAttritionRisk(supabase: SupabaseClient, tenantId: s
   const { data: candidates } = await supabase.from('succession_candidates')
     .select('id, employee_id, plan_id')
     .eq('tenant_id', tenantId)
-    .in('readiness_level', ['ready_now', 'ready_12m'])
+    .in('readiness_level', ['ready_now', 'ready_1_2_years'])
   if (!candidates?.length) return
 
   const threeMonthsAgo = new Date()
@@ -1204,7 +1204,7 @@ async function scanSuccessionAttritionRisk(supabase: SupabaseClient, tenantId: s
 
     await notifyHrAdmins(supabase, {
       tenantId, item_type: 'general', severity: 'warning',
-      title:    `Succession Risk: Ready-Now candidate shows high attrition risk`,
+      title:    `Succession Risk: candidate shows high attrition risk`,
       summary:  `Candidate ${candidate.employee_id} (succession plan ${candidate.plan_id}) has mood avg of ${avg.toFixed(1)}/5 over last 3 months — at risk of leaving.`,
       entity_type: 'succession_candidate', entity_id: candidate.id,
       action_route: '/admin/succession', action_label: 'View Succession Plans',

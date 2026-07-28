@@ -179,7 +179,7 @@ export default async function successionRoutes(fastify: FastifyInstance) {
           .range(from, to)),
       fetchAllRows<any>((from, to) =>
         supabase.from('succession_candidates')
-          .select('readiness_level')
+          .select('plan_id, readiness_level')
           .eq('tenant_id', tenantId)
           .range(from, to)),
     ])
@@ -188,6 +188,13 @@ export default async function successionRoutes(fastify: FastifyInstance) {
     plans.forEach(p => { riskBreakdown[p.risk_level as keyof typeof riskBreakdown]++ })
 
     const readyNow = candidates.filter(c => c.readiness_level === 'ready_now').length
+    // Which specific plans have at least one ready-now candidate — coverage
+    // must be judged per plan, not by whether ANY plan tenant-wide has one
+    // (that previously let a single unrelated ready-now candidate make every
+    // critical-risk plan report as "covered").
+    const plansWithReadyNow = new Set(
+      candidates.filter(c => c.readiness_level === 'ready_now').map(c => c.plan_id),
+    )
 
     return reply.send({
       data: {
@@ -195,7 +202,7 @@ export default async function successionRoutes(fastify: FastifyInstance) {
         risk_breakdown: riskBreakdown,
         total_candidates: candidates.length,
         ready_now:      readyNow,
-        coverage_rate:  plans.length > 0 ? Math.round((plans.filter(p => p.risk_level !== 'critical' || readyNow > 0).length / plans.length) * 100) : 0,
+        coverage_rate:  plans.length > 0 ? Math.round((plans.filter(p => p.risk_level !== 'critical' || plansWithReadyNow.has(p.id)).length / plans.length) * 100) : 0,
       },
     })
   })
@@ -764,12 +771,35 @@ export default async function successionRoutes(fastify: FastifyInstance) {
     return reply.send({ data: { ...sessionResult.data, changes: changesData } })
   })
 
+  // Mirrors the DB CHECK constraints on succession_candidates (migration 330)
+  // so an out-of-range new_value is rejected before it's ever written to the
+  // audit trail — without this, the UPDATE below would fail the CHECK
+  // silently (error not checked) while the calibration_changes row already
+  // claims the change was applied, and the endpoint still returned 201.
+  function validateCandidateFieldValue(field: string, value: unknown): string | null {
+    if (field === 'readiness_level') {
+      return ['ready_now', 'ready_1_2_years', 'ready_3_5_years'].includes(value as string)
+        ? null
+        : 'readiness_level must be one of ready_now, ready_1_2_years, ready_3_5_years'
+    }
+    const n = Number(value)
+    if (field === 'nine_box_performance' || field === 'nine_box_potential') {
+      return Number.isInteger(n) && n >= 1 && n <= 3 ? null : `${field} must be an integer between 1 and 3`
+    }
+    return Number.isInteger(n) && n >= 0 && n <= 10 ? null : `${field} must be an integer between 0 and 10`
+  }
+
   fastify.post('/calibration/:sessionId/changes', hrAuth, async (req: any, reply) => {
     const { sessionId } = req.params as { sessionId: string }
     const tenantId      = req.tenantId
     const parsed = CalibrationChangeSchema.safeParse(req.body)
     if (!parsed.success) return reply.status(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message ?? 'Invalid request body' })
     const { employee_id, field_changed, old_value, new_value, notes } = parsed.data
+
+    if (field_changed && new_value !== undefined) {
+      const validationErr = validateCandidateFieldValue(field_changed, new_value)
+      if (validationErr) return reply.status(400).send({ error: 'VALIDATION_ERROR', message: validationErr })
+    }
 
     // Look up the succession_candidates row for this employee in this tenant
     const { data: candRow } = await supabase
@@ -814,9 +844,12 @@ export default async function successionRoutes(fastify: FastifyInstance) {
     if (field_changed && new_value !== undefined) {
       const validFields = ['readiness_level','score_performance','score_skill_gap','score_leadership','score_mobility','score_tenure','score_attrition_risk','nine_box_performance','nine_box_potential']
       if (validFields.includes(field_changed)) {
-        await supabase.from('succession_candidates')
+        const { error: applyErr } = await supabase.from('succession_candidates')
           .update({ [field_changed]: new_value })
           .eq('id', candidate_id).eq('tenant_id', tenantId)
+        if (applyErr) {
+          return serverError(req, reply, applyErr, ErrorCode.UPDATE_FAILED, 'Change was logged but failed to apply to the candidate record')
+        }
       }
     }
 
