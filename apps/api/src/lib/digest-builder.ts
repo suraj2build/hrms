@@ -11,8 +11,28 @@
  * No LLM calls; text is assembled from counts.
  */
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { fetchTenantTz } from './attendance-engine.js'
+import { getLocalDate } from './org-context.js'
 
 export type DigestFrequency = 'daily' | 'weekly' | 'monthly'
+
+// Resolve "today" in the tenant's own timezone, not the server's (UTC) clock —
+// between 00:00-05:29 IST the UTC calendar date is still yesterday, which
+// shifted "new joiners today"/"this month" calculations by a day right at
+// every day/month boundary (ISSUE-154 class).
+async function tenantTodayStr(supabase: SupabaseClient, tenantId: string): Promise<string> {
+  const tz = await fetchTenantTz(supabase, tenantId)
+  return getLocalDate(new Date().toISOString(), tz)
+}
+
+// Add/subtract whole days from a YYYY-MM-DD string, staying UTC-anchored so
+// the result doesn't depend on the server process's local TZ setting.
+function shiftDateStr(dateStr: string, days: number): string {
+  const [y, m, d] = dateStr.split('-').map(Number)
+  const dt = new Date(Date.UTC(y, m - 1, d))
+  dt.setUTCDate(dt.getUTCDate() + days)
+  return dt.toISOString().slice(0, 10)
+}
 
 export interface DigestResult {
   period:       DigestFrequency
@@ -42,7 +62,7 @@ async function count(
 // ── Daily ──────────────────────────────────────────────────────────────────
 export async function buildDailyDigest(supabase: SupabaseClient, tenantId: string): Promise<DigestResult> {
   const now = new Date()
-  const todayStr      = now.toISOString().slice(0, 10)
+  const todayStr      = await tenantTodayStr(supabase, tenantId)
   const twentyFourAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString()
 
   const j = await count(supabase, 'employees',             q => q.eq('tenant_id', tenantId).eq('joining_date', todayStr))
@@ -77,8 +97,9 @@ export async function buildDailyDigest(supabase: SupabaseClient, tenantId: strin
 export async function buildWeeklyDigest(supabase: SupabaseClient, tenantId: string): Promise<DigestResult> {
   const now = new Date()
   const sevenDaysAgo  = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
-  const weekStart     = sevenDaysAgo.toISOString().slice(0, 10)
-  const ninetyDaysAgo = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
+  const todayStr      = await tenantTodayStr(supabase, tenantId)
+  const weekStart     = shiftDateStr(todayStr, -7)
+  const ninetyDaysAgo = shiftDateStr(todayStr, -90)
 
   const j  = await count(supabase, 'employees',           q => q.eq('tenant_id', tenantId).gte('joining_date', weekStart))
   const e  = await count(supabase, 'employee_separation', q => q.eq('tenant_id', tenantId).in('lifecycle_stage', ['relieved', 'archived']).gte('updated_at', sevenDaysAgo.toISOString()))
@@ -109,16 +130,20 @@ export async function buildWeeklyDigest(supabase: SupabaseClient, tenantId: stri
 // ── Monthly ────────────────────────────────────────────────────────────────
 export async function buildMonthlyDigest(supabase: SupabaseClient, tenantId: string): Promise<DigestResult> {
   const now = new Date()
-  const monthStart    = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10)
-  const monthEnd      = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().slice(0, 10)
-  const ninetyDaysAgo = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
+  const todayStr      = await tenantTodayStr(supabase, tenantId)
+  const [y, m]        = todayStr.split('-').map(Number)
+  const monthStart    = `${y}-${String(m).padStart(2, '0')}-01`
+  // Date.UTC (not new Date(y, m, 0), which anchors to the process's local TZ)
+  // so month-end is correct regardless of the server process's TZ setting.
+  const monthEnd      = new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10)
+  const ninetyDaysAgo = shiftDateStr(todayStr, -90)
 
   const headcount = await count(supabase, 'employees',           q => q.eq('tenant_id', tenantId).eq('status', 'active'))
   const joiners   = await count(supabase, 'employees',           q => q.eq('tenant_id', tenantId).gte('joining_date', monthStart).lte('joining_date', monthEnd))
   const exits     = await count(supabase, 'employee_separation', q => q.eq('tenant_id', tenantId).in('lifecycle_stage', ['relieved', 'archived']).gte('updated_at', monthStart))
   const probBacklog = await count(supabase, 'employees',         q => q.eq('tenant_id', tenantId).eq('status', 'active').lte('joining_date', ninetyDaysAgo))
   const netChange = joiners - exits
-  const monthLabel = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+  const monthLabel = todayStr.slice(0, 7)
 
   const parts: string[] = [`Monthly digest for ${monthLabel}.`]
   parts.push(`Active headcount: ${headcount} employee${headcount !== 1 ? 's' : ''}.`)
