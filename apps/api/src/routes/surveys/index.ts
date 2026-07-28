@@ -230,11 +230,30 @@ export default async function surveyRoutes(fastify: FastifyInstance) {
     if (!assignment) return reply.status(404).send({ error: 'Survey not assigned to you' })
     if (assignment.completed_at) return reply.status(400).send({ error: 'Survey already completed' })
 
+    // survey_responses.employee_id/response_value/response_type/survey_type
+    // (migration 351) are denormalized fields the intelligence scanner's
+    // onboarding-score-degradation query reads directly — without populating
+    // them here, that scanner's queries always return zero rows and can
+    // never detect a real Day-30 → Day-60 score drop.
+    const [{ data: surveyRow, error: surveyErr }, { data: qRows, error: qErr }] = await Promise.all([
+      supabase.from('surveys').select('survey_type').eq('id', id).maybeSingle(),
+      supabase.from('survey_questions').select('id, question_type').in('id', responses.map(r => r.question_id)),
+    ])
+    if (surveyErr) return serverError(req, reply, surveyErr, ErrorCode.QUERY_FAILED, 'Failed to fetch survey')
+    if (qErr) return serverError(req, reply, qErr, ErrorCode.QUERY_FAILED, 'Failed to fetch survey questions')
+
+    const surveyType = (surveyRow as any)?.survey_type ?? null
+    const questionTypeMap = new Map(((qRows ?? []) as any[]).map(q => [q.id, q.question_type]))
+
     const rows = responses.map(r => ({
-      assignment_id: assignment.id,
-      question_id:   r.question_id,
-      tenant_id:     assignment.tenant_id,
-      response:      r.response,
+      assignment_id:  assignment.id,
+      question_id:    r.question_id,
+      tenant_id:      assignment.tenant_id,
+      response:       r.response,
+      employee_id:    empId,
+      response_type:  questionTypeMap.get(r.question_id) ?? 'text',
+      response_value: r.response == null ? null : (typeof r.response === 'string' ? r.response : JSON.stringify(r.response)),
+      survey_type:    surveyType,
     }))
 
     const { error: respErr } = await supabase
