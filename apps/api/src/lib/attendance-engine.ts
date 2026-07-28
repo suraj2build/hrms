@@ -1157,35 +1157,44 @@ export async function upsertAttendanceDaily(
     )
   }
 
-  // Event on status or day_fraction change
-  if (beforeStatus !== row.status || beforeDayFraction !== row.day_fraction) {
-    eventService.emit('attendance.updated', {
-      tenant_id:    row.tenant_id,
-      employee_id:  row.employee_id,
-      date:         row.date,
-      old_status:   beforeStatus,
-      new_status:   row.status,
-      day_fraction: row.day_fraction,
-    })
-  }
+  const eventChanged = beforeStatus !== row.status || beforeDayFraction !== row.day_fraction
 
   // Anomaly sync — detect from computed result + meta, then upsert/delete
   // Resolve policy if not supplied by caller (single-row path)
   const effectivePolicy = policy ?? await policyService.getPolicy(supabase, row.tenant_id, row.employee_id)
   const anomalies = detectAnomalies(row, effectivePolicy)
-  // Fire-and-forget — anomaly sync must never block attendance write
+  // Fire-and-forget — anomaly sync must never block attendance write. The
+  // 'attendance.updated' event is emitted only once syncAnomalies settles
+  // (success or failure), not before — anomaly-handler.ts's consumer reads
+  // attendance_anomalies to decide what to notify, and emitting via
+  // eventService.emit() (a microtask) before this setImmediate's (macrotask)
+  // write landed meant the read always ran first and saw no rows yet,
+  // silently dropping every anomaly notification.
   setImmediate(() => {
-    syncAnomalies(supabase, row.tenant_id, row.employee_id, row.date, anomalies).catch((err) => {
-      console.warn(JSON.stringify({
-        level:   'warn',
-        service: 'attendance-engine',
-        action:  'sync_anomalies_failed',
-        tenant_id:   row.tenant_id,
-        employee_id: row.employee_id,
-        date:        row.date,
-        error:       err instanceof Error ? err.message : String(err),
-      }))
-    })
+    syncAnomalies(supabase, row.tenant_id, row.employee_id, row.date, anomalies)
+      .catch((err) => {
+        console.warn(JSON.stringify({
+          level:   'warn',
+          service: 'attendance-engine',
+          action:  'sync_anomalies_failed',
+          tenant_id:   row.tenant_id,
+          employee_id: row.employee_id,
+          date:        row.date,
+          error:       err instanceof Error ? err.message : String(err),
+        }))
+      })
+      .finally(() => {
+        if (eventChanged) {
+          eventService.emit('attendance.updated', {
+            tenant_id:    row.tenant_id,
+            employee_id:  row.employee_id,
+            date:         row.date,
+            old_status:   beforeStatus,
+            new_status:   row.status,
+            day_fraction: row.day_fraction,
+          })
+        }
+      })
   })
 }
 
@@ -1427,43 +1436,51 @@ export async function recomputeRange(
     )
   }
 
-  // Events — only for rows that were actually written (not protected ones)
-  for (const r of safeComputed) {
-    const key    = `${r.employee_id}:${r.date}`
-    const before = beforeMap.get(key)
-    if (before?.status !== r.status || before?.day_fraction !== r.day_fraction) {
-      eventService.emit('attendance.updated', {
-        tenant_id,
-        employee_id:  r.employee_id,
-        date:         r.date,
-        old_status:   before?.status ?? null,
-        new_status:   r.status,
-        day_fraction: r.day_fraction,
-      })
-    }
-  }
+  // Changed rows — only for rows that were actually written (not protected ones)
+  const changedRows = safeComputed.filter((r) => {
+    const before = beforeMap.get(`${r.employee_id}:${r.date}`)
+    return before?.status !== r.status || before?.day_fraction !== r.day_fraction
+  })
 
   // Anomaly sync — fire-and-forget, errors must not block the recompute result.
   // Use safeComputed (not computed) so we don't generate ghost anomalies for dates
   // that were skipped due to leave_approval / manual / wo_credit protection.
+  // 'attendance.updated' events are emitted only after the batch settles
+  // (success or failure), not before — see the matching fix + comment in
+  // upsertAttendanceDaily() above for why emitting first silently dropped
+  // every anomaly notification.
   setImmediate(() => {
     Promise.all(
       safeComputed.map((r) => {
         const anomalies = detectAnomalies(r, policy)
         return syncAnomalies(supabase, tenant_id, r.employee_id, r.date, anomalies)
       }),
-    ).catch((err) => {
-      console.warn(JSON.stringify({
-        level:   'warn',
-        service: 'attendance-engine',
-        action:  'batch_sync_anomalies_failed',
-        tenant_id,
-        employee_id,
-        from_date,
-        to_date,
-        error: err instanceof Error ? err.message : String(err),
-      }))
-    })
+    )
+      .catch((err) => {
+        console.warn(JSON.stringify({
+          level:   'warn',
+          service: 'attendance-engine',
+          action:  'batch_sync_anomalies_failed',
+          tenant_id,
+          employee_id,
+          from_date,
+          to_date,
+          error: err instanceof Error ? err.message : String(err),
+        }))
+      })
+      .finally(() => {
+        for (const r of changedRows) {
+          const before = beforeMap.get(`${r.employee_id}:${r.date}`)
+          eventService.emit('attendance.updated', {
+            tenant_id,
+            employee_id:  r.employee_id,
+            date:         r.date,
+            old_status:   before?.status ?? null,
+            new_status:   r.status,
+            day_fraction: r.day_fraction,
+          })
+        }
+      })
   })
 
   return {
