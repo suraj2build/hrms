@@ -375,6 +375,12 @@ export default async function essSelfServiceRoutes(fastify: FastifyInstance) {
     const empId = await selfOr400(req, reply); if (!empId) return
     const parsed = documentSchema.safeParse(req.body)
     if (!parsed.success) return validationError(reply, ErrorCode.VALIDATION_ERROR, parsed.error.issues[0].message)
+    // storage_path is signed and returned verbatim on every subsequent GET —
+    // without this check an employee could register (and later download) a
+    // path pointing at another tenant's or another employee's file.
+    if (!parsed.data.storage_path.startsWith(`${req.tenantId}/${empId}/`)) {
+      return validationError(reply, ErrorCode.VALIDATION_ERROR, 'storage_path must be within your own employee namespace')
+    }
     const { data, error } = await fastify.supabase
       .from('documents')
       .insert({ ...parsed.data, employee_id: empId, tenant_id: req.tenantId, uploaded_by: req.userId })

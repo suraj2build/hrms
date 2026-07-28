@@ -4,10 +4,25 @@ import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { optStr, optDate } from '../../lib/zod-form.js'
 import { serverError, notFound, forbidden, ErrorCode } from '../../lib/api-errors.js'
 
+const STORAGE_BUCKET = 'employee-files'
+const SIGNED_URL_TTL = 3600 // 1 hour
+
 async function resolveCallerEmployeeId(fastify: any, userId: string, tenantId: string): Promise<string | null> {
   const { data } = await fastify.supabase
     .from('profiles').select('employee_id').eq('id', userId).eq('tenant_id', tenantId).maybeSingle()
   return data?.employee_id ?? null
+}
+
+/** Generate a signed URL for a storage path. Returns null on failure. */
+async function createSignedUrl(fastify: any, storagePath: string): Promise<string | null> {
+  const { data, error } = await fastify.supabase.storage
+    .from(STORAGE_BUCKET)
+    .createSignedUrl(storagePath, SIGNED_URL_TTL)
+  if (error || !data?.signedUrl) {
+    fastify.log.warn({ storagePath, error: error?.message }, 'contracts: failed to generate signed URL')
+    return null
+  }
+  return data.signedUrl
 }
 
 const schema = z.object({
@@ -52,7 +67,15 @@ export default async function contractsRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', req.tenantId)
       .order('start_date', { ascending: false })
     if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch employee contracts')
-    return reply.send({ data })
+
+    const contracts = await Promise.all(
+      (data ?? []).map(async (c: any) => ({
+        ...c,
+        signed_url: c.storage_path ? await createSignedUrl(fastify, c.storage_path) : null,
+        signed_url_expires_in: SIGNED_URL_TTL,
+      })),
+    )
+    return reply.send({ data: contracts })
   })
 
   // HR admin only — employees do not manage their own contracts
@@ -62,6 +85,9 @@ export default async function contractsRoutes(fastify: FastifyInstance) {
     const parsed = schema.safeParse(req.body)
     if (!parsed.success)
       return reply.code(400).send({ error: 'VALIDATION', message: parsed.error.issues[0].message })
+    if (parsed.data.storage_path && !parsed.data.storage_path.startsWith(`${req.tenantId}/`)) {
+      return reply.code(400).send({ error: 'INVALID_STORAGE_PATH', message: 'storage_path must be within your tenant namespace' })
+    }
     const { data, error } = await fastify.supabase
       .from('employee_contracts')
       .insert({ ...parsed.data, employee_id: req.params.id, tenant_id: req.tenantId, created_by: req.userId })
@@ -74,6 +100,9 @@ export default async function contractsRoutes(fastify: FastifyInstance) {
     const parsed = schema.partial().safeParse(req.body)
     if (!parsed.success)
       return reply.code(400).send({ error: 'VALIDATION', message: parsed.error.issues[0].message })
+    if (parsed.data.storage_path && !parsed.data.storage_path.startsWith(`${req.tenantId}/`)) {
+      return reply.code(400).send({ error: 'INVALID_STORAGE_PATH', message: 'storage_path must be within your tenant namespace' })
+    }
     const { data, error } = await fastify.supabase
       .from('employee_contracts')
       .update(parsed.data)

@@ -103,6 +103,14 @@ export default async function employeeDocumentsRoutes(fastify: FastifyInstance) 
     if (!parsed.success)
       return validationError(reply, ErrorCode.VALIDATION_ERROR, parsed.error.issues[0]?.message)
 
+    // Storage path must live under this tenant's prefix — the metadata row
+    // carries the correct tenant_id, but the referenced object is signed
+    // later, so an admin could otherwise register (and later sign) another
+    // tenant's file. Matches the check in routes/documents/index.ts.
+    if (!parsed.data.storage_path.startsWith(`${req.tenantId}/`)) {
+      return validationError(reply, ErrorCode.VALIDATION_ERROR, 'storage_path must be within your tenant namespace')
+    }
+
     const { data, error } = await (fastify as any).supabase
       .from('documents')
       .insert({
