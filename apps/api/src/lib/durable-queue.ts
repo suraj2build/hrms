@@ -168,6 +168,7 @@ function calcNextSchedule(attempt: number, baseMs: number, maxMs: number): Date 
 const POLL_INTERVAL_MS    = 5_000    // poll every 5 seconds
 const BATCH_SIZE          = 5        // claim up to 5 jobs per poll
 const STALE_THRESHOLD_MS  = 2 * 60 * 60 * 1_000  // 2 hours — payroll runs can legitimately take 30–60 min
+const RECOVERY_INTERVAL_MS = 15 * 60 * 1_000  // re-sweep for stale 'running' jobs every 15 min, not just at boot
 const RESULT_RETENTION_MS = 90 * 24 * 60 * 60 * 1_000  // 90 days
 
 // ── Retry storm detection ──────────────────────────────────────────────────────
@@ -197,12 +198,13 @@ export interface PoisonJobInfo {
 }
 
 export class DurableJobQueue {
-  private supabase:  SupabaseClient | null = null
-  private log:       Logger | null = null
-  private handlers:  Map<string, JobHandlerFn> = new Map()
-  private pollTimer: ReturnType<typeof setInterval> | null = null
-  private running:   Set<string> = new Set()   // in-process job IDs being executed
-  private started:   boolean = false
+  private supabase:      SupabaseClient | null = null
+  private log:           Logger | null = null
+  private handlers:      Map<string, JobHandlerFn> = new Map()
+  private pollTimer:     ReturnType<typeof setInterval> | null = null
+  private recoveryTimer: ReturnType<typeof setInterval> | null = null
+  private running:       Set<string> = new Set()   // in-process job IDs being executed
+  private started:       boolean = false
   // NOTE: requeueCounts and quarantined were previously in-memory Maps/Sets.
   // As of Migration 120 they are fully DB-backed in poison_job_quarantine.
   // No in-memory state for quarantine — safe for multi-instance deployments.
@@ -226,6 +228,16 @@ export class DurableJobQueue {
     // Crash recovery: reset stale running jobs before accepting new work
     await this._recoverStaleJobs()
 
+    // Re-sweep periodically too — a job can get stuck at 'running' mid-
+    // process-lifetime (e.g. a transient DB error on the terminal-state
+    // write), not just from a hard restart. Without this, such a job would
+    // sit stuck until the next full process restart.
+    this.recoveryTimer = setInterval(() => {
+      this._recoverStaleJobs().catch(e => {
+        this.log?.error({ err: e }, '[durable-queue] periodic stale-job recovery error')
+      })
+    }, RECOVERY_INTERVAL_MS)
+
     // Begin polling
     this.pollTimer = setInterval(() => { this._poll().catch(e => {
       this.log?.error({ err: e }, '[durable-queue] poll error')
@@ -244,6 +256,10 @@ export class DurableJobQueue {
     if (this.pollTimer) {
       clearInterval(this.pollTimer)
       this.pollTimer = null
+    }
+    if (this.recoveryTimer) {
+      clearInterval(this.recoveryTimer)
+      this.recoveryTimer = null
     }
 
     if (this.running.size === 0) {
@@ -319,11 +335,11 @@ export class DurableJobQueue {
       return returnedId
     }
 
-    // Fallback: no idempotency key was supplied and somehow nothing came back
-    // (should not happen — a fresh insert with no conflict target always
-    // returns its own id). Use the locally generated UUID defensively.
-    this.log?.warn({ jobId, jobType }, '[durable-queue] enqueue returned null with no matching job — using local UUID')
-    return jobId
+    // Should not happen — a fresh insert with no conflict target always
+    // returns its own id. Returning the locally generated UUID here would be
+    // a fabricated success: callers use this id to poll job status, and a
+    // row that was never actually persisted would never be found.
+    throw new Error(`[durable-queue] enqueue_background_job returned no id for job type '${jobType}'`)
   }
 
   // ── Polling ──────────────────────────────────────────────────────────────────
@@ -438,13 +454,24 @@ export class DurableJobQueue {
     if (!this.supabase) return
     const now = new Date().toISOString()
 
-    await this.supabase
+    const { error: updateErr } = await this.supabase
       .from('background_jobs')
       .update({ status: 'completed', completed_at: now })
       .eq('id', job.id)
 
+    if (updateErr) {
+      // The job stays 'running' in the DB even though the handler actually
+      // succeeded. Writing a 'completed' audit row below would be a
+      // fabricated success record that disagrees with the real row —
+      // skip it and let the periodic stale-job sweep requeue this job
+      // (it will re-run, but that's honest: the queue genuinely doesn't
+      // know it finished).
+      this.log?.error({ err: updateErr, jobId: job.id, jobType: job.job_type }, '[durable-queue] failed to mark job completed')
+      return
+    }
+
     // Persist to results for audit trail
-    await this.supabase
+    const { error: resultErr } = await this.supabase
       .from('background_job_results')
       .insert({
         job_id:       job.id,
@@ -456,6 +483,7 @@ export class DurableJobQueue {
         started_at:   job.started_at,
         completed_at: now,
       })
+    if (resultErr) this.log?.warn({ err: resultErr, jobId: job.id }, '[durable-queue] failed to write completed audit row')
 
     this.log?.debug({ jobId: job.id, jobType: job.job_type }, '[durable-queue] job completed')
   }
@@ -464,7 +492,7 @@ export class DurableJobQueue {
     if (!this.supabase) return
     const now = new Date().toISOString()
 
-    await this.supabase
+    const { error: updateErr } = await this.supabase
       .from('background_jobs')
       .update({
         status:           'dead',
@@ -474,8 +502,15 @@ export class DurableJobQueue {
       })
       .eq('id', job.id)
 
+    if (updateErr) {
+      // Same reasoning as _markCompleted — don't record a 'dead' audit row
+      // if the job is actually still 'running' in the DB.
+      this.log?.error({ err: updateErr, jobId: job.id, jobType: job.job_type }, '[durable-queue] failed to mark job dead')
+      return
+    }
+
     // Persist to dead-letter results
-    await this.supabase
+    const { error: resultErr } = await this.supabase
       .from('background_job_results')
       .insert({
         job_id:           job.id,
@@ -489,6 +524,7 @@ export class DurableJobQueue {
         started_at:       job.started_at,
         completed_at:     now,
       })
+    if (resultErr) this.log?.warn({ err: resultErr, jobId: job.id }, '[durable-queue] failed to write dead-letter audit row')
 
     this.log?.error(
       { jobId: job.id, jobType: job.job_type, attempts: job.attempt, category },
@@ -500,7 +536,7 @@ export class DurableJobQueue {
     if (!this.supabase) return
     const nextSchedule = calcNextSchedule(job.attempt, job.retry_delay_ms, job.max_delay_ms)
 
-    await this.supabase
+    const { error: updateErr } = await this.supabase
       .from('background_jobs')
       .update({
         status:           'pending',
@@ -510,6 +546,13 @@ export class DurableJobQueue {
         failure_category: category,
       })
       .eq('id', job.id)
+
+    if (updateErr) {
+      // Job is stuck at 'running' instead of being requeued — the periodic
+      // stale-job sweep will eventually pick it back up.
+      this.log?.error({ err: updateErr, jobId: job.id, jobType: job.job_type }, '[durable-queue] failed to schedule job retry')
+      return
+    }
 
     this.log?.info(
       { jobId: job.id, jobType: job.job_type, nextSchedule, attempt: job.attempt },

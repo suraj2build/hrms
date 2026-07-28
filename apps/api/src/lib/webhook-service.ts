@@ -116,6 +116,24 @@ export class WebhookService {
       return { success: false, error: 'Associated webhook not found' }
     }
 
+    // Atomically claim the delivery row before dispatching the outbound HTTP
+    // call — two concurrent retry requests (double-click, two admin tabs, or
+    // a manual retry racing an automated one) would otherwise both pass the
+    // fetch above and both send a live webhook call for the same event.
+    // 'delivering' is the same in-flight status _deliverToWebhook implicitly
+    // occupies during its own attempt.
+    const { data: claimed, error: claimErr } = await this.supabase
+      .from('webhook_deliveries')
+      .update({ status: 'delivering' })
+      .eq('id', deliveryId)
+      .eq('tenant_id', tenantId)
+      .in('status', ['failed', 'retrying'])
+      .select('id')
+      .maybeSingle()
+
+    if (claimErr) return { success: false, error: 'Failed to claim delivery for retry' }
+    if (!claimed) return { success: false, error: 'Delivery is already being retried or is not in a retryable state' }
+
     // Fetch the original request body from the delivery row
     const { data: deliveryDetail, error: detailErr } = await this.supabase
       .from('webhook_deliveries')
@@ -247,8 +265,14 @@ export class WebhookService {
       })
 
     if (insertErr) {
+      // Carry on — we still attempt delivery even if tracking row failed —
+      // but the update-by-id calls below would silently match zero rows
+      // against a delivery that was never inserted, so skip them (and the
+      // aggregate stats bump, which would otherwise report a successful
+      // delivery with no corresponding webhook_deliveries audit record).
       console.error('[WebhookService] failed to create delivery row', { webhookId: webhook.id, err: insertErr })
-      // Carry on — we still attempt delivery even if tracking row failed
+      await this._attemptHttpDelivery(deliveryId, tenantId, webhook, body)
+      return
     }
 
     // 2. Attempt HTTP delivery
