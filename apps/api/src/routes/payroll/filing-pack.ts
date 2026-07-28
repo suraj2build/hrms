@@ -51,10 +51,12 @@ function monthToDDMMYYYY(yyyyMM: string): string {
   return `${m}/${y}`
 }
 
-// "2024-03" → "01/04/2024" (last day + 1 → salary due)
+// "2024-03" → "01/04/2024" (last day + 1 → salary due). "2024-12" → "01/01/2025".
 function salaryDueDate(yyyyMM: string): string {
-  const [y, m] = yyyyMM.split('-')
-  return `01/${String(Number(m) + 1).padStart(2, '0')}/${Number(m) === 12 ? Number(y) + 1 : y}`
+  const [y, m] = yyyyMM.split('-').map(Number)
+  const nextMonth = m === 12 ? 1 : m + 1
+  const nextYear  = m === 12 ? y + 1 : y
+  return `01/${String(nextMonth).padStart(2, '0')}/${nextYear}`
 }
 
 function todayDDMMYYYY(): string {
@@ -236,26 +238,42 @@ export default async function filingPackRoutes(fastify: FastifyInstance) {
         .eq('month', month),
     ])
 
+    // A transient read failure here must not silently read as "no
+    // registrations/contributions" — that would make the readiness verdict
+    // (and any missing-UAN/PAN count derived from it) falsely report ready.
+    for (const [label, result] of [
+      ['EPF contributions', epfContribs], ['ESI contributions', esiContribs],
+      ['PTax contributions', ptaxContribs], ['EPF registration', epfReg],
+      ['ESI registration', esiReg], ['PTax registrations', ptaxRegs],
+      ['finalized slips', finalizedSlips], ['all slips', allSlips],
+    ] as const) {
+      if ((result as any).error) {
+        return serverError(req, reply, (result as any).error, ErrorCode.QUERY_FAILED, `Failed to fetch ${label}`)
+      }
+    }
+
     // UAN check: get EPF employee IDs then check overrides
     const epfCount = epfContribs.count ?? 0
     let missingUan = 0
     if (epfCount > 0) {
-      const { data: epfEmpRows } = await fastify.supabase
+      const { data: epfEmpRows, error: epfEmpErr } = await fastify.supabase
         .from('epf_contributions')
         .select('employee_id')
         .eq('tenant_id', req.tenantId)
         .eq('contribution_month', month)
+      if (epfEmpErr) return serverError(req, reply, epfEmpErr, ErrorCode.QUERY_FAILED, 'Failed to fetch EPF contributors')
 
       const epfEmpIds = (epfEmpRows ?? []).map((r: any) => r.employee_id)
 
       if (epfEmpIds.length > 0) {
-        const { data: uanData } = await fastify.supabase
+        const { data: uanData, error: uanErr } = await fastify.supabase
           .from('epf_eligibility_overrides')
           .select('employee_id')
           .eq('tenant_id', req.tenantId)
           .in('employee_id', epfEmpIds)
           .not('uan', 'is', null)
           .is('effective_to', null)
+        if (uanErr) return serverError(req, reply, uanErr, ErrorCode.QUERY_FAILED, 'Failed to fetch UAN coverage')
 
         const uanCovered = new Set((uanData ?? []).map((r: any) => r.employee_id))
         missingUan = epfEmpIds.filter(id => !uanCovered.has(id)).length
@@ -263,23 +281,25 @@ export default async function filingPackRoutes(fastify: FastifyInstance) {
     }
 
     // PAN check: employees who had TDS deducted this month
-    const { data: tdsSlips } = await fastify.supabase
+    const { data: tdsSlips, error: tdsSlipsErr } = await fastify.supabase
       .from('payroll_slips')
       .select('employee_id, tds_deducted')
       .eq('tenant_id', req.tenantId)
       .eq('month', month)
       .eq('status', 'finalized')
       .gt('tds_deducted', 0)
+    if (tdsSlipsErr) return serverError(req, reply, tdsSlipsErr, ErrorCode.QUERY_FAILED, 'Failed to fetch TDS slips')
 
     const tdsEmpIds = (tdsSlips ?? []).map((r: any) => r.employee_id)
     let missingPan = 0
     if (tdsEmpIds.length > 0) {
-      const { data: panData } = await fastify.supabase
+      const { data: panData, error: panErr } = await fastify.supabase
         .from('employee_bank_statutory')
         .select('employee_id')
         .eq('tenant_id', req.tenantId)
         .in('employee_id', tdsEmpIds)
         .not('pan_number', 'is', null)
+      if (panErr) return serverError(req, reply, panErr, ErrorCode.QUERY_FAILED, 'Failed to fetch PAN coverage')
 
       const panCovered = new Set((panData ?? []).map((r: any) => r.employee_id))
       missingPan = tdsEmpIds.filter(id => !panCovered.has(id)).length
