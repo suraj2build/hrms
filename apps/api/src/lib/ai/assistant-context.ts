@@ -11,6 +11,8 @@
  */
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { resolveCallerEmployeeId, isHrAdmin } from '../manager-scope.js'
+import { fetchTenantTz } from '../attendance-engine.js'
+import { getLocalDate } from '../org-context.js'
 
 export interface AssistantCaller {
   userId:    string
@@ -31,7 +33,10 @@ export async function buildAssistantContext(
   supabase: SupabaseClient,
   caller:   AssistantCaller,
 ): Promise<{ context: string; employeeId: string | null; isManagerOrHr: boolean }> {
-  const today = new Date().toISOString().slice(0, 10)
+  // Tenant-timezone-aware "today" — the raw UTC clock reads yesterday's date
+  // for the LLM's "Today's date" fact between 00:00-05:29 IST (ISSUE-154 class).
+  const tenantTz = await fetchTenantTz(supabase, caller.tenantId)
+  const today = getLocalDate(new Date().toISOString(), tenantTz)
   const hr    = isHrAdmin(caller.userRole)
   const employeeId = await resolveCallerEmployeeId(supabase, caller.userId, caller.tenantId)
 

@@ -13,8 +13,18 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { getDirectReportIds, isHrAdmin } from '../manager-scope.js'
 import { fetchAllRows } from '../supabase-paginate.js'
+import { fetchTenantTz } from '../attendance-engine.js'
+import { getLocalDate } from '../org-context.js'
 import type { ToolDef } from './llm.js'
 import type { AssistantCaller } from './assistant-context.js'
+
+// Resolve "today" in the tenant's own timezone, not the server's (UTC) clock —
+// between 00:00-05:29 IST, new Date().toISOString().slice(0,10) still reads
+// yesterday's UTC date (ISSUE-154 class).
+async function tenantTodayStr(supabase: SupabaseClient, tenantId: string): Promise<string> {
+  const tz = await fetchTenantTz(supabase, tenantId)
+  return getLocalDate(new Date().toISOString(), tz)
+}
 
 const DATE_RE  = /^\d{4}-\d{2}-\d{2}$/
 const MONTH_RE = /^\d{4}-\d{2}$/
@@ -598,7 +608,7 @@ async function getLeaveRequests(ctx: ToolCtx, args: any): Promise<string> {
 async function getAttendance(ctx: ToolCtx, args: any): Promise<string> {
   const hr = isHrAdmin(ctx.caller.userRole)
   const date = typeof args?.date === 'string' && DATE_RE.test(args.date)
-    ? args.date : new Date().toISOString().slice(0, 10)
+    ? args.date : await tenantTodayStr(ctx.supabase, ctx.caller.tenantId)
 
   // HR/Admin with no employee → org-wide absent count for the date.
   if (!args?.employee && hr) {
@@ -676,7 +686,7 @@ async function getEmployeeAssets(ctx: ToolCtx, args: any): Promise<string> {
 }
 
 async function getHolidays(ctx: ToolCtx, args: any): Promise<string> {
-  const from = typeof args?.from === 'string' && DATE_RE.test(args.from) ? args.from : new Date().toISOString().slice(0, 10)
+  const from = typeof args?.from === 'string' && DATE_RE.test(args.from) ? args.from : await tenantTodayStr(ctx.supabase, ctx.caller.tenantId)
   const to   = typeof args?.to === 'string' && DATE_RE.test(args.to) ? args.to : null
 
   let q = ctx.supabase
@@ -1059,12 +1069,19 @@ async function searchPolicy(ctx: ToolCtx, args: { query?: string }): Promise<str
 async function getPayBreakdown(ctx: ToolCtx): Promise<string> {
   if (!ctx.employeeId) return 'No employee profile linked to your account.'
 
-  const { data: comp } = await ctx.supabase
+  // employee_compensations is one row per revision (history) — a partial unique
+  // index only enforces uniqueness where is_active = true. Without this filter,
+  // any employee with more than one revision (i.e. anyone who's had a raise)
+  // matches multiple rows and .maybeSingle() errors with PGRST116 instead of
+  // returning the current structure.
+  const { data: comp, error } = await ctx.supabase
     .from('employee_compensations')
     .select('employee_compensation_components(value, calculation_type, salary_components!salary_component_id(name))')
     .eq('employee_id', ctx.employeeId)
     .eq('tenant_id', ctx.caller.tenantId)
+    .eq('is_active', true)
     .maybeSingle()
+  if (error) return 'Unable to fetch your salary structure right now. Please try again.'
 
   const components = (comp as any)?.employee_compensation_components ?? []
   if (!components.length) return 'Salary structure not found. Contact HR for your compensation details.'
@@ -1136,16 +1153,31 @@ async function updateEmergencyContact(ctx: ToolCtx, args: { name?: string; relat
   if (!ctx.employeeId) return 'No employee profile linked to your account.'
   if (!args.name?.trim() || !args.phone?.trim()) return 'Name and phone are required.'
 
-  const { error } = await ctx.supabase
+  // emergency_contacts is 1:N (no UNIQUE(employee_id, tenant_id) constraint exists —
+  // only a non-unique index), so upsert(onConflict: 'employee_id,tenant_id') always
+  // fails with "no unique or exclusion constraint matching the ON CONFLICT
+  // specification". Find the existing primary contact and update it, or insert
+  // a new one, instead of relying on a constraint that isn't there.
+  const { data: existing, error: findErr } = await ctx.supabase
     .from('emergency_contacts')
-    .upsert({
-      employee_id:  ctx.employeeId,
-      tenant_id:    ctx.caller.tenantId,
-      name:         args.name.trim(),
-      phone:        args.phone.trim(),
-      relationship: args.relationship ?? null,
-      is_primary:   true,
-    }, { onConflict: 'employee_id,tenant_id' })
+    .select('id')
+    .eq('employee_id', ctx.employeeId)
+    .eq('tenant_id', ctx.caller.tenantId)
+    .eq('is_primary', true)
+    .maybeSingle()
+  if (findErr) return `Failed to update emergency contact: ${findErr.message}`
+
+  const payload = {
+    employee_id:  ctx.employeeId,
+    tenant_id:    ctx.caller.tenantId,
+    name:         args.name.trim(),
+    phone:        args.phone.trim(),
+    relationship: args.relationship ?? null,
+    is_primary:   true,
+  }
+  const { error } = existing
+    ? await ctx.supabase.from('emergency_contacts').update(payload).eq('id', (existing as any).id).eq('tenant_id', ctx.caller.tenantId)
+    : await ctx.supabase.from('emergency_contacts').insert(payload)
 
   if (error) return `Failed to update emergency contact: ${error.message}`
   return `Emergency contact updated: ${args.name} (${args.relationship ?? 'N/A'}) — ${args.phone}.`
@@ -1181,14 +1213,21 @@ async function escalateTicket(ctx: ToolCtx, args: { ticket_id?: string; reason?:
   const ticketId = sanitizeQuery(args.ticket_id)
   if (!ticketId) return `Ticket "${args.ticket_id}" not found.`
 
-  // Find the ticket
-  const { data: ticket } = await ctx.supabase
+  // helpdesk_tickets.id is a UUID column — feeding a non-UUID ticket_number
+  // (e.g. "TKT-2026-00001", the format employees normally see and use) into an
+  // `id.eq.` filter makes Postgres fail the whole OR expression trying to cast
+  // it to uuid, silently yielding "not found" for the documented primary use case.
+  const isUuidTicketId = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(ticketId)
+  let ticketQuery = ctx.supabase
     .from('helpdesk_tickets')
     .select('id, subject, status, employee_id')
-    .or(`id.eq.${ticketId},ticket_number.eq.${ticketId}`)
     .eq('tenant_id', ctx.caller.tenantId)
-    .maybeSingle()
+  ticketQuery = isUuidTicketId
+    ? ticketQuery.or(`id.eq.${ticketId},ticket_number.eq.${ticketId}`)
+    : ticketQuery.eq('ticket_number', ticketId)
+  const { data: ticket, error: ticketErr } = await ticketQuery.maybeSingle()
 
+  if (ticketErr) return `Couldn't look up ticket "${args.ticket_id}" — please try again.`
   if (!ticket) return `Ticket "${args.ticket_id}" not found.`
   if ((ticket as any).employee_id !== ctx.employeeId && !isHrAdmin(ctx.caller.userRole)) {
     return 'You can only escalate your own tickets.'
