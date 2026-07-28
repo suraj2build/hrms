@@ -258,7 +258,7 @@ export function StatutoryPolicy() {
       {/* TDS (Income Tax) — payroll statutory settings */}
       <SectionCard
         title="TDS (Income Tax)"
-        description="Master switch for TDS in the payroll run. When ON, TDS is computed on projected annual income — no employee declaration is required (new regime + ₹50,000 standard deduction by default)."
+        description="Master switch for TDS in the payroll run. When ON, TDS is computed on projected annual income — no employee declaration is required (new regime + ₹75,000 standard deduction by default, FY24-25+)."
         icon={<Scale className="h-4 w-4 text-muted-foreground" />}
       >
         <ToggleRow
