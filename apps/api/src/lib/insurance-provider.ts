@@ -26,7 +26,7 @@ export class InsuranceProvider {
   ): Promise<void> {
     const payload = { employee_id: employeeId, plan_id: planId, dependent_ids: dependentIds }
 
-    const { data: outboxRow } = await this.supabase
+    const { data: outboxRow, error: insertErr } = await this.supabase
       .from('insurance_outbox')
       .insert({
         tenant_id:     this.tenantId,
@@ -37,6 +37,7 @@ export class InsuranceProvider {
       })
       .select('id')
       .single()
+    if (insertErr) console.error('[insurance-provider] outbox insert failed:', insertErr)
 
     const apiKey = process.env.INSURANCE_API_KEY
     const apiUrl = process.env.INSURANCE_API_URL

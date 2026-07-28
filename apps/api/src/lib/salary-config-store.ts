@@ -169,12 +169,15 @@ export async function updateComponent(
     // against the type it actually has.
     let componentType = parsed.data.component_type
     if (componentType === undefined) {
-      const { data: existing } = await supabase
+      const { data: existing, error: lookupErr } = await supabase
         .from('salary_components')
         .select('component_type')
         .eq('id', id)
         .eq('tenant_id', tenantId)
         .maybeSingle()
+      // A failed lookup must not silently skip the reserved-code guard below —
+      // fail the request rather than let componentType stay undefined.
+      if (lookupErr) return dbFail(lookupErr)
       componentType = (existing as { component_type?: string } | null)?.component_type as any
     }
     if (isReservedStatutoryCode(parsed.data.code, componentType)) {
