@@ -20,6 +20,8 @@
  */
 
 import type { FastifyInstance } from 'fastify'
+import { fetchTenantTz } from '../../lib/attendance-engine.js'
+import { getLocalDate } from '../../lib/org-context.js'
 
 // ── The canonical Event (EXPERIENCE_EVENT_MODEL.md §1) ──────────────────────────
 
@@ -87,6 +89,11 @@ export async function projectEvents(
   const limit = Math.min(Math.max(opts.limit ?? 40, 1), 100)
   if (!employeeId) return { events: [], nextCursor: null }
   const CAP = 200  // per-source ceiling — bounds deep histories without storage
+  // Tenant-local "today", anchored at UTC noon — anniversary milestones below
+  // compare against this rather than the server's raw UTC clock, so they land
+  // on the tenant's actual local calendar day instead of the UTC one.
+  const tz = await fetchTenantTz(fastify.supabase, tenantId)
+  const now = new Date(`${getLocalDate(new Date().toISOString(), tz)}T12:00:00Z`)
 
   const [me, leaves, slips, kudosIn, kudosOut, announcements] = await Promise.all([
     safe(fastify.supabase.from('employees')
@@ -211,7 +218,6 @@ export async function projectEvents(
         context: { joining_date: join }, deepLink: null, visibility: 'self', severity: 'success',
         aiExplanation: null, flags: { milestone: true },
       })
-      const now = new Date()
       const years = Math.floor((now.getTime() - jd.getTime()) / (365.25 * 86_400_000))
       for (let y = 1; y <= years; y++) {
         const a = new Date(jd); a.setUTCFullYear(jd.getUTCFullYear() + y)

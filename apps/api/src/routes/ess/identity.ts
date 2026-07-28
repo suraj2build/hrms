@@ -16,6 +16,8 @@
 
 import type { FastifyInstance } from 'fastify'
 import { projectJourney } from './journey.js'
+import { fetchTenantTz } from '../../lib/attendance-engine.js'
+import { getLocalDate } from '../../lib/org-context.js'
 
 interface Party { id: string; name: string; subtitle?: string }
 
@@ -53,7 +55,10 @@ export default async function essIdentityRoutes(fastify: FastifyInstance) {
 
   fastify.get('/identity', auth, async (req: any, reply) => {
     const tenantId = req.tenantId as string
-    const now = new Date()
+    // Tenant-local "today", anchored at UTC noon — anniversary/tenure math
+    // below compares against this rather than the server's raw UTC clock.
+    const tz = await fetchTenantTz(fastify.supabase, tenantId)
+    const now = new Date(`${getLocalDate(new Date().toISOString(), tz)}T12:00:00Z`)
 
     const { data: profileRow } = await fastify.supabase
       .from('profiles').select('employee_id')

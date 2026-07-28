@@ -19,6 +19,8 @@
  */
 
 import type { FastifyInstance } from 'fastify'
+import { fetchTenantTz } from '../../lib/attendance-engine.js'
+import { getLocalDate } from '../../lib/org-context.js'
 
 interface Reflection {
   insight: string | null
@@ -50,7 +52,13 @@ export default async function essReflectionRoutes(fastify: FastifyInstance) {
 
     if (!employeeId) return reply.send({ insight: null } as Reflection)
 
-    const today = new Date().toISOString().slice(0, 10)
+    // Tenant-local "today" — the leave `to_date` comparison below is an exact
+    // day-boundary filter, so the server's raw UTC clock would wrongly treat
+    // an employee's actual local "today" as tomorrow for the first ~5.5 hours
+    // of the day for an IST tenant, excluding a just-ended leave from the
+    // "time since your last break" calculation.
+    const tz = await fetchTenantTz(fastify.supabase, tenantId)
+    const today = getLocalDate(new Date().toISOString(), tz)
 
     const [slips, lastLeave, attRows] = await Promise.all([
       // Last two finalized slips → pay delta (memory across pay cycles).

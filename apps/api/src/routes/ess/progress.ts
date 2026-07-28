@@ -20,6 +20,8 @@
  */
 
 import type { FastifyInstance } from 'fastify'
+import { fetchTenantTz } from '../../lib/attendance-engine.js'
+import { getLocalDate } from '../../lib/org-context.js'
 
 interface ProgressHint { label: string; value: string }
 interface ProgressPayload {
@@ -87,12 +89,17 @@ export default async function essProgressRoutes(fastify: FastifyInstance) {
     const streak = onTimeStreak(attRows as { date: string; status: string }[])
 
     // Kudos given — this month vs last, to celebrate a rising generosity.
-    const now = new Date()
+    // Tenant-local "today", anchored at UTC noon — the this-month/last-month
+    // split below is an exact calendar boundary, so the server's raw UTC
+    // clock would misclassify kudos given near the tenant-local month
+    // rollover (e.g. the first ~5.5 hours of the month for an IST tenant).
+    const tz = await fetchTenantTz(fastify.supabase, tenantId)
+    const now = new Date(`${getLocalDate(new Date().toISOString(), tz)}T12:00:00Z`)
     const thisMonth = monthKey(now)
     const lastMonth = monthKey(new Date(now.getFullYear(), now.getMonth() - 1, 1))
     let kudosThis = 0, kudosLast = 0
     for (const r of recRows as any[]) {
-      const k = monthKey(new Date(r.created_at))
+      const k = getLocalDate(r.created_at, tz).slice(0, 7)
       if (k === thisMonth) kudosThis++
       else if (k === lastMonth) kudosLast++
     }

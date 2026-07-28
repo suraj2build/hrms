@@ -25,6 +25,8 @@
 import type { FastifyInstance } from 'fastify'
 import { projectEvents, type ExperienceEvent } from './events.js'
 import { projectJourney, type JourneyStep } from './journey.js'
+import { fetchTenantTz } from '../../lib/attendance-engine.js'
+import { getLocalDate } from '../../lib/org-context.js'
 
 // The Story-view item — Patterns §3.3 Event projection. No href: memories don't eject.
 interface StoryItem {
@@ -110,7 +112,10 @@ export default async function essTimelineRoutes(fastify: FastifyInstance) {
     const cursor = (req.query?.cursor as string) || null
     const limit  = req.query?.limit ? Number(req.query.limit) : 60
     const firstPage = !cursor
-    const now = new Date()
+    // Tenant-local "today", anchored at UTC noon — chapter/tenure math below
+    // compares against this rather than the server's raw UTC clock.
+    const tz = await fetchTenantTz(fastify.supabase, tenantId)
+    const now = new Date(`${getLocalDate(new Date().toISOString(), tz)}T12:00:00Z`)
 
     // The canonical stream + the shared Growth-spine projector (one source of the
     // "firsts" and the Journey — no duplicated milestone logic).
