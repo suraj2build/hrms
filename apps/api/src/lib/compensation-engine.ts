@@ -248,8 +248,16 @@ export function computeCompensation({
     // Engine-injected PF (employer side counts toward CTC; employee side is a deduction within gross)
     let pfEmployeeAnnual = 0, pfEmployerAnnual = 0
     if (pfEligible) {
-      const basicMonthly = r2(basicAnnual / 12)
-      const pfBase = employee.pf_capped ? r2(Math.min(basicMonthly, policy.pf_cap_amount)) : basicMonthly
+      // PF wage base is Basic plus any other earning flagged affects_pf (e.g. DA) —
+      // migration 048's own doc comment: "Typical: only Basic. Some employers
+      // include DA too." This previously ignored affects_pf entirely and based
+      // PF on Basic alone, silently understating PF for any tenant that flags
+      // a second component (DA is a standard Indian-payroll setup).
+      const pfWageAnnual = r2(basicAnnual + earnings
+        .filter(c => !c.is_basic && c.affects_pf && c.calc_type !== 'balance')
+        .reduce((s, c) => s + (amt.get(c.salary_component_id) ?? 0), 0))
+      const pfBaseMonthly = r2(pfWageAnnual / 12)
+      const pfBase = employee.pf_capped ? r2(Math.min(pfBaseMonthly, policy.pf_cap_amount)) : pfBaseMonthly
       pfEmployeeAnnual = r2(r2(pfBase * (policy.pf_employee_rate / 100)) * 12)
       pfEmployerAnnual = r2(r2(pfBase * (policy.pf_employer_rate / 100)) * 12)
       employerAnnual   = r2(employerAnnual + pfEmployerAnnual)
