@@ -417,6 +417,22 @@ export default async function incidentsRoute(fastify: FastifyInstance) {
 
     const body = parsed.data
 
+    // employee_id/department_id are plain FKs (090_operational_incidents.sql),
+    // not tenant-scoped — verify each belongs to this tenant before trusting
+    // it, or a client could attach another tenant's employee/department to
+    // this incident (and have their name/code leak back via the FK-embed on
+    // GET /system/incidents).
+    if (body.employee_id) {
+      const { data: emp } = await fastify.supabase
+        .from('employees').select('id').eq('id', body.employee_id).eq('tenant_id', req.tenantId).maybeSingle()
+      if (!emp) return validationError(reply, ErrorCode.VALIDATION_ERROR, 'employee_id does not belong to this tenant')
+    }
+    if (body.department_id) {
+      const { data: dept } = await fastify.supabase
+        .from('departments').select('id').eq('id', body.department_id).eq('tenant_id', req.tenantId).maybeSingle()
+      if (!dept) return validationError(reply, ErrorCode.VALIDATION_ERROR, 'department_id does not belong to this tenant')
+    }
+
     const { data: incident, error: insertError } = await fastify.supabase
       .from('operational_incidents')
       .insert({
@@ -489,6 +505,14 @@ export default async function incidentsRoute(fastify: FastifyInstance) {
 
     if (fetchError || !existing) {
       return notFound(reply, 'NOT_FOUND', 'Incident not found')
+    }
+
+    // assigned_to is a plain profiles FK (090_operational_incidents.sql), not
+    // tenant-scoped — verify it belongs to this tenant before trusting it.
+    if (body.assigned_to !== undefined) {
+      const { data: assignee } = await fastify.supabase
+        .from('profiles').select('id').eq('id', body.assigned_to).eq('tenant_id', req.tenantId).maybeSingle()
+      if (!assignee) return validationError(reply, ErrorCode.VALIDATION_ERROR, 'assigned_to does not belong to this tenant')
     }
 
     const updatePayload: Record<string, unknown> = { updated_at: new Date().toISOString() }
@@ -581,6 +605,12 @@ export default async function incidentsRoute(fastify: FastifyInstance) {
       return notFound(reply, 'NOT_FOUND', 'Incident not found')
     }
 
+    // escalated_to is a plain profiles FK (090_operational_incidents.sql), not
+    // tenant-scoped — verify it belongs to this tenant before trusting it.
+    const { data: escalatee } = await fastify.supabase
+      .from('profiles').select('id').eq('id', escalate_to).eq('tenant_id', req.tenantId).maybeSingle()
+    if (!escalatee) return validationError(reply, ErrorCode.VALIDATION_ERROR, 'escalate_to does not belong to this tenant')
+
     // Insert escalation record
     const { data: escalation, error: escalationError } = await fastify.supabase
       .from('incident_escalations')
@@ -657,6 +687,9 @@ export default async function incidentsRoute(fastify: FastifyInstance) {
 
     const resolvedAt = new Date().toISOString()
 
+    // Fold the not-already-resolved precondition into the UPDATE's own WHERE
+    // clause so two concurrent resolve calls can't both pass the pre-check
+    // above and both write (which would double the resolution timeline event).
     const { data: updated, error: updateError } = await fastify.supabase
       .from('operational_incidents')
       .update({
@@ -668,11 +701,15 @@ export default async function incidentsRoute(fastify: FastifyInstance) {
       })
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
+      .neq('status', 'resolved')
       .select()
-      .single()
+      .maybeSingle()
 
-    if (updateError || !updated) {
+    if (updateError) {
       return serverError(req, reply, updateError, ErrorCode.UPDATE_FAILED, 'Failed to resolve incident')
+    }
+    if (!updated) {
+      return conflictError(reply, 'ALREADY_RESOLVED', 'Incident is already resolved')
     }
 
     const timelineErr = await addTimelineEvent(

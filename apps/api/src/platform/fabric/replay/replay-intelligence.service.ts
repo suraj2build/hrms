@@ -71,8 +71,13 @@ export class ReplayIntelligenceService {
       session.result_summary = { error: err instanceof Error ? err.message : 'Unknown error' }
     }
 
-    // Persist session record (fire-and-forget)
-    void supabase
+    // Persist session record (fire-and-forget — matches the sibling
+    // DecisionGraphService's addNode/addEdge: log and swallow rather than
+    // throw, since a missing audit row shouldn't fail the caller's primary
+    // replay result. But previously this wasn't even awaited/checked, so a
+    // failed insert was invisible — the session would silently never appear
+    // via listSessions() with no diagnostic trail.
+    const { error: persistErr } = await supabase
       .from('replay_sessions')
       .insert({
         id:              session.id,
@@ -87,6 +92,7 @@ export class ReplayIntelligenceService {
         created_at:      session.created_at,
         created_by:      session.created_by ?? null,
       })
+    if (persistErr) console.warn('[ReplayIntelligenceService] session persist failed', persistErr.message)
 
     return session
   }
