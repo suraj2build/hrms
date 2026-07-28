@@ -1058,11 +1058,32 @@ async function scanPostTransferSurveys(supabase: SupabaseClient, tenantId: strin
 async function scanSurveyNegativeClusters(supabase: SupabaseClient, tenantId: string): Promise<void> {
   const thirtyAgo = new Date(); thirtyAgo.setDate(thirtyAgo.getDate() - 30)
 
-  const { data: analyses } = await supabase
-    .from('survey_response_analysis').select('id, themes, response_id')
-    .eq('sentiment', 'negative').eq('urgency', 'high')
-    .gte('analyzed_at', thirtyAgo.toISOString())
-  if (!analyses?.length) return
+  // Fresh audit finding: survey_response_analysis.response_id has no real FK
+  // constraint (just NOT NULL UNIQUE) and the table has no tenant_id column
+  // of its own — tenant scoping only exists via RLS (joining through
+  // survey_responses → survey_assignments → surveys.tenant_id). Since this
+  // codebase's service-role Supabase client bypasses RLS, a plain
+  // .eq('sentiment', ...) query with no join pulled EVERY tenant's negative/
+  // high-urgency survey analyses on every iteration of the per-tenant scan
+  // loop, and notifyHrAdmins() then alerted tenant A's HR admins using data
+  // built from tenant B/C/etc.'s confidential employee sentiment. Resolve
+  // this tenant's own response_ids first (survey_responses does have a real
+  // tenant_id column) and scope the analysis query to that set.
+  const responseRows = await fetchAllRows<{ id: string }>((from, to) =>
+    supabase.from('survey_responses').select('id').eq('tenant_id', tenantId).range(from, to),
+  )
+  if (!responseRows.length) return
+  const responseIds = responseRows.map(r => r.id)
+
+  const analyses = await fetchAllRows<{ id: string; themes: string[]; response_id: string }>((from, to) =>
+    supabase
+      .from('survey_response_analysis').select('id, themes, response_id')
+      .eq('sentiment', 'negative').eq('urgency', 'high')
+      .gte('analyzed_at', thirtyAgo.toISOString())
+      .in('response_id', responseIds)
+      .range(from, to),
+  )
+  if (!analyses.length) return
 
   const week = `W${String(Math.ceil(new Date().getDate() / 7)).padStart(2, '0')}`
 
