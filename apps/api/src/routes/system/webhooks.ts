@@ -54,6 +54,25 @@ function isAdmin(role: string): boolean {
   return (HR_ADMIN_ROLES as readonly string[]).includes(role)
 }
 
+// Custom outbound headers (webhooks.headers, migration 091) commonly carry a
+// destination Authorization/X-Api-Key value when the built-in HMAC secret
+// mechanism doesn't fit the receiving vendor — mask the same way
+// attendance/api-sources.ts redacts extra_headers, rather than passing them
+// through in full on every read.
+function redactHeaders(headers: Record<string, unknown> | null | undefined): Record<string, unknown> {
+  if (!headers) return {}
+  const redacted: Record<string, unknown> = {}
+  for (const [k, v] of Object.entries(headers)) {
+    const lower = k.toLowerCase()
+    if (lower.includes('key') || lower.includes('password') || lower.includes('secret') || lower.includes('token') || lower.includes('authoriz')) {
+      redacted[k] = typeof v === 'string' && v.length > 4 ? `${v.slice(0, 2)}${'*'.repeat(Math.min(v.length - 4, 8))}${v.slice(-2)}` : '***'
+    } else {
+      redacted[k] = v
+    }
+  }
+  return redacted
+}
+
 // ── Plugin ────────────────────────────────────────────────────────────────────
 
 export default async function webhooksRoutes(fastify: FastifyInstance) {
@@ -95,7 +114,7 @@ export default async function webhooksRoutes(fastify: FastifyInstance) {
     // Never re-serialize the HMAC signing secret, even to an admin — it's
     // write-only once set (same pattern as an API key), and this is the
     // secret used to sign every outbound webhook payload.
-    const safeData = (data ?? []).map(({ secret, ...w }: any) => w)
+    const safeData = (data ?? []).map(({ secret, headers, ...w }: any) => ({ ...w, headers: redactHeaders(headers) }))
     return reply.send({ data: safeData, total: count ?? 0, limit })
   })
 
@@ -129,11 +148,12 @@ export default async function webhooksRoutes(fastify: FastifyInstance) {
     }
 
     // Never re-serialize the HMAC signing secret — see GET / above.
-    const { secret, ...safeWebhook } = webhook as any
+    const { secret, headers, ...safeWebhook } = webhook as any
 
     return reply.send({
       data: {
         ...safeWebhook,
+        headers:           redactHeaders(headers),
         recent_deliveries: deliveries ?? [],
       },
     })
@@ -186,7 +206,12 @@ export default async function webhooksRoutes(fastify: FastifyInstance) {
       return reply.code(500).send({ error: 'INSERT_FAILED', message: 'Failed to create webhook' })
     }
 
-    return reply.code(201).send({ data })
+    // Never re-serialize the HMAC signing secret — see GET / above. The
+    // caller just set it in this same request, so they already know it;
+    // echoing it back in the response is unnecessary exposure (state,
+    // network logs, browser devtools history).
+    const { secret: _secret, headers: rowHeaders, ...safeData } = data as any
+    return reply.code(201).send({ data: { ...safeData, headers: redactHeaders(rowHeaders) } })
   })
 
   // ── PUT /system/webhooks/:id ──────────────────────────────────────────────
@@ -233,7 +258,9 @@ export default async function webhooksRoutes(fastify: FastifyInstance) {
       return reply.code(404).send({ error: 'NOT_FOUND', message: 'Webhook not found' })
     }
 
-    return reply.send({ data })
+    // Never re-serialize the HMAC signing secret — see GET / above.
+    const { secret: _secret, headers: rowHeaders, ...safeData } = data as any
+    return reply.send({ data: { ...safeData, headers: redactHeaders(rowHeaders) } })
   })
 
   // ── DELETE /system/webhooks/:id ───────────────────────────────────────────
