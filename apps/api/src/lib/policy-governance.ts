@@ -422,11 +422,15 @@ export async function rollbackPolicyToVersion(
   const rules = snapshot.rules_snapshot as Array<Record<string, unknown>>
   if (rules.length > 0) {
     // Delete existing rules
-    await supabase
+    const { error: deleteErr } = await supabase
       .from('leave_policy_rules')
       .delete()
       .eq('tenant_id', tenantId)
       .eq('policy_id', policyId)
+
+    if (deleteErr) {
+      return { success: false, error: `Rollback left the policy in an inconsistent state: failed to clear existing rules (${deleteErr.message}).` }
+    }
 
     // Re-insert rules from snapshot (omit id to generate new UUIDs)
     const restored = rules.map(r => ({
@@ -438,7 +442,10 @@ export async function rollbackPolicyToVersion(
       updated_at: new Date().toISOString(),
     }))
 
-    await supabase.from('leave_policy_rules').insert(restored)
+    const { error: insertErr } = await supabase.from('leave_policy_rules').insert(restored)
+    if (insertErr) {
+      return { success: false, error: `Rollback left the policy with zero rules: failed to restore rules from snapshot (${insertErr.message}).` }
+    }
   }
 
   // Log rollback

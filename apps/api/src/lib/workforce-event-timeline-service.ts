@@ -29,6 +29,7 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { fetchAllRows } from './supabase-paginate.js'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -219,15 +220,18 @@ export async function getTimelineEventCounts(
   fromDate:   string,
   toDate:     string,
 ): Promise<Record<WorkforceEventType, number>> {
-  const { data } = await supabase
-    .from('workforce_event_timeline')
-    .select('event_type')
-    .eq('tenant_id',  tenantId)
-    .gte('event_date', fromDate)
-    .lte('event_date', toDate)
+  const data = await fetchAllRows<{ event_type: string }>((from, to) =>
+    supabase
+      .from('workforce_event_timeline')
+      .select('event_type')
+      .eq('tenant_id',  tenantId)
+      .gte('event_date', fromDate)
+      .lte('event_date', toDate)
+      .range(from, to) as any,
+  )
 
   const counts: Record<string, number> = {}
-  for (const row of (data ?? []) as { event_type: string }[]) {
+  for (const row of data) {
     counts[row.event_type] = (counts[row.event_type] ?? 0) + 1
   }
   return counts as Record<WorkforceEventType, number>

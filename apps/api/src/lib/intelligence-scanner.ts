@@ -902,7 +902,7 @@ async function scanBenefitsEnrolment(supabase: SupabaseClient, tenantId: string)
   for (const plan of (toOpen ?? []) as any[]) {
     const key = `benefits-enrolment-open:${tenantId}:${plan.id}`
     if (!shouldEmit(key)) continue
-    const { error: openErr } = await supabase.from('benefit_plans').update({ status: 'open' }).eq('id', plan.id)
+    const { error: openErr } = await supabase.from('benefit_plans').update({ status: 'open' }).eq('id', plan.id).eq('tenant_id', tenantId)
     if (openErr) {
       // Don't tell HR/employees enrolment opened if the status write failed —
       // the portal's actual enrolment gate never changed.
@@ -925,7 +925,7 @@ async function scanBenefitsEnrolment(supabase: SupabaseClient, tenantId: string)
   for (const plan of (toClose ?? []) as any[]) {
     const key = `benefits-enrolment-close:${tenantId}:${plan.id}`
     if (!shouldEmit(key)) continue
-    const { error: closeErr } = await supabase.from('benefit_plans').update({ status: 'active' }).eq('id', plan.id)
+    const { error: closeErr } = await supabase.from('benefit_plans').update({ status: 'active' }).eq('id', plan.id).eq('tenant_id', tenantId)
     if (closeErr) {
       // Same reasoning as the open branch above — don't send a misleading
       // "enrolment closed" notification if the status write failed.
@@ -1147,11 +1147,11 @@ async function scanOnboardingDegradation(supabase: SupabaseClient, tenantId: str
     // Get avg scores from survey_responses via assignments
     const { data: d30Responses } = await supabase
       .from('survey_responses').select('response_value')
-      .eq('employee_id', empId).eq('response_type', 'rating')
+      .eq('tenant_id', tenantId).eq('employee_id', empId).eq('response_type', 'rating')
       .in('survey_type', ['onboarding_d30'])
     const { data: d60Responses } = await supabase
       .from('survey_responses').select('response_value')
-      .eq('employee_id', empId).eq('response_type', 'rating')
+      .eq('tenant_id', tenantId).eq('employee_id', empId).eq('response_type', 'rating')
       .in('survey_type', ['onboarding_d60'])
 
     if (!d30Responses?.length || !d60Responses?.length) continue
@@ -1200,15 +1200,15 @@ async function scanSuccessionAttritionRisk(supabase: SupabaseClient, tenantId: s
 
     // Set attrition_risk_flag
     await supabase.from('succession_candidates')
-      .update({ attrition_risk_flag: true }).eq('id', candidate.id)
+      .update({ attrition_risk_flag: true }).eq('id', candidate.id).eq('tenant_id', tenantId)
 
     await notifyHrAdmins(supabase, {
       tenantId, item_type: 'general', severity: 'warning',
       title:    `Succession Risk: Ready-Now candidate shows high attrition risk`,
-      summary:  `Candidate ${candidate.employee_id} (succession plan ${candidate.succession_plan_id}) has mood avg of ${avg.toFixed(1)}/5 over last 3 months — at risk of leaving.`,
+      summary:  `Candidate ${candidate.employee_id} (succession plan ${candidate.plan_id}) has mood avg of ${avg.toFixed(1)}/5 over last 3 months — at risk of leaving.`,
       entity_type: 'succession_candidate', entity_id: candidate.id,
       action_route: '/admin/succession', action_label: 'View Succession Plans',
-      metadata: { employee_id: candidate.employee_id, mood_avg: avg, plan_id: candidate.succession_plan_id },
+      metadata: { employee_id: candidate.employee_id, mood_avg: avg, plan_id: candidate.plan_id },
     })
   }
 }

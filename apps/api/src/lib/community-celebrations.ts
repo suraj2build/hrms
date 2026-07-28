@@ -17,6 +17,8 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { fetchAllRows } from './supabase-paginate.js'
+import { fetchTenantTz } from './attendance-engine.js'
+import { getLocalDate, localDayBoundsUtc } from './org-context.js'
 
 interface EmpRow {
   id: string
@@ -40,10 +42,14 @@ function isAnniversaryToday(iso: string, m: number, d: number): boolean {
  */
 export async function ensureTodaysCelebrations(supabase: SupabaseClient, tenantId: string): Promise<number> {
   try {
-    const now  = new Date()
-    const m    = now.getMonth()
-    const d    = now.getDate()
-    const year = now.getFullYear()
+    // Tenant-local "today" — never the server process's own clock/TZ (same bug
+    // class already fixed in absconding-engine.ts / compliance-calendar.ts).
+    const tz = await fetchTenantTz(supabase, tenantId)
+    const todayStr = getLocalDate(new Date().toISOString(), tz)
+    const [yearStr, monthStr, dayStr] = todayStr.split('-')
+    const year = Number(yearStr)
+    const m    = Number(monthStr) - 1   // isAnniversaryToday expects getMonth()-style 0-indexed month
+    const d    = Number(dayStr)
 
     // .limit(2000) previously relied on the server never capping below 2000 —
     // fetchAllRows is correct at any server-side row cap.
@@ -65,7 +71,7 @@ export async function ensureTodaysCelebrations(supabase: SupabaseClient, tenantI
     if (!birthdays.length && !anniversaries.length) return 0
 
     // What already exists today (system posts only) → skip duplicates.
-    const startOfDay = new Date(year, m, d, 0, 0, 0, 0).toISOString()
+    const { startUtc: startOfDay } = localDayBoundsUtc(todayStr, tz)
     const { data: existing } = await supabase
       .from('feed_posts')
       .select('type, subject_employee')

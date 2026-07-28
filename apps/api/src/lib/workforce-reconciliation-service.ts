@@ -44,6 +44,7 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { fetchAllRows } from './supabase-paginate.js'
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -382,14 +383,16 @@ async function checkAttendancePayrollMismatch(
   const yearEnd   = `${reconcileYear}-12-31`
 
   // Find employees with finalized attendance in this year
-  const { data: finalizedStates } = await supabase
-    .from('attendance_processing_states')
-    .select('employee_id, work_date')
-    .eq('tenant_id', tenantId)
-    .eq('state', 'finalized')
-    .gte('work_date', yearStart)
-    .lte('work_date', yearEnd)
-    .limit(1000)
+  const finalizedStates = await fetchAllRows<{ employee_id: string; work_date: string }>((from, to) =>
+    supabase
+      .from('attendance_processing_states')
+      .select('employee_id, work_date')
+      .eq('tenant_id', tenantId)
+      .eq('state', 'finalized')
+      .gte('work_date', yearStart)
+      .lte('work_date', yearEnd)
+      .range(from, to),
+  )
 
   if (!finalizedStates?.length) return
 
