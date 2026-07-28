@@ -28,6 +28,8 @@ import { durableQueue }         from '../../lib/durable-queue.js'
 import { platformHealth }       from '../../lib/startup-health.js'
 import { serverError, ErrorCode } from '../../lib/api-errors.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { fetchTenantTz } from '../../lib/attendance-engine.js'
+import { getLocalDate }  from '../../lib/org-context.js'
 
 export default async function operationalHealthRoutes(fastify: FastifyInstance) {
   const auth = { preHandler: [fastify.authenticate] }
@@ -96,9 +98,15 @@ export default async function operationalHealthRoutes(fastify: FastifyInstance) 
 
     const tenantId = req.tenantId as string
     const now      = new Date()
-    const monthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
-    const prevDate = new Date(now.getFullYear(), now.getMonth() - 1, 1)
-    const prevMonth= `${prevDate.getFullYear()}-${String(prevDate.getMonth() + 1).padStart(2, '0')}`
+    // Tenant-local "current month", not the server's (UTC) clock — otherwise
+    // near local midnight at month start this looks up payroll_runs for the
+    // wrong month (ISSUE-154 class).
+    const tz       = await fetchTenantTz(fastify.supabase, tenantId)
+    const todayStr = getLocalDate(now.toISOString(), tz)
+    const [curY, curM] = todayStr.slice(0, 7).split('-').map(Number)
+    const monthKey = todayStr.slice(0, 7)
+    const prevDate = new Date(Date.UTC(curY, curM - 2, 1, 12))
+    const prevMonth= prevDate.toISOString().slice(0, 7)
 
     // Run all probes in parallel — each wrapped in a catch so one failure
     // doesn't take down the whole dashboard response.

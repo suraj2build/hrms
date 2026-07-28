@@ -175,15 +175,19 @@ async function fetchPayrollRegisterRows(
   // ── 1. Resolve payroll run ───────────────────────────────────────────────
   let runRow: any = null
   if (run_id) {
-    const { data } = await supabase
+    const { data, error: runErr } = await supabase
       .from('payroll_runs')
       .select('id, month, status, total_gross, total_net, total_deductions, total_lop_amount, employee_count, finalized_at, created_at')
       .eq('id', run_id)
       .eq('tenant_id', tenantId)
       .single()
+    if (runErr && runErr.code !== 'PGRST116') {
+      logger?.error({ err: runErr, run_id }, 'payroll-register: run lookup failed')
+      return { rows: [], runRow: null, error: 'Failed to fetch payroll run' }
+    }
     runRow = data
   } else {
-    const { data } = await supabase
+    const { data, error: runErr } = await supabase
       .from('payroll_runs')
       .select('id, month, status, total_gross, total_net, total_deductions, total_lop_amount, employee_count, finalized_at, created_at')
       .eq('tenant_id', tenantId)
@@ -191,6 +195,10 @@ async function fetchPayrollRegisterRows(
       .order('created_at', { ascending: false })
       .limit(1)
       .maybeSingle()
+    if (runErr) {
+      logger?.error({ err: runErr, month }, 'payroll-register: run lookup failed')
+      return { rows: [], runRow: null, error: 'Failed to fetch payroll run' }
+    }
     runRow = data
   }
   if (!runRow) return { rows: [], runRow: null }
@@ -245,11 +253,18 @@ async function fetchPayrollRegisterRows(
     const ID_CHUNK = 200
     const bankRows: unknown[] = []
     for (let i = 0; i < employeeIds.length; i += ID_CHUNK) {
-      const { data } = await supabase
+      const { data, error: bankErr } = await supabase
         .from('employee_bank_statutory')
         .select('employee_id, bank_name, account_number, ifsc_code, branch_name, account_type')
         .eq('tenant_id', tenantId)
         .in('employee_id', employeeIds.slice(i, i + ID_CHUNK))
+      // A failed chunk must not be silently treated as "no bank record" — that
+      // fabricates a MISSING_BANK flag on this finance-facing disbursement
+      // register for employees whose bank details actually exist.
+      if (bankErr) {
+        logger?.error({ err: bankErr, run_id: runRow.id }, 'payroll-register: bank details query failed')
+        return { rows: [], runRow, error: 'Failed to fetch employee bank details' }
+      }
       if (data) bankRows.push(...data)
     }
 
