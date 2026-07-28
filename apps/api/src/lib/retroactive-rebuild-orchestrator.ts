@@ -310,31 +310,47 @@ export async function markRebuildFailed(
   queueId:   string,
   errorMsg:  string,
 ): Promise<{ willRetry: boolean }> {
-  // Fetch current retry state
-  const { data: current } = await supabase
-    .from('retroactive_rebuild_queue')
-    .select('retry_count, max_retries')
-    .eq('id',        queueId)
-    .eq('tenant_id', tenantId)
-    .maybeSingle()
+  // Read-modify-write on retry_count is a lost-update race: two concurrent
+  // failure callbacks for the same queue row (e.g. an at-least-once retry
+  // delivery of the same worker job) would both read the same retry_count,
+  // each compute +1, and the loser's write clobbers the winner's — under-
+  // counting retries and letting a chronically-failing rebuild retry past
+  // its intended max_retries ceiling. Retry with updated_at as an
+  // optimistic-concurrency token.
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const { data: current } = await supabase
+      .from('retroactive_rebuild_queue')
+      .select('retry_count, max_retries, updated_at')
+      .eq('id',        queueId)
+      .eq('tenant_id', tenantId)
+      .maybeSingle()
 
-  const retryCount = ((current as any)?.retry_count ?? 0) + 1
-  const maxRetries = (current as any)?.max_retries ?? 3
-  const willRetry  = retryCount < maxRetries
+    if (!current) return { willRetry: false }
 
-  await supabase
-    .from('retroactive_rebuild_queue')
-    .update({
-      status:      willRetry ? 'pending' : 'failed',
-      retry_count: retryCount,
-      last_error:  errorMsg,
-      started_at:  null,           // reset so it can be picked up again
-      updated_at:  new Date().toISOString(),
-    })
-    .eq('id',        queueId)
-    .eq('tenant_id', tenantId)
+    const retryCount = ((current as any).retry_count ?? 0) + 1
+    const maxRetries = (current as any).max_retries ?? 3
+    const willRetry  = retryCount < maxRetries
 
-  return { willRetry }
+    const { data: updated } = await supabase
+      .from('retroactive_rebuild_queue')
+      .update({
+        status:      willRetry ? 'pending' : 'failed',
+        retry_count: retryCount,
+        last_error:  errorMsg,
+        started_at:  null,           // reset so it can be picked up again
+        updated_at:  new Date().toISOString(),
+      })
+      .eq('id',         queueId)
+      .eq('tenant_id',  tenantId)
+      .eq('updated_at', (current as any).updated_at)
+      .select('id')
+      .maybeSingle()
+
+    if (!updated) continue  // row changed concurrently — retry with fresh state
+    return { willRetry }
+  }
+
+  return { willRetry: false }
 }
 
 /**

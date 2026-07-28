@@ -482,56 +482,72 @@ export async function orchestrateWorkforceEvent(
  * Advances the chain: checks if all downstream modules have completed,
  * and marks the workforce_rebuild_events row as completed if so.
  */
+const REBUILD_STEP_UPDATE_ATTEMPTS = 5
+
 export async function markRebuildStepCompleted(
   supabase:               SupabaseClient,
   tenantId:               string,
   orchestratorLineageId:  string,
   completedModule:        string,
 ): Promise<void> {
-  // Fetch the rebuild event for this lineage
-  const { data: event } = await supabase
-    .from('workforce_rebuild_events')
-    .select('id, downstream_modules, completed_modules, failed_modules')
-    .eq('tenant_id',               tenantId)
-    .eq('orchestrator_lineage_id', orchestratorLineageId)
-    .maybeSingle()
+  // Read-modify-write on completed_modules is a lost-update race: two
+  // module processors for the same lineage completing concurrently would
+  // both read the same array and each write back a version missing the
+  // other's module. Retry with updated_at as an optimistic-concurrency
+  // token — the UPDATE only lands if no one else touched the row since we
+  // read it; on conflict, re-read the (now newer) state and retry.
+  for (let attempt = 0; attempt < REBUILD_STEP_UPDATE_ATTEMPTS; attempt++) {
+    const { data: event } = await supabase
+      .from('workforce_rebuild_events')
+      .select('id, downstream_modules, completed_modules, failed_modules, updated_at')
+      .eq('tenant_id',               tenantId)
+      .eq('orchestrator_lineage_id', orchestratorLineageId)
+      .maybeSingle()
 
-  if (!event) return
+    if (!event) return
 
-  const row = event as {
-    id:                string
-    downstream_modules: string[]
-    completed_modules:  string[]
-    failed_modules:     string[]
-  }
+    const row = event as {
+      id:                string
+      downstream_modules: string[]
+      completed_modules:  string[]
+      failed_modules:     string[]
+      updated_at:         string
+    }
 
-  const newCompleted = [...new Set([...row.completed_modules, completedModule])]
-  const allDone      = row.downstream_modules.every(m => newCompleted.includes(m))
-  const hasFailed    = row.failed_modules.length > 0
+    const newCompleted = [...new Set([...row.completed_modules, completedModule])]
+    const allDone      = row.downstream_modules.every(m => newCompleted.includes(m))
+    const hasFailed    = row.failed_modules.length > 0
 
-  await supabase
-    .from('workforce_rebuild_events')
-    .update({
-      completed_modules:    newCompleted,
-      orchestration_status: allDone
-        ? (hasFailed ? 'failed' : 'completed')
-        : 'in_progress',
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id',        row.id)
-    .eq('tenant_id', tenantId)
+    const { data: updated } = await supabase
+      .from('workforce_rebuild_events')
+      .update({
+        completed_modules:    newCompleted,
+        orchestration_status: allDone
+          ? (hasFailed ? 'failed' : 'completed')
+          : 'in_progress',
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id',         row.id)
+      .eq('tenant_id',  tenantId)
+      .eq('updated_at', row.updated_at)
+      .select('id')
+      .maybeSingle()
 
-  // Record completion in timeline
-  if (allDone) {
-    await recordWorkforceEvent(supabase, {
-      tenantId,
-      eventType:              'retroactive_rebuild_completed',
-      eventDate:              new Date().toISOString().slice(0, 10),
-      sourceModule:           'orchestrator',
-      orchestratorLineageId,
-      rebuildEventId:         row.id,
-      payload:                { completed_modules: newCompleted, failed_modules: row.failed_modules },
-    })
+    if (!updated) continue  // row changed concurrently — retry with fresh state
+
+    // Record completion in timeline
+    if (allDone) {
+      await recordWorkforceEvent(supabase, {
+        tenantId,
+        eventType:              'retroactive_rebuild_completed',
+        eventDate:              new Date().toISOString().slice(0, 10),
+        sourceModule:           'orchestrator',
+        orchestratorLineageId,
+        rebuildEventId:         row.id,
+        payload:                { completed_modules: newCompleted, failed_modules: row.failed_modules },
+      })
+    }
+    return
   }
 }
 
@@ -545,27 +561,37 @@ export async function markRebuildStepFailed(
   failedModule:           string,
   errorMessage:           string,
 ): Promise<void> {
-  const { data: event } = await supabase
-    .from('workforce_rebuild_events')
-    .select('id, failed_modules')
-    .eq('tenant_id',               tenantId)
-    .eq('orchestrator_lineage_id', orchestratorLineageId)
-    .maybeSingle()
+  // Same lost-update race as markRebuildStepCompleted above — retry with
+  // updated_at as an optimistic-concurrency token.
+  for (let attempt = 0; attempt < REBUILD_STEP_UPDATE_ATTEMPTS; attempt++) {
+    const { data: event } = await supabase
+      .from('workforce_rebuild_events')
+      .select('id, failed_modules, updated_at')
+      .eq('tenant_id',               tenantId)
+      .eq('orchestrator_lineage_id', orchestratorLineageId)
+      .maybeSingle()
 
-  if (!event) return
+    if (!event) return
 
-  const row = event as { id: string; failed_modules: string[] }
-  const newFailed = [...new Set([...row.failed_modules, failedModule])]
+    const row = event as { id: string; failed_modules: string[]; updated_at: string }
+    const newFailed = [...new Set([...row.failed_modules, failedModule])]
 
-  await supabase
-    .from('workforce_rebuild_events')
-    .update({
-      failed_modules:       newFailed,
-      orchestration_status: 'failed',
-      updated_at:           new Date().toISOString(),
-    })
-    .eq('id',        row.id)
-    .eq('tenant_id', tenantId)
+    const { data: updated } = await supabase
+      .from('workforce_rebuild_events')
+      .update({
+        failed_modules:       newFailed,
+        orchestration_status: 'failed',
+        updated_at:           new Date().toISOString(),
+      })
+      .eq('id',         row.id)
+      .eq('tenant_id',  tenantId)
+      .eq('updated_at', row.updated_at)
+      .select('id')
+      .maybeSingle()
+
+    if (!updated) continue  // row changed concurrently — retry with fresh state
+    return
+  }
 }
 
 /**
