@@ -196,14 +196,21 @@ export async function scan(supabase: SupabaseClient): Promise<void> {
     await autoAdvanceStaleInstances(supabase, tenantId, hrProfileIds).catch(() => void 0)
 
     // ── 1. Overdue leave requests ──────────────────────────────────────────────
-    const { data: overLeave } = await supabase
-      .from('leave_requests')
-      .select('id, employee_id, created_at, employees(first_name, last_name)')
-      .eq('tenant_id', tenantId)
-      .eq('status', 'PENDING')
-      .lt('created_at', cutoffLeave)
+    // fetchAllRows: a tenant with an approval backlog can exceed 1,000
+    // simultaneously-overdue rows, past which the plain-select form silently
+    // dropped the excess from SLA-breach notification (same as the ticket
+    // queries below, which already use fetchAllRows).
+    const overLeave = await fetchAllRows<any>((from, to) =>
+      supabase
+        .from('leave_requests')
+        .select('id, employee_id, created_at, employees(first_name, last_name)')
+        .eq('tenant_id', tenantId)
+        .eq('status', 'PENDING')
+        .lt('created_at', cutoffLeave)
+        .range(from, to),
+    ).catch(() => [] as any[])
 
-    for (const row of (overLeave ?? [])) {
+    for (const row of overLeave) {
       const dedupeKey = `leave:${row.id}`
       if (notifiedIds.has(dedupeKey)) continue
 
@@ -238,14 +245,17 @@ export async function scan(supabase: SupabaseClient): Promise<void> {
     }
 
     // ── 2. Overdue correction requests ─────────────────────────────────────────
-    const { data: overCorr } = await supabase
-      .from('attendance_regularisation')
-      .select('id, employee_id, created_at, employees(first_name, last_name)')
-      .eq('tenant_id', tenantId)
-      .eq('status', 'pending')
-      .lt('created_at', cutoffCorrection)
+    const overCorr = await fetchAllRows<any>((from, to) =>
+      supabase
+        .from('attendance_regularisation')
+        .select('id, employee_id, created_at, employees(first_name, last_name)')
+        .eq('tenant_id', tenantId)
+        .eq('status', 'pending')
+        .lt('created_at', cutoffCorrection)
+        .range(from, to),
+    ).catch(() => [] as any[])
 
-    for (const row of (overCorr ?? [])) {
+    for (const row of overCorr) {
       const dedupeKey = `correction:${row.id}`
       if (notifiedIds.has(dedupeKey)) continue
 
