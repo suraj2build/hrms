@@ -217,10 +217,11 @@ function EditConfigDialog({
   const [error, setError] = useState('')
 
   const mutation = useMutation({
-    mutationFn: () => api.put('/payroll/statutory/esi/config', {
-      ...form,
-      effective_from: new Date().toISOString().slice(0, 10),
-    }),
+    mutationFn: () => {
+      const d = new Date()
+      const effectiveFrom = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+      return api.put('/payroll/statutory/esi/config', { ...form, effective_from: effectiveFrom })
+    },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['esi-config'] })
       toast.success('ESI configuration updated')

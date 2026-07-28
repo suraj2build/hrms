@@ -266,7 +266,8 @@ export function PayrollFinalizationCenter() {
   const pfActualCount   = epfContribs.filter(r => r.is_capped === false).length
 
   // ESI continuation: rows where continuation_until is set and >= today
-  const today = new Date().toISOString().slice(0, 10)
+  const todayDate = new Date()
+  const today = `${todayDate.getFullYear()}-${String(todayDate.getMonth() + 1).padStart(2, '0')}-${String(todayDate.getDate()).padStart(2, '0')}`
   const esiContinuationCount = esiEligRows.filter(
     r => r.continuation_until && r.continuation_until >= today,
   ).length
