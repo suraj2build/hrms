@@ -13,6 +13,8 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { computeTaxWithDB } from '../../../lib/statutory/tax-computation-engine.js'
 import { HR_ADMIN_ROLES } from '../../../lib/rbac.js'
+import { fetchTenantTz } from '../../../lib/attendance-engine.js'
+import { getLocalDate } from '../../../lib/org-context.js'
 
 // ── Admin guard ───────────────────────────────────────────────────────────────
 
@@ -26,21 +28,30 @@ function requireHrAdmin(req: any, reply: any, done: () => void) {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function currentFinancialYear(): string {
-  const now = new Date()
-  const fyYear = now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1
+// Resolve "today" in the tenant's own timezone, not the server's (UTC) clock —
+// at e.g. 00:15 IST on the 1st, the server's UTC clock still reads the last
+// day of the previous month, which shifted the FY/remaining-months math by a
+// day right at every month boundary. Matches the same fix already applied to
+// tds.ts / tds-plans.ts (ISSUE-154 class).
+async function tenantTodayStr(fastify: FastifyInstance, tenantId: string): Promise<string> {
+  const tz = await fetchTenantTz(fastify.supabase, tenantId)
+  return getLocalDate(new Date().toISOString(), tz)
+}
+
+function currentFinancialYear(todayStr: string): string {
+  const [y, m] = todayStr.split('-').map(Number)
+  const fyYear = m >= 4 ? y : y - 1
   return `${fyYear}-${String(fyYear + 1).slice(2)}`
 }
 
-function remainingMonthsInFY(financialYear: string): number {
+function remainingMonthsInFY(financialYear: string, todayStr: string): number {
   const fyStart = parseInt(financialYear.split('-')[0], 10)
   const fromPeriod = `${fyStart}-04`
   const toPeriod   = `${fyStart + 1}-03`
   const fyMonths: string[] = []
   for (let m = 4; m <= 12; m++) fyMonths.push(`${fyStart}-${String(m).padStart(2, '0')}`)
   for (let m = 1; m <= 3;  m++) fyMonths.push(`${fyStart + 1}-${String(m).padStart(2, '0')}`)
-  const now = new Date()
-  const currentMonthStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+  const currentMonthStr = todayStr.slice(0, 7)
   // The "current month" must be interpreted relative to the REQUESTED FY, not
   // raw today. For a future FY all months remain; for a past/closed FY spread the
   // balance across the whole FY rather than dumping it into a single month (the
@@ -67,6 +78,7 @@ async function buildITStatement(
   tenantId: string,
   employeeId: string,
   financialYear: string,
+  todayStr: string,
   finalizedOnly: boolean = true,
 ): Promise<any> {
   const fyStart  = parseInt(financialYear.split('-')[0], 10)
@@ -201,13 +213,14 @@ async function buildITStatement(
 
   const get = (key: string) => approvedBySection[key] ?? 0
 
-  const remaining = remainingMonthsInFY(financialYear)
+  const remaining = remainingMonthsInFY(financialYear, todayStr)
 
   // ── Run tax computation ────────────────────────────────────────────────────
   const taxResult = await computeTaxWithDB(fastify.supabase, {
     grossAnnualIncome: projectedAnnualGross,
     regime,
     financialYear,
+    todayStr,
     deductions: {
       section80C:             get('80C'),
       section80CCD1B:         get('NPS'),
@@ -351,11 +364,12 @@ export default async function itStatementRoute(fastify: FastifyInstance) {
       return reply.code(403).send({ error: 'PROFILE_NOT_LINKED', message: 'Your profile is not linked to an employee record' })
     }
 
+    const todayStr = await tenantTodayStr(fastify, req.tenantId)
     const qs = z.object({ financial_year: z.string().optional() }).safeParse(req.query)
-    const fy = qs.data?.financial_year ?? currentFinancialYear()
+    const fy = qs.data?.financial_year ?? currentFinancialYear(todayStr)
 
     try {
-      const statement = await buildITStatement(fastify, req.tenantId, employeeId, fy)
+      const statement = await buildITStatement(fastify, req.tenantId, employeeId, fy, todayStr)
       return reply.send(statement)
     } catch (err: any) {
       if (err.message === 'Employee not found') {
@@ -378,11 +392,12 @@ export default async function itStatementRoute(fastify: FastifyInstance) {
       // false → finalized-only, matching what the employee sees.
       include_unfinalized: z.coerce.boolean().optional(),
     }).safeParse(req.query)
-    const fy = qs.data?.financial_year ?? currentFinancialYear()
+    const todayStr = await tenantTodayStr(fastify, req.tenantId)
+    const fy = qs.data?.financial_year ?? currentFinancialYear(todayStr)
     const finalizedOnly = !(qs.data?.include_unfinalized ?? false)
 
     try {
-      const statement = await buildITStatement(fastify, req.tenantId, employeeId, fy, finalizedOnly)
+      const statement = await buildITStatement(fastify, req.tenantId, employeeId, fy, todayStr, finalizedOnly)
       return reply.send(statement)
     } catch (err: any) {
       if (err.message === 'Employee not found') {
