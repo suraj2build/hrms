@@ -184,7 +184,7 @@ export async function logJobEnd(
     const startedAt = existing ? new Date((existing as any).started_at) : now
     const durationMs = now.getTime() - startedAt.getTime()
 
-    await supabase
+    const { error } = await supabase
       .from('scheduler_job_log')
       .update({
         status:          result.status,
@@ -195,6 +195,8 @@ export async function logJobEnd(
         meta:            result.meta           ?? {},
       })
       .eq('id', jobId)
+
+    if (error) console.warn('[notify] logJobEnd update failed', { jobId, error: error.message })
   } catch {
     // Non-throwing
   }

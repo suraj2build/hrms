@@ -106,6 +106,7 @@ export function registerEventBusAutomation(supabase: SupabaseClient): void {
         .from('leave_requests')
         .select('created_at, approved_at')
         .eq('id', leaveId)
+        .eq('tenant_id', tenantId)
         .maybeSingle()
 
       if (app?.created_at && app?.approved_at) {
@@ -155,6 +156,7 @@ export function registerEventBusAutomation(supabase: SupabaseClient): void {
         .from('leave_requests')
         .select('created_at, approved_at')
         .eq('id', leaveId)
+        .eq('tenant_id', tenantId)
         .maybeSingle()
 
       if (app?.created_at && app?.approved_at) {
@@ -191,6 +193,7 @@ export function registerEventBusAutomation(supabase: SupabaseClient): void {
         .from('attendance_regularisation')
         .select('created_at, approved_at')
         .eq('id', correctionId)
+        .eq('tenant_id', tenantId)
         .maybeSingle()
 
       if (corr?.created_at && corr?.approved_at) {
@@ -342,7 +345,6 @@ export function registerEventBusAutomation(supabase: SupabaseClient): void {
           .select('id')
           .eq('tenant_id', tenantId)
           .in('role', ['super_admin', 'hr_admin'])
-          .limit(3)
 
         for (const hr of (hrs ?? [])) {
           await supabase.from('notifications').insert({
@@ -403,7 +405,6 @@ export function registerEventBusAutomation(supabase: SupabaseClient): void {
           .select('id')
           .eq('tenant_id', tenantId)
           .in('role', ['super_admin', 'hr_admin'])
-          .limit(3)
 
         for (const hr of (hrs ?? [])) {
           await supabase.from('notifications').insert({
@@ -444,7 +445,6 @@ export function registerEventBusAutomation(supabase: SupabaseClient): void {
           .select('id')
           .eq('tenant_id', tenantId)
           .in('role', ['super_admin', 'hr_admin'])
-          .limit(3)
 
         for (const hr of (hrs ?? [])) {
           await supabase.from('notifications').insert({
@@ -520,7 +520,6 @@ export function registerEventBusAutomation(supabase: SupabaseClient): void {
           .select('id')
           .eq('tenant_id', tenantId)
           .in('role', ['super_admin', 'hr_admin'])
-          .limit(3)
 
         for (const hr of (hrs ?? [])) {
           await supabase.from('notifications').insert({
@@ -619,7 +618,6 @@ export function registerEventBusAutomation(supabase: SupabaseClient): void {
           .select('id')
           .eq('tenant_id', tenantId)
           .in('role', ['super_admin', 'hr_admin'])
-          .limit(3)
 
         for (const hr of (hrs ?? [])) {
           await supabase.from('notifications').insert({
@@ -661,7 +659,6 @@ export function registerEventBusAutomation(supabase: SupabaseClient): void {
         .select('id')
         .eq('tenant_id', tenantId)
         .in('role', ['super_admin', 'hr_admin'])
-        .limit(3)
 
       for (const hr of (hrs ?? [])) {
         await supabase.from('notifications').insert({
@@ -702,7 +699,6 @@ export function registerEventBusAutomation(supabase: SupabaseClient): void {
           .select('id')
           .eq('tenant_id', tenantId)
           .in('role', ['super_admin', 'hr_admin'])
-          .limit(3)
 
         for (const hr of (hrs ?? [])) {
           await supabase.from('notifications').insert({
@@ -762,7 +758,6 @@ export function registerEventBusAutomation(supabase: SupabaseClient): void {
           .select('id')
           .eq('tenant_id', tenantId)
           .in('role', ['super_admin', 'hr_admin'])
-          .limit(3)
 
         for (const hr of (hrs ?? [])) {
           await supabase.from('notifications').insert({

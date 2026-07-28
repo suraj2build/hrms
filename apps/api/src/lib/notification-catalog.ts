@@ -137,11 +137,11 @@ export async function resolveNotificationVariables(
         values.employee_code = emp.employee_code ?? ''
         values.email         = emp.email ?? ''
         if (emp.department_id) {
-          const { data: d } = await supabase.from('departments').select('name').eq('id', emp.department_id).maybeSingle()
+          const { data: d } = await supabase.from('departments').select('name').eq('id', emp.department_id).eq('tenant_id', tenantId).maybeSingle()
           if ((d as any)?.name) values.department = (d as any).name
         }
         if (emp.designation_id) {
-          const { data: g } = await supabase.from('designations').select('name').eq('id', emp.designation_id).maybeSingle()
+          const { data: g } = await supabase.from('designations').select('name').eq('id', emp.designation_id).eq('tenant_id', tenantId).maybeSingle()
           if ((g as any)?.name) values.designation = (g as any).name
         }
       }
