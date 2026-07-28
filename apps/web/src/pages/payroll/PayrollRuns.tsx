@@ -2873,7 +2873,7 @@ export function PayrollRuns() {
               <Button
                 className="flex-1 h-9 text-sm gap-2"
                 disabled={triggerMutation.isPending || dryRunMutation.isPending || runMonth > todayYM}
-                onClick={() => triggerMutation.mutate()}
+                onClick={() => triggerMutation.mutate(undefined)}
               >
                 {triggerMutation.isPending
                   ? <><Loader2 className="h-4 w-4 animate-spin" />Processing…</>

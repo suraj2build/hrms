@@ -271,7 +271,7 @@ function InterestPanel({ role, onClose }: { role: TalentRole; onClose: () => voi
                       {emp?.employee_code && <span className="text-xs text-gray-400 ml-1">({emp.employee_code})</span>}
                     </p>
                     <div className="flex gap-2 flex-wrap mt-0.5">
-                      {emp?.designation?.name && <span className="text-xs text-gray-500">{emp.designation.name}</span>}
+                      {emp?.designation && <span className="text-xs text-gray-500">{emp.designation}</span>}
                       {emp?.department  && <span className="text-xs text-gray-400">· {emp.department}</span>}
                       {interest.availability && (
                         <span className="text-xs text-gray-400">· {AVAIL_LABELS[interest.availability] ?? interest.availability}</span>
