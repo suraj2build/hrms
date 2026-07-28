@@ -198,6 +198,17 @@ export default async function rosterCalendarRoutes(fastify: FastifyInstance) {
     const tenantId = req.tenantId as string
     const body     = req.body as Record<string, unknown>
 
+    // Fresh audit finding (cross-tenant IDOR): roster_id was accepted from the
+    // client with no tenant-ownership check, letting a caller attach a
+    // weekly-off rule to another tenant's roster — since roster_id is
+    // ON DELETE CASCADE, that other tenant deleting its own roster would
+    // silently cascade-delete this tenant's rule row as a side effect.
+    if (body.roster_id) {
+      const { data: roster } = await supabase
+        .from('rosters').select('id').eq('id', body.roster_id as string).eq('tenant_id', tenantId).maybeSingle()
+      if (!roster) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Roster not found in your organisation' })
+    }
+
     const { data, error } = await supabase
       .from('roster_weekly_off_rules')
       .insert({ ...body, tenant_id: tenantId })
@@ -212,6 +223,14 @@ export default async function rosterCalendarRoutes(fastify: FastifyInstance) {
     const { id }   = req.params as { id: string }
     const tenantId = req.tenantId as string
     const body     = req.body as Record<string, unknown>
+
+    // Same cross-tenant IDOR guard as POST above — roster_id can also be
+    // repointed via this update path.
+    if (body.roster_id) {
+      const { data: roster } = await supabase
+        .from('rosters').select('id').eq('id', body.roster_id as string).eq('tenant_id', tenantId).maybeSingle()
+      if (!roster) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Roster not found in your organisation' })
+    }
 
     const { data, error } = await supabase
       .from('roster_weekly_off_rules')
@@ -285,6 +304,14 @@ export default async function rosterCalendarRoutes(fastify: FastifyInstance) {
     const { id }   = req.params as { id: string }
     const tenantId = req.tenantId as string
     const body     = req.body as Record<string, unknown>
+
+    // Same cross-tenant IDOR guard as POST /shift-segments above — shift_id
+    // can also be repointed at another tenant's shift via this update path.
+    if (body.shift_id) {
+      const { data: shift } = await supabase
+        .from('shifts').select('id').eq('id', body.shift_id as string).eq('tenant_id', tenantId).maybeSingle()
+      if (!shift) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Shift not found in your organisation' })
+    }
 
     const { data, error } = await supabase
       .from('shift_segments')
@@ -382,6 +409,26 @@ export default async function rosterCalendarRoutes(fastify: FastifyInstance) {
   fastify.post('/roster-rotation-members', { preHandler: [fastify.authenticate, hrAdminAuth] }, async (req: any, reply) => {
     const tenantId = req.tenantId as string
     const body     = req.body as Record<string, unknown>
+
+    // Fresh audit finding (cross-tenant IDOR): employee_id and
+    // rotation_group_id were accepted from the client with no tenant-
+    // ownership check. Since the backend uses the service-role client (RLS
+    // bypassed) and both GET /roster-rotation-groups and GET /roster-
+    // rotation-members embed the FK'd rows with no tenant filter on the
+    // embed, a foreign employee_id leaked that employee's real name/code
+    // back to the caller, and a foreign rotation_group_id caused the
+    // victim tenant's own group listing to return the attacker's injected
+    // member row.
+    if (body.employee_id) {
+      const { data: emp } = await supabase
+        .from('employees').select('id').eq('id', body.employee_id as string).eq('tenant_id', tenantId).maybeSingle()
+      if (!emp) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Employee not found in your organisation' })
+    }
+    if (body.rotation_group_id) {
+      const { data: group } = await supabase
+        .from('roster_rotation_groups').select('id').eq('id', body.rotation_group_id as string).eq('tenant_id', tenantId).maybeSingle()
+      if (!group) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Rotation group not found in your organisation' })
+    }
 
     const { data, error } = await supabase
       .from('roster_rotation_members')
