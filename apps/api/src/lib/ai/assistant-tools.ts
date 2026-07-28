@@ -15,6 +15,9 @@ import { getDirectReportIds, isHrAdmin } from '../manager-scope.js'
 import { fetchAllRows } from '../supabase-paginate.js'
 import { fetchTenantTz } from '../attendance-engine.js'
 import { getLocalDate } from '../org-context.js'
+import { createLeaveRequest } from '../leave-request-service.js'
+import { submitRegularisation } from '../regularisation-service.js'
+import { resolveTicketSla } from '../helpdesk-sla.js'
 import type { ToolDef } from './llm.js'
 import type { AssistantCaller } from './assistant-context.js'
 
@@ -454,22 +457,28 @@ async function resolveEmployee(ctx: ToolCtx, rawQuery: string | undefined): Prom
   }
   ors.add(`employee_code.ilike.%${s}%`)
 
-  let query = ctx.supabase.from('employees').select(EMP_COLS)
-    .eq('tenant_id', ctx.caller.tenantId)
-    .or([...ors].join(','))
-    .limit(25)
-
-  const { data, error } = await query
-  if (error) return { ok: false, message: 'Could not search employees right now.' }
-  let candidates = (data ?? []) as EmpRow[]
-
-  // Manager scope: restrict to self + direct reports.
+  // Manager scope: restrict to self + direct reports IN THE QUERY ITSELF, not
+  // by filtering after .limit(25) — a tenant-wide cap filled with out-of-scope
+  // matches (e.g. many employees sharing a name token) could otherwise leave 0
+  // rows once narrowed to the manager's own team, reporting "not found" for an
+  // employee who is actually in scope.
+  let scopeIds: string[] | null = null
   if (!hr) {
     if (!self) return { ok: false, message: 'Your login is not linked to an employee record.' }
     const reports = new Set(await getDirectReportIds(ctx.supabase, ctx.caller.tenantId, self))
     reports.add(self)
-    candidates = candidates.filter(e => reports.has(e.id))
+    scopeIds = [...reports]
   }
+
+  let query = ctx.supabase.from('employees').select(EMP_COLS)
+    .eq('tenant_id', ctx.caller.tenantId)
+    .or([...ors].join(','))
+    .limit(25)
+  if (scopeIds) query = query.in('id', scopeIds)
+
+  const { data, error } = await query
+  if (error) return { ok: false, message: 'Could not search employees right now.' }
+  const candidates = (data ?? []) as EmpRow[]
 
   if (candidates.length === 0) return { ok: false, message: `No employee found matching "${q}"${hr ? '' : ' in your team'}.` }
 
@@ -649,22 +658,24 @@ async function getPendingApprovals(ctx: ToolCtx): Promise<string> {
     if (scopeIds.length === 0) return 'You have no direct reports, so nothing is pending your approval.'
   }
 
-  const countPending = async (table: string, status: string): Promise<number> => {
-    try {
-      let q = ctx.supabase.from(table).select('id', { count: 'exact', head: true })
-        .eq('tenant_id', ctx.caller.tenantId).eq('status', status)
-      if (scopeIds) q = q.in('employee_id', scopeIds)
-      const { count } = await q
-      return count ?? 0
-    } catch { return 0 }
+  const countPending = async (table: string, status: string): Promise<{ count: number; failed: boolean }> => {
+    let q = ctx.supabase.from(table).select('id', { count: 'exact', head: true })
+      .eq('tenant_id', ctx.caller.tenantId).eq('status', status)
+    if (scopeIds) q = q.in('employee_id', scopeIds)
+    const { count, error } = await q
+    if (error) return { count: 0, failed: true }
+    return { count: count ?? 0, failed: false }
   }
   const [leave, reg] = await Promise.all([
     countPending('leave_requests', 'PENDING'),
     countPending('attendance_regularisation', 'pending'),
   ])
-  const total = leave + reg
+  // A query failure must not be reported as "nothing pending" — that could hide
+  // a real approvals backlog from the manager/HR admin asking about it.
+  if (leave.failed || reg.failed) return 'Could not check pending approvals right now — please try again.'
+  const total = leave.count + reg.count
   if (total === 0) return 'Nothing is pending your approval right now.'
-  return `${total} pending: ${leave} leave request(s), ${reg} attendance regularisation(s).`
+  return `${total} pending: ${leave.count} leave request(s), ${reg.count} attendance regularisation(s).`
 }
 
 async function getEmployeeAssets(ctx: ToolCtx, args: any): Promise<string> {
@@ -710,13 +721,20 @@ async function getHeadcount(ctx: ToolCtx, args: any): Promise<string> {
   if (!isHrAdmin(ctx.caller.userRole)) return 'Headcount is available to HR/Admin only.'
 
   if (args?.by_department) {
-    const { data } = await ctx.supabase
-      .from('job_history')
-      .select('departments(name), employees!inner(status)')
-      .eq('tenant_id', ctx.caller.tenantId)
-      .eq('is_current', true)
+    let rows: any[]
+    try {
+      rows = await fetchAllRows<any>((from, to) =>
+        ctx.supabase
+          .from('job_history')
+          .select('departments(name), employees!inner(status)')
+          .eq('tenant_id', ctx.caller.tenantId)
+          .eq('is_current', true)
+          .range(from, to))
+    } catch {
+      return 'Could not look up headcount right now.'
+    }
     const counts = new Map<string, number>()
-    for (const r of (data ?? []) as any[]) {
+    for (const r of rows as any[]) {
       if (r.employees?.status && r.employees.status !== 'active') continue
       const dept = r.departments?.name ?? 'Unassigned'
       counts.set(dept, (counts.get(dept) ?? 0) + 1)
@@ -843,36 +861,23 @@ async function applyLeave(ctx: ToolCtx, args: { leave_type: string; start_date: 
 
   if (ltErr || !lt) return `Leave type "${args.leave_type}" not found. Available types can be checked in your leave balance.`
 
-  // Lookup profile_id → user_id for the employee
-  const { data: profile } = await ctx.supabase
-    .from('profiles')
-    .select('id')
-    .eq('tenant_id', ctx.caller.tenantId)
-    .eq('employee_id', ctx.employeeId)
-    .single()
+  // Delegate to the canonical service (same one /leave/apply uses) rather than
+  // hand-rolling the insert — it enforces the overlap guard, the roster/holiday
+  // -aware duration calc that approval-time balance deduction trusts verbatim,
+  // and the leave-policy application-window rules. A hand-rolled insert here
+  // previously bypassed all three.
+  const result = await createLeaveRequest(ctx.supabase, {
+    tenantId:    ctx.caller.tenantId,
+    employeeId:  ctx.employeeId,
+    leaveTypeId: lt.id,
+    fromDate:    args.start_date,
+    toDate:      args.end_date,
+    reason:      args.reason?.trim() || undefined,
+    requestedBy: ctx.caller.userId,
+  })
 
-  if (!profile) return 'Could not resolve your profile. Please apply via the Leave page.'
-
-  const computed_days = Math.ceil((new Date(args.end_date).getTime() - new Date(args.start_date).getTime()) / 86400000) + 1
-
-  const { data, error } = await ctx.supabase
-    .from('leave_requests')
-    .insert({
-      tenant_id:     ctx.caller.tenantId,
-      employee_id:   ctx.employeeId,
-      leave_type_id: lt.id,
-      from_date:     args.start_date,
-      to_date:       args.end_date,
-      computed_days,
-      reason:        args.reason?.trim() || null,
-      status:        'PENDING',
-      requested_by:  ctx.caller.userId,
-    })
-    .select('id')
-    .single()
-
-  if (error) return `Failed to apply leave: ${error.message}`
-  return `✅ Leave applied successfully! ${lt.name} from ${args.start_date} to ${args.end_date} is now PENDING approval. Request ID: ${data.id}`
+  if (!result.ok) return `Failed to apply leave: ${result.error.message}`
+  return `✅ Leave applied successfully! ${lt.name} from ${args.start_date} to ${args.end_date} is now PENDING approval. Request ID: ${result.value.id}`
 }
 
 async function cancelLeaveRequest(ctx: ToolCtx, args: { request_id: string }): Promise<string> {
@@ -918,17 +923,25 @@ async function createHelpdeskTicket(ctx: ToolCtx, args: { subject: string; descr
   if (!validCategories.includes(category)) return `Invalid category. Use one of: ${validCategories.join(', ')}`
   if (!validPriorities.includes(priority))  return `Invalid priority. Use one of: ${validPriorities.join(', ')}`
 
+  // sla_due_at/resolution_due_at must be set the same way POST /helpdesk/tickets
+  // sets them — the SLA-breach scanner queries .lt('sla_due_at', now), and NULL
+  // never satisfies that, making a ticket permanently invisible to breach detection.
+  const sla = await resolveTicketSla(ctx.supabase, ctx.caller.tenantId, category, priority)
+
   const { data, error } = await ctx.supabase
     .from('helpdesk_tickets')
     .insert({
-      tenant_id:   ctx.caller.tenantId,
-      employee_id: ctx.employeeId,
-      subject:     args.subject.slice(0, 120),
-      description: args.description,
+      tenant_id:         ctx.caller.tenantId,
+      employee_id:       ctx.employeeId,
+      subject:           args.subject.slice(0, 120),
+      description:       args.description,
       category,
       priority,
-      status:      'open',
-      created_by:  ctx.caller.userId,
+      status:            'open',
+      created_by:        ctx.caller.userId,
+      sla_hours:         sla.response_hours,
+      sla_due_at:        sla.sla_due_at,
+      resolution_due_at: sla.resolution_due_at,
     })
     .select('id, ticket_number')
     .single()
@@ -963,23 +976,23 @@ async function regularizeAttendance(ctx: ToolCtx, args: {
   const checkIn  = args.requested_check_in  && timeRe.test(args.requested_check_in)  ? args.requested_check_in  : null
   const checkOut = args.requested_check_out && timeRe.test(args.requested_check_out) ? args.requested_check_out : null
 
-  const { data, error } = await ctx.supabase
-    .from('attendance_regularisation')
-    .insert({
-      tenant_id:            ctx.caller.tenantId,
-      employee_id:          ctx.employeeId,
-      date:                 args.date,
-      regularization_type:  regType,
-      requested_check_in:   checkIn,
-      requested_check_out:  checkOut,
-      reason:               args.reason.trim(),
-      status:               'pending',
-      submitted_by:         ctx.caller.userId,
-    })
-    .select('id, date, status')
-    .single()
+  // Delegate to the canonical service (same one POST /attendance/regularisation
+  // uses) rather than hand-rolling the insert — it enforces the submission
+  // window, frequency limits, and payroll period lock, and computes the SLA
+  // deadline the breach scanner relies on. A hand-rolled insert here previously
+  // bypassed all of it and left sla_deadline NULL, making the request invisible
+  // to SLA-breach detection no matter how long it sat pending.
+  const result = await submitRegularisation(ctx.supabase, {
+    tenantId:             ctx.caller.tenantId,
+    employeeId:           ctx.employeeId,
+    date:                 args.date,
+    regularization_type:  regType,
+    requested_check_in:   checkIn,
+    requested_check_out:  checkOut,
+    reason:               args.reason.trim(),
+  })
 
-  if (error) return `Failed to submit regularization request: ${error.message}`
+  if (!result.ok) return `Could not submit regularization request: ${result.error.message}`
   return `✅ Attendance regularization request submitted for ${args.date} (${regType.replace(/_/g, ' ')}). Status: PENDING. HR will review and approve it shortly.`
 }
 
@@ -1054,11 +1067,12 @@ async function searchPolicy(ctx: ToolCtx, args: { query?: string }): Promise<str
   const q = args.query?.trim()
   if (!q) return 'Please provide a search term.'
 
-  const { data } = await ctx.supabase.rpc('search_policies', {
+  const { data, error } = await ctx.supabase.rpc('search_policies', {
     p_tenant_id: ctx.caller.tenantId,
     p_query:     q,
     p_limit:     3,
   })
+  if (error) return 'Could not search policies right now. Please try again.'
   if (!data?.length) return `No policies found matching "${q}". Try different keywords or contact HR.`
 
   return (data as any[]).map((p: any) =>
@@ -1092,7 +1106,10 @@ async function getPayBreakdown(ctx: ToolCtx): Promise<string> {
 async function getAttendanceCalendar(ctx: ToolCtx, args: { month?: string }): Promise<string> {
   if (!ctx.employeeId) return 'No employee profile linked to your account.'
 
-  const month   = args.month || new Date().toISOString().slice(0, 7)
+  // Default month resolved in the tenant's own timezone, not the server's
+  // (UTC) clock — otherwise between 00:00-05:29 IST on the 1st of a month
+  // this silently returns last month's calendar (ISSUE-154 class).
+  const month = args.month || (await tenantTodayStr(ctx.supabase, ctx.caller.tenantId)).slice(0, 7)
   if (!MONTH_RE.test(month)) return 'Please provide month as YYYY-MM.'
 
   const from  = `${month}-01`
@@ -1101,7 +1118,7 @@ async function getAttendanceCalendar(ctx: ToolCtx, args: { month?: string }): Pr
   toD.setDate(0)
   const to    = toD.toISOString().slice(0, 10)
 
-  const { data } = await ctx.supabase
+  const { data, error } = await ctx.supabase
     .from('attendance_daily')
     .select('date, status, work_hours')
     .eq('tenant_id', ctx.caller.tenantId)
@@ -1110,6 +1127,7 @@ async function getAttendanceCalendar(ctx: ToolCtx, args: { month?: string }): Pr
     .lte('date', to)
     .order('date')
 
+  if (error) return 'Could not look up your attendance right now. Please try again.'
   if (!data?.length) return `No attendance records found for ${month}.`
 
   const lines = (data as any[]).map(r => {
@@ -1233,13 +1251,14 @@ async function escalateTicket(ctx: ToolCtx, args: { ticket_id?: string; reason?:
     return 'You can only escalate your own tickets.'
   }
 
-  await ctx.supabase.from('helpdesk_ticket_comments').insert({
+  const { error: commentErr } = await ctx.supabase.from('helpdesk_ticket_comments').insert({
     tenant_id:  ctx.caller.tenantId,
     ticket_id:  (ticket as any).id,
     author_id:  ctx.caller.userId,
     body:       `[ESCALATION REQUEST] ${args.reason}`,
     is_internal: false,
   })
+  if (commentErr) return `Couldn't submit the escalation for "${(ticket as any).subject}" — please try again.`
 
   return `Escalation requested for "${(ticket as any).subject}". HR will review and prioritize your ticket.`
 }

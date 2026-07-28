@@ -18,6 +18,7 @@ import { chatCompleteWithFallback } from '../../lib/ai/llm.js'
 import { WhatsAppProvider } from '../../lib/whatsapp-provider.js'
 import { serverError, notFound, forbidden, validationError, conflictError, ErrorCode } from '../../lib/api-errors.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
+import { resolveTicketSla } from '../../lib/helpdesk-sla.js'
 
 // Default SLA windows by priority (used when no tenant policy row exists).
 // Response = time to first HR reply; Resolution = time to resolve/close.
@@ -63,59 +64,6 @@ function detectCategory(text: string, currentCategory: string): { category: stri
 const CATEGORIES = ['payroll', 'leave', 'attendance', 'it', 'facilities', 'hr_policy', 'grievance', 'posh', 'compliance', 'other'] as const
 const PRIORITIES = ['low', 'medium', 'high', 'urgent'] as const
 const STATUSES   = ['open', 'in_progress', 'awaiting_employee', 'resolved', 'closed'] as const
-
-/**
- * Resolve the response + resolution SLA windows (hours) for a priority.
- * Prefers the tenant's configured helpdesk_sla_policies row; falls back to the
- * built-in defaults (and degrades gracefully if the table doesn't exist yet).
- */
-async function resolveSla(
-  fastify: any, tenantId: string, priority: string,
-): Promise<{ response_hours: number; resolution_hours: number }> {
-  const fallback = {
-    response_hours:   SLA_HOURS[priority] ?? 24,
-    resolution_hours: RESOLUTION_HOURS[priority] ?? 72,
-  }
-  try {
-    const { data, error } = await fastify.supabase
-      .from('helpdesk_sla_policies')
-      .select('response_hours, resolution_hours')
-      .eq('tenant_id', tenantId)
-      .eq('priority', priority)
-      .maybeSingle()
-    if (error || !data) return fallback
-    return {
-      response_hours:   Number((data as any).response_hours)   || fallback.response_hours,
-      resolution_hours: Number((data as any).resolution_hours) || fallback.resolution_hours,
-    }
-  } catch {
-    return fallback
-  }
-}
-
-/**
- * Resolve SLA windows for a category from helpdesk_category_sla.
- * Returns null when no category SLA row exists so caller can fall back to priority SLA.
- */
-async function resolveCategorySla(
-  fastify: any, tenantId: string, category: string,
-): Promise<{ response_hours: number; resolution_hours: number } | null> {
-  try {
-    const { data, error } = await fastify.supabase
-      .from('helpdesk_category_sla')
-      .select('response_hours, resolution_hours')
-      .eq('tenant_id', tenantId)
-      .eq('category', category)
-      .maybeSingle()
-    if (error || !data) return null
-    return {
-      response_hours:   Number((data as any).response_hours),
-      resolution_hours: Number((data as any).resolution_hours),
-    }
-  } catch {
-    return null
-  }
-}
 
 async function resolveCallerEmployeeId(fastify: any, userId: string, tenantId: string): Promise<string | null> {
   const { data } = await fastify.supabase
@@ -203,11 +151,7 @@ export default async function helpdeskRoutes(fastify: FastifyInstance) {
       : (parsed.data.category as string)
 
     // Prefer category-based SLA; fall back to priority SLA
-    const categorySla = await resolveCategorySla(fastify, req.tenantId, effectiveCategory)
-    const sla         = categorySla ?? await resolveSla(fastify, req.tenantId, parsed.data.priority)
-    const now         = Date.now()
-    const slaDueAt    = new Date(now + sla.response_hours   * 3_600_000).toISOString()
-    const resDueAt    = new Date(now + sla.resolution_hours * 3_600_000).toISOString()
+    const sla = await resolveTicketSla(fastify.supabase, req.tenantId, effectiveCategory, parsed.data.priority)
 
     const { data, error } = await fastify.supabase
       .from('helpdesk_tickets')
@@ -221,8 +165,8 @@ export default async function helpdeskRoutes(fastify: FastifyInstance) {
         employee_id:            employeeId,
         created_by:             req.userId,
         sla_hours:              sla.response_hours,
-        sla_due_at:             slaDueAt,
-        resolution_due_at:      resDueAt,
+        sla_due_at:             sla.sla_due_at,
+        resolution_due_at:      sla.resolution_due_at,
         ai_suggested_category:  aiResult.category,
         ai_routing_confidence:  aiResult.confidence,
         ai_suggested_team:      aiResult.suggested_team,
