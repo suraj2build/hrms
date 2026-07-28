@@ -75,8 +75,12 @@ export default async function trustIntelligenceRoutes(fastify: FastifyInstance) 
   fastify.get('/trust/graph/:employeeId', adminAuth, async (req, reply) => {
     const { employeeId } = req.params as any
     const tenantId = (req as any).tenantId
-    const edges = await workforceGraphService.getEmployeeEdges(fastify.supabase, employeeId, tenantId)
-    return { edges, total: edges.length }
+    try {
+      const edges = await workforceGraphService.getEmployeeEdges(fastify.supabase, employeeId, tenantId)
+      return { edges, total: edges.length }
+    } catch (err: any) {
+      return serverError(req, reply, err, ErrorCode.QUERY_FAILED, 'Failed to fetch workforce graph')
+    }
   })
 
   /**
@@ -384,6 +388,11 @@ export default async function trustIntelligenceRoutes(fastify: FastifyInstance) 
         return reply.status(400).send({ error: 'NO_AADHAAR', message: 'No Aadhaar number on file for this employee.' })
       }
 
+      // Captured before verify() so the readback below can tell "this call's
+      // write landed" apart from "a stale row from an earlier verification is
+      // still sitting there" (see comment below).
+      const beforeIso = new Date().toISOString()
+
       // Awaited so the verification_records row is persisted before we respond.
       await verificationOrchestrator.verify({
         supabase:        fastify.supabase,
@@ -399,16 +408,19 @@ export default async function trustIntelligenceRoutes(fastify: FastifyInstance) 
       // from local structural validation, independent of whether the
       // verification_records upsert actually succeeded. Read back the row
       // this call just wrote so a DB failure is surfaced instead of a false
-      // "verified".
+      // "verified". On a re-verification a prior row already exists, so also
+      // check updated_at moved past beforeIso — otherwise a failed upsert
+      // (swallowed inside the orchestrator) would silently return the old
+      // verification's status instead of surfacing that this attempt failed.
       const { data: record, error: readErr } = await fastify.supabase
         .from('verification_records')
-        .select('status')
+        .select('status, updated_at')
         .eq('employee_id', employeeId)
         .eq('tenant_id', tenantId)
         .eq('verification_type', 'aadhaar')
         .maybeSingle()
       if (readErr) return serverError(req, reply, readErr, ErrorCode.QUERY_FAILED, 'Failed to read verification result')
-      if (!record) return serverError(req, reply, new Error('verification_records row missing after verify()'), ErrorCode.COMPUTE_FAILED, 'Aadhaar verification did not persist')
+      if (!record || (record as any).updated_at < beforeIso) return serverError(req, reply, new Error('verification_records row missing or stale after verify()'), ErrorCode.COMPUTE_FAILED, 'Aadhaar verification did not persist')
 
       const v = aadhaarVerificationService.validateStructure(aadhaar)
       return { status: (record as any).status, masked: v.masked, employee_id: employeeId }
@@ -449,6 +461,8 @@ export default async function trustIntelligenceRoutes(fastify: FastifyInstance) 
         return reply.status(403).send({ error: 'PROFILE_NOT_LINKED', message: 'Your profile is not linked to an employee record.' })
       }
 
+      const beforeIso = new Date().toISOString()
+
       await verificationOrchestrator.verify({
         supabase:        fastify.supabase,
         employee_id:     employeeId,
@@ -459,16 +473,18 @@ export default async function trustIntelligenceRoutes(fastify: FastifyInstance) 
 
       // See the analogous comment in POST /trust/verifications/aadhaar/:employeeId —
       // verify() never rejects, so read back the persisted row instead of
-      // fabricating the response from local structural validation alone.
+      // fabricating the response from local structural validation alone, and
+      // check updated_at moved past beforeIso so a re-verification whose
+      // upsert silently failed doesn't return a stale prior status.
       const { data: record, error: readErr } = await fastify.supabase
         .from('verification_records')
-        .select('status')
+        .select('status, updated_at')
         .eq('employee_id', employeeId)
         .eq('tenant_id', tenantId)
         .eq('verification_type', 'aadhaar')
         .maybeSingle()
       if (readErr) return serverError(req, reply, readErr, ErrorCode.QUERY_FAILED, 'Failed to read verification result')
-      if (!record) return serverError(req, reply, new Error('verification_records row missing after verify()'), ErrorCode.COMPUTE_FAILED, 'Aadhaar verification did not persist')
+      if (!record || (record as any).updated_at < beforeIso) return serverError(req, reply, new Error('verification_records row missing or stale after verify()'), ErrorCode.COMPUTE_FAILED, 'Aadhaar verification did not persist')
 
       const v = aadhaarVerificationService.validateStructure(aadhaar)
       return { status: (record as any).status, masked: v.masked }

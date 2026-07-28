@@ -591,7 +591,7 @@ export default async function moodRoutes(fastify: FastifyInstance) {
   fastify.get('/admin/cluster-breakdown', hrAuth, async (req: any, reply) => {
     const tenantId = req.tenantId
     const { month } = req.query as { month?: string }
-    const targetMonth = month ?? new Date().toISOString().slice(0, 7)
+    const targetMonth = month ?? (await todayDate(tenantId)).slice(0, 7)
 
     const { data, error } = await supabase
       .from('mood_cluster_monthly')
@@ -608,7 +608,7 @@ export default async function moodRoutes(fastify: FastifyInstance) {
   fastify.get('/admin/region-breakdown', hrAuth, async (req: any, reply) => {
     const tenantId = req.tenantId
     const { month } = req.query as { month?: string }
-    const targetMonth = month ?? new Date().toISOString().slice(0, 7)
+    const targetMonth = month ?? (await todayDate(tenantId)).slice(0, 7)
 
     const { data, error } = await supabase
       .from('mood_region_monthly')

@@ -88,11 +88,12 @@ export class WorkforceGraphService {
    * Get all edges for an employee (for graph rendering).
    */
   async getEmployeeEdges(supabase: SupabaseClient, employeeId: string, orgId: string): Promise<WorkforceGraphEdge[]> {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('workforce_graph_edges')
       .select('*')
       .eq('tenant_id', orgId)
       .eq('from_entity', employeeId)
+    if (error) throw new Error(`getEmployeeEdges query failed: ${error.message}`)
     return (data ?? []) as WorkforceGraphEdge[]
   }
 
