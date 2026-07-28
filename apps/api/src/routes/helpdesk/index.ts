@@ -812,7 +812,8 @@ Write a helpful, professional HR reply to address the employee's concern:`
 
       return reply.send({ suggestion: result.content.content?.trim() ?? '' })
     } catch (e: any) {
-      return reply.code(503).send({ error: 'AI_ERROR', message: e.message ?? 'AI request failed' })
+      req.log.error({ err: e }, 'AI draft reply generation failed')
+      return reply.code(503).send({ error: 'AI_ERROR', message: 'AI request failed' })
     }
   })
 
@@ -959,7 +960,10 @@ Write a helpful, professional HR reply to address the employee's concern:`
     if (!callerEmployeeId || callerEmployeeId !== (ticket as any).employee_id) {
       return forbidden(reply, 'FORBIDDEN', 'You can only rate your own tickets')
     }
-    const { error } = await fastify.supabase
+    // Re-assert status='resolved' and not-already-rated in the UPDATE's own
+    // WHERE clause — the SELECT above is TOCTOU-vulnerable (the ticket could
+    // be reopened, or rated twice, between the check and this write).
+    const { data: updated, error } = await fastify.supabase
       .from('helpdesk_tickets')
       .update({
         satisfaction_rating:  Math.round(rating),
@@ -968,7 +972,12 @@ Write a helpful, professional HR reply to address the employee's concern:`
       })
       .eq('id', id)
       .eq('tenant_id', tenantId)
+      .eq('status', 'resolved')
+      .is('satisfaction_rated_at', null)
+      .select('id')
+      .maybeSingle()
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to rate ticket')
+    if (!updated) return conflictError(reply, 'ALREADY_RATED', 'This ticket has already been rated or is no longer resolved')
     return reply.send({ data: { rated: true } })
   })
 
