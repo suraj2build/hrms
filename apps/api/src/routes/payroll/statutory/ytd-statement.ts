@@ -12,6 +12,9 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { HR_ADMIN_ROLES } from '../../../lib/rbac.js'
+import { serverError, ErrorCode } from '../../../lib/api-errors.js'
+import { fetchTenantTz } from '../../../lib/attendance-engine.js'
+import { getLocalDate } from '../../../lib/org-context.js'
 
 // ── Admin guard ───────────────────────────────────────────────────────────────
 
@@ -25,9 +28,16 @@ function requireHrAdmin(req: any, reply: any, done: () => void) {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function currentFinancialYear(): string {
-  const now = new Date()
-  const fyYear = now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1
+// Resolve "today" in the tenant's own timezone, not the server's (UTC) clock —
+// matches the same fix applied to it-statement.ts (ISSUE-154 class).
+async function tenantTodayStr(fastify: FastifyInstance, tenantId: string): Promise<string> {
+  const tz = await fetchTenantTz(fastify.supabase, tenantId)
+  return getLocalDate(new Date().toISOString(), tz)
+}
+
+function currentFinancialYear(todayStr: string): string {
+  const [y, m] = todayStr.split('-').map(Number)
+  const fyYear = m >= 4 ? y : y - 1
   return `${fyYear}-${String(fyYear + 1).slice(2)}`
 }
 
@@ -96,6 +106,8 @@ async function buildYTDStatement(
 
     slipsQuery,
   ])
+
+  if (slipsResult.error) throw new Error(`Failed to fetch payroll slips: ${slipsResult.error.message}`)
 
   const employee = empResult.data as any
   const slips    = (slipsResult.data as any[]) ?? []
@@ -247,8 +259,9 @@ export default async function ytdStatementRoute(fastify: FastifyInstance) {
       return reply.code(403).send({ error: 'PROFILE_NOT_LINKED', message: 'Your profile is not linked to an employee record' })
     }
 
+    const todayStr = await tenantTodayStr(fastify, req.tenantId)
     const qs = z.object({ financial_year: z.string().optional() }).safeParse(req.query)
-    const fy = qs.data?.financial_year ?? currentFinancialYear()
+    const fy = qs.data?.financial_year ?? currentFinancialYear(todayStr)
 
     try {
       const statement = await buildYTDStatement(fastify, req.tenantId, employeeId, fy)
@@ -257,8 +270,7 @@ export default async function ytdStatementRoute(fastify: FastifyInstance) {
       if (err.message === 'Employee not found') {
         return reply.code(404).send({ error: 'NOT_FOUND', message: 'Employee record not found' })
       }
-      fastify.log.error(err, 'YTD statement build failed')
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: err.message })
+      return serverError(req, reply, err, ErrorCode.COMPUTE_FAILED, 'Failed to build YTD statement')
     }
   })
 
@@ -275,7 +287,8 @@ export default async function ytdStatementRoute(fastify: FastifyInstance) {
       // matching exactly what the employee sees.
       include_unfinalized: z.coerce.boolean().optional(),
     }).safeParse(req.query)
-    const fy = qs.data?.financial_year ?? currentFinancialYear()
+    const todayStr = await tenantTodayStr(fastify, req.tenantId)
+    const fy = qs.data?.financial_year ?? currentFinancialYear(todayStr)
     const finalizedOnly = !(qs.data?.include_unfinalized ?? false)
 
     try {
@@ -285,8 +298,7 @@ export default async function ytdStatementRoute(fastify: FastifyInstance) {
       if (err.message === 'Employee not found') {
         return reply.code(404).send({ error: 'NOT_FOUND', message: 'Employee not found' })
       }
-      fastify.log.error(err, 'YTD statement build failed (admin)')
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: err.message })
+      return serverError(req, reply, err, ErrorCode.COMPUTE_FAILED, 'Failed to build YTD statement')
     }
   })
 }
