@@ -373,7 +373,10 @@ export default async function esiRoutes(fastify: FastifyInstance) {
 
     // Last calendar day of the payroll month (YYYY-MM-DD) for continuation comparison
     const [mYr, mMo] = month.split('-').map(Number)
-    const monthEnd = new Date(mYr, mMo, 0).toISOString().slice(0, 10)
+    // Date.UTC (not new Date(y, m, d), which anchors to the process's local TZ)
+    // so this calendar computation is correct regardless of the server process's
+    // TZ setting — matches the same fix in statutory-governance.ts.
+    const monthEnd = new Date(Date.UTC(mYr, mMo, 0)).toISOString().slice(0, 10)
 
     // ── Actual gross wages from finalized payroll slips ───────────────────────
     // ESI wages = gross_pay from the finalized payroll slip for this month.

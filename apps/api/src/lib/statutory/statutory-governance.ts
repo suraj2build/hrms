@@ -312,7 +312,11 @@ export async function resolveEmployeeStatutoryParams(
   // Continuation is active when continuation_until (last day of the contribution
   // period, e.g. Sep 30 / Mar 31) is on/after the last calendar day of this month.
   const [cyY, cyM] = month.split('-').map(Number)
-  const monthEnd   = new Date(cyY, cyM, 0).toISOString().slice(0, 10)
+  // Date.UTC (not new Date(y, m, d), which anchors to the process's local TZ)
+  // so this calendar computation is correct regardless of the server process's
+  // TZ setting — the local-Date form silently shifts by a day whenever the
+  // process runs in a non-UTC TZ (the same bug class as ISSUE-154/tds.ts).
+  const monthEnd   = new Date(Date.UTC(cyY, cyM, 0)).toISOString().slice(0, 10)
   const continuationUntil = (esiContinuationResult.data as any)?.continuation_until ?? null
   const continuationActive = !!(continuationUntil && continuationUntil >= monthEnd)
   const esiApplicability: ESIApplicability = {
