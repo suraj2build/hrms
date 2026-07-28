@@ -83,6 +83,20 @@ export function MobileFlowDesk({ base }: { base: string }) {
       qc.invalidateQueries({ queryKey: ['mobile-flowdesk-pending'] })
       qc.invalidateQueries({ queryKey: ['mobile-flowdesk-ot'] })
       qc.invalidateQueries({ queryKey: ['mobile-flowdesk-co'] })
+      // The same leave/regularisation/overtime/comp-off requests are also
+      // read by desktop's approval queues (ApprovalInbox, ManagerDashboard,
+      // ManagerProfileView, EssFlowDesk, ManagerTeamOvertimeRequests) and the
+      // employee's own ESS tracker — none of those get refreshed by a mobile
+      // approve/reject without this.
+      qc.invalidateQueries({ queryKey: ['approvals-pending'] })
+      qc.invalidateQueries({ queryKey: ['mgr-approvals-pending'] })
+      qc.invalidateQueries({ queryKey: ['ess-approvals-leave'] })
+      qc.invalidateQueries({ queryKey: ['ess-approvals-corrections'] })
+      qc.invalidateQueries({ queryKey: ['ess-approvals-compoff'] })
+      qc.invalidateQueries({ queryKey: ['flowdesk-pending'] })
+      qc.invalidateQueries({ queryKey: ['flowdesk-compoff'] })
+      qc.invalidateQueries({ queryKey: ['manager-team-overtime'] })
+      qc.invalidateQueries({ queryKey: ['ot-requests'] })
     },
     onError: (e: Error) => toast.error('Action failed', { description: e.message }),
   })
