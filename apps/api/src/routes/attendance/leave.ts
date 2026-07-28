@@ -181,18 +181,27 @@ export default async function leaveRoute(fastify: FastifyInstance) {
       return validationError(reply, 'INVALID_DATES', 'from_date must be ≤ to_date')
     }
 
+    // Verify leave_type_id belongs to this tenant before any use — the FK only
+    // requires existence (not tenant match), so an unchecked leave_type_id
+    // write would let a caller reference another tenant's leave type record.
+    // Runs for every session (not just half_day — full_day is the default and
+    // was previously skipping this check entirely).
+    const { data: leaveType } = await fastify.supabase
+      .from('leave_types')
+      .select('allow_half_day')
+      .eq('id', parsed.data.leave_type_id)
+      .eq('tenant_id', req.tenantId)
+      .maybeSingle()
+    if (!leaveType) {
+      return validationError(reply, 'INVALID_LEAVE_TYPE', 'Leave type not found in your organisation')
+    }
+
     // Half-day validation: must be a single day and the leave type must allow it.
     if (session !== 'full_day') {
       if (from_date !== to_date) {
         return validationError(reply, 'INVALID_HALF_DAY', 'A half-day leave must be for a single date (from_date = to_date)')
       }
-      const { data: lt } = await fastify.supabase
-        .from('leave_types')
-        .select('allow_half_day')
-        .eq('id', parsed.data.leave_type_id)
-        .eq('tenant_id', req.tenantId)
-        .maybeSingle()
-      if (!lt?.allow_half_day) {
+      if (!leaveType.allow_half_day) {
         return reply.code(422).send({
           error:   'HALF_DAY_NOT_ALLOWED',
           message: 'This leave type does not permit half-day leave',
@@ -231,7 +240,7 @@ export default async function leaveRoute(fastify: FastifyInstance) {
     // this legacy leave_applications table had none, so an employee could submit the
     // same date range any number of times. (ISSUE-145)
     // Overlap condition: existing.from_date <= new.to_date AND existing.to_date >= new.from_date
-    const { data: overlapping } = await fastify.supabase
+    const { data: overlapping, error: overlapErr } = await fastify.supabase
       .from('leave_applications')
       .select('id')
       .eq('tenant_id', req.tenantId)
@@ -241,6 +250,10 @@ export default async function leaveRoute(fastify: FastifyInstance) {
       .gte('to_date', from_date)
       .limit(1)
       .maybeSingle()
+
+    if (overlapErr) {
+      return serverError(req, reply, overlapErr, ErrorCode.QUERY_FAILED, 'Failed to check for overlapping leave applications')
+    }
 
     if (overlapping) {
       return reply.code(409).send({
@@ -359,12 +372,16 @@ export default async function leaveRoute(fastify: FastifyInstance) {
       return forbidden(reply, 'SELF_APPROVAL_FORBIDDEN', 'You cannot approve your own leave application.')
     }
 
-    // Fetch leave type for paid flag + sandwich flag
+    // Fetch leave type for paid flag + sandwich flag. Tenant-scoped — the FK
+    // only requires existence (not tenant match), so an unscoped lookup here
+    // would use another tenant's is_paid/allow_sandwich flags to decide this
+    // approval's balance deduction.
     const { data: lt } = await fastify.supabase
       .from('leave_types')
       .select('id, name, is_paid, allow_sandwich')
       .eq('id', app.leave_type_id)
-      .single()
+      .eq('tenant_id', app.tenant_id as string)
+      .maybeSingle()
 
     // Resolve the roster-aware working dates (excludes holidays + weekly-offs)
     // for BOTH paid and unpaid leave. Used for balance deduction AND for the
@@ -817,12 +834,14 @@ export default async function leaveRoute(fastify: FastifyInstance) {
       }
     }
 
-    // Fetch leave type to know if this is a paid leave (balance must be restored)
+    // Fetch leave type to know if this is a paid leave (balance must be restored).
+    // Tenant-scoped — see the matching fix + comment on the approve handler above.
     const { data: lt } = await fastify.supabase
       .from('leave_types')
       .select('id, name, is_paid')
       .eq('id', app.leave_type_id)
-      .single()
+      .eq('tenant_id', req.tenantId)
+      .maybeSingle()
 
     // Look up the original consumption ledger row to determine exact days consumed.
     // This is more reliable than recomputing since the roster may have changed.
