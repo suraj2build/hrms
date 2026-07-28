@@ -17,6 +17,7 @@ import { z } from 'zod'
 import { generateUniqueCode } from '../../lib/generate-code.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { serverError, ErrorCode } from '../../lib/api-errors.js'
+import { fetchAllRows } from '../../lib/supabase-paginate.js'
 
 const schema = z.object({
   name:      z.string().min(1, 'Name is required'),
@@ -50,19 +51,22 @@ export default async function workLocationsRoutes(fastify: FastifyInstance) {
   fastify.get('/', auth, async (req: any, reply) => {
     const siteId = (req.query as any)?.site_id as string | undefined
 
-    let query = fastify.supabase
-      .from('work_locations')
-      .select('id, name, code, site_id, address, city, state, country, pincode, is_active, created_at')
-      .eq('tenant_id', req.tenantId)
-      .order('name')
+    // PostgREST caps any single response at 1000 rows server-side — plain
+    // .select() silently truncated the list for an enterprise tenant with
+    // more than 1000 work locations.
+    const data = await fetchAllRows<any>((from, to) => {
+      let query = fastify.supabase
+        .from('work_locations')
+        .select('id, name, code, site_id, address, city, state, country, pincode, is_active, created_at')
+        .eq('tenant_id', req.tenantId)
+        .order('name')
 
-    if (siteId) {
-      query = query.eq('site_id', siteId)
-    }
-
-    const { data, error } = await query
-    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch work locations')
-    return reply.send({ data: data ?? [] })
+      if (siteId) {
+        query = query.eq('site_id', siteId)
+      }
+      return query.range(from, to)
+    })
+    return reply.send({ data })
   })
 
   // ── GET /masters/work-locations/:id ───────────────────────────────────────
@@ -180,6 +184,13 @@ export default async function workLocationsRoutes(fastify: FastifyInstance) {
 
     if (mergeTo && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(mergeTo)) {
       return reply.code(400).send({ error: 'VALIDATION', message: 'merge_to must be a valid UUID' })
+    }
+    // merge_to === id would resolve to the record being deleted itself,
+    // passing the tenant check below while every reassignment UPDATE
+    // becomes a no-op and the record is deleted anyway — the referencing
+    // FK (ON DELETE SET NULL) goes to NULL instead of the intended target.
+    if (mergeTo === id) {
+      return reply.code(400).send({ error: 'VALIDATION', message: 'merge_to cannot be the same record being deleted' })
     }
 
     // merge_to must resolve to a work location in this tenant — without this,

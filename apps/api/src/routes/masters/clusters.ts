@@ -191,6 +191,13 @@ export default async function clustersRoutes(fastify: FastifyInstance) {
     if (mergeTo && !UUID_RE.test(mergeTo))
       return reply.code(400).send({ error: 'VALIDATION', message: 'merge_to must be a valid UUID' })
 
+    // merge_to === id would resolve to the record being deleted itself,
+    // passing the tenant check below while every reassignment UPDATE
+    // becomes a no-op and the record is deleted anyway — the referencing
+    // FK (ON DELETE SET NULL) goes to NULL instead of the intended target.
+    if (mergeTo === id)
+      return reply.code(400).send({ error: 'VALIDATION', message: 'merge_to cannot be the same record being deleted' })
+
     // merge_to must resolve to a cluster in this tenant — without this,
     // sites rows could be repointed at another tenant's cluster.
     if (mergeTo) {

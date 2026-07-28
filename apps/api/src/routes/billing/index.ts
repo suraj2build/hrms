@@ -52,15 +52,21 @@ export default async function billingRoutes(fastify: FastifyInstance) {
     }
 
     const { data: tenant } = await fastify.supabase
-      .from('tenants').select('name, billing_email, subscription_status').eq('id', req.tenantId).single()
+      .from('tenants').select('name, billing_email, subscription_status, razorpay_subscription_id').eq('id', req.tenantId).single()
 
     // Fresh audit finding: no precondition check meant a double-click or a
     // retried network timeout created two live Razorpay subscriptions for
     // the same tenant (both billing it), but the DB only ever remembered
     // the latest razorpay_subscription_id — the first was silently
-    // orphaned. Reject re-checkout while already active.
-    if ((tenant as any)?.subscription_status === 'active') {
-      return reply.code(409).send({ error: 'ALREADY_SUBSCRIBED', message: 'Tenant already has an active subscription' })
+    // orphaned. Gating only on subscription_status === 'active' didn't
+    // actually close this: per migration 278, a freshly-created
+    // subscription sits in 'created'/'authenticated' until Razorpay's
+    // async webhook flips it to 'active' — exactly the window a
+    // double-click/retry lands in. Reject re-checkout whenever a
+    // subscription already exists and hasn't reached a terminal state.
+    const existingStatus = (tenant as any)?.subscription_status as string | null
+    if ((tenant as any)?.razorpay_subscription_id && existingStatus && !['cancelled', 'completed'].includes(existingStatus)) {
+      return reply.code(409).send({ error: 'ALREADY_SUBSCRIBED', message: 'Tenant already has a subscription in progress' })
     }
 
     try {

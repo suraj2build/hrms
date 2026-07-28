@@ -144,6 +144,14 @@ export default async function orgRoutes(fastify: FastifyInstance) {
     if (merge_to !== undefined && !uuidRegex.test(merge_to)) {
       return reply.code(400).send({ error: 'VALIDATION', message: 'merge_to must be a valid UUID' })
     }
+    // merge_to === id resolves to the record being deleted itself, so the
+    // "in use" guard below would pass (mergeTarget found) while every
+    // reassignment UPDATE becomes a no-op — the record is deleted anyway
+    // and every FK referencing it (ON DELETE SET NULL) goes to NULL instead
+    // of the intended merge target, with the endpoint still reporting success.
+    if (merge_to === id) {
+      return reply.code(400).send({ error: 'VALIDATION', message: 'merge_to cannot be the same record being deleted' })
+    }
 
     // Fresh audit finding (cross-tenant IDOR): merge_to was only format-
     // validated, never checked against tenant_id, before being used to
@@ -257,6 +265,14 @@ export default async function orgRoutes(fastify: FastifyInstance) {
     if (merge_to !== undefined && !uuidRegex.test(merge_to)) {
       return reply.code(400).send({ error: 'VALIDATION', message: 'merge_to must be a valid UUID' })
     }
+    // merge_to === id resolves to the record being deleted itself, so the
+    // "in use" guard below would pass (mergeTarget found) while every
+    // reassignment UPDATE becomes a no-op — the record is deleted anyway
+    // and every FK referencing it (ON DELETE SET NULL) goes to NULL instead
+    // of the intended merge target, with the endpoint still reporting success.
+    if (merge_to === id) {
+      return reply.code(400).send({ error: 'VALIDATION', message: 'merge_to cannot be the same record being deleted' })
+    }
 
     // Fresh audit finding (cross-tenant IDOR): merge_to was only format-
     // validated, never checked against tenant_id — same gap as the
@@ -355,6 +371,14 @@ export default async function orgRoutes(fastify: FastifyInstance) {
 
     if (merge_to !== undefined && !uuidRegex.test(merge_to)) {
       return reply.code(400).send({ error: 'VALIDATION', message: 'merge_to must be a valid UUID' })
+    }
+    // merge_to === id resolves to the record being deleted itself, so the
+    // "in use" guard below would pass (mergeTarget found) while every
+    // reassignment UPDATE becomes a no-op — the record is deleted anyway
+    // and every FK referencing it (ON DELETE SET NULL) goes to NULL instead
+    // of the intended merge target, with the endpoint still reporting success.
+    if (merge_to === id) {
+      return reply.code(400).send({ error: 'VALIDATION', message: 'merge_to cannot be the same record being deleted' })
     }
 
     // Fresh audit finding (cross-tenant IDOR): merge_to was only format-

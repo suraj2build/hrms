@@ -31,6 +31,7 @@ import type { FastifyInstance } from 'fastify'
 import { z }                    from 'zod'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { serverError, ErrorCode } from '../../lib/api-errors.js'
+import { fetchAllRows } from '../../lib/supabase-paginate.js'
 
 const SELECT_COLS =
   'id, name, location, timezone, state_code, site_type, city, region, zone, default_roster_id, default_rotation_policy_id, default_leave_policy_id, default_shift_id, holiday_group_id, created_at'
@@ -187,16 +188,19 @@ export default async function sitesRoutes(fastify: FastifyInstance) {
   // that are absent. '*' also surfaces `code` (migration 116), which the list
   // search filters on.
   fastify.get('/', auth, async (req: any, reply) => {
-    const { data, error } = await fastify.supabase
-      .from('sites')
-      .select('*')
-      .eq('tenant_id', req.tenantId)
-      .order('name')
-
-    if (error) {
-      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch sites')
-    }
-    return reply.send({ data: data ?? [] })
+    // PostgREST caps any single response at 1000 rows server-side — a plain
+    // .select() silently truncated the Sites list for an enterprise tenant
+    // with more than 1000 sites (the exact table this file's own roster/
+    // rotation-policy siblings already call out as capable of exceeding it).
+    const data = await fetchAllRows<any>((from, to) =>
+      fastify.supabase
+        .from('sites')
+        .select('*')
+        .eq('tenant_id', req.tenantId)
+        .order('name')
+        .range(from, to),
+    )
+    return reply.send({ data })
   })
 
   // ── POST /masters/sites ───────────────────────────────────────────────────
@@ -458,6 +462,13 @@ export default async function sitesRoutes(fastify: FastifyInstance) {
     // Validate merge_to is a UUID if provided
     if (mergeTo && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(mergeTo)) {
       return reply.code(400).send({ error: 'VALIDATION', message: 'merge_to must be a valid UUID' })
+    }
+    // merge_to === id would resolve to the record being deleted itself,
+    // passing the tenant check below while every reassignment UPDATE
+    // becomes a no-op and the record is deleted anyway — the referencing
+    // FK (ON DELETE SET NULL) goes to NULL instead of the intended target.
+    if (mergeTo === id) {
+      return reply.code(400).send({ error: 'VALIDATION', message: 'merge_to cannot be the same record being deleted' })
     }
 
     // merge_to must resolve to a site in this tenant — without this,

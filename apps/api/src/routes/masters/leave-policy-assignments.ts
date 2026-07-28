@@ -96,16 +96,18 @@ export default async function leavePolicyAssignmentsRoutes(fastify: FastifyInsta
     const empIds: string[]  = []
     const deptIds: string[] = []
     const locIds: string[]  = []
+    const siteIds: string[] = []
 
     for (const row of (data ?? []) as any[]) {
       if (!row.scope_id) continue
       if (row.scope_type === 'employee')      empIds.push(row.scope_id)
       if (row.scope_type === 'department')    deptIds.push(row.scope_id)
       if (row.scope_type === 'work_location') locIds.push(row.scope_id)
+      if (row.scope_type === 'site')          siteIds.push(row.scope_id)
     }
 
     // Batch fetch names
-    const [emps, depts, locs] = await Promise.all([
+    const [emps, depts, locs, sites] = await Promise.all([
       empIds.length ? fastify.supabase
         .from('employees')
         .select('id, first_name, last_name, employee_code')
@@ -124,11 +126,18 @@ export default async function leavePolicyAssignmentsRoutes(fastify: FastifyInsta
         .in('id', locIds)
         .eq('tenant_id', req.tenantId)
         .then(r => r.data ?? []) : [],
+      siteIds.length ? fastify.supabase
+        .from('sites')
+        .select('id, name, location')
+        .in('id', siteIds)
+        .eq('tenant_id', req.tenantId)
+        .then(r => r.data ?? []) : [],
     ])
 
     const empMap  = new Map((emps  as any[]).map(e => [e.id, e]))
     const deptMap = new Map((depts as any[]).map(d => [d.id, d]))
     const locMap  = new Map((locs  as any[]).map(l => [l.id, l]))
+    const siteMap = new Map((sites as any[]).map(s => [s.id, s]))
 
     const rows = ((data ?? []) as any[]).map(row => {
       let scope_label: string = 'All employees (default)'
@@ -146,6 +155,10 @@ export default async function leavePolicyAssignmentsRoutes(fastify: FastifyInsta
         const l = locMap.get(row.scope_id)
         scope_label   = l ? `${l.name}${l.city ? ` · ${l.city}` : ''}` : row.scope_id
         scope_details = l ?? null
+      } else if (row.scope_type === 'site' && row.scope_id) {
+        const s = siteMap.get(row.scope_id)
+        scope_label   = s ? `${s.name}${s.location ? ` · ${s.location}` : ''}` : row.scope_id
+        scope_details = s ?? null
       }
 
       return {
