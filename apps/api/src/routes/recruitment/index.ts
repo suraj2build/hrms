@@ -21,6 +21,8 @@ import { sanitizeOrFilterTerm } from '../../lib/postgrest-filter.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
 import { serverError, ErrorCode } from '../../lib/api-errors.js'
 import { checkIdempotency, storeIdempotency } from '../../lib/idempotency.js'
+import { fetchTenantTz } from '../../lib/attendance-engine.js'
+import { getLocalDate }  from '../../lib/org-context.js'
 import {
   sendEmail,
   applicationReceivedEmail,
@@ -30,6 +32,11 @@ import {
   offerExtendedEmail,
   applicationRejectedEmail,
 } from '../../lib/email-service.js'
+
+async function tenantTodayStr(supabase: any, tenantId: string): Promise<string> {
+  const tz = await fetchTenantTz(supabase, tenantId)
+  return getLocalDate(new Date().toISOString(), tz)
+}
 
 // Fetch candidate name/email + job title + company name for a given application
 async function getAppEmailCtx(
@@ -557,11 +564,18 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
     if (!decided) return reply.code(409).send({ error: 'NOT_PENDING', message: 'Step already decided' })
 
     // Final approval opens the requisition; a rejection leaves it as draft.
+    // Fold the 'draft' precondition into the WHERE and check errors/rows —
+    // the requisition may have been separately held/cancelled between the
+    // decision above and this write, and an unconditioned update would
+    // silently flip it back to 'open' while reporting success regardless.
     const remaining = (steps ?? []).filter((s: any) => s.id !== stepId && s.status === 'pending')
     if (parsed.data.decision === 'approved' && remaining.length === 0) {
-      await fastify.supabase.from('job_requisitions')
+      const { data: opened, error: openErr } = await fastify.supabase.from('job_requisitions')
         .update({ status: 'open', approved_by: req.userId, approved_at: new Date().toISOString() })
-        .eq('id', step.requisition_id).eq('tenant_id', req.tenantId)
+        .eq('id', step.requisition_id).eq('tenant_id', req.tenantId).eq('status', 'draft')
+        .select('id').maybeSingle()
+      if (openErr) return serverError(req, reply, openErr, ErrorCode.UPDATE_FAILED, 'Failed to open requisition after final approval')
+      if (!opened) return reply.code(409).send({ error: 'CONFLICT', message: 'Requisition status changed before it could be opened' })
       return reply.send({ message: 'Final approval — requisition opened', opened: true })
     }
     return reply.send({ message: `Step ${parsed.data.decision}`, opened: false })
@@ -1830,6 +1844,14 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
     const parsed = schema.safeParse(req.body)
     if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
 
+    // category_id is a raw UUID from the request body — verify it belongs to
+    // this tenant before writing it, or a caller who obtains a foreign
+    // tenant's qb_categories UUID could attach their own question to it,
+    // exposing that tenant's category name/type via the GET join above.
+    const { data: category } = await fastify.supabase
+      .from('qb_categories').select('id').eq('id', parsed.data.category_id).eq('tenant_id', req.tenantId).maybeSingle()
+    if (!category) return reply.code(400).send({ error: 'INVALID_CATEGORY', message: 'Category not found for this tenant' })
+
     const { data, error } = await fastify.supabase
       .from('qb_items')
       .insert({ ...parsed.data, tenant_id: req.tenantId, created_by: req.userId, is_active: true })
@@ -1852,6 +1874,14 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
     })
     const parsed = schema.safeParse(req.body)
     if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+
+    // Same cross-tenant check as POST above — a client-supplied category_id
+    // must belong to this tenant before it's attached to the item.
+    if (parsed.data.category_id) {
+      const { data: category } = await fastify.supabase
+        .from('qb_categories').select('id').eq('id', parsed.data.category_id).eq('tenant_id', req.tenantId).maybeSingle()
+      if (!category) return reply.code(400).send({ error: 'INVALID_CATEGORY', message: 'Category not found for this tenant' })
+    }
 
     const { error } = await fastify.supabase
       .from('qb_items')
@@ -2369,11 +2399,17 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
     if (ctx.offer.status !== 'sent') {
       return reply.code(409).send({ error: 'NOT_ACTIONABLE', message: `This offer is ${ctx.offer.status} and can no longer be accepted.` })
     }
-    if (ctx.offer.valid_until && new Date(ctx.offer.valid_until) < new Date(new Date().toISOString().slice(0, 10))) {
+
+    const tenantId = (ctx.app as any).tenant_id
+
+    // Tenant-local "today", not the server's (UTC) clock — otherwise a
+    // candidate in a tenant ahead of UTC (e.g. IST) could still accept an
+    // offer whose valid_until date already passed locally (ISSUE-154 class).
+    const todayStr = await tenantTodayStr(fastify.supabase, tenantId)
+    if (ctx.offer.valid_until && ctx.offer.valid_until < todayStr) {
       return reply.code(410).send({ error: 'EXPIRED', message: 'This offer has expired. Please contact the recruiter.' })
     }
 
-    const tenantId = (ctx.app as any).tenant_id
     const reqn = (ctx.app as any).job_requisitions
     const now = new Date().toISOString()
 
