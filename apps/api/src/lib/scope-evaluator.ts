@@ -124,14 +124,16 @@ export class ScopeEvaluator {
       return { allowed: false, scope: 'none', reason: 'Manager profile has no linked employee record' }
     }
 
-    // a. Direct-report check — subject is a direct report of actor
+    // a. Direct-report check — subject is a direct report of actor.
+    // employees.manager_id is the canonical hierarchy column (see manager-scope.ts
+    // header): PUT /employees/:id/manager writes it directly with no corresponding
+    // job_history row, so job_history.manager_id can go stale relative to it.
     const { data: directReport } = await this.supabase
-      .from('job_history')
-      .select('employee_id')
+      .from('employees')
+      .select('id')
       .eq('tenant_id', tenantId)
-      .eq('employee_id', subjectId)
+      .eq('id', subjectId)
       .eq('manager_id', actorEmpId)
-      .eq('is_current', true)
       .maybeSingle()
 
     if (directReport) {
