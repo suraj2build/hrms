@@ -385,21 +385,33 @@ export default async function trustIntelligenceRoutes(fastify: FastifyInstance) 
       }
 
       // Awaited so the verification_records row is persisted before we respond.
-      try {
-        await verificationOrchestrator.verify({
-          supabase:        fastify.supabase,
-          employee_id:     employeeId,
-          tenant_id:       tenantId,
-          aadhaar,
-          aadhaar_consent: true,
-        })
-      } catch (err) {
-        return serverError(req, reply, err, 'VERIFICATION_FAILED', 'Aadhaar verification engine error')
-      }
+      await verificationOrchestrator.verify({
+        supabase:        fastify.supabase,
+        employee_id:     employeeId,
+        tenant_id:       tenantId,
+        aadhaar,
+        aadhaar_consent: true,
+      })
 
-      // PII-safe echo of the outcome (mask only).
+      // verify() is fire-and-forget-safe (swallows adapter/DB errors so a
+      // background caller never crashes), so it can never reject — the old
+      // try/catch here was dead code and the response was fabricated purely
+      // from local structural validation, independent of whether the
+      // verification_records upsert actually succeeded. Read back the row
+      // this call just wrote so a DB failure is surfaced instead of a false
+      // "verified".
+      const { data: record, error: readErr } = await fastify.supabase
+        .from('verification_records')
+        .select('status')
+        .eq('employee_id', employeeId)
+        .eq('tenant_id', tenantId)
+        .eq('verification_type', 'aadhaar')
+        .maybeSingle()
+      if (readErr) return serverError(req, reply, readErr, ErrorCode.QUERY_FAILED, 'Failed to read verification result')
+      if (!record) return serverError(req, reply, new Error('verification_records row missing after verify()'), ErrorCode.COMPUTE_FAILED, 'Aadhaar verification did not persist')
+
       const v = aadhaarVerificationService.validateStructure(aadhaar)
-      return { status: v.isValid ? 'verified' : 'failed', masked: v.masked, employee_id: employeeId }
+      return { status: (record as any).status, masked: v.masked, employee_id: employeeId }
     },
   )
 
@@ -437,20 +449,29 @@ export default async function trustIntelligenceRoutes(fastify: FastifyInstance) 
         return reply.status(403).send({ error: 'PROFILE_NOT_LINKED', message: 'Your profile is not linked to an employee record.' })
       }
 
-      try {
-        await verificationOrchestrator.verify({
-          supabase:        fastify.supabase,
-          employee_id:     employeeId,
-          tenant_id:       tenantId,
-          aadhaar,
-          aadhaar_consent: true,
-        })
-      } catch (err) {
-        return serverError(req, reply, err, 'VERIFICATION_FAILED', 'Aadhaar verification engine error')
-      }
+      await verificationOrchestrator.verify({
+        supabase:        fastify.supabase,
+        employee_id:     employeeId,
+        tenant_id:       tenantId,
+        aadhaar,
+        aadhaar_consent: true,
+      })
+
+      // See the analogous comment in POST /trust/verifications/aadhaar/:employeeId —
+      // verify() never rejects, so read back the persisted row instead of
+      // fabricating the response from local structural validation alone.
+      const { data: record, error: readErr } = await fastify.supabase
+        .from('verification_records')
+        .select('status')
+        .eq('employee_id', employeeId)
+        .eq('tenant_id', tenantId)
+        .eq('verification_type', 'aadhaar')
+        .maybeSingle()
+      if (readErr) return serverError(req, reply, readErr, ErrorCode.QUERY_FAILED, 'Failed to read verification result')
+      if (!record) return serverError(req, reply, new Error('verification_records row missing after verify()'), ErrorCode.COMPUTE_FAILED, 'Aadhaar verification did not persist')
 
       const v = aadhaarVerificationService.validateStructure(aadhaar)
-      return { status: v.isValid ? 'verified' : 'failed', masked: v.masked }
+      return { status: (record as any).status, masked: v.masked }
     },
   )
 

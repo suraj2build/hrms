@@ -7,6 +7,7 @@ import { randomUUID }                    from 'crypto'
 import type { SupabaseClient }           from '@supabase/supabase-js'
 import type { ReplaySession }            from '../types/fabric-types.js'
 import type { ResolvedPlatformEvent }    from '../../events/types/platform-event.js'
+import { fetchAllRows }                  from '../../../lib/supabase-paginate.js'
 
 export class ReplayIntelligenceService {
   /**
@@ -36,19 +37,23 @@ export class ReplayIntelligenceService {
     }
 
     try {
-      // Fetch events from platform_events (read-only)
-      const { data, error } = await supabase
-        .from('platform_events')
-        .select('*')
-        .eq('tenant_id', params.tenant_id)
-        .eq('entity_id', params.entity_id)
-        .gte('timestamp', params.from)
-        .lte('timestamp', params.to)
-        .order('timestamp', { ascending: true })
-
-      if (error) throw new Error(error.message)
-
-      const events = (data ?? []) as ResolvedPlatformEvent[]
+      // Fetch events from platform_events (read-only). Paginated — a plain
+      // .select() truncates at PostgREST's 1,000-row ceiling regardless of
+      // any Range header, and a busy entity over a wide from/to window can
+      // easily accumulate more than 1,000 append-only events — silently
+      // under-reporting events_replayed in a feature whose whole purpose is
+      // an accurate reconstruction.
+      const events = await fetchAllRows<ResolvedPlatformEvent>((from, to) =>
+        supabase
+          .from('platform_events')
+          .select('*')
+          .eq('tenant_id', params.tenant_id)
+          .eq('entity_id', params.entity_id)
+          .gte('timestamp', params.from)
+          .lte('timestamp', params.to)
+          .order('timestamp', { ascending: true })
+          .range(from, to),
+      )
       const severityRank = { info: 0, warning: 1, high: 2, critical: 3 } as const
       session.events_replayed = events.length
       session.status = 'completed'

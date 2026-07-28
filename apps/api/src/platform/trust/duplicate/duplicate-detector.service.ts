@@ -88,17 +88,35 @@ export class DuplicateDetectorService {
     tenant_id:   string
   }): Promise<DuplicateDetectionResult | null> {
     const normalized = params.phone.replace(/[\s\-\+]/g, '')
-    const { data, error } = await supabase
-      .from('employees')
-      .select('id, phone')
-      .eq('tenant_id', params.tenant_id)
-      .neq('id', params.employee_id)
-      .eq('phone', params.phone)
 
-    if (error || !data || data.length === 0) return null
+    // Match on normalized phone number, not the raw stored value — the
+    // same number can be entered as "+91 98765 43210" or "9876543210" and
+    // both should be flagged. Also paginated (employees is a table known to
+    // exceed 1,000 rows at enterprise scale), so a large tenant doesn't
+    // silently miss duplicate-phone matches past PostgREST's 1000-row cap.
+    let data: any[]
+    try {
+      data = await fetchAllRows<any>((from, to) =>
+        supabase
+          .from('employees')
+          .select('id, phone')
+          .eq('tenant_id', params.tenant_id)
+          .neq('id', params.employee_id)
+          .not('phone', 'is', null)
+          .range(from, to),
+      )
+    } catch {
+      return null
+    }
+
+    const matches = (data as any[]).filter(r =>
+      r.phone && r.phone.replace(/[\s\-\+]/g, '') === normalized
+    )
+
+    if (matches.length === 0) return null
 
     return this.buildResult('phone', params.employee_id, 'employee', params.tenant_id,
-      (data as any[]).map(r => r.id as string),
+      matches.map(r => r.id as string),
       hash(normalized), 'warning')
   }
 

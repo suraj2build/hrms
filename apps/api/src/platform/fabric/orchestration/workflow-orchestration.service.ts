@@ -70,22 +70,28 @@ export class WorkflowOrchestrationService {
 
   /** Complete an orchestration activity. */
   async completeOrchestration(supabase: SupabaseClient, activityId: string, orgId: string): Promise<void> {
-    const { error } = await supabase
+    // .select() + row-count check (not just `error`) — a stale/foreign
+    // activityId matches zero rows with no error raised, and the caller
+    // would otherwise be told completion succeeded when nothing changed.
+    const { data, error } = await supabase
       .from('orchestration_activity_logs')
       .update({ status: 'completed', completed_at: new Date().toISOString() })
       .eq('activity_id', activityId)
       .eq('tenant_id', orgId)
+      .select('activity_id')
     if (error) throw new Error('Failed to complete orchestration activity')
+    if (!data || data.length === 0) throw new Error('Orchestration activity not found')
   }
 
   /** Get recent orchestration activities for an org. */
   async getRecentActivities(supabase: SupabaseClient, orgId: string, limit = 20): Promise<OrchestrationActivity[]> {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('orchestration_activity_logs')
       .select('*')
       .eq('tenant_id', orgId)
       .order('started_at', { ascending: false })
       .limit(limit)
+    if (error) throw new Error('Failed to fetch orchestration activities')
     return (data ?? []) as OrchestrationActivity[]
   }
 

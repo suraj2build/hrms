@@ -17,23 +17,26 @@ export class WorkforceGraphService {
    * Upsert a graph edge. Non-fatal — errors swallowed.
    */
   async upsertEdge(supabase: SupabaseClient, edge: WorkforceGraphEdge): Promise<void> {
-    try {
-      await supabase
-        .from('workforce_graph_edges')
-        .upsert({
-          tenant_id:      edge.tenant_id,
-          from_entity: edge.from_entity,
-          from_type:   edge.from_type,
-          to_entity:   edge.to_entity,
-          to_type:     edge.to_type,
-          edge_type:   edge.edge_type,
-          weight:      edge.weight,
-          metadata:    edge.metadata ?? null,
-          created_at:  new Date().toISOString(),
-        }, { onConflict: 'tenant_id,from_entity,to_entity,edge_type' })
-    } catch {
-      // Non-fatal — graph edge upsert errors are swallowed
-    }
+    const { error } = await supabase
+      .from('workforce_graph_edges')
+      .upsert({
+        tenant_id:      edge.tenant_id,
+        from_entity: edge.from_entity,
+        from_type:   edge.from_type,
+        to_entity:   edge.to_entity,
+        to_type:     edge.to_type,
+        edge_type:   edge.edge_type,
+        weight:      edge.weight,
+        metadata:    edge.metadata ?? null,
+        created_at:  new Date().toISOString(),
+      }, { onConflict: 'tenant_id,from_entity,to_entity,edge_type' })
+    // Matches the sibling DecisionGraphService.addEdge's error handling: log
+    // and swallow rather than throw, since a missing edge shouldn't fail the
+    // caller's primary operation — but previously the query result wasn't
+    // even destructured, so a real DB failure was invisible even to logs,
+    // and the fraud/duplicate-identity graph could silently go blank for a
+    // tenant with zero diagnostic trail.
+    if (error) console.warn('[WorkforceGraphService] upsertEdge failed', error.message)
   }
 
   /**
