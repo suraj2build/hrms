@@ -44,6 +44,8 @@ import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { logAction } from '../../lib/audit-service.js'
 import { z } from 'zod'
 import { serverError, notFound, ErrorCode } from '../../lib/api-errors.js'
+import { fetchTenantTz } from '../../lib/attendance-engine.js'
+import { getLocalDate } from '../../lib/org-context.js'
 
 // ── Embedded-employee normaliser ──────────────────────────────────────────────
 // employees has no `full_name` / `designation` columns (name is first+last,
@@ -107,7 +109,9 @@ async function resolveEmployeeVars(
   const flat = (rel: any) => (Array.isArray(rel) ? rel[0] : rel)
 
   const doj     = emp.joining_date ? new Date(emp.joining_date) : null
-  const today   = new Date()
+  const tenantTz    = await fetchTenantTz(supabase, tenantId)
+  const todayLocalStr = getLocalDate(new Date().toISOString(), tenantTz)
+  const today   = new Date(`${todayLocalStr}T12:00:00Z`)
   const yearsOfService = doj
     ? Math.floor((today.getTime() - doj.getTime()) / (1000 * 60 * 60 * 24 * 365.25))
     : null
@@ -159,9 +163,9 @@ async function resolveEmployeeVars(
 
     // Dates
     today:               fmt(today.toISOString()),
-    current_date:        today.toISOString().split('T')[0],
+    current_date:        todayLocalStr,
     current_month:       today.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' }),
-    current_year:        String(today.getFullYear()),
+    current_year:        String(today.getUTCFullYear()),
   }
 }
 

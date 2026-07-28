@@ -373,6 +373,7 @@ export async function sendWarningLetter1(
       type:      'wl1',
       tenantId,
       refNumber,
+      dateStr:   todayStr,
       variables: {
         ...mergeFields,
         absent_from_date:  cas.first_ua_date,
@@ -469,6 +470,7 @@ export async function sendWarningLetter2(
       type:      'wl2',
       tenantId,
       refNumber,
+      dateStr:   todayStr,
       variables: {
         ...mergeFields,
         absent_from_date:  cas.first_ua_date,
@@ -649,6 +651,7 @@ export async function processTermination(
       type:      'termination',
       tenantId,
       refNumber,
+      dateStr:   todayStr,
       variables: {
         ...mergeFields,
         absent_from_date: cas.first_ua_date,

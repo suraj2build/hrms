@@ -16,6 +16,8 @@ export interface LetterOptions {
   variables: Record<string, string | number>
   tenantId:  string
   refNumber: string
+  /** Tenant-local YYYY-MM-DD date to print as the letter's "Date:" header. */
+  dateStr?:  string
 }
 
 const LETTER_TITLES: Record<string, string> = {
@@ -126,10 +128,15 @@ export async function generateLetterPDF(opts: LetterOptions): Promise<Buffer> {
       .moveTo(60, doc.y).lineTo(550, doc.y).stroke()
       .moveDown(0.5)
 
-    // Date
+    // Date — use the tenant-local date the caller resolved (e.g. via fetchTenantTz +
+    // getLocalDate), not the server's own clock, so the printed date matches the
+    // ref number / filename / deadline the caller already derived from it.
+    const printedDate = opts.dateStr
+      ? new Date(`${opts.dateStr}T12:00:00Z`).toLocaleDateString('en-IN')
+      : new Date().toLocaleDateString('en-IN')
     doc
       .fontSize(10)
-      .text(`Date: ${new Date().toLocaleDateString('en-IN')}`, { align: 'right' })
+      .text(`Date: ${printedDate}`, { align: 'right' })
       .moveDown(0.5)
 
     // Title
