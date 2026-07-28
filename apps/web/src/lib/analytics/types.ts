@@ -78,6 +78,11 @@ export interface ChartData {
   format:       'currency' | 'percent' | 'number'
   measureLabel: string
   isEmpty:      boolean
+  // Full, untruncated labels/series for "by group" charts that cap the on-screen
+  // chart at the top N rows — CSV export must include every row, not just what's
+  // charted. Absent when the chart isn't truncated (labels/series are already complete).
+  csvLabels?:   string[]
+  csvSeries?:   ChartSeries[]
 }
 
 export interface DrillStep {

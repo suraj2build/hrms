@@ -243,13 +243,15 @@ async function payrollByDept(q: AnalyticsQuery, months: string[], drillFilters: 
 
   if (fetchMonths.length === 1) {
     const result = results[0]
-    const depts = [...(result?.by_department ?? [])]
+    const allDepts = [...(result?.by_department ?? [])]
       .sort((a, b) => (b.gross ?? 0) - (a.gross ?? 0))
-      .slice(0, 12)
+    const depts = allDepts.slice(0, 12)
     return {
       labels:       depts.map(d => d.name ?? ''),
       labelIds:     depts.map(d => d.department_id ?? ''),
       series:       [{ name: label, color: seriesColor(0), values: depts.map(deptVal) }],
+      csvLabels:    allDepts.map(d => d.name ?? ''),
+      csvSeries:    [{ name: label, color: seriesColor(0), values: allDepts.map(deptVal) }],
       format,
       measureLabel: label,
       isEmpty:      depts.length === 0,
@@ -288,7 +290,8 @@ async function payrollByGroup(q: AnalyticsQuery, months: string[], drillFilters:
   const fs     = buildFilterStr(drillFilters)
   const result = await api.get<PayrollResponse>(`/datasets/payroll-cost?month=${month}&group_by=${q.dimension}${fs}`).catch(() => null)
 
-  const groups = [...(result?.by_group ?? [])].slice(0, 12)
+  const allGroups = [...(result?.by_group ?? [])]
+  const groups    = allGroups.slice(0, 12)
 
   function groupVal(g: GroupRow): number {
     switch (q.measure) {
@@ -304,6 +307,8 @@ async function payrollByGroup(q: AnalyticsQuery, months: string[], drillFilters:
     labels:       groups.map(g => g.label ?? ''),
     labelIds:     groups.map(g => g.key ?? ''),
     series:       [{ name: label, color: seriesColor(0), values: groups.map(groupVal) }],
+    csvLabels:    allGroups.map(g => g.label ?? ''),
+    csvSeries:    [{ name: label, color: seriesColor(0), values: allGroups.map(groupVal) }],
     format,
     measureLabel: label,
     isEmpty:      groups.length === 0,
@@ -349,7 +354,8 @@ async function headcountByGroup(q: AnalyticsQuery, months: string[], drillFilter
   const fs     = buildFilterStr(drillFilters)
   const result = await api.get<HeadcountResponse>(`/datasets/headcount?from=${from}&to=${to}&group_by=${q.dimension}${fs}`).catch(() => null)
 
-  const groups = [...(result?.by_group ?? [])].slice(0, 12)
+  const allGroups = [...(result?.by_group ?? [])]
+  const groups    = allGroups.slice(0, 12)
 
   function groupVal(g: GroupRow): number {
     switch (q.measure) {
@@ -363,6 +369,8 @@ async function headcountByGroup(q: AnalyticsQuery, months: string[], drillFilter
     labels:       groups.map(g => g.label ?? ''),
     labelIds:     groups.map(g => g.key ?? ''),
     series:       [{ name: label, color: seriesColor(1), values: groups.map(groupVal) }],
+    csvLabels:    allGroups.map(g => g.label ?? ''),
+    csvSeries:    [{ name: label, color: seriesColor(1), values: allGroups.map(groupVal) }],
     format:       'number',
     measureLabel: label,
     isEmpty:      groups.length === 0,
@@ -378,9 +386,9 @@ async function headcountByDept(q: AnalyticsQuery, months: string[], drillFilters
   const fs     = buildFilterStr(drillFilters)
   const result = await api.get<HeadcountResponse>(`/datasets/headcount?from=${from}&to=${to}${fs}`).catch(() => null)
 
-  const depts = [...(result?.by_department ?? [])]
+  const allDepts = [...(result?.by_department ?? [])]
     .sort((a, b) => (b.count ?? 0) - (a.count ?? 0))
-    .slice(0, 12)
+  const depts = allDepts.slice(0, 12)
 
   function deptVal(d: DeptRow): number {
     switch (q.measure) {
@@ -395,6 +403,8 @@ async function headcountByDept(q: AnalyticsQuery, months: string[], drillFilters
     labels:       depts.map(d => d.name ?? ''),
     labelIds:     depts.map(d => d.id ?? ''),
     series:       [{ name: label, color: seriesColor(1), values: depts.map(deptVal) }],
+    csvLabels:    allDepts.map(d => d.name ?? ''),
+    csvSeries:    [{ name: label, color: seriesColor(1), values: allDepts.map(deptVal) }],
     format:       'number',
     measureLabel: label,
     isEmpty:      depts.length === 0,
@@ -492,7 +502,8 @@ async function employeesByGroup(q: AnalyticsQuery, months: string[], drillFilter
   const fs     = buildFilterStr(drillFilters)
   const result = await api.get<GroupResponse>(`/datasets/employees?group_by=${q.dimension}&from=${from}&to=${to}${fs}`).catch(() => null)
 
-  const groups = [...(result?.by_group ?? [])].slice(0, 12)
+  const allGroups = [...(result?.by_group ?? [])]
+  const groups    = allGroups.slice(0, 12)
 
   function groupVal(g: GroupRow): number {
     switch (q.measure) {
@@ -509,6 +520,8 @@ async function employeesByGroup(q: AnalyticsQuery, months: string[], drillFilter
     labels:       groups.map(g => g.label ?? ''),
     labelIds:     groups.map(g => g.key ?? ''),
     series:       [{ name: label, color: seriesColor(3), values: groups.map(groupVal) }],
+    csvLabels:    allGroups.map(g => g.label ?? ''),
+    csvSeries:    [{ name: label, color: seriesColor(3), values: allGroups.map(groupVal) }],
     format:       'number',
     measureLabel: label,
     isEmpty:      groups.length === 0,
@@ -524,7 +537,8 @@ async function leaveByGroup(q: AnalyticsQuery, months: string[], drillFilters: R
   const fs     = buildFilterStr(drillFilters)
   const result = await api.get<GroupResponse>(`/datasets/leave?group_by=${q.dimension}&from=${from}&to=${to}${fs}`).catch(() => null)
 
-  const groups = [...(result?.by_group ?? [])].slice(0, 12)
+  const allGroups = [...(result?.by_group ?? [])]
+  const groups    = allGroups.slice(0, 12)
 
   function groupVal(g: GroupRow): number {
     switch (q.measure) {
@@ -539,6 +553,8 @@ async function leaveByGroup(q: AnalyticsQuery, months: string[], drillFilters: R
     labels:       groups.map(g => g.label ?? ''),
     labelIds:     groups.map(g => g.key ?? ''),
     series:       [{ name: label, color: seriesColor(4), values: groups.map(groupVal) }],
+    csvLabels:    allGroups.map(g => g.label ?? ''),
+    csvSeries:    [{ name: label, color: seriesColor(4), values: allGroups.map(groupVal) }],
     format:       'number',
     measureLabel: label,
     isEmpty:      groups.length === 0,
@@ -554,7 +570,8 @@ async function compensationByGroup(q: AnalyticsQuery, months: string[], drillFil
   const fs     = buildFilterStr(drillFilters)
   const result = await api.get<GroupResponse>(`/datasets/compensation?group_by=${q.dimension}&month=${month}${fs}`).catch(() => null)
 
-  const groups = [...(result?.by_group ?? [])].slice(0, 12)
+  const allGroups = [...(result?.by_group ?? [])]
+  const groups    = allGroups.slice(0, 12)
 
   function groupVal(g: GroupRow): number {
     switch (q.measure) {
@@ -569,6 +586,8 @@ async function compensationByGroup(q: AnalyticsQuery, months: string[], drillFil
     labels:       groups.map(g => g.label ?? ''),
     labelIds:     groups.map(g => g.key ?? ''),
     series:       [{ name: label, color: seriesColor(0), values: groups.map(groupVal) }],
+    csvLabels:    allGroups.map(g => g.label ?? ''),
+    csvSeries:    [{ name: label, color: seriesColor(0), values: allGroups.map(groupVal) }],
     format,
     measureLabel: label,
     isEmpty:      groups.length === 0,
@@ -584,7 +603,8 @@ async function separationByGroup(q: AnalyticsQuery, months: string[], drillFilte
   const fs     = buildFilterStr(drillFilters)
   const result = await api.get<GroupResponse>(`/datasets/separation?group_by=${q.dimension}&from=${from}&to=${to}${fs}`).catch(() => null)
 
-  const groups = [...(result?.by_group ?? [])].slice(0, 12)
+  const allGroups = [...(result?.by_group ?? [])]
+  const groups    = allGroups.slice(0, 12)
 
   function groupVal(g: GroupRow): number {
     switch (q.measure) {
@@ -599,6 +619,8 @@ async function separationByGroup(q: AnalyticsQuery, months: string[], drillFilte
     labels:       groups.map(g => g.label ?? ''),
     labelIds:     groups.map(g => g.key ?? ''),
     series:       [{ name: label, color: seriesColor(1), values: groups.map(groupVal) }],
+    csvLabels:    allGroups.map(g => g.label ?? ''),
+    csvSeries:    [{ name: label, color: seriesColor(1), values: allGroups.map(groupVal) }],
     format:       'number',
     measureLabel: label,
     isEmpty:      groups.length === 0,
@@ -662,14 +684,19 @@ export async function resolveQuery(q: AnalyticsQuery, drillStack: DrillStep[] = 
 export function exportToCSV(data: ChartData, q: AnalyticsQuery): void {
   if (data.isEmpty || data.labels.length === 0) return
 
-  const headers = data.series.length === 1
-    ? ['Label', data.measureLabel]
-    : ['Label', ...data.series.map(s => s.name)]
+  // Charts cap "by group" bars at the top 12 (readability) — export must still
+  // include every row, so prefer the untruncated csvLabels/csvSeries when present.
+  const labels = data.csvLabels ?? data.labels
+  const series = data.csvSeries ?? data.series
 
-  const rows = data.labels.map((label, i) =>
-    data.series.length === 1
-      ? [label, data.series[0].values[i] ?? 0]
-      : [label, ...data.series.map(s => s.values[i] ?? 0)]
+  const headers = series.length === 1
+    ? ['Label', data.measureLabel]
+    : ['Label', ...series.map(s => s.name)]
+
+  const rows = labels.map((label, i) =>
+    series.length === 1
+      ? [label, series[0].values[i] ?? 0]
+      : [label, ...series.map(s => s.values[i] ?? 0)]
   )
 
   const csv  = [headers, ...rows].map(row => row.join(',')).join('\n')

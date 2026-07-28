@@ -695,7 +695,11 @@ export function AnalyticsStudio() {
           <div className="flex items-center gap-3 text-xs text-muted-foreground flex-shrink-0">
             {chartData && !chartData.isEmpty && (
               <>
-                <span>{chartData.labels.length} {query.dimension === 'time' ? 'periods' : 'groups'}</span>
+                <span>
+                  {chartData.csvLabels && chartData.csvLabels.length > chartData.labels.length
+                    ? `Top ${chartData.labels.length} of ${chartData.csvLabels.length} ${query.dimension === 'time' ? 'periods' : 'groups'}`
+                    : `${chartData.labels.length} ${query.dimension === 'time' ? 'periods' : 'groups'}`}
+                </span>
                 {chartData.series.length > 1 && <span>{chartData.series.length} series</span>}
               </>
             )}

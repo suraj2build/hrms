@@ -117,11 +117,35 @@ async function createPreJoineeFromApp(
 
   if (error || !invitation) return { ok: false, code: 500, message: error?.message ?? 'Failed to create invitation' }
 
-  await fastify.supabase
+  // Fold the "not already initiated" precondition into the UPDATE's own WHERE
+  // clause: two concurrent calls (double-click, retry, two admin tabs) can both
+  // pass the pre-check above and both reach this INSERT before either commits.
+  // Without this guard the loser's INSERT still leaves a fully valid, unlinked
+  // pre_joinee_invitations row — its token works at /pre-join/:token regardless
+  // of what applications.pre_joinee_invitation_id ends up pointing to.
+  const { data: updated } = await fastify.supabase
     .from('applications')
     .update({ pre_joinee_invitation_id: invitation.id, preboarding_initiated_at: new Date().toISOString() })
     .eq('id', applicationId)
     .eq('tenant_id', tenantId)
+    .is('pre_joinee_invitation_id', null)
+    .select('id')
+    .maybeSingle()
+
+  if (!updated) {
+    // Lost the race — another call already won. Clean up this orphaned
+    // invitation row so its token can't be used as a second, unlinked path.
+    await fastify.supabase.from('pre_joinee_invitations').delete().eq('id', invitation.id)
+    const { data: winner } = await fastify.supabase
+      .from('applications')
+      .select('pre_joinee_invitation_id')
+      .eq('id', applicationId)
+      .eq('tenant_id', tenantId)
+      .maybeSingle()
+    return winner?.pre_joinee_invitation_id
+      ? { ok: true, invitation_id: winner.pre_joinee_invitation_id, already: true }
+      : { ok: false, code: 409, message: 'Preboarding was already initiated by another request' }
+  }
 
   // Fire the pre-join invite email (best-effort).
   void (async () => {
