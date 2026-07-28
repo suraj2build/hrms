@@ -26,13 +26,17 @@ export class InsuranceProvider {
   ): Promise<void> {
     const payload = { employee_id: employeeId, plan_id: planId, dependent_ids: dependentIds }
 
-    await this.supabase.from('insurance_outbox').insert({
-      tenant_id:     this.tenantId,
-      provider_name: process.env.INSURANCE_PROVIDER_NAME ?? 'GMC',
-      event_type:    'enrolment_sync',
-      payload,
-      status:        'pending',
-    })
+    const { data: outboxRow } = await this.supabase
+      .from('insurance_outbox')
+      .insert({
+        tenant_id:     this.tenantId,
+        provider_name: process.env.INSURANCE_PROVIDER_NAME ?? 'GMC',
+        event_type:    'enrolment_sync',
+        payload,
+        status:        'pending',
+      })
+      .select('id')
+      .single()
 
     const apiKey = process.env.INSURANCE_API_KEY
     const apiUrl = process.env.INSURANCE_API_URL
@@ -47,20 +51,18 @@ export class InsuranceProvider {
       const status = res.ok ? 'sent' : 'failed'
       const err    = res.ok ? undefined : (await res.text()).slice(0, 500)
 
-      const { data: row } = await this.supabase
-        .from('insurance_outbox')
-        .select('id')
-        .eq('tenant_id', this.tenantId)
-        .eq('event_type', 'enrolment_sync')
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle()
-
-      if (row?.id) {
+      // Update by the id captured from this insert, not a "most recent row
+      // of this event_type" re-query — two concurrent enrolments racing
+      // would otherwise let the second insert's lookup return the FIRST
+      // request's row, stamping employee A's send-status onto employee B's
+      // outbox record (and vice versa), corrupting the insurance sync audit
+      // trail ops relies on to know whether an enrolment actually reached
+      // the insurer.
+      if (outboxRow?.id) {
         await this.supabase
           .from('insurance_outbox')
           .update({ status, sent_at: new Date().toISOString(), error_message: err })
-          .eq('id', row.id)
+          .eq('id', outboxRow.id)
       }
     } catch (err: unknown) {
       console.error('[insurance-provider] sync failed:', err)
@@ -77,13 +79,17 @@ export class InsuranceProvider {
     // been logged to the outbox (the real-world unenrolment API call below
     // still fires regardless, since it doesn't depend on this insert
     // succeeding — only the audit trail was silently missing).
-    const { error: insertErr } = await this.supabase.from('insurance_outbox').insert({
-      tenant_id:     this.tenantId,
-      provider_name: process.env.INSURANCE_PROVIDER_NAME ?? 'GMC',
-      event_type:    'unenrolment',
-      payload,
-      status:        'pending',
-    })
+    const { data: outboxRow, error: insertErr } = await this.supabase
+      .from('insurance_outbox')
+      .insert({
+        tenant_id:     this.tenantId,
+        provider_name: process.env.INSURANCE_PROVIDER_NAME ?? 'GMC',
+        event_type:    'unenrolment',
+        payload,
+        status:        'pending',
+      })
+      .select('id')
+      .single()
     if (insertErr) console.error('[insurance-provider] outbox insert failed:', insertErr)
 
     const apiKey = process.env.INSURANCE_API_KEY
@@ -99,20 +105,14 @@ export class InsuranceProvider {
       const status = res.ok ? 'sent' : 'failed'
       const err    = res.ok ? undefined : (await res.text()).slice(0, 500)
 
-      const { data: row } = await this.supabase
-        .from('insurance_outbox')
-        .select('id')
-        .eq('tenant_id', this.tenantId)
-        .eq('event_type', 'unenrolment')
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle()
-
-      if (row?.id) {
+      // Update by the id captured from this insert — see syncEnrolment above
+      // for why a "most recent row of this event_type" re-query is unsafe
+      // under concurrent requests.
+      if (outboxRow?.id) {
         await this.supabase
           .from('insurance_outbox')
           .update({ status, sent_at: new Date().toISOString(), error_message: err })
-          .eq('id', row.id)
+          .eq('id', outboxRow.id)
       }
     } catch (err: unknown) {
       console.error('[insurance-provider] unenrolment sync failed:', err)

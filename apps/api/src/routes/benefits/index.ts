@@ -231,17 +231,41 @@ export default async function benefitsRoutes(fastify: FastifyInstance) {
   fastify.get('/admin/plans', hrAdminAuth, async (req: any, reply) => {
     const { data, error } = await fastify.supabase
       .from('benefit_plans')
-      .select('*, benefit_enrollments(status)')
+      .select('*')
       .eq('tenant_id', req.tenantId)
       .order('created_at', { ascending: false })
 
     if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch benefit plans')
 
+    // Counts come from a separately-paginated enrollments fetch rather than a
+    // nested .select('*, benefit_enrollments(status)') embed — PostgREST's
+    // 1000-row cap applies to embedded resources too, so a popular plan with
+    // 1000+ enrollments would silently undercount enrolled_count/total_count
+    // on this HR admin dashboard (the exact numbers used for plan funding /
+    // cost-split decisions).
+    const planIds = ((data ?? []) as any[]).map(p => p.id)
+    const enrollments = planIds.length
+      ? await fetchAllRows<{ plan_id: string; status: string }>((from, to) =>
+          fastify.supabase
+            .from('benefit_enrollments')
+            .select('plan_id, status')
+            .eq('tenant_id', req.tenantId)
+            .in('plan_id', planIds)
+            .range(from, to),
+        )
+      : []
+
+    const countsByPlan = new Map<string, { enrolled: number; total: number }>()
+    for (const e of enrollments) {
+      const c = countsByPlan.get(e.plan_id) ?? { enrolled: 0, total: 0 }
+      c.total += 1
+      if (e.status === 'enrolled') c.enrolled += 1
+      countsByPlan.set(e.plan_id, c)
+    }
+
     const today = new Date().toISOString().slice(0, 10)
     const plans = ((data ?? []) as any[]).map(p => {
-      const enrollments = (p.benefit_enrollments ?? []) as { status: string }[]
-      const enrolled_count = enrollments.filter(e => e.status === 'enrolled').length
-      const total_count    = enrollments.length
+      const counts = countsByPlan.get(p.id) ?? { enrolled: 0, total: 0 }
 
       let window_status: 'always_open' | 'open' | 'upcoming' | 'closed'
       if (!p.enrollment_opens_at && !p.enrollment_closes_at) {
@@ -254,11 +278,10 @@ export default async function benefitsRoutes(fastify: FastifyInstance) {
         window_status = 'open'
       }
 
-      const { benefit_enrollments: _e, ...rest } = p
       return {
-        ...rest,
-        enrolled_count,
-        total_count,
+        ...p,
+        enrolled_count: counts.enrolled,
+        total_count:    counts.total,
         window_status,
         is_esic: p.plan_type === 'health' && p.name?.toLowerCase().includes('esic'),
         is_nps:  p.plan_type === 'nps',
