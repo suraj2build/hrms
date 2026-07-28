@@ -50,10 +50,11 @@ export default async function lwfRoutes(fastify: FastifyInstance) {
 
   // ── GET /payroll/statutory/lwf/states ─────────────────────────────────────────
   fastify.get('/states', { preHandler: [fastify.authenticate, requireHrAdmin] }, async (req: any, reply) => {
-    const { data: settings } = await fastify.supabase
+    const { data: settings, error } = await fastify.supabase
       .from('lwf_state_settings')
       .select('*')
       .eq('tenant_id', req.tenantId)
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch LWF state settings')
 
     if (!settings) return reply.send([])
 
@@ -264,55 +265,89 @@ export default async function lwfRoutes(fastify: FastifyInstance) {
     const siteIds = [...new Set(empList.map((e: any) => e.site_id).filter(Boolean))] as string[]
     const siteStateMap = new Map<string, string>()
     if (siteIds.length > 0) {
-      const { data: siteRows } = await fastify.supabase.from('sites').select('id, state_code').in('id', siteIds)
+      const { data: siteRows, error: siteErr } = await fastify.supabase.from('sites').select('id, state_code').in('id', siteIds)
+      if (siteErr) return serverError(req, reply, siteErr, ErrorCode.QUERY_FAILED, 'Failed to fetch site state codes')
       for (const s of (siteRows ?? []) as any[]) if (s.state_code) siteStateMap.set(s.id, s.state_code)
     }
 
-    // Manual LWF state overrides (latest row per employee)
-    const { data: stateConfigs } = await fastify.supabase
-      .from('lwf_state_config')
-      .select('employee_id, state_code')
-      .eq('tenant_id', req.tenantId)
-      .order('effective_from', { ascending: false })
+    // Manual LWF state overrides (latest row per employee) — fetchAllRows: a
+    // large tenant's override history can exceed the 1,000-row PostgREST ceiling.
+    let stateConfigs: any[]
+    let exemptRows: any[]
+    try {
+      stateConfigs = await fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('lwf_state_config')
+          .select('employee_id, state_code')
+          .eq('tenant_id', req.tenantId)
+          .order('effective_from', { ascending: false })
+          .range(from, to),
+      )
+      exemptRows = await fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('employee_statutory_overrides')
+          .select('employee_id')
+          .eq('tenant_id', req.tenantId)
+          .eq('statutory_type', 'lwf')
+          .eq('is_exempt', true)
+          .order('effective_from', { ascending: false })
+          .range(from, to),
+      )
+    } catch (fetchErr) {
+      return serverError(req, reply, fetchErr, ErrorCode.QUERY_FAILED, 'Failed to fetch LWF state overrides/exemptions')
+    }
     const manualStateMap = new Map<string, string>()
-    for (const r of (stateConfigs ?? []) as any[]) {
+    for (const r of stateConfigs as any[]) {
       if (!manualStateMap.has(r.employee_id)) manualStateMap.set(r.employee_id, r.state_code)
     }
-
-    // LWF exemptions (latest)
-    const { data: exemptRows } = await fastify.supabase
-      .from('employee_statutory_overrides')
-      .select('employee_id')
-      .eq('tenant_id', req.tenantId)
-      .eq('statutory_type', 'lwf')
-      .eq('is_exempt', true)
-      .order('effective_from', { ascending: false })
-    const exemptSet = new Set<string>(((exemptRows ?? []) as any[]).map(r => r.employee_id))
+    const exemptSet = new Set<string>((exemptRows as any[]).map(r => r.employee_id))
 
     // LWF state settings keyed by state_code
-    const { data: settingsRows } = await fastify.supabase
+    const { data: settingsRows, error: settingsErr } = await fastify.supabase
       .from('lwf_state_settings')
       .select('*')
       .eq('tenant_id', req.tenantId)
       .eq('enabled', true)
       .eq('is_active', true)
+    if (settingsErr) return serverError(req, reply, settingsErr, ErrorCode.QUERY_FAILED, 'Failed to fetch LWF state settings')
     const settingsMap = new Map<string, any>()
     for (const s of (settingsRows ?? []) as any[]) settingsMap.set(s.state_code, s)
 
-    // Gross wages from finalized slips
-    const { data: slipRows } = await fastify.supabase
-      .from('payroll_slips')
-      .select('employee_id, gross_pay, component_breakdown')
-      .eq('tenant_id', req.tenantId)
-      .eq('month', month)
-      .eq('status', 'finalized')
+    // Gross wages from finalized slips — fetchAllRows: a large tenant's
+    // finalized-slip set for a month can exceed the 1,000-row ceiling.
+    let slipRows: any[]
+    let fallbackRows: any[]
+    try {
+      slipRows = await fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('payroll_slips')
+          .select('employee_id, gross_pay, component_breakdown')
+          .eq('tenant_id', req.tenantId)
+          .eq('month', month)
+          .eq('status', 'finalized')
+          .range(from, to),
+      )
+      // One row per active earning component per employee — can exceed 1,000
+      // rows even for a mid-size tenant (e.g. 150 employees × 7 components).
+      fallbackRows = await fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('employee_compensation_components')
+          .select('employee_compensations!inner(employee_id), computed_monthly, salary_components!inner(component_type)')
+          .eq('employee_compensations.tenant_id', req.tenantId)
+          .eq('employee_compensations.is_active', true)
+          .eq('salary_components.component_type', 'earning')
+          .range(from, to),
+      )
+    } catch (fetchErr) {
+      return serverError(req, reply, fetchErr, ErrorCode.QUERY_FAILED, 'Failed to fetch payroll slips/fallback compensation')
+    }
     const slipGrossMap = new Map<string, number>(
-      ((slipRows ?? []) as any[]).map(r => [r.employee_id, r.gross_pay ?? 0]),
+      (slipRows as any[]).map(r => [r.employee_id, r.gross_pay ?? 0]),
     )
     // Actual LWF lines from slip if already computed on the run
     const slipLwfEmpMap = new Map<string, number>()
     const slipLwfEmprMap = new Map<string, number>()
-    for (const r of (slipRows ?? []) as any[]) {
+    for (const r of slipRows as any[]) {
       const bd = Array.isArray(r.component_breakdown) ? r.component_breakdown : []
       for (const c of bd) {
         const code = String(c?.code ?? '').toUpperCase()
@@ -322,15 +357,8 @@ export default async function lwfRoutes(fastify: FastifyInstance) {
       }
     }
 
-    // Fallback gross from compensation
-    const { data: fallbackRows } = await fastify.supabase
-      .from('employee_compensation_components')
-      .select('employee_compensations!inner(employee_id), computed_monthly, salary_components!inner(component_type)')
-      .eq('employee_compensations.tenant_id', req.tenantId)
-      .eq('employee_compensations.is_active', true)
-      .eq('salary_components.component_type', 'earning')
     const fallbackGrossMap = new Map<string, number>()
-    for (const r of (fallbackRows ?? []) as any[]) {
+    for (const r of fallbackRows as any[]) {
       const empId = r.employee_compensations?.employee_id
       if (empId) fallbackGrossMap.set(empId, (fallbackGrossMap.get(empId) ?? 0) + (r.computed_monthly ?? 0))
     }
