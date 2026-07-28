@@ -24,6 +24,7 @@ import { HR_ADMIN_ROLES } from '../../../lib/rbac.js'
 import { fetchAllRows } from '../../../lib/supabase-paginate.js'
 import { fetchTenantTz } from '../../../lib/attendance-engine.js'
 import { getLocalDate } from '../../../lib/org-context.js'
+import { serverError, ErrorCode } from '../../../lib/api-errors.js'
 
 /** Rows per .in() call — keeps the request URL well under server/proxy
  *  request-line limits. The request-body schemas here allow up to 500
@@ -102,6 +103,37 @@ async function logBulkOperation(
     })
 }
 
+/**
+ * chunkedUpdateByIds stops at the first failing chunk and returns whatever
+ * updated successfully before it. Without this, callers discarded that
+ * partial success entirely: the audit-trail insert (logBulkOperation) never
+ * ran for the ids that DID get updated, and the client received a bare 500
+ * with no indication some records were already mutated (verified/rejected/
+ * locked) in the DB.
+ */
+async function respondPartialBulkFailure(
+  fastify: FastifyInstance,
+  req: any,
+  reply: any,
+  error: unknown,
+  updatedIds: string[],
+  requestedIds: string[],
+  operationType: string,
+  reason: string | undefined,
+  financialYear: string | undefined,
+): Promise<any> {
+  if (updatedIds.length > 0) {
+    await logBulkOperation(
+      fastify, req.tenantId, req.userId, operationType, updatedIds, reason, financialYear,
+      { requested_ids: requestedIds, partial_failure: true },
+    )
+  }
+  return serverError(
+    req, reply, error, ErrorCode.UPDATE_FAILED,
+    `Bulk operation stopped after updating ${updatedIds.length} of ${requestedIds.length} record(s); the completed portion has been saved and logged`,
+  )
+}
+
 // =============================================================================
 export default async function tdsBulkRoutes(fastify: FastifyInstance) {
   const auth = { preHandler: [fastify.authenticate] }
@@ -151,7 +183,7 @@ export default async function tdsBulkRoutes(fastify: FastifyInstance) {
         .select('id'),
     )
 
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: (error as Error).message })
+    if (error) return respondPartialBulkFailure(fastify, req, reply, error, updatedIds, proof_ids, 'bulk_verify', notes, undefined)
 
     const failed = proof_ids.filter(id => !updatedIds.includes(id))
 
@@ -198,7 +230,7 @@ export default async function tdsBulkRoutes(fastify: FastifyInstance) {
         .select('id'),
     )
 
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: (error as Error).message })
+    if (error) return respondPartialBulkFailure(fastify, req, reply, error, updatedIds, proof_ids, 'bulk_reject', rejection_reason, undefined)
 
     const failed = proof_ids.filter(id => !updatedIds.includes(id))
 
@@ -244,7 +276,7 @@ export default async function tdsBulkRoutes(fastify: FastifyInstance) {
         .select('id'),
     )
 
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: (error as Error).message })
+    if (error) return respondPartialBulkFailure(fastify, req, reply, error, updatedIds, proof_ids, 'bulk_request_revision', revision_reason, undefined)
 
     const failed = proof_ids.filter(id => !updatedIds.includes(id))
 
@@ -298,7 +330,7 @@ export default async function tdsBulkRoutes(fastify: FastifyInstance) {
         .select('id'),
     )
 
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: (error as Error).message })
+    if (error) return respondPartialBulkFailure(fastify, req, reply, error, updatedIds, declaration_ids, 'bulk_lock', undefined, financial_year)
 
     const skipped = declaration_ids.filter(id => !updatedIds.includes(id))
 
