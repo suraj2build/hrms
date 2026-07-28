@@ -58,25 +58,35 @@ export default async function managerTeamHelpdeskRoute(fastify: FastifyInstance)
     }
 
     const VALID_STATUSES = ['open', 'in_progress', 'awaiting_employee', 'resolved', 'closed']
-    let q = fastify.supabase
-      .from('helpdesk_tickets')
-      .select(`
-        id, subject, category, priority, status,
-        created_at, sla_due_at, resolution_due_at,
-        sla_breached_at, first_response_at, resolved_at, closed_at,
-        employees!inner( id, first_name, last_name, employee_code )
-      `)
-      .eq('tenant_id', req.tenantId)
-      .in('employee_id', employeeIds)
-      .order('created_at', { ascending: false })
-      .limit(200)
 
-    if (status && VALID_STATUSES.includes(status)) {
-      q = q.eq('status', status)
+    // Paginated — a hard .limit(200) with no page/count signal silently
+    // undercounted the SLA/breach summary for any team whose tickets exceeded
+    // 200 rows (the summary below is computed from these rows, not a separate
+    // exact count). Mirrors the fetchAllRows() fix already applied to the
+    // employees lookup above.
+    let data: any[]
+    try {
+      data = await fetchAllRows<any>((from, to) => {
+        let q = fastify.supabase
+          .from('helpdesk_tickets')
+          .select(`
+            id, subject, category, priority, status,
+            created_at, sla_due_at, resolution_due_at,
+            sla_breached_at, first_response_at, resolved_at, closed_at,
+            employees!inner( id, first_name, last_name, employee_code )
+          `)
+          .eq('tenant_id', req.tenantId)
+          .in('employee_id', employeeIds)
+          .order('created_at', { ascending: false })
+          .range(from, to)
+        if (status && VALID_STATUSES.includes(status)) {
+          q = q.eq('status', status)
+        }
+        return q
+      })
+    } catch (error) {
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch team helpdesk tickets')
     }
-
-    const { data, error } = await q
-    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch team helpdesk tickets')
 
     const now = Date.now()
     const rows = (data ?? []).map((t: any) => {

@@ -133,12 +133,13 @@ export default async function managerTeamLifecycleRoute(fastify: FastifyInstance
     let managerClearances: Record<string, { id: string; status: string }> = {}
     if (sepRows.length) {
       const sepEmpIds = sepRows.map(s => s.employee_id)
-      const { data: clr } = await fastify.supabase
+      const { data: clr, error: clrError } = await fastify.supabase
         .from('separation_clearances')
         .select('id, employee_id, department, status')
         .eq('tenant_id', req.tenantId)
         .eq('department', 'manager')
         .in('employee_id', sepEmpIds)
+      if (clrError) return serverError(req, reply, clrError, ErrorCode.QUERY_FAILED, 'Failed to fetch manager clearances')
       for (const c of (clr ?? []) as any[]) {
         managerClearances[c.employee_id] = { id: c.id, status: c.status }
       }
