@@ -36,8 +36,14 @@ const SEVERITY_ORDER: Record<InsightSeverity, number> = {
   low:      3,
 }
 
-function makeId(type: string): string {
-  return `insight_${type}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`
+// Deterministic — derived from the type + the exact set of source event IDs
+// that triggered this insight, NOT Date.now()/Math.random(). The activity
+// stream polls every 30s and regenerates insights from the same underlying
+// events between user actions; a random ID here would mint a new identity
+// for the same logical condition on every poll, silently un-dismissing (or
+// un-actioning) an insight the user just cleared moments earlier.
+function makeId(type: string, eventIds: string[]): string {
+  return `insight_${type}_${[...eventIds].sort().join('_')}`
 }
 
 // ── Rule 1 — regularise_punches ───────────────────────────────────────────────
@@ -73,7 +79,7 @@ function ruleRegularisePunches(events: OperationalActivityEvent[]): DecisionInsi
   }
 
   return {
-    id:                makeId('regularise_punches'),
+    id:                makeId('regularise_punches', eventIds),
     type:              'regularise_punches',
     category:          'attendance',
     severity,
@@ -132,7 +138,7 @@ function ruleApproveSessions(events: OperationalActivityEvent[]): DecisionInsigh
   }
 
   return {
-    id:                makeId('approve_sessions'),
+    id:                makeId('approve_sessions', eventIds),
     type:              'approve_sessions',
     category:          'attendance',
     severity:          'low',
@@ -187,7 +193,7 @@ function ruleInvestigateTiming(events: OperationalActivityEvent[]): DecisionInsi
   }
 
   return {
-    id:                makeId('investigate_timing'),
+    id:                makeId('investigate_timing', eventIds),
     type:              'investigate_timing',
     category:          'attendance',
     severity:          'high',
@@ -242,7 +248,7 @@ function ruleRebalanceShifts(events: OperationalActivityEvent[]): DecisionInsigh
   }
 
   return {
-    id:                makeId('rebalance_shifts'),
+    id:                makeId('rebalance_shifts', eventIds),
     type:              'rebalance_shifts',
     category:          'roster',
     severity,
@@ -298,7 +304,7 @@ function ruleReduceFatigue(events: OperationalActivityEvent[]): DecisionInsight 
   }
 
   return {
-    id:                makeId('reduce_fatigue'),
+    id:                makeId('reduce_fatigue', eventIds),
     type:              'reduce_fatigue',
     category:          'roster',
     severity,
@@ -353,7 +359,7 @@ function ruleResolvePayrollBlockers(events: OperationalActivityEvent[]): Decisio
   }
 
   return {
-    id:                makeId('resolve_payroll_blockers'),
+    id:                makeId('resolve_payroll_blockers', eventIds),
     type:              'resolve_payroll_blockers',
     category:          'payroll',
     severity,
@@ -409,7 +415,7 @@ function ruleDetectPayrollVariance(events: OperationalActivityEvent[]): Decision
   }
 
   return {
-    id:                makeId('detect_payroll_variance'),
+    id:                makeId('detect_payroll_variance', eventIds),
     type:              'detect_payroll_variance',
     category:          'payroll',
     severity:          'medium',
@@ -464,7 +470,7 @@ function ruleOtThresholdWarning(events: OperationalActivityEvent[]): DecisionIns
   }
 
   return {
-    id:                makeId('ot_threshold_warning'),
+    id:                makeId('ot_threshold_warning', eventIds),
     type:              'ot_threshold_warning',
     category:          'compliance',
     severity,
@@ -518,7 +524,7 @@ function ruleComplianceWarning(events: OperationalActivityEvent[]): DecisionInsi
   }
 
   return {
-    id:                makeId('compliance_warning'),
+    id:                makeId('compliance_warning', eventIds),
     type:              'compliance_warning',
     category:          'compliance',
     severity,

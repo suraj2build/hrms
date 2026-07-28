@@ -36,8 +36,13 @@ const SEVERITY_ORDER: Record<'critical' | 'high' | 'medium', number> = {
   medium:   2,
 }
 
+// Deterministic — each rule below produces at most one warning per type, so
+// the type alone is a stable identity. Date.now() here would (like the same
+// anti-pattern in recommendationEngine.ts's makeId) mint a new identity on
+// every 30s activity-stream poll even when the underlying condition is
+// unchanged, breaking any future dismiss-tracking keyed on this ID.
 function makeWarningId(type: PredictiveWarningType): string {
-  return `warning_${type}_${Date.now().toString(36)}`
+  return `warning_${type}`
 }
 
 // ── Rule 1 — payroll_delay ────────────────────────────────────────────────────

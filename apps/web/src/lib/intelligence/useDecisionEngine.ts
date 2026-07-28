@@ -21,8 +21,13 @@ import type { OperationalActivityEvent } from '@/lib/activity/types'
 
 // ── Local helpers ─────────────────────────────────────────────────────────────
 
-function makeOptId(type: OptimizationInsightType): string {
-  return `opt_${type}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`
+// Deterministic for the same reason as recommendationEngine.ts's makeId —
+// the 30s activity-stream poll must not mint a new identity for the same
+// underlying condition, or React remounts every optimization card on every
+// tick (losing any per-card UI state) and a future dismiss feature would
+// silently un-dismiss insights the moment the poll refires.
+function makeOptId(type: OptimizationInsightType, sourceIds: string[]): string {
+  return `opt_${type}_${[...sourceIds].sort().join('_')}`
 }
 
 function uniqueEntitiesFromEvents(
@@ -59,7 +64,7 @@ function generateOptimizationInsights(events: OperationalActivityEvent[]): Optim
       type: 'employee' as const,
     }))
     insights.push({
-      id:               makeOptId('chronic_absenteeism'),
+      id:               makeOptId('chronic_absenteeism', chronicAbsentees.map(([id]) => id)),
       type:             'chronic_absenteeism',
       title:            'Chronic Absenteeism Pattern Detected',
       metric:           chronicAbsentees.length,
@@ -75,7 +80,7 @@ function generateOptimizationInsights(events: OperationalActivityEvent[]): Optim
   const otSpikeEvents = events.filter(e => e.type === 'ot_spike')
   if (otSpikeEvents.length > 3) {
     insights.push({
-      id:               makeOptId('ot_hotspot'),
+      id:               makeOptId('ot_hotspot', otSpikeEvents.map(e => e.id)),
       type:             'ot_hotspot',
       title:            'Overtime Hotspot Identified',
       metric:           otSpikeEvents.length,
@@ -91,7 +96,7 @@ function generateOptimizationInsights(events: OperationalActivityEvent[]): Optim
   const shiftUnassignedEvents = events.filter(e => e.type === 'shift_unassigned')
   if (shiftUnassignedEvents.length > 0) {
     insights.push({
-      id:               makeOptId('shift_imbalance'),
+      id:               makeOptId('shift_imbalance', shiftUnassignedEvents.map(e => e.id)),
       type:             'shift_imbalance',
       title:            'Shift Coverage Imbalance',
       metric:           shiftUnassignedEvents.length,
@@ -115,7 +120,7 @@ function generateOptimizationInsights(events: OperationalActivityEvent[]): Optim
   })
   if (blockers24h.length > blockers48h.length && blockers24h.length > 0) {
     insights.push({
-      id:               makeOptId('payroll_anomaly_trend'),
+      id:               makeOptId('payroll_anomaly_trend', blockers24h.map(e => e.id)),
       type:             'payroll_anomaly_trend',
       title:            'Payroll Blocker Count Trending Up',
       metric:           blockers24h.length,
@@ -131,7 +136,7 @@ function generateOptimizationInsights(events: OperationalActivityEvent[]): Optim
   const fatigueEvents = events.filter(e => e.type === 'fatigue_risk' && e.status === 'open')
   if (fatigueEvents.length > 2) {
     insights.push({
-      id:               makeOptId('fatigue_cluster'),
+      id:               makeOptId('fatigue_cluster', fatigueEvents.map(e => e.id)),
       type:             'fatigue_cluster',
       title:            'Fatigue Risk Cluster Forming',
       metric:           fatigueEvents.length,

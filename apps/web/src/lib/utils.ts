@@ -68,7 +68,9 @@ export function formatCurrency(amount: number): string {
 
 export function getInitials(name: string): string {
   return name
-    .split(' ')
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
     .map((n) => n[0])
     .slice(0, 2)
     .join('')
