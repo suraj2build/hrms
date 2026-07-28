@@ -119,20 +119,20 @@ export function computeEPF(input: EPFInput, config: EPFConfig): EPFResult {
   const employerEps = round2(cappedPfWages * config.employerEpsPct / 100)
   traceSteps.push(`Employer EPS (${config.employerEpsPct}%): ${cappedPfWages} × ${config.employerEpsPct}% = ${employerEps}`)
 
-  // ── EDLI contribution (fully configurable) ────────────────────────────────────
+  // ── EDLI contribution (rate, capped — no floor; the floor field protects admin charges) ──
   const edliRaw = round2(cappedPfWages * config.edliRatePct / 100)
-  const edliContribution = Math.max(
-    Math.min(edliRaw, config.edliCap),
-    config.edliFloor > 0 ? config.edliFloor : 0,
-  )
+  const edliContribution = Math.min(edliRaw, config.edliCap)
   traceSteps.push(
-    `EDLI (${config.edliRatePct}%, cap=${config.edliCap}, floor=${config.edliFloor}): ` +
-    `raw=${edliRaw} → applied=${edliContribution}`,
+    `EDLI (${config.edliRatePct}%, cap=${config.edliCap}): raw=${edliRaw} → applied=${edliContribution}`,
   )
 
-  // ── Admin charges ─────────────────────────────────────────────────────────────
-  const adminCharges = round2(cappedPfWages * config.adminChargesPct / 100)
-  traceSteps.push(`Admin charges (${config.adminChargesPct}%): ${cappedPfWages} × ${config.adminChargesPct}% = ${adminCharges}`)
+  // ── Admin charges (floored so a small wage base doesn't zero out the admin charge) ──
+  const adminChargesRaw = round2(cappedPfWages * config.adminChargesPct / 100)
+  const adminCharges = Math.max(adminChargesRaw, config.edliFloor > 0 ? config.edliFloor : 0)
+  traceSteps.push(
+    `Admin charges (${config.adminChargesPct}%, floor=${config.edliFloor}): ` +
+    `raw=${adminChargesRaw} → applied=${adminCharges}`,
+  )
 
   // ── Total employer contribution ───────────────────────────────────────────────
   const totalEmployerContribution = round2(employerPf + employerEps + edliContribution)
