@@ -64,7 +64,13 @@ export interface PTaxResult {
 export function computePTax(
   monthlyIncome: number,
   slabs: PTaxSlab[],
-  calendarMonth: number = new Date().getMonth() + 1,
+  // No default here deliberately: both call sites already resolve calendarMonth
+  // from the payroll month before calling in, and a `new Date().getMonth() + 1`
+  // default would silently use the server process's local time (UTC) instead of
+  // the tenant's payroll period — the same UTC/IST bug class fixed elsewhere in
+  // this module (ISSUE-154). Making it required prevents a future caller from
+  // ever falling back to that wrong default.
+  calendarMonth: number,
   stateCode: string | null = null,
 ): PTaxResult {
   const traceSteps: string[] = []
