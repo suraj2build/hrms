@@ -187,12 +187,15 @@ export default async function executiveRoutes(fastify: FastifyInstance) {
       daily, excOpenRes, incOpenRes,
       pendingRevRes, payrollRunRes,
     ] = await Promise.all([
-      // Active headcount
+      // Active headcount. Includes 'on_notice' to match the SSOT "employed"
+      // headcount convention used by datasets/headcount.ts (activeCount +
+      // onNoticeCount) — an active-only filter undercounts employees
+      // currently serving notice.
       fastify.supabase
         .from('employees')
         .select('id', { count: 'exact', head: true })
         .eq('tenant_id', req.tenantId)
-        .eq('status', 'active'),
+        .in('status', ['active', 'on_notice']),
 
       // Joiners last 30 days
       fastify.supabase
@@ -335,13 +338,16 @@ export default async function executiveRoutes(fastify: FastifyInstance) {
       // Active headcount. Paginated — a row-returning .select() (no
       // count:exact/head:true) truncates at PostgREST's 1,000-row ceiling
       // for a large tenant, understating employee_count itself plus the
-      // employment-type/gender distributions below.
+      // employment-type/gender distributions below. Includes 'on_notice' to
+      // match the SSOT "employed" headcount convention (datasets/headcount.ts:
+      // activeCount + onNoticeCount) — active-only undercounts employees
+      // currently serving notice.
       fetchAllRows((from, to2) =>
         fastify.supabase
           .from('employees')
           .select('id, employment_type, gender')
           .eq('tenant_id', req.tenantId)
-          .eq('status', 'active')
+          .in('status', ['active', 'on_notice'])
           .range(from, to2),
       ),
 
@@ -622,13 +628,15 @@ export default async function executiveRoutes(fastify: FastifyInstance) {
     // ceiling, silently understating headcount, department/type/gender
     // distributions, and the joiner/exit trend lines below.
     const [empRows, deptRows, separationRows, joiners] = await Promise.all([
-      // All active employees with joining date and type
+      // All active employees with joining date and type. Includes 'on_notice'
+      // to match the SSOT "employed" headcount convention (datasets/headcount.ts:
+      // activeCount + onNoticeCount).
       fetchAllRows((from, to) =>
         fastify.supabase
           .from('employees')
           .select('id, joining_date, employment_type, status, gender, employee_separation!employee_separation_employee_id_fkey(last_working_date)')
           .eq('tenant_id', req.tenantId)
-          .in('status', ['active', 'separated'])
+          .in('status', ['active', 'on_notice', 'separated'])
           .range(from, to),
       ),
 
@@ -666,7 +674,7 @@ export default async function executiveRoutes(fastify: FastifyInstance) {
 
     const _flattenSep = (e: any) => ({ ...e, separation_date: (e.employee_separation ?? [])[0]?.last_working_date ?? null })
     const allEmp    = empRows.map(_flattenSep)
-    const active    = allEmp.filter((e: any) => e.status === 'active')
+    const active    = allEmp.filter((e: any) => e.status === 'active' || e.status === 'on_notice')
     const separated = separationRows.map(_flattenSep)
 
     // Build month boundaries
@@ -756,7 +764,7 @@ export default async function executiveRoutes(fastify: FastifyInstance) {
           .from('employees')
           .select('id, joining_date, status, employee_separation!employee_separation_employee_id_fkey(last_working_date)')
           .eq('tenant_id', req.tenantId)
-          .in('status', ['active', 'separated'])
+          .in('status', ['active', 'on_notice', 'separated'])
           .range(from, to),
       ),
       fetchAllRows((from, to) =>
@@ -780,7 +788,7 @@ export default async function executiveRoutes(fastify: FastifyInstance) {
 
     const flatten = (e: any) => ({ ...e, separation_date: (e.employee_separation ?? [])[0]?.last_working_date ?? null })
     const emp = empRows.map(flatten).filter((e: any) => deptOf(e.id) === department)
-    const activeInDept = emp.filter(e => e.status === 'active').length
+    const activeInDept = emp.filter(e => e.status === 'active' || e.status === 'on_notice').length
 
     const monthBoundaries = monthSeries(todayStr, monthCount)
       .map((m) => ({ month: m, from: monthStart(m), to: monthEnd(m) }))
