@@ -237,6 +237,11 @@ export function EmployeeList() {
   const [sortDir,      setSortDir]      = useState<SortDir>('asc')
   const [page,         setPage]         = useState(1)
   const [selected,     setSelected]     = useState<Set<string>>(new Set())
+  // Emails captured at selection time, keyed by id — `selected` survives
+  // pagination, but re-deriving emails from only the current page's rows would
+  // silently drop any recipient selected on a previous page (bulk "Send Email"
+  // would then mail only whoever happens to be on the page open when clicked).
+  const [selectedEmailsMap, setSelectedEmailsMap] = useState<Map<string, string>>(new Map())
 
   const PAGE_SIZE     = 50
   const debouncedSearch = useDebounce(search, 300)
@@ -359,8 +364,8 @@ export function EmployeeList() {
   }, [statusNarrow, sortKey, sortDir])
 
   const selectedEmails = useMemo(
-    () => pageEmployees.filter(e => selected.has(e.id)).map(e => e.email),
-    [pageEmployees, selected],
+    () => Array.from(selectedEmailsMap.values()),
+    [selectedEmailsMap],
   )
 
   const totalPages   = Math.max(1, Math.ceil(serverTotal / PAGE_SIZE))
@@ -378,15 +383,26 @@ export function EmployeeList() {
   function toggleSelectAll() {
     if (allSelected) {
       setSelected(prev => { const n = new Set(prev); allPageIds.forEach(id => n.delete(id)); return n })
+      setSelectedEmailsMap(prev => { const n = new Map(prev); allPageIds.forEach(id => n.delete(id)); return n })
     } else {
       setSelected(prev => { const n = new Set(prev); allPageIds.forEach(id => n.add(id)); return n })
+      setSelectedEmailsMap(prev => {
+        const n = new Map(prev)
+        for (const e of pageItems) n.set(e.id, e.email)
+        return n
+      })
     }
   }
 
-  function toggleSelect(id: string) {
+  function toggleSelect(id: string, email: string) {
     setSelected(prev => {
       const n = new Set(prev)
       n.has(id) ? n.delete(id) : n.add(id)
+      return n
+    })
+    setSelectedEmailsMap(prev => {
+      const n = new Map(prev)
+      n.has(id) ? n.delete(id) : n.set(id, email)
       return n
     })
   }
@@ -625,7 +641,7 @@ export function EmployeeList() {
                     basePath={basePath}
                     navigate={navigate}
                     selected={selected.has(emp.id)}
-                    onSelect={() => toggleSelect(emp.id)}
+                    onSelect={() => toggleSelect(emp.id, emp.email)}
                   />
                 ))
               )}
@@ -664,7 +680,7 @@ export function EmployeeList() {
 
         <BulkBar
           count={selected.size}
-          onClear={() => setSelected(new Set())}
+          onClear={() => { setSelected(new Set()); setSelectedEmailsMap(new Map()) }}
           selectedEmails={selectedEmails}
         />
 

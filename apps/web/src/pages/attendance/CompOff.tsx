@@ -91,7 +91,28 @@ export function CompOff() {
 
   const [statusFilter, setStatusFilter] = useState<CompOffStatus | ''>('')
   const [actionRowId,  setActionRowId]  = useState<string | null>(null)
+  const [actionType,   setActionType]   = useState<'approve' | 'reject' | null>(null)
   const [notes,        setNotes]        = useState('')
+
+  // Opens the inline confirm panel for a row+action, resetting notes so a
+  // leftover value typed for a different row/action can't be submitted as
+  // the reason for this one.
+  function openAction(id: string, type: 'approve' | 'reject') {
+    if (actionRowId === id && actionType === type) {
+      setActionRowId(null)
+      setActionType(null)
+    } else {
+      setActionRowId(id)
+      setActionType(type)
+    }
+    setNotes('')
+  }
+
+  function closeAction() {
+    setActionRowId(null)
+    setActionType(null)
+    setNotes('')
+  }
 
   // Generate form
   const [genFrom,    setGenFrom]    = useState(() => {
@@ -134,8 +155,7 @@ export function CompOff() {
       api.post(`/attendance/comp-off/${id}/approve`, { notes }),
     onSuccess: () => {
       invalidate()
-      setActionRowId(null)
-      setNotes('')
+      closeAction()
       toast.success('Comp-off approved and balance credited')
     },
     onError: (e: Error) => {
@@ -152,8 +172,7 @@ export function CompOff() {
       api.post(`/attendance/comp-off/${id}/reject`, { notes }),
     onSuccess: () => {
       invalidate()
-      setActionRowId(null)
-      setNotes('')
+      closeAction()
       toast.success('Comp-off request rejected')
     },
     onError: (e: Error) => toast.error('Rejection failed', { description: e.message }),
@@ -309,7 +328,7 @@ export function CompOff() {
                                   variant="ghost"
                                   className="h-7 w-7 text-success hover:text-success"
                                   title="Approve"
-                                  onClick={() => setActionRowId(actionRowId === req.id ? null : req.id)}
+                                  onClick={() => openAction(req.id, 'approve')}
                                 >
                                   <Check className="h-3.5 w-3.5" />
                                 </Button>
@@ -318,8 +337,7 @@ export function CompOff() {
                                   variant="ghost"
                                   className="h-7 w-7 text-destructive hover:text-destructive"
                                   title="Reject"
-                                  onClick={() => rejectMutation.mutate({ id: req.id, notes })}
-                                  disabled={rejectMutation.isPending}
+                                  onClick={() => openAction(req.id, 'reject')}
                                 >
                                   <X className="h-3.5 w-3.5" />
                                 </Button>
@@ -330,28 +348,45 @@ export function CompOff() {
                             )}
                           </td>
                         </tr>
-                        {/* Inline approval panel */}
-                        {actionRowId === req.id && (
-                          <tr key={`${req.id}-action`} className="bg-success/5 border-b border-border/50">
+                        {/* Inline confirm panel — shared by approve/reject so a reject always
+                            requires the same explicit confirmation step approve does, and
+                            never fires from a stale notes value left over from another row. */}
+                        {actionRowId === req.id && actionType && (
+                          <tr key={`${req.id}-action`} className={cn('border-b border-border/50', actionType === 'approve' ? 'bg-success/5' : 'bg-destructive/5')}>
                             <td colSpan={7} className="px-3 py-2">
                               <div className="flex items-center gap-2">
-                                <span className="text-xs text-foreground font-medium">Add notes (optional):</span>
+                                <span className="text-xs text-foreground font-medium">
+                                  {actionType === 'approve' ? 'Add notes (optional):' : 'Reason for rejection (optional):'}
+                                </span>
                                 <Input
                                   value={notes}
                                   onChange={e => setNotes(e.target.value)}
-                                  placeholder="Approval notes…"
+                                  placeholder={actionType === 'approve' ? 'Approval notes…' : 'Rejection reason…'}
                                   className="h-7 text-xs flex-1 max-w-xs"
                                 />
-                                <Button
-                                  size="sm"
-                                  className="h-7 gap-1 text-xs"
-                                  disabled={approveMutation.isPending}
-                                  onClick={() => approveMutation.mutate({ id: req.id, notes })}
-                                >
-                                  {approveMutation.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />}
-                                  Confirm Approve
-                                </Button>
-                                <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => setActionRowId(null)}>
+                                {actionType === 'approve' ? (
+                                  <Button
+                                    size="sm"
+                                    className="h-7 gap-1 text-xs"
+                                    disabled={approveMutation.isPending}
+                                    onClick={() => approveMutation.mutate({ id: req.id, notes })}
+                                  >
+                                    {approveMutation.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />}
+                                    Confirm Approve
+                                  </Button>
+                                ) : (
+                                  <Button
+                                    size="sm"
+                                    variant="destructive"
+                                    className="h-7 gap-1 text-xs"
+                                    disabled={rejectMutation.isPending}
+                                    onClick={() => rejectMutation.mutate({ id: req.id, notes })}
+                                  >
+                                    {rejectMutation.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <X className="h-3 w-3" />}
+                                    Confirm Reject
+                                  </Button>
+                                )}
+                                <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={closeAction}>
                                   Cancel
                                 </Button>
                               </div>
