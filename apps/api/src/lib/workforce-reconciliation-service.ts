@@ -107,7 +107,7 @@ async function flushIssues(
       .from('workforce_reconciliation_issues')
       .insert(chunk)
     if (error) {
-      console.error('[workforce-reconciliation] issue flush error:', error.message)
+      throw new Error(`Failed to persist workforce reconciliation issues: ${error.message}`)
     }
   }
 }
@@ -127,15 +127,17 @@ async function checkOrphanRebuildChains(
   tenantId:  string,
   issues:    WorkforceIssue[],
 ): Promise<void> {
-  const { data: stalled } = await supabase
-    .from('workforce_rebuild_events')
-    .select('id, orchestrator_lineage_id, employee_id, downstream_modules, completed_modules, created_at, source_event_type')
-    .eq('tenant_id', tenantId)
-    .in('orchestration_status', ['in_progress', 'sequencing'])
-    .lt('updated_at', stallCutoff())
-    .limit(MAX_ISSUES)
+  const stalled = await fetchAllRows((from, to) =>
+    supabase
+      .from('workforce_rebuild_events')
+      .select('id, orchestrator_lineage_id, employee_id, downstream_modules, completed_modules, created_at, source_event_type')
+      .eq('tenant_id', tenantId)
+      .in('orchestration_status', ['in_progress', 'sequencing'])
+      .lt('updated_at', stallCutoff())
+      .range(from, to),
+  )
 
-  for (const row of (stalled ?? []) as any[]) {
+  for (const row of stalled as any[]) {
     if (issues.length >= MAX_ISSUES) break
     const pending  = (row.downstream_modules as string[]).filter(
       (m: string) => !(row.completed_modules as string[]).includes(m),
@@ -170,14 +172,16 @@ async function checkFreezeBoundaryViolations(
   issues:    WorkforceIssue[],
 ): Promise<void> {
   // Find pending rebuild entries
-  const { data: pendingRebuild } = await supabase
-    .from('retroactive_rebuild_queue')
-    .select('id, employee_id, rebuild_from_date, rebuild_to_date, source_event_type, affected_modules, orchestrator_lineage_id')
-    .eq('tenant_id', tenantId)
-    .eq('status', 'pending')
-    .limit(MAX_ISSUES)
+  const pendingRebuild = await fetchAllRows((from, to) =>
+    supabase
+      .from('retroactive_rebuild_queue')
+      .select('id, employee_id, rebuild_from_date, rebuild_to_date, source_event_type, affected_modules, orchestrator_lineage_id')
+      .eq('tenant_id', tenantId)
+      .eq('status', 'pending')
+      .range(from, to),
+  )
 
-  if (!pendingRebuild?.length) return
+  if (!pendingRebuild.length) return
 
   // Get all locked/archived periods
   const { data: lockedPeriods } = await supabase
@@ -195,7 +199,7 @@ async function checkFreezeBoundaryViolations(
     (lockedPeriods as { period_month: string; governance_state: string }[]).map(p => [p.period_month, p.governance_state])
   )
 
-  for (const rebuild of (pendingRebuild as any[])) {
+  for (const rebuild of pendingRebuild as any[]) {
     if (issues.length >= MAX_ISSUES) break
     const fromPeriod = (rebuild.rebuild_from_date as string).slice(0, 7)
 
@@ -232,15 +236,17 @@ async function checkReplayLineageCorruption(
   issues:    WorkforceIssue[],
 ): Promise<void> {
   // Queue entries with a lineage ID
-  const { data: linkedEntries } = await supabase
-    .from('retroactive_rebuild_queue')
-    .select('id, orchestrator_lineage_id, employee_id, source_event_type, affected_modules, status')
-    .eq('tenant_id', tenantId)
-    .not('orchestrator_lineage_id', 'is', null)
-    .in('status', ['pending', 'in_progress', 'failed'])
-    .limit(MAX_ISSUES)
+  const linkedEntries = await fetchAllRows((from, to) =>
+    supabase
+      .from('retroactive_rebuild_queue')
+      .select('id, orchestrator_lineage_id, employee_id, source_event_type, affected_modules, status')
+      .eq('tenant_id', tenantId)
+      .not('orchestrator_lineage_id', 'is', null)
+      .in('status', ['pending', 'in_progress', 'failed'])
+      .range(from, to),
+  )
 
-  if (!linkedEntries?.length) return
+  if (!linkedEntries.length) return
 
   // Get all known lineage IDs from workforce_rebuild_events
   const lineageIds = [...new Set(
@@ -293,16 +299,18 @@ async function checkRetroBuildIncomplete(
   const yearStart = `${reconcileYear}-01-01`
   const yearEnd   = `${reconcileYear}-12-31`
 
-  const { data: failedEvents } = await supabase
-    .from('workforce_rebuild_events')
-    .select('id, orchestrator_lineage_id, employee_id, downstream_modules, completed_modules, failed_modules, source_event_type, rebuild_from_date')
-    .eq('tenant_id', tenantId)
-    .eq('orchestration_status', 'failed')
-    .gte('rebuild_from_date', yearStart)
-    .lte('rebuild_from_date', yearEnd)
-    .limit(MAX_ISSUES)
+  const failedEvents = await fetchAllRows((from, to) =>
+    supabase
+      .from('workforce_rebuild_events')
+      .select('id, orchestrator_lineage_id, employee_id, downstream_modules, completed_modules, failed_modules, source_event_type, rebuild_from_date')
+      .eq('tenant_id', tenantId)
+      .eq('orchestration_status', 'failed')
+      .gte('rebuild_from_date', yearStart)
+      .lte('rebuild_from_date', yearEnd)
+      .range(from, to),
+  )
 
-  for (const event of (failedEvents ?? []) as any[]) {
+  for (const event of failedEvents as any[]) {
     if (issues.length >= MAX_ISSUES) break
     const unrecoverable = (event.failed_modules as string[]).some(m =>
       !(event.completed_modules as string[]).includes(m)
@@ -337,14 +345,16 @@ async function checkCrossModuleReplayDrift(
   tenantId:  string,
   issues:    WorkforceIssue[],
 ): Promise<void> {
-  const { data: completed } = await supabase
-    .from('workforce_rebuild_events')
-    .select('id, orchestrator_lineage_id, employee_id, downstream_modules, completed_modules')
-    .eq('tenant_id', tenantId)
-    .eq('orchestration_status', 'completed')
-    .limit(MAX_ISSUES)
+  const completed = await fetchAllRows((from, to) =>
+    supabase
+      .from('workforce_rebuild_events')
+      .select('id, orchestrator_lineage_id, employee_id, downstream_modules, completed_modules')
+      .eq('tenant_id', tenantId)
+      .eq('orchestration_status', 'completed')
+      .range(from, to),
+  )
 
-  for (const event of (completed ?? []) as any[]) {
+  for (const event of completed as any[]) {
     if (issues.length >= MAX_ISSUES) break
     const missing = (event.downstream_modules as string[]).filter(
       (m: string) => !(event.completed_modules as string[]).includes(m),

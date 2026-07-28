@@ -24,6 +24,8 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { fetchAllRows } from './supabase-paginate.js'
+import { fetchTenantTz } from './attendance-engine.js'
+import { getLocalDate } from './org-context.js'
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -111,6 +113,12 @@ function classifyHealth(snap: Omit<FreshnessSnapshot, 'health_status'>): Freshne
   return 'healthy'
 }
 
+/** Shift a YYYY-MM-DD date string by `deltaDays`, anchored at UTC noon to dodge DST. */
+function shiftDateStr(dateStr: string, deltaDays: number): string {
+  const [y, m, d] = dateStr.split('-').map(Number)
+  return new Date(Date.UTC(y, m - 1, d + deltaDays, 12)).toISOString().slice(0, 10)
+}
+
 // ── Main scanner ───────────────────────────────────────────────────────────────
 
 export async function scanAttendanceFreshness(
@@ -120,10 +128,9 @@ export async function scanAttendanceFreshness(
   includeStaleList:  boolean = true,
 ): Promise<FreshnessReport> {
   const today       = new Date()
-  const snapshotDate = today.toISOString().slice(0, 10)
-  const staleDate   = new Date(today)
-  staleDate.setDate(staleDate.getDate() - staleDays)
-  const staleDateStr = staleDate.toISOString().slice(0, 10)
+  const tenantTz    = await fetchTenantTz(supabase, tenantId)
+  const snapshotDate = getLocalDate(today.toISOString(), tenantTz)
+  const staleDateStr = shiftDateStr(snapshotDate, -staleDays)
 
   // ── 1. Active employee list ────────────────────────────────────────────────
   const empRows = await fetchAllRows((from, to) =>
@@ -139,9 +146,7 @@ export async function scanAttendanceFreshness(
 
   // ── 2. Most recent attendance_daily per employee ───────────────────────────
   // Query the latest date per employee in the last 90 days window
-  const window90Start = new Date(today)
-  window90Start.setDate(window90Start.getDate() - 90)
-  const window90 = window90Start.toISOString().slice(0, 10)
+  const window90 = shiftDateStr(snapshotDate, -90)
 
   const latestRows = await fetchAllRows((from, to) =>
     supabase
@@ -189,8 +194,8 @@ export async function scanAttendanceFreshness(
 
   // ── 3. Unprocessed raw log backlog ─────────────────────────────────────────
   const [
-    { count: unprocessedCount },
-    { data: oldestRaw },
+    { count: unprocessedCount, error: unprocessedErr },
+    { data: oldestRaw, error: oldestErr },
   ] = await Promise.all([
     supabase
       .from('attendance_raw_logs')
@@ -207,13 +212,16 @@ export async function scanAttendanceFreshness(
       .maybeSingle(),
   ])
 
+  if (unprocessedErr) throw new Error(`Raw log backlog count failed: ${unprocessedErr.message}`)
+  if (oldestErr) throw new Error(`Oldest raw log lookup failed: ${oldestErr.message}`)
+
   const unprocessedRawLogs    = unprocessedCount ?? 0
   const oldestUnprocessedHours = oldestRaw?.timestamp
     ? Math.round((today.getTime() - new Date(oldestRaw.timestamp).getTime()) / 3_600_000 * 10) / 10
     : null
 
   // ── 4. Last processing run ─────────────────────────────────────────────────
-  const { data: lastRun } = await supabase
+  const { data: lastRun, error: lastRunErr } = await supabase
     .from('attendance_processing_runs')
     .select('completed_at')
     .eq('tenant_id', tenantId)
@@ -222,6 +230,8 @@ export async function scanAttendanceFreshness(
     .order('completed_at', { ascending: false })
     .limit(1)
     .maybeSingle()
+
+  if (lastRunErr) throw new Error(`Last processing run lookup failed: ${lastRunErr.message}`)
 
   const lastRunAt = lastRun?.completed_at ?? null
   const hoursSinceLastRun = lastRunAt
