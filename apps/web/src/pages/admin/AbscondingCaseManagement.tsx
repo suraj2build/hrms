@@ -211,11 +211,11 @@ export function AbscondingCaseManagement() {
  })
 
  const autoEscalateMutation = useMutation({
- mutationFn: () => api.post<{ data: { processed: number; escalated: string[] } }>('/absconding/run-auto-escalation'),
+ mutationFn: () => api.post<{ data: { processed: number; escalated_count: number } }>('/absconding/run-auto-escalation'),
  onSuccess: (res) => {
  // eslint-disable-next-line @typescript-eslint/no-explicit-any
- const result = (res as any)?.data ?? { processed: 0, escalated: [] }
- const count = result.escalated?.length ?? 0
+ const result = (res as any)?.data ?? { processed: 0, escalated_count: 0 }
+ const count = result.escalated_count ?? 0
  toast.success(
  count > 0
  ? `${count} case${count !== 1 ?'s':''} escalated automatically`

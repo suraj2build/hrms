@@ -26,12 +26,13 @@ import { fetchAllRows } from './supabase-paginate.js'
 const THRESHOLDS = { flag: 3, second_escalation: 5, wl1: 7, wl2: 14, termination: 21 } as const
 
 export interface ScanResult {
-  tenant_id:    string
-  cases_opened: number
-  cases_wl1:    number
-  cases_wl2:    number
-  cases_term:   number
-  errors:       string[]
+  tenant_id:      string
+  cases_opened:   number
+  cases_wl1:      number
+  cases_wl2:      number
+  cases_term:     number
+  cases_scanned:  number
+  errors:         string[]
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -820,7 +821,7 @@ export async function scanAndEscalate(
   supabase:  SupabaseClient,
   tenantId:  string,
 ): Promise<ScanResult> {
-  const result: ScanResult = { tenant_id: tenantId, cases_opened: 0, cases_wl1: 0, cases_wl2: 0, cases_term: 0, errors: [] }
+  const result: ScanResult = { tenant_id: tenantId, cases_opened: 0, cases_wl1: 0, cases_wl2: 0, cases_term: 0, cases_scanned: 0, errors: [] }
   const todayStr = await todayISO(supabase, tenantId)
 
   // 1. Find employees with ≥1 consecutive UA day — early alert at 1-2, flag at 3+
@@ -884,6 +885,8 @@ export async function scanAndEscalate(
       .select('id, status, first_ua_date, ua_days_count, employee_id')
       .eq('tenant_id', tenantId)
       .in('status', ['flagged', 'second_escalation', 'wl1_sent', 'wl2_sent'])
+
+    result.cases_scanned = (openCases ?? []).length
 
     for (const c of (openCases ?? []) as { id: string; status: string; first_ua_date: string; ua_days_count: number; employee_id: string }[]) {
       try {
