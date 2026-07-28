@@ -241,15 +241,20 @@ export default async function overtimeRoutes(fastify: FastifyInstance) {
   // GET /overtime/assignments
   fastify.get('/overtime/assignments', auth, async (req: any, reply) => {
     if (!requireAdmin(req, reply)) return
-    const { data, error } = await fastify.supabase
+    const parsed = z.object({ employee_id: z.string().uuid().optional() }).safeParse(req.query)
+    if (!parsed.success) {
+      return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+    }
+    let query = fastify.supabase
       .from('employee_overtime_policies')
       .select(`
-        id, effective_from, created_at,
+        id, employee_id, ot_policy_id, effective_from, created_at,
         employees!inner(id, first_name, last_name, employee_code),
         overtime_policies(id, name)
       `)
       .eq('tenant_id', req.tenantId)
-      .order('created_at', { ascending: false })
+    if (parsed.data.employee_id) query = query.eq('employee_id', parsed.data.employee_id)
+    const { data, error } = await query.order('created_at', { ascending: false })
     if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch assignments' })
     return reply.send({ data: data ?? [] })
   })

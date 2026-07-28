@@ -468,6 +468,8 @@ export function RegularisationApproval() {
       await api.post(`/attendance/regularisation/${id}/${type}`, body)
       queryClient.invalidateQueries({ queryKey: ['regularisation-pending'] })
       queryClient.invalidateQueries({ queryKey: ['attendance-ops-stats'] })
+      // The employees' own ESS approvals tracker reads these same records.
+      queryClient.invalidateQueries({ queryKey: ['ess-approvals-corrections'] })
       // Close dialogs if they were open for this row
       if (drawerRequest?.id === id) setDrawerRequest(null)
       if (rejectTarget?.id === id) { setRejectTarget(null); setRejectReason('') }

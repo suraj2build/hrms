@@ -327,6 +327,8 @@ function RequestsTab() {
   const [statusFilter, setStatusFilter] = useState<OtStatus | ''>('')
   const [actionRowId, setActionRowId]   = useState<string | null>(null)
   const [approveMinutes, setApproveMinutes] = useState<Record<string, string>>({})
+  const [rejectTarget, setRejectTarget] = useState<OtRequest | null>(null)
+  const [rejectReason, setRejectReason] = useState('')
 
   const { data, isLoading, refetch } = useQuery<{ data: OtRequest[]; total: number }>({
     queryKey: ['ot-requests', statusFilter],
@@ -358,11 +360,14 @@ function RequestsTab() {
   })
 
   const rejectMutation = useMutation({
-    mutationFn: (id: string) => api.post(`/overtime/requests/${id}/reject`, {}),
+    mutationFn: ({ id, reason }: { id: string; reason: string }) =>
+      api.post(`/overtime/requests/${id}/reject`, { rejection_reason: reason }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['ot-requests'] })
       qc.invalidateQueries({ queryKey: ['manager-team-overtime'] })
       setActionRowId(null)
+      setRejectTarget(null)
+      setRejectReason('')
       toast.success('Overtime request rejected')
     },
     onError: (e: Error) => {
@@ -456,7 +461,7 @@ function RequestsTab() {
                                 </Button>
                                 <Button size="sm" variant="ghost" className="h-6 text-[10px] px-2 text-destructive"
                                   disabled={rejectMutation.isPending}
-                                  onClick={() => { setActionRowId(req.id); rejectMutation.mutate(req.id) }}>
+                                  onClick={() => { setRejectTarget(req); setRejectReason('') }}>
                                   <XCircle className="h-3 w-3" />
                                 </Button>
                               </>
@@ -494,6 +499,43 @@ function RequestsTab() {
           </div>
         )}
       </SectionCard>
+
+      <Dialog open={!!rejectTarget} onOpenChange={(open: boolean) => { if (!open) { setRejectTarget(null); setRejectReason('') } }}>
+        <DialogContent className="max-w-[400px]">
+          {rejectTarget && (
+            <>
+              <DialogHeader>
+                <DialogTitle className="text-base">Reject Overtime Request</DialogTitle>
+              </DialogHeader>
+              <div className="space-y-3 py-2">
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-muted-foreground">Rejection Reason *</label>
+                  <textarea
+                    value={rejectReason}
+                    onChange={e => setRejectReason(e.target.value)}
+                    placeholder="Explain why this request is being rejected…"
+                    rows={3}
+                    className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-xs text-foreground placeholder:text-muted-foreground outline-none focus:ring-1 ring-primary/50 resize-none"
+                  />
+                </div>
+              </div>
+              <DialogFooter>
+                <Button variant="outline" size="sm" onClick={() => { setRejectTarget(null); setRejectReason('') }}>Cancel</Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="border-destructive/40 text-destructive hover:bg-destructive/10"
+                  disabled={!rejectReason.trim() || rejectMutation.isPending}
+                  onClick={() => { setActionRowId(rejectTarget.id); rejectMutation.mutate({ id: rejectTarget.id, reason: rejectReason.trim() }) }}
+                >
+                  {rejectMutation.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> : <XCircle className="h-3.5 w-3.5 mr-1" />}
+                  Confirm Reject
+                </Button>
+              </DialogFooter>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
@@ -644,7 +686,7 @@ function AssignmentsTab() {
   const [policyId, setPolicyId] = useState('')
   const [msg, setMsg]         = useState('')
 
-  const { data: assignments, isLoading: loadingAss } = useQuery<{ data: Array<{ id: string; employee_id: string; policy_id: string; created_at: string }> }>({
+  const { data: assignments, isLoading: loadingAss } = useQuery<{ data: Array<{ id: string; employee_id: string; ot_policy_id: string; created_at: string }> }>({
     queryKey: ['ot-assignments', applied],
     queryFn:  () => api.get(`/overtime/assignments?employee_id=${applied}`),
     enabled:  !!applied,
@@ -659,7 +701,7 @@ function AssignmentsTab() {
   const policies = policiesData?.data ?? []
 
   const assignMutation = useMutation({
-    mutationFn: (body: { employee_id: string; policy_id: string }) =>
+    mutationFn: (body: { employee_id: string; ot_policy_id: string }) =>
       api.post('/overtime/assignments', body),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['ot-assignments'] })
@@ -709,7 +751,7 @@ function AssignmentsTab() {
                 <div>
                   <p className="text-xs font-medium">Current Assignment</p>
                   <p className="text-[11px] text-muted-foreground">
-                    {policies.find(p => p.id === assignments?.data[0]?.policy_id)?.name ?? 'Unknown Policy'}
+                    {policies.find(p => p.id === assignments?.data[0]?.ot_policy_id)?.name ?? 'Unknown Policy'}
                   </p>
                 </div>
                 <Button size="sm" variant="ghost" className="h-7 text-xs text-destructive"
@@ -734,7 +776,7 @@ function AssignmentsTab() {
                 </select>
                 <Button size="sm" className="h-8 text-xs"
                   disabled={!policyId || assignMutation.isPending}
-                  onClick={() => assignMutation.mutate({ employee_id: applied, policy_id: policyId })}>
+                  onClick={() => assignMutation.mutate({ employee_id: applied, ot_policy_id: policyId })}>
                   {assignMutation.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : 'Assign'}
                 </Button>
               </div>
