@@ -215,6 +215,16 @@ export function AdminRecruitment() {
 
   async function handleSave() {
     if (!form.title.trim()) { toast.error('Title is required'); return }
+    const salaryMin = form.salary_min ? parseFloat(form.salary_min) : null
+    const salaryMax = form.salary_max ? parseFloat(form.salary_max) : null
+    if (salaryMin != null && salaryMax != null && salaryMin > salaryMax) {
+      toast.error('Salary minimum cannot exceed salary maximum'); return
+    }
+    const expMin = form.min_experience ? parseFloat(form.min_experience) : null
+    const expMax = form.max_experience ? parseFloat(form.max_experience) : null
+    if (expMin != null && expMax != null && expMin > expMax) {
+      toast.error('Minimum experience cannot exceed maximum experience'); return
+    }
     setSaving(true)
     try {
       const payload: {
@@ -238,10 +248,10 @@ export function AdminRecruitment() {
         openings:        parseInt(form.openings) || 1,
         jd_text:         form.jd_text || null,
         required_skills: form.skills_raw ? form.skills_raw.split(',').map(s => s.trim()).filter(Boolean) : null,
-        min_experience:  form.min_experience ? parseFloat(form.min_experience) : null,
-        max_experience:  form.max_experience ? parseFloat(form.max_experience) : null,
-        salary_min:      form.salary_min ? parseFloat(form.salary_min) : null,
-        salary_max:      form.salary_max ? parseFloat(form.salary_max) : null,
+        min_experience:  expMin,
+        max_experience:  expMax,
+        salary_min:      salaryMin,
+        salary_max:      salaryMax,
         target_date:     form.target_date || null,
       }
       if (editTarget) {

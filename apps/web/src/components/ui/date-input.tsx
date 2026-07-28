@@ -40,6 +40,12 @@ function partsToIso(day: string, month: string, year: string): string {
   const mIdx = MONTHS.findIndex(m => m.toLowerCase() === month.toLowerCase())
   const y = Number(year)
   if (!d || d < 1 || d > 31 || mIdx === -1 || !y || y < 1900 || y > 2100) return ''
+  // Reject calendar-invalid dates (e.g. 30-Feb, 31-Apr) — the Date
+  // constructor silently rolls these over to the next month rather than
+  // erroring (30-Feb-2026 becomes 2-Mar-2026), so round-trip the constructed
+  // date and confirm it lands back on the requested day/month/year.
+  const dt = new Date(y, mIdx, d)
+  if (dt.getFullYear() !== y || dt.getMonth() !== mIdx || dt.getDate() !== d) return ''
   return `${y}-${String(mIdx + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`
 }
 

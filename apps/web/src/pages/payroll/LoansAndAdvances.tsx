@@ -224,7 +224,7 @@ function ApproveAdvanceDialog({
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
               <label className="text-sm font-medium">Approved Amount (₹)</label>
-              <Input type="number" value={approvedAmount}
+              <Input type="number" min={0} value={approvedAmount}
                 onChange={e => setApprovedAmount(e.target.value)}
                 placeholder={advance ? String(advance.requested_amount) : ''} />
             </div>
@@ -358,7 +358,7 @@ function DisburseAdvanceDialog({
           </div>
           <div className="space-y-1.5">
             <label className="text-sm font-medium">Disbursed Amount (₹)</label>
-            <Input type="number" value={disbursedAmount}
+            <Input type="number" min={0} value={disbursedAmount}
               onChange={e => setDisbursedAmount(e.target.value)}
               placeholder={advance?.approved_amount ? String(advance.approved_amount) : ''} />
           </div>
@@ -423,7 +423,7 @@ function NewAdvanceDialog({ open, onClose }: { open: boolean; onClose: () => voi
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
               <label className="text-sm font-medium">Amount (₹)</label>
-              <Input type="number" value={amount} onChange={e => setAmount(e.target.value)} placeholder="50000" />
+              <Input type="number" min={0} value={amount} onChange={e => setAmount(e.target.value)} placeholder="50000" />
             </div>
             <div className="space-y-1.5">
               <label className="text-sm font-medium">Recovery Months</label>
@@ -519,7 +519,7 @@ function NewLoanDialog({ open, onClose }: { open: boolean; onClose: () => void }
             </div>
             <div className="space-y-1.5">
               <label className="text-sm font-medium">Principal (₹)</label>
-              <Input type="number" value={principal} onChange={e => setPrincipal(e.target.value)} placeholder="100000" />
+              <Input type="number" min={0} value={principal} onChange={e => setPrincipal(e.target.value)} placeholder="100000" />
             </div>
           </div>
           <div className="grid grid-cols-2 gap-3">
@@ -626,7 +626,7 @@ function DisburseLoanDialog({
             </div>
             <div className="space-y-1.5">
               <label className="text-sm font-medium">Disbursed Amount (₹)</label>
-              <Input type="number" value={disbursedAmount} onChange={e => setDisbursedAmount(e.target.value)}
+              <Input type="number" min={0} value={disbursedAmount} onChange={e => setDisbursedAmount(e.target.value)}
                 placeholder={loan?.principal_amount ? String(loan.principal_amount) : ''} />
             </div>
           </div>
@@ -693,7 +693,7 @@ function ForecloseDialog({
           )}
           <div className="space-y-1.5">
             <label className="text-sm font-medium">Foreclosure Amount (₹)</label>
-            <Input type="number" value={amount} onChange={e => setAmount(e.target.value)}
+            <Input type="number" min={0} value={amount} onChange={e => setAmount(e.target.value)}
               placeholder={loan?.outstanding_balance ? String(loan.outstanding_balance) : ''} />
           </div>
           <div className="space-y-1.5">

@@ -88,7 +88,7 @@ export default function ComplianceView() {
       <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <KpiCard label="Risk Posture Index" value={c?.posture_index != null ? `${postureIdx}` : '—'} icon={ShieldAlert} tone={postureBand === 'high' || postureBand === 'critical' ? 'destructive' : postureBand === 'medium' ? 'warning' : 'success'} deltaLabel={`${postureBand} · composite`} />
         <KpiCard label="Compliance Score" value={c ? `${score}` : '—'} icon={Gauge} tone={status === 'high' ? 'destructive' : status === 'medium' ? 'warning' : 'success'} deltaLabel={`Risk: ${status}`} />
-        <KpiCard label="Open Breaches" value={(c?.sla_breached_30d ?? 0).toLocaleString()} icon={FileWarning} tone="destructive" hint={c ? `${(c.sla_breach_rate * 100).toFixed(0)}% rate` : undefined} />
+        <KpiCard label="Open Breaches" value={(c?.sla_breached_30d ?? 0).toLocaleString()} icon={FileWarning} tone="destructive" hint={c ? `${c.sla_breach_rate.toFixed(0)}% rate` : undefined} />
         <KpiCard label="Open Incidents" value={(c?.open_incidents ?? 0).toLocaleString()} icon={AlertTriangle} tone="info" hint={c ? `${c.critical_incidents} critical` : undefined} />
       </section>
 

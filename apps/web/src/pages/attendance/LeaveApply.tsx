@@ -177,7 +177,15 @@ interface CalShiftAssignment {
 const STD_SHIFT_HOURS = 8
 
 function today(): string {
-  return new Date().toISOString().slice(0, 10)
+  // Local calendar date, NOT toISOString().slice(0,10) — that converts to
+  // UTC, so between 00:00-05:29 IST this would return YESTERDAY's date,
+  // silently shifting minDate/maxDate and the past/future-date validation
+  // checks below by a day. Matches the todayStr memo further down this file,
+  // which already computes "today" this way for the calendar widget — the
+  // two must agree or the calendar's "Today" ring and this validation logic
+  // silently disagree on what day it is.
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
 
