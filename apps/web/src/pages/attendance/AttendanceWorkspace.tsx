@@ -721,7 +721,16 @@ function TabAnomalies() {
 
   const resolve = useMutation({
     mutationFn: (id: string) => api.post(`/work-session-anomalies/${id}/resolve`, {}),
-    onSuccess: () => { toast.success('Anomaly resolved.'); qc.invalidateQueries({ queryKey: ['att-workspace-anomalies'] }) },
+    onSuccess: () => {
+      toast.success('Anomaly resolved.')
+      qc.invalidateQueries({ queryKey: ['att-workspace-anomalies'] })
+      // Same underlying work_session_anomalies table backs the global Context
+      // Rail, Operational Inbox, and workflow-recommendations panels — keep
+      // them in sync too rather than leaving them stale for up to a minute.
+      qc.invalidateQueries({ queryKey: ['attendance', 'anomalies-unresolved'] })
+      qc.invalidateQueries({ queryKey: ['operational-inbox'] })
+      qc.invalidateQueries({ queryKey: ['workflow-recs'] })
+    },
     onError: () => toast.error('Failed to resolve anomaly.'),
   })
 

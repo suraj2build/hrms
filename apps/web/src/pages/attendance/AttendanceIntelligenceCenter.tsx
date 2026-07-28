@@ -697,6 +697,12 @@ function TabAnomalies({
     onSuccess: () => {
       toast.success('Anomaly resolved.')
       qc.invalidateQueries({ queryKey: ['att-anomalies', month] })
+      // The global Context Rail, Operational Inbox, and workflow-recommendations
+      // panels all read the same work_session_anomalies table under separate
+      // keys and are visible alongside this page — keep them in sync too.
+      qc.invalidateQueries({ queryKey: ['attendance', 'anomalies-unresolved'] })
+      qc.invalidateQueries({ queryKey: ['operational-inbox'] })
+      qc.invalidateQueries({ queryKey: ['workflow-recs'] })
     },
     onError: () => toast.error('Failed to resolve anomaly.'),
   })

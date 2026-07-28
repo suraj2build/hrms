@@ -834,11 +834,14 @@ export default async function workforceOptimizationRoute(fastify: FastifyInstanc
   fastify.post('/attendance/workforce-optimization/compute', auth, async (req: any, reply) => {
     if (!requireAdmin(req, reply)) return
 
-    const parsed = computeQuerySchema.safeParse(req.query)
+    // Frontend sends from/to as a JSON body (it's a POST action, not a GET
+    // list), but this validated req.query — which fetch() never populates for
+    // a POST body — so every call 400'd here regardless of what the client sent.
+    const parsed = computeQuerySchema.safeParse(req.body)
     if (!parsed.success) {
       return reply.code(400).send({
         error:   'VALIDATION_ERROR',
-        message: parsed.error.issues[0]?.message ?? 'Invalid query parameters',
+        message: parsed.error.issues[0]?.message ?? 'Invalid request body',
       })
     }
 

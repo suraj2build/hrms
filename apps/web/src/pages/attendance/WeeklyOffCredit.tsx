@@ -66,6 +66,11 @@ export function WeeklyOffCredit() {
   // Editor state for a new/edited structure
   const [editing, setEditing] = useState<Partial<WoStructure> | null>(null)
 
+  // Finalise converts every employee's pending absent-days into LOP for the
+  // month — irreversible in effect (normally only runs automatically once the
+  // month is 10+ days old). Require an explicit second click before firing.
+  const [confirmFinalize, setConfirmFinalize] = useState(false)
+
   const { data: structures = [] } = useQuery<WoStructure[]>({
     queryKey: ['wo-credit', 'structures'],
     queryFn: () => api.get<{ data: WoStructure[] }>('/attendance/wo-credit/structures').then(r => r.data),
@@ -135,6 +140,7 @@ export function WeeklyOffCredit() {
     mutationFn: () => api.post<{ data?: { credited: number; lop: number } }>('/attendance/wo-credit/finalize', { year, month }),
     onSuccess: (r) => {
       qc.invalidateQueries({ queryKey: ['wo-credit', 'review'] })
+      setConfirmFinalize(false)
       const d = r?.data
       toast.success('Month finalised', { description: d ? `${d.credited} carried-over · ${d.lop} LOP day(s)` : undefined })
     },
@@ -227,8 +233,8 @@ export function WeeklyOffCredit() {
           title="Monthly Review"
           action={
             <div className="flex items-center gap-2">
-              <Input type="number" value={year} onChange={e => setYear(+e.target.value)} className="h-8 w-20 text-xs" />
-              <select value={month} onChange={e => setMonth(+e.target.value)} className="h-8 text-xs border border-border rounded-md px-2 bg-background text-foreground">
+              <Input type="number" value={year} onChange={e => { setYear(+e.target.value); setConfirmFinalize(false) }} className="h-8 w-20 text-xs" />
+              <select value={month} onChange={e => { setMonth(+e.target.value); setConfirmFinalize(false) }} className="h-8 text-xs border border-border rounded-md px-2 bg-background text-foreground">
                 {Array.from({ length: 12 }, (_, i) => i + 1).map(m => <option key={m} value={m}>{m}</option>)}
               </select>
               {periodLocked ? (
@@ -240,9 +246,21 @@ export function WeeklyOffCredit() {
                   <Button size="sm" variant="outline" onClick={() => reconcile.mutate()} disabled={reconcile.isPending}>
                     <Play className="h-3.5 w-3.5 mr-1" />Run now
                   </Button>
-                  <Button size="sm" onClick={() => finalize.mutate()} disabled={finalize.isPending}>
-                    <Lock className="h-3.5 w-3.5 mr-1" />Finalise
-                  </Button>
+                  {confirmFinalize ? (
+                    <>
+                      <Button size="sm" variant="destructive" onClick={() => finalize.mutate()} disabled={finalize.isPending}>
+                        <Lock className="h-3.5 w-3.5 mr-1" />
+                        {finalize.isPending ? 'Finalising…' : `Confirm — finalise ${month}/${year}`}
+                      </Button>
+                      <Button size="sm" variant="ghost" onClick={() => setConfirmFinalize(false)} disabled={finalize.isPending}>
+                        Cancel
+                      </Button>
+                    </>
+                  ) : (
+                    <Button size="sm" onClick={() => setConfirmFinalize(true)}>
+                      <Lock className="h-3.5 w-3.5 mr-1" />Finalise
+                    </Button>
+                  )}
                 </>
               )}
             </div>
