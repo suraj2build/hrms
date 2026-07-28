@@ -490,8 +490,8 @@ function RegulatoryTab() {
       queryClient.invalidateQueries({ queryKey: ['trust', 'regulatory'] })
       setConfirmId(null)
     },
-    onError: () => {
-      toast.error('Failed to approve revision')
+    onError: (e: Error) => {
+      toast.error('Failed to approve revision', { description: e.message })
       setConfirmId(null)
     },
   })
@@ -503,8 +503,8 @@ function RegulatoryTab() {
       queryClient.invalidateQueries({ queryKey: ['trust', 'regulatory'] })
       setConfirmId(null)
     },
-    onError: () => {
-      toast.error('Failed to reject revision')
+    onError: (e: Error) => {
+      toast.error('Failed to reject revision', { description: e.message })
       setConfirmId(null)
     },
   })

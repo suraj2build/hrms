@@ -355,8 +355,21 @@ function EscalateDialog({
   open, incidentId, onClose,
 }: { open: boolean; incidentId: string; onClose: () => void }) {
   const qc = useQueryClient()
-  const [escalateTo, setEscalateTo] = useState('')
-  const [reason, setReason]         = useState('')
+  const [escalateTo, setEscalateTo]     = useState('')
+  const [reason, setReason]             = useState('')
+  const [pickerOpen, setPickerOpen]     = useState(false)
+  const [pickerSearch, setPickerSearch] = useState('')
+
+  // escalate_to is a profiles(id) FK, not an employees(id) FK (090_operational_
+  // incidents.sql — REFERENCES profiles(id)), so this must pick from HR/admin
+  // profiles, not the employee directory. Reuses the same tenant-scoped
+  // super_admin/hr_admin profile list the helpdesk agent picker already uses.
+  const { data: profiles = [] } = useQuery<{ id: string; full_name: string; role: string }[]>({
+    queryKey: ['incident-escalate-profiles'],
+    queryFn:  () => api.get<{ data: { id: string; full_name: string; role: string }[] }>('/helpdesk/agents').then(r => r.data ?? []),
+    enabled:  open,
+  })
+  const selectedName = profiles.find(p => p.id === escalateTo)?.full_name ?? ''
 
   const mutation = useMutation({
     mutationFn: () =>
@@ -381,12 +394,40 @@ function EscalateDialog({
         <div className="space-y-3 pt-1">
           <div className="space-y-1">
             <label className="text-xs font-medium text-muted-foreground">Escalate To</label>
-            <EmployeeSelector
-              value={escalateTo}
-              onChange={v => setEscalateTo(typeof v === 'string' ? v : (v[0] ?? ''))}
-              placeholder="Select employee…"
-              className="w-full"
-            />
+            <div className="relative">
+              {pickerOpen ? (
+                <>
+                  <input
+                    autoFocus
+                    value={pickerSearch}
+                    onChange={e => setPickerSearch(e.target.value)}
+                    onBlur={() => setPickerOpen(false)}
+                    placeholder="Search by name…"
+                    className="w-full text-xs border border-input rounded-md px-2 py-1.5 bg-background text-foreground"
+                  />
+                  <div className="absolute z-10 mt-0.5 w-full rounded-md border border-border bg-background shadow-md max-h-40 overflow-y-auto">
+                    {profiles
+                      .filter(p => !pickerSearch || (p.full_name ?? '').toLowerCase().includes(pickerSearch.toLowerCase()))
+                      .map(p => (
+                        <div key={p.id}
+                          onMouseDown={e => { e.preventDefault(); setEscalateTo(p.id); setPickerOpen(false); setPickerSearch('') }}
+                          className="px-2 py-1.5 text-xs cursor-pointer hover:bg-muted/50"
+                        >{p.full_name}</div>
+                      ))
+                    }
+                  </div>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => { setPickerSearch(''); setPickerOpen(true) }}
+                  className="w-full text-xs border border-input rounded-md px-2 py-1.5 bg-background text-foreground text-left flex items-center justify-between"
+                >
+                  <span>{selectedName || <span className="text-muted-foreground">Select HR/admin user…</span>}</span>
+                  <span className="text-muted-foreground text-[10px]">▾</span>
+                </button>
+              )}
+            </div>
           </div>
           <div className="space-y-1">
             <label className="text-xs font-medium text-muted-foreground">Reason</label>
@@ -516,7 +557,9 @@ function DetailPanel({ incidentId, onClear }: DetailPanelProps) {
 
   const commentMutation = useMutation({
     mutationFn: (body: string) =>
-      api.post(`/system/incidents/${incidentId}/comments`, { body }),
+      // Backend's commentBodySchema requires `content`, not `body` — this
+      // mismatch made every comment submission fail its 400 validation.
+      api.post(`/system/incidents/${incidentId}/comments`, { content: body }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['incident-detail', incidentId] })
       setCommentBody('')
