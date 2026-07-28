@@ -2,6 +2,8 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { MASTER_TEMPLATES } from './templates.js'
+import { fetchTenantTz } from '../attendance-engine.js'
+import { getLocalDate } from '../org-context.js'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -74,16 +76,19 @@ async function resolveEmployeeCodes(
   if (codes.length === 0) return new Map()
   const result = new Map<string, string>()
   for (const chunk of chunkArray(codes, 500)) {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('employees')
       .select('id, employee_code')
       .eq('tenant_id', tenantId)
       .in('employee_code', chunk)
       .limit(500)
-    if (data) {
-      for (const r of data as any[]) {
-        result.set(String(r.employee_code).toUpperCase(), r.id as string)
-      }
+    // Unchecked before: a transient DB error silently resolved to "no match,"
+    // which downstream treats as "not a duplicate" — e.g. a create_only/
+    // update_only import mode would then insert a brand-new row instead of
+    // skipping/updating the one that genuinely already exists.
+    if (error) throw new Error(`resolveEmployeeCodes query failed: ${error.message}`)
+    for (const r of (data ?? []) as any[]) {
+      result.set(String(r.employee_code).toUpperCase(), r.id as string)
     }
   }
   return result
@@ -103,16 +108,15 @@ async function resolveCodeToId(
   if (codes.length === 0) return new Map()
   const result = new Map<string, string>()
   for (const chunk of chunkArray(codes, 500)) {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from(table)
       .select(`id, ${codeColumn}`)
       .eq('tenant_id', tenantId)
       .in(codeColumn, chunk)
       .limit(500)
-    if (data) {
-      for (const r of data as any[]) {
-        result.set(String(r[codeColumn] ?? '').toUpperCase(), r.id as string)
-      }
+    if (error) throw new Error(`resolveCodeToId(${table}) query failed: ${error.message}`)
+    for (const r of (data ?? []) as any[]) {
+      result.set(String(r[codeColumn] ?? '').toUpperCase(), r.id as string)
     }
   }
   return result
@@ -130,19 +134,18 @@ async function resolveEmployeesByEmail(
   if (emails.length === 0) return new Map()
   const result = new Map<string, { id: string; code: string }>()
   for (const chunk of chunkArray(emails, 500)) {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('employees')
       .select('id, email, employee_code')
       .eq('tenant_id', tenantId)
       .in('email', chunk)
       .limit(500)
-    if (data) {
-      for (const r of data as any[]) {
-        result.set(String(r.email ?? '').toLowerCase(), {
-          id:   r.id   as string,
-          code: String(r.employee_code ?? ''),
-        })
-      }
+    if (error) throw new Error(`resolveEmployeesByEmail query failed: ${error.message}`)
+    for (const r of (data ?? []) as any[]) {
+      result.set(String(r.email ?? '').toLowerCase(), {
+        id:   r.id   as string,
+        code: String(r.employee_code ?? ''),
+      })
     }
   }
   return result
@@ -469,6 +472,7 @@ function validateLeaveOpeningBalance(
   rowNumber: number,
   raw: Record<string, string>,
   batchKeys: Set<string>,
+  defaultYear: number,
 ): ValidatedRow {
   const errors: RowError[]   = []
   const warnings: RowError[] = []
@@ -512,7 +516,7 @@ function validateLeaveOpeningBalance(
       norm.year = y
     }
   } else {
-    norm.year = new Date().getFullYear()
+    norm.year = defaultYear
   }
 
   // carry_forward_balance — optional, defaults to 0
@@ -772,15 +776,14 @@ async function checkExistingCodes(
   if (codes.length === 0) return new Set()
   const result = new Set<string>()
   for (const chunk of chunkArray(codes, 500)) {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from(table)
       .select(codeColumn)
       .eq('tenant_id', tenantId)
       .in(codeColumn, chunk)
       .limit(500)
-    if (data) {
-      for (const r of data as any[]) result.add(String(r[codeColumn] ?? '').toUpperCase())
-    }
+    if (error) throw new Error(`checkExistingCodes(${table}) query failed: ${error.message}`)
+    for (const r of (data ?? []) as any[]) result.add(String(r[codeColumn] ?? '').toUpperCase())
   }
   return result
 }
@@ -796,6 +799,15 @@ export async function validateImportRows(
   const batchCodes = new Set<string>()
   const validatedRows: ValidatedRow[] = []
 
+  // Resolved once (not per row) for leave_opening_balances' blank-year default —
+  // the tenant-local calendar year, not the server's own UTC clock (the same
+  // ISSUE-154-class bug already fixed elsewhere).
+  let defaultYear = new Date().getUTCFullYear()
+  if (masterType === 'leave_opening_balances') {
+    const tenantTz = await fetchTenantTz(supabase, tenantId)
+    defaultYear = Number(getLocalDate(new Date().toISOString(), tenantTz).slice(0, 4))
+  }
+
   // Per-row validation
   for (let i = 0; i < rows.length; i++) {
     const rowNumber = i + 2 // row 1 = header, data starts at row 2
@@ -806,7 +818,7 @@ export async function validateImportRows(
     } else if (masterType === 'employee_compensation') {
       vr = validateEmployeeCompensation(rowNumber, rows[i], batchCodes)
     } else if (masterType === 'leave_opening_balances') {
-      vr = validateLeaveOpeningBalance(rowNumber, rows[i], batchCodes)
+      vr = validateLeaveOpeningBalance(rowNumber, rows[i], batchCodes, defaultYear)
     } else if (masterType === 'shift_assignments') {
       vr = validateShiftAssignment(rowNumber, rows[i], batchCodes)
     } else if (masterType === 'compensation_revisions') {
@@ -999,14 +1011,13 @@ export async function validateImportRows(
     ]
     let ssCodeMap = new Map<string, string>()
     if (ssCodes.length > 0) {
-      const { data: ssData } = await supabase
+      const { data: ssData, error: ssErr } = await supabase
         .from('salary_structures')
         .select('id, code')
         .eq('tenant_id', tenantId)
         .in('code', ssCodes)
-      if (ssData) {
-        ssCodeMap = new Map((ssData as any[]).map((r) => [String(r.code).toUpperCase(), r.id as string]))
-      }
+      if (ssErr) throw new Error(`salary_structures lookup failed: ${ssErr.message}`)
+      ssCodeMap = new Map((ssData ?? []).map((r: any) => [String(r.code).toUpperCase(), r.id as string]))
     }
 
     for (const vr of validatedRows) {
@@ -1035,7 +1046,7 @@ export async function validateImportRows(
       }
 
       // Check if an active compensation already exists for this employee + effective_from
-      const { data: existingComp } = await supabase
+      const { data: existingComp, error: existingCompErr } = await supabase
         .from('employee_compensations')
         .select('id')
         .eq('tenant_id', tenantId)
@@ -1043,6 +1054,7 @@ export async function validateImportRows(
         .eq('effective_from', vr.normalizedData.effective_from as string)
         .eq('is_active', true)
         .maybeSingle()
+      if (existingCompErr) throw new Error(`employee_compensations existence check failed: ${existingCompErr.message}`)
 
       if (existingComp) {
         vr.isDuplicate = true
@@ -1070,14 +1082,13 @@ export async function validateImportRows(
     ]
     let leaveTypeMap = new Map<string, string>()
     if (leaveTypeNames.length > 0) {
-      const { data: ltData } = await supabase
+      const { data: ltData, error: ltErr } = await supabase
         .from('leave_types')
         .select('id, name')
         .eq('tenant_id', tenantId)
         .in('name', leaveTypeNames)
-      if (ltData) {
-        leaveTypeMap = new Map((ltData as any[]).map((r) => [String(r.name).toLowerCase(), r.id as string]))
-      }
+      if (ltErr) throw new Error(`leave_types lookup failed: ${ltErr.message}`)
+      leaveTypeMap = new Map((ltData ?? []).map((r: any) => [String(r.name).toLowerCase(), r.id as string]))
     }
 
     for (const vr of validatedRows) {
@@ -1102,7 +1113,7 @@ export async function validateImportRows(
       vr.normalizedData.leave_type_id = ltId
 
       // Check for existing balance (upsert will overwrite)
-      const { data: existingBal } = await supabase
+      const { data: existingBal, error: existingBalErr } = await supabase
         .from('employee_leave_balance')
         .select('id')
         .eq('tenant_id', tenantId)
@@ -1110,6 +1121,7 @@ export async function validateImportRows(
         .eq('leave_type_id', ltId)
         .eq('year', vr.normalizedData.year as number)
         .maybeSingle()
+      if (existingBalErr) throw new Error(`employee_leave_balance existence check failed: ${existingBalErr.message}`)
 
       if (existingBal) {
         vr.isDuplicate = true // Will overwrite existing opening balance
@@ -1136,14 +1148,13 @@ export async function validateImportRows(
     ]
     let shiftCodeMap = new Map<string, string>()
     if (shiftCodes.length > 0) {
-      const { data: shiftData } = await supabase
+      const { data: shiftData, error: shiftErr } = await supabase
         .from('shifts')
         .select('id, code')
         .eq('tenant_id', tenantId)
         .in('code', shiftCodes)
-      if (shiftData) {
-        shiftCodeMap = new Map((shiftData as any[]).map((r) => [String(r.code).toUpperCase(), r.id as string]))
-      }
+      if (shiftErr) throw new Error(`shifts lookup failed: ${shiftErr.message}`)
+      shiftCodeMap = new Map((shiftData ?? []).map((r: any) => [String(r.code).toUpperCase(), r.id as string]))
     }
 
     for (const vr of validatedRows) {
@@ -1167,14 +1178,18 @@ export async function validateImportRows(
       }
       vr.normalizedData.shift_id = shiftId
 
-      // Check for existing assignment at the same effective_from (warn, will replace)
-      const { data: existingAssign } = await supabase
+      // Check for existing assignment at the same effective_from (warn, will replace).
+      // isDuplicate here gates update_only vs insert semantics in importer.ts — a
+      // silently-swallowed error would fall through to an unconditional INSERT
+      // instead of the intended UPDATE.
+      const { data: existingAssign, error: existingAssignErr } = await supabase
         .from('employee_shifts')
         .select('id')
         .eq('tenant_id', tenantId)
         .eq('employee_id', empId)
         .eq('effective_from', vr.normalizedData.effective_from as string)
         .maybeSingle()
+      if (existingAssignErr) throw new Error(`employee_shifts existence check failed: ${existingAssignErr.message}`)
 
       if (existingAssign) {
         vr.isDuplicate = true // Will overwrite
@@ -1191,14 +1206,13 @@ export async function validateImportRows(
     ]
     let shiftCodeMap = new Map<string, string>()
     if (shiftCodes.length > 0) {
-      const { data: shiftData } = await supabase
+      const { data: shiftData, error: shiftErr } = await supabase
         .from('shifts')
         .select('id, code')
         .eq('tenant_id', tenantId)
         .in('code', shiftCodes)
-      if (shiftData) {
-        shiftCodeMap = new Map((shiftData as any[]).map((r) => [String(r.code).toUpperCase(), r.id as string]))
-      }
+      if (shiftErr) throw new Error(`shifts lookup failed: ${shiftErr.message}`)
+      shiftCodeMap = new Map((shiftData ?? []).map((r: any) => [String(r.code).toUpperCase(), r.id as string]))
     }
 
     // Which policy names already exist → mark every row of that policy as duplicate (update path)
@@ -1211,12 +1225,13 @@ export async function validateImportRows(
     ]
     const existingPolicies = new Set<string>()
     if (policyNames.length > 0) {
-      const { data: polData } = await supabase
+      const { data: polData, error: polErr } = await supabase
         .from('rotation_policies')
         .select('name')
         .eq('tenant_id', tenantId)
         .in('name', policyNames)
-      if (polData) for (const r of polData as any[]) existingPolicies.add(String(r.name))
+      if (polErr) throw new Error(`rotation_policies lookup failed: ${polErr.message}`)
+      for (const r of (polData ?? []) as any[]) existingPolicies.add(String(r.name))
     }
 
     for (const vr of validatedRows) {
@@ -1246,12 +1261,13 @@ export async function validateImportRows(
     const empIds = [...empCodeMap.values()]
     const existingBank = new Set<string>()
     if (empIds.length > 0) {
-      const { data: bankRows } = await supabase
+      const { data: bankRows, error: bankErr } = await supabase
         .from('employee_bank_statutory')
         .select('employee_id')
         .eq('tenant_id', tenantId)
         .in('employee_id', empIds)
-      if (bankRows) for (const r of bankRows as any[]) existingBank.add(r.employee_id as string)
+      if (bankErr) throw new Error(`employee_bank_statutory lookup failed: ${bankErr.message}`)
+      for (const r of (bankRows ?? []) as any[]) existingBank.add(r.employee_id as string)
     }
 
     for (const vr of validatedRows) {
@@ -1278,18 +1294,17 @@ export async function validateImportRows(
     ]
     let siteCodeMap = new Map<string, string>()
     if (siteCodesInBatch.length > 0) {
-      const { data: siteRows } = await supabase
+      const { data: siteRows, error: siteErr } = await supabase
         .from('sites')
         .select('id, code')
         .eq('tenant_id', tenantId)
         .in('code', siteCodesInBatch)
-      if (siteRows) {
-        siteCodeMap = new Map(
-          (siteRows as Array<{ id: string; code: string }>)
-            .filter((s) => s.code)
-            .map((s) => [s.code.toUpperCase(), s.id]),
-        )
-      }
+      if (siteErr) throw new Error(`sites lookup failed: ${siteErr.message}`)
+      siteCodeMap = new Map(
+        ((siteRows ?? []) as Array<{ id: string; code: string }>)
+          .filter((s) => s.code)
+          .map((s) => [s.code.toUpperCase(), s.id]),
+      )
     }
 
     for (const vr of validatedRows) {
@@ -1348,8 +1363,11 @@ export async function validateImportRows(
       }
       vr.normalizedData.employee_id = empId
 
-      // Warn if a pending revision already exists for the same employee + effective_date
-      const { data: existing } = await supabase
+      // Warn if a pending revision already exists for the same employee + effective_date.
+      // isDuplicate here gates create_only skip semantics in importer.ts — a
+      // silently-swallowed error would let a genuine duplicate request through
+      // as a second pending revision instead of being skipped.
+      const { data: existing, error: existingErr } = await supabase
         .from('compensation_revisions')
         .select('id, status')
         .eq('tenant_id', tenantId)
@@ -1358,6 +1376,7 @@ export async function validateImportRows(
         .in('status', ['pending', 'approved'])
         .limit(1)
         .maybeSingle()
+      if (existingErr) throw new Error(`compensation_revisions existence check failed: ${existingErr.message}`)
 
       if (existing) {
         vr.isDuplicate = true
