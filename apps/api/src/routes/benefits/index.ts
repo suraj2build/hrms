@@ -16,6 +16,13 @@ import { logAction } from '../../lib/audit-service.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
 import { InsuranceProvider } from '../../lib/insurance-provider.js'
 import { serverError, ErrorCode } from '../../lib/api-errors.js'
+import { fetchTenantTz } from '../../lib/attendance-engine.js'
+import { getLocalDate }  from '../../lib/org-context.js'
+
+async function tenantTodayStr(supabase: any, tenantId: string): Promise<string> {
+  const tz = await fetchTenantTz(supabase, tenantId)
+  return getLocalDate(new Date().toISOString(), tz)
+}
 
 const PLAN_TYPES = ['health', 'term_life', 'accident', 'wellness', 'meal', 'transport', 'nps', 'other'] as const
 
@@ -74,7 +81,7 @@ export default async function benefitsRoutes(fastify: FastifyInstance) {
 
     if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch benefit plans')
 
-    const today = new Date().toISOString().slice(0, 10)
+    const today = await tenantTodayStr(fastify.supabase, req.tenantId)
     const plans = ((data ?? []) as any[])
       .filter(p => {
         // Band eligibility: if plan has eligible_bands, employee must be in one of them
@@ -157,7 +164,7 @@ export default async function benefitsRoutes(fastify: FastifyInstance) {
 
     if (!plan) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Benefit plan not found' })
 
-    const today = new Date().toISOString().slice(0, 10)
+    const today = await tenantTodayStr(fastify.supabase, req.tenantId)
     if (!isPlanOpen(plan, today)) {
       return reply.code(409).send({ error: 'ENROLMENT_CLOSED', message: 'This plan is not open for enrolment' })
     }
@@ -263,7 +270,7 @@ export default async function benefitsRoutes(fastify: FastifyInstance) {
       countsByPlan.set(e.plan_id, c)
     }
 
-    const today = new Date().toISOString().slice(0, 10)
+    const today = await tenantTodayStr(fastify.supabase, req.tenantId)
     const plans = ((data ?? []) as any[]).map(p => {
       const counts = countsByPlan.get(p.id) ?? { enrolled: 0, total: 0 }
 
