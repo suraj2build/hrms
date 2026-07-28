@@ -30,6 +30,7 @@ import { api }          from '@/lib/api/client'
 import { useAuthStore } from '@/stores/authStore'
 import { cn }           from '@/lib/utils'
 import { toast }        from 'sonner'
+import { invalidateAllPayrollRunViews } from './PayrollRuns'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -233,8 +234,9 @@ function MakerCheckerTab() {
     mutationFn: (id: string) => api.post<{ data: unknown }>(`/payroll/governance/maker-checker/${id}/approve`).then(r => r.data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['maker-checker-logs'] })
-      // Approval changes run status/stats — keep ops pages in sync
-      queryClient.invalidateQueries({ queryKey: ['payroll-runs'] })
+      // Approval changes run status/stats — keep every payroll ops page in sync,
+      // not just the two keys this page happens to know about (ISSUE-134 pattern).
+      invalidateAllPayrollRunViews(queryClient)
       queryClient.invalidateQueries({ queryKey: ['payroll-run-stats'] })
       toast.success('Entry approved')
     },
@@ -251,7 +253,7 @@ function MakerCheckerTab() {
       api.post<{ data: unknown }>(`/payroll/governance/maker-checker/${id}/reject`, { reason }).then(r => r.data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['maker-checker-logs'] })
-      queryClient.invalidateQueries({ queryKey: ['payroll-runs'] })
+      invalidateAllPayrollRunViews(queryClient)
       queryClient.invalidateQueries({ queryKey: ['payroll-run-stats'] })
       setRejectTarget(null)
       toast.success('Entry rejected')
@@ -519,7 +521,7 @@ function VarianceApprovalsTab() {
     mutationFn: (id: string) => api.post<{ data: unknown }>(`/payroll/governance/variance-approvals/${id}/approve`).then(r => r.data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['variance-approvals'] })
-      queryClient.invalidateQueries({ queryKey: ['payroll-runs'] })
+      invalidateAllPayrollRunViews(queryClient)
       queryClient.invalidateQueries({ queryKey: ['payroll-run-stats'] })
       toast.success('Variance approved')
     },
@@ -533,7 +535,7 @@ function VarianceApprovalsTab() {
     mutationFn: (id: string) => api.post<{ data: unknown }>(`/payroll/governance/variance-approvals/${id}/reject`).then(r => r.data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['variance-approvals'] })
-      queryClient.invalidateQueries({ queryKey: ['payroll-runs'] })
+      invalidateAllPayrollRunViews(queryClient)
       queryClient.invalidateQueries({ queryKey: ['payroll-run-stats'] })
       toast.success('Variance rejected')
     },

@@ -4629,6 +4629,22 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
     const tenantId = req.tenantId as string
     const { notes } = (req.body ?? {}) as { notes?: string }
 
+    // payroll_run/finalize proposals can't be completed by flipping this log row
+    // alone — see the identical guard in governance.ts's maker-checker/:id/approve.
+    // Only a re-call of POST /payroll/runs/:id/finalize actually finalizes the run.
+    const { data: entry } = await fastify.supabase
+      .from('maker_checker_log')
+      .select('entity_type, action')
+      .eq('id', id)
+      .eq('tenant_id', tenantId)
+      .maybeSingle()
+    if ((entry as any)?.entity_type === 'payroll_run' && (entry as any)?.action === 'finalize') {
+      return reply.code(409).send({
+        error:   'USE_FINALIZE_ENDPOINT',
+        message: 'Payroll finalize proposals cannot be approved here. A different, authorised user must go to the Payroll Finalization Center and click Confirm Finalize again to approve and complete it.',
+      })
+    }
+
     const { error } = await fastify.supabase
       .from('maker_checker_log')
       .update({ status: 'approved', checker_id: req.userId, checker_notes: notes ?? null, reviewed_at: new Date().toISOString() })

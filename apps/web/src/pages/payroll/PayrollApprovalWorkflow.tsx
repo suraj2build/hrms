@@ -28,6 +28,7 @@ import { Input }         from '@/components/ui/input'
 import { api }           from '@/lib/api/client'
 import { cn }            from '@/lib/utils'
 import { toast }         from 'sonner'
+import { invalidateAllPayrollRunViews } from './PayrollRuns'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -305,8 +306,14 @@ export function PayrollApprovalWorkflow() {
     onSuccess: () => {
       toast.success('Entry approved')
       queryClient.invalidateQueries({ queryKey: ['approval-stages'] })
+      // Approval can change a payroll run's status/stats — keep ops pages in sync.
+      invalidateAllPayrollRunViews(queryClient)
     },
-    onError: () => toast.error('Approval failed'),
+    // Surface the backend's message (e.g. the payroll-finalize redirect guidance)
+    // instead of a generic string that would hide it.
+    onError: (e: unknown) => toast.error('Approval failed', {
+      description: e instanceof Error ? e.message : undefined,
+    }),
   })
 
   const rejectMutation = useMutation({

@@ -344,12 +344,23 @@ export function PayrollFinalizationCenter() {
 
   // ── Mutations ──────────────────────────────────────────────────────────────
   const finalizeMutation = useMutation({
-    mutationFn: () => api.post(`/payroll/runs/${run!.id}/finalize`, {
+    mutationFn: () => api.post<{ status?: string; message?: string }>(`/payroll/runs/${run!.id}/finalize`, {
       force_finalize: forceFinalize,
       override_reason: forceFinalize ? forceReason : undefined,
     }),
-    onSuccess: () => {
-      toast.success('Payroll finalized successfully')
+    onSuccess: (data) => {
+      // Under four-eyes finalize (default on), the FIRST call only records a
+      // pending proposal (202 PENDING_CHECKER) — the run is not finalized yet.
+      // A different, non-preparer admin must call Confirm Finalize again to
+      // actually approve and seal it. Showing "finalized successfully" here
+      // regardless was misleading the maker into thinking the run was sealed.
+      if (data?.status === 'PENDING_CHECKER') {
+        toast.success('Submitted for four-eyes approval', {
+          description: data.message ?? 'A different authorised user must approve this to finalize the run.',
+        })
+      } else {
+        toast.success('Payroll finalized successfully')
+      }
       setFinalizeOpen(false)
       queryClient.invalidateQueries({ queryKey: ['payroll-runs-finalize'] })
       queryClient.invalidateQueries({ queryKey: ['payroll-runs'] })

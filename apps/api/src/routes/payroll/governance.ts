@@ -242,6 +242,27 @@ export default async function governanceRoutes(fastify: FastifyInstance) {
       return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
     }
 
+    // payroll_run/finalize proposals are NOT completed by flipping this log row —
+    // the actual finalize (snapshotting, dept-cost rebuild, payroll_runs.status
+    // update) only runs inside POST /payroll/runs/:id/finalize itself, which a
+    // different, non-preparer admin must call again to act as the checker. This
+    // generic endpoint used to happily flip the row to 'approved' anyway, which
+    // looked like success but never finalized the run — and worse, permanently
+    // orphaned the proposal, since the finalize handler's own pending-lookup
+    // would no longer find it (creating a fresh, disconnected proposal instead).
+    const { data: entry } = await fastify.supabase
+      .from('maker_checker_log')
+      .select('entity_type, action')
+      .eq('id', id)
+      .eq('tenant_id', req.tenantId)
+      .maybeSingle()
+    if ((entry as any)?.entity_type === 'payroll_run' && (entry as any)?.action === 'finalize') {
+      return reply.code(409).send({
+        error:   'USE_FINALIZE_ENDPOINT',
+        message: 'Payroll finalize proposals cannot be approved here. A different, authorised user must go to the Payroll Finalization Center and click Confirm Finalize again to approve and complete it.',
+      })
+    }
+
     const now = new Date().toISOString()
 
     const { data, error } = await fastify.supabase

@@ -2375,7 +2375,7 @@ function PayrollAuditTimeline({ run }: { run: PayrollRun }) {
 // invalidate all of them, or a sibling page already mounted in the session keeps
 // showing pre-mutation data — most consequential for freeze/reopen, which gate
 // statutory filing and bank payout.
-const PAYROLL_RUNS_SIBLING_KEYS = [
+export const PAYROLL_RUNS_SIBLING_KEYS = [
   'payroll-runs-forensics',
   'payroll-runs-accounting',
   'payroll-runs-payout-recon',
@@ -2388,7 +2388,7 @@ const PAYROLL_RUNS_SIBLING_KEYS = [
   'payroll-runs-finalize',
 ] as const
 
-function invalidateAllPayrollRunViews(qc: QueryClient) {
+export function invalidateAllPayrollRunViews(qc: QueryClient) {
   qc.invalidateQueries({ queryKey: ['payroll-runs'] })
   for (const key of PAYROLL_RUNS_SIBLING_KEYS) qc.invalidateQueries({ queryKey: [key] })
 }
