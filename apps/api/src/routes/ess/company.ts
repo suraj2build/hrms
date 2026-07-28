@@ -21,8 +21,9 @@
 
 import type { FastifyInstance } from 'fastify'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
+import { fetchTenantTz } from '../../lib/attendance-engine.js'
+import { getLocalDate } from '../../lib/org-context.js'
 
-function todayISO(): string { return new Date().toISOString().slice(0, 10) }
 function safe<T>(p: PromiseLike<T>, fallback: T): Promise<T> {
   return Promise.resolve(p).then(v => v, () => fallback)
 }
@@ -45,12 +46,13 @@ export default async function essCompanyRoutes(fastify: FastifyInstance) {
 
   fastify.get('/company', auth, async (req: any, reply) => {
     const tenantId = req.tenantId as string
-    const today = todayISO()
+    const tz = await fetchTenantTz(fastify.supabase, tenantId)
+    const today = getLocalDate(new Date().toISOString(), tz)
     const todayMMDD = today.slice(5)
     const thisYear = today.slice(0, 4)
 
     // ── Sources (each safe()-wrapped so one bad source can't nuke the lens) ──
-    const sevenDaysAgo = new Date(Date.now() - 7 * 86_400_000).toISOString().slice(0, 10)
+    const sevenDaysAgo = new Date(new Date(`${today}T12:00:00Z`).getTime() - 7 * 86_400_000).toISOString().slice(0, 10)
     const [empRows, joinerRows, recogRows, feedRows] = await Promise.all([
       // Active roster — for today's company-wide birthdays + anniversaries.
       safe(

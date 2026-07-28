@@ -14,10 +14,11 @@
  */
 
 import type { FastifyInstance } from 'fastify'
+import { fetchTenantTz } from '../../lib/attendance-engine.js'
+import { getLocalDate } from '../../lib/org-context.js'
 
 interface Party { id: string; name: string; subtitle?: string }
 
-function todayISO(): string { return new Date().toISOString().slice(0, 10) }
 function safe<T>(p: PromiseLike<T>, fallback: T): Promise<T> {
   return Promise.resolve(p).then(v => v, () => fallback)
 }
@@ -35,7 +36,8 @@ export default async function essTeamRoutes(fastify: FastifyInstance) {
 
   fastify.get('/team', auth, async (req: any, reply) => {
     const tenantId = req.tenantId as string
-    const today = todayISO()
+    const tz = await fetchTenantTz(fastify.supabase, tenantId)
+    const today = getLocalDate(new Date().toISOString(), tz)
     const todayMMDD = today.slice(5)
 
     const { data: profileRow } = await fastify.supabase
