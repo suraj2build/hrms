@@ -116,10 +116,19 @@ export async function computeCollision(
   const scanFrom = shiftDate(fromDate, -7)
   const scanTo   = shiftDate(toDate,    7)
 
+  // Optional/restricted holidays only apply to employees who opted in via
+  // employee_optional_holidays — they are not collision-worthy for everyone.
+  // Every sibling engine (attendance-engine.ts, attendance-processor.ts,
+  // leave-request-service.ts) excludes is_optional=true from its "is this a
+  // real holiday" set; this query previously didn't, so an optional holiday
+  // could block/convert leave for employees who never selected it, and the
+  // collision preview would disagree with what leave-request-service.ts
+  // actually charges.
   const { data: rawHolidays } = await supabase
     .from('holiday_calendar')
     .select('date, name, is_optional, site_id, location_id')
     .eq('tenant_id', tenantId)
+    .eq('is_optional', false)
     .gte('date', scanFrom)
     .lte('date', scanTo)
 
