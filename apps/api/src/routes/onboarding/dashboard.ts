@@ -87,6 +87,14 @@ export default async function onboardingDashboardRoutes(fastify: FastifyInstance
         .not('duplicate_risk', 'is', null),
     ])
 
+    if (totalResult.error)             return serverError(req, reply, totalResult.error,             ErrorCode.QUERY_FAILED, 'Failed to fetch onboarding dashboard stats')
+    if (pendingReviewResult.error)      return serverError(req, reply, pendingReviewResult.error,      ErrorCode.QUERY_FAILED, 'Failed to fetch onboarding dashboard stats')
+    if (extractionFailedResult.error)   return serverError(req, reply, extractionFailedResult.error,   ErrorCode.QUERY_FAILED, 'Failed to fetch onboarding dashboard stats')
+    if (approvedThisMonthResult.error)  return serverError(req, reply, approvedThisMonthResult.error,  ErrorCode.QUERY_FAILED, 'Failed to fetch onboarding dashboard stats')
+    if (rejectedThisMonthResult.error)  return serverError(req, reply, rejectedThisMonthResult.error,  ErrorCode.QUERY_FAILED, 'Failed to fetch onboarding dashboard stats')
+    if (recentSessionsResult.error)     return serverError(req, reply, recentSessionsResult.error,     ErrorCode.QUERY_FAILED, 'Failed to fetch onboarding dashboard stats')
+    if (duplicateRisksResult.error)     return serverError(req, reply, duplicateRisksResult.error,     ErrorCode.QUERY_FAILED, 'Failed to fetch onboarding dashboard stats')
+
     // Both queries below are real .select()s (not count-only), so — unlike
     // the head:true count queries above — they're subject to PostgREST's
     // 1,000-row cap and must be paginated separately.

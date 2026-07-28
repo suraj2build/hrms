@@ -356,28 +356,38 @@ export default async function jobQueueRoutes(fastify: FastifyInstance) {
       whPendingResult,
     ] = await Promise.all([
       durableQueue.getMetrics(fastify.supabase),
+      // Cross-tenant leak fix: background_jobs/webhook_deliveries are tenant-scoped
+      // tables (webhook_deliveries.tenant_id is NOT NULL per migration 091) — without
+      // .eq('tenant_id', ...) a tenant-scoped hr_admin saw platform-wide counts across
+      // every tenant. Mirrors the tenant scoping already applied to the sibling
+      // GET /system/jobs/durable endpoint's background_jobs query in this same file.
       fastify.supabase
         .from('background_jobs')
         .select('id', { count: 'exact', head: true })
+        .eq('tenant_id', req.tenantId)
         .eq('status', 'running')
         .lt('started_at', staleThreshold),
       fastify.supabase
         .from('background_jobs')
         .select('id', { count: 'exact', head: true })
+        .eq('tenant_id', req.tenantId)
         .eq('status', 'pending')
         .gt('attempt', 0),
       fastify.supabase
         .from('webhook_deliveries')
         .select('id', { count: 'exact', head: true })
+        .eq('tenant_id', req.tenantId)
         .gte('created_at', since24h),
       fastify.supabase
         .from('webhook_deliveries')
         .select('id', { count: 'exact', head: true })
+        .eq('tenant_id', req.tenantId)
         .eq('status', 'failed')
         .gte('created_at', since24h),
       fastify.supabase
         .from('webhook_deliveries')
         .select('id', { count: 'exact', head: true })
+        .eq('tenant_id', req.tenantId)
         .eq('status', 'pending'),
     ])
 

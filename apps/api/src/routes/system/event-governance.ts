@@ -414,17 +414,29 @@ export default async function eventGovernanceRoutes(fastify: FastifyInstance) {
       })
     }
 
+    // Re-assert status='pending' in the UPDATE's own WHERE clause — the earlier
+    // SELECT is only for the 404/409 fast-path; without this, a worker that
+    // transitions the row (e.g. to 'processing'/'completed') between the SELECT
+    // and this UPDATE would still be silently overwritten to 'cancelled'.
     const { data: updated, error: updateErr } = await fastify.supabase
       .from('event_replay_queue')
       .update({ status: 'cancelled', updated_at: new Date().toISOString() })
       .eq('tenant_id', req.tenantId)
       .eq('id', id)
+      .eq('status', 'pending')
       .select()
-      .single()
+      .maybeSingle()
 
     if (updateErr) {
       req.log.error({ err: updateErr, id }, 'replay queue cancel update failed')
       return reply.code(500).send({ error: 'UPDATE_FAILED', message: 'Failed to cancel replay request' })
+    }
+
+    if (!updated) {
+      return reply.code(409).send({
+        error:   'INVALID_STATE',
+        message: 'Replay request was no longer pending when the cancel was applied',
+      })
     }
 
     req.log.info({ replayId: id, cancelledBy: req.userId }, 'event replay request cancelled')

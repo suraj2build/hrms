@@ -116,7 +116,11 @@ export default async function seedOnboardingTemplatesRoutes(fastify: FastifyInst
         sort_order:       idx,
       }))
 
-      await fastify.supabase.from('onboarding_checklist_items').insert(items)
+      const { error: itemsErr } = await fastify.supabase.from('onboarding_checklist_items').insert(items)
+      if (itemsErr) {
+        req.log.warn({ err: itemsErr, template: tpl.name }, 'seed-default-templates: checklist item insert failed — template left with no items')
+        continue
+      }
       created.push(tpl.name)
     }
 
