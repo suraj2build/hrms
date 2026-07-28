@@ -290,10 +290,37 @@ export default async function rostersRoutes(fastify: FastifyInstance) {
 
   // ── DELETE /masters/rosters/:id ───────────────────────────────────────────
   fastify.delete('/:id', adminAuth, async (req: any, reply) => {
+    const rosterId = (req.params as any).id
+
+    // Safety check — both FKs are ON DELETE SET NULL (060_employee_site_roster.sql,
+    // 061_sites_default_roster.sql), so an unguarded delete would silently strip
+    // roster_id off every assigned employee and default_roster_id off every site
+    // that uses this as its default, with no warning. Refuse if referenced,
+    // matching the sibling rotation-policies.ts DELETE guard.
+    const { count: empCount } = await fastify.supabase
+      .from('employees')
+      .select('id', { count: 'exact', head: true })
+      .eq('roster_id', rosterId)
+      .eq('tenant_id', req.tenantId)
+
+    const { count: siteCount } = await fastify.supabase
+      .from('sites')
+      .select('id', { count: 'exact', head: true })
+      .eq('default_roster_id', rosterId)
+      .eq('tenant_id', req.tenantId)
+
+    const totalRefs = (empCount ?? 0) + (siteCount ?? 0)
+    if (totalRefs > 0) {
+      return reply.code(409).send({
+        error: 'REFERENCED',
+        message: `Roster policy is used by ${empCount ?? 0} employee(s) and ${siteCount ?? 0} site(s). Unassign them first.`,
+      })
+    }
+
     const { error } = await fastify.supabase
       .from('rosters')
       .delete()
-      .eq('id', (req.params as any).id)
+      .eq('id', rosterId)
       .eq('tenant_id', req.tenantId)
 
     if (error) {

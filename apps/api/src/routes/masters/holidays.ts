@@ -39,6 +39,32 @@ const querySchema = z.object({
   site_id: z.string().uuid().optional(),
 })
 
+// site_id/location_id/holiday_group_id are plain FKs with no tenant scoping at
+// the DB level — verify each belongs to the caller's tenant before writing, the
+// same guard already applied to /group-assignments.
+async function verifyTenantRefs(
+  fastify: FastifyInstance,
+  tenantId: string,
+  fields: { site_id?: string | null; location_id?: string | null; holiday_group_id?: string | null },
+): Promise<string | null> {
+  if (fields.site_id) {
+    const { data } = await (fastify as any).supabase
+      .from('sites').select('id').eq('id', fields.site_id).eq('tenant_id', tenantId).maybeSingle()
+    if (!data) return 'site_id does not belong to this tenant'
+  }
+  if (fields.location_id) {
+    const { data } = await (fastify as any).supabase
+      .from('work_locations').select('id').eq('id', fields.location_id).eq('tenant_id', tenantId).maybeSingle()
+    if (!data) return 'location_id does not belong to this tenant'
+  }
+  if (fields.holiday_group_id) {
+    const { data } = await (fastify as any).supabase
+      .from('roster_holiday_groups').select('id').eq('id', fields.holiday_group_id).eq('tenant_id', tenantId).maybeSingle()
+    if (!data) return 'holiday_group_id does not belong to this tenant'
+  }
+  return null
+}
+
 export default async function holidaysRoutes(fastify: FastifyInstance) {
   const auth = { preHandler: [fastify.authenticate] }
 
@@ -82,6 +108,9 @@ export default async function holidaysRoutes(fastify: FastifyInstance) {
     if (!parsed.success) {
       return reply.code(400).send({ error: 'VALIDATION', message: parsed.error.issues[0]?.message })
     }
+
+    const refErr = await verifyTenantRefs(fastify, req.tenantId, parsed.data)
+    if (refErr) return reply.code(400).send({ error: 'VALIDATION', message: refErr })
 
     const { data, error } = await fastify.supabase
       .from('holiday_calendar')
@@ -150,6 +179,9 @@ export default async function holidaysRoutes(fastify: FastifyInstance) {
     if (Object.keys(parsed.data).length === 0) {
       return reply.code(400).send({ error: 'VALIDATION', message: 'No fields to update' })
     }
+
+    const refErr = await verifyTenantRefs(fastify, req.tenantId, parsed.data)
+    if (refErr) return reply.code(400).send({ error: 'VALIDATION', message: refErr })
 
     const { data, error } = await fastify.supabase
       .from('holiday_calendar')
