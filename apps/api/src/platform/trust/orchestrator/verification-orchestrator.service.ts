@@ -100,8 +100,18 @@ export class VerificationOrchestrator {
           ifsc_code:      params.ifsc_code!,
         })
 
-      const status      = this.adapterToVerificationStatus(result.status, result.data?.ifsc_valid ?? false)
+      let status        = this.adapterToVerificationStatus(result.status, result.data?.ifsc_valid ?? false)
       const explanation = verificationExplainabilityService.bank(result)
+
+      // IFSC lookup succeeding only confirms the bank/branch exist — it says
+      // nothing about whether the account belongs to this employee. Penny
+      // drop (account-holder-name match) is the check that actually confirms
+      // that, and bank-verification.adapter.ts's penny drop path is still a
+      // stub that never resolves past 'pending'. Reporting 'verified' here
+      // would fabricate a completed identity check that never ran.
+      if (status === 'verified' && result.data?.penny_drop_status === 'pending') {
+        status = 'pending'
+      }
 
       await this.upsert(params.supabase, {
         employee_id:        params.employee_id,
