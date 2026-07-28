@@ -316,17 +316,19 @@ export default async function rotationPoliciesRoutes(fastify: FastifyInstance) {
 
   fastify.delete('/:id', hrAdminAuth, async (req: any, reply) => {
     // Safety check — refuse if any employees or sites reference this policy
-    const { count: empCount } = await fastify.supabase
+    const { count: empCount, error: empErr } = await fastify.supabase
       .from('employees')
       .select('id', { count: 'exact', head: true })
       .eq('rotation_policy_id', req.params.id)
       .eq('tenant_id', req.tenantId)
+    if (empErr) return serverError(req, reply, empErr, ErrorCode.QUERY_FAILED, 'Failed to check rotation policy usage')
 
-    const { count: siteCount } = await fastify.supabase
+    const { count: siteCount, error: siteErr } = await fastify.supabase
       .from('sites')
       .select('id', { count: 'exact', head: true })
       .eq('default_rotation_policy_id', req.params.id)
       .eq('tenant_id', req.tenantId)
+    if (siteErr) return serverError(req, reply, siteErr, ErrorCode.QUERY_FAILED, 'Failed to check rotation policy usage')
 
     const totalRefs = (empCount ?? 0) + (siteCount ?? 0)
     if (totalRefs > 0)

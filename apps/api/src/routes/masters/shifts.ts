@@ -75,6 +75,9 @@ export default async function shiftsRoutes(fastify: FastifyInstance) {
       fastify.supabase.from('job_history').select('id', { count: 'exact', head: true })
         .eq('shift_id', id).eq('tenant_id', req.tenantId),
     ])
+    if (emp.error) return serverError(req, reply, emp.error, ErrorCode.QUERY_FAILED, 'Failed to check shift usage')
+    if (roster.error) return serverError(req, reply, roster.error, ErrorCode.QUERY_FAILED, 'Failed to check shift usage')
+    if (hist.error) return serverError(req, reply, hist.error, ErrorCode.QUERY_FAILED, 'Failed to check shift usage')
     const usageCount = (emp.count ?? 0) + (roster.count ?? 0) + (hist.count ?? 0)
     if (usageCount > 0) {
       return reply.code(409).send({

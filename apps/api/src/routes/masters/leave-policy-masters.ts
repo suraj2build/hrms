@@ -274,11 +274,12 @@ export default async function leavePolicyMastersRoutes(fastify: FastifyInstance)
     const { id } = req.params as { id: string }
 
     // Check for existing assignments
-    const { count } = await fastify.supabase
+    const { count, error: countErr } = await fastify.supabase
       .from('leave_policy_assignments')
       .select('id', { count: 'exact', head: true })
       .eq('tenant_id', req.tenantId)
       .eq('policy_id', id)
+    if (countErr) return serverError(req, reply, countErr, ErrorCode.QUERY_FAILED, 'Failed to check policy assignments')
 
     if ((count ?? 0) > 0) {
       return reply.code(409).send({

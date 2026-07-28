@@ -297,17 +297,19 @@ export default async function rostersRoutes(fastify: FastifyInstance) {
     // roster_id off every assigned employee and default_roster_id off every site
     // that uses this as its default, with no warning. Refuse if referenced,
     // matching the sibling rotation-policies.ts DELETE guard.
-    const { count: empCount } = await fastify.supabase
+    const { count: empCount, error: empErr } = await fastify.supabase
       .from('employees')
       .select('id', { count: 'exact', head: true })
       .eq('roster_id', rosterId)
       .eq('tenant_id', req.tenantId)
+    if (empErr) return serverError(req, reply, empErr, ErrorCode.QUERY_FAILED, 'Failed to check roster usage')
 
-    const { count: siteCount } = await fastify.supabase
+    const { count: siteCount, error: siteErr } = await fastify.supabase
       .from('sites')
       .select('id', { count: 'exact', head: true })
       .eq('default_roster_id', rosterId)
       .eq('tenant_id', req.tenantId)
+    if (siteErr) return serverError(req, reply, siteErr, ErrorCode.QUERY_FAILED, 'Failed to check roster usage')
 
     const totalRefs = (empCount ?? 0) + (siteCount ?? 0)
     if (totalRefs > 0) {

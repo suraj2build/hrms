@@ -216,11 +216,12 @@ export async function seedStandardComponents(
 export async function deleteComponent(
   supabase: SupabaseClient, tenantId: string, id: string,
 ): Promise<StoreResult> {
-  const { count } = await supabase
+  const { count, error: countErr } = await supabase
     .from('salary_structure_components')
     .select('id', { count: 'exact', head: true })
     .eq('salary_component_id', id)
     .eq('tenant_id', tenantId)
+  if (countErr) return dbFail(countErr)
 
   if ((count ?? 0) > 0) {
     const { error } = await supabase
@@ -348,11 +349,12 @@ export async function updateStructure(
 export async function deleteStructure(
   supabase: SupabaseClient, tenantId: string, id: string,
 ): Promise<StoreResult> {
-  const { count } = await supabase
+  const { count, error: countErr } = await supabase
     .from('employee_compensations')
     .select('id', { count: 'exact', head: true })
     .eq('salary_structure_id', id)
     .eq('tenant_id', tenantId)
+  if (countErr) return dbFail(countErr)
   if ((count ?? 0) > 0)
     return fail(409, 'IN_USE', 'Structure is assigned to employees')
   const { error } = await supabase
