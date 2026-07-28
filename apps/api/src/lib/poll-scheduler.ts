@@ -14,18 +14,20 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { WhatsAppProvider }    from './whatsapp-provider.js'
 import { durableQueue }        from './durable-queue.js'
 import { fetchAllRows }        from './supabase-paginate.js'
+import { fetchTenantTz }       from './attendance-engine.js'
+import { getLocalDate, getLocalDayOfWeek, getLocalTimeMinutes } from './org-context.js'
 
 const POLL_INTERVAL_MS = 60 * 60 * 1_000  // 1 hour
 
 /** Concurrent WhatsApp sends per chunk. Keeps per-tenant API pressure manageable. */
 const SEND_CHUNK_SIZE = 25
 
-/** Run the Monday 09:00 poll tick — no-op outside that window. */
+/**
+ * Run the poll tick — fires hourly. Each tenant is gated on its OWN local
+ * Monday 09:00 hour, not the server's (UTC) clock — a single server-time gate
+ * would fire the poll at the wrong local hour for every non-UTC tenant.
+ */
 export async function runPollTick(supabase: SupabaseClient): Promise<void> {
-  const now = new Date()
-  // Monday = 1 (getDay()), 09:00–09:59
-  if (now.getDay() !== 1 || now.getHours() !== 9) return
-
   let tenants: { id: string }[]
   try {
     tenants = await fetchAllRows<{ id: string }>((from, to) =>
@@ -36,9 +38,15 @@ export async function runPollTick(supabase: SupabaseClient): Promise<void> {
     return
   }
 
+  const nowIso = new Date().toISOString()
   for (const tenant of tenants) {
     try {
-      await dispatchWeeklyPoll(supabase, tenant.id)
+      const tz = await fetchTenantTz(supabase, tenant.id)
+      const localDate = getLocalDate(nowIso, tz)
+      const localMinutes = getLocalTimeMinutes(nowIso, tz)
+      const isMonday9am = getLocalDayOfWeek(localDate, tz) === 1 && localMinutes >= 9 * 60 && localMinutes < 10 * 60
+      if (!isMonday9am) continue
+      await dispatchWeeklyPoll(supabase, tenant.id, localDate)
     } catch (err) {
       console.error(`[poll-scheduler] tenant=${tenant.id} error:`, err)
     }
@@ -58,15 +66,15 @@ export function registerPollScheduler(supabase: SupabaseClient): void {
   setTimeout(enqueue, 5_000)
 }
 
-async function dispatchWeeklyPoll(supabase: SupabaseClient, tenantId: string): Promise<void> {
-  const today = new Date().toISOString().slice(0, 10)
-
-  // Dedup: already created a weekly pulse today?
+async function dispatchWeeklyPoll(supabase: SupabaseClient, tenantId: string, todayLocal: string): Promise<void> {
+  // Dedup: already created a weekly pulse today (tenant-local calendar day,
+  // not UTC — otherwise the "already sent today" boundary can be off by
+  // several hours relative to what the tenant considers "today").
   const { data: existing } = await supabase
     .from('pulse_questions')
     .select('id')
     .eq('tenant_id', tenantId)
-    .gte('created_at', `${today}T00:00:00Z`)
+    .gte('created_at', `${todayLocal}T00:00:00Z`)
     .like('question', '%How are you feeling at work%')
     .maybeSingle()
 

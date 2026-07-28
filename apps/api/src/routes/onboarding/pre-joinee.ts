@@ -350,10 +350,17 @@ async function mergeInvitationToSession(
     // 1. Fetch the invitation's identity fields.
     const { data: inv } = await fastify.supabase
       .from('pre_joinee_invitations')
-      .select('first_name, last_name, email, designation, department, joining_date')
+      .select('first_name, last_name, email, designation, department, joining_date, session_id')
       .eq('id', invitationId)
       .eq('tenant_id', tenantId)
       .maybeSingle()
+
+    // Guard against creating a duplicate/orphaned session on re-submission —
+    // e.g. a re-upload cycle (submit → HR requests changes → candidate
+    // resubmits) previously called this unconditionally on every /submit,
+    // creating a fresh onboarding_sessions + draft_employee_profiles row each
+    // time and abandoning whatever HR review work existed on the prior one.
+    if (inv?.session_id) return inv.session_id as string
 
     const firstName = inv?.first_name ?? null
     const lastName  = inv?.last_name ?? null
@@ -497,7 +504,13 @@ export default async function preJoineeRoutes(fastify: FastifyInstance) {
       reply.code(410).send({ error: 'GONE', message: 'This invitation link has expired' })
       return null
     }
-    if (invitation.status !== 'pending') {
+    // 'changes_requested' is a re-opened-for-re-upload state (see
+    // request-reupload below) — GET /pre-join/:token and POST /submit already
+    // special-case it. This resolver is the shared gate for the upload-url
+    // and register-document endpoints too; excluding 'changes_requested' here
+    // made re-upload unreachable (every attempt to get an upload URL or
+    // register the corrected document 410'd as "already changes_requested").
+    if (invitation.status !== 'pending' && invitation.status !== 'changes_requested') {
       reply.code(410).send({
         error: 'GONE',
         message: `This invitation has already been ${invitation.status}`,
@@ -1823,6 +1836,15 @@ export default async function preJoineeRoutes(fastify: FastifyInstance) {
       .maybeSingle()
 
     if (invErr || !inv) return reply.code(404).send({ error: 'NOT_FOUND' })
+
+    // Fresh audit finding (cross-tenant IDOR): buddy_employee_id's only DB
+    // constraint is REFERENCES employees(id) — it does not require the row to
+    // belong to this tenant. Verify ownership before persisting it.
+    if (buddy_employee_id) {
+      const { data: buddyEmp } = await fastify.supabase
+        .from('employees').select('id').eq('id', buddy_employee_id).eq('tenant_id', tenantId).maybeSingle()
+      if (!buddyEmp) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: 'Buddy employee not found in your organisation' })
+    }
 
     // Update buddy
     const { error: updErr } = await fastify.supabase

@@ -24,6 +24,8 @@ import { resolveAssistantChain }       from '../../lib/ai/config.js'
 import { chatCompleteWithFallback }    from '../../lib/ai/llm.js'
 import { fetchAllRows }                from '../../lib/supabase-paginate.js'
 import { serverError, ErrorCode }      from '../../lib/api-errors.js'
+import { fetchTenantTz }               from '../../lib/attendance-engine.js'
+import { getLocalDate }                from '../../lib/org-context.js'
 
 export default async function moodRoutes(fastify: FastifyInstance) {
   const { supabase } = fastify
@@ -40,8 +42,14 @@ export default async function moodRoutes(fastify: FastifyInstance) {
     return data?.employee_id ?? null
   }
 
-  function todayDate(): string {
-    return new Date().toISOString().split('T')[0]
+  // Local calendar date in the tenant's own timezone, NOT server UTC — the
+  // mood_checkins UNIQUE(tenant_id, employee_id, checkin_date) constraint and
+  // every "today"/"this week"/"this month" boundary below must agree with
+  // what the tenant actually considers today, or check-ins near local
+  // midnight get attributed to the wrong day (ISSUE-154 class).
+  async function todayDate(tenantId: string): Promise<string> {
+    const tz = await fetchTenantTz(supabase, tenantId)
+    return getLocalDate(new Date().toISOString(), tz)
   }
 
   function detectSentiment(note: string | null | undefined): 'positive' | 'neutral' | 'negative' | null {
@@ -61,7 +69,7 @@ export default async function moodRoutes(fastify: FastifyInstance) {
   fastify.get('/today', { preHandler: fastify.authenticate }, async (req: any, reply) => {
     const tenantId    = req.tenantId
     const employeeId  = await getEmployeeId(req.userId)
-    const today       = todayDate()
+    const today       = await todayDate(tenantId)
 
     let checkin: Record<string, unknown> | null = null
     if (employeeId) {
@@ -150,7 +158,7 @@ export default async function moodRoutes(fastify: FastifyInstance) {
           note:               note ?? null,
           sentiment_label:    sentiment_label,
           sentiment_category: sentiment_category,
-          checkin_date:       todayDate(),
+          checkin_date:       await todayDate(tenantId),
         },
         { onConflict: 'tenant_id,employee_id,checkin_date' },
       )
@@ -206,17 +214,17 @@ export default async function moodRoutes(fastify: FastifyInstance) {
   fastify.get('/admin/dashboard', hrAuth, async (req: any, reply) => {
     const tenantId = req.tenantId
 
-    // Build last-7-days date list
+    // Build last-7-days date list anchored to the tenant's local "today", not
+    // the server's (UTC) clock — otherwise every day in this list, and every
+    // boundary derived from it below, can be off by a day near local midnight.
+    const todayStr = await todayDate(tenantId)
+    const todayAnchor = new Date(`${todayStr}T12:00:00Z`)
     const days: string[] = []
     for (let i = 6; i >= 0; i--) {
-      const d = new Date()
-      d.setDate(d.getDate() - i)
-      days.push(d.toISOString().split('T')[0])
+      days.push(new Date(todayAnchor.getTime() - i * 86_400_000).toISOString().slice(0, 10))
     }
 
-    const since30d = new Date()
-    since30d.setDate(since30d.getDate() - 7)
-    const since7dStr = since30d.toISOString().split('T')[0]
+    const since7dStr = days[0]!
 
     // mood_checkins can easily exceed 1000 rows within a 7-day window for a
     // tenant with a few hundred daily-active employees (fresh audit finding)
@@ -292,8 +300,8 @@ export default async function moodRoutes(fastify: FastifyInstance) {
       else if (r.sentiment_label === 'negative') sentCounts.negative++
     }
 
-    // Participation rate (current month)
-    const currentMonthStart = new Date().toISOString().slice(0, 7) + '-01'
+    // Participation rate (current month, tenant-local)
+    const currentMonthStart = todayStr.slice(0, 7) + '-01'
     const [respondentRows, totalEmpResult] = await Promise.all([
       fetchAllRows((from, to) =>
         supabase.from('mood_checkins').select('employee_id')
@@ -329,8 +337,8 @@ export default async function moodRoutes(fastify: FastifyInstance) {
 
   fastify.get('/admin/store-breakdown', hrAuth, async (req: any, reply) => {
     const tenantId = req.tenantId
-    const { month } = req.query as { month?: string }  // YYYY-MM format, defaults to current month
-    const targetMonth = month ? month + '-01' : new Date().toISOString().slice(0, 7) + '-01'
+    const { month } = req.query as { month?: string }  // YYYY-MM format, defaults to current (tenant-local) month
+    const targetMonth = month ? month + '-01' : (await todayDate(tenantId)).slice(0, 7) + '-01'
 
     const nextMonthDate = new Date(new Date(targetMonth).getTime() + 32 * 86400000)
     const nextMonthStr = nextMonthDate.toISOString().slice(0, 7) + '-01'
@@ -369,9 +377,11 @@ export default async function moodRoutes(fastify: FastifyInstance) {
   fastify.get('/admin/sentiment-report', hrAuth, async (req: any, reply) => {
     const tenantId = req.tenantId
 
-    const since30d = new Date()
-    since30d.setDate(since30d.getDate() - 30)
-    const since30dStr = since30d.toISOString().split('T')[0]
+    // Anchored to the tenant's local "today", not the server's (UTC) clock —
+    // otherwise this 30-day window boundary shifts by up to a day near local
+    // midnight relative to what the tenant sees as "30 days ago".
+    const todayStr = await todayDate(tenantId)
+    const since30dStr = new Date(new Date(`${todayStr}T12:00:00Z`).getTime() - 30 * 86_400_000).toISOString().slice(0, 10)
 
     const [sentimentRows, negativeNotesResult] = await Promise.all([
       fetchAllRows((from, to) =>
