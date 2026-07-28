@@ -67,8 +67,10 @@ export default async function signalIntelligenceRoutes(fastify: FastifyInstance)
   fastify.post('/signals/digest', { preHandler: [fastify.authenticate] }, async (req, reply) => {
     const orgId  = (req as any).tenantId as string
     const body   = req.body as { signals?: PlatformSignal[]; period?: string }
-    const input  = Array.isArray(body?.signals) ? body.signals : []
+    const rawInput = Array.isArray(body?.signals) ? body.signals : []
     const period = body?.period ?? 'last_1h'
+    // Never trust a client-supplied tenant_id — see /signals/process above.
+    const input  = rawInput.map(signal => ({ ...signal, tenant_id: orgId }))
 
     const digest = signalDigestService.compute(orgId, input, period)
     return reply.send(digest)
@@ -79,8 +81,11 @@ export default async function signalIntelligenceRoutes(fastify: FastifyInstance)
    * Sort a batch of signals by computed priority descending.
    */
   fastify.post('/signals/prioritize', { preHandler: [fastify.authenticate] }, async (req, reply) => {
-    const body  = req.body as { signals?: PlatformSignal[] }
-    const input = Array.isArray(body?.signals) ? body.signals : []
+    const tenantId = (req as any).tenantId as string
+    const body     = req.body as { signals?: PlatformSignal[] }
+    const rawInput = Array.isArray(body?.signals) ? body.signals : []
+    // Never trust a client-supplied tenant_id — see /signals/process above.
+    const input    = rawInput.map(signal => ({ ...signal, tenant_id: tenantId }))
 
     const sorted = signalPrioritizer.prioritizeBatch(input)
     return reply.send({ signals: sorted })
