@@ -23,17 +23,22 @@ import {
 } from '../../lib/manager-scope.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
 import { serverError, ErrorCode } from '../../lib/api-errors.js'
+import { fetchTenantTz } from '../../lib/attendance-engine.js'
+import { getLocalDate }  from '../../lib/org-context.js'
 
 const dateRe = /^\d{4}-\d{2}-\d{2}$/
 
 const isoDate = (d: Date) => d.toISOString().slice(0, 10)
 
 /**
- * Bounds of the configurable limit period containing `now` (UTC).
+ * Bounds of the configurable limit period containing `now`.
  * Returns [start, end) as YYYY-MM-DD strings, comparable against created_at.
  * The window is anchored to submission time (now), so the cap means
  * "requests an employee raises per <period>", regardless of which date is
- * being regularised.
+ * being regularised. Callers should pass `now` already anchored to the
+ * tenant's local calendar date (at UTC noon, to sidestep DST edge cases) —
+ * not a raw server-clock Date — so the period boundary lines up with the
+ * tenant's own day, not the server's UTC day.
  */
 function limitPeriodBounds(period: string, now: Date): { start: string; end: string; label: string } {
   const y = now.getUTCFullYear(), m = now.getUTCMonth(), d = now.getUTCDate()
@@ -123,9 +128,13 @@ export default async function regularisationRoute(fastify: FastifyInstance) {
     const perTypeLimits   = (policy?.per_type_limits ?? {}) as Record<string, number>
 
     // ── Submission window check ────────────────────────────────────────────────
+    // "today" is resolved in the tenant's own timezone, not the server's (UTC)
+    // clock — otherwise the window-closed cutoff and the frequency-limit period
+    // boundary below shift by up to a day near the tenant's local midnight.
+    const tenantTz  = await fetchTenantTz(fastify.supabase, req.tenantId)
+    const todayStr  = getLocalDate(new Date().toISOString(), tenantTz)
     const attendanceDate = new Date(`${date}T12:00:00.000Z`)
-    const today = new Date()
-    today.setUTCHours(12, 0, 0, 0)
+    const today = new Date(`${todayStr}T12:00:00.000Z`)
     const diffDays = Math.floor((today.getTime() - attendanceDate.getTime()) / 86_400_000)
 
     if (diffDays > windowDays) {
@@ -149,7 +158,7 @@ export default async function regularisationRoute(fastify: FastifyInstance) {
       ? ['pending', 'approved']
       : ['pending', 'approved', 'rejected']
 
-    const { start: periodStart, end: periodEnd, label: periodLabel } = limitPeriodBounds(limitPeriod, new Date())
+    const { start: periodStart, end: periodEnd, label: periodLabel } = limitPeriodBounds(limitPeriod, today)
 
     const { count: periodCount } = await fastify.supabase
       .from('attendance_regularisation')

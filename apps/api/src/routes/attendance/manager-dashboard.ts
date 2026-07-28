@@ -19,6 +19,8 @@ import { z }                    from 'zod'
 import { normalizeAttendanceStatus } from '../../lib/attendance-utils.js'
 import { PRESENT_STATUSES }          from '../../lib/attendance-read-model.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { fetchTenantTz } from '../../lib/attendance-engine.js'
+import { getLocalDate }  from '../../lib/org-context.js'
 
 const querySchema = z.object({
   /** Override — HR admin can inspect another manager's dashboard */
@@ -36,8 +38,14 @@ export default async function managerDashboardRoute(fastify: FastifyInstance) {
       return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
     }
 
-    const today   = parsed.data.date ?? new Date().toISOString().slice(0, 10)
     const { tenantId, userId, userRole } = req
+    // Resolve "today" in the tenant's own timezone, not the server's (UTC)
+    // clock — otherwise the dashboard queries the wrong calendar day of
+    // attendance_daily/attendance_logs near the UTC/local-midnight boundary.
+    const today = parsed.data.date ?? await (async () => {
+      const tz = await fetchTenantTz(fastify.supabase, tenantId)
+      return getLocalDate(new Date().toISOString(), tz)
+    })()
 
     // ── Resolve manager employee_id ─────────────────────────────────────────────
     let managerEmployeeId: string | null = null
