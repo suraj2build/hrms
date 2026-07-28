@@ -45,6 +45,8 @@ import { computeUpcoming }    from './compliance-calendar.js'
 import { computeLifecycleActionable, categoryLabel } from './lifecycle-expiry.js'
 import { notifyHrAdmins }     from './notify.js'
 import { durableQueue }       from './durable-queue.js'
+import { fetchTenantTz }      from './attendance-engine.js'
+import { getLocalDate }       from './org-context.js'
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -85,6 +87,22 @@ function shouldEmit(key: string): boolean {
 function currentMonth(): string {
   const now = new Date()
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+}
+
+/**
+ * Tenant-local "today" as YYYY-MM-DD. Scanners that match exact lifecycle
+ * dates (joining_date, effective_date) against server-UTC "today" can miss
+ * or double-fire around local midnight for non-UTC tenants (ISSUE-154 class).
+ */
+async function tenantTodayStr(supabase: SupabaseClient, tenantId: string): Promise<string> {
+  const tz = await fetchTenantTz(supabase, tenantId)
+  return getLocalDate(new Date().toISOString(), tz)
+}
+
+/** Shift a YYYY-MM-DD date string by `deltaDays`, anchored at UTC noon to dodge DST. */
+function shiftDateStr(dateStr: string, deltaDays: number): string {
+  const [y, m, d] = dateStr.split('-').map(Number)
+  return new Date(Date.UTC(y, m - 1, d + deltaDays, 12)).toISOString().slice(0, 10)
 }
 
 function lookbackFrom(): string {
@@ -543,7 +561,7 @@ async function scanLifecycleExpiry(supabase: SupabaseClient, tenantId: string): 
   }
 
   // Self-heal: mark active contracts expired once their end_date is in the past.
-  const todayIso = new Date().toISOString().slice(0, 10)
+  const todayIso = await tenantTodayStr(supabase, tenantId)
   const { data: lapsed } = await supabase
     .from('employee_contracts')
     .select('id')
@@ -814,11 +832,10 @@ async function autoAssignSurvey(
 // ── Scanner 9 — Auto polls (event-based) ─────────────────────────────────────
 
 async function scanAutoPolls(supabase: SupabaseClient, tenantId: string): Promise<void> {
-  const today = new Date().toISOString().slice(0, 10)
+  const today = await tenantTodayStr(supabase, tenantId)
 
   // Post-appraisal polls (3 days after completion)
-  const appraisalDate = new Date(); appraisalDate.setDate(appraisalDate.getDate() - 3)
-  const appraisalDateStr = appraisalDate.toISOString().slice(0, 10)
+  const appraisalDateStr = shiftDateStr(today, -3)
   const { data: appraisals } = await supabase
     .from('performance_appraisals').select('employee_id')
     .eq('tenant_id', tenantId).eq('status', 'completed')
@@ -834,11 +851,10 @@ async function scanAutoPolls(supabase: SupabaseClient, tenantId: string): Promis
   }
 
   // Post-transfer polls (14 days after transfer)
-  const transferDate = new Date(); transferDate.setDate(transferDate.getDate() - 14)
   const { data: transfers } = await supabase
     .from('employee_transfers').select('employee_id')
     .eq('tenant_id', tenantId)
-    .eq('effective_date', transferDate.toISOString().slice(0, 10))
+    .eq('effective_date', shiftDateStr(today, -14))
   if (transfers?.length) {
     const key = `auto-poll:post_transfer:${tenantId}:${today}`
     if (shouldEmit(key)) {
@@ -945,7 +961,7 @@ async function scanBenefitsEnrolment(supabase: SupabaseClient, tenantId: string)
 // ── Scanner 12 — New joiner mandatory policy assignment ───────────────────────
 
 async function scanNewJoinerPolicyAssignment(supabase: SupabaseClient, tenantId: string): Promise<void> {
-  const today = new Date().toISOString().slice(0, 10)
+  const today = await tenantTodayStr(supabase, tenantId)
 
   const { data: newJoiners } = await supabase.from('employees')
     .select('id, first_name, last_name, phone').eq('tenant_id', tenantId)
@@ -959,19 +975,28 @@ async function scanNewJoinerPolicyAssignment(supabase: SupabaseClient, tenantId:
   const key = `new-joiner-policies:${tenantId}:${today}`
   if (!shouldEmit(key)) return
 
+  // Track actual write success — HR must not be told policies were assigned
+  // if every upsert failed (fabricated-success).
+  let assignedCount = 0
   for (const emp of newJoiners as any[]) {
     for (const policy of mandatoryPolicies as any[]) {
-      await supabase.from('policy_acknowledgements').upsert(
+      const { error: upsertErr } = await supabase.from('policy_acknowledgements').upsert(
         { tenant_id: tenantId, policy_id: policy.id, employee_id: emp.id },
         { onConflict: 'tenant_id,policy_id,employee_id', ignoreDuplicates: true },
       )
+      if (upsertErr) {
+        console.warn('[intelligence-scanner] failed to assign policy ack:', emp.id, policy.id, upsertErr.message)
+        continue
+      }
+      assignedCount++
     }
   }
+  if (!assignedCount) return
 
   await notifyHrAdmins(supabase, {
     tenantId, item_type: 'general', severity: 'info',
     title:    `${newJoiners.length} new joiner(s) — mandatory policies assigned`,
-    summary:  `${mandatoryPolicies.length} mandatory polic${mandatoryPolicies.length === 1 ? 'y' : 'ies'} auto-assigned to today's joiners.`,
+    summary:  `${assignedCount} mandatory policy assignment${assignedCount === 1 ? '' : 's'} auto-created for today's joiners.`,
     entity_type: 'employee', action_route: '/admin/policies', action_label: 'View Policies',
   })
 }
@@ -979,12 +1004,10 @@ async function scanNewJoinerPolicyAssignment(supabase: SupabaseClient, tenantId:
 // ── Scanner 13 — Onboarding surveys (D30/60/90) ───────────────────────────────
 
 async function scanOnboardingSurveys(supabase: SupabaseClient, tenantId: string): Promise<void> {
-  const today = new Date()
-  const todayStr = today.toISOString().slice(0, 10)
+  const todayStr = await tenantTodayStr(supabase, tenantId)
 
   for (const [days, type] of [[30, 'onboarding_d30'], [60, 'onboarding_d60'], [90, 'onboarding_d90']] as [number, string][]) {
-    const target = new Date(today); target.setDate(target.getDate() - days)
-    const targetDate = target.toISOString().slice(0, 10)
+    const targetDate = shiftDateStr(todayStr, -days)
 
     const { data: emps } = await supabase.from('employees')
       .select('id').eq('tenant_id', tenantId).eq('status', 'active').eq('joining_date', targetDate)
@@ -1013,9 +1036,8 @@ async function scanOnboardingSurveys(supabase: SupabaseClient, tenantId: string)
 // ── Scanner 14 — Post-appraisal surveys ──────────────────────────────────────
 
 async function scanPostAppraisalSurveys(supabase: SupabaseClient, tenantId: string): Promise<void> {
-  const todayStr = new Date().toISOString().slice(0, 10)
-  const threeAgo = new Date(); threeAgo.setDate(threeAgo.getDate() - 3)
-  const dateStr  = threeAgo.toISOString().slice(0, 10)
+  const todayStr = await tenantTodayStr(supabase, tenantId)
+  const dateStr  = shiftDateStr(todayStr, -3)
 
   const { data: appraisals } = await supabase.from('performance_appraisals')
     .select('employee_id').eq('tenant_id', tenantId).eq('status', 'completed')
@@ -1035,12 +1057,11 @@ async function scanPostAppraisalSurveys(supabase: SupabaseClient, tenantId: stri
 // ── Scanner 15 — Post-transfer surveys ───────────────────────────────────────
 
 async function scanPostTransferSurveys(supabase: SupabaseClient, tenantId: string): Promise<void> {
-  const todayStr    = new Date().toISOString().slice(0, 10)
-  const fourteenAgo = new Date(); fourteenAgo.setDate(fourteenAgo.getDate() - 14)
+  const todayStr = await tenantTodayStr(supabase, tenantId)
 
   const { data: transfers } = await supabase.from('employee_transfers')
     .select('employee_id').eq('tenant_id', tenantId)
-    .eq('effective_date', fourteenAgo.toISOString().slice(0, 10))
+    .eq('effective_date', shiftDateStr(todayStr, -14))
   if (!transfers?.length) return
 
   const key = `post-transfer-survey:${tenantId}:${todayStr}`
@@ -1120,22 +1141,28 @@ async function scanOnboardingDegradation(supabase: SupabaseClient, tenantId: str
   const month = currentMonth()
 
   // Find employees who have completed both D30 and D60 surveys
-  const { data: d30Results } = await supabase
-    .from('survey_assignments').select('employee_id, surveys!inner(survey_type, tenant_id)')
-    .eq('surveys.tenant_id', tenantId).eq('surveys.survey_type', 'onboarding_d30')
-    .not('completed_at', 'is', null)
+  const d30Results = await fetchAllRows<{ employee_id: string }>((from, to) =>
+    supabase
+      .from('survey_assignments').select('employee_id, surveys!inner(survey_type, tenant_id)')
+      .eq('surveys.tenant_id', tenantId).eq('surveys.survey_type', 'onboarding_d30')
+      .not('completed_at', 'is', null)
+      .range(from, to),
+  )
 
-  const { data: d60Results } = await supabase
-    .from('survey_assignments').select('employee_id, surveys!inner(survey_type, tenant_id)')
-    .eq('surveys.tenant_id', tenantId).eq('surveys.survey_type', 'onboarding_d60')
-    .not('completed_at', 'is', null)
+  const d60Results = await fetchAllRows<{ employee_id: string }>((from, to) =>
+    supabase
+      .from('survey_assignments').select('employee_id, surveys!inner(survey_type, tenant_id)')
+      .eq('surveys.tenant_id', tenantId).eq('surveys.survey_type', 'onboarding_d60')
+      .not('completed_at', 'is', null)
+      .range(from, to),
+  )
 
-  if (!d30Results?.length || !d60Results?.length) return
+  if (!d30Results.length || !d60Results.length) return
 
-  const d60EmpIds = new Set((d60Results as any[]).map((r: any) => r.employee_id as string))
-  const bothIds   = (d30Results as any[])
-    .filter((r: any) => d60EmpIds.has(r.employee_id))
-    .map((r: any) => r.employee_id as string)
+  const d60EmpIds = new Set(d60Results.map(r => r.employee_id))
+  const bothIds   = d30Results
+    .filter(r => d60EmpIds.has(r.employee_id))
+    .map(r => r.employee_id)
 
   if (!bothIds.length) return
 
