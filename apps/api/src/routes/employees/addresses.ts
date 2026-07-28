@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { serverError, validationError, ErrorCode } from '../../lib/api-errors.js'
 
 const schema = z.object({
   address_type:          z.enum(['current','permanent','correspondence']),
@@ -31,7 +32,7 @@ export default async function addressesRoutes(fastify: FastifyInstance) {
       .eq('employee_id', req.params.id)
       .eq('tenant_id', req.tenantId)
       .order('address_type')
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch addresses')
     return reply.send({ data })
   })
 
@@ -41,7 +42,7 @@ export default async function addressesRoutes(fastify: FastifyInstance) {
       return reply.code(404).send({ error: 'NOT_FOUND', message: 'Employee not found' })
     const parsed = schema.safeParse(req.body)
     if (!parsed.success)
-      return reply.code(400).send({ error: 'VALIDATION', message: parsed.error.issues[0].message })
+      return validationError(reply, ErrorCode.VALIDATION_ERROR, parsed.error.issues[0].message)
     const { data, error } = await fastify.supabase
       .from('employee_addresses')
       .upsert(
@@ -49,7 +50,7 @@ export default async function addressesRoutes(fastify: FastifyInstance) {
         { onConflict: 'tenant_id,employee_id,address_type' }
       )
       .select().single()
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to save address')
     return reply.send(data)
   })
 
@@ -60,7 +61,7 @@ export default async function addressesRoutes(fastify: FastifyInstance) {
       .eq('id', req.params.addressId)
       .eq('employee_id', req.params.id)
       .eq('tenant_id', req.tenantId)
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.DELETE_FAILED, 'Failed to delete address')
     return reply.code(204).send()
   })
 }

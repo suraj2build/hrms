@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { optStr, optDate } from '../../lib/zod-form.js'
+import { serverError, notFound, conflictError, validationError, ErrorCode } from '../../lib/api-errors.js'
 
 const schema = z.object({
   card_number:   z.string().min(1, 'Card number is required'),
@@ -29,7 +30,7 @@ export default async function accessCardsRoutes(fastify: FastifyInstance) {
       .eq('employee_id', req.params.id)
       .eq('tenant_id', req.tenantId)
       .order('issued_date', { ascending: false })
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch access cards')
     return reply.send({ data })
   })
 
@@ -45,8 +46,8 @@ export default async function accessCardsRoutes(fastify: FastifyInstance) {
       .select().single()
     if (error) {
       if (error.code === '23505')
-        return reply.code(409).send({ error: 'DUPLICATE', message: 'Card number already in use' })
-      return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+        return conflictError(reply, 'DUPLICATE', 'Card number already in use')
+      return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create access card')
     }
     return reply.code(201).send(data)
   })
@@ -54,16 +55,16 @@ export default async function accessCardsRoutes(fastify: FastifyInstance) {
   fastify.put('/employees/:id/access-cards/:cardId', hrAdminAuth, async (req: any, reply) => {
     const parsed = schema.partial().safeParse(req.body)
     if (!parsed.success)
-      return reply.code(400).send({ error: 'VALIDATION', message: parsed.error.issues[0].message })
+      return validationError(reply, ErrorCode.VALIDATION_ERROR, parsed.error.issues[0].message)
     const { data, error } = await fastify.supabase
       .from('employee_access_cards')
       .update(parsed.data)
       .eq('id', req.params.cardId)
       .eq('employee_id', req.params.id)
       .eq('tenant_id', req.tenantId)
-      .select().single()
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
-    if (!data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Access card not found' })
+      .select().maybeSingle()
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update access card')
+    if (!data) return notFound(reply, 'NOT_FOUND', 'Access card not found')
     return reply.send(data)
   })
 }

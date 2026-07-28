@@ -17,6 +17,7 @@
  */
 import type { FastifyInstance } from 'fastify'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 async function verifyEmployee(fastify: any, employeeId: string, tenantId: string) {
   const { data } = await fastify.supabase
@@ -54,7 +55,7 @@ export default async function onboardingStatusRoutes(fastify: FastifyInstance) {
       .limit(1)
       .maybeSingle()
 
-    if (draftError) return reply.code(500).send({ error: 'QUERY_FAILED', message: draftError.message })
+    if (draftError) return serverError(req, reply, draftError, ErrorCode.QUERY_FAILED, 'Failed to fetch onboarding status')
     if (!draft) return reply.send({ data: null })
 
     // Fetch the parent session
@@ -65,7 +66,7 @@ export default async function onboardingStatusRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', req.tenantId)
       .maybeSingle()
 
-    if (sessionError) return reply.code(500).send({ error: 'QUERY_FAILED', message: sessionError.message })
+    if (sessionError) return serverError(req, reply, sessionError, ErrorCode.QUERY_FAILED, 'Failed to fetch onboarding session')
 
     // Fetch documents for this session
     const { data: docs, error: docsError } = await fastify.supabase
@@ -74,7 +75,7 @@ export default async function onboardingStatusRoutes(fastify: FastifyInstance) {
       .eq('session_id', draft.session_id)
       .eq('tenant_id', req.tenantId)
 
-    if (docsError) return reply.code(500).send({ error: 'QUERY_FAILED', message: docsError.message })
+    if (docsError) return serverError(req, reply, docsError, ErrorCode.QUERY_FAILED, 'Failed to fetch onboarding documents')
 
     const documents    = docs ?? []
     const totalDocs    = documents.length

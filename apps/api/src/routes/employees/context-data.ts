@@ -15,6 +15,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z }                    from 'zod'
 import { MANAGER_ROLES }        from '../../lib/rbac.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 const ALLOWED_ROLES = MANAGER_ROLES
 
 export default async function employeeContextDataRoutes(fastify: FastifyInstance) {
@@ -58,7 +59,7 @@ export default async function employeeContextDataRoutes(fastify: FastifyInstance
       .order('date', { ascending: false })
       .limit(limit)
 
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch attendance history')
 
     // Map to the shape the workspace expects
     const rows = (data ?? []).map((r: any) => ({
@@ -102,7 +103,7 @@ export default async function employeeContextDataRoutes(fastify: FastifyInstance
       .order('attendance_date', { ascending: false })
       .limit(limit)
 
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch overtime history')
 
     const rows = (data ?? []).map((r: any) => {
       const minutes = r.approved_minutes ?? r.raw_ot_minutes ?? 0
@@ -144,7 +145,7 @@ export default async function employeeContextDataRoutes(fastify: FastifyInstance
       .limit(1)
       .maybeSingle()
 
-    if (slipErr) return reply.code(500).send({ error: 'QUERY_FAILED', message: slipErr.message })
+    if (slipErr) return serverError(req, reply, slipErr, ErrorCode.QUERY_FAILED, 'Failed to fetch payroll summary')
 
     if (!slip) {
       // No payslip yet — return summary from employee_compensations

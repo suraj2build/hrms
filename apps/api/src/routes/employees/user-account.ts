@@ -184,11 +184,7 @@ export default async function userAccountRoutes(fastify: FastifyInstance) {
       )
 
       if (inviteErr || !invited?.user) {
-        fastify.log.error({ err: inviteErr, email }, 'user-account: inviteUserByEmail failed')
-        return reply.code(500).send({
-          error:   'INVITE_FAILED',
-          message: inviteErr?.message ?? 'Failed to send invite email',
-        })
+        return serverError(req, reply, inviteErr ?? new Error('no user returned'), ErrorCode.INSERT_FAILED, 'Failed to send invite email')
       }
 
       authUserId = invited.user.id
@@ -209,11 +205,7 @@ export default async function userAccountRoutes(fastify: FastifyInstance) {
 
       if (inviteProfileErr || !inviteProfile) {
         await fastify.supabase.auth.admin.deleteUser(authUserId)
-        fastify.log.error({ err: inviteProfileErr }, 'user-account: profiles insert failed (invite) — auth user rolled back')
-        return reply.code(500).send({
-          error:   'PROFILE_CREATE_FAILED',
-          message: inviteProfileErr?.message ?? 'Failed to create user profile',
-        })
+        return serverError(req, reply, inviteProfileErr ?? new Error('no profile returned'), ErrorCode.INSERT_FAILED, 'Failed to create user profile (auth user rolled back)')
       }
 
       fastify.log.info({ employeeId: id, authUserId, role }, 'user-account: invite sent')
@@ -242,11 +234,7 @@ export default async function userAccountRoutes(fastify: FastifyInstance) {
       })
 
       if (createErr || !created?.user) {
-        fastify.log.error({ err: createErr, email }, 'user-account: createUser failed')
-        return reply.code(500).send({
-          error:   'CREATE_FAILED',
-          message: createErr?.message ?? 'Failed to create user',
-        })
+        return serverError(req, reply, createErr ?? new Error('no user returned'), ErrorCode.INSERT_FAILED, 'Failed to create user account')
       }
 
       authUserId = created.user.id
@@ -267,11 +255,7 @@ export default async function userAccountRoutes(fastify: FastifyInstance) {
 
       if (profileErr || !newProfile) {
         await fastify.supabase.auth.admin.deleteUser(authUserId)
-        fastify.log.error({ err: profileErr }, 'user-account: profiles insert failed — auth user rolled back')
-        return reply.code(500).send({
-          error:   'PROFILE_CREATE_FAILED',
-          message: profileErr?.message ?? 'Failed to create user profile',
-        })
+        return serverError(req, reply, profileErr ?? new Error('no profile returned'), ErrorCode.INSERT_FAILED, 'Failed to create user profile (auth user rolled back)')
       }
 
       // If account created as inactive, ban in Supabase Auth as well
@@ -342,8 +326,7 @@ export default async function userAccountRoutes(fastify: FastifyInstance) {
       .eq('id', profile.id)
 
     if (updateErr) {
-      fastify.log.error({ err: updateErr }, 'user-account: update is_active failed')
-      return reply.code(500).send({ error: 'DB_ERROR', message: updateErr.message })
+      return serverError(req, reply, updateErr, ErrorCode.UPDATE_FAILED, 'Failed to update account status')
     }
 
     // Also ban/unban in Supabase Auth so JWTs are rejected

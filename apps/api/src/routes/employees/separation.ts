@@ -106,7 +106,7 @@ export default async function separationRoutes(fastify: FastifyInstance) {
       .update(parsed.data)
       .eq('employee_id', req.params.id)
       .eq('tenant_id', req.tenantId)
-      .select().single()
+      .select().maybeSingle()
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update separation record')
     if (!data) return notFound(reply, 'NOT_FOUND', 'Separation record not found')
 

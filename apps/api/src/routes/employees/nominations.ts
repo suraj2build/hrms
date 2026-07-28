@@ -102,7 +102,7 @@ export default async function nominationsRoutes(fastify: FastifyInstance) {
       .eq('id', req.params.nomId)
       .eq('employee_id', req.params.id)
       .eq('tenant_id', req.tenantId)
-      .select('*, relationship_types(id, name)').single()
+      .select('*, relationship_types(id, name)').maybeSingle()
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update nomination')
     if (!data) return notFound(reply, 'NOT_FOUND', 'Nomination not found')
     return reply.send(data)

@@ -103,7 +103,7 @@ export default async function passportVisaRoutes(fastify: FastifyInstance) {
       .eq('employee_id', req.params.id)
       .eq('tenant_id', req.tenantId)
       .select('*')
-      .single()
+      .maybeSingle()
 
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update passport/visa record')
     if (!data) return notFound(reply, 'NOT_FOUND', 'Record not found')
