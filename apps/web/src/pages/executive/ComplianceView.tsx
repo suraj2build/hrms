@@ -141,7 +141,7 @@ export default function ComplianceView() {
                 <StatTile label="Due This Month" value={(deadlines.length - overdue.length).toLocaleString()} tone="muted" />
               </div>
               <div className="max-h-48 space-y-1.5 overflow-y-auto pr-1">
-                {deadlines.slice(0, 12).map(d => (
+                {deadlines.map(d => (
                   <div key={d.id} className="flex items-center justify-between rounded-md border border-border/60 px-3 py-1.5">
                     <div className="min-w-0"><p className="truncate text-xs font-medium">{d.label}</p><p className="text-[10px] text-muted-foreground">{d.jurisdiction} · {d.compliance_type}</p></div>
                     <span className={`whitespace-nowrap text-[11px] font-medium tabular-nums ${d.status === 'overdue' ? 'text-destructive' : d.status === 'due_soon' ? 'text-warning' : 'text-muted-foreground'}`}>
