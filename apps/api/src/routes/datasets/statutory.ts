@@ -13,6 +13,7 @@
 import type { FastifyInstance } from 'fastify'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 // Rows per .in() call — a large tenant's employee-id list for these lookups
 // can exceed both PostgREST's 1,000-row response ceiling and safe request-URL
@@ -247,6 +248,17 @@ export default async function statutoryDataset(fastify: FastifyInstance) {
         .eq('tenant_id', tid)
         .eq('month', month),
     ])
+
+    // A transient failure here must not silently read as "no registrations /
+    // no slips submitted yet" — finalizedCount/totalCount feed directly into
+    // payrollReady and the top-level filing-readiness verdict this endpoint
+    // exists to compute (same PEND-21 pattern already fixed in the sibling
+    // payroll-cost.ts main handler).
+    if (epfRegRes.error)        return serverError(req, reply, epfRegRes.error, ErrorCode.QUERY_FAILED, 'Failed to fetch EPF registration')
+    if (esiRegRes.error)        return serverError(req, reply, esiRegRes.error, ErrorCode.QUERY_FAILED, 'Failed to fetch ESI registration')
+    if (ptaxRegsRes.error)      return serverError(req, reply, ptaxRegsRes.error, ErrorCode.QUERY_FAILED, 'Failed to fetch PTax registrations')
+    if (finalizedSlipsRes.error) return serverError(req, reply, finalizedSlipsRes.error, ErrorCode.QUERY_FAILED, 'Failed to fetch finalized payroll slips')
+    if (allSlipsRes.error)      return serverError(req, reply, allSlipsRes.error, ErrorCode.QUERY_FAILED, 'Failed to fetch payroll slips')
 
     const epfRegNum  = (epfRegRes.data  as any)?.registration_number ?? null
     const esiRegNum  = (esiRegRes.data  as any)?.registration_number ?? null

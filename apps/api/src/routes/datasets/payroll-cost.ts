@@ -62,6 +62,10 @@ export default async function payrollCostDataset(fastify: FastifyInstance) {
   // any slip month, so it works even if run/slip status drift.
   fastify.get('/anchor', adminAuth, async (req: any, reply) => {
     const tid = req.tenantId
+    // A transient query error here must not silently fall through to null/an
+    // earlier month — this determines the month the Reports/Explorer UI
+    // defaults to (same PEND-21 unchecked-error pattern already fixed in the
+    // main handler below).
     const latestSlipMonth = async (statuses?: string[]) => {
       let qb = fastify.supabase
         .from('payroll_slips')
@@ -70,24 +74,31 @@ export default async function payrollCostDataset(fastify: FastifyInstance) {
         .order('month', { ascending: false })
         .limit(1)
       if (statuses) qb = qb.in('status', statuses)
-      const { data } = await qb.maybeSingle()
+      const { data, error } = await qb.maybeSingle()
+      if (error) throw error
       return (data as any)?.month ?? null
     }
 
-    // Prefer the latest finalized RUN month — that's the authoritative "payroll
-    // is locked" signal and matches what the breakdown reads.
-    const { data: run } = await fastify.supabase
-      .from('payroll_runs')
-      .select('month')
-      .eq('tenant_id', tid)
-      .in('status', FINAL_RUN_STATUSES)
-      .order('month', { ascending: false })
-      .limit(1)
-      .maybeSingle()
-    let month = (run as any)?.month ?? null
-    if (!month) month = await latestSlipMonth(FINAL_SLIP_STATUSES)
-    if (!month) month = await latestSlipMonth()   // any slip at all
-    return reply.send({ month })
+    try {
+      // Prefer the latest finalized RUN month — that's the authoritative "payroll
+      // is locked" signal and matches what the breakdown reads.
+      const { data: run, error: runErr } = await fastify.supabase
+        .from('payroll_runs')
+        .select('month')
+        .eq('tenant_id', tid)
+        .in('status', FINAL_RUN_STATUSES)
+        .order('month', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+      if (runErr) throw runErr
+
+      let month = (run as any)?.month ?? null
+      if (!month) month = await latestSlipMonth(FINAL_SLIP_STATUSES)
+      if (!month) month = await latestSlipMonth()   // any slip at all
+      return reply.send({ month })
+    } catch (err) {
+      return serverError(req, reply, err, ErrorCode.QUERY_FAILED, 'Failed to resolve payroll cost anchor month')
+    }
   })
 
   fastify.get('/', adminAuth, async (req: any, reply) => {

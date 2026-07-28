@@ -368,8 +368,8 @@ async function fetchComparisonRows(
   // ceiling for a large tenant, silently dropping employees from the report.
   let employees: any[]
   try {
-    employees = await fetchAllRows((from, to) => {
-      let q = supabase
+    employees = await fetchAllRows((from, to) =>
+      supabase
         .from('employees')
         .select(`
           id, first_name, last_name, employee_code,
@@ -379,12 +379,23 @@ async function fetchComparisonRows(
         .eq('status', 'active')
         .eq('job_history.is_current', true)
         .order('employee_code')
-      if (department_id) q = q.eq('job_history.department_id', department_id)
-      return q.range(from, to)
-    })
+        .range(from, to),
+    )
   } catch (empErr) {
     logger?.error({ err: empErr }, 'comparison: employee query failed')
     return { rows: [], runRow: null, error: 'Failed to fetch employees' }
+  }
+
+  // Department filter — post-fetch. job_history is embedded without !inner,
+  // so .eq('job_history.department_id', ...) only nulls the nested JSON for
+  // non-matching rows rather than removing the parent employees row —
+  // GET /reports/attendance-payroll-comparison(/export)?department_id=X was
+  // silently returning every employee in the tenant, not just department X.
+  if (department_id) {
+    employees = employees.filter((e: any) => {
+      const jh = Array.isArray(e.job_history) ? e.job_history[0] : e.job_history
+      return jh?.department_id === department_id
+    })
   }
 
   // ── 2. Attendance aggregates for the month ────────────────────────────────
@@ -593,8 +604,8 @@ export default async function reportExportRoutes(fastify: FastifyInstance) {
     // ── Fetch employees ────────────────────────────────────────────────────────
     let employees: any[]
     try {
-      employees = await fetchAllRows((from, to) => {
-        let q = fastify.supabase
+      employees = await fetchAllRows((from, to) =>
+        fastify.supabase
           .from('employees')
           .select(`
         id, first_name, last_name, employee_code,
@@ -604,12 +615,26 @@ export default async function reportExportRoutes(fastify: FastifyInstance) {
           .eq('status', 'active')
           .eq('job_history.is_current', true)
           .order('employee_code')
-        if (department_id) q = q.eq('job_history.department_id', department_id)
-        return q.range(from, to)
-      })
+          .range(from, to),
+      )
     } catch (err: any) {
       return serverError(req, reply, err, ErrorCode.QUERY_FAILED, 'Failed to fetch employees')
     }
+
+    // Department filter — post-fetch, not .eq('job_history.department_id', …).
+    // job_history is embedded without !inner, so a filter on the embed only
+    // nulls out the nested JSON for non-matching rows; it never removes the
+    // parent employees row. Filtering server-side there silently returned
+    // every employee in the tenant regardless of department_id. Same
+    // post-fetch pattern already used by the payroll-register/salary-sheet
+    // helpers above.
+    if (department_id) {
+      employees = employees.filter((e: any) => {
+        const jh = Array.isArray(e.job_history) ? e.job_history[0] : e.job_history
+        return jh?.department_id === department_id
+      })
+    }
+
     if (employees.length === 0) {
       return notFound(reply, 'NO_DATA', 'No active employees found for the selected filters.')
     }
