@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
-import { serverError, notFound, ErrorCode } from '../../lib/api-errors.js'
+import { serverError, notFound, validationError, ErrorCode } from '../../lib/api-errors.js'
 
 /** One calendar day before the given YYYY-MM-DD date, as YYYY-MM-DD. */
 function dayBefore(dateStr: string): string {
@@ -147,6 +147,31 @@ export default async function jobHistoryRoutes(fastify: FastifyInstance) {
     const parsed = createJobHistorySchema.safeParse(req.body)
     if (!parsed.success)
       return reply.code(400).send({ error: 'VALIDATION', message: parsed.error.issues[0].message })
+
+    // Cross-tenant IDOR guard: department_id/designation_id/grade_id/work_location_id/
+    // cost_center_id/shift_id/manager_id are plain FKs with no tenant condition, so
+    // without this check an hr_admin could attach another tenant's row here (mirrors
+    // the fkChecks pattern in index.ts PUT /employees/:id and full-create.ts).
+    const fkChecks: Array<[string, string, string]> = [
+      ['department_id',     'departments',      'Department'],
+      ['designation_id',    'designations',     'Designation'],
+      ['grade_id',          'grades',           'Grade'],
+      ['work_location_id',  'work_locations',   'Work location'],
+      ['cost_center_id',    'cost_centers',     'Cost center'],
+      ['shift_id',          'shifts',           'Shift'],
+      ['manager_id',        'employees',        'Manager'],
+    ]
+    for (const [field, table, label] of fkChecks) {
+      const fkId = (parsed.data as Record<string, unknown>)[field]
+      if (!fkId) continue
+      const { data: fkRow } = await fastify.supabase
+        .from(table)
+        .select('id')
+        .eq('id', fkId as string)
+        .eq('tenant_id', req.tenantId)
+        .maybeSingle()
+      if (!fkRow) return validationError(reply, ErrorCode.VALIDATION_ERROR, `${label} not found in your organisation`)
+    }
 
     // Supersede the prior current row BEFORE inserting, replicating exactly
     // what fn_close_prev_job_history's AFTER INSERT trigger (migration 013)

@@ -16,9 +16,25 @@ import { z }                    from 'zod'
 import {
   resolveEmployeeOrgContext,
   getHolidayDates,
+  getLocalDate,
   type HolidayRowWithDate,
 } from '../../lib/org-context.js'
+import { fetchTenantTz }  from '../../lib/attendance-engine.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { serverError, validationError, ErrorCode } from '../../lib/api-errors.js'
+
+// Resolve "today" in the tenant's own timezone, not the server's (UTC) clock —
+// mirrors the same fix applied to tds.ts / it-statement.ts / ytd-statement.ts.
+async function tenantTodayStr(fastify: FastifyInstance, tenantId: string): Promise<string> {
+  const tz = await fetchTenantTz(fastify.supabase, tenantId)
+  return getLocalDate(new Date().toISOString(), tz)
+}
+
+/** todayStr + N months, as YYYY-MM-DD (pure date arithmetic, no local-TZ constructor). */
+function addMonths(todayStr: string, months: number): string {
+  const [y, m, d] = todayStr.split('-').map(Number)
+  return new Date(Date.UTC(y, m - 1 + months, d)).toISOString().slice(0, 10)
+}
 
 export default async function employeeOrgContextRoutes(fastify: FastifyInstance) {
   const auth = { preHandler: [fastify.authenticate] }
@@ -29,7 +45,7 @@ export default async function employeeOrgContextRoutes(fastify: FastifyInstance)
       return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
     }
     const employeeId = (req.params as any).id
-    const today      = new Date().toISOString().slice(0, 10)
+    const today      = await tenantTodayStr(fastify, req.tenantId)
 
     // Verify employee belongs to tenant
     const { data: emp } = await fastify.supabase
@@ -104,14 +120,13 @@ export default async function employeeOrgContextRoutes(fastify: FastifyInstance)
     }
 
     // Upcoming holidays (next 5 applicable to this employee)
-    const futureEnd = new Date()
-    futureEnd.setMonth(futureEnd.getMonth() + 3)
+    const futureEnd = addMonths(today, 3)
     const { data: rawHolidays } = await fastify.supabase
       .from('holiday_calendar')
       .select('date, name, is_optional, site_id, location_id')
       .eq('tenant_id', req.tenantId)
       .gte('date', today)
-      .lte('date', futureEnd.toISOString().slice(0, 10))
+      .lte('date', futureEnd)
       .order('date')
 
     const holidaySet  = getHolidayDates((rawHolidays ?? []) as HolidayRowWithDate[], orgCtx)
@@ -175,6 +190,27 @@ export default async function employeeOrgContextRoutes(fastify: FastifyInstance)
 
     const { site_id, roster_id, rotation_policy_id, effective_from, reason } = parsed.data
 
+    // Cross-tenant IDOR guard: site_id/roster_id/rotation_policy_id are plain FKs
+    // with no tenant condition — without this check an hr_admin could point an
+    // employee's assignment at another tenant's site/roster/rotation policy
+    // (which then leaks cross-tenant names via the GET handler and, for site_id,
+    // via bank-statutory.ts's site_state_code lookup).
+    const fkChecks: Array<[string | null | undefined, string, string]> = [
+      [site_id,            'sites',             'Site'],
+      [roster_id,           'rosters',           'Roster'],
+      [rotation_policy_id,  'rotation_policies', 'Rotation policy'],
+    ]
+    for (const [fkId, table, label] of fkChecks) {
+      if (!fkId) continue
+      const { data: fkRow } = await fastify.supabase
+        .from(table)
+        .select('id')
+        .eq('id', fkId)
+        .eq('tenant_id', req.tenantId)
+        .maybeSingle()
+      if (!fkRow) return validationError(reply, ErrorCode.VALIDATION_ERROR, `${label} not found in your organisation`)
+    }
+
     // Close the current assignment(s). A single unique "one current" index means
     // any leftover is_current row would block the insert below — so closing must
     // succeed. Set effective_to to the day before the new effective_from (but
@@ -188,7 +224,7 @@ export default async function employeeOrgContextRoutes(fastify: FastifyInstance)
       .eq('tenant_id', req.tenantId)
       .eq('employee_id', employeeId)
       .eq('is_current', true)
-    if (closeErr) return reply.code(500).send({ error: 'DB_ERROR', message: `Could not close previous assignment: ${closeErr.message}` })
+    if (closeErr) return serverError(req, reply, closeErr, ErrorCode.UPDATE_FAILED, 'Could not close previous assignment')
 
     const newAssignment = {
       tenant_id:   req.tenantId,
@@ -222,7 +258,7 @@ export default async function employeeOrgContextRoutes(fastify: FastifyInstance)
         .single())
     }
 
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create org context assignment')
 
     // Mirror site + roster to employees table for quick lookups (core columns —
     // always present). Must not be coupled with rotation_policy_id, whose column
@@ -233,7 +269,7 @@ export default async function employeeOrgContextRoutes(fastify: FastifyInstance)
       .update({ site_id: site_id ?? null, roster_id: roster_id ?? null })
       .eq('id', employeeId)
       .eq('tenant_id', req.tenantId)
-    if (mirrorErr) return reply.code(500).send({ error: 'DB_ERROR', message: mirrorErr.message })
+    if (mirrorErr) return serverError(req, reply, mirrorErr, ErrorCode.UPDATE_FAILED, 'Failed to sync site/roster to employee record')
 
     // Rotation policy — separate, best-effort. undefined = leave as-is;
     // null = clear (inherit site default). If the column doesn't exist on this

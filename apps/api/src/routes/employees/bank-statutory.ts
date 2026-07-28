@@ -2,6 +2,15 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { serverError, notFound, validationError, ErrorCode } from '../../lib/api-errors.js'
+import { fetchTenantTz } from '../../lib/attendance-engine.js'
+import { getLocalDate } from '../../lib/org-context.js'
+
+// Resolve "today" in the tenant's own timezone, not the server's (UTC) clock —
+// mirrors the same fix applied to tds.ts / it-statement.ts / org-context.ts.
+async function tenantTodayStr(fastify: any, tenantId: string): Promise<string> {
+  const tz = await fetchTenantTz(fastify.supabase, tenantId)
+  return getLocalDate(new Date().toISOString(), tz)
+}
 
 // clearable*: a field the user can blank out to CLEAR it. '' or null → null so
 // the upsert writes null (erases the value). A field simply OMITTED from the
@@ -85,7 +94,9 @@ export default async function bankStatutoryRoutes(fastify: FastifyInstance) {
     if ((empRow as any)?.site_id) {
       const { data: siteRow } = await fastify.supabase
         .from('sites').select('state_code')
-        .eq('id', (empRow as any).site_id).maybeSingle()
+        .eq('id', (empRow as any).site_id)
+        .eq('tenant_id', req.tenantId)
+        .maybeSingle()
       siteStateCode = (siteRow as any)?.state_code ?? null
     }
     return reply.send({ data: {
@@ -111,7 +122,7 @@ export default async function bankStatutoryRoutes(fastify: FastifyInstance) {
     const bankPayload  = { ...parsed.data }
     delete (bankPayload as any).pt_state_code
     delete (bankPayload as any).lwf_state_code
-    const today = new Date().toISOString().slice(0, 10)
+    const today = await tenantTodayStr(fastify, req.tenantId)
 
     // Write PT state to ptax_state_config (idempotent).
     if (ptStateCode !== undefined) {
