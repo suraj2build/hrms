@@ -85,13 +85,17 @@ export class IncidentService {
     relatedIncidentId: string,
     tenantId:          string,
   ): Promise<void> {
-    const { data } = await this.supabase
+    const { data, error: fetchError } = await this.supabase
       .from('operational_incidents')
       .select('metadata')
       .eq('id', incidentId)
       .eq('tenant_id', tenantId)
       .single()
 
+    if (fetchError) {
+      console.warn('[IncidentService] failed to fetch incident for linking', { incidentId, error: fetchError.message })
+      return
+    }
     if (!data) return
 
     const meta     = (data as any).metadata ?? {}
@@ -100,17 +104,17 @@ export class IncidentService {
       related.push(relatedIncidentId)
     }
 
-    try {
-      await this.supabase
-        .from('operational_incidents')
-        .update({
-          metadata:   { ...meta, related_incidents: related },
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', incidentId)
-        .eq('tenant_id', tenantId)
-    } catch {
-      // non-fatal
+    const { error: updateError } = await this.supabase
+      .from('operational_incidents')
+      .update({
+        metadata:   { ...meta, related_incidents: related },
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', incidentId)
+      .eq('tenant_id', tenantId)
+
+    if (updateError) {
+      console.warn('[IncidentService] failed to link related incident', { incidentId, relatedIncidentId, error: updateError.message })
     }
   }
 
@@ -123,7 +127,7 @@ export class IncidentService {
     entityId:   string,
     limit = 20,
   ): Promise<any[]> {
-    const { data } = await this.supabase
+    const { data, error } = await this.supabase
       .from('operational_incidents')
       .select('id, incident_type, severity, title, status, created_at, metadata')
       .eq('tenant_id', tenantId)
@@ -131,6 +135,15 @@ export class IncidentService {
       .eq('related_entity_id', entityId)
       .order('created_at', { ascending: false })
       .limit(limit)
+
+    if (error) {
+      // Non-fatal by design (mirrors createFromGovernance/linkRelatedIncidents),
+      // but logged so a query failure isn't silently indistinguishable from
+      // "no matching incidents" — the caller (detectPatternAndEscalate) uses
+      // this to decide whether to escalate.
+      console.warn('[IncidentService] failed to fetch entity incidents', { tenantId, entityType, entityId, error: error.message })
+      return []
+    }
     return data ?? []
   }
 

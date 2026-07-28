@@ -105,7 +105,8 @@ export class RegulatoryIngestionService {
       q = q.or(`tenant_id.eq.${tenantId},tenant_id.is.null`)
     }
 
-    const { data } = await q
+    const { data, error } = await q
+    if (error) throw error
     return (data ?? []) as ComplianceRevisionEvent[]
   }
 }
