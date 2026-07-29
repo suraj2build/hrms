@@ -74,8 +74,9 @@ function fmtDateTime(s: string) {
 function monthRange() {
   const now = new Date()
   const y = now.getFullYear(), m = now.getMonth()
-  const from = new Date(y, m, 1).toISOString().slice(0, 10)
-  const to   = new Date(y, m + 1, 0).toISOString().slice(0, 10)
+  const from = `${y}-${String(m + 1).padStart(2, '0')}-01`
+  const lastDay = new Date(y, m + 1, 0)
+  const to = `${lastDay.getFullYear()}-${String(lastDay.getMonth() + 1).padStart(2, '0')}-${String(lastDay.getDate()).padStart(2, '0')}`
   return { from, to, label: now.toLocaleString('default', { month: 'long', year: 'numeric' }) }
 }
 

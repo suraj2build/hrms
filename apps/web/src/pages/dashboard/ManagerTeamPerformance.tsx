@@ -84,13 +84,17 @@ const WINDOWS: { value: Window; label: string }[] = [
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
+function localDateStr(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
 function buildDateRange(days: number): { from: string; to: string } {
   const to  = new Date()
   const from = new Date()
   from.setDate(from.getDate() - (days - 1))
   return {
-    from: from.toISOString().slice(0, 10),
-    to:   to.toISOString().slice(0, 10),
+    from: localDateStr(from),
+    to:   localDateStr(to),
   }
 }
 

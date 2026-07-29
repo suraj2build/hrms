@@ -184,7 +184,7 @@ function buildDates(offset: number): string[] {
   for (let i = 13; i >= 0; i--) {
     const d = new Date(now)
     d.setDate(d.getDate() - i - offset)
-    list.push(d.toISOString().slice(0, 10))
+    list.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`)
   }
   return list
 }
@@ -1035,7 +1035,10 @@ export function ManagerDashboardPage() {
   const navigate    = useNavigate()
   const qc          = useQueryClient()
 
-  const today      = useMemo(() => new Date().toISOString().slice(0, 10), [])
+  const today      = useMemo(() => {
+    const d = new Date()
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  }, [])
   const employeeId = profile?.employee_id
 
   const [dateOffset, setDateOffset] = useState(0)
