@@ -61,9 +61,16 @@ export default async function ingestRoute(fastify: FastifyInstance) {
     // Upsert (not insert) so a re-POSTed device batch — network retry or device
     // replay — does not duplicate raw punches and inflate computed hours/OT.
     // Dedupe key matches uidx_raw_logs_dedup (migration 284).
-    const { error: insertError } = await fastify.supabase
+    // `.select('id')` is required to get the true inserted count — with
+    // ignoreDuplicates, Postgres's RETURNING only reports rows actually
+    // written, never the ones skipped by ON CONFLICT DO NOTHING. Without it,
+    // the response/log previously reported rows.length (the submitted batch
+    // size) even when most of the batch was a duplicate replay, hiding
+    // exactly the dedup outcome this endpoint exists to report accurately.
+    const { data: insertedRows, error: insertError } = await fastify.supabase
       .from('attendance_raw_logs')
       .upsert(rows, { onConflict: 'tenant_id,employee_code,timestamp,direction', ignoreDuplicates: true })
+      .select('id')
 
     if (insertError) {
       req.log.error(
@@ -76,11 +83,13 @@ export default async function ingestRoute(fastify: FastifyInstance) {
       })
     }
 
+    const insertedCount = insertedRows?.length ?? 0
+
     req.log.info(
-      { module: 'attendance', route: 'ingest', tenant_id: device.tenant_id, inserted: rows.length },
+      { module: 'attendance', route: 'ingest', tenant_id: device.tenant_id, received: rows.length, inserted: insertedCount },
       'raw logs ingested',
     )
 
-    return reply.code(201).send({ inserted: rows.length })
+    return reply.code(201).send({ received: rows.length, inserted: insertedCount })
   })
 }

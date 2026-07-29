@@ -23,6 +23,7 @@ import {
   cancelLeaveRequest,
 }                               from '../../lib/leave-request-service.js'
 import { MANAGER_ROLES }       from '../../lib/rbac.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 const dateRe = /^\d{4}-\d{2}-\d{2}$/
 
@@ -35,19 +36,26 @@ function errorToHttp(type: string): number {
   }
 }
 
-/** Resolve the caller's employee_id from their profile (tenant-scoped). */
+/**
+ * Resolve the caller's employee_id from their profile (tenant-scoped).
+ * Distinguishes "no linked employee record" (data null, no error) from a
+ * genuine DB failure — the error was previously unchecked and both cases
+ * collapsed to `null`, so a transient failure read as "no employee record"
+ * (400 in /leave/apply) or silently as "zero leave requests" (200 empty
+ * array in /leave/my-requests).
+ */
 async function resolveEmployeeId(
   fastify:  FastifyInstance,
   userId:   string,
   tenantId: string,
-): Promise<string | null> {
-  const { data } = await fastify.supabase
+): Promise<{ employeeId: string | null; error: unknown }> {
+  const { data, error } = await fastify.supabase
     .from('profiles')
     .select('employee_id')
     .eq('id', userId)
     .eq('tenant_id', tenantId)
     .maybeSingle()
-  return (data as { employee_id: string | null } | null)?.employee_id ?? null
+  return { employeeId: (data as { employee_id: string | null } | null)?.employee_id ?? null, error }
 }
 
 export default async function leaveEmployeeRoutes(fastify: FastifyInstance) {
@@ -91,7 +99,8 @@ export default async function leaveEmployeeRoutes(fastify: FastifyInstance) {
     }
 
     // Resolve the caller's employee record — employee_id is authoritative from auth
-    const employeeId = await resolveEmployeeId(fastify, req.userId, req.tenantId)
+    const { employeeId, error: profileErr } = await resolveEmployeeId(fastify, req.userId, req.tenantId)
+    if (profileErr) return serverError(req, reply, profileErr, ErrorCode.QUERY_FAILED, 'Failed to resolve your employee record')
     if (!employeeId) {
       return reply.code(400).send({
         error:   'NO_EMPLOYEE_RECORD',
@@ -148,7 +157,8 @@ export default async function leaveEmployeeRoutes(fastify: FastifyInstance) {
     const offset = (page - 1) * limit
 
     // Resolve employee_id from auth (non-admins only see their own records)
-    const employeeId = await resolveEmployeeId(fastify, req.userId, req.tenantId)
+    const { employeeId, error: profileErr } = await resolveEmployeeId(fastify, req.userId, req.tenantId)
+    if (profileErr) return serverError(req, reply, profileErr, ErrorCode.QUERY_FAILED, 'Failed to resolve your employee record')
     if (!employeeId) {
       // No employee record → empty result (not an error for the route)
       return reply.send({

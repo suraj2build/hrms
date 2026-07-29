@@ -31,6 +31,7 @@
 import type { FastifyInstance } from 'fastify'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 export default async function attendancePipelineStatsRoute(fastify: FastifyInstance) {
   const adminAuth = { preHandler: [fastify.authenticate, requireRole(...HR_ADMIN_ROLES)] }
@@ -40,15 +41,24 @@ export default async function attendancePipelineStatsRoute(fastify: FastifyInsta
     const since30d  = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()
 
     // ── Distinct employees — fetched separately to avoid PostgREST 1000-row cap ─
-    const punchEmpRows = await fetchAllRows((from, to) =>
-      fastify.supabase
-        .from('attendance_punch_logs')
-        .select('employee_id')
-        .eq('tenant_id', tenantId)
-        .eq('source', 'csv_upload')
-        .gte('created_at', since30d)
-        .range(from, to),
-    ).catch(() => [] as { employee_id: string }[])
+    // This is an operational-health endpoint whose whole purpose is to detect
+    // pipeline failures — swallowing this error to [] would make a genuine
+    // DB failure indistinguishable from "zero CSV employees," silently
+    // masking exactly the kind of incident it exists to surface.
+    let punchEmpRows: { employee_id: string }[]
+    try {
+      punchEmpRows = await fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('attendance_punch_logs')
+          .select('employee_id')
+          .eq('tenant_id', tenantId)
+          .eq('source', 'csv_upload')
+          .gte('created_at', since30d)
+          .range(from, to),
+      )
+    } catch (err) {
+      return serverError(req, reply, err, ErrorCode.QUERY_FAILED, 'Failed to fetch pipeline stats')
+    }
 
     // ── Run all queries in parallel ──────────────────────────────────────────
     const [
@@ -117,6 +127,12 @@ export default async function attendancePipelineStatsRoute(fastify: FastifyInsta
         .limit(1)
         .maybeSingle(),
     ])
+
+    const firstError = [
+      punchLogResult.error, dailyFromEngineResult.error, uploadSessionResult.error,
+      rawLogResult.error, runCountResult.error, lastRunResult.error,
+    ].find(Boolean)
+    if (firstError) return serverError(req, reply, firstError, ErrorCode.QUERY_FAILED, 'Failed to fetch pipeline stats')
 
     // ── Pipeline A: biometric ────────────────────────────────────────────────
     const rawLogCount30d      = rawLogResult.count ?? 0

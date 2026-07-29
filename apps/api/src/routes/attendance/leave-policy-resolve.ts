@@ -26,6 +26,7 @@ import {
   resolveEffectivePolicyForEmployee,
   resolveEffectivePolicyRule,
 } from '../../lib/leave-policy-service.js'
+import { fetchTenantTz, utcToLocalDate } from '../../lib/attendance-engine.js'
 import { MANAGER_ROLES } from '../../lib/rbac.js'
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
@@ -74,11 +75,18 @@ export default async function leavePolicyResolveRoute(fastify: FastifyInstance) 
       return reply.code(404).send({ error: 'NOT_FOUND', message: 'Employee not found' })
     }
 
+    // The service defaults a missing asOf to the tenant-LOCAL date
+    // (utcToLocalDate). The response used to independently echo a raw UTC
+    // date here, so near either day boundary the `as_of` shown to the
+    // caller didn't match the date the resolution was actually evaluated
+    // against — resolve it the same way once, up front, and reuse it.
+    const effectiveAsOf = asOf ?? utcToLocalDate(new Date(), await fetchTenantTz(fastify.supabase, req.tenantId))
+
     const resolution = await resolveEffectivePolicyForEmployee(
       fastify.supabase,
       req.tenantId,
       employeeId,
-      { asOf, includeDebug },
+      { asOf: effectiveAsOf, includeDebug },
     )
 
     return reply.send({
@@ -89,7 +97,7 @@ export default async function leavePolicyResolveRoute(fastify: FastifyInstance) 
           employee_code: (emp as any).employee_code,
           joining_date:  (emp as any).joining_date,
         },
-        as_of: asOf ?? new Date().toISOString().slice(0, 10),
+        as_of: effectiveAsOf,
         ...resolution,
       },
     })
@@ -148,12 +156,14 @@ export default async function leavePolicyResolveRoute(fastify: FastifyInstance) 
       return reply.code(404).send({ error: 'NOT_FOUND', message: 'Leave type not found' })
     }
 
+    const effectiveAsOf = asOf ?? utcToLocalDate(new Date(), await fetchTenantTz(fastify.supabase, req.tenantId))
+
     const rule = await resolveEffectivePolicyRule(
       fastify.supabase,
       req.tenantId,
       employeeId,
       leaveTypeId,
-      asOf,
+      effectiveAsOf,
     )
 
     if (!rule) {
@@ -174,7 +184,7 @@ export default async function leavePolicyResolveRoute(fastify: FastifyInstance) 
           id:   (lt as any).id,
           name: (lt as any).name,
         },
-        as_of: asOf ?? new Date().toISOString().slice(0, 10),
+        as_of: effectiveAsOf,
         rule,
       },
     })

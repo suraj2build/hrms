@@ -565,7 +565,7 @@ export async function createLeaveRequest(
         error: { type: 'CONFLICT', message: 'You already have a leave request that overlaps with this date range' },
       }
     }
-    return { ok: false, error: { type: 'DB_ERROR', message: error.message ?? 'Failed to create leave request' } }
+    return { ok: false, error: { type: 'DB_ERROR', message: 'Failed to create leave request' } }
   }
 
   return { ok: true, value: data as unknown as LeaveRequestRow }
