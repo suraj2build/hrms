@@ -55,7 +55,7 @@ export default async function bulkOpsRoutes(fastify: FastifyInstance) {
       .in('id', declaration_ids)
       .in('status', ['submitted', 'under_review'])
 
-    if (fetchErr) return reply.code(500).send({ error: 'QUERY_FAILED', message: fetchErr.message })
+    if (fetchErr) return serverError(req, reply, fetchErr, ErrorCode.QUERY_FAILED, 'Failed to fetch tax declarations')
 
     const approvable = (decls ?? []) as any[]
     const skipped    = declaration_ids.filter(id => !approvable.find((d: any) => d.id === id))
@@ -140,12 +140,13 @@ export default async function bulkOpsRoutes(fastify: FastifyInstance) {
     const { declaration_ids, reason, notes } = parsed.data
     const now = new Date().toISOString()
 
-    const { data: decls } = await fastify.supabase
+    const { data: decls, error: fetchErr } = await fastify.supabase
       .from('tax_declarations')
       .select('id, status, employee_id')
       .eq('tenant_id', req.tenantId)
       .in('id', declaration_ids)
       .in('status', ['submitted', 'under_review', 'approved'])
+    if (fetchErr) return serverError(req, reply, fetchErr, ErrorCode.QUERY_FAILED, 'Failed to fetch tax declarations')
 
     const rejectable = (decls ?? []) as any[]
     const skipped    = declaration_ids.filter(id => !rejectable.find((d: any) => d.id === id))
@@ -204,12 +205,13 @@ export default async function bulkOpsRoutes(fastify: FastifyInstance) {
     const { proof_ids, notes } = parsed.data
     const now = new Date().toISOString()
 
-    const { data: proofs } = await fastify.supabase
+    const { data: proofs, error: proofsErr } = await fastify.supabase
       .from('declaration_proofs')
       .select('id, document_state')
       .eq('tenant_id', req.tenantId)
       .in('id', proof_ids)
       .in('document_state', ['uploaded', 'under_review'])
+    if (proofsErr) return serverError(req, reply, proofsErr, ErrorCode.QUERY_FAILED, 'Failed to fetch declaration proofs')
 
     const verifiable = (proofs ?? []) as any[]
     const skipped    = proof_ids.filter(id => !verifiable.find((p: any) => p.id === id))
@@ -261,12 +263,13 @@ export default async function bulkOpsRoutes(fastify: FastifyInstance) {
 
     const { application_ids, reason } = parsed.data
 
-    const { data: apps } = await fastify.supabase
+    const { data: apps, error: appsErr } = await fastify.supabase
       .from('leave_requests')
       .select('id, employee_id, leave_type_id, from_date, to_date, status, leave_types(is_paid)')
       .eq('tenant_id', req.tenantId)
       .in('id', application_ids)
       .eq('status', 'PENDING')
+    if (appsErr) return serverError(req, reply, appsErr, ErrorCode.QUERY_FAILED, 'Failed to fetch leave requests')
 
     const approvedIds: string[] = []
     const advancedIds: string[] = []
@@ -296,16 +299,19 @@ export default async function bulkOpsRoutes(fastify: FastifyInstance) {
       }
 
       // Frozen-period payroll adjustment (extra logic beyond the approval service).
-      const from = new Date(app.from_date)
-      const to   = new Date(app.to_date)
+      // Pure UTC millisecond arithmetic — mixing a UTC-parsed Date with local
+      // getDate()/setDate() mutators would drift by a day across a server-TZ
+      // DST transition falling inside the leave range.
+      const fromMs = new Date(app.from_date + 'T00:00:00.000Z').getTime()
+      const toMs   = new Date(app.to_date   + 'T00:00:00.000Z').getTime()
       const dates: string[] = []
-      for (let d = new Date(from); d <= to; d.setDate(d.getDate() + 1)) {
-        dates.push(d.toISOString().slice(0, 10))
+      for (let t = fromMs; t <= toMs; t += 24 * 60 * 60 * 1000) {
+        dates.push(new Date(t).toISOString().slice(0, 10))
       }
 
       const affectedMonths = [...new Set(dates.map(d => d.slice(0, 7)))]
       for (const month of affectedMonths) {
-        const { data: freeze } = await fastify.supabase
+        const { data: freeze, error: freezeErr } = await fastify.supabase
           .from('payroll_freeze_log')
           .select('id')
           .eq('tenant_id', req.tenantId)
@@ -314,6 +320,16 @@ export default async function bulkOpsRoutes(fastify: FastifyInstance) {
           .is('unfrozen_at', null)
           .limit(1)
           .maybeSingle()
+
+        if (freezeErr) {
+          // Leave approval already committed — do not block/revert it, but a
+          // failed freeze check must not silently look like "not frozen" and
+          // skip a required LOP adjustment for a locked period.
+          req.log.warn(
+            { err: freezeErr, employeeId: app.employee_id, month, leaveRequestId: app.id, tenantId: req.tenantId },
+            '[payroll] failed to check freeze status for bulk-approved leave — LOP adjustment may be missing',
+          )
+        }
 
         if (freeze) {
           const { error: adjError } = await fastify.supabase.from('payroll_adjustments').insert({
@@ -460,16 +476,22 @@ export default async function bulkOpsRoutes(fastify: FastifyInstance) {
     const now = new Date().toISOString()
 
     // Verify employees belong to this tenant
-    const { data: emps } = await fastify.supabase
+    const { data: emps, error: empsErr } = await fastify.supabase
       .from('employees')
       .select('id')
       .eq('tenant_id', req.tenantId)
       .in('id', employee_ids)
+    if (empsErr) return serverError(req, reply, empsErr, ErrorCode.QUERY_FAILED, 'Failed to verify employees')
 
     const validIds = ((emps ?? []) as any[]).map(e => e.id)
     const invalidIds = employee_ids.filter(id => !validIds.includes(id))
 
     let updatedCount = 0
+    // The audit log (below) records exactly the employees actually touched —
+    // for exempt/epf that's every valid id (the bulk write either succeeds
+    // whole or the request already returned on error above); for reinstate
+    // it's only the subset that actually had an open exemption to close.
+    let affectedIds: string[] = validIds
 
     if (statutory_type === 'epf') {
       // EPF uses epf_eligibility_overrides table
@@ -488,7 +510,7 @@ export default async function bulkOpsRoutes(fastify: FastifyInstance) {
         .from('epf_eligibility_overrides')
         .upsert(rows, { onConflict: 'tenant_id,employee_id' })
 
-      if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+      if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update EPF eligibility overrides')
       updatedCount = rows.length
     } else {
       // ESI / PTax uses employee_statutory_overrides
@@ -505,33 +527,47 @@ export default async function bulkOpsRoutes(fastify: FastifyInstance) {
         }))
 
         const { error } = await fastify.supabase.from('employee_statutory_overrides').insert(rows)
-        if (error) return reply.code(500).send({ error: 'INSERT_FAILED', message: error.message })
+        if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to insert statutory overrides')
         updatedCount = rows.length
       } else {
         // Reinstate: close existing exemptions by setting effective_to = today
-        const { data: existing } = await fastify.supabase
+        const { data: existing, error: existingErr } = await fastify.supabase
           .from('employee_statutory_overrides')
-          .select('id')
+          .select('id, employee_id')
           .eq('tenant_id', req.tenantId)
           .eq('statutory_type', statutory_type)
           .eq('is_exempt', true)
           .in('employee_id', validIds)
           .is('effective_to', null)
+        if (existingErr) return serverError(req, reply, existingErr, ErrorCode.QUERY_FAILED, 'Failed to check existing statutory exemptions')
 
         const existingIds = ((existing ?? []) as any[]).map(r => r.id)
+        let reinstatedEmployeeIds: string[] = []
         if (existingIds.length > 0) {
-          const { error: reinstateErr } = await fastify.supabase
+          // Re-assert the same predicates as the SELECT above in the UPDATE's
+          // own WHERE clause, and derive the count/audit set from what the
+          // write actually touched — not the pre-read snapshot — so a
+          // concurrent reinstate/exempt racing this one can't be counted (or
+          // audited) as succeeded here when it silently updated 0 rows.
+          const { data: reinstated, error: reinstateErr } = await fastify.supabase
             .from('employee_statutory_overrides')
             .update({ effective_to: effective_from })
             .in('id', existingIds)
+            .eq('tenant_id', req.tenantId)
+            .eq('statutory_type', statutory_type)
+            .eq('is_exempt', true)
+            .is('effective_to', null)
+            .select('id, employee_id')
           if (reinstateErr) return serverError(req, reply, reinstateErr, ErrorCode.UPDATE_FAILED, 'Failed to reinstate statutory applicability')
+          reinstatedEmployeeIds = ((reinstated ?? []) as any[]).map(r => r.employee_id)
         }
-        updatedCount = existingIds.length
+        updatedCount = reinstatedEmployeeIds.length
+        affectedIds   = reinstatedEmployeeIds
       }
     }
 
-    // Audit log
-    const auditRows = validIds.map(empId => ({
+    // Audit log — only for employees actually affected by the write above.
+    const auditRows = affectedIds.map(empId => ({
       tenant_id:   req.tenantId,
       event_type:  'statutory_override_set',
       entity_type: statutory_type === 'epf' ? 'epf_eligibility_overrides' : 'employee_statutory_overrides',

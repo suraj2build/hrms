@@ -12,6 +12,9 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { fetchTenantTz } from '../../lib/attendance-engine.js'
+import { getLocalDate } from '../../lib/org-context.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 export default async function opsDashboardRoutes(fastify: FastifyInstance) {
   const adminAuth = { preHandler: [fastify.authenticate, (req: any, reply: any, done: () => void) => {
@@ -27,7 +30,8 @@ export default async function opsDashboardRoutes(fastify: FastifyInstance) {
   // Uses parallel COUNT queries — each is independent and lightweight.
   fastify.get('/dashboard', adminAuth, async (req: any, reply) => {
     const tenantId = req.tenantId as string
-    const today    = new Date().toISOString().slice(0, 10)
+    const tz       = await fetchTenantTz(fastify.supabase, tenantId)
+    const today    = getLocalDate(new Date().toISOString(), tz)
     const monthDate = today.slice(0, 7)  // YYYY-MM
 
     const [
@@ -106,6 +110,15 @@ export default async function opsDashboardRoutes(fastify: FastifyInstance) {
         .eq('tenant_id', tenantId)
         .eq('contribution_month', monthDate),
     ])
+
+    // A failed count query returns `count: null`, which every section below
+    // treats as `?? 0` — silently reporting "0 issues" / severity 'ok' for a
+    // check that never actually ran, instead of surfacing the failure.
+    const firstError = [
+      adjResult, runErrResult, missingProofResult, statRegResult,
+      reconResult, schedulerFailResult, staleLeaveResult, epfOrphanResult,
+    ].find(r => r.error)?.error
+    if (firstError) return serverError(req, reply, firstError, ErrorCode.QUERY_FAILED, 'Failed to load ops dashboard')
 
     const dashboard = {
       generated_at: new Date().toISOString(),
@@ -215,7 +228,7 @@ export default async function opsDashboardRoutes(fastify: FastifyInstance) {
     let trueTotal = 0
 
     if (type === 'all' || type === 'payroll_failures') {
-      const [{ data: runErrs }, { count: runErrCount }] = await Promise.all([
+      const [{ data: runErrs, error: runErrsErr }, { count: runErrCount, error: runErrCountErr }] = await Promise.all([
         fastify.supabase
           .from('payroll_run_events')
           .select('id, event_type, employee_id, payload, error_details, created_at, run_id')
@@ -229,6 +242,7 @@ export default async function opsDashboardRoutes(fastify: FastifyInstance) {
           .eq('tenant_id', tenantId)
           .in('event_type', ['data_fetch_failed','compensation_missing','validation_failed','slip_insert_failed']),
       ])
+      if (runErrsErr || runErrCountErr) return serverError(req, reply, runErrsErr ?? runErrCountErr, ErrorCode.QUERY_FAILED, 'Failed to load payroll failure issues')
       trueTotal += runErrCount ?? 0
 
       for (const e of (runErrs ?? []) as any[]) {
@@ -247,7 +261,7 @@ export default async function opsDashboardRoutes(fastify: FastifyInstance) {
     }
 
     if (type === 'all' || type === 'blockers') {
-      const [{ data: blockers }, { count: blockerCount }] = await Promise.all([
+      const [{ data: blockers, error: blockersErr }, { count: blockerCount, error: blockerCountErr }] = await Promise.all([
         fastify.supabase
           .from('payroll_run_blockers')
           .select('id, blocker_type:rule_code, employee_id, reason, severity, status, created_at, run_id')
@@ -261,6 +275,7 @@ export default async function opsDashboardRoutes(fastify: FastifyInstance) {
           .eq('tenant_id', tenantId)
           .eq('status', 'open'),
       ])
+      if (blockersErr || blockerCountErr) return serverError(req, reply, blockersErr ?? blockerCountErr, ErrorCode.QUERY_FAILED, 'Failed to load payroll blocker issues')
       trueTotal += blockerCount ?? 0
 
       for (const b of (blockers ?? []) as any[]) {
@@ -279,7 +294,7 @@ export default async function opsDashboardRoutes(fastify: FastifyInstance) {
     }
 
     if (type === 'all' || type === 'adjustments') {
-      const [{ data: adjs }, { count: adjCount }] = await Promise.all([
+      const [{ data: adjs, error: adjsErr }, { count: adjCount, error: adjCountErr }] = await Promise.all([
         fastify.supabase
           .from('payroll_adjustments')
           .select('id, employee_id, locked_month, adjustment_type, reason, status, created_at')
@@ -293,6 +308,7 @@ export default async function opsDashboardRoutes(fastify: FastifyInstance) {
           .eq('tenant_id', tenantId)
           .eq('status', 'pending'),
       ])
+      if (adjsErr || adjCountErr) return serverError(req, reply, adjsErr ?? adjCountErr, ErrorCode.QUERY_FAILED, 'Failed to load payroll adjustment issues')
       trueTotal += adjCount ?? 0
 
       for (const a of (adjs ?? []) as any[]) {
@@ -312,7 +328,7 @@ export default async function opsDashboardRoutes(fastify: FastifyInstance) {
 
     if (type === 'all' || type === 'scheduler_failures') {
       const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()
-      const [{ data: sjl }, { count: sjlCount }] = await Promise.all([
+      const [{ data: sjl, error: sjlErr }, { count: sjlCount, error: sjlCountErr }] = await Promise.all([
         fastify.supabase
           .from('scheduler_job_log')
           .select('id, job_type, job_name, error_message, started_at, status')
@@ -328,6 +344,7 @@ export default async function opsDashboardRoutes(fastify: FastifyInstance) {
           .eq('status', 'failed')
           .gte('started_at', sevenDaysAgo),
       ])
+      if (sjlErr || sjlCountErr) return serverError(req, reply, sjlErr ?? sjlCountErr, ErrorCode.QUERY_FAILED, 'Failed to load scheduler failure issues')
       trueTotal += sjlCount ?? 0
 
       for (const j of (sjl ?? []) as any[]) {
@@ -373,13 +390,14 @@ export default async function opsDashboardRoutes(fastify: FastifyInstance) {
     // affected slips this said "5 finalized slip(s)", silently undercounting by
     // 40x. `count: 'exact'` returns the true total (pre-limit) alongside the
     // capped `data`, which stays as a 5-row sample for `detail`.
-    const { data: zeroNetSlips, count: zeroNetCount } = await fastify.supabase
+    const { data: zeroNetSlips, count: zeroNetCount, error: zeroNetErr } = await fastify.supabase
       .from('payroll_slips')
       .select('id, employee_id, month', { count: 'exact' })
       .eq('tenant_id', tenantId)
       .eq('status', 'finalized')
       .lte('net_pay', 0)
       .limit(5)
+    if (zeroNetErr) return serverError(req, reply, zeroNetErr, ErrorCode.QUERY_FAILED, 'Failed to run finalized-slip net-pay validation')
 
     const zeroNetTotal = zeroNetCount ?? (zeroNetSlips ?? []).length
     results.push({
@@ -419,22 +437,24 @@ export default async function opsDashboardRoutes(fastify: FastifyInstance) {
     }
 
     // 3. Snapshot integrity — check for recent runs with snapshots
-    const { data: recentRuns } = await fastify.supabase
+    const { data: recentRuns, error: recentRunsErr } = await fastify.supabase
       .from('payroll_runs')
       .select('id, month, status')
       .eq('tenant_id', tenantId)
       .eq('status', 'finalized')
       .order('month', { ascending: false })
       .limit(3)
+    if (recentRunsErr) return serverError(req, reply, recentRunsErr, ErrorCode.QUERY_FAILED, 'Failed to run snapshot-integrity validation')
 
     const runIds = (recentRuns ?? []).map((r: any) => r.id)
     let snapshotCount = 0
     if (runIds.length > 0) {
-      const { count } = await fastify.supabase
+      const { count, error: snapshotErr } = await fastify.supabase
         .from('payroll_run_snapshots')
         .select('id', { count: 'exact', head: true })
         .eq('tenant_id', tenantId)
         .in('run_id', runIds)
+      if (snapshotErr) return serverError(req, reply, snapshotErr, ErrorCode.QUERY_FAILED, 'Failed to run snapshot-integrity validation')
       snapshotCount = count ?? 0
     }
 
@@ -453,6 +473,7 @@ export default async function opsDashboardRoutes(fastify: FastifyInstance) {
       fastify.supabase.from('epf_config').select('id').eq('tenant_id', tenantId).is('effective_to', null).limit(1).maybeSingle(),
       fastify.supabase.from('esi_config').select('id').eq('tenant_id', tenantId).is('effective_to', null).limit(1).maybeSingle(),
     ])
+    if (epfCfg.error || esiCfg.error) return serverError(req, reply, epfCfg.error ?? esiCfg.error, ErrorCode.QUERY_FAILED, 'Failed to run statutory-config validation')
     results.push({
       check:   'epf_config_present',
       status:  epfCfg.data ? 'pass' : 'warn',
@@ -465,11 +486,12 @@ export default async function opsDashboardRoutes(fastify: FastifyInstance) {
     })
 
     // 5. No pending payroll adjustments for open (unfrozen) months
-    const { data: adjCheck } = await fastify.supabase
+    const { data: adjCheck, error: adjCheckErr } = await fastify.supabase
       .from('payroll_adjustments')
       .select('locked_month')
       .eq('tenant_id', tenantId)
       .eq('status', 'pending')
+    if (adjCheckErr) return serverError(req, reply, adjCheckErr, ErrorCode.QUERY_FAILED, 'Failed to run pending-adjustments validation')
 
     const pendingAdj = (adjCheck ?? []) as any[]
     results.push({

@@ -11,6 +11,8 @@ import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { checkIdempotency, storeIdempotency } from '../../lib/idempotency.js'
 import { serverError, notFound, conflictError, ErrorCode } from '../../lib/api-errors.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
+import { fetchTenantTz } from '../../lib/attendance-engine.js'
+import { getLocalDate } from '../../lib/org-context.js'
 
 const RECOVERY_TYPES = ['payroll_deduction', 'manual_payment', 'adjustment'] as const
 
@@ -57,18 +59,19 @@ export default async function advancesRoutes(fastify: FastifyInstance) {
       parsed.data.employee_id = callerEmpId
     }
 
-    let q = fastify.supabase
-      .from('advance_salary_requests')
-      .select('*, employees(id, first_name, last_name, employee_code)')
-      .eq('tenant_id', req.tenantId)
-      .order('created_at', { ascending: false }).limit(500)
+    const data = await fetchAllRows((from, to) => {
+      let q = fastify.supabase
+        .from('advance_salary_requests')
+        .select('*, employees(id, first_name, last_name, employee_code)')
+        .eq('tenant_id', req.tenantId)
+        .order('created_at', { ascending: false })
 
-    if (parsed.data.employee_id) q = q.eq('employee_id', parsed.data.employee_id)
-    if (parsed.data.status) q = q.eq('status', parsed.data.status)
+      if (parsed.data.employee_id) q = q.eq('employee_id', parsed.data.employee_id)
+      if (parsed.data.status) q = q.eq('status', parsed.data.status)
 
-    const { data, error } = await q
-    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch advance requests')
-    return reply.send({ data: data ?? [] })
+      return q.range(from, to)
+    })
+    return reply.send({ data })
   })
 
   // ── POST /payroll/advances ────────────────────────────────────────────────────
@@ -96,7 +99,23 @@ export default async function advancesRoutes(fastify: FastifyInstance) {
       if (profile?.employee_id !== parsed.data.employee_id) {
         return reply.code(403).send({ error: 'FORBIDDEN', message: 'You can only request an advance for yourself' })
       }
+    } else {
+      // HR-admin path skips the self-scoping check above, so employee_id is
+      // otherwise never verified to belong to this tenant — fastify.supabase
+      // is a service-role client that bypasses RLS, so without this an HR
+      // admin could raise (and later see) an advance against another
+      // tenant's employee.
+      const { data: empRow, error: empErr } = await fastify.supabase
+        .from('employees')
+        .select('id')
+        .eq('id', parsed.data.employee_id)
+        .eq('tenant_id', req.tenantId)
+        .maybeSingle()
+      if (empErr) return serverError(req, reply, empErr, ErrorCode.QUERY_FAILED, 'Failed to verify employee')
+      if (!empRow) return notFound(reply, 'EMPLOYEE_NOT_FOUND', 'Employee not found')
     }
+
+    const tz = await fetchTenantTz(fastify.supabase, req.tenantId)
 
     const { data, error } = await fastify.supabase
       .from('advance_salary_requests')
@@ -105,7 +124,7 @@ export default async function advancesRoutes(fastify: FastifyInstance) {
         tenant_id: req.tenantId,
         status: 'pending',
         created_by: req.userId,
-        requested_date: new Date().toISOString().slice(0, 10),
+        requested_date: getLocalDate(new Date().toISOString(), tz),
       })
       .select()
       .single()
@@ -219,10 +238,11 @@ export default async function advancesRoutes(fastify: FastifyInstance) {
       return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
     }
 
-    const { data: adv } = await fastify.supabase
+    const { data: adv, error: advFetchErr } = await fastify.supabase
       .from('advance_salary_requests')
       .select('id, status, employee_id, requested_amount')
       .eq('id', id).eq('tenant_id', req.tenantId).maybeSingle()
+    if (advFetchErr) return serverError(req, reply, advFetchErr, ErrorCode.QUERY_FAILED, 'Failed to fetch advance request')
     if (!adv) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Advance not found' })
     if ((adv as any).status !== 'pending') {
       return reply.code(409).send({ error: 'INVALID_STATE', message: 'Advance not found or not in a pending state' })
@@ -323,17 +343,21 @@ export default async function advancesRoutes(fastify: FastifyInstance) {
     const recoveryMonths  = d0.recovery_months ?? 1
     const scheduledAmount = Math.round((parsed.data.disbursed_amount / recoveryMonths) * 100) / 100
     const schedules: any[] = []
-    const startDate = new Date()
-    startDate.setDate(1)                          // first of month
-    startDate.setMonth(startDate.getMonth() + 1)  // recovery starts next month
+    // Tenant-local "today" — a bare server clock can be a day (and near a
+    // month boundary, a whole month) behind the tenant's own calendar,
+    // silently starting the recovery schedule a month early/late.
+    const tz = await fetchTenantTz(fastify.supabase, req.tenantId)
+    const [ty, tmo] = getLocalDate(new Date().toISOString(), tz).slice(0, 7).split('-').map(Number)
     // True-up: recoveryMonths equal installments of the rounded per-month
     // amount don't necessarily sum back to disbursed_amount (e.g. 10,000 / 3
     // = 3,333.33 x 3 = 9,999.99, one paisa short) — the last installment
     // absorbs the residual so the schedule recovers the full amount.
     let recoveredSoFar = 0
     for (let i = 0; i < recoveryMonths; i++) {
-      const dt = new Date(startDate)
-      dt.setMonth(dt.getMonth() + i)
+      // Recovery starts next month (delta of 1) plus i additional months —
+      // pure UTC arithmetic to avoid the local/UTC mixing bug this same
+      // computation had before.
+      const dt = new Date(Date.UTC(ty, tmo - 1 + 1 + i, 1))
       const isLast = i === recoveryMonths - 1
       const amount = isLast
         ? Math.round((parsed.data.disbursed_amount - recoveredSoFar) * 100) / 100
@@ -343,7 +367,7 @@ export default async function advancesRoutes(fastify: FastifyInstance) {
         tenant_id:       req.tenantId,
         advance_id:      id,
         employee_id:     d0.employee_id,
-        recovery_month:  `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}`,
+        recovery_month:  `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, '0')}`,
         scheduled_amount: amount,
         status:          'pending',
       })

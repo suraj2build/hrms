@@ -26,7 +26,7 @@ import { notifyHrAdmins } from '../../lib/notify.js'
 import { logAction } from '../../lib/audit-service.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
-import { serverError, ErrorCode } from '../../lib/api-errors.js'
+import { serverError, notFound, ErrorCode } from '../../lib/api-errors.js'
 
 export default async function payrollAdjustmentsRoutes(fastify: FastifyInstance) {
   const auth      = { preHandler: [fastify.authenticate] }
@@ -151,8 +151,20 @@ export default async function payrollAdjustmentsRoutes(fastify: FastifyInstance)
       return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
     }
 
+    // employee_id is caller-supplied — fastify.supabase is a service-role
+    // client that bypasses RLS, so the employees(id) FK alone doesn't stop a
+    // cross-tenant id from being accepted here.
+    const { data: empRow, error: empErr } = await fastify.supabase
+      .from('employees')
+      .select('id')
+      .eq('id', parsed.data.employee_id)
+      .eq('tenant_id', req.tenantId)
+      .maybeSingle()
+    if (empErr) return serverError(req, reply, empErr, ErrorCode.QUERY_FAILED, 'Failed to verify employee')
+    if (!empRow) return notFound(reply, 'EMPLOYEE_NOT_FOUND', 'Employee not found')
+
     // Verify the locked_month is actually frozen (or warn if not)
-    const { data: freeze } = await fastify.supabase
+    const { data: freeze, error: freezeErr } = await fastify.supabase
       .from('payroll_freeze_log')
       .select('id')
       .eq('tenant_id', req.tenantId)
@@ -161,6 +173,7 @@ export default async function payrollAdjustmentsRoutes(fastify: FastifyInstance)
       .is('unfrozen_at', null)
       .limit(1)
       .maybeSingle()
+    if (freezeErr) return serverError(req, reply, freezeErr, ErrorCode.QUERY_FAILED, 'Failed to check freeze status')
 
     const { data, error } = await fastify.supabase
       .from('payroll_adjustments')
