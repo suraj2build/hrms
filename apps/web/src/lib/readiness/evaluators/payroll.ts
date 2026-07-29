@@ -58,7 +58,7 @@ export function evaluatePayroll(data: PayrollEvalData): ReadinessCheck[] {
                 : earnings.length === 0          ? 'warning'
                 : 'ok',
       severity:   'blocker',
-      isBlocking: false,
+      isBlocking: true,
       value:      salaryComponents.length,
       detail:     salaryComponents.length > 0
         ? `${earnings.length} earnings · ${deductions.length} deductions`

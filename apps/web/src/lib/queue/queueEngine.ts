@@ -62,6 +62,8 @@ interface RawRegItem {
   attendance_date?: string
   site_id?: string
   site_name?: string
+  // GET /attendance/regularisation/pending returns this SLA deadline field.
+  sla_deadline?: string
 }
 
 interface RawRevisionItem {
@@ -249,7 +251,7 @@ export function normalizeToQueueItems(sources: RawSources): OperationalQueueItem
     const payrollBlocking = ageDays > 3
 
     const severity: QueueSeverity = payrollBlocking ? 'high' : 'medium'
-    const overdue = isOverdue({ sla_deadline: undefined, due_at: undefined })
+    const overdue = isOverdue({ sla_deadline: r.sla_deadline, due_at: undefined })
 
     items.push({
       id: rId,

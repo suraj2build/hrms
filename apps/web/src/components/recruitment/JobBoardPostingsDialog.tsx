@@ -12,6 +12,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
+import { isSafeHref } from '@/lib/sanitize'
 
 interface Posting { id: string; board: string; external_url: string | null; status: string; posted_at: string }
 const BOARDS = ['Naukri', 'LinkedIn', 'Indeed', 'Company site', 'Referral', 'Other']
@@ -53,7 +54,7 @@ export function JobBoardPostingsDialog({ requisitionId, title, open, onOpenChang
             ) : postings.map(p => (
               <div key={p.id} className="flex items-center gap-2 rounded-lg border border-border p-2.5">
                 <span className="text-sm font-medium flex-1">{p.board}</span>
-                {p.external_url && (
+                {p.external_url && isSafeHref(p.external_url) && (
                   <a href={p.external_url} target="_blank" rel="noreferrer" className="text-primary hover:underline text-xs inline-flex items-center gap-1">
                     <ExternalLink className="h-3 w-3" />open
                   </a>

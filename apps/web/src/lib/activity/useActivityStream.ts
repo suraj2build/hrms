@@ -61,9 +61,12 @@ export function useActivityStream(filters: EventFilters = {}): ActivityStreamSta
             .then(r => r.data ?? [])
             .catch((): unknown[] => []),
 
+          // GET /attendance/regularisation/pending returns a bare array
+          // (reply.send(rows)), not a { data } wrapper like the sibling
+          // endpoints above.
           api
-            .get<{ data: unknown[] }>('/attendance/regularisation/pending')
-            .then(r => r.data ?? [])
+            .get<unknown[]>('/attendance/regularisation/pending')
+            .then(r => r ?? [])
             .catch((): unknown[] => []),
 
           api

@@ -173,7 +173,7 @@ const FILTER_TO_EMP_PARAM: Record<string, string> = {
 }
 
 export async function resolveEmployeeList(drillStack: DrillStep[]): Promise<EmployeeRow[]> {
-  const params: string[] = ['status=active', 'limit=200']
+  const params: string[] = ['status=active', 'limit=500']
   for (const step of drillStack) {
     if (!step.filterParam) continue
     const empParam = FILTER_TO_EMP_PARAM[step.filterParam]
@@ -190,10 +190,22 @@ export async function resolveEmployeeList(drillStack: DrillStep[]): Promise<Empl
     designation?: { name?: string | null } | null
     status: string
   }
-  const res = await api
-    .get<{ data?: RawEmployee[] }>(`/employees?${params.join('&')}`)
-    .catch(() => null)
-  const rows: RawEmployee[] = res?.data ?? []
+
+  // GET /employees is paginated (500/page max) — page through every result so
+  // segments with >200/500 active employees aren't silently truncated.
+  const rows: RawEmployee[] = []
+  let page = 1
+  let total = Infinity
+  while (rows.length < total) {
+    const res = await api
+      .get<{ data?: RawEmployee[]; total?: number }>(`/employees?${params.join('&')}&page=${page}`)
+      .catch(() => null)
+    const pageRows = res?.data ?? []
+    if (pageRows.length === 0) break
+    rows.push(...pageRows)
+    total = res?.total ?? rows.length
+    page++
+  }
 
   return rows.map(e => ({
     id:            e.id,
@@ -231,7 +243,9 @@ export function exportRows(
   const url  = URL.createObjectURL(blob)
   const a    = document.createElement('a')
   a.href     = url
-  a.download = `explorer-${surfaceLabel.toLowerCase()}-${new Date().toISOString().slice(0, 10)}.${ext}`
+  const now = new Date()
+  const dateStamp = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+  a.download = `explorer-${surfaceLabel.toLowerCase()}-${dateStamp}.${ext}`
   a.click()
   URL.revokeObjectURL(url)
 }

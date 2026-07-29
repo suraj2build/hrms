@@ -25,9 +25,11 @@ interface AnomalyItem {
   employee_id?:   string
   employee_name?: string
   site_id?:       string
-  anomaly_type?:  string
+  // GET /attendance/anomalies returns `type` + `message` (not
+  // `anomaly_type`/`description`) — see apps/api/src/routes/attendance/anomalies.ts.
+  type?:          string
   severity?:      string
-  description?:   string
+  message?:       string
   created_at:     string
   resolved?:      boolean
   date?:          string
@@ -41,10 +43,11 @@ interface CorrectionItem {
   reason?:        string
   created_at:     string
   date?:          string
-  old_punch_in?:  string
-  old_punch_out?: string
-  new_punch_in?:  string
-  new_punch_out?: string
+  // GET /attendance/corrections only ever returns the corrected punch times
+  // (no "old" value is stored/returned) — see
+  // apps/api/src/routes/attendance/corrections.ts.
+  corrected_in?:  string
+  corrected_out?: string
 }
 
 interface RegItem {
@@ -61,6 +64,10 @@ interface RevisionItem {
   id:               string
   employee_id?:     string
   employee_name?:   string
+  // GET /payroll/revisions never flattens the employee join into
+  // employee_name — it comes back nested as `employees: {...}` (see
+  // apps/api/src/routes/payroll/compensation-revisions.ts).
+  employees?:       { first_name: string; last_name: string; employee_code: string } | null
   status?:          string
   revision_type?:   string
   new_ctc_annual?:  number
@@ -104,8 +111,8 @@ function normalizeAnomaly(a: AnomalyItem): OperationalActivityEvent {
     employeeName:  a.employee_name,
     siteId:        a.site_id,
     workspace:     'attendance',
-    title:         `Anomaly: ${a.anomaly_type ?? 'Unknown'} — ${a.employee_name ?? 'Employee'}`,
-    description:   a.description,
+    title:         `Anomaly: ${a.type ?? 'Unknown'} — ${a.employee_name ?? 'Employee'}`,
+    description:   a.message,
     status:        a.resolved ? 'resolved' : 'open',
     actionLinks:   [{ label: 'View Anomaly', route: '/admin/attendance/anomalies' }],
   }
@@ -131,10 +138,8 @@ function normalizeCorrection(c: CorrectionItem): OperationalActivityEvent {
     status,
     actionLinks:  [{ label: 'Review Correction', route: '/admin/attendance/corrections' }],
     metadata: {
-      old_punch_in:  c.old_punch_in,
-      old_punch_out: c.old_punch_out,
-      new_punch_in:  c.new_punch_in,
-      new_punch_out: c.new_punch_out,
+      corrected_in:  c.corrected_in,
+      corrected_out: c.corrected_out,
     },
   }
 }
@@ -173,15 +178,18 @@ function normalizeRevision(v: RevisionItem): OperationalActivityEvent {
     v.before_ctc_annual !== undefined && v.before_ctc_annual !== null &&
     v.new_ctc_annual    !== undefined && v.new_ctc_annual    !== null
 
+  const employeeName = v.employee_name
+    ?? (v.employees ? `${v.employees.first_name} ${v.employees.last_name}` : undefined)
+
   const event: OperationalActivityEvent = {
     id:           v.id,
     type,
     severity,
     timestamp:    v.created_at,
     employeeId:   v.employee_id,
-    employeeName: v.employee_name,
+    employeeName,
     workspace:    'payroll',
-    title:        `Compensation revision (${v.revision_type ?? 'revision'}): ${v.employee_name ?? 'Unknown'}`,
+    title:        `Compensation revision (${v.revision_type ?? 'revision'}): ${employeeName ?? 'Unknown'}`,
     description:  v.reason,
     status:       isPending ? 'pending' : isApproved ? 'resolved' : 'dismissed',
     actionLinks:  [{ label: 'Review Revision', route: '/admin/payroll/revisions' }],
@@ -309,7 +317,11 @@ export function filterEvents(
     if (filters.employeeId && e.employeeId !== filters.employeeId) return false
     if (filters.siteId     && e.siteId     !== filters.siteId)     return false
 
-    const dateStr = e.timestamp.slice(0, 10)
+    // Tenant-local (not UTC) calendar date — e.timestamp is a UTC timestamptz,
+    // and slicing it directly would misfile events near midnight IST into the
+    // wrong day when filtering by dateFrom/dateTo (both tenant-local dates).
+    const d = new Date(e.timestamp)
+    const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
     if (filters.dateFrom && dateStr < filters.dateFrom) return false
     if (filters.dateTo   && dateStr > filters.dateTo)   return false
 

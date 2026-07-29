@@ -704,7 +704,9 @@ export function exportToCSV(data: ChartData, q: AnalyticsQuery): void {
   const url  = URL.createObjectURL(blob)
   const a    = document.createElement('a')
   a.href     = url
-  a.download = `analytics-${q.dataset}-${q.dimension}-${new Date().toISOString().slice(0, 10)}.csv`
+  const now = new Date()
+  const dateStamp = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+  a.download = `analytics-${q.dataset}-${q.dimension}-${dateStamp}.csv`
   a.click()
   URL.revokeObjectURL(url)
 }
