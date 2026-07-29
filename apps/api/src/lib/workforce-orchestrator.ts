@@ -103,6 +103,7 @@ export interface OrchestrationResult {
     | 'deferred_processing'    // queued but execution deferred (period in processing)
     | 'blocked_locked'         // payroll locked — adjustment workflow required
     | 'blocked_archived'       // payroll archived — audit only
+    | 'blocked_check_failed'   // freeze state could not be verified — failed closed
     | 'no_rebuild_needed'      // event type doesn't require downstream rebuilds
 }
 
@@ -311,6 +312,35 @@ export async function orchestrateWorkforceEvent(
       freezeConstraint,
       timelineEventId,
       status: 'no_rebuild_needed',
+    }
+  }
+
+  // ── 3.5. Freeze state could not be verified — fail closed, do not proceed ──
+  if (freezeConstraint.checkFailed) {
+    const rebuildEventId = await createWorkforceRebuildEvent(
+      supabase, tenantId, orchestratorLineageId, event, steps,
+    )
+    await updateRebuildEventStatus(supabase, tenantId, rebuildEventId, 'cancelled')
+
+    const timelineEventId = await recordWorkforceEvent(supabase, {
+      tenantId,
+      employeeId:               event.employeeId,
+      eventType:                'freeze_application',
+      eventDate:                event.affectedFromDate,
+      sourceModule:             'orchestrator',
+      sourceEntityId:           event.sourceEventId,
+      orchestratorLineageId,
+      payload:                  { blocked_reason: 'freeze_check_failed', ...event.metadata },
+      createdBy:                event.triggeredBy,
+    })
+
+    return {
+      orchestratorLineageId,
+      rebuildEventId,
+      enqueuedRebuildIds: [],
+      freezeConstraint,
+      timelineEventId,
+      status: 'blocked_check_failed',
     }
   }
 

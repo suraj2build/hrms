@@ -64,6 +64,8 @@ export interface PeriodFreezeInfo {
  *   requiresAdjustmentWorkflow — some periods are PAYROLL_LOCKED
  *   auditOnly               — some periods are PAYROLL_ARCHIVED; rebuild blocked
  *   blockedPeriods          — the specific locked/archived periods
+ *   checkFailed             — the underlying query errored; state could not be
+ *                             verified (see checkFreezeConstraint below)
  */
 export interface FreezeConstraintResult {
   allowed:                     boolean
@@ -71,6 +73,7 @@ export interface FreezeConstraintResult {
   requiresAdjustmentWorkflow:  boolean
   auditOnly:                   boolean
   blockedPeriods:              PeriodFreezeInfo[]
+  checkFailed?:                boolean
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -257,11 +260,27 @@ export async function checkFreezeConstraint(
   }
 
   // Fetch all rows for the affected periods in one query
-  const { data: rows } = await supabase
+  const { data: rows, error } = await supabase
     .from('payroll_period_states')
     .select('period_month, governance_state')
     .eq('tenant_id', tenantId)
     .in('period_month', periods)
+
+  if (error) {
+    // Fail CLOSED: freeze state could not be verified, so treat as blocked
+    // rather than silently letting a retroactive rebuild through against a
+    // period that may actually be locked/archived (same class of bug as
+    // ISSUE-147's checkFreezeGuard — a transient DB error must never read
+    // as "no periods are frozen").
+    console.error(
+      'payroll-freeze-service: checkFreezeConstraint query failed — failing closed',
+      { tenantId, fromDate, toDate: effectiveTo, error: error.message },
+    )
+    return {
+      allowed: false, queuedOnly: false, requiresAdjustmentWorkflow: false,
+      auditOnly: false, blockedPeriods: [], checkFailed: true,
+    }
+  }
 
   // Build a map — periods not in the response are 'open'
   const stateMap = new Map<string, PayrollGovernanceState>(
