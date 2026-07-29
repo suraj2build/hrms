@@ -37,6 +37,7 @@
 import type { FastifyInstance } from 'fastify'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { serverError, ErrorCode } from '../../lib/api-errors.js'
+import { fetchAllRows } from '../../lib/supabase-paginate.js'
 
 export default async function attendanceUploadHealthRoute(fastify: FastifyInstance) {
   const adminAuth = { preHandler: [fastify.authenticate, requireRole(...HR_ADMIN_ROLES)] }
@@ -45,16 +46,23 @@ export default async function attendanceUploadHealthRoute(fastify: FastifyInstan
     const since30d = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()
 
     // ── Fetch all attendance_csv sessions in last 30 days ──────────────────
-    const { data: sessions, error } = await fastify.supabase
-      .from('upload_sessions')
-      .select('id, status, file_name, created_at, error_message, result_summary, content_checksum')
-      .eq('tenant_id', req.tenantId)
-      .eq('upload_type', 'attendance_csv')
-      .gte('created_at', since30d)
-      .order('created_at', { ascending: false })
-      .limit(200)
-
-    if (error) {
+    // Was .limit(200) — a busy multi-site tenant running several scheduled
+    // syncs a day can exceed 200 sessions in 30 days, silently dropping the
+    // older ones from every summary count and the health-status computation
+    // below with no truncation signal.
+    let sessions: unknown[]
+    try {
+      sessions = await fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('upload_sessions')
+          .select('id, status, file_name, created_at, error_message, result_summary, content_checksum')
+          .eq('tenant_id', req.tenantId)
+          .eq('upload_type', 'attendance_csv')
+          .gte('created_at', since30d)
+          .order('created_at', { ascending: false })
+          .range(from, to),
+      )
+    } catch (error) {
       return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch upload health summary')
     }
 

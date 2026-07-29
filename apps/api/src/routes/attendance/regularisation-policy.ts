@@ -10,6 +10,7 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { serverError, ErrorCode } from '../../lib/api-errors.js'
+import { fetchAllRows } from '../../lib/supabase-paginate.js'
 
 const policySchema = z.object({
   submission_window_days:   z.number().int().min(1).max(90).optional(),
@@ -191,16 +192,23 @@ export default async function regularisationPolicyRoutes(fastify: FastifyInstanc
     const now = new Date()
     const cutoff = new Date(now.getTime() - slaHours * 3_600_000).toISOString()
 
-    // Find pending requests created before the SLA cutoff that haven't been marked breached
-    const { data: breached, error: fetchErr } = await fastify.supabase
-      .from('attendance_regularisation')
-      .select('id')
-      .eq('tenant_id', req.tenantId)
-      .eq('status', 'pending')
-      .eq('sla_breached', false)
-      .lt('created_at', cutoff)
-
-    if (fetchErr) {
+    // Find pending requests created before the SLA cutoff that haven't been marked breached.
+    // Unpaginated before — a tenant with >1000 such requests (e.g. after this
+    // cron job was paused, or a large org) would have the remainder silently
+    // excluded from both breach-marking and auto-rejection with no signal.
+    let breached: { id: string }[]
+    try {
+      breached = await fetchAllRows<{ id: string }>((from, to) =>
+        fastify.supabase
+          .from('attendance_regularisation')
+          .select('id')
+          .eq('tenant_id', req.tenantId)
+          .eq('status', 'pending')
+          .eq('sla_breached', false)
+          .lt('created_at', cutoff)
+          .range(from, to),
+      )
+    } catch (fetchErr) {
       return serverError(req, reply, fetchErr, ErrorCode.QUERY_FAILED, 'Failed to scan for breaches')
     }
 

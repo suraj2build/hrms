@@ -26,6 +26,7 @@ import type { FastifyInstance } from 'fastify'
 import { z }                    from 'zod'
 import { runAttendanceReconciliation } from '../../lib/attendance-reconciliation.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 const dateRe = /^\d{4}-\d{2}-\d{2}$/
 
@@ -78,8 +79,7 @@ export default async function attendanceReconciliationRoutes(fastify: FastifyIns
       )
       return reply.code(201).send({ data: result })
     } catch (err: any) {
-      req.log.error({ err, module: 'reconciliation' }, 'reconciliation run failed')
-      return reply.code(500).send({ error: 'RECONCILIATION_FAILED', message: err.message })
+      return serverError(req, reply, err, ErrorCode.COMPUTE_FAILED, 'Reconciliation run failed')
     }
   })
 
@@ -109,7 +109,7 @@ export default async function attendanceReconciliationRoutes(fastify: FastifyIns
       .range(offset, offset + limit - 1)
 
     if (error) {
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch reconciliation runs')
     }
     return reply.send({ data: data ?? [], total: count ?? 0, limit, offset })
   })
@@ -181,7 +181,7 @@ export default async function attendanceReconciliationRoutes(fastify: FastifyIns
 
     const { data, error, count } = await q
     if (error) {
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch reconciliation issues')
     }
     return reply.send({ data: data ?? [], total: count ?? 0, limit, offset })
   })
@@ -253,8 +253,7 @@ export default async function attendanceReconciliationRoutes(fastify: FastifyIns
         req.log.warn({ err: error }, 'attendance_reconciliation_issues table missing — run migration 182')
         return reply.send({ data: [], total: 0, by_type: {}, by_severity: {} })
       }
-      req.log.error({ err: error }, 'attendance_reconciliation_issues query failed')
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch open reconciliation issues')
     }
 
     // Summary by type
