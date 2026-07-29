@@ -155,12 +155,14 @@ function LevelForm({
   onCancel,
   saving,
   showAmount,
+  isEditing,
 }: {
   initial:  EmptyForm
   onSave:   (form: EmptyForm) => void
   onCancel: () => void
   saving:   boolean
   showAmount: boolean
+  isEditing?: boolean
 }) {
   const [form, setForm] = useState<EmptyForm>(initial)
 
@@ -182,6 +184,8 @@ function LevelForm({
             onChange={(e) => set('level', e.target.value)}
             placeholder="1"
             className="h-8 text-xs"
+            disabled={isEditing}
+            title={isEditing ? 'The backend saves by (workflow, level) — changing this would create a new level instead of renaming this one. Delete and re-add to change the level number.' : undefined}
           />
         </div>
 
@@ -494,6 +498,7 @@ export function ApprovalWorkflows() {
                             onCancel={() => setEditId(null)}
                             saving={saveMutation.isPending}
                             showAmount={AMOUNT_WORKFLOWS.includes(activeTab)}
+                            isEditing
                           />
                         ) : (
                           <div className={cn(

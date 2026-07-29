@@ -343,6 +343,7 @@ function MasterTab({ tab }: { tab: TabDef }) {
   const [showAdd,  setShowAdd]  = useState(false)
   const [editId,   setEditId]   = useState<string | null>(null)
   const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [deactivatingId, setDeactivatingId] = useState<string | null>(null)
 
   // ── Query ────────────────────────────────────────────────────────────────
   const { data, isLoading, isError, refetch } = useQuery<{ data: MasterRecord[] }>({
@@ -378,8 +379,8 @@ function MasterTab({ tab }: { tab: TabDef }) {
   const toggleMutation = useMutation({
     mutationFn: ({ id, is_active }: { id: string; is_active: boolean }) =>
       api.put(`${tab.endpoint}/${id}`, { is_active }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['masters', tab.id] }); toast.success('Status updated') },
-    onError: (e: Error) => toast.error('Failed to update status', { description: e.message }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['masters', tab.id] }); setDeactivatingId(null); toast.success('Status updated') },
+    onError: (e: Error) => { setDeactivatingId(null); toast.error('Failed to update status', { description: e.message }) },
   })
 
   if (isLoading) {
@@ -471,18 +472,44 @@ function MasterTab({ tab }: { tab: TabDef }) {
                     <td className="py-2 px-3">
                       <div className="flex items-center justify-end gap-1">
                         {/* Toggle active */}
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          className="h-7 w-7"
-                          title={row.is_active ? 'Deactivate' : 'Activate'}
-                          onClick={() =>
-                            toggleMutation.mutate({ id: row.id, is_active: !row.is_active })
-                          }
-                          disabled={toggleMutation.isPending}
-                        >
-                          <ToggleLeft className="h-3.5 w-3.5" />
-                        </Button>
+                        {deactivatingId === row.id ? (
+                          <div className="flex items-center gap-1">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="h-7 text-[10px] gap-1 border-destructive/40 text-destructive hover:bg-destructive/10"
+                              onClick={() => toggleMutation.mutate({ id: row.id, is_active: false })}
+                              disabled={toggleMutation.isPending}
+                            >
+                              {toggleMutation.isPending
+                                ? <Loader2 className="h-3 w-3 animate-spin" />
+                                : 'Deactivate?'}
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="h-7 text-[10px]"
+                              onClick={() => setDeactivatingId(null)}
+                            >
+                              Cancel
+                            </Button>
+                          </div>
+                        ) : (
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="h-7 w-7"
+                            title={row.is_active ? 'Deactivate' : 'Activate'}
+                            onClick={() =>
+                              row.is_active
+                                ? setDeactivatingId(row.id)
+                                : toggleMutation.mutate({ id: row.id, is_active: true })
+                            }
+                            disabled={toggleMutation.isPending}
+                          >
+                            <ToggleLeft className="h-3.5 w-3.5" />
+                          </Button>
+                        )}
 
                         {/* Edit */}
                         <Button
