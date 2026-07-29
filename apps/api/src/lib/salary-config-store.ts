@@ -403,16 +403,18 @@ export async function addStructureComponent(
   // from the request body — neither was previously checked against the
   // caller's tenant, so either could reference another tenant's structure
   // or component, corrupting that tenant's payroll configuration.
-  const { data: structure } = await supabase
+  const { data: structure, error: structureErr } = await supabase
     .from('salary_structures').select('id').eq('id', structureId).eq('tenant_id', tenantId).maybeSingle()
+  if (structureErr) return dbFail(structureErr)
   if (!structure) return fail(404, 'NOT_FOUND', 'Salary structure not found')
 
-  const { data: comp } = await supabase
+  const { data: comp, error: compErr } = await supabase
     .from('salary_components')
     .select('default_calculation_type, default_value')
     .eq('id', parsed.data.salary_component_id)
     .eq('tenant_id', tenantId)
     .maybeSingle()
+  if (compErr) return dbFail(compErr)
   if (!comp) return fail(404, 'NOT_FOUND', 'Salary component not found')
 
   let { calculation_type, default_value } = parsed.data
