@@ -17,6 +17,7 @@ import { SectionCard } from'@/components/layout/SectionCard'
 import { Badge } from'@/components/ui/badge'
 import { Button } from'@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from'@/components/ui/dialog'
+import { ConfirmDialog } from'@/components/ui/ConfirmDialog'
 import { api } from'@/lib/api/client'
 import { useAuthStore } from'@/stores/authStore'
 import { cn } from'@/lib/utils'
@@ -89,6 +90,7 @@ export function AdminBenefits() {
  const [editing, setEditing] = useState<Plan | null>(null)
  const [form, setForm] = useState<PlanForm>(BLANK)
  const [showForm, setShowForm] = useState(false)
+ const [deactivateTarget, setDeactivateTarget] = useState<Plan | null>(null)
 
  const { data: plansRaw, isLoading } = useQuery<{ data: Plan[] }>({
  queryKey: ['admin-benefit-plans'],
@@ -119,7 +121,7 @@ export function AdminBenefits() {
 
  const deactivate = useMutation({
  mutationFn: (id: string) => api.delete(`/benefits/admin/plans/${id}`),
- onSuccess: () => { qc.invalidateQueries({ queryKey: ['admin-benefit-plans'] }); qc.invalidateQueries({ queryKey: ['ess-benefit-plans'] }); toast.success('Plan deactivated') },
+ onSuccess: () => { qc.invalidateQueries({ queryKey: ['admin-benefit-plans'] }); qc.invalidateQueries({ queryKey: ['ess-benefit-plans'] }); toast.success('Plan deactivated'); setDeactivateTarget(null) },
  onError: (e: unknown) => toast.error(e instanceof Error ? e.message :'Could not deactivate'),
  })
 
@@ -254,7 +256,7 @@ export function AdminBenefits() {
  <td className="py-2 px-3 text-right whitespace-nowrap">
  <Button size="sm" variant="ghost" onClick={() => openEdit(p)}><Pencil className="h-3.5 w-3.5" /></Button>
  {p.is_active && (
- <Button size="sm" variant="ghost" onClick={() => deactivate.mutate(p.id)}><Power className="h-3.5 w-3.5 text-destructive" /></Button>
+ <Button size="sm" variant="ghost" onClick={() => setDeactivateTarget(p)}><Power className="h-3.5 w-3.5 text-destructive" /></Button>
  )}
  </td>
  </tr>
@@ -370,6 +372,16 @@ export function AdminBenefits() {
  </div>
  </DialogContent>
  </Dialog>
+
+ <ConfirmDialog
+ open={!!deactivateTarget}
+ title="Deactivate Benefit Plan"
+ message={deactivateTarget ? `Deactivate "${deactivateTarget.name}"? It will be hidden from employee enrolment${deactivateTarget.enrolled_count ? ` and ${deactivateTarget.enrolled_count} existing enrolment${deactivateTarget.enrolled_count !== 1 ? 's' : ''} will remain on record` : ''}.` : ''}
+ confirmLabel="Deactivate"
+ destructive
+ onConfirm={() => deactivateTarget && deactivate.mutate(deactivateTarget.id)}
+ onCancel={() => setDeactivateTarget(null)}
+ />
  </PageContainer>
  )
 }
