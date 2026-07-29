@@ -126,17 +126,22 @@ export default async function payrollExportsRoutes(fastify: FastifyInstance) {
       employer_pf:           r.employer_pf,
       employer_eps:          r.employer_eps,
       edli_contribution:     r.edli_contribution,
-      admin_charges:         r.admin_charges ?? 0,
       total_employer:        ((r.employer_pf ?? 0) + (r.employer_eps ?? 0) + (r.edli_contribution ?? 0)),
       is_capped:             r.is_capped ? 'Y' : 'N',
     }))
+    // Admin charges (0.5% of aggregate PF wages, EPFO standard rate) is a
+    // lump-sum employer-level charge, not a per-employee figure —
+    // epf_contributions has no admin_charges column at all (this row shape
+    // used to fabricate one at 0 via `r.admin_charges ?? 0`, always reading
+    // as "no admin charge" instead of omitting a field that doesn't exist
+    // per employee). See /challan below for the correct aggregate total.
 
     if (format === 'json') return reply.send({ data: records, month, count: records.length })
 
     const headers = [
       'uan','employee_code','employee_name','contribution_month',
       'pf_wages','employee_pf','voluntary_pf','employer_pf','employer_eps',
-      'edli_contribution','admin_charges','total_employer','is_capped',
+      'edli_contribution','total_employer','is_capped',
     ]
     setCsvHeaders(reply, `epf-ecr-${month}.csv`)
     return reply.send(toCSV(headers, records))
@@ -175,7 +180,7 @@ export default async function payrollExportsRoutes(fastify: FastifyInstance) {
     if (site_id) rows = rows.filter(r => r.employees?.site_id === site_id)
 
     // Fetch ESI registration for tenant
-    const { data: reg } = await fastify.supabase
+    const { data: reg, error: regErr } = await fastify.supabase
       .from('statutory_registrations')
       .select('registration_number')
       .eq('tenant_id', req.tenantId)
@@ -183,6 +188,7 @@ export default async function payrollExportsRoutes(fastify: FastifyInstance) {
       .eq('is_active', true)
       .limit(1)
       .maybeSingle()
+    if (regErr) return serverError(req, reply, regErr, ErrorCode.QUERY_FAILED, 'Failed to fetch ESI registration')
 
     const esiRegNumber = (reg as any)?.registration_number ?? ''
 
@@ -251,13 +257,14 @@ export default async function payrollExportsRoutes(fastify: FastifyInstance) {
     const states = [...new Set(rows.map(r => r.state_code).filter(Boolean))]
     const regMap = new Map<string, string>()
     if (states.length > 0) {
-      const { data: regs } = await fastify.supabase
+      const { data: regs, error: regsErr } = await fastify.supabase
         .from('statutory_registrations')
         .select('state_code, registration_number')
         .eq('tenant_id', req.tenantId)
         .eq('statutory_type', 'ptax')
         .eq('is_active', true)
         .in('state_code', states)
+      if (regsErr) return serverError(req, reply, regsErr, ErrorCode.QUERY_FAILED, 'Failed to fetch PTax registrations')
 
       for (const r of (regs ?? []) as any[]) regMap.set(r.state_code, r.registration_number)
     }
@@ -328,11 +335,12 @@ export default async function payrollExportsRoutes(fastify: FastifyInstance) {
     const states = [...new Set(rows.map(r => r.state_code).filter(Boolean))]
     const regMap = new Map<string, string>()
     if (states.length > 0) {
-      const { data: regs } = await fastify.supabase
+      const { data: regs, error: regsErr } = await fastify.supabase
         .from('lwf_state_settings')
         .select('state_code, registration_number')
         .eq('tenant_id', req.tenantId)
         .in('state_code', states)
+      if (regsErr) return serverError(req, reply, regsErr, ErrorCode.QUERY_FAILED, 'Failed to fetch LWF registrations')
       for (const r of (regs ?? []) as any[]) regMap.set(r.state_code, r.registration_number ?? '')
     }
 
@@ -409,6 +417,12 @@ export default async function payrollExportsRoutes(fastify: FastifyInstance) {
       if (!seen.has(r.employee_id)) seen.set(r.employee_id, r)
     }
 
+    // total_rejected doesn't exist on tds_declaration_snapshots (only
+    // total_declared/total_approved — migration 165) and was previously
+    // fabricated as `r.total_rejected ?? 0`, always reading as "nothing
+    // rejected" regardless of the real figure. Removed rather than guessed
+    // at a derivation (total_declared - total_approved would conflate
+    // "rejected" with "still pending review", which isn't the same thing).
     const records = [...seen.values()].map(r => ({
       employee_code:    r.employees?.employee_code ?? '',
       employee_name:    r.employees ? `${r.employees.first_name} ${r.employees.last_name}` : '',
@@ -416,7 +430,6 @@ export default async function payrollExportsRoutes(fastify: FastifyInstance) {
       snapshot_at:      r.snapshot_at,
       total_declared:   r.total_declared ?? 0,
       total_approved:   r.total_approved ?? 0,
-      total_rejected:   r.total_rejected ?? 0,
       items_count:      Array.isArray(r.declaration_items) ? r.declaration_items.length : 0,
     }))
 
@@ -424,7 +437,7 @@ export default async function payrollExportsRoutes(fastify: FastifyInstance) {
 
     const headers = [
       'employee_code','employee_name','financial_year','snapshot_at',
-      'total_declared','total_approved','total_rejected','items_count',
+      'total_declared','total_approved','items_count',
     ]
     setCsvHeaders(reply, `tds-${financial_year}.csv`)
     return reply.send(toCSV(headers, records))
@@ -449,7 +462,7 @@ export default async function payrollExportsRoutes(fastify: FastifyInstance) {
         fetchAllRows((from, to) =>
           fastify.supabase
             .from('epf_contributions')
-            .select('employee_contribution, employer_pf, employer_eps, edli_contribution, voluntary_pf')
+            .select('employee_contribution, employer_pf, employer_eps, edli_contribution, voluntary_pf, pf_wages')
             .eq('tenant_id', req.tenantId)
             .eq('contribution_month', month)
             .range(from, to),
@@ -484,6 +497,13 @@ export default async function payrollExportsRoutes(fastify: FastifyInstance) {
       ptaxByState[r.state_code] = r2((ptaxByState[r.state_code] ?? 0) + (r.ptax_amount ?? 0))
     }
 
+    // Admin charges = 0.50% of aggregate PF wages (EPFO standard rate) —
+    // epf_contributions has no admin_charges column at all, so
+    // sum(epfRows, 'admin_charges') always evaluated to 0, understating
+    // every EPF/grand total in this challan by the real admin-charge amount.
+    // Matches the correct pattern already used in filing-pack.ts.
+    const epfAdminCharges = r2(sum(epfRows, 'pf_wages') * 0.005)
+
     const challan = {
       month,
       epf: {
@@ -492,11 +512,11 @@ export default async function payrollExportsRoutes(fastify: FastifyInstance) {
         employer_pf:           sum(epfRows, 'employer_pf'),
         employer_eps:          sum(epfRows, 'employer_eps'),
         edli:                  sum(epfRows, 'edli_contribution'),
-        admin_charges:         sum(epfRows, 'admin_charges'),
+        admin_charges:         epfAdminCharges,
         total_remittance:      r2(
           sum(epfRows, 'employee_contribution') + sum(epfRows, 'voluntary_pf') +
           sum(epfRows, 'employer_pf') + sum(epfRows, 'employer_eps') +
-          sum(epfRows, 'edli_contribution') + sum(epfRows, 'admin_charges')
+          sum(epfRows, 'edli_contribution') + epfAdminCharges
         ),
         employee_count: epfRows.length,
       },
@@ -514,7 +534,7 @@ export default async function payrollExportsRoutes(fastify: FastifyInstance) {
       grand_total_remittance: r2(
         sum(epfRows, 'employee_contribution') + sum(epfRows, 'voluntary_pf') +
         sum(epfRows, 'employer_pf')          + sum(epfRows, 'employer_eps') +
-        sum(epfRows, 'edli_contribution')    + sum(epfRows, 'admin_charges') +
+        sum(epfRows, 'edli_contribution')    + epfAdminCharges +
         sum(esiRows, 'total_contribution')   +
         ptaxRows.reduce((s: number, r: any) => s + (r.ptax_amount ?? 0), 0)
       ),
@@ -642,8 +662,9 @@ export default async function payrollExportsRoutes(fastify: FastifyInstance) {
         slip_ptax:      slipPtax,
         contrib_ptax:   ptaxContrib,
         ptax_variance:  r2(slipPtax - ptaxContrib),
-        // Match flag
-        is_matched:     (Math.abs(r2(slipEpf - epfContrib)) < 1 && Math.abs(r2(slipEsi - esiContrib)) < 1) ? 'Y' : 'N',
+        // Match flag — was missing the PTax variance check, so a row with a
+        // genuine PTax mismatch but matching EPF/ESI was silently marked 'Y'.
+        is_matched:     (Math.abs(r2(slipEpf - epfContrib)) < 1 && Math.abs(r2(slipEsi - esiContrib)) < 1 && Math.abs(r2(slipPtax - ptaxContrib)) < 1) ? 'Y' : 'N',
       }
     })
 
