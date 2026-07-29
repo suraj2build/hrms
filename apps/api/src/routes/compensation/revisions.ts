@@ -235,6 +235,23 @@ export default async function compensationRevisionsRoute(fastify: FastifyInstanc
       if (!structure) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: 'Salary structure not found in your organisation' })
     }
 
+    // Same IDOR class as new_salary_structure_id above, but for the parallel
+    // component_overrides[].salary_component_id field, which had no tenant
+    // check anywhere in the pipeline — a foreign tenant's component id would
+    // be written straight into employee_compensation_components on approve.
+    if (d.component_overrides?.length) {
+      const componentIds = [...new Set(d.component_overrides.map(o => o.salary_component_id))]
+      const { data: ownComponents } = await fastify.supabase
+        .from('salary_components')
+        .select('id')
+        .in('id', componentIds)
+        .eq('tenant_id', req.tenantId)
+      const ownIds = new Set((ownComponents ?? []).map((c: any) => c.id))
+      if (componentIds.some(cid => !ownIds.has(cid))) {
+        return reply.code(400).send({ error: 'VALIDATION_ERROR', message: 'One or more salary components not found in your organisation' })
+      }
+    }
+
     // Fetch current active compensation for before snapshot
     const { data: currentComp } = await fastify.supabase
       .from('employee_compensations')
@@ -679,6 +696,7 @@ export default async function compensationRevisionsRoute(fastify: FastifyInstanc
       .from('compensation_revisions')
       .update({ payroll_impact_preview: preview })
       .eq('id', id)
+      .eq('tenant_id', req.tenantId)
 
     return reply.send({ data: preview })
   })
@@ -733,6 +751,25 @@ export default async function compensationRevisionsRoute(fastify: FastifyInstanc
       }
     }
 
+    // `employees` has no `grade` column — only `grade_id` (FK to `grades`).
+    // The filter below used to run `.eq('grade', d.grade)` directly, which
+    // PostgREST rejects as an unknown column; every grade-filtered bulk call
+    // failed with a generic 500 with the real cause hidden in the catch.
+    // Resolve the grade name to its id first so the cohort query below can
+    // filter on the real column.
+    let gradeId: string | null = null
+    if (d.grade) {
+      const { data: gradeRow, error: gradeErr } = await fastify.supabase
+        .from('grades')
+        .select('id')
+        .eq('tenant_id', req.tenantId)
+        .eq('name', d.grade)
+        .maybeSingle()
+      if (gradeErr) return serverError(req, reply, gradeErr, ErrorCode.QUERY_FAILED, 'Failed to resolve grade')
+      if (!gradeRow) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: 'Grade not found in your organisation' })
+      gradeId = gradeRow.id
+    }
+
     // ── Resolve the cohort (active employees only) ────────────────────────────
     // A department_id/grade-only filter can match well over 1000 employees
     // in a large tenant — paginated so a bulk increment/promotion doesn't
@@ -748,7 +785,7 @@ export default async function compensationRevisionsRoute(fastify: FastifyInstanc
           .eq('status', 'active')
         if (d.employee_ids?.length) empQ = empQ.in('id', d.employee_ids)
         if (d.department_id)        empQ = empQ.eq('department_id', d.department_id)
-        if (d.grade)                empQ = empQ.eq('grade', d.grade)
+        if (gradeId)                empQ = empQ.eq('grade_id', gradeId)
         return empQ.range(from, to)
       })
     } catch {

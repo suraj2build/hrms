@@ -227,12 +227,13 @@ export default async function talentRoutes(fastify: FastifyInstance) {
     const myInterestMap: Record<string, string> = {}
     if (employeeId && data.length > 0) {
       const roleIds = data.map((r: any) => r.id)
-      const { data: myInts } = await supabase
+      const { data: myInts, error: myIntsErr } = await supabase
         .from('talent_interests')
         .select('role_id, status')
         .eq('tenant_id', req.tenantId)
         .eq('employee_id', employeeId)
         .in('role_id', roleIds)
+      if (myIntsErr) return serverError(req, reply, myIntsErr, ErrorCode.QUERY_FAILED, 'Failed to fetch your interest status')
       ;(myInts ?? []).forEach((i: any) => { myInterestMap[i.role_id] = i.status })
     }
 
@@ -275,11 +276,12 @@ export default async function talentRoutes(fastify: FastifyInstance) {
     // not_selected) must not be silently reset to 'interested' by the
     // applicant re-registering — the RLS UPDATE policy only checks
     // employee_id ownership, not status, so the app layer is the only gate.
-    const { data: existing } = await supabase
+    const { data: existing, error: existingErr } = await supabase
       .from('talent_interests')
       .select('id, status')
       .eq('tenant_id', req.tenantId).eq('role_id', role_id).eq('employee_id', employeeId)
       .maybeSingle()
+    if (existingErr) return serverError(req, reply, existingErr, ErrorCode.QUERY_FAILED, 'Failed to check existing interest')
 
     if (existing) {
       if (!['interested', 'withdrawn'].includes(existing.status)) {

@@ -72,33 +72,50 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
       }
 
       // 2. Stalled onboarding sessions
+      // .limit(50) only bounds the SAMPLE fetched for the observation body —
+      // the true count (used for severity + the KPI tile below) comes from a
+      // separate exact `count` query so a tenant with >50 stalled sessions
+      // doesn't have its KPI silently clipped to 50 with no error.
       const { data: stalledSessions } = await fastify.supabase
         .from('onboarding_sessions').select('id, candidate_name, status, created_at')
         .eq('tenant_id', tenantId).neq('status', 'employee_created').neq('status', 'rejected')
         .lt('created_at', sevenDaysAgo).limit(50)
+      const { count: stalledCount } = await fastify.supabase
+        .from('onboarding_sessions').select('id', { count: 'exact', head: true })
+        .eq('tenant_id', tenantId).neq('status', 'employee_created').neq('status', 'rejected')
+        .lt('created_at', sevenDaysAgo)
+      const stalledTotal = stalledCount ?? stalledSessions?.length ?? 0
       if (stalledSessions && stalledSessions.length > 0) {
         observations.push({
           id: 'stalled-onboarding', category: 'onboarding',
-          severity: stalledSessions.length > 5 ? 'high' : 'medium',
-          title: stalledSessions.length + ' onboarding session' + (stalledSessions.length > 1 ? 's' : '') + ' stalled over 7 days',
+          severity: stalledTotal > 5 ? 'high' : 'medium',
+          title: stalledTotal + ' onboarding session' + (stalledTotal > 1 ? 's' : '') + ' stalled over 7 days',
           body: 'Candidates with stalled onboarding sessions have not been converted to employees. Review to complete or reject.',
-          source_records: [{ table: 'onboarding_sessions', count: stalledSessions.length, sample: stalledSessions.slice(0, 3).map((s: any) => s.candidate_name || s.id.slice(0,8)).join(', ') }],
+          source_records: [{ table: 'onboarding_sessions', count: stalledTotal, sample: stalledSessions.slice(0, 3).map((s: any) => s.candidate_name || s.id.slice(0,8)).join(', ') }],
           generated_at: now.toISOString(),
         })
       }
 
       // 3. Separations stalled in intermediate stage > 3 days
+      // Same fix as above: .limit(20) only bounds the sample; the exact
+      // count backs severity/KPI so a tenant with >20 stalled separations
+      // isn't silently reported as capped at 20.
       const { data: pendingSep } = await fastify.supabase
         .from('employee_separation').select('id, employee_id, lifecycle_stage, updated_at')
         .eq('tenant_id', tenantId).not('lifecycle_stage', 'in', '("relieved","archived")')
         .lt('updated_at', threeDaysAgo).limit(20)
+      const { count: pendingSepCount } = await fastify.supabase
+        .from('employee_separation').select('id', { count: 'exact', head: true })
+        .eq('tenant_id', tenantId).not('lifecycle_stage', 'in', '("relieved","archived")')
+        .lt('updated_at', threeDaysAgo)
+      const pendingSepTotal = pendingSepCount ?? pendingSep?.length ?? 0
       if (pendingSep && pendingSep.length > 0) {
         observations.push({
           id: 'pending-separation', category: 'separation',
-          severity: pendingSep.length > 2 ? 'high' : 'medium',
-          title: pendingSep.length + ' separation' + (pendingSep.length > 1 ? 's' : '') + ' pending action over 3 days',
+          severity: pendingSepTotal > 2 ? 'high' : 'medium',
+          title: pendingSepTotal + ' separation' + (pendingSepTotal > 1 ? 's' : '') + ' pending action over 3 days',
           body: 'Employee separations in intermediate stages may delay final settlements and asset recovery.',
-          source_records: [{ table: 'employee_separation', count: pendingSep.length }],
+          source_records: [{ table: 'employee_separation', count: pendingSepTotal }],
           generated_at: now.toISOString(),
         })
       }
@@ -227,6 +244,7 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
       }
 
       // 7. O3 — Sessions in hr_review > 3 days (approvals over SLA)
+      // Same fix as findings #2/#3: .limit(50) bounds the sample only.
       const { data: slaBreached } = await fastify.supabase
         .from('onboarding_sessions')
         .select('id, candidate_name')
@@ -234,13 +252,20 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
         .in('status', ['hr_review', 'validation_pending'])
         .lt('updated_at', threeDaysAgo)
         .limit(50)
+      const { count: slaBreachedCount } = await fastify.supabase
+        .from('onboarding_sessions')
+        .select('id', { count: 'exact', head: true })
+        .eq('tenant_id', tenantId)
+        .in('status', ['hr_review', 'validation_pending'])
+        .lt('updated_at', threeDaysAgo)
+      const slaBreachedTotal = slaBreachedCount ?? slaBreached?.length ?? 0
       if (slaBreached && slaBreached.length > 0) {
         observations.push({
           id: 'readiness-approval-sla', category: 'onboarding',
-          severity: slaBreached.length > 3 ? 'high' : 'medium',
-          title: slaBreached.length + ' onboarding approval' + (slaBreached.length > 1 ? 's' : '') + ' pending > 3 days',
+          severity: slaBreachedTotal > 3 ? 'high' : 'medium',
+          title: slaBreachedTotal + ' onboarding approval' + (slaBreachedTotal > 1 ? 's' : '') + ' pending > 3 days',
           body: 'Onboarding sessions awaiting HR review or validation for more than 3 days. Delayed approvals block employee joining and onboarding checklist assignment.',
-          source_records: [{ table: 'onboarding_sessions', count: slaBreached.length, sample: (slaBreached as any[]).slice(0, 3).map((s: any) => s.candidate_name || s.id.slice(0, 8)).join(', ') }],
+          source_records: [{ table: 'onboarding_sessions', count: slaBreachedTotal, sample: (slaBreached as any[]).slice(0, 3).map((s: any) => s.candidate_name || s.id.slice(0, 8)).join(', ') }],
           generated_at: now.toISOString(),
         })
       }
@@ -254,13 +279,20 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
         .neq('status', 'completed')
         .lt('start_date', fourteenDaysAgo.slice(0, 10))
         .limit(50)
+      const { count: overdueChecklistsCount } = await fastify.supabase
+        .from('employee_onboarding_checklists')
+        .select('id', { count: 'exact', head: true })
+        .eq('tenant_id', tenantId)
+        .neq('status', 'completed')
+        .lt('start_date', fourteenDaysAgo.slice(0, 10))
+      const overdueChecklistsTotal = overdueChecklistsCount ?? overdueChecklists?.length ?? 0
       if (overdueChecklists && overdueChecklists.length > 0) {
         observations.push({
           id: 'readiness-checklist-overdue', category: 'onboarding',
-          severity: overdueChecklists.length > 5 ? 'high' : 'medium',
-          title: overdueChecklists.length + ' onboarding checklist' + (overdueChecklists.length > 1 ? 's' : '') + ' overdue (>14 days)',
+          severity: overdueChecklistsTotal > 5 ? 'high' : 'medium',
+          title: overdueChecklistsTotal + ' onboarding checklist' + (overdueChecklistsTotal > 1 ? 's' : '') + ' overdue (>14 days)',
           body: 'Employees have incomplete onboarding checklists more than 14 days after checklist assignment. Incomplete checklists reduce onboarding readiness scores.',
-          source_records: [{ table: 'employee_onboarding_checklists', count: overdueChecklists.length }],
+          source_records: [{ table: 'employee_onboarding_checklists', count: overdueChecklistsTotal }],
           generated_at: now.toISOString(),
         })
       }
@@ -326,8 +358,8 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
             active_headcount:           activeCount              ?? 0,
             joiners_this_month:         joinersThisMonth         ?? 0,
             on_notice:                  onNotice                 ?? 0,
-            stalled_onboarding:         stalledSessions?.length  ?? 0,
-            pending_separations:        pendingSep?.length        ?? 0,
+            stalled_onboarding:         stalledTotal,
+            pending_separations:        pendingSepTotal,
             assets_at_risk:             assetsAtRiskCount,
             probation_due:              probationDueCount,
             // O3 readiness KPIs
@@ -335,8 +367,8 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
             onboarding_blocked:         rejCount                 ?? 0,
             onboarding_in_progress:     activeOnb                ?? 0,
             onboarding_ready_pct:       readyPct,
-            onboarding_approval_sla:    slaBreached?.length       ?? 0,
-            onboarding_checklist_overdue: overdueChecklists?.length ?? 0,
+            onboarding_approval_sla:    slaBreachedTotal,
+            onboarding_checklist_overdue: overdueChecklistsTotal,
           },
           generated_at: now.toISOString(),
         },
@@ -921,28 +953,36 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
     const ninetyDaysAgo = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
     try {
       // SSOT status values are active/inactive/on_notice/separated (no 'resigned')
+      // Was .limit(500) — a mass-attrition event above that cap silently
+      // clipped both `total` and the per-department breakdown returned to
+      // HR admins, understating exactly the risk this endpoint exists to surface.
       let rows: any[] = []
       try {
-        const { data } = await fastify.supabase
-          .from('employees')
-          .select('id, status, updated_at')
-          .eq('tenant_id', tenantId)
-          .in('status', ['on_notice', 'separated'])
-          .gte('updated_at', ninetyDaysAgo)
-          .limit(500)
-        rows = data ?? []
+        rows = await fetchAllRows<any>((from, to) =>
+          fastify.supabase
+            .from('employees')
+            .select('id, status, updated_at')
+            .eq('tenant_id', tenantId)
+            .in('status', ['on_notice', 'separated'])
+            .gte('updated_at', ninetyDaysAgo)
+            .range(from, to),
+        )
       } catch (_e) { rows = [] }
 
       // Resolve department via current job_history row (employees has no department_id)
       const empDept = new Map<string, string>()
       if (rows.length > 0) {
         try {
-          const { data: jh } = await fastify.supabase
-            .from('job_history')
-            .select('employee_id, departments(name)')
-            .eq('tenant_id', tenantId)
-            .eq('is_current', true)
-            .in('employee_id', rows.map((r: any) => r.id))
+          const empIds = rows.map((r: any) => r.id)
+          const jh = await fetchAllRows<any>((from, to) =>
+            fastify.supabase
+              .from('job_history')
+              .select('employee_id, departments(name)')
+              .eq('tenant_id', tenantId)
+              .eq('is_current', true)
+              .in('employee_id', empIds)
+              .range(from, to),
+          )
           for (const j of jh ?? []) empDept.set(j.employee_id, (j.departments as any)?.name ?? 'Unassigned')
         } catch (_e) { /* skip */ }
       }

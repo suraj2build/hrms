@@ -18,6 +18,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 export default async function managerCompensationRoute(fastify: FastifyInstance) {
   const auth = { preHandler: [fastify.authenticate] }
@@ -60,13 +61,13 @@ export default async function managerCompensationRoute(fastify: FastifyInstance)
       .eq('status', 'active')
       .order('first_name', { ascending: true })
 
-    if (repErr) return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch team' })
+    if (repErr) return serverError(req, reply, repErr, ErrorCode.QUERY_FAILED, 'Failed to fetch team')
     if (!reports?.length) return reply.send({ data: [], manager_employee_id: managerId })
 
     const empIds = reports.map((e: any) => e.id)
 
     // Active compensation + latest revision per report, in two batched reads.
-    const [{ data: comps }, { data: revisions }] = await Promise.all([
+    const [{ data: comps, error: compsErr }, { data: revisions, error: revErr }] = await Promise.all([
       fastify.supabase
         .from('employee_compensations')
         .select('employee_id, ctc_annual, ctc_monthly, effective_from')
@@ -80,6 +81,12 @@ export default async function managerCompensationRoute(fastify: FastifyInstance)
         .in('employee_id', empIds)
         .order('submitted_at', { ascending: false }),
     ])
+    // Neither error was previously checked — a transient failure on either
+    // query would silently fall back to (comps ?? []) / (revisions ?? []),
+    // showing every report's CTC/last-revision as blank/null instead of
+    // surfacing the failure, which could also mask a real pending revision.
+    if (compsErr) return serverError(req, reply, compsErr, ErrorCode.QUERY_FAILED, 'Failed to fetch team compensation')
+    if (revErr)   return serverError(req, reply, revErr, ErrorCode.QUERY_FAILED, 'Failed to fetch team revisions')
 
     const compByEmp = new Map((comps ?? []).map((c: any) => [c.employee_id, c]))
     const lastRevByEmp = new Map<string, any>()
@@ -141,7 +148,7 @@ export default async function managerCompensationRoute(fastify: FastifyInstance)
       .eq('employee_id', employeeId)
       .order('submitted_at', { ascending: false })
 
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch history' })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch history')
     return reply.send({ data: data ?? [], employee_id: employeeId })
   })
 }
