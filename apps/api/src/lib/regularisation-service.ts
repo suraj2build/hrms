@@ -117,7 +117,7 @@ export async function submitRegularisation(
 
   const { start: periodStart, end: periodEnd, label: periodLabel } = limitPeriodBounds(limitPeriod, today)
 
-  const { count: periodCount } = await supabase
+  const { count: periodCount, error: periodCountErr } = await supabase
     .from('attendance_regularisation')
     .select('id', { count: 'exact', head: true })
     .eq('tenant_id', tenantId)
@@ -125,6 +125,9 @@ export async function submitRegularisation(
     .in('status', countedStatuses)
     .gte('created_at', periodStart)
     .lt('created_at', periodEnd)
+  // Fail closed — a query error must not silently read as "0 requests this
+  // period" and skip the frequency cap.
+  if (periodCountErr) return { ok: false, error: { type: 'DB_ERROR', message: 'Failed to check regularisation frequency' } }
 
   if ((periodCount ?? 0) >= maxPerPeriod) {
     return {
@@ -138,7 +141,7 @@ export async function submitRegularisation(
 
   const typeCap = regularization_type ? Number(perTypeLimits[regularization_type]) : NaN
   if (regularization_type && Number.isFinite(typeCap) && typeCap > 0) {
-    const { count: typeCount } = await supabase
+    const { count: typeCount, error: typeCountErr } = await supabase
       .from('attendance_regularisation')
       .select('id', { count: 'exact', head: true })
       .eq('tenant_id', tenantId)
@@ -147,6 +150,7 @@ export async function submitRegularisation(
       .in('status', countedStatuses)
       .gte('created_at', periodStart)
       .lt('created_at', periodEnd)
+    if (typeCountErr) return { ok: false, error: { type: 'DB_ERROR', message: 'Failed to check regularisation type frequency' } }
 
     if ((typeCount ?? 0) >= typeCap) {
       return {
@@ -159,12 +163,16 @@ export async function submitRegularisation(
     }
   }
 
-  const { data: periodLock } = await supabase
+  const { data: periodLock, error: periodLockErr } = await supabase
     .from('attendance_period_locks')
     .select('state')
     .eq('tenant_id', tenantId)
     .eq('period_month', date.slice(0, 7))
     .maybeSingle()
+  // Must not silently skip this check — this is the only backstop against
+  // new regularisation requests for a month HR has already frozen/finalized
+  // for payroll (no DB-level trigger enforces it for this table).
+  if (periodLockErr) return { ok: false, error: { type: 'DB_ERROR', message: 'Failed to check payroll period lock' } }
 
   if (periodLock && periodLock.state !== 'OPEN') {
     return { ok: false, error: { type: 'PERIOD_LOCKED', message: 'Regularisation submissions are closed for this pay period.' } }
