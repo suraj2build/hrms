@@ -14,9 +14,16 @@ import type { FastifyPluginAsync } from 'fastify'
 import crypto                     from 'node:crypto'
 import { createClient }           from '@supabase/supabase-js'
 import { WhatsAppProvider }       from '../../lib/whatsapp-provider.js'
+import { fetchTenantTz }          from '../../lib/attendance-engine.js'
+import { getLocalDate }           from '../../lib/org-context.js'
 
 // Mood score mapping from WhatsApp reply to 1-5 scale
 const MOOD_MAP: Record<string, number> = { '1': 5, '2': 3, '3': 1 }
+
+async function tenantTodayStr(supabase: any, tenantId: string): Promise<string> {
+  const tz = await fetchTenantTz(supabase, tenantId)
+  return getLocalDate(new Date().toISOString(), tz)
+}
 
 const whatsappRoutes: FastifyPluginAsync = async (fastify) => {
   // ── GET /whatsapp/webhook — verification ─────────────────────────────────────
@@ -95,7 +102,7 @@ const whatsappRoutes: FastifyPluginAsync = async (fastify) => {
       // ── Mood poll response (1, 2, 3) ─────────────────────────────────────────
       if (MOOD_MAP[text] !== undefined) {
         const mood = MOOD_MAP[text]
-        const today = new Date().toISOString().slice(0, 10)
+        const today = await tenantTodayStr(supabase, tenantId)
 
         const { error: moodErr } = await supabase.from('mood_checkins').upsert(
           {
@@ -163,7 +170,7 @@ const whatsappRoutes: FastifyPluginAsync = async (fastify) => {
 
       // ── Free text → update note on today's check-in if exists ────────────────
       if (text.length > 0) {
-        const today = new Date().toISOString().slice(0, 10)
+        const today = await tenantTodayStr(supabase, tenantId)
         const { data: existing } = await supabase
           .from('mood_checkins')
           .select('id')

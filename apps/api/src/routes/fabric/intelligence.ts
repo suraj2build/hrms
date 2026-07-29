@@ -88,7 +88,7 @@ export default async function fabricRoutes(fastify: FastifyInstance) {
       tenant_id: run.tenant_id, simulation_type: run.simulation_type, label: run.label,
       input_params: run.input_params, result_summary: run.result_summary,
       created_at: run.created_at, created_by: run.created_by ?? null,
-    }).then(undefined, () => {})
+    }).then(undefined, (err: any) => fastify.log.warn({ err }, 'simulation_runs insert failed (fabric policy)'))
     return run
   })
 
@@ -107,7 +107,7 @@ export default async function fabricRoutes(fastify: FastifyInstance) {
       tenant_id: run.tenant_id, simulation_type: run.simulation_type, label: run.label,
       input_params: run.input_params, result_summary: run.result_summary,
       created_at: run.created_at, created_by: run.created_by ?? null,
-    }).then(undefined, () => {})
+    }).then(undefined, (err: any) => fastify.log.warn({ err }, 'simulation_runs insert failed (fabric governance-drift)'))
     return run
   })
 
