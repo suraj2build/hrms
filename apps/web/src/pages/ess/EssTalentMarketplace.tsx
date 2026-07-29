@@ -253,8 +253,7 @@ export function EssTalentMarketplace() {
  // manual refresh to see a new applicant.
  invalidateTalentMarketplace(qc)
  },
- // eslint-disable-next-line @typescript-eslint/no-explicit-any
- onError: (e: any) => toast.error(e?.response?.data?.error ??'Failed to register interest'),
+ onError: (e: Error) => toast.error('Failed to register interest', { description: e.message }),
  })
 
  const withdrawMutation = useMutation({

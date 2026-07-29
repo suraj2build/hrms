@@ -63,6 +63,10 @@ export function MobileAttendance({ base: _base }: { base: string }) {
     onSuccess: (_r, dir) => {
       toast.success(dir === 'IN' ? 'Punched in' : 'Punched out')
       qc.invalidateQueries({ queryKey: ['mobile-attendance', employeeId, today] })
+      qc.invalidateQueries({ queryKey: ['mobile-attendance-week', employeeId, wk.from] })
+      // Home screen's own punch card reads the same today's-attendance endpoint
+      // under a separate cache key — must refresh together.
+      qc.invalidateQueries({ queryKey: ['mobile-home-att', employeeId, today] })
     },
     onError: (e: Error) => toast.error('Punch failed', { description: e.message }),
   })

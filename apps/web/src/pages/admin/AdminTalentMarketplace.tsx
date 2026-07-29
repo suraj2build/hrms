@@ -32,6 +32,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { api } from '@/lib/api/client'
 import { cn } from '@/lib/utils'
 import { invalidateTalentMarketplace } from '@/lib/talent-marketplace-cache'
@@ -132,8 +133,8 @@ function PostRoleDialog({
       }
       onSuccess()
       onClose()
-    } catch (e: any) {
-      toast.error(e?.response?.data?.error ?? 'Failed to save role')
+    } catch (e) {
+      toast.error('Failed to save role', { description: e instanceof Error ? e.message : undefined })
     } finally {
       setSubmitting(false)
     }
@@ -331,6 +332,7 @@ export function AdminTalentMarketplace() {
   const [showPost,     setShowPost]     = useState(false)
   const [editingRole,  setEditingRole]  = useState<TalentRole | null>(null)
   const [viewingRole,  setViewingRole]  = useState<TalentRole | null>(null)
+  const [closeTarget,  setCloseTarget]  = useState<TalentRole | null>(null)
 
   const { data: rolesData, isLoading } = useQuery<TalentRole[]>({
     queryKey: ['talent-roles', tab],
@@ -345,8 +347,9 @@ export function AdminTalentMarketplace() {
       // Must reach ESS's talent-browse too — otherwise an employee with the
       // marketplace open still sees this role as open and can apply to it.
       invalidateTalentMarketplace(qc)
+      setCloseTarget(null)
     },
-    onError: () => toast.error('Failed to close role'),
+    onError: (e: Error) => toast.error('Failed to close role', { description: e.message }),
   })
 
   function refreshRoles() {
@@ -485,7 +488,7 @@ export function AdminTalentMarketplace() {
                             size="sm"
                             variant="outline"
                             className="h-8 text-red-600 hover:text-red-700 border-red-200 hover:border-red-300"
-                            onClick={() => closeMutation.mutate(role.id)}
+                            onClick={() => setCloseTarget(role)}
                             disabled={closeMutation.isPending}
                           >
                             <XCircle className="h-3.5 w-3.5 mr-1" /> Close
@@ -506,6 +509,16 @@ export function AdminTalentMarketplace() {
         onClose={() => { setShowPost(false); setEditingRole(null) }}
         onSuccess={refreshRoles}
         editing={editingRole}
+      />
+
+      <ConfirmDialog
+        open={!!closeTarget}
+        title="Close Internal Role"
+        message={closeTarget ? `Close "${closeTarget.title}"? There is no reopen option — employees will no longer be able to view or apply to this role.` : ''}
+        confirmLabel="Close Role"
+        destructive
+        onConfirm={() => closeTarget && closeMutation.mutate(closeTarget.id)}
+        onCancel={() => setCloseTarget(null)}
       />
     </PageContainer>
   )

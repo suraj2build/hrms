@@ -25,14 +25,26 @@ export function MobileTeam() {
 
   const pending = (data?.data ?? []).filter((r) => r.status === 'pending')
 
+  // Same underlying regularisation requests are also read by desktop's
+  // ManagerTeamRegularisation, the various admin/manager pending queues, and
+  // the employee's own approval tracker — all must refresh together.
+  function invalidateRegularisationViews() {
+    qc.invalidateQueries({ queryKey: ['mobile-team-reg'] })
+    qc.invalidateQueries({ queryKey: ['manager-team-regularisation'] })
+    qc.invalidateQueries({ queryKey: ['reg-pending'] })
+    qc.invalidateQueries({ queryKey: ['reg-queue'] })
+    qc.invalidateQueries({ queryKey: ['ess-approvals-corrections'] })
+    qc.invalidateQueries({ queryKey: ['regularization-my'] })
+  }
+
   const approve = useMutation({
     mutationFn: (id: string) => api.post('/attendance/regularisation/bulk-approve', { ids: [id] }) as Promise<BulkResult>,
-    onSuccess: () => { toast.success('Approved'); qc.invalidateQueries({ queryKey: ['mobile-team-reg'] }) },
+    onSuccess: () => { toast.success('Approved'); invalidateRegularisationViews() },
     onError: (e: Error) => toast.error('Failed', { description: e.message }),
   })
   const reject = useMutation({
     mutationFn: (id: string) => api.post('/attendance/regularisation/bulk-reject', { ids: [id] }) as Promise<BulkResult>,
-    onSuccess: () => { toast.success('Rejected'); qc.invalidateQueries({ queryKey: ['mobile-team-reg'] }) },
+    onSuccess: () => { toast.success('Rejected'); invalidateRegularisationViews() },
     onError: (e: Error) => toast.error('Failed', { description: e.message }),
   })
 
