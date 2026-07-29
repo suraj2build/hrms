@@ -28,6 +28,7 @@ import type { FastifyInstance } from 'fastify'
 import { resolveEmployeeOrgContext, getWeeklyOffDays } from '../../lib/org-context.js'
 import { normalizeAttendanceStatus } from '../../lib/attendance-utils.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
 
@@ -74,20 +75,20 @@ export default async function attendanceForensicsRoute(fastify: FastifyInstance)
 
       // ── Parallel fetch all data sources ─────────────────────────────────
       const [
-        { data: rawLogs },
-        { data: processedLogs },
-        { data: dailyRecord },
-        { data: auditRows },
-        { data: corrections },
-        { data: leaveApps },
-        { data: rosterRow },
-        { data: standingShift },
-        { data: holidayRows },
-        { data: policyEvals },
+        { data: rawLogs, error: rawLogsErr },
+        { data: processedLogs, error: processedLogsErr },
+        { data: dailyRecord, error: dailyRecordErr },
+        { data: auditRows, error: auditRowsErr },
+        { data: corrections, error: correctionsErr },
+        { data: leaveApps, error: leaveAppsErr },
+        { data: rosterRow, error: rosterRowErr },
+        { data: standingShift, error: standingShiftErr },
+        { data: holidayRows, error: holidayRowsErr },
+        { data: policyEvals, error: policyEvalsErr },
         // NEW: CSV pipeline punch logs
-        { data: csvPunchLogs },
+        { data: csvPunchLogs, error: csvPunchLogsErr },
         // NEW: Upload session for this employee's punches (most recent, last 7d)
-        { data: uploadSession },
+        { data: uploadSession, error: uploadSessionErr },
       ] = await Promise.all([
         // 1. Raw device punches (Pipeline A — biometric)
         fastify.supabase
@@ -100,12 +101,18 @@ export default async function attendanceForensicsRoute(fastify: FastifyInstance)
           .order('timestamp', { ascending: true }),
 
         // 2. Processed punch sessions (Pipeline A — biometric)
+        // Was .or('check_in.gte.X,check_in.lte.Y') — that compiles to an OR,
+        // not a bounded range, so it matched every session the employee ever
+        // had (any timestamp is either >= start-of-day or <= end-of-day) and
+        // this per-day forensic report silently included the employee's
+        // entire session history instead of just the requested date.
         fastify.supabase
           .from('attendance_logs')
           .select('id, check_in, check_out, is_complete, created_at')
           .eq('tenant_id', req.tenantId)
           .eq('employee_id', employeeId)
-          .or(`check_in.gte.${date}T00:00:00.000Z,check_in.lte.${date}T23:59:59.999Z`)
+          .gte('check_in', `${date}T00:00:00.000Z`)
+          .lte('check_in', `${date}T23:59:59.999Z`)
           .order('check_in', { ascending: true }),
 
         // 3. Computed daily record — includes computed_source to identify which pipeline wrote it
@@ -204,6 +211,18 @@ export default async function attendanceForensicsRoute(fastify: FastifyInstance)
           .limit(1)
           .maybeSingle(),
       ])
+
+      // None of these 12 queries previously checked `error` — a transient
+      // DB failure on any one silently rendered as an empty/null result,
+      // so this forensic trace (built to reconstruct provenance for pay
+      // disputes) could present an incomplete picture as if it were
+      // complete, with no signal to the admin that something was missing.
+      const firstError = [
+        rawLogsErr, processedLogsErr, dailyRecordErr, auditRowsErr, correctionsErr,
+        leaveAppsErr, rosterRowErr, standingShiftErr, holidayRowsErr, policyEvalsErr,
+        csvPunchLogsErr, uploadSessionErr,
+      ].find(Boolean)
+      if (firstError) return serverError(req, reply, firstError, ErrorCode.QUERY_FAILED, 'Failed to build attendance forensic trace')
 
       // ── Normalise daily record status ────────────────────────────────────
       const daily = dailyRecord as any
