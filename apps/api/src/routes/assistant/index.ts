@@ -15,6 +15,8 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { serverError, ErrorCode } from '../../lib/api-errors.js'
+import { fetchTenantTz } from '../../lib/attendance-engine.js'
+import { getLocalDate, localDayBoundsUtc } from '../../lib/org-context.js'
 import {
   chatCompleteWithFallback, testConnection,
   AssistantNotConfiguredError, isConfigUsable, effectiveModel, PROVIDER_META,
@@ -239,8 +241,11 @@ export default async function assistantRoutes(fastify: FastifyInstance) {
   // Per-tenant AI token usage summary for the current and previous month, plus a
   // recent-days trend. Token counts only — pricing is applied by the owner portal.
   fastify.get('/assistant/usage', hrAuth, async (req: any, reply) => {
-    const now = new Date()
-    const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString()
+    // Tenant-local "this month" — a UTC month boundary can exclude/include
+    // up to ~5.5 hours of usage into the wrong month for a non-UTC tenant.
+    const tz = await fetchTenantTz(fastify.supabase, req.tenantId)
+    const today = getLocalDate(new Date().toISOString(), tz)
+    const monthStart = localDayBoundsUtc(`${today.slice(0, 7)}-01`, tz).startUtc
     const since = new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString()
 
     let rows: Array<{ provider: string; source: string; total_tokens: number; prompt_tokens: number; completion_tokens: number; created_at: string }>

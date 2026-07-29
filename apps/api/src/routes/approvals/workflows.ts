@@ -22,6 +22,7 @@ import {
 
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { isHrAdmin, resolveCallerEmployeeId, isDirectReport } from '../../lib/manager-scope.js'
+import { serverError, notFound, ErrorCode } from '../../lib/api-errors.js'
 
 // Workflow types the engine drives (must match the 053 enum + migrations 313/314).
 const WORKFLOW_TYPES = ['leave', 'correction', 'regularisation', 'overtime', 'comp_off', 'reimbursement', 'loan', 'advance'] as const
@@ -109,13 +110,16 @@ export default async function workflowsRoute(fastify: FastifyInstance) {
     }
 
     const { id } = req.params as { id: string }
-    const { error } = await fastify.supabase
+    const { data, error } = await fastify.supabase
       .from('approval_workflow_config')
       .delete()
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
+      .select('id')
+      .maybeSingle()
 
-    if (error) return reply.code(500).send({ error: 'DELETE_FAILED', message: 'Failed to delete workflow config' })
+    if (error) return serverError(req, reply, error, ErrorCode.DELETE_FAILED, 'Failed to delete workflow config')
+    if (!data) return notFound(reply, 'NOT_FOUND', 'Workflow config not found')
     return reply.code(204).send()
   })
 
@@ -164,12 +168,14 @@ export default async function workflowsRoute(fastify: FastifyInstance) {
     }
 
     // Fetch actions for timeline
-    const { data: actions } = await fastify.supabase
+    const { data: actions, error: actionsErr } = await fastify.supabase
       .from('approval_actions')
       .select('id, level, action, actor_id, comments, acted_at, profiles!inner(id, full_name)')
       .eq('instance_id', instanceId)
       .eq('tenant_id', req.tenantId)
       .order('acted_at', { ascending: true })
+
+    if (actionsErr) return serverError(req, reply, actionsErr, ErrorCode.QUERY_FAILED, 'Failed to fetch approval actions')
 
     return reply.send({ data: { ...inst, actions: actions ?? [] } })
   })
@@ -240,12 +246,13 @@ export default async function workflowsRoute(fastify: FastifyInstance) {
     if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
 
     if (!isHrAdmin(req.userRole)) {
-      const { data: entityRow } = await fastify.supabase
+      const { data: entityRow, error: entityErr } = await fastify.supabase
         .from(ENTITY_TABLE_MAP[parsed.data.entityType])
         .select('employee_id')
         .eq('id', parsed.data.entityId)
         .eq('tenant_id', req.tenantId)
         .maybeSingle()
+      if (entityErr) return serverError(req, reply, entityErr, ErrorCode.QUERY_FAILED, 'Failed to resolve approval chain owner')
       const targetEmployeeId = (entityRow as { employee_id: string } | null)?.employee_id
       if (!targetEmployeeId) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Request not found' })
 

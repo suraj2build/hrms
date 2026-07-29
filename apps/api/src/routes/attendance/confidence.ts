@@ -128,6 +128,14 @@ export default async function attendanceConfidenceRoute(fastify: FastifyInstance
 
   // ── GET /attendance/confidence/summary ────────────────────────────────────────
   fastify.get('/attendance/confidence/summary', auth, async (req: any, reply) => {
+    // Sibling routes in this file (/employee/:id, /low) both gate on
+    // HR_ADMIN_ROLES, and the consuming page is documented as
+    // "hr_admin, super_admin only" — this endpoint was missing that check,
+    // letting any authenticated employee read tenant-wide confidence-score
+    // aggregates.
+    if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
+      return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
+    }
     const parsed = summaryQuerySchema.safeParse(req.query)
     if (!parsed.success) {
       return reply.code(400).send({

@@ -36,6 +36,8 @@ import { orchestrateWorkforceEvent }    from '../../lib/workforce-orchestrator.j
 import { isMonthLocked, monthOf }       from '../../lib/period-lock.js'
 
 import { HR_ADMIN_ROLES, MANAGER_ROLES } from '../../lib/rbac.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
+
 const dateRe      = /^\d{4}-\d{2}-\d{2}$/
 const ALLOW_ROLES = MANAGER_ROLES
 
@@ -238,8 +240,13 @@ export default async function attendanceCorrectionsRoute(fastify: FastifyInstanc
       employeeId = resolved
     }
 
-    // Prevent duplicate pending corrections for the same date
-    const { count } = await fastify.supabase
+    // Fast-path pre-check for a friendly 409 (best-effort UX only — the real
+    // guard is the partial unique index on (tenant_id, employee_id, date)
+    // WHERE status = 'pending', migration 407). Without that DB-level guard,
+    // two concurrent submissions for the same employee+date could both pass
+    // this check before either INSERT commits, producing two pending
+    // corrections for the same date.
+    const { count, error: countError } = await fastify.supabase
       .from('attendance_corrections')
       .select('id', { count: 'exact', head: true })
       .eq('tenant_id', req.tenantId)
@@ -247,6 +254,9 @@ export default async function attendanceCorrectionsRoute(fastify: FastifyInstanc
       .eq('date', parsed.data.date)
       .eq('status', 'pending')
 
+    if (countError) {
+      return serverError(req, reply, countError, ErrorCode.QUERY_FAILED, 'Failed to check for an existing correction request')
+    }
     if ((count ?? 0) > 0) {
       return reply.code(409).send({
         error:   'CONFLICT',
@@ -269,6 +279,12 @@ export default async function attendanceCorrectionsRoute(fastify: FastifyInstanc
       .single()
 
     if (error) {
+      if ((error as any).code === '23505') {
+        return reply.code(409).send({
+          error:   'CONFLICT',
+          message: 'A pending correction already exists for this date. Please wait for it to be processed.',
+        })
+      }
       return reply.code(500).send({ error: 'INSERT_FAILED', message: 'Failed to submit correction request' })
     }
 

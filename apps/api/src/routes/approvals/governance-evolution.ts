@@ -338,9 +338,10 @@ export default async function governanceEvolutionRoutes(fastify: FastifyInstance
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
       .select('id, is_active')
-      .single()
+      .maybeSingle()
 
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to revoke delegation')
+    if (!data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Delegation not found' })
 
     return reply.send({ data })
   })

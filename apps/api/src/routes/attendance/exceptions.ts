@@ -176,27 +176,38 @@ export default async function attendanceExceptionsRoute(fastify: FastifyInstance
       return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch exceptions summary')
     }
 
-    const by_category: Record<string, number> = {}
-    const by_severity: Record<string, number> = {}
+    // by_category/by_severity are consumed by ExceptionGovernance.tsx as arrays
+    // ({category|severity, count, open_count}) — count/open_count are tracked
+    // separately per category (this endpoint's own query already scopes to
+    // 'open'/'acknowledged'; open_count narrows further to status === 'open').
+    const categoryCounts = new Map<string, { count: number; open_count: number }>()
+    const severityCounts = new Map<string, number>()
     let total_payroll_impacting = 0
-    let sla_breached_count = 0
+    let total_sla_breached = 0
     let requires_investigation = 0
 
     for (const row of rows) {
-      by_category[row.exception_category] = (by_category[row.exception_category] ?? 0) + 1
-      by_severity[row.severity] = (by_severity[row.severity] ?? 0) + 1
+      const cat = categoryCounts.get(row.exception_category) ?? { count: 0, open_count: 0 }
+      cat.count++
+      if (row.status === 'open') cat.open_count++
+      categoryCounts.set(row.exception_category, cat)
+
+      severityCounts.set(row.severity, (severityCounts.get(row.severity) ?? 0) + 1)
+
       if (row.payroll_impacting)    total_payroll_impacting++
-      if (row.sla_breached)         sla_breached_count++
+      if (row.sla_breached)         total_sla_breached++
       if (row.requires_investigation) requires_investigation++
     }
 
     return reply.send({
-      by_category,
-      by_severity,
-      total_open:             rows.length,
-      total_payroll_impacting,
-      sla_breached_count,
-      requires_investigation,
+      data: {
+        by_category: Array.from(categoryCounts.entries()).map(([category, v]) => ({ category, ...v })),
+        by_severity: Array.from(severityCounts.entries()).map(([severity, count]) => ({ severity, count })),
+        total_open:             rows.length,
+        total_payroll_impacting,
+        total_sla_breached,
+        requires_investigation,
+      },
     })
   })
 
@@ -281,13 +292,14 @@ export default async function attendanceExceptionsRoute(fastify: FastifyInstance
     const { status, resolution_note } = parsed.data
 
     // Fetch current row to check sla_due_at
-    const { data: existing } = await fastify.supabase
+    const { data: existing, error: existingErr } = await fastify.supabase
       .from('attendance_exceptions')
-      .select('id, sla_due_at, sla_breached')
+      .select('id, status, sla_due_at, sla_breached')
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
       .maybeSingle()
 
+    if (existingErr) return serverError(req, reply, existingErr, ErrorCode.QUERY_FAILED, 'Failed to fetch exception')
     if (!existing) {
       return reply.code(404).send({ error: 'NOT_FOUND', message: 'Exception not found' })
     }
@@ -309,17 +321,28 @@ export default async function attendanceExceptionsRoute(fastify: FastifyInstance
       }
     }
 
+    // Fold "not already in a terminal state" into the UPDATE's own WHERE
+    // clause — the read above is advisory only; without this, two admins
+    // acting concurrently on the same exception (e.g. one resolves while
+    // another dismisses) could both succeed, the second silently
+    // overwriting the first's status/resolution_note/resolved_by with no
+    // conflict surfaced, matching the race class already closed for
+    // corrections.ts's approve/retry/reject transitions.
     const { data, error } = await fastify.supabase
       .from('attendance_exceptions')
       .update(updates)
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
+      .not('status', 'in', '("resolved","dismissed")')
       .select()
-      .single()
+      .maybeSingle()
 
     if (error) {
       req.log.error({ err: error, exception_id: id }, 'attendance_exceptions update failed')
       return reply.code(500).send({ error: 'UPDATE_FAILED', message: 'Failed to update exception' })
+    }
+    if (!data) {
+      return reply.code(409).send({ error: 'CONFLICT', message: 'This exception was already resolved or dismissed' })
     }
 
     return reply.send({ data })

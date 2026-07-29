@@ -95,10 +95,9 @@ interface OperationalHealthData {
 }
 
 interface ExceptionSummary {
-  total:       number
-  open:        number
-  by_severity: Record<string, number>
-  by_category: Record<string, number>
+  total_open:  number
+  by_severity: Array<{ severity: string; count: number }>
+  by_category: Array<{ category: string; count: number; open_count: number }>
 }
 
 interface SchedulerRow {
@@ -550,7 +549,7 @@ export function ControlCenter() {
   const totalReconcIssues = (reconciliation?.attendance.total ?? 0) + (reconciliation?.leave.total ?? 0)
   const criticalIssues    = (reconciliation?.attendance.critical ?? 0)
     + (reconciliation?.leave.critical ?? 0)
-    + (excSummary?.by_severity?.critical ?? 0)
+    + (excSummary?.by_severity?.find(s => s.severity === 'critical')?.count ?? 0)
 
   const payrollStatus = payroll?.current_run?.status ?? 'no_run'
   const payrollHealth = payrollStatus === 'finalized' ? 'healthy'
@@ -578,10 +577,12 @@ export function ControlCenter() {
       rows.push({ label: 'Attendance reconciliation errors', count: reconciliation!.attendance.error, severity: 'medium', module: 'Attendance · Reconciliation' })
     if ((reconciliation?.leave.error ?? 0) > 0)
       rows.push({ label: 'Leave reconciliation errors', count: reconciliation!.leave.error, severity: 'medium', module: 'Leave · Reconciliation' })
-    if ((excSummary?.by_severity?.critical ?? 0) > 0)
-      rows.push({ label: 'Attendance exceptions (critical)', count: excSummary!.by_severity.critical, severity: 'critical', module: 'Attendance · Exceptions' })
-    if ((excSummary?.by_severity?.high ?? 0) > 0)
-      rows.push({ label: 'Attendance exceptions (high)', count: excSummary!.by_severity.high, severity: 'high', module: 'Attendance · Exceptions' })
+    const excCritical = excSummary?.by_severity?.find(s => s.severity === 'critical')?.count ?? 0
+    const excHigh     = excSummary?.by_severity?.find(s => s.severity === 'high')?.count ?? 0
+    if (excCritical > 0)
+      rows.push({ label: 'Attendance exceptions (critical)', count: excCritical, severity: 'critical', module: 'Attendance · Exceptions' })
+    if (excHigh > 0)
+      rows.push({ label: 'Attendance exceptions (high)', count: excHigh, severity: 'high', module: 'Attendance · Exceptions' })
     if ((freshness?.unprocessed_raw_logs ?? 0) > 50)
       rows.push({ label: 'Unprocessed raw attendance logs', count: freshness!.unprocessed_raw_logs, severity: 'medium', module: 'Attendance · Processing Queue' })
     return rows.sort((a, b) => ({ critical: 0, high: 1, medium: 2, low: 3 }[a.severity] - { critical: 0, high: 1, medium: 2, low: 3 }[b.severity]))

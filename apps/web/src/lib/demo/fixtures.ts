@@ -673,10 +673,21 @@ export function demoSchedulerRows() {
 
 export function demoExceptionsSummary() {
   return {
-    total: 9,
-    open: 6,
-    by_severity: { critical: 0, high: 2, medium: 3, low: 4 },
-    by_category: { missing_punch: 3, late: 4, early_out: 2 },
+    total_open: 9,
+    total_payroll_impacting: 2,
+    total_sla_breached: 1,
+    requires_investigation: 1,
+    by_severity: [
+      { severity: 'critical', count: 0 },
+      { severity: 'high',     count: 2 },
+      { severity: 'medium',   count: 3 },
+      { severity: 'low',      count: 4 },
+    ],
+    by_category: [
+      { category: 'missing_punch', count: 3, open_count: 2 },
+      { category: 'late',          count: 4, open_count: 3 },
+      { category: 'early_out',     count: 2, open_count: 1 },
+    ],
   }
 }
 

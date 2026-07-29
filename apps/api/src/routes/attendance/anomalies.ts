@@ -16,6 +16,9 @@ import { eventBus } from '../../lib/event-bus.js'
 import { recomputeRange } from '../../lib/attendance-engine.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
+import { fetchTenantTz } from '../../lib/attendance-engine.js'
+import { getLocalDate } from '../../lib/org-context.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 const dateRe = /^\d{4}-\d{2}-\d{2}$/
 
@@ -23,7 +26,7 @@ const hrQuerySchema = z.object({
   from:        z.string().regex(dateRe).optional(),
   to:          z.string().regex(dateRe).optional(),
   employee_id: z.string().uuid().optional(),
-  type:        z.enum(['missing_punch', 'missing_out', 'no_punch', 'late', 'excessive_hours']).optional(),
+  type:        z.enum(['missing_out', 'no_punch', 'late', 'excessive_hours']).optional(),
   severity:    z.enum(['low', 'medium', 'high']).optional(),
   resolved:    z.enum(['true', 'false']).optional(),
   limit:       z.coerce.number().int().min(1).max(200).default(100),
@@ -33,7 +36,7 @@ const hrQuerySchema = z.object({
 const myQuerySchema = z.object({
   from:   z.string().regex(dateRe).optional(),
   to:     z.string().regex(dateRe).optional(),
-  type:   z.enum(['missing_punch', 'missing_out', 'no_punch', 'late', 'excessive_hours']).optional(),
+  type:   z.enum(['missing_out', 'no_punch', 'late', 'excessive_hours']).optional(),
   limit:  z.coerce.number().int().min(1).max(100).default(50),
   offset: z.coerce.number().int().min(0).default(0),
 })
@@ -69,10 +72,12 @@ export default async function attendanceAnomaliesRoute(fastify: FastifyInstance)
 
     const { from, to, type, limit, offset } = parsed.data
 
-    // Default to current month if no date range supplied
-    const now    = new Date()
-    const fromDt = from ?? `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`
-    const toDate = new Date(now.getFullYear(), now.getMonth() + 1, 0)
+    // Default to current month (tenant-local) if no date range supplied
+    const tz     = await fetchTenantTz(fastify.supabase, req.tenantId)
+    const today  = getLocalDate(new Date().toISOString(), tz)
+    const [ty, tm] = today.split('-').map(Number)
+    const fromDt = from ?? `${ty}-${String(tm).padStart(2, '0')}-01`
+    const toDate = new Date(Date.UTC(ty, tm, 0))
     const toDt   = to   ?? toDate.toISOString().slice(0, 10)
 
     let q = fastify.supabase
@@ -106,10 +111,11 @@ export default async function attendanceAnomaliesRoute(fastify: FastifyInstance)
     }
 
     const { month } = req.query as { month?: string }
-    const now = new Date()
+    const tzSummary = await fetchTenantTz(fastify.supabase, req.tenantId)
+    const todaySummary = getLocalDate(new Date().toISOString(), tzSummary)
     const targetMonth = month && /^\d{4}-\d{2}$/.test(month)
       ? month
-      : `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+      : todaySummary.slice(0, 7)
 
     const periodStart = `${targetMonth}-01`
     const nextMonthDate = new Date(`${targetMonth}-01`)
@@ -136,13 +142,14 @@ export default async function attendanceAnomaliesRoute(fastify: FastifyInstance)
     // ── Fetch department info for all affected employees in one query ─────────────
     const affectedEmpIds = [...new Set((anomalies).map((r: any) => r.employee_id).filter(Boolean))]
 
-    const { data: empDeptRows } = affectedEmpIds.length > 0
+    const { data: empDeptRows, error: empDeptErr } = affectedEmpIds.length > 0
       ? await fastify.supabase
           .from('employees')
           .select('id, job_history!job_history_employee_id_fkey(department_id, department_name, is_current)')
           .eq('tenant_id', req.tenantId)
           .in('id', affectedEmpIds)
-      : { data: [] }
+      : { data: [], error: null }
+    if (empDeptErr) return serverError(req, reply, empDeptErr, ErrorCode.QUERY_FAILED, 'Failed to resolve employee departments')
 
     // Build employee → dept lookup (department lives on job_history)
     const empDeptMap: Record<string, { department_id: string; department_name: string }> = {}
@@ -155,11 +162,12 @@ export default async function attendanceAnomaliesRoute(fastify: FastifyInstance)
     }
 
     // ── Fetch active employee counts per department (for rate calculation) ────────
-    const { data: empCounts } = await fastify.supabase
+    const { data: empCounts, error: empCountsErr } = await fastify.supabase
       .from('employees')
       .select('job_history!job_history_employee_id_fkey(department_id, department_name, is_current)')
       .eq('tenant_id', req.tenantId)
       .eq('status', 'active')
+    if (empCountsErr) return serverError(req, reply, empCountsErr, ErrorCode.QUERY_FAILED, 'Failed to fetch active employee counts')
 
     // Build dept employee count map
     const deptEmpCount: Record<string, { name: string; count: number }> = {}
@@ -172,7 +180,7 @@ export default async function attendanceAnomaliesRoute(fastify: FastifyInstance)
     }
 
     // ── Aggregate anomalies by department ────────────────────────────────────────
-    type TypeKey = 'no_punch' | 'missing_punch' | 'missing_out' | 'late' | 'excessive_hours'
+    type TypeKey = 'no_punch' | 'missing_out' | 'late' | 'excessive_hours'
     interface DeptBucket {
       department_id:   string
       department_name: string
@@ -204,7 +212,7 @@ export default async function attendanceAnomaliesRoute(fastify: FastifyInstance)
           department_name: deptName,
           total: 0, unresolved: 0, high_severity: 0,
           employee_ids: new Set(),
-          by_type: { no_punch: 0, missing_punch: 0, missing_out: 0, late: 0, excessive_hours: 0 },
+          by_type: { no_punch: 0, missing_out: 0, late: 0, excessive_hours: 0 },
         })
       }
       const bucket = deptMap.get(deptId)!
@@ -249,17 +257,19 @@ export default async function attendanceAnomaliesRoute(fastify: FastifyInstance)
         const mNext  = new Date(`${m}-01`)
         mNext.setUTCMonth(mNext.getUTCMonth() + 1)
         const mEnd = mNext.toISOString().slice(0, 10)
-        const { count: mTotal } = await fastify.supabase
+        const { count: mTotal, error: mTotalErr } = await fastify.supabase
           .from('attendance_anomalies')
           .select('id', { count: 'exact', head: true })
           .eq('tenant_id', req.tenantId)
           .gte('date', mStart).lt('date', mEnd)
-        const { count: mUnres } = await fastify.supabase
+        if (mTotalErr) return serverError(req, reply, mTotalErr, ErrorCode.QUERY_FAILED, 'Failed to fetch anomaly trend')
+        const { count: mUnres, error: mUnresErr } = await fastify.supabase
           .from('attendance_anomalies')
           .select('id', { count: 'exact', head: true })
           .eq('tenant_id', req.tenantId)
           .eq('resolved', false)
           .gte('date', mStart).lt('date', mEnd)
+        if (mUnresErr) return serverError(req, reply, mUnresErr, ErrorCode.QUERY_FAILED, 'Failed to fetch anomaly trend')
         trendData.push({ month: m, total: mTotal ?? 0, unresolved: mUnres ?? 0 })
       }
     }
