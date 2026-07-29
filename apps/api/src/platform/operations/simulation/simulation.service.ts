@@ -32,8 +32,8 @@ export class SimulationService {
       risk_level:       riskLevel,
       key_findings: [
         `${params.affected_count} employees affected`,
-        `Estimated additional payroll cost: ₹${(totalImpact / 100).toFixed(0)} per month`,
-        `Annual payroll impact: ₹${(totalImpact * 12 / 100).toFixed(0)}`,
+        `Estimated additional payroll cost: ₹${totalImpact.toFixed(0)} per month`,
+        `Annual payroll impact: ₹${(totalImpact * 12).toFixed(0)}`,
       ],
       explainability: explainabilityService.explain({
         event_type:  'simulation.payroll_impact',

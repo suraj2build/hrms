@@ -39,7 +39,14 @@ export class VerificationOrchestrator {
   ): VerificationStatus {
     if (adapterStatus === 'active' && isPositive)  return 'verified'
     if (adapterStatus === 'active' && !isPositive) return 'failed'
-    if (adapterStatus === 'not_configured')        return isPositive ? 'verified' : 'pending'
+    // 'not_configured' means no external provider ever ran — the adapter's
+    // is_valid is a purely local format/checksum check (PAN regex, Aadhaar
+    // Verhoeff checksum), not a real identity confirmation. Reporting
+    // 'verified' here — as this used to do when isPositive was true — would
+    // fabricate a completed identity check that never actually ran (see the
+    // identical reasoning already applied to the bank penny-drop case in
+    // verifyBank below). Always 'pending' — awaiting a real provider run.
+    if (adapterStatus === 'not_configured')        return 'pending'
     return 'degraded'
   }
 

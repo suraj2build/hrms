@@ -13,6 +13,7 @@ import { verificationRetryService }    from '../../platform/integrations/retry/v
 import { aadhaarVerificationService }  from '../../platform/trust/verification/aadhaar/aadhaar-verification.service.js'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { serverError, notFound, ErrorCode } from '../../lib/api-errors.js'
+import { fetchAllRows } from '../../lib/supabase-paginate.js'
 
 export default async function trustIntelligenceRoutes(fastify: FastifyInstance) {
   // Almost every route below is tenant-wide or takes an arbitrary
@@ -497,12 +498,18 @@ export default async function trustIntelligenceRoutes(fastify: FastifyInstance) 
    */
   fastify.get('/trust/verifications/stats', adminAuth, async (req, reply) => {
     const tenantId = (req as any).tenantId
-    const { data, error } = await fastify.supabase
-      .from('verification_records')
-      .select('status, verification_type')
-      .eq('tenant_id', tenantId)
-    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch verification statistics')
-    const records = data ?? []
+    let records: Array<{ status: string; verification_type: string }>
+    try {
+      records = await fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('verification_records')
+          .select('status, verification_type')
+          .eq('tenant_id', tenantId)
+          .range(from, to),
+      )
+    } catch (error) {
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch verification statistics')
+    }
     return {
       total:        records.length,
       verified:     records.filter(r => r.status === 'verified').length,

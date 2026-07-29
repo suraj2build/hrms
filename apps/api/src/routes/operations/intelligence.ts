@@ -13,6 +13,7 @@ import { securityIntelligenceService }    from '../../platform/operations/securi
 import { triggerRegistry }                from '../../platform/operations/automation/trigger-registry.js'
 import { requireRole, HR_ADMIN_ROLES }    from '../../lib/rbac.js'
 import { serverError, ErrorCode }         from '../../lib/api-errors.js'
+import { fetchTenantTz }                  from '../../lib/attendance-engine.js'
 
 export default async function operationsRoutes(fastify: FastifyInstance) {
 
@@ -42,7 +43,8 @@ export default async function operationsRoutes(fastify: FastifyInstance) {
   // GET /operations/heatmaps — all domain heatmaps
   fastify.get('/operations/heatmaps', adminAuth, async (req, _reply) => {
     const tenantId = (req as any).tenantId
-    const snapshots = heatmapService.getAllSnapshots(tenantId)
+    const tz = await fetchTenantTz(fastify.supabase, tenantId)
+    const snapshots = heatmapService.getAllSnapshots(tenantId, tz)
     return { snapshots, total: snapshots.length }
   })
 
@@ -50,7 +52,8 @@ export default async function operationsRoutes(fastify: FastifyInstance) {
   fastify.get('/operations/heatmaps/:domain', adminAuth, async (req, _reply) => {
     const { domain } = req.params as any
     const tenantId = (req as any).tenantId
-    const snapshot = heatmapService.buildDomainHeatmap(domain, tenantId)
+    const tz = await fetchTenantTz(fastify.supabase, tenantId)
+    const snapshot = heatmapService.buildDomainHeatmap(domain, tenantId, tz)
     return snapshot
   })
 

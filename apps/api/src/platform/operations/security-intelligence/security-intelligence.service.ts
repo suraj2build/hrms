@@ -7,6 +7,12 @@ import type { SecurityIntelligenceEvent, SecuritySignalType } from '../types/ope
 import type { ResolvedPlatformEvent }                         from '../../events/types/platform-event.js'
 import { explainabilityService }                              from '../../ai/services/explainability.service.js'
 
+// Both instance fields below are process-global (this service is a
+// module-level singleton) and previously grew without bound for the
+// lifetime of the Node process — `clearWindow()` existed but had zero
+// callers, and `events` had no cap at all.
+const MAX_EVENTS = 2000
+
 export class SecurityIntelligenceService {
   // Track per-actor event counts in a short rolling window
   private actorCounts: Map<string, { count: number; window_start: number }> = new Map()
@@ -25,6 +31,13 @@ export class SecurityIntelligenceService {
       existing.count++
     } else {
       this.actorCounts.set(key, { count: 1, window_start: now })
+    }
+
+    // Opportunistic sweep of expired windows — bounds actorCounts to
+    // roughly the distinct (tenant, actor, event_type) tuples seen within
+    // the last 5 minutes rather than every tuple ever seen by the process.
+    for (const [k, v] of this.actorCounts) {
+      if (now - v.window_start >= windowMs) this.actorCounts.delete(k)
     }
 
     const count = this.actorCounts.get(key)?.count ?? 1
@@ -69,6 +82,7 @@ export class SecurityIntelligenceService {
       }),
     }
     this.events.push(signal)
+    if (this.events.length > MAX_EVENTS) this.events.splice(0, this.events.length - MAX_EVENTS)
     return signal
   }
 

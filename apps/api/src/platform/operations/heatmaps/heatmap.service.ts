@@ -7,6 +7,7 @@ import type { HeatmapSnapshot, HeatmapCell, HealthDomain } from '../types/operat
 import { observabilityIntelligenceService }                 from '../../observability/intelligence/observability-intelligence.service.js'
 import { riskScoreService }                                 from '../../risk/scoring/risk-score.service.js'
 import type { EventSeverity }                               from '../../events/types/platform-event.js'
+import { getLocalDate }                                     from '../../../lib/org-context.js'
 
 export class HeatmapService {
   private readonly snapshots: Map<string, HeatmapSnapshot> = new Map()
@@ -14,9 +15,12 @@ export class HeatmapService {
   /**
    * Build a risk heatmap for a domain by aggregating risk scores.
    * Groups by entity_id with their risk scores.
+   * `tz` is the tenant's IANA timezone (default 'UTC') — used only to label
+   * the snapshot's `period` with the tenant's local calendar month; callers
+   * without a tz handy (self-recursive call below) fall back to UTC.
    */
-  buildDomainHeatmap(domain: HealthDomain, orgId: string): HeatmapSnapshot {
-    const period = new Date().toISOString().slice(0, 7)  // YYYY-MM
+  buildDomainHeatmap(domain: HealthDomain, orgId: string, tz = 'UTC'): HeatmapSnapshot {
+    const period = getLocalDate(new Date().toISOString(), tz).slice(0, 7)  // YYYY-MM
     const topRisks = riskScoreService.getTopRisks(50, orgId)
     const clusters = observabilityIntelligenceService.getClusters(orgId)
 
@@ -62,9 +66,9 @@ export class HeatmapService {
     return this.snapshots.get(`${orgId}:${domain}`)
   }
 
-  getAllSnapshots(orgId: string): HeatmapSnapshot[] {
+  getAllSnapshots(orgId: string, tz = 'UTC'): HeatmapSnapshot[] {
     const domains: HealthDomain[] = ['payroll', 'attendance', 'governance', 'trust', 'approvals']
-    return domains.map(d => this.buildDomainHeatmap(d, orgId))
+    return domains.map(d => this.buildDomainHeatmap(d, orgId, tz))
   }
 }
 

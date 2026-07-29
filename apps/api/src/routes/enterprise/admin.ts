@@ -1,10 +1,36 @@
 import type { FastifyInstance } from 'fastify'
 import { slaService }            from '../../platform/operations/sla/sla.service.js'
+import type { SlaBreachEvent }   from '../../platform/operations/types/operations-types.js'
 import { governanceEvaluator }   from '../../platform/governance/evaluators/event-evaluator.js'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 export default async function adminRoutes(fastify: FastifyInstance) {
+
+  // scanBreaches() returns newly-detected breaches across ALL tenants (it has
+  // no tenant filter), so this must persist the full unfiltered result — not
+  // just the calling tenant's slice — or another tenant's breach would be
+  // detected-and-discarded here and never appear in GET /operations/sla/breaches,
+  // which reads from this table and previously had nothing to ever read
+  // (scanBreaches() only ever appended to its own in-memory array).
+  async function persistBreaches(breaches: SlaBreachEvent[]): Promise<void> {
+    if (breaches.length === 0) return
+    const { error } = await fastify.supabase.from('sla_breach_events').insert(
+      breaches.map(b => ({
+        tenant_id:       b.tenant_id,
+        sla_id:          b.sla_id,
+        entity_id:       b.entity_id,
+        entity_type:     b.entity_type,
+        breach_severity: b.breach_severity,
+        description:     b.description,
+        explainability:  b.explainability,
+        breached_at:     b.breached_at,
+      })),
+    )
+    if (error) {
+      fastify.log.error({ err: error }, '[adminRoutes] failed to persist SLA breach events')
+    }
+  }
 
   // GET /enterprise/queue
   // scanBreaches()/getTracked() operate on a process-global, cross-tenant
@@ -18,7 +44,9 @@ export default async function adminRoutes(fastify: FastifyInstance) {
   // for payroll/compliance/incident SLAs, not general-employee data.
   fastify.get('/queue', { preHandler: [fastify.authenticate, requireRole(...HR_ADMIN_ROLES)] }, async (req: any, reply) => {
     try {
-      const sla_breaches   = slaService.scanBreaches().filter(b => b.tenant_id === req.tenantId)
+      const allNewBreaches = slaService.scanBreaches()
+      await persistBreaches(allNewBreaches)
+      const sla_breaches   = allNewBreaches.filter(b => b.tenant_id === req.tenantId)
       const pending_sla    = slaService.getTracked(req.tenantId)
       const listener_health = governanceEvaluator.listenerHealth(req.tenantId)
 
@@ -36,7 +64,9 @@ export default async function adminRoutes(fastify: FastifyInstance) {
   // POST /enterprise/sla/scan
   fastify.post('/sla/scan', { preHandler: [fastify.authenticate, requireRole(...HR_ADMIN_ROLES)] }, async (req: any, reply) => {
     try {
-      const breaches = slaService.scanBreaches().filter(b => b.tenant_id === req.tenantId)
+      const allNewBreaches = slaService.scanBreaches()
+      await persistBreaches(allNewBreaches)
+      const breaches = allNewBreaches.filter(b => b.tenant_id === req.tenantId)
       return reply.send({
         breaches,
         count:      breaches.length,
