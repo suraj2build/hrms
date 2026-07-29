@@ -288,6 +288,9 @@ function AddTemplateDialog({ open, onClose }: { open: boolean; onClose: () => vo
       onClose()
       setForm({ name: '', code: '', calculation_basis: 'fixed', payout_frequency: 'monthly' })
     },
+    onError: (e: Error) => {
+      toast.error('Failed to create template', { description: e.message })
+    },
   })
 
   return (

@@ -33,7 +33,7 @@ function getLast6Months(): string[] {
   const months: string[] = []
   const d = new Date(); d.setDate(1)
   for (let i = 0; i < 6; i++) {
-    months.push(d.toISOString().slice(0, 7))
+    months.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`)
     d.setMonth(d.getMonth() - 1)
   }
   return months

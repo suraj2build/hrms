@@ -64,7 +64,7 @@ function getLast6Months(): string[] {
   const now = new Date()
   return Array.from({ length: 6 }, (_, i) => {
     const d = new Date(now.getFullYear(), now.getMonth() - i, 1)
-    return d.toISOString().slice(0, 7)
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
   })
 }
 
@@ -114,7 +114,8 @@ export function PTAXManagement() {
   const isAdmin     = ['super_admin', 'hr_admin'].includes(profile?.role ?? '')
   const qc          = useQueryClient()
 
-  const todayYM = new Date().toISOString().slice(0, 7)
+  const todayYMDate = new Date()
+  const todayYM = `${todayYMDate.getFullYear()}-${String(todayYMDate.getMonth() + 1).padStart(2, '0')}`
   const [viewMonth] = useStatutoryMonth()   // shared across all Compliance tabs
   const last6   = useMemo(() => getLast6Months(), [])
 

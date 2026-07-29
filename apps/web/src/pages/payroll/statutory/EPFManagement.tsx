@@ -27,6 +27,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { api, ApiError } from '@/lib/api/client'
 import { useAuthStore }  from '@/stores/authStore'
 import { cn }            from '@/lib/utils'
@@ -89,7 +90,7 @@ function getLast6Months(): string[] {
   const now = new Date()
   return Array.from({ length: 6 }, (_, i) => {
     const d = new Date(now.getFullYear(), now.getMonth() - i, 1)
-    return d.toISOString().slice(0, 7)
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
   })
 }
 
@@ -322,6 +323,7 @@ export function EPFManagement() {
 
   const [showAddReg, setShowAddReg] = useState(false)
   const [regForm, setRegForm] = useState({ registration_number: '', code_label: '', pf_sub_code: '', is_default: false })
+  const [deleteRegTarget, setDeleteRegTarget] = useState<EPFRegistration | null>(null)
 
   const qc = useQueryClient()
 
@@ -355,8 +357,12 @@ export function EPFManagement() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['epf-registrations'] })
       toast.success('Registration removed')
+      setDeleteRegTarget(null)
     },
-    onError: () => toast.error('Failed to remove registration'),
+    onError: () => {
+      toast.error('Failed to remove registration')
+      setDeleteRegTarget(null)
+    },
   })
 
   // ── Current month (stat cards) ────────────────────────────────────────────────
@@ -567,7 +573,7 @@ export function EPFManagement() {
                               </button>
                             )}
                             <button
-                              onClick={() => deleteRegMutation.mutate(reg.id)}
+                              onClick={() => setDeleteRegTarget(reg)}
                               disabled={deleteRegMutation.isPending}
                               className="p-1 rounded text-muted-foreground/50 hover:text-destructive hover:bg-destructive/10 transition-colors"
                               title="Remove"
@@ -756,6 +762,16 @@ export function EPFManagement() {
       {showEditConfig && config && (
         <EditConfigDialog config={config} onClose={() => setShowEditConfig(false)} />
       )}
+
+      <ConfirmDialog
+        open={!!deleteRegTarget}
+        title="Remove EPF Registration"
+        message={deleteRegTarget ? `Remove registration "${deleteRegTarget.registration_number}"${deleteRegTarget.code_label ? ` (${deleteRegTarget.code_label})` : ''}? This cannot be undone.` : ''}
+        confirmLabel="Remove"
+        destructive
+        onConfirm={() => deleteRegTarget && deleteRegMutation.mutate(deleteRegTarget.id)}
+        onCancel={() => setDeleteRegTarget(null)}
+      />
     </PageContainer>
   )
 }

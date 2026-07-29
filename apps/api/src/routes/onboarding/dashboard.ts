@@ -1,6 +1,8 @@
 import type { FastifyInstance } from 'fastify'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
 import { serverError, ErrorCode } from '../../lib/api-errors.js'
+import { fetchTenantTz } from '../../lib/attendance-engine.js'
+import { getLocalDate, localDayBoundsUtc } from '../../lib/org-context.js'
 
 export default async function onboardingDashboardRoutes(fastify: FastifyInstance) {
   const auth = { preHandler: [fastify.authenticate] }
@@ -13,10 +15,16 @@ export default async function onboardingDashboardRoutes(fastify: FastifyInstance
 
     const tenantId: string = req.tenantId
 
-    // Current month boundaries
-    const now = new Date()
-    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString()
-    const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59).toISOString()
+    // Current month boundaries, resolved in the tenant's own timezone — not the
+    // server's (UTC) clock — otherwise this/last month's counts shift by up to a
+    // day right at the tenant-local month boundary (the ISSUE-154 bug class).
+    const tenantTz = await fetchTenantTz(fastify.supabase, tenantId)
+    const todayStr = getLocalDate(new Date().toISOString(), tenantTz)
+    const [ty, tm] = todayStr.split('-').map(Number)
+    const firstOfMonth = `${ty}-${String(tm).padStart(2, '0')}-01`
+    const lastOfMonth = new Date(Date.UTC(ty, tm, 0)).toISOString().slice(0, 10)
+    const monthStart = localDayBoundsUtc(firstOfMonth, tenantTz).startUtc
+    const monthEnd = localDayBoundsUtc(lastOfMonth, tenantTz).endUtc
 
     // Run all stats queries in parallel
     const [

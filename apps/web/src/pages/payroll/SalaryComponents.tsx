@@ -25,6 +25,7 @@ import { SectionCard }   from '@/components/layout/SectionCard'
 import { Button }        from '@/components/ui/button'
 import { Badge }         from '@/components/ui/badge'
 import { Input }         from '@/components/ui/input'
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { api }           from '@/lib/api/client'
 import { useAuthStore }  from '@/stores/authStore'
 import { cn }            from '@/lib/utils'
@@ -114,6 +115,7 @@ export function SalaryComponents() {
   const [form, setForm]           = useState<ComponentForm>(EMPTY_FORM)
   const [search, setSearch]       = useState('')
   const [typeFilter, setTypeFilter] = useState<ComponentType | 'all'>('all')
+  const [deleteTarget, setDeleteTarget] = useState<SalaryComponent | null>(null)
 
   // ── Queries ─────────────────────────────────────────────────────────────────
 
@@ -151,8 +153,8 @@ export function SalaryComponents() {
 
   const deleteMutation = useMutation({
     mutationFn: (id: string) => api.delete(`/masters/salary-components/${id}`),
-    onSuccess: () => { toast.success('Component deleted'); invalidate() },
-    onError: (e: Error) => { toast.error('Failed to delete component', { description: e.message }) },
+    onSuccess: () => { toast.success('Component deleted'); invalidate(); setDeleteTarget(null) },
+    onError: (e: Error) => { toast.error('Failed to delete component', { description: e.message }); setDeleteTarget(null) },
   })
 
   const seedMutation = useMutation<{ data: { created: number; skipped: number; total: number } }, Error>({
@@ -438,7 +440,7 @@ export function SalaryComponents() {
                         </Button>
                         <Button size="icon" variant="ghost" className="h-7 w-7 text-destructive hover:text-destructive"
                           disabled={deleteMutation.isPending}
-                          onClick={() => deleteMutation.mutate(c.id)}>
+                          onClick={() => setDeleteTarget(c)}>
                           <Trash2 className="h-3.5 w-3.5" />
                         </Button>
                       </div>
@@ -450,6 +452,16 @@ export function SalaryComponents() {
           </div>
         )}
       </SectionCard>
+
+      <ConfirmDialog
+        open={!!deleteTarget}
+        title="Delete Component"
+        message={deleteTarget ? `Delete "${deleteTarget.name}" (${deleteTarget.code})? This may affect any salary structures that reference it.` : ''}
+        confirmLabel="Delete"
+        destructive
+        onConfirm={() => deleteTarget && deleteMutation.mutate(deleteTarget.id)}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </PageContainer>
   )
 }

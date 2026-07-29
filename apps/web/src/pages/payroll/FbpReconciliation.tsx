@@ -22,6 +22,7 @@ import { SectionCard }   from '@/components/layout/SectionCard'
 import { Button }        from '@/components/ui/button'
 import { Input }         from '@/components/ui/input'
 import { Badge }         from '@/components/ui/badge'
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { api }           from '@/lib/api/client'
 import { useAuthStore }  from '@/stores/authStore'
 import { getSignedUrl }  from '@/lib/supabase-storage'
@@ -64,6 +65,7 @@ export function FbpReconciliation() {
 
   const [fy, setFy] = useState(currentFY())
   const [quarter, setQuarter] = useState(1)
+  const [showLockConfirm, setShowLockConfirm] = useState(false)
 
   const reconQ = useQuery<{ data: { rows: ReconRow[]; total_taxable: number } }>({
     queryKey: ['fbp-recon', fy, quarter],
@@ -100,8 +102,8 @@ export function FbpReconciliation() {
   })
   const lock = useMutation({
     mutationFn: () => api.post<{ data: { locked: number } }>('/payroll/fbp/reconciliation/lock', { financial_year: fy, quarter }),
-    onSuccess: (res) => { toast.success(`Quarter locked (${res?.data?.locked ?? 0} rows). Taxable now flows to TDS.`); refresh() },
-    onError: (e: Error) => toast.error('Lock failed', { description: e.message }),
+    onSuccess: (res) => { setShowLockConfirm(false); toast.success(`Quarter locked (${res?.data?.locked ?? 0} rows). Taxable now flows to TDS.`); refresh() },
+    onError: (e: Error) => { setShowLockConfirm(false); toast.error('Lock failed', { description: e.message }) },
   })
 
   // Open each uploaded bill for a submission in a new tab via a short-lived signed URL.
@@ -131,6 +133,7 @@ export function FbpReconciliation() {
   }
 
   return (
+    <>
     <PageContainer>
       <PageHeader
         title="FBP Reconciliation"
@@ -199,7 +202,7 @@ export function FbpReconciliation() {
               <span className="font-semibold text-foreground ml-1">{inr(totalTaxable)}</span>
             </span>
             <Button size="sm" disabled={lock.isPending || rows.length === 0 || anyLocked}
-              onClick={() => lock.mutate()}>
+              onClick={() => setShowLockConfirm(true)}>
               {lock.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : <Lock className="h-3.5 w-3.5 mr-1.5" />}
               {anyLocked ? 'Locked' : 'Lock Quarter'}
             </Button>
@@ -247,5 +250,14 @@ export function FbpReconciliation() {
         )}
       </SectionCard>
     </PageContainer>
+    <ConfirmDialog
+      open={showLockConfirm}
+      title="Lock quarter?"
+      message={`This locks ${fy} Q${quarter} — the taxable shortfall will flow to TDS and can no longer be changed for this quarter.`}
+      confirmLabel="Lock Quarter"
+      onConfirm={() => lock.mutate()}
+      onCancel={() => setShowLockConfirm(false)}
+    />
+    </>
   )
 }

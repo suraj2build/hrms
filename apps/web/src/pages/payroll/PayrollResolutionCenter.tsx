@@ -28,6 +28,7 @@ import { PageContainer }  from '@/components/layout/PageContainer'
 import { PageHeader }     from '@/components/layout/PageHeader'
 import { SectionCard }    from '@/components/layout/SectionCard'
 import { Button }         from '@/components/ui/button'
+import { ConfirmDialog }  from '@/components/ui/ConfirmDialog'
 import { api }            from '@/lib/api/client'
 import { cn }             from '@/lib/utils'
 
@@ -414,6 +415,9 @@ export function PayrollResolutionCenter() {
   // Filter state
   const [filterStatus, setFilterStatus] = useState<'all' | 'open' | 'resolved' | 'ignored'>('all')
 
+  // Freeze-month confirmation
+  const [showFreezeConfirm, setShowFreezeConfirm] = useState(false)
+
   // ── Fetch blockers ──────────────────────────────────────────────────────────
   const {
     data,
@@ -473,12 +477,16 @@ export function PayrollResolutionCenter() {
       reason: 'Frozen from Resolution Center — investigation in progress',
     }),
     onSuccess: (res) => {
+      setShowFreezeConfirm(false)
       toast.success(`Payroll for ${res?.frozen_month} frozen`, {
         description: 'No further payroll writes are allowed for this month.',
       })
       qc.invalidateQueries({ queryKey: ['payroll-runs'] })
     },
-    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : 'Failed to freeze payroll month'),
+    onError: (e: unknown) => {
+      setShowFreezeConfirm(false)
+      toast.error(e instanceof Error ? e.message : 'Failed to freeze payroll month')
+    },
   })
 
   // ── Derived ─────────────────────────────────────────────────────────────────
@@ -703,7 +711,7 @@ export function PayrollResolutionCenter() {
                 variant="outline"
                 className="gap-1.5 w-full text-warning border-warning/40 hover:bg-warning/10"
                 disabled={freezeMutation.isPending}
-                onClick={() => freezeMutation.mutate()}
+                onClick={() => setShowFreezeConfirm(true)}
               >
                 {freezeMutation.isPending
                   ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -758,6 +766,16 @@ export function PayrollResolutionCenter() {
           }
         />
       )}
+
+      <ConfirmDialog
+        open={showFreezeConfirm}
+        title="Freeze payroll month?"
+        message={`This blocks all further payroll writes for ${run.month} until it is reopened. Use only when investigation requires changes to be blocked.`}
+        confirmLabel="Freeze Month"
+        destructive
+        onConfirm={() => freezeMutation.mutate()}
+        onCancel={() => setShowFreezeConfirm(false)}
+      />
     </PageContainer>
   )
 }

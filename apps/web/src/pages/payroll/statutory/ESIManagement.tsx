@@ -25,6 +25,7 @@ import { Button }        from '@/components/ui/button'
 import { Badge }         from '@/components/ui/badge'
 import { Input }         from '@/components/ui/input'
 import { EmployeeSelector } from '@/components/filters/EmployeeSelector'
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import {
   Dialog,
   DialogContent,
@@ -90,7 +91,7 @@ function getLast6Months(): string[] {
   const now = new Date()
   return Array.from({ length: 6 }, (_, i) => {
     const d = new Date(now.getFullYear(), now.getMonth() - i, 1)
-    return d.toISOString().slice(0, 7)
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
   })
 }
 
@@ -403,7 +404,8 @@ export function ESIManagement() {
   const { profile } = useAuthStore()
   const isAdmin     = ['super_admin', 'hr_admin'].includes(profile?.role ?? '')
 
-  const todayYM = new Date().toISOString().slice(0, 7)
+  const todayYMDate = new Date()
+  const todayYM = `${todayYMDate.getFullYear()}-${String(todayYMDate.getMonth() + 1).padStart(2, '0')}`
   const [viewMonth] = useStatutoryMonth()   // shared across all Compliance tabs
   const last6   = useMemo(() => getLast6Months(), [])
   const [showEditConfig, setShowEditConfig] = useState(false)
@@ -434,6 +436,7 @@ export function ESIManagement() {
   const registrations = Array.isArray(registrationsData) ? registrationsData : []
 
   const [showAddReg, setShowAddReg] = useState(false)
+  const [deleteRegTarget, setDeleteRegTarget] = useState<ESIRegistration | null>(null)
   const [regForm, setRegForm] = useState({ registration_number: '', code_label: '', is_default: false })
 
   const qc = useQueryClient()
@@ -467,8 +470,12 @@ export function ESIManagement() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['esi-registrations'] })
       toast.success('Registration removed')
+      setDeleteRegTarget(null)
     },
-    onError: () => toast.error('Failed to remove registration'),
+    onError: () => {
+      toast.error('Failed to remove registration')
+      setDeleteRegTarget(null)
+    },
   })
 
   // ── Contributions query (current-month summary for stat cards only) ──────────
@@ -712,7 +719,7 @@ export function ESIManagement() {
                               </button>
                             )}
                             <button
-                              onClick={() => deleteRegMutation.mutate(reg.id)}
+                              onClick={() => setDeleteRegTarget(reg)}
                               disabled={deleteRegMutation.isPending}
                               className="p-1 rounded text-muted-foreground/50 hover:text-destructive hover:bg-destructive/10 transition-colors"
                               title="Remove"
@@ -894,6 +901,16 @@ export function ESIManagement() {
       {showEditConfig && config && (
         <EditConfigDialog config={config} onClose={() => setShowEditConfig(false)} />
       )}
+
+      <ConfirmDialog
+        open={!!deleteRegTarget}
+        title="Remove ESI Registration"
+        message={deleteRegTarget ? `Remove registration "${deleteRegTarget.registration_number}"${deleteRegTarget.code_label ? ` (${deleteRegTarget.code_label})` : ''}? This cannot be undone.` : ''}
+        confirmLabel="Remove"
+        destructive
+        onConfirm={() => deleteRegTarget && deleteRegMutation.mutate(deleteRegTarget.id)}
+        onCancel={() => setDeleteRegTarget(null)}
+      />
     </PageContainer>
   )
 }

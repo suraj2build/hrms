@@ -396,6 +396,10 @@ export function PayrollControlCenter(): JSX.Element {
   const [isFrozen,  setIsFrozen]  = useState(false)
   const [lastRunId, setLastRunId] = useState<string | null>(null)
 
+  // Sent as Idempotency-Key on trigger, mirroring PayrollRuns.tsx's triggerMutation.
+  // Rotated only after a successful trigger, so a failed-then-retried submit reuses the same key.
+  const runPayrollIdempotencyKey = useRef(crypto.randomUUID())
+
   // ── Skip the month-change effect on first mount (state already initialised above) ──
   const isFirstMount = useRef(true)
 
@@ -549,8 +553,11 @@ export function PayrollControlCenter(): JSX.Element {
   })
 
   const runPayrollMutation = useMutation({
-    mutationFn: () => api.post<{ run_id: string }>('/payroll/runs', { month: payrollMonth }),
+    mutationFn: () => api.post<{ run_id: string }>('/payroll/runs', { month: payrollMonth }, {
+      headers: { 'Idempotency-Key': runPayrollIdempotencyKey.current },
+    }),
     onSuccess: (data) => {
+      runPayrollIdempotencyKey.current = crypto.randomUUID()
       setIsRunning(false)
       setLastRunId(data?.run_id ?? null)
       completeStep('final-lock')

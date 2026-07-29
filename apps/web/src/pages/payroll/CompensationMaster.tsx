@@ -12,6 +12,7 @@ import { SectionCard }   from '@/components/layout/SectionCard'
 import { Button }        from '@/components/ui/button'
 import { Badge }         from '@/components/ui/badge'
 import { Input }         from '@/components/ui/input'
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@/components/ui/dialog'
@@ -480,6 +481,7 @@ export function CompensationMaster() {
   const [cloneDialogOpen, setCloneDialogOpen] = useState(false)
 
   const [componentDialogOpen, setComponentDialogOpen] = useState(false)
+  const [removeComponentTarget, setRemoveComponentTarget] = useState<StructureComponent | null>(null)
 
   const [previewCtc, setPreviewCtc] = useState('1200000')
 
@@ -512,8 +514,14 @@ export function CompensationMaster() {
 
   // ── Mutations ────────────────────────────────────────────────────────────────
 
-  const invalidateStructures = () => qc.invalidateQueries({ queryKey: ['comp-structures'] })
-  const invalidateComponents = () => qc.invalidateQueries({ queryKey: ['comp-structure-components', selectedId] })
+  const invalidateStructures = () => {
+    qc.invalidateQueries({ queryKey: ['comp-structures'] })
+    qc.invalidateQueries({ queryKey: ['salary-structures-list'] })  // EmployeeProfile Setup Compensation dialog
+  }
+  const invalidateComponents = () => {
+    qc.invalidateQueries({ queryKey: ['comp-structure-components', selectedId] })
+    qc.invalidateQueries({ queryKey: ['structure-components', selectedId] })  // EmployeeProfile Setup Compensation dialog
+  }
 
   const createStructureMutation = useMutation({
     mutationFn: (body: object) => api.post('/payroll/compensation/structures', body),
@@ -554,8 +562,8 @@ export function CompensationMaster() {
   const removeComponentMutation = useMutation({
     mutationFn: (compId: string) =>
       api.delete(`/payroll/compensation/structures/${selectedId}/components/${compId}`),
-    onSuccess: () => { invalidateComponents(); invalidateStructures(); toast.success('Component removed') },
-    onError: (e: Error) => toast.error('Error', { description: e.message }),
+    onSuccess: () => { invalidateComponents(); invalidateStructures(); toast.success('Component removed'); setRemoveComponentTarget(null) },
+    onError: (e: Error) => { toast.error('Error', { description: e.message }); setRemoveComponentTarget(null) },
   })
 
   const cloneMutation = useMutation<{ data: { id: string } }, Error, { id: string; body: object }>({
@@ -657,6 +665,7 @@ export function CompensationMaster() {
   }
 
   return (
+    <>
     <PageContainer>
       <PageHeader
         title="Compensation Master"
@@ -899,7 +908,7 @@ export function CompensationMaster() {
                                 size="icon" variant="ghost"
                                 className="h-6 w-6 shrink-0 text-muted-foreground hover:text-destructive"
                                 disabled={removeComponentMutation.isPending}
-                                onClick={() => removeComponentMutation.mutate(sc.id)}
+                                onClick={() => setRemoveComponentTarget(sc)}
                               >
                                 <Trash2 className="h-3 w-3" />
                               </Button>
@@ -1034,5 +1043,16 @@ export function CompensationMaster() {
         </div>
       </div>
     </PageContainer>
+
+    <ConfirmDialog
+      open={!!removeComponentTarget}
+      title="Remove Component"
+      message={removeComponentTarget ? `Remove "${removeComponentTarget.salary_components.name}" from this structure?` : ''}
+      confirmLabel="Remove"
+      destructive
+      onConfirm={() => removeComponentTarget && removeComponentMutation.mutate(removeComponentTarget.id)}
+      onCancel={() => setRemoveComponentTarget(null)}
+    />
+    </>
   )
 }
