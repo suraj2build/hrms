@@ -638,14 +638,15 @@ export default async function successionRoutes(fastify: FastifyInstance) {
     const tenantId = req.tenantId
     const { cid }  = req.params as { id: string; cid: string }
 
-    const { data: candidate } = await supabase
+    const { data: candidate, error: candidateErr } = await supabase
       .from('succession_candidates')
       .select(`strengths, gaps, readiness_level, development_plan,
         employees!succession_candidates_employee_id_fkey(first_name, last_name, designation:designations(name), department:departments!department_id(name))`)
       .eq('tenant_id', tenantId)
       .eq('id', cid)
-      .single()
+      .maybeSingle()
 
+    if (candidateErr) return serverError(req, reply, candidateErr, ErrorCode.QUERY_FAILED, 'Failed to fetch candidate')
     if (!candidate) return notFound(reply, 'NOT_FOUND', 'Candidate not found')
     const c = candidate as any
 
@@ -681,20 +682,22 @@ export default async function successionRoutes(fastify: FastifyInstance) {
     const { departing_employee_id } = parsed.data
 
     // Fetch the departing employee's info
-    const { data: deptEmployee } = await supabase
+    const { data: deptEmployee, error: deptEmployeeErr } = await supabase
       .from('employees')
       .select('id, first_name, last_name, employee_code')
       .eq('id', departing_employee_id)
       .eq('tenant_id', tenantId)
       .maybeSingle()
+    if (deptEmployeeErr) return serverError(req, reply, deptEmployeeErr, ErrorCode.QUERY_FAILED, 'Failed to fetch employee')
 
     // Find succession plans where this employee is the incumbent
-    const { data: plans } = await supabase
+    const { data: plans, error: plansErr } = await supabase
       .from('succession_plans')
       .select(`id, position_title, department, risk_level, status`)
       .eq('tenant_id', tenantId)
       .eq('incumbent_id', departing_employee_id)
       .eq('status', 'active')
+    if (plansErr) return serverError(req, reply, plansErr, ErrorCode.QUERY_FAILED, 'Failed to fetch succession plans')
 
     if (!plans?.length) {
       return reply.send({
@@ -708,13 +711,14 @@ export default async function successionRoutes(fastify: FastifyInstance) {
     }
 
     const planIds = plans.map(p => p.id)
-    const { data: candidates } = await supabase
+    const { data: candidates, error: candidatesErr } = await supabase
       .from('succession_candidates')
       .select(`id, plan_id, readiness_level, readiness_score,
         score_performance, score_skill_gap, score_leadership, score_mobility, score_tenure, score_attrition_risk,
         employees!succession_candidates_employee_id_fkey(id, first_name, last_name, designation:designations(name))`)
       .eq('tenant_id', tenantId)
       .in('plan_id', planIds)
+    if (candidatesErr) return serverError(req, reply, candidatesErr, ErrorCode.QUERY_FAILED, 'Failed to fetch candidates')
 
     const candsByPlan: Record<string, any[]> = {}
     for (const c of candidates ?? []) {
@@ -785,13 +789,18 @@ export default async function successionRoutes(fastify: FastifyInstance) {
     const { sessionId } = req.params as { sessionId: string }
     const tenantId      = req.tenantId
 
-    const changesData = await fetchAllRows((from, to) =>
-      supabase.from('calibration_changes')
-        .select(`id, field_changed, old_value, new_value, notes, created_at, employee:employees!employee_id(first_name, last_name, employee_code)`)
-        .eq('session_id', sessionId).eq('tenant_id', tenantId)
-        .order('created_at', { ascending: false })
-        .range(from, to),
-    ).catch(() => [] as any[])
+    let changesData: any[]
+    try {
+      changesData = await fetchAllRows((from, to) =>
+        supabase.from('calibration_changes')
+          .select(`id, field_changed, old_value, new_value, notes, created_at, employee:employees!employee_id(first_name, last_name, employee_code)`)
+          .eq('session_id', sessionId).eq('tenant_id', tenantId)
+          .order('created_at', { ascending: false })
+          .range(from, to),
+      )
+    } catch (err) {
+      return serverError(req, reply, err, ErrorCode.QUERY_FAILED, 'Failed to fetch calibration changes')
+    }
 
     const [sessionResult] = await Promise.all([
       supabase.from('calibration_sessions')
@@ -907,20 +916,22 @@ export default async function successionRoutes(fastify: FastifyInstance) {
     const { candidateId } = req.params as { candidateId: string }
     const tenantId        = req.tenantId
 
-    const { data: candidate } = await supabase
+    const { data: candidate, error: candidateErr } = await supabase
       .from('succession_candidates')
       .select('gaps, employees!succession_candidates_employee_id_fkey(department:departments!department_id(name), designation:designations(name))')
-      .eq('id', candidateId).eq('tenant_id', tenantId).single()
+      .eq('id', candidateId).eq('tenant_id', tenantId).maybeSingle()
 
+    if (candidateErr) return serverError(req, reply, candidateErr, ErrorCode.QUERY_FAILED, 'Failed to fetch candidate')
     if (!candidate) return reply.status(404).send({ error: 'Candidate not found' })
 
-    const { data: mentors } = await supabase
+    const { data: mentors, error: mentorsErr } = await supabase
       .from('mentor_profiles')
       .select(`id, skill_tags, max_mentees, current_mentees, available, engagement_score,
         employees!mentor_profiles_employee_id_fkey(id, first_name, last_name, designation:designations(name), department:departments!department_id(name))`)
       .eq('tenant_id', tenantId)
       .eq('available', true)
       .lt('current_mentees', 9999) // filtered client-side on line below
+    if (mentorsErr) return serverError(req, reply, mentorsErr, ErrorCode.QUERY_FAILED, 'Failed to fetch mentors')
 
     const cGaps: string[] = ((candidate as any).gaps ?? '').toLowerCase().split(/[,\s]+/).filter(Boolean)
 

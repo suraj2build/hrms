@@ -1040,17 +1040,33 @@ export default async function preJoineeRoutes(fastify: FastifyInstance) {
         return reply.code(400).send({ error: 'MISSING_EMPLOYEE_ID', message: 'employee_id is required for rehire action' })
       }
 
-      await fastify.supabase
+      // rehireEmpId comes straight from the request body — verify it belongs
+      // to this tenant before writing anything (fastify.supabase runs with
+      // the service-role key, so RLS won't catch a foreign-tenant id here).
+      const { data: rehireEmp, error: rehireEmpErr } = await fastify.supabase
         .from('employees')
         .update({ status: 'active', joining_date: invitation.joining_date, updated_at: new Date().toISOString() })
         .eq('id', rehireEmpId)
         .eq('tenant_id', tenantId)
+        .select('id')
+        .maybeSingle()
 
-      await fastify.supabase
+      if (rehireEmpErr || !rehireEmp) {
+        // Revert the claim above so HR can retry — mirrors the failure
+        // handling on the new-employee path below.
+        await fastify.supabase.from('pre_joinee_invitations')
+          .update({ status: 'submitted', updated_at: new Date().toISOString() })
+          .eq('id', id).eq('tenant_id', tenantId).eq('status', 'approved')
+        if (rehireEmpErr) return serverError(req, reply, rehireEmpErr, ErrorCode.UPDATE_FAILED, 'Failed to reactivate employee')
+        return reply.code(404).send({ error: 'EMPLOYEE_NOT_FOUND', message: 'Employee not found for rehire' })
+      }
+
+      const { error: rehireInviteErr } = await fastify.supabase
         .from('pre_joinee_invitations')
         .update({ status: 'approved', employee_id: rehireEmpId, updated_at: new Date().toISOString() })
         .eq('id', id)
         .eq('tenant_id', tenantId)
+      if (rehireInviteErr) return serverError(req, reply, rehireInviteErr, ErrorCode.UPDATE_FAILED, 'Failed to update invitation for rehire')
 
       await logAction(fastify.supabase, {
         tenantId,
