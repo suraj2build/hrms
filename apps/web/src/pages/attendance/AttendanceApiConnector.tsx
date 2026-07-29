@@ -8,6 +8,7 @@
 
 import { useState, useCallback } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { toast } from 'sonner'
 import {
   Plus, Link2, Wifi, Play, Settings2, Trash2,
   RefreshCw, ChevronRight, ChevronDown, Eye, EyeOff,
@@ -474,6 +475,7 @@ export function AttendanceApiConnector() {
   const deleteMutation = useMutation({
     mutationFn: (id: string) => api.delete(`/attendance/api-sources/${id}`),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['attendance-api-sources'] }),
+    onError: (e: Error) => toast.error('Failed to disable source', { description: e.message }),
   })
 
   // ── Handlers ───────────────────────────────────────────────────────────────

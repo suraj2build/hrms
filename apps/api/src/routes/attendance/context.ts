@@ -9,6 +9,8 @@
  */
 import type { FastifyInstance } from 'fastify'
 import { MANAGER_ROLES } from '../../lib/rbac.js'
+import { fetchTenantTz } from '../../lib/attendance-engine.js'
+import { getLocalDate }  from '../../lib/org-context.js'
 
 export default async function attendanceContextRoutes(fastify: FastifyInstance) {
   const auth = {
@@ -26,7 +28,11 @@ export default async function attendanceContextRoutes(fastify: FastifyInstance) 
 
   // ── GET /attendance/active-now ───────────────────────────────────────────────
   fastify.get('/attendance/active-now', auth, async (req: any, reply) => {
-    const today = new Date().toISOString().slice(0, 10)
+    // Resolve "today" in the tenant's own timezone, not the server's (UTC)
+    // clock — otherwise this undercounts/miscounts near the UTC/local-midnight
+    // boundary, same bug class already fixed in manager-dashboard.ts.
+    const tz = await fetchTenantTz(fastify.supabase, req.tenantId)
+    const today = getLocalDate(new Date().toISOString(), tz)
     try {
       const [activeRes, totalRes] = await Promise.all([
         fastify.supabase
@@ -49,7 +55,8 @@ export default async function attendanceContextRoutes(fastify: FastifyInstance) 
 
   // ── GET /attendance/missing-punches/today ────────────────────────────────────
   fastify.get('/attendance/missing-punches/today', auth, async (req: any, reply) => {
-    const today = new Date().toISOString().slice(0, 10)
+    const tz = await fetchTenantTz(fastify.supabase, req.tenantId)
+    const today = getLocalDate(new Date().toISOString(), tz)
     try {
       // Employees who have a check_in today but no check_out
       const { data: logs } = await fastify.supabase
@@ -79,7 +86,8 @@ export default async function attendanceContextRoutes(fastify: FastifyInstance) 
   // ── GET /attendance/ot-spike-employees?limit=5 ───────────────────────────────
   fastify.get('/attendance/ot-spike-employees', auth, async (req: any, reply) => {
     const limit     = Math.min(parseInt((req.query as any).limit ?? '5', 10) || 5, 50)
-    const today     = new Date().toISOString().slice(0, 10)
+    const tz        = await fetchTenantTz(fastify.supabase, req.tenantId)
+    const today     = getLocalDate(new Date().toISOString(), tz)
     const monthStart = today.slice(0, 7) + '-01'
 
     try {

@@ -30,6 +30,7 @@ import { PageHeader }     from '@/components/layout/PageHeader'
 import { SectionCard }    from '@/components/layout/SectionCard'
 import { Badge }          from '@/components/ui/badge'
 import { Button }         from '@/components/ui/button'
+import { ConfirmDialog }  from '@/components/ui/ConfirmDialog'
 import { api }            from '@/lib/api/client'
 import { useAuthStore }   from '@/stores/authStore'
 import { cn }             from '@/lib/utils'
@@ -187,6 +188,8 @@ export function PayrollReadiness() {
   const isLocked     = lockState?.is_locked ?? false
   const payrollSum   = payrollSummaryData?.summary
 
+  const [confirmLock, setConfirmLock] = useState(false)
+
   // Lock/unlock mutation
   const lockMutation = useMutation({
     mutationFn: (action: 'lock' | 'unlock') =>
@@ -194,6 +197,10 @@ export function PayrollReadiness() {
     onSuccess: (_data, action) => {
       // Exact key with month prevents invalidating period-lock entries for other months
       qc.invalidateQueries({ queryKey: ['period-lock', month], exact: true })
+      // AttendanceOperationsCenter.tsx and AttendancePeriods.tsx read the same
+      // period-lock state under these separate keys.
+      qc.invalidateQueries({ queryKey: ['attendance-periods-current'] })
+      qc.invalidateQueries({ queryKey: ['period-locks'] })
       toast.success(action === 'lock' ? 'Period locked' : 'Period unlocked', {
         description: monthLabel(month),
       })
@@ -408,7 +415,7 @@ export function PayrollReadiness() {
                 variant={isLocked ? 'outline' : 'default'}
                 className="w-full h-8 text-xs gap-1.5"
                 disabled={lockMutation.isPending || lockLoading}
-                onClick={() => lockMutation.mutate(isLocked ? 'unlock' : 'lock')}
+                onClick={() => (isLocked ? lockMutation.mutate('unlock') : setConfirmLock(true))}
               >
                 {lockMutation.isPending
                   ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -450,6 +457,16 @@ export function PayrollReadiness() {
           </SectionCard>
         </div>
       </div>
+
+      <ConfirmDialog
+        open={confirmLock}
+        title="Lock this period?"
+        message="Employees will no longer be able to submit or edit attendance, leave, or regularization requests for this month until it is unlocked."
+        confirmLabel="Lock Period"
+        destructive
+        onConfirm={() => { setConfirmLock(false); lockMutation.mutate('lock') }}
+        onCancel={() => setConfirmLock(false)}
+      />
     </PageContainer>
   )
 }

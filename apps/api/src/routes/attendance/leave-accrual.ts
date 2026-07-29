@@ -26,6 +26,7 @@ import {
   processCarryForward,
   processEncashment,
 } from '../../lib/accrual-engine.js'
+import { checkIdempotency, storeIdempotency } from '../../lib/idempotency.js'
 
 const dateRe = /^\d{4}-\d{2}-\d{2}$/
 
@@ -64,6 +65,19 @@ export default async function leaveAccrualRoutes(fastify: FastifyInstance) {
     const parsed = ruleSchema.safeParse(req.body)
     if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
 
+    // leave_type_id is caller-supplied and the FK only checks existence, not
+    // tenant — an unverified value would let this rule (and the accrual
+    // engine that reads it) reference another tenant's leave_types row.
+    const { data: leaveType } = await fastify.supabase
+      .from('leave_types')
+      .select('id')
+      .eq('id', parsed.data.leave_type_id)
+      .eq('tenant_id', req.tenantId)
+      .maybeSingle()
+    if (!leaveType) {
+      return reply.code(400).send({ error: 'INVALID_LEAVE_TYPE', message: 'Leave type not found in your organisation' })
+    }
+
     const { data, error } = await fastify.supabase
       .from('leave_accrual_rules')
       .insert({ tenant_id: req.tenantId, ...parsed.data })
@@ -82,6 +96,20 @@ export default async function leaveAccrualRoutes(fastify: FastifyInstance) {
   fastify.put('/leave/accrual/rules/:id', hrAdminAuth, async (req: any, reply) => {
     const parsed = ruleSchema.partial().safeParse(req.body)
     if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+
+    // Same cross-tenant guard as the POST handler, for when a rule is
+    // re-pointed to a different leave_type_id on update.
+    if (parsed.data.leave_type_id) {
+      const { data: leaveType } = await fastify.supabase
+        .from('leave_types')
+        .select('id')
+        .eq('id', parsed.data.leave_type_id)
+        .eq('tenant_id', req.tenantId)
+        .maybeSingle()
+      if (!leaveType) {
+        return reply.code(400).send({ error: 'INVALID_LEAVE_TYPE', message: 'Leave type not found in your organisation' })
+      }
+    }
 
     const { data, error } = await fastify.supabase
       .from('leave_accrual_rules')
@@ -118,10 +146,21 @@ export default async function leaveAccrualRoutes(fastify: FastifyInstance) {
     const parsed = schema.safeParse(req.body)
     if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
 
+    const iKey = (req.headers['idempotency-key'] as string | undefined)?.trim()
+    if (iKey) {
+      const cached = await checkIdempotency(fastify.supabase, req.tenantId, iKey, 'leave-accrual-run')
+      if (cached) {
+        reply.header('Idempotency-Replayed', 'true')
+        return reply.code(cached.status_code).send(cached.response)
+      }
+    }
+
     const [year, month] = parsed.data.period.split('-').map(Number)
     try {
       const result = await runMonthlyAccrual(fastify.supabase, req.tenantId, year, month)
-      return reply.send({ data: result, period: parsed.data.period })
+      const responseBody = { data: result, period: parsed.data.period }
+      if (iKey) await storeIdempotency(fastify.supabase, req.tenantId, iKey, 'leave-accrual-run', 200, responseBody)
+      return reply.send(responseBody)
     } catch (err: unknown) {
       req.log.error({ err, tenantId: req.tenantId, period: parsed.data.period }, '[leave-accrual] unexpected error running monthly accrual')
       return reply.code(500).send({ error: 'ACCRUAL_ERROR', message: 'Failed to run monthly accrual' })

@@ -158,6 +158,9 @@ export function MyLeaveRequests() {
     onSuccess:  () => {
       toast.success('Leave request cancelled')
       qc.invalidateQueries({ queryKey: ['my-leave-requests'] })
+      // Cancelling an approved leave restores the balance server-side —
+      // EmployeeDashboard.tsx reads it under this same key.
+      qc.invalidateQueries({ queryKey: ['leave-balance'] })
       setConfirmCancel(null)
     },
     onError:    (err: Error) => toast.error('Cancellation failed', { description: err.message }),

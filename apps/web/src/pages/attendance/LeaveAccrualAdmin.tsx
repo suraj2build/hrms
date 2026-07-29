@@ -12,7 +12,7 @@
  * Design: design-system tokens only.
  */
 
-import { useState }                                      from 'react'
+import { useState, useRef }                              from 'react'
 import { useQuery, useMutation, useQueryClient }         from '@tanstack/react-query'
 import { useNavigate }                                   from 'react-router-dom'
 import { toast }                                         from 'sonner'
@@ -30,6 +30,7 @@ import { Badge }          from '@/components/ui/badge'
 import { Button }         from '@/components/ui/button'
 import { Input }          from '@/components/ui/input'
 import { DateInput }      from '@/components/ui/date-input'
+import { ConfirmDialog }  from '@/components/ui/ConfirmDialog'
 import {
   Dialog,
   DialogContent,
@@ -211,10 +212,11 @@ export function LeaveAccrualAdmin() {
     onError: (e) => toast.error('Failed to update rule', { description: (e as Error).message }),
   })
 
+  const [deleteRuleTarget, setDeleteRuleTarget] = useState<AccrualRule | null>(null)
   const deleteRuleMutation = useMutation({
     mutationFn: (id: string) => api.delete(`/leave/accrual/rules/${id}`),
-    onSuccess: () => { refetchRules(); toast.success('Rule deactivated') },
-    onError: (e) => toast.error('Failed to deactivate rule', { description: (e as Error).message }),
+    onSuccess: () => { refetchRules(); setDeleteRuleTarget(null); toast.success('Rule deactivated') },
+    onError: (e) => { setDeleteRuleTarget(null); toast.error('Failed to deactivate rule', { description: (e as Error).message }) },
   })
 
   const approveEncMutation = useMutation({
@@ -237,9 +239,16 @@ export function LeaveAccrualAdmin() {
 
   // Manual accrual run (other than the scheduler) — credits the given month now.
   const [accrualPeriod, setAccrualPeriod] = useState(() => new Date().toISOString().slice(0, 7))
+  const [confirmRunAccrual, setConfirmRunAccrual] = useState(false)
+  // Sent as Idempotency-Key on trigger, mirroring PayrollControlCenter.tsx's runPayrollMutation.
+  // Rotated only after a successful trigger, so a failed-then-retried submit reuses the same key.
+  const runAccrualIdempotencyKey = useRef(crypto.randomUUID())
   const runAccrualMutation = useMutation({
-    mutationFn: (period: string) => api.post('/leave/accrual/run', { period }),
+    mutationFn: (period: string) => api.post('/leave/accrual/run', { period }, {
+      headers: { 'Idempotency-Key': runAccrualIdempotencyKey.current },
+    }),
     onSuccess: () => {
+      runAccrualIdempotencyKey.current = crypto.randomUUID()
       qc.invalidateQueries({ queryKey: ['accrual-runs'] })
       qc.invalidateQueries({ queryKey: ['leave-balance'] })
       toast.success('Accrual run complete', { description: `Credited leave for ${accrualPeriod}` })
@@ -354,7 +363,7 @@ export function LeaveAccrualAdmin() {
           <Button
             size="sm" className="h-8 text-xs gap-1.5"
             disabled={runAccrualMutation.isPending || !accrualPeriod}
-            onClick={() => runAccrualMutation.mutate(accrualPeriod)}
+            onClick={() => setConfirmRunAccrual(true)}
           >
             {runAccrualMutation.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Activity className="h-3.5 w-3.5" />}
             Run Accrual Now
@@ -435,7 +444,7 @@ export function LeaveAccrualAdmin() {
                       </Button>
                       <Button
                         size="sm" variant="ghost" className="h-7 w-7 p-0 text-destructive hover:text-destructive hover:bg-destructive/10"
-                        onClick={e => { e.stopPropagation(); deleteRuleMutation.mutate(rule.id) }}
+                        onClick={e => { e.stopPropagation(); setDeleteRuleTarget(rule) }}
                         disabled={deleteRuleMutation.isPending}
                       >
                         <Trash2 className="h-3.5 w-3.5" />
@@ -722,6 +731,25 @@ export function LeaveAccrualAdmin() {
           </div>
         </DialogContent>
       </Dialog>
+
+      <ConfirmDialog
+        open={confirmRunAccrual}
+        title="Run accrual now?"
+        message={`This immediately credits monthly leave accrual for every active employee for ${accrualPeriod}. This action affects the whole tenant and cannot be undone.`}
+        confirmLabel="Run Accrual"
+        onConfirm={() => { setConfirmRunAccrual(false); runAccrualMutation.mutate(accrualPeriod) }}
+        onCancel={() => setConfirmRunAccrual(false)}
+      />
+
+      <ConfirmDialog
+        open={!!deleteRuleTarget}
+        title="Deactivate accrual rule?"
+        message={deleteRuleTarget ? `This deactivates the accrual rule effective ${fmtDate(deleteRuleTarget.effective_from)}. Existing history is preserved, but future accrual for this leave type will stop.` : ''}
+        confirmLabel="Deactivate"
+        destructive
+        onConfirm={() => { if (deleteRuleTarget) deleteRuleMutation.mutate(deleteRuleTarget.id) }}
+        onCancel={() => setDeleteRuleTarget(null)}
+      />
     </PageContainer>
   )
 }
