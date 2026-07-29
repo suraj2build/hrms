@@ -171,10 +171,16 @@ export default async function importantDateTypesRoutes(fastify: FastifyInstance)
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
       .select('id, code, name, description, is_system, is_active, updated_at')
-      .single()
+      .maybeSingle()
 
     if (error) {
       return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update date type')
+    }
+    // A concurrent delete between the ownership check above and this UPDATE
+    // would otherwise throw PGRST116 (0 rows) as a generic 500 instead of the
+    // benign 404 a legitimate race deserves.
+    if (!data) {
+      return reply.code(404).send({ error: 'NOT_FOUND', message: 'Date type not found' })
     }
 
     return reply.send({ data })

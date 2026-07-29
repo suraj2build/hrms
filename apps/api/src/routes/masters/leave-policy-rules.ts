@@ -272,10 +272,16 @@ export async function leavePolicyRulesMutationsRoutes(fastify: FastifyInstance) 
         event_trigger_date_type_id, event_grant_days, event_validity_days,
         updated_at
       `)
-      .single()
+      .maybeSingle()
 
     if (error) {
       return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update leave policy rule')
+    }
+    // A concurrent delete between the tenant-ownership check above and this
+    // UPDATE would otherwise throw PGRST116 (0 rows) as a generic 500 instead
+    // of the benign 404 a legitimate race deserves.
+    if (!data) {
+      return reply.code(404).send({ error: 'NOT_FOUND', message: 'Rule not found' })
     }
 
     await logAction(fastify.supabase, {
@@ -297,14 +303,22 @@ export async function leavePolicyRulesMutationsRoutes(fastify: FastifyInstance) 
 
     const { id } = req.params as { id: string }
 
-    const { error } = await fastify.supabase
+    const { data, error } = await fastify.supabase
       .from('leave_policy_rules')
       .delete()
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
+      .select('id')
+      .maybeSingle()
 
     if (error) {
       return serverError(req, reply, error, ErrorCode.DELETE_FAILED, 'Failed to delete leave policy rule')
+    }
+    // Supabase does not error on a 0-row delete — without this check, a
+    // nonexistent/already-deleted id returns a fabricated 204 success and
+    // writes a phantom DELETE audit-log entry for a row that was never removed.
+    if (!data) {
+      return reply.code(404).send({ error: 'NOT_FOUND', message: 'Rule not found' })
     }
 
     await logAction(fastify.supabase, {
