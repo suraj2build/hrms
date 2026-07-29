@@ -20,6 +20,16 @@ async function verifyEmployee(fastify: any, employeeId: string, tenantId: string
   return !!data
 }
 
+// relationship_types is tenant-scoped (RLS-protected under a real client,
+// but this route runs under the service-role client) — the FK on
+// employee_family.relationship_type_id only checks existence, not tenant,
+// so this must be verified explicitly before insert/update.
+async function verifyRelationshipType(fastify: any, id: string, tenantId: string) {
+  const { data } = await fastify.supabase
+    .from('relationship_types').select('id').eq('id', id).eq('tenant_id', tenantId).maybeSingle()
+  return !!data
+}
+
 export default async function familyRoutes(fastify: FastifyInstance) {
   // Family data is HR-managed in the employee master and not consumed by ESS —
   // gate read + write to HR admin (previously GET allowed any authenticated user
@@ -45,6 +55,8 @@ export default async function familyRoutes(fastify: FastifyInstance) {
     const parsed = schema.safeParse(req.body)
     if (!parsed.success)
       return reply.code(400).send({ error: 'VALIDATION', message: parsed.error.issues[0].message })
+    if (!await verifyRelationshipType(fastify, parsed.data.relationship_type_id, req.tenantId))
+      return reply.code(400).send({ error: 'VALIDATION', message: 'Invalid relationship type' })
     const { data, error } = await fastify.supabase
       .from('employee_family')
       .insert({ ...parsed.data, employee_id: req.params.id, tenant_id: req.tenantId })
@@ -57,6 +69,8 @@ export default async function familyRoutes(fastify: FastifyInstance) {
     const parsed = schema.partial().safeParse(req.body)
     if (!parsed.success)
       return reply.code(400).send({ error: 'VALIDATION', message: parsed.error.issues[0].message })
+    if (parsed.data.relationship_type_id && !await verifyRelationshipType(fastify, parsed.data.relationship_type_id, req.tenantId))
+      return reply.code(400).send({ error: 'VALIDATION', message: 'Invalid relationship type' })
     // .maybeSingle() (not .single()) — a wrong/foreign memberId must fall
     // through to the 404 below, not surface as a PGRST116 500.
     const { data, error } = await fastify.supabase

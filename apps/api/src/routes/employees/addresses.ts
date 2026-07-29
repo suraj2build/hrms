@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
-import { serverError, validationError, ErrorCode } from '../../lib/api-errors.js'
+import { serverError, notFound, validationError, ErrorCode } from '../../lib/api-errors.js'
 
 const schema = z.object({
   address_type:          z.enum(['current','permanent','correspondence']),
@@ -55,13 +55,15 @@ export default async function addressesRoutes(fastify: FastifyInstance) {
   })
 
   fastify.delete('/employees/:id/addresses/:addressId', hrAdminAuth, async (req: any, reply) => {
-    const { error } = await fastify.supabase
+    const { data, error } = await fastify.supabase
       .from('employee_addresses')
       .delete()
       .eq('id', req.params.addressId)
       .eq('employee_id', req.params.id)
       .eq('tenant_id', req.tenantId)
+      .select('id')
     if (error) return serverError(req, reply, error, ErrorCode.DELETE_FAILED, 'Failed to delete address')
+    if (!data || data.length === 0) return notFound(reply, 'NOT_FOUND', 'Address not found')
     return reply.code(204).send()
   })
 }

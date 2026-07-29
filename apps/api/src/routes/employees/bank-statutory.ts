@@ -161,11 +161,24 @@ export default async function bankStatutoryRoutes(fastify: FastifyInstance) {
     const holidayGroupId = (bankPayload as any).holiday_group_id
     delete (bankPayload as any).holiday_group_id
     if (holidayGroupId !== undefined) {
-      await fastify.supabase
+      if (holidayGroupId) {
+        // roster_holiday_groups' FK on employees.holiday_group_id has no
+        // tenant compound, and this route runs under the service-role
+        // client (bypasses RLS) — verify the group actually belongs to this
+        // tenant before tagging the employee with it, matching the same
+        // check already applied in masters/holidays.ts.
+        const { data: group, error: groupErr } = await fastify.supabase
+          .from('roster_holiday_groups').select('id')
+          .eq('id', holidayGroupId).eq('tenant_id', req.tenantId).maybeSingle()
+        if (groupErr) return serverError(req, reply, groupErr, ErrorCode.QUERY_FAILED, 'Failed to verify holiday group')
+        if (!group) return validationError(reply, ErrorCode.VALIDATION_ERROR, 'Invalid holiday_group_id')
+      }
+      const { error: hgErr } = await fastify.supabase
         .from('employees')
         .update({ holiday_group_id: holidayGroupId || null })
         .eq('id', req.params.id)
         .eq('tenant_id', req.tenantId)
+      if (hgErr) return serverError(req, reply, hgErr, ErrorCode.UPDATE_FAILED, 'Failed to update holiday group assignment')
     }
 
     const { data, error } = await fastify.supabase

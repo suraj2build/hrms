@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
-import { serverError, notFound, ErrorCode } from '../../lib/api-errors.js'
+import { serverError, notFound, validationError, ErrorCode } from '../../lib/api-errors.js'
 
 const STORAGE_BUCKET = 'employee-files'
 const SIGNED_URL_TTL = 3600 // 1 hour
@@ -57,6 +57,14 @@ export default async function educationRoutes(fastify: FastifyInstance) {
     const parsed = schema.safeParse(req.body)
     if (!parsed.success)
       return reply.code(400).send({ error: 'VALIDATION', message: parsed.error.issues[0].message })
+    // Storage path must live under this tenant's prefix — the metadata row
+    // carries the correct tenant_id, but the referenced object is signed
+    // later (signUrl uses the service-role client, bypassing bucket RLS), so
+    // without this check an admin could register — and later sign — another
+    // tenant's file. Matches the check in routes/uploads/index.ts.
+    if (parsed.data.document_path && !parsed.data.document_path.startsWith(`${req.tenantId}/`)) {
+      return validationError(reply, ErrorCode.VALIDATION_ERROR, 'document_path must be within your tenant namespace')
+    }
     const { data, error } = await fastify.supabase
       .from('employee_education')
       .insert({ ...parsed.data, employee_id: req.params.id, tenant_id: req.tenantId })
@@ -69,6 +77,9 @@ export default async function educationRoutes(fastify: FastifyInstance) {
     const parsed = schema.partial().safeParse(req.body)
     if (!parsed.success)
       return reply.code(400).send({ error: 'VALIDATION', message: parsed.error.issues[0].message })
+    if (parsed.data.document_path && !parsed.data.document_path.startsWith(`${req.tenantId}/`)) {
+      return validationError(reply, ErrorCode.VALIDATION_ERROR, 'document_path must be within your tenant namespace')
+    }
     // .maybeSingle() (not .single()) — a wrong/foreign eduId must fall
     // through to the 404 below, not surface as a PGRST116 500.
     const { data, error } = await fastify.supabase

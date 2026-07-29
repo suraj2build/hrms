@@ -88,13 +88,15 @@ export default async function emergencyContactsRoutes(fastify: FastifyInstance) 
   })
 
   fastify.delete('/employees/:id/emergency-contacts/:contactId', hrAdminAuth, async (req: any, reply) => {
-    const { error } = await fastify.supabase
+    const { data, error } = await fastify.supabase
       .from('emergency_contacts')
       .delete()
       .eq('id', req.params.contactId)
       .eq('employee_id', req.params.id)
       .eq('tenant_id', req.tenantId)
+      .select('id')
     if (error) return serverError(req, reply, error, ErrorCode.DELETE_FAILED, 'Failed to delete emergency contact')
+    if (!data || data.length === 0) return notFound(reply, 'NOT_FOUND', 'Contact not found')
     return reply.code(204).send()
   })
 }
