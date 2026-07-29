@@ -937,10 +937,16 @@ async function resolveShiftForDate(
   }
 
   // 3. Site/department default shift (via employee → site → default_shift_id)
+  // Both lookups below must also scope by tenant_id — without it, an
+  // employee_id belonging to a different tenant (no tenant_id filter earlier
+  // in the resolution chain would ever match, so this fallback is reached)
+  // still resolves that other tenant's real site_id → real default shift,
+  // leaking cross-tenant shift configuration into this tenant's reports.
   const { data: empRow } = await supabase
     .from('employees')
     .select('site_id, job_history!job_history_employee_id_fkey(department_id, is_current)')
     .eq('id', employeeId)
+    .eq('tenant_id', tenantId)
     .maybeSingle()
 
   if (empRow) {
@@ -957,6 +963,7 @@ async function resolveShiftForDate(
           )`,
         )
         .eq('id', ep.site_id)
+        .eq('tenant_id', tenantId)
         .maybeSingle()
 
       if (siteRow) {
