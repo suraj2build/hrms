@@ -117,6 +117,17 @@ export default async function essSelfServiceRoutes(fastify: FastifyInstance) {
     return empId
   }
 
+  // relationship_types is tenant-scoped, but the FK on employee_family/
+  // employee_nominations.relationship_type_id only checks existence, not
+  // tenant (this route runs under the service-role client, bypassing RLS) —
+  // must be verified explicitly before insert/update. Mirrors the same guard
+  // in employees/family.ts and employees/nominations.ts.
+  async function verifyRelationshipType(id: string, tenantId: string) {
+    const { data } = await fastify.supabase
+      .from('relationship_types').select('id').eq('id', id).eq('tenant_id', tenantId).maybeSingle()
+    return !!data
+  }
+
   async function validateShareTotal(empId: string, tenantId: string, scheme: string, newShare: number, excludeId?: string) {
     let q = fastify.supabase
       .from('employee_nominations').select('share_percentage')
@@ -257,6 +268,8 @@ export default async function essSelfServiceRoutes(fastify: FastifyInstance) {
     const empId = await selfOr400(req, reply); if (!empId) return
     const parsed = familySchema.safeParse(req.body)
     if (!parsed.success) return validationError(reply, ErrorCode.VALIDATION_ERROR, parsed.error.issues[0].message)
+    if (!await verifyRelationshipType(parsed.data.relationship_type_id, req.tenantId))
+      return validationError(reply, ErrorCode.VALIDATION_ERROR, 'Invalid relationship type')
     const { data, error } = await fastify.supabase
       .from('employee_family')
       .insert({ ...parsed.data, employee_id: empId, tenant_id: req.tenantId })
@@ -269,6 +282,8 @@ export default async function essSelfServiceRoutes(fastify: FastifyInstance) {
     const empId = await selfOr400(req, reply); if (!empId) return
     const parsed = familySchema.partial().safeParse(req.body)
     if (!parsed.success) return validationError(reply, ErrorCode.VALIDATION_ERROR, parsed.error.issues[0].message)
+    if (parsed.data.relationship_type_id && !await verifyRelationshipType(parsed.data.relationship_type_id, req.tenantId))
+      return validationError(reply, ErrorCode.VALIDATION_ERROR, 'Invalid relationship type')
     const { data, error } = await fastify.supabase
       .from('employee_family').update(parsed.data)
       .eq('id', req.params.memberId).eq('employee_id', empId).eq('tenant_id', req.tenantId)
@@ -303,6 +318,8 @@ export default async function essSelfServiceRoutes(fastify: FastifyInstance) {
     if (!parsed.success) return validationError(reply, ErrorCode.VALIDATION_ERROR, parsed.error.issues[0].message)
     if (parsed.data.is_minor && !parsed.data.guardian_name)
       return validationError(reply, ErrorCode.VALIDATION_ERROR, 'Guardian name required for minor nominees')
+    if (parsed.data.relationship_type_id && !await verifyRelationshipType(parsed.data.relationship_type_id, req.tenantId))
+      return validationError(reply, ErrorCode.VALIDATION_ERROR, 'Invalid relationship type')
     if (!await validateShareTotal(empId, req.tenantId, parsed.data.scheme, parsed.data.share_percentage))
       return validationError(reply, ErrorCode.VALIDATION_ERROR, `Total share for ${parsed.data.scheme} would exceed 100%`)
     const { data, error } = await fastify.supabase
@@ -317,6 +334,8 @@ export default async function essSelfServiceRoutes(fastify: FastifyInstance) {
     const empId = await selfOr400(req, reply); if (!empId) return
     const parsed = nominationSchema.partial().safeParse(req.body)
     if (!parsed.success) return validationError(reply, ErrorCode.VALIDATION_ERROR, parsed.error.issues[0].message)
+    if (parsed.data.relationship_type_id && !await verifyRelationshipType(parsed.data.relationship_type_id, req.tenantId))
+      return validationError(reply, ErrorCode.VALIDATION_ERROR, 'Invalid relationship type')
     if (parsed.data.share_percentage) {
       const { data: existing } = await fastify.supabase
         .from('employee_nominations').select('scheme').eq('id', req.params.nomId)

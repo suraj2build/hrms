@@ -520,6 +520,24 @@ export default async function tdsPlansRoute(fastify: FastifyInstance) {
       return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
     }
 
+    // component_id's FK to tax_declaration_components only checks existence,
+    // not tenant — components are either system-wide (tenant_id IS NULL) or a
+    // tenant's own custom component (see tds-components.ts), so a caller-
+    // supplied id from another tenant's private component would otherwise
+    // pass the FK and leak that tenant's component metadata on every read.
+    const componentIds = [...new Set(parsed.data.map(item => item.component_id))]
+    const { data: validComponents, error: compErr } = await fastify.supabase
+      .from('tax_declaration_components')
+      .select('id')
+      .in('id', componentIds)
+      .or(`tenant_id.is.null,tenant_id.eq.${req.tenantId}`)
+    if (compErr) return serverError(req, reply, compErr, ErrorCode.QUERY_FAILED, 'Failed to verify plan item components')
+    const validIds = new Set((validComponents ?? []).map((c: any) => c.id))
+    const invalidId = componentIds.find(id => !validIds.has(id))
+    if (invalidId) {
+      return reply.code(400).send({ error: 'VALIDATION_ERROR', message: `Component ${invalidId} not found` })
+    }
+
     const records = parsed.data.map(item => ({
       plan_id:         planId,
       component_id:    item.component_id,

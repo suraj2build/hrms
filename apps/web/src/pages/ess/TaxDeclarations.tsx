@@ -219,7 +219,8 @@ export function TaxDeclarations() {
   // ── Window status ─────────────────────────────────────────────────────────────
   const windowOpen  = govSettings?.declaration_window_open  ?? null
   const windowClose = govSettings?.declaration_window_close ?? null
-  const today       = new Date().toISOString().substring(0, 10)
+  const todayDate   = new Date()
+  const today       = `${todayDate.getFullYear()}-${String(todayDate.getMonth() + 1).padStart(2, '0')}-${String(todayDate.getDate()).padStart(2, '0')}`
   const windowConfigured  = windowOpen || windowClose
   const windowNotYetOpen  = windowConfigured && windowOpen  && today < windowOpen
   const windowClosed      = windowConfigured && windowClose && today > windowClose

@@ -33,8 +33,15 @@ import { cn }            from '@/lib/utils'
 const inr = (n: number) =>
   new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(n)
 
-const CURRENT_FY = '2025-26'
-const FY_OPTIONS = ['2025-26', '2024-25']
+// Indian FY (Apr–Mar) computed from today, not hardcoded — a fixed year meant
+// the page requested the wrong FY and locked out the actual current period.
+const fyOf = (d: Date) => {
+  const y = d.getFullYear()
+  const start = d.getMonth() >= 3 ? y : y - 1
+  return `${start}-${String((start + 1) % 100).padStart(2, '0')}`
+}
+const CURRENT_FY = fyOf(new Date())
+const FY_OPTIONS = [CURRENT_FY, fyOf(new Date(new Date().getFullYear() - 1, 0, 1))]
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 

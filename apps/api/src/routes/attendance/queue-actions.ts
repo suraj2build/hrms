@@ -19,6 +19,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z }                    from 'zod'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 export default async function attendanceQueueActionsRoute(fastify: FastifyInstance) {
   const auth = { preHandler: [fastify.authenticate] }
@@ -46,8 +47,7 @@ export default async function attendanceQueueActionsRoute(fastify: FastifyInstan
       .maybeSingle()
 
     if (error) {
-      req.log.error({ err: error, id }, 'queue resolve: anomaly update failed')
-      return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+      return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to resolve queue item')
     }
 
     // data === null means the id isn't an anomaly (correction, revision, etc.) — still succeed
