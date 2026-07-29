@@ -12,6 +12,7 @@ import {
   Dialog, DialogContent, DialogHeader,
   DialogTitle, DialogFooter,
 }                                                 from '@/components/ui/dialog'
+import { ConfirmDialog }                          from '@/components/ui/ConfirmDialog'
 import { api }                                    from '@/lib/api/client'
 import { useAuthStore }                           from '@/stores/authStore'
 
@@ -55,6 +56,7 @@ export function StatutoryGroups() {
   const [editItem, setEditItem] = useState<StatutoryGroup | null>(null)
   const [form, setForm]        = useState(EMPTY)
   const [err, setErr]          = useState('')
+  const [deleteTarget, setDeleteTarget] = useState<StatutoryGroup | null>(null)
 
   const { data: groupsData, isLoading } = useQuery<{ data: StatutoryGroup[] }>({
     queryKey: ['statutory-groups'],
@@ -119,6 +121,7 @@ export function StatutoryGroups() {
     onSuccess: (res) => {
       qc.invalidateQueries({ queryKey: ['statutory-groups'] })
       toast.success(res?.data?.deactivated ? 'Group deactivated (in use)' : 'Statutory group deleted')
+      setDeleteTarget(null)
     },
     onError: (e: Error) => toast.error('Delete failed', { description: e.message }),
   })
@@ -184,7 +187,7 @@ export function StatutoryGroups() {
                           <Button
                             size="icon" variant="ghost"
                             className="h-7 w-7 text-destructive hover:text-destructive"
-                            onClick={() => delMut.mutate(g.id)}
+                            onClick={() => setDeleteTarget(g)}
                           >
                             <Trash2 className="h-3.5 w-3.5" />
                           </Button>
@@ -305,6 +308,20 @@ export function StatutoryGroups() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <ConfirmDialog
+        open={!!deleteTarget}
+        title="Delete Statutory Group"
+        message={
+          deleteTarget
+            ? `Delete "${deleteTarget.name}" (${deleteTarget.code})? If no employee records reference it, this permanently deletes the group — there is no undo. If any do, it will be deactivated instead.`
+            : ''
+        }
+        confirmLabel="Delete"
+        destructive
+        onConfirm={() => deleteTarget && delMut.mutate(deleteTarget.id)}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </PageContainer>
   )
 }

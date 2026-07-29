@@ -257,6 +257,7 @@ export function CandidatePortal() {
 
   async function respondToOffer(decision: 'accept' | 'decline') {
     if (!token) return
+    if (decision === 'decline' && !window.confirm('Are you sure you want to decline this offer? This cannot be undone.')) return
     setActing(decision)
     setActionError('')
     try {

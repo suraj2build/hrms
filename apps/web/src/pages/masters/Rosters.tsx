@@ -13,6 +13,7 @@ import {
   DialogTitle, DialogFooter,
 }                                                 from '@/components/ui/dialog'
 import { cn }                                     from '@/lib/utils'
+import { ConfirmDialog }                          from '@/components/ui/ConfirmDialog'
 import { api }                                    from '@/lib/api/client'
 import { useAuthStore }                           from '@/stores/authStore'
 
@@ -61,6 +62,7 @@ export function Rosters() {
   const [editRoster, setEditRoster]     = useState<Roster | null>(null)
   const [form,      setForm]            = useState(EMPTY_FORM)
   const [err,       setErr]             = useState('')
+  const [deleteTarget, setDeleteTarget] = useState<Roster | null>(null)
 
   const { data: rostersData, isLoading } = useQuery<{ data: Roster[] }>({
     queryKey: ['rosters'],
@@ -95,13 +97,13 @@ export function Rosters() {
         : api.post('/masters/rosters', payload)
     },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['rosters'] }); setDlgOpen(false); toast.success('Roster saved') },
-    onError:   (e: Error) => { setErr(e.message ?? 'Failed to save'); toast.error('Roster saved', { description: e.message }) },
+    onError:   (e: Error) => { setErr(e.message ?? 'Failed to save'); toast.error('Failed to save roster', { description: e.message }) },
   })
 
   const delMut = useMutation({
     mutationFn: (id: string) => api.delete(`/masters/rosters/${id}`),
-    onSuccess:  () => { qc.invalidateQueries({ queryKey: ['rosters'] }); toast.success('Roster deleted') },
-    onError: (e: Error) => toast.error('Roster deleted', { description: e.message }),
+    onSuccess:  () => { qc.invalidateQueries({ queryKey: ['rosters'] }); toast.success('Roster deleted'); setDeleteTarget(null) },
+    onError: (e: Error) => toast.error('Failed to delete roster', { description: e.message }),
   })
 
   function toggleDay(dow: number) {
@@ -172,7 +174,7 @@ export function Rosters() {
                           <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => openEdit(r)}>
                             <Pencil className="h-3.5 w-3.5" />
                           </Button>
-                          <Button size="icon" variant="ghost" className="h-7 w-7 text-destructive hover:text-destructive" onClick={() => delMut.mutate(r.id)}>
+                          <Button size="icon" variant="ghost" className="h-7 w-7 text-destructive hover:text-destructive" onClick={() => setDeleteTarget(r)}>
                             <Trash2 className="h-3.5 w-3.5" />
                           </Button>
                         </div>
@@ -280,6 +282,16 @@ export function Rosters() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <ConfirmDialog
+        open={!!deleteTarget}
+        title="Delete Roster"
+        message={deleteTarget ? `Delete "${deleteTarget.name}"? This cannot be undone.` : ''}
+        confirmLabel="Delete"
+        destructive
+        onConfirm={() => deleteTarget && delMut.mutate(deleteTarget.id)}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </PageContainer>
   )
 }

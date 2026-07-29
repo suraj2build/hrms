@@ -16,6 +16,7 @@ import {
   Select, SelectContent, SelectItem,
   SelectTrigger, SelectValue,
 }                                                 from '@/components/ui/select'
+import { ConfirmDialog }                          from '@/components/ui/ConfirmDialog'
 import { api }                                    from '@/lib/api/client'
 import { useAuthStore }                           from '@/stores/authStore'
 
@@ -55,6 +56,7 @@ export function AssetCategories() {
   const [editItem, setEditItem] = useState<AssetCategory | null>(null)
   const [form, setForm]        = useState(EMPTY)
   const [err, setErr]          = useState('')
+  const [deleteTarget, setDeleteTarget] = useState<AssetCategory | null>(null)
 
   const { data: catsData, isLoading } = useQuery<{ data: AssetCategory[] }>({
     queryKey: ['asset-categories'],
@@ -113,10 +115,16 @@ export function AssetCategories() {
   })
 
   const delMut = useMutation({
-    mutationFn: (id: string) => api.delete<{ data?: { deactivated?: boolean } }>(`/masters/asset-categories/${id}`),
+    mutationFn: (id: string) => api.delete<{ deactivated?: boolean; message?: string }>(`/masters/asset-categories/${id}`),
     onSuccess: (res) => {
       qc.invalidateQueries({ queryKey: ['asset-categories'] })
-      toast.success(res?.data?.deactivated ? 'Category deactivated (in use)' : 'Asset category deleted')
+      // Backend always soft-deactivates (never hard-deletes asset categories) —
+      // the response is { deactivated, message } at the top level, not nested
+      // under `data`, so the old `res?.data?.deactivated` check was always
+      // undefined and the toast always claimed "deleted" even though the
+      // category was actually just deactivated and reversible via edit.
+      toast.success(res?.message ?? (res?.deactivated ? 'Asset category deactivated' : 'Asset category deleted'))
+      setDeleteTarget(null)
     },
     onError: (e: Error) => toast.error('Delete failed', { description: e.message }),
   })
@@ -196,7 +204,7 @@ export function AssetCategories() {
                           <Button
                             size="icon" variant="ghost"
                             className="h-7 w-7 text-destructive hover:text-destructive"
-                            onClick={() => delMut.mutate(c.id)}
+                            onClick={() => setDeleteTarget(c)}
                           >
                             <Trash2 className="h-3.5 w-3.5" />
                           </Button>
@@ -316,6 +324,16 @@ export function AssetCategories() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <ConfirmDialog
+        open={!!deleteTarget}
+        title="Deactivate Asset Category"
+        message={deleteTarget ? `Deactivate "${deleteTarget.name}" (${deleteTarget.code})? It will no longer be selectable for new assets.` : ''}
+        confirmLabel="Deactivate"
+        destructive
+        onConfirm={() => deleteTarget && delMut.mutate(deleteTarget.id)}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </PageContainer>
   )
 }

@@ -11,6 +11,7 @@ import { api } from '@/lib/api/client'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 
 interface Posting { id: string; board: string; external_url: string | null; status: string; posted_at: string }
 const BOARDS = ['Naukri', 'LinkedIn', 'Indeed', 'Company site', 'Referral', 'Other']
@@ -21,6 +22,7 @@ export function JobBoardPostingsDialog({ requisitionId, title, open, onOpenChang
   const qc = useQueryClient()
   const [board, setBoard] = useState('Naukri')
   const [url, setUrl] = useState('')
+  const [deleteTarget, setDeleteTarget] = useState<Posting | null>(null)
 
   const { data } = useQuery<{ data: Posting[] }>({
     queryKey: ['req-postings', requisitionId], queryFn: () => api.get(`/recruitment/requisitions/${requisitionId}/postings`), enabled: open,
@@ -35,43 +37,56 @@ export function JobBoardPostingsDialog({ requisitionId, title, open, onOpenChang
   })
   const delMut = useMutation({
     mutationFn: (id: string) => api.delete(`/recruitment/requisitions/postings/${id}`),
-    onSuccess: () => { invalidate(); toast.success('Removed') },
+    onSuccess: () => { invalidate(); toast.success('Removed'); setDeleteTarget(null) },
+    onError: (e: Error) => toast.error('Failed to remove', { description: e.message }),
   })
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader><DialogTitle>Job-board postings — {title}</DialogTitle></DialogHeader>
+    <>
+      <Dialog open={open} onOpenChange={onOpenChange}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader><DialogTitle>Job-board postings — {title}</DialogTitle></DialogHeader>
 
-        <div className="space-y-2 py-1">
-          {postings.length === 0 ? (
-            <p className="text-sm text-muted-foreground py-2">No postings recorded yet.</p>
-          ) : postings.map(p => (
-            <div key={p.id} className="flex items-center gap-2 rounded-lg border border-border p-2.5">
-              <span className="text-sm font-medium flex-1">{p.board}</span>
-              {p.external_url && (
-                <a href={p.external_url} target="_blank" rel="noreferrer" className="text-primary hover:underline text-xs inline-flex items-center gap-1">
-                  <ExternalLink className="h-3 w-3" />open
-                </a>
-              )}
-              <Button size="icon" variant="ghost" className="h-7 w-7 text-destructive" onClick={() => delMut.mutate(p.id)}><Trash2 className="h-3.5 w-3.5" /></Button>
-            </div>
-          ))}
-        </div>
+          <div className="space-y-2 py-1">
+            {postings.length === 0 ? (
+              <p className="text-sm text-muted-foreground py-2">No postings recorded yet.</p>
+            ) : postings.map(p => (
+              <div key={p.id} className="flex items-center gap-2 rounded-lg border border-border p-2.5">
+                <span className="text-sm font-medium flex-1">{p.board}</span>
+                {p.external_url && (
+                  <a href={p.external_url} target="_blank" rel="noreferrer" className="text-primary hover:underline text-xs inline-flex items-center gap-1">
+                    <ExternalLink className="h-3 w-3" />open
+                  </a>
+                )}
+                <Button size="icon" variant="ghost" className="h-7 w-7 text-destructive" onClick={() => setDeleteTarget(p)}><Trash2 className="h-3.5 w-3.5" /></Button>
+              </div>
+            ))}
+          </div>
 
-        <div className="flex items-center gap-2">
-          <select value={board} onChange={e => setBoard(e.target.value)} className="h-8 rounded-md border border-input bg-background px-2 text-sm">
-            {BOARDS.map(b => <option key={b} value={b}>{b}</option>)}
-          </select>
-          <Input value={url} onChange={e => setUrl(e.target.value)} placeholder="Posting URL (optional)" className="h-8 text-sm flex-1" />
-          <Button size="sm" disabled={addMut.isPending} onClick={() => addMut.mutate()}>Add</Button>
-        </div>
-        <p className="text-[11px] text-muted-foreground">Automated posting & applicant import per board can be enabled once that board's API credentials are configured.</p>
+          <div className="flex items-center gap-2">
+            <select value={board} onChange={e => setBoard(e.target.value)} className="h-8 rounded-md border border-input bg-background px-2 text-sm">
+              {BOARDS.map(b => <option key={b} value={b}>{b}</option>)}
+            </select>
+            <Input value={url} onChange={e => setUrl(e.target.value)} placeholder="Posting URL (optional)" className="h-8 text-sm flex-1" />
+            <Button size="sm" disabled={addMut.isPending} onClick={() => addMut.mutate()}>Add</Button>
+          </div>
+          <p className="text-[11px] text-muted-foreground">Automated posting & applicant import per board can be enabled once that board's API credentials are configured.</p>
 
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>Close</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => onOpenChange(false)}>Close</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <ConfirmDialog
+        open={!!deleteTarget}
+        title="Remove Job-Board Posting"
+        message={deleteTarget ? `Remove the "${deleteTarget.board}" posting? This cannot be undone.` : ''}
+        confirmLabel="Remove"
+        destructive
+        onConfirm={() => deleteTarget && delMut.mutate(deleteTarget.id)}
+        onCancel={() => setDeleteTarget(null)}
+      />
+    </>
   )
 }

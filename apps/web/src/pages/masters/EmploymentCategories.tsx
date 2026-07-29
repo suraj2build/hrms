@@ -12,6 +12,7 @@ import {
   Dialog, DialogContent, DialogHeader,
   DialogTitle, DialogFooter,
 }                                                 from '@/components/ui/dialog'
+import { ConfirmDialog }                          from '@/components/ui/ConfirmDialog'
 import { api }                                    from '@/lib/api/client'
 import { useAuthStore }                           from '@/stores/authStore'
 
@@ -53,6 +54,7 @@ export function EmploymentCategories() {
   const [editItem, setEditItem] = useState<EmploymentCategory | null>(null)
   const [form, setForm]        = useState(EMPTY)
   const [err, setErr]          = useState('')
+  const [deleteTarget, setDeleteTarget] = useState<EmploymentCategory | null>(null)
 
   const { data: catsData, isLoading } = useQuery<{ data: EmploymentCategory[] }>({
     queryKey: ['employment-categories'],
@@ -112,6 +114,7 @@ export function EmploymentCategories() {
     onSuccess: (res) => {
       qc.invalidateQueries({ queryKey: ['employment-categories'] })
       toast.success(res?.data?.deactivated ? 'Category deactivated (in use)' : 'Category deleted')
+      setDeleteTarget(null)
     },
     onError: (e: Error) => toast.error('Delete failed', { description: e.message }),
   })
@@ -176,7 +179,7 @@ export function EmploymentCategories() {
                           <Button
                             size="icon" variant="ghost"
                             className="h-7 w-7 text-destructive hover:text-destructive"
-                            onClick={() => delMut.mutate(c.id)}
+                            onClick={() => setDeleteTarget(c)}
                           >
                             <Trash2 className="h-3.5 w-3.5" />
                           </Button>
@@ -270,6 +273,20 @@ export function EmploymentCategories() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <ConfirmDialog
+        open={!!deleteTarget}
+        title="Delete Employment Category"
+        message={
+          deleteTarget
+            ? `Delete "${deleteTarget.name}" (${deleteTarget.code})? If no employees are currently assigned, this permanently deletes the category — there is no undo. If employees are assigned, it will be deactivated instead.`
+            : ''
+        }
+        confirmLabel="Delete"
+        destructive
+        onConfirm={() => deleteTarget && delMut.mutate(deleteTarget.id)}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </PageContainer>
   )
 }
