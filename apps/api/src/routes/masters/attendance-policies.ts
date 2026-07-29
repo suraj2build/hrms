@@ -26,6 +26,7 @@ import { z }                   from 'zod'
 import { policyService }       from '../../lib/policy-service.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { serverError, ErrorCode } from '../../lib/api-errors.js'
+import { fetchAllRows }        from '../../lib/supabase-paginate.js'
 
 // ── Validation schemas ────────────────────────────────────────────────────────
 
@@ -113,7 +114,7 @@ export default async function attendancePoliciesRoutes(fastify: FastifyInstance)
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
       .select()
-      .single()
+      .maybeSingle()
 
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update attendance policy')
     if (!data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Policy not found' })
@@ -214,18 +215,26 @@ export default async function attendancePoliciesRoutes(fastify: FastifyInstance)
   fastify.get('/assignments', auth, async (req: any, reply) => {
     if (!requireHrAdmin(req, reply)) return
 
-    const { data, error } = await fastify.supabase
-      .from('employee_attendance_policies')
-      .select(`
-        id, employee_id, policy_id, effective_from, effective_to, created_at,
-        employees!inner(id, first_name, last_name, employee_code),
-        attendance_policies!inner(id, name)
-      `)
-      .eq('tenant_id', req.tenantId)
-      .order('created_at', { ascending: false })
-
-    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch attendance policy assignments')
-    return reply.send({ data: data ?? [] })
+    // Paginated — an unbounded .select() truncates at PostgREST's 1,000-row
+    // ceiling for a tenant with many non-default policy assignments.
+    let data: any[]
+    try {
+      data = await fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('employee_attendance_policies')
+          .select(`
+            id, employee_id, policy_id, effective_from, effective_to, created_at,
+            employees!inner(id, first_name, last_name, employee_code),
+            attendance_policies!inner(id, name)
+          `)
+          .eq('tenant_id', req.tenantId)
+          .order('created_at', { ascending: false })
+          .range(from, to),
+      )
+    } catch (error) {
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch attendance policy assignments')
+    }
+    return reply.send({ data })
   })
 
   // ── POST /masters/attendance-policies/assignments ─────────────────────────

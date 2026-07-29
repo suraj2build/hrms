@@ -53,7 +53,7 @@ export default async function shiftsRoutes(fastify: FastifyInstance) {
       .eq('id', req.params.id)
       .eq('tenant_id', req.tenantId)
       .select()
-      .single()
+      .maybeSingle()
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update shift')
     if (!data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Shift not found' })
     return reply.send(data)

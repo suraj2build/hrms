@@ -25,6 +25,7 @@ import { z }                    from 'zod'
 import { logAction }            from '../../lib/audit-service.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { serverError, notFound, ErrorCode } from '../../lib/api-errors.js'
+import { fetchAllRows }         from '../../lib/supabase-paginate.js'
 
 const assignmentSchema = z.discriminatedUnion('scope_type', [
   z.object({
@@ -78,16 +79,22 @@ export default async function leavePolicyAssignmentsRoutes(fastify: FastifyInsta
   // ── GET / ──────────────────────────────────────────────────────────────────
   // Returns all assignments with policy name + scope label.
   fastify.get('/', auth, async (req: any, reply) => {
-    const { data, error } = await fastify.supabase
-      .from('leave_policy_assignments')
-      .select(`
-        id, scope_type, scope_id, created_at, updated_at,
-        leave_policy_masters(id, name, year_type, is_active)
-      `)
-      .eq('tenant_id', req.tenantId)
-      .order('scope_type')
-
-    if (error) {
+    // Paginated — an unbounded .select() truncates at PostgREST's 1,000-row
+    // ceiling for a tenant with many employee-level policy overrides.
+    let data: any[]
+    try {
+      data = await fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('leave_policy_assignments')
+          .select(`
+            id, scope_type, scope_id, created_at, updated_at,
+            leave_policy_masters(id, name, year_type, is_active)
+          `)
+          .eq('tenant_id', req.tenantId)
+          .order('scope_type')
+          .range(from, to),
+      )
+    } catch (error) {
       return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch leave policy assignments')
     }
 

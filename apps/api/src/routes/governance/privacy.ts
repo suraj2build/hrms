@@ -56,11 +56,12 @@ export default async function privacyRoutes(fastify: FastifyInstance) {
     const controlIds = (data ?? []).map((c: any) => c.control_id)
     let evidenceMap: Record<string, any> = {}
     if (controlIds.length > 0) {
-      const { data: evidence } = await fastify.supabase
+      const { data: evidence, error: evidenceErr } = await fastify.supabase
         .from('compliance_evidence_snapshots')
         .select('control_id, snapshot_date, pass, failure_reason')
         .in('control_id', controlIds)
         .order('snapshot_date', { ascending: false })
+      if (evidenceErr) return serverError(req, reply, evidenceErr, ErrorCode.QUERY_FAILED, 'Failed to fetch compliance evidence')
 
       for (const ev of (evidence ?? []) as any[]) {
         if (!evidenceMap[ev.control_id]) evidenceMap[ev.control_id] = ev

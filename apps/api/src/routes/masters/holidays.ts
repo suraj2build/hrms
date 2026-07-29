@@ -189,7 +189,7 @@ export default async function holidaysRoutes(fastify: FastifyInstance) {
       .eq('id', req.params.id)
       .eq('tenant_id', req.tenantId)
       .select('id, date, name, is_optional, site_id, location_id, holiday_group_id, created_at')
-      .single()
+      .maybeSingle()
 
     if (error) {
       if (error.code === '23505') return reply.code(409).send({ error: 'DUPLICATE', message: 'A holiday already exists on that date' })

@@ -134,7 +134,7 @@ export default async function leaveTypesRoutes(fastify: FastifyInstance) {
       .eq('id', (req.params as { id: string }).id)
       .eq('tenant_id', req.tenantId)
       .select('id, name, is_paid, allow_sandwich, allow_half_day, allow_hourly, max_hours_per_day, is_active, created_at')
-      .single()
+      .maybeSingle()
 
     if (error) {
       if (error.code === '23505') {
