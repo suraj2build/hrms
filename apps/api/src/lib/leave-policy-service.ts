@@ -37,6 +37,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { persistEvaluationLog } from './policy-governance.js'
+import { fetchTenantTz, utcToLocalDate } from './attendance-engine.js'
 
 // ── Canonical rule shape ───────────────────────────────────────────────────────
 
@@ -288,13 +289,39 @@ async function resolveAssignment(
     { scope_type: 'default',       scope_id: null,                priority: 5 },
   ]
 
-  // Fetch all assignments for this tenant that match any candidate scope_type.
-  // We include effective_from / effective_to for Step 2 filtering.
-  const { data: assignments, error } = await supabase
-    .from('leave_policy_assignments')
-    .select('id, policy_id, scope_type, scope_id, effective_from, effective_to')
-    .eq('tenant_id', tenantId)
-    .in('scope_type', candidates.map(c => c.scope_type))
+  // Fetch only the assignment rows that could actually match one of this
+  // employee's candidate scopes — NOT every row in the tenant matching any
+  // of the 5 generic scope_type values. The old tenant-wide-by-scope_type
+  // query had no upper bound: for a tenant with >1000 total assignment rows
+  // across its whole workforce (per-employee overrides, many department/
+  // work-location assignments accumulated over time), PostgREST's 1,000-row
+  // cap could silently drop this specific employee's row with no error,
+  // resolving to the wrong policy. Scoping to exact scope_id values bounds
+  // the result to at most one row per candidate.
+  const scopeIds = candidates
+    .map(c => c.scope_id)
+    .filter((id): id is string => !!id)
+  const scopedTypes = candidates.filter(c => c.scope_type !== 'default').map(c => c.scope_type)
+
+  const [scopedRes, defaultRes] = await Promise.all([
+    scopeIds.length > 0
+      ? supabase
+          .from('leave_policy_assignments')
+          .select('id, policy_id, scope_type, scope_id, effective_from, effective_to')
+          .eq('tenant_id', tenantId)
+          .in('scope_type', scopedTypes)
+          .in('scope_id', scopeIds)
+      : Promise.resolve({ data: [] as any[], error: null }),
+    supabase
+      .from('leave_policy_assignments')
+      .select('id, policy_id, scope_type, scope_id, effective_from, effective_to')
+      .eq('tenant_id', tenantId)
+      .eq('scope_type', 'default')
+      .is('scope_id', null),
+  ])
+
+  const error = scopedRes.error ?? defaultRes.error
+  const assignments = [...(scopedRes.data ?? []), ...(defaultRes.data ?? [])]
 
   // Filter by effective date window (Step 2), then score by priority
   let best: ResolvedAssignment | null = null
@@ -486,7 +513,7 @@ export async function resolveEffectivePolicyRule(
     isSimulation?:   boolean
   },
 ): Promise<PolicyRule | null> {
-  const effectiveAsOf = asOf ?? new Date().toISOString().slice(0, 10)
+  const effectiveAsOf = asOf ?? utcToLocalDate(new Date(), await fetchTenantTz(supabase, tenantId))
 
   const [ctx, leaveTypeNames, publishedPolicyIds] = await Promise.all([
     fetchJobContext(supabase, tenantId, employeeId),
@@ -593,7 +620,7 @@ export async function resolveAllPolicyRules(
     isSimulation?:   boolean
   },
 ): Promise<Map<string, PolicyRule>> {
-  const effectiveAsOf = asOf ?? new Date().toISOString().slice(0, 10)
+  const effectiveAsOf = asOf ?? utcToLocalDate(new Date(), await fetchTenantTz(supabase, tenantId))
 
   const [ctx, leaveTypeNames, publishedPolicyIds] = await Promise.all([
     fetchJobContext(supabase, tenantId, employeeId),
@@ -735,7 +762,7 @@ export async function resolveEffectivePolicyForEmployee(
     isSimulation?:   boolean
   },
 ): Promise<PolicyResolution> {
-  const effectiveAsOf = opts?.asOf ?? new Date().toISOString().slice(0, 10)
+  const effectiveAsOf = opts?.asOf ?? utcToLocalDate(new Date(), await fetchTenantTz(supabase, tenantId))
 
   // ── Build candidate list for debug output (Step 1) ─────────────────────────
   const [ctx, leaveTypeNames, publishedPolicyIds] = await Promise.all([
@@ -769,12 +796,31 @@ export async function resolveEffectivePolicyForEmployee(
   }> = []
 
   if (opts?.includeDebug) {
-    const { data } = await supabase
-      .from('leave_policy_assignments')
-      .select('id, policy_id, scope_type, scope_id, effective_from, effective_to')
-      .eq('tenant_id', tenantId)
-      .in('scope_type', candidateList.map(c => c.scope_type))
-    debugAssignments = (data ?? []) as typeof debugAssignments
+    // Scoped to this employee's actual candidate scope_ids — see the same
+    // fix (and its rationale) in resolveAssignment() above. 'employee_override'
+    // and 'site_default' are synthetic candidate markers for debug display,
+    // not real leave_policy_assignments.scope_type values, so they're excluded.
+    const realCandidates = candidateList.filter(c => c.scope_type !== 'employee_override' && c.scope_type !== 'site_default')
+    const debugScopeIds = realCandidates.map(c => c.scope_id).filter((id): id is string => !!id)
+    const debugScopedTypes = realCandidates.filter(c => c.scope_type !== 'default').map(c => c.scope_type)
+
+    const [scopedRes, defaultRes] = await Promise.all([
+      debugScopeIds.length > 0
+        ? supabase
+            .from('leave_policy_assignments')
+            .select('id, policy_id, scope_type, scope_id, effective_from, effective_to')
+            .eq('tenant_id', tenantId)
+            .in('scope_type', debugScopedTypes)
+            .in('scope_id', debugScopeIds)
+        : Promise.resolve({ data: [] as any[] }),
+      supabase
+        .from('leave_policy_assignments')
+        .select('id, policy_id, scope_type, scope_id, effective_from, effective_to')
+        .eq('tenant_id', tenantId)
+        .eq('scope_type', 'default')
+        .is('scope_id', null),
+    ])
+    debugAssignments = [...(scopedRes.data ?? []), ...(defaultRes.data ?? [])] as typeof debugAssignments
   }
 
   // ── Re-use shared resolution logic ─────────────────────────────────────────

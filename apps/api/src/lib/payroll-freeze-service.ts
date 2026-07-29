@@ -110,12 +110,18 @@ export async function getPayrollPeriodState(
   tenantId:     string,
   periodMonth:  string,   // 'YYYY-MM'
 ): Promise<PayrollGovernanceState> {
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from('payroll_period_states')
     .select('governance_state')
     .eq('tenant_id',    tenantId)
     .eq('period_month', periodMonth)
     .maybeSingle()
+
+  // A query error must not read the same as "no row" (→ 'open') — that would
+  // let isRetroactiveAllowed() fail open on a transient DB error against a
+  // period that may actually be locked/archived (same class as ISSUE-147's
+  // checkFreezeGuard / checkFreezeConstraint's fail-closed handling above).
+  if (error) throw new Error(`Failed to read payroll period state for ${periodMonth}: ${error.message}`)
 
   return (data as { governance_state: PayrollGovernanceState } | null)?.governance_state ?? 'open'
 }
@@ -129,12 +135,14 @@ export async function getPayrollPeriodStateRow(
   tenantId:     string,
   periodMonth:  string,
 ): Promise<PayrollPeriodStateRow | null> {
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from('payroll_period_states')
     .select('*')
     .eq('tenant_id',    tenantId)
     .eq('period_month', periodMonth)
     .maybeSingle()
+
+  if (error) throw new Error(`Failed to read payroll period state row for ${periodMonth}: ${error.message}`)
 
   return data ? (data as unknown as PayrollPeriodStateRow) : null
 }
@@ -184,7 +192,10 @@ export async function getOrCreatePayrollPeriod(
  * Attempts to regress the state (e.g. locked → open) are rejected by returning
  * false. The orchestrator must not attempt to revert freeze states.
  *
- * Returns true on success, false if transition was invalid.
+ * Returns true on success, false if the transition was invalid OR if the
+ * governance_state changed concurrently between the read and the write
+ * (the update's WHERE clause is scoped to the state just read, so a
+ * concurrent transition wins the race cleanly instead of being overwritten).
  */
 export async function transitionPayrollPeriod(
   supabase:     SupabaseClient,
@@ -225,13 +236,25 @@ export async function transitionPayrollPeriod(
     updates.archived_at = new Date().toISOString()
   }
 
-  await supabase
+  // Fold the state we validated against into the UPDATE's own WHERE clause —
+  // otherwise two concurrent transitions can each read the same starting
+  // state, both pass the regression check above, and the second writer's
+  // last-write-wins update could silently regress the governance state
+  // (e.g. an automatic archive racing an admin lock).
+  const { data: updated, error } = await supabase
     .from('payroll_period_states')
     .update(updates)
-    .eq('tenant_id',    tenantId)
-    .eq('period_month', periodMonth)
+    .eq('tenant_id',        tenantId)
+    .eq('period_month',     periodMonth)
+    .eq('governance_state', row.governance_state)
+    .select('id')
+    .maybeSingle()
 
-  return true
+  if (error) throw new Error(`Failed to transition payroll period ${periodMonth} to ${newState}: ${error.message}`)
+
+  // No row matched → governance_state changed concurrently since the read
+  // above; the transition lost the race and must not be reported as applied.
+  return !!updated
 }
 
 /**
@@ -356,7 +379,13 @@ export async function isRetroactiveAllowed(
   tenantId:     string,
   periodMonth:  string,
 ): Promise<{ allowed: boolean; requiresAdjustmentWorkflow: boolean; auditOnly: boolean }> {
-  const state = await getPayrollPeriodState(supabase, tenantId, periodMonth)
+  let state: PayrollGovernanceState
+  try {
+    state = await getPayrollPeriodState(supabase, tenantId, periodMonth)
+  } catch {
+    // Fail CLOSED — see checkFreezeConstraint's fail-closed handling above.
+    return { allowed: false, requiresAdjustmentWorkflow: false, auditOnly: false }
+  }
   return {
     allowed:                    state === 'open' || state === 'payroll_processing',
     requiresAdjustmentWorkflow: state === 'payroll_locked',

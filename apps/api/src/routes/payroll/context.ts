@@ -101,6 +101,8 @@ export default async function payrollContextRoutes(fastify: FastifyInstance) {
       if (!curRunRes.data?.id || !prevRunRes.data?.id) {
         return reply.send({ data: { spike_count: 0, top_variances: [] } })
       }
+      const curRunId  = curRunRes.data.id
+      const prevRunId = prevRunRes.data.id
 
       // Paginated — an unbounded .select() would silently truncate at
       // PostgREST's 1,000-row ceiling for a run with >1000 slips, hiding
@@ -111,7 +113,7 @@ export default async function payrollContextRoutes(fastify: FastifyInstance) {
             .from('payroll_slips')
             .select('employee_id, gross_pay, employees(first_name, last_name)')
             .eq('tenant_id', req.tenantId)
-            .eq('run_id', curRunRes.data.id)
+            .eq('run_id', curRunId)
             .range(from, to),
         ),
         fetchAllRows<{ employee_id: string; gross_pay: number }>((from, to) =>
@@ -119,7 +121,7 @@ export default async function payrollContextRoutes(fastify: FastifyInstance) {
             .from('payroll_slips')
             .select('employee_id, gross_pay')
             .eq('tenant_id', req.tenantId)
-            .eq('run_id', prevRunRes.data.id)
+            .eq('run_id', prevRunId)
             .range(from, to),
         ),
       ])

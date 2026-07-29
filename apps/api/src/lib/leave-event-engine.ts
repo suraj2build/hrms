@@ -50,11 +50,6 @@ function toDateStr(d: Date): string {
   return d.toISOString().slice(0, 10)
 }
 
-/** Return today's calendar year. */
-function currentYear(): number {
-  return new Date().getFullYear()
-}
-
 // ── Core functions ────────────────────────────────────────────────────────────
 
 /**
@@ -215,7 +210,13 @@ export async function processEventGrant(
   lineageId?:  string,
 ): Promise<boolean> {
   const today     = toDateStr(grantDate)
-  const eventYear = currentYear()
+  // Derived from the processing date passed in, NOT a fresh clock read — the
+  // scheduler reconstructs a deterministic grantDate from a queued dayKey
+  // specifically so idempotency holds even if the job runs slightly after
+  // midnight (see leave-scheduler.ts). Using new Date().getFullYear() here
+  // would silently use next year's value for any run that crosses the
+  // Dec 31/Jan 1 boundary, keying the grant/ledger write to the wrong year.
+  const eventYear = grantDate.getUTCFullYear()
   const year      = eventYear
 
   // Cheap pre-check to skip the common case without round-tripping through

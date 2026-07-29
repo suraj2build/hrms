@@ -412,7 +412,7 @@ export async function countWorkingDaysInMonth(
 ): Promise<number> {
   const [year, mon] = month.split('-').map(Number)
   const firstDay    = `${month}-01`
-  const lastDay     = new Date(year, mon, 0).toISOString().slice(0, 10)
+  const lastDay     = new Date(Date.UTC(year, mon, 0)).toISOString().slice(0, 10)
   const allDates    = expandDateRange(firstDay, lastDay)
 
   // Fetch public holidays for the month (tenant-wide, non-optional).
@@ -467,7 +467,7 @@ export async function countWorkingDaysForEmployee(
 ): Promise<number> {
   const [year, mon] = month.split('-').map(Number)
   const firstDay    = `${month}-01`
-  const lastDay     = new Date(year, mon, 0).toISOString().slice(0, 10)
+  const lastDay     = new Date(Date.UTC(year, mon, 0)).toISOString().slice(0, 10)
   const allDates    = expandDateRange(firstDay, lastDay)
 
   const ctx = await resolveEmployeeOrgContext(supabase, tenantId, employeeId, firstDay)
@@ -539,7 +539,7 @@ export async function fetchAttendanceSummary(
 }> {
   const [year, mon] = month.split('-').map(Number)
   const from = `${month}-01`
-  const to   = new Date(year, mon, 0).toISOString().slice(0, 10)
+  const to   = new Date(Date.UTC(year, mon, 0)).toISOString().slice(0, 10)
 
   const { data: rows, error: attErr } = await supabase
     .from('attendance_daily')
