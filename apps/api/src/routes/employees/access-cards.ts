@@ -63,7 +63,11 @@ export default async function accessCardsRoutes(fastify: FastifyInstance) {
       .eq('employee_id', req.params.id)
       .eq('tenant_id', req.tenantId)
       .select().maybeSingle()
-    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update access card')
+    if (error) {
+      if (error.code === '23505')
+        return conflictError(reply, 'DUPLICATE', 'Card number already in use')
+      return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update access card')
+    }
     if (!data) return notFound(reply, 'NOT_FOUND', 'Access card not found')
     return reply.send(data)
   })

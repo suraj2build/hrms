@@ -364,9 +364,10 @@ export default async function uploadSessionRoutes(fastify: FastifyInstance) {
     }
 
     if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
-      const { data: prof } = await (fastify as any).supabase
+      const { data: prof, error: profError } = await (fastify as any).supabase
         .from('profiles').select('employee_id')
         .eq('id', req.userId).eq('tenant_id', req.tenantId).maybeSingle()
+      if (profError) return serverError(req, reply, profError, ErrorCode.QUERY_FAILED, 'Failed to resolve caller identity')
       const ownEmployeeId = prof?.employee_id ?? null
       const isOwnSession = session.reference_type === 'employee' && session.reference_id === ownEmployeeId
       if (!ownEmployeeId || !isOwnSession) {

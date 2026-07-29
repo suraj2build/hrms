@@ -6,6 +6,8 @@
  * approve faster. This computes it from attendance_daily over a rolling window.
  */
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { fetchTenantTz } from './attendance-engine.js'
+import { getLocalDate } from './org-context.js'
 
 export interface AttendanceTrend {
   window_days:      number
@@ -26,9 +28,12 @@ export async function fetchAttendanceTrend(
   employeeId: string,
   days = 30,
 ): Promise<AttendanceTrend> {
-  const since = new Date()
-  since.setDate(since.getDate() - days)
-  const sinceStr = since.toISOString().slice(0, 10)
+  // Anchor the window on the tenant's local calendar date, not server UTC —
+  // attendance_daily.date is tenant-local, so a UTC "today" can silently
+  // shift the reported window by a day for a tenant far from UTC.
+  const tz = await fetchTenantTz(supabase, tenantId)
+  const today = getLocalDate(new Date().toISOString(), tz)
+  const sinceStr = new Date(new Date(`${today}T00:00:00Z`).getTime() - days * 86_400_000).toISOString().slice(0, 10)
 
   const { data, error } = await supabase
     .from('attendance_daily')

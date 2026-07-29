@@ -28,17 +28,17 @@ export default async function managerCompensationRoute(fastify: FastifyInstance)
   }
 
   /** Resolve the manager employee_id for this request (self, or admin override). */
-  async function resolveManagerId(req: any, override?: string): Promise<string | null> {
+  async function resolveManagerId(req: any, override?: string): Promise<{ id: string | null; error: unknown }> {
     if (override && isAdmin(req.userRole)) {
-      const { data } = await fastify.supabase
+      const { data, error } = await fastify.supabase
         .from('employees').select('id')
         .eq('id', override).eq('tenant_id', req.tenantId).maybeSingle()
-      return (data as { id: string } | null)?.id ?? null
+      return { id: (data as { id: string } | null)?.id ?? null, error }
     }
-    const { data } = await fastify.supabase
+    const { data, error } = await fastify.supabase
       .from('profiles').select('employee_id')
       .eq('id', req.userId).eq('tenant_id', req.tenantId).maybeSingle()
-    return (data as { employee_id: string | null } | null)?.employee_id ?? null
+    return { id: (data as { employee_id: string | null } | null)?.employee_id ?? null, error }
   }
 
   // ── GET /manager/team/compensation ────────────────────────────────────────────
@@ -48,7 +48,8 @@ export default async function managerCompensationRoute(fastify: FastifyInstance)
       return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
     }
 
-    const managerId = await resolveManagerId(req, parsed.data.manager_employee_id)
+    const { id: managerId, error: managerErr } = await resolveManagerId(req, parsed.data.manager_employee_id)
+    if (managerErr) return serverError(req, reply, managerErr, ErrorCode.QUERY_FAILED, 'Failed to resolve manager identity')
     if (!managerId) return reply.send({ data: [], manager_employee_id: null })
 
     // Direct reports (active). designation/grade are FK lookups (designation_id /
@@ -125,14 +126,16 @@ export default async function managerCompensationRoute(fastify: FastifyInstance)
   // ── GET /manager/team/compensation/:employeeId/history ────────────────────────
   fastify.get('/manager/team/compensation/:employeeId/history', auth, async (req: any, reply) => {
     const { employeeId } = req.params as { employeeId: string }
-    const managerId = await resolveManagerId(req)
+    const { id: managerId, error: managerErr } = await resolveManagerId(req)
+    if (managerErr) return serverError(req, reply, managerErr, ErrorCode.QUERY_FAILED, 'Failed to resolve manager identity')
 
     // The target must be the caller's own direct report (HR admins bypass the scope).
     if (!isAdmin(req.userRole)) {
       if (!managerId) return reply.code(403).send({ error: 'FORBIDDEN', message: 'No manager profile linked' })
-      const { data: emp } = await fastify.supabase
+      const { data: emp, error: empErr } = await fastify.supabase
         .from('employees').select('id, manager_id')
         .eq('id', employeeId).eq('tenant_id', req.tenantId).maybeSingle()
+      if (empErr) return serverError(req, reply, empErr, ErrorCode.QUERY_FAILED, 'Failed to verify direct-report scope')
       if (!emp || (emp as any).manager_id !== managerId) {
         return reply.code(403).send({ error: 'FORBIDDEN', message: 'This employee is not one of your direct reports' })
       }

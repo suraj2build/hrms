@@ -113,12 +113,16 @@ export default async function employeeManagerRoutes(fastify: FastifyInstance) {
       let depth = 0
 
       while (cursor && depth < MAX_DEPTH) {
-        const { data: node } = await fastify.supabase
+        const { data: node, error: nodeErr } = await fastify.supabase
           .from('employees')
           .select('manager_id')
           .eq('id', cursor)
           .eq('tenant_id', req.tenantId)
           .maybeSingle()
+
+        // A transient failure here must not fail open as "no cycle found" —
+        // that would let a genuine circular chain slip through undetected.
+        if (nodeErr) return serverError(req, reply, nodeErr, ErrorCode.QUERY_FAILED, 'Failed to verify manager chain')
 
         const nodeRow = node as { manager_id: string | null } | null
         if (!nodeRow) break
@@ -141,9 +145,10 @@ export default async function employeeManagerRoutes(fastify: FastifyInstance) {
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
       .select('id, employee_code, first_name, last_name, manager_id')
-      .single()
+      .maybeSingle()
 
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update manager')
+    if (!data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Employee not found' })
 
     await logAction(fastify.supabase, {
       tenantId:    req.tenantId,
