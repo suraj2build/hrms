@@ -58,12 +58,13 @@ export async function resolveManagerEmployeeId(
   override?: string | null,
 ): Promise<string | null> {
   if (override && isHrAdmin(req.userRole)) {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('employees')
       .select('id')
       .eq('id', override)
       .eq('tenant_id', req.tenantId)
       .maybeSingle()
+    if (error) throw error
     return (data as { id: string } | null)?.id ?? null
   }
   return resolveCallerEmployeeId(supabase, req.userId, req.tenantId)
@@ -101,12 +102,13 @@ export async function isDirectReport(
   managerEmployeeId: string,
   employeeId: string,
 ): Promise<boolean> {
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from('employees')
     .select('id')
     .eq('id', employeeId)
     .eq('manager_id', managerEmployeeId)
     .eq('tenant_id', tenantId)
     .maybeSingle()
+  if (error) throw error
   return !!data
 }

@@ -274,10 +274,11 @@ export default async function managerTeamLifecycleRoute(fastify: FastifyInstance
       }
     }
 
-    const { data: emp } = await fastify.supabase
+    const { data: emp, error: empErr } = await fastify.supabase
       .from('employees')
       .select('id, first_name, last_name, employee_code')
       .eq('id', parsed.data.employee_id).eq('tenant_id', req.tenantId).maybeSingle()
+    if (empErr) return serverError(req, reply, empErr, ErrorCode.QUERY_FAILED, 'Failed to fetch employee')
     if (!emp) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Employee not found' })
 
     const name = `${(emp as any).first_name ?? ''} ${(emp as any).last_name ?? ''}`.trim() || (emp as any).employee_code

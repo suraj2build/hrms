@@ -562,6 +562,7 @@ function EventLogTab() {
 function ReplayQueueTab() {
   const qc = useQueryClient()
   const [statusFilter, setStatusFilter] = useState<'' | ReplayStatus>('')
+  const [cancelTarget, setCancelTarget] = useState<ReplayQueueRow | null>(null)
 
   const { data, isLoading, isError, refetch } = useQuery<ReplayQueueRow[]>({
     queryKey: ['event-governance-replay-queue', statusFilter],
@@ -579,8 +580,12 @@ function ReplayQueueTab() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['event-governance-replay-queue'] })
       toast.success('Replay cancelled')
+      setCancelTarget(null)
     },
-    onError: (e: Error) => toast.error('Failed to cancel replay', { description: e.message }),
+    onError: (e: Error) => {
+      toast.error('Failed to cancel replay', { description: e.message })
+      setCancelTarget(null)
+    },
   })
 
   const rows = data ?? []
@@ -681,7 +686,7 @@ function ReplayQueueTab() {
                         variant="outline"
                         className="h-6 text-[10px] px-2 text-destructive border-destructive/40 hover:bg-destructive/5"
                         disabled={cancel.isPending}
-                        onClick={() => cancel.mutate(row.id)}
+                        onClick={() => setCancelTarget(row)}
                       >
                         Cancel
                       </Button>
@@ -693,6 +698,16 @@ function ReplayQueueTab() {
           </table>
         </div>
       )}
+
+      <ConfirmDialog
+        open={!!cancelTarget}
+        title="Cancel Replay"
+        message={cancelTarget ? `Cancel the pending replay for "${cancelTarget.event_type}"? This cannot be undone.` : ''}
+        confirmLabel="Cancel Replay"
+        destructive
+        onConfirm={() => cancelTarget && cancel.mutate(cancelTarget.id)}
+        onCancel={() => setCancelTarget(null)}
+      />
     </SectionCard>
   )
 }

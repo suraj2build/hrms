@@ -19,6 +19,7 @@ import { SubTabs } from '@/components/ui/SubTabs'
 import { Button } from '@/components/ui/button'
 import { Label }  from '@/components/ui/label'
 import { sanitizeHtml, escapeHtml } from '@/lib/sanitize'
+import { toast } from 'sonner'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@/components/ui/dialog'
@@ -170,6 +171,8 @@ function RequestLetterDialog({ onClose }: { onClose: () => void }) {
       await api.post('/letters/ess/request', { template_id: selectedId, reason })
       qc.invalidateQueries({ queryKey: ['my-letter-requests'] })
       setDone(true)
+    } catch (err) {
+      toast.error('Failed to submit request', { description: err instanceof Error ? err.message : undefined })
     } finally {
       setSubmitting(false)
     }
