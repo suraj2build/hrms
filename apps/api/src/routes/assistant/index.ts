@@ -188,11 +188,12 @@ export default async function assistantRoutes(fastify: FastifyInstance) {
 
   // ── GET /assistant/config (admin) ─────────────────────────────────────────────
   fastify.get('/assistant/config', hrAuth, async (req: any, reply) => {
-    const { data: row } = await fastify.supabase
+    const { data: row, error: rowError } = await fastify.supabase
       .from('ai_assistant_config')
       .select('*')
       .eq('tenant_id', req.tenantId)
       .maybeSingle()
+    if (rowError) return serverError(req, reply, rowError, ErrorCode.QUERY_FAILED, 'Failed to fetch assistant config')
     const r = row as any
 
     // Stored chain (masked). Fall back to legacy primary/fallback columns if the
@@ -242,15 +243,20 @@ export default async function assistantRoutes(fastify: FastifyInstance) {
     const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString()
     const since = new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString()
 
-    const rows = (await fetchAllRows((from, to) =>
-      fastify.supabase
-        .from('ai_usage_log')
-        .select('provider, model, source, prompt_tokens, completion_tokens, total_tokens, created_at')
-        .eq('tenant_id', req.tenantId)
-        .gte('created_at', since)
-        .order('created_at', { ascending: false })
-        .range(from, to),
-    ).catch(() => [] as any[])) as Array<{ provider: string; source: string; total_tokens: number; prompt_tokens: number; completion_tokens: number; created_at: string }>
+    let rows: Array<{ provider: string; source: string; total_tokens: number; prompt_tokens: number; completion_tokens: number; created_at: string }>
+    try {
+      rows = await fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('ai_usage_log')
+          .select('provider, model, source, prompt_tokens, completion_tokens, total_tokens, created_at')
+          .eq('tenant_id', req.tenantId)
+          .gte('created_at', since)
+          .order('created_at', { ascending: false })
+          .range(from, to),
+      ) as any[]
+    } catch (error: unknown) {
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch assistant usage')
+    }
     const monthRows = rows.filter(r => r.created_at >= monthStart)
     const sum = (rs: typeof rows) => rs.reduce((a, r) => ({
       calls: a.calls + 1,
@@ -289,11 +295,15 @@ export default async function assistantRoutes(fastify: FastifyInstance) {
     if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
 
     // Load existing keys so an omitted api_key preserves the saved value (per provider).
-    const { data: existing } = await fastify.supabase
+    // Must not proceed on a failed read: if this silently returned nothing, every
+    // omitted-key entry below would resolve to null and the upsert would wipe out
+    // every previously-saved provider key.
+    const { data: existing, error: existingError } = await fastify.supabase
       .from('ai_assistant_config')
       .select('*')
       .eq('tenant_id', req.tenantId)
       .maybeSingle()
+    if (existingError) return serverError(req, reply, existingError, ErrorCode.QUERY_FAILED, 'Failed to load existing assistant config')
     const ex = existing as any
     const savedKey = new Map<string, string>()
     if (Array.isArray(ex?.providers_json)) {

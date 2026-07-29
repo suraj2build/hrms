@@ -16,6 +16,7 @@ import { z }                    from 'zod'
 import { durableQueue }         from '../../lib/durable-queue.js'
 import { HR_ADMIN_ROLES }       from '../../lib/rbac.js'
 import { conflictError, serverError, ErrorCode } from '../../lib/api-errors.js'
+import { checkIdempotency, storeIdempotency } from '../../lib/idempotency.js'
 import {
   createImportJob,
   getImportJob,
@@ -96,6 +97,15 @@ export default async function importsRoutes(fastify: FastifyInstance) {
       })
     }
 
+    const iKey = (req.headers['idempotency-key'] as string | undefined)?.trim()
+    if (iKey) {
+      const cached = await checkIdempotency(fastify.supabase, tenantId, iKey, 'import-create-job')
+      if (cached) {
+        reply.header('Idempotency-Replayed', 'true')
+        return reply.code(cached.status_code).send(cached.response)
+      }
+    }
+
     const job = await createImportJob(fastify.supabase, {
       tenant_id:         tenantId,
       created_by:        userId,
@@ -124,7 +134,9 @@ export default async function importsRoutes(fastify: FastifyInstance) {
       },
     )
 
-    return reply.code(201).send({ job })
+    const responseBody = { job }
+    if (iKey) await storeIdempotency(fastify.supabase, tenantId, iKey, 'import-create-job', 201, responseBody)
+    return reply.code(201).send(responseBody)
   })
 
   // ── GET /imports ──────────────────────────────────────────────────────────

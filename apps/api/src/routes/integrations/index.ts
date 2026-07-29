@@ -8,6 +8,7 @@ import {
 import type { AccountingFormat, PayrollExportInput } from '../../platform/integrations/index.js'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { serverError, ErrorCode } from '../../lib/api-errors.js'
+import { checkIdempotency, storeIdempotency } from '../../lib/idempotency.js'
 
 export default async function integrationRoutes(fastify: FastifyInstance) {
   const auth = { preHandler: [fastify.authenticate] }
@@ -37,8 +38,19 @@ export default async function integrationRoutes(fastify: FastifyInstance) {
     if (!body.pan || typeof body.pan !== 'string') {
       return reply.status(400).send({ error: 'pan is required' })
     }
+
+    const iKey = (req.headers['idempotency-key'] as string | undefined)?.trim()
+    if (iKey) {
+      const cached = await checkIdempotency(fastify.supabase, req.tenantId, iKey, 'integrations-pan-verify')
+      if (cached) {
+        reply.header('Idempotency-Replayed', 'true')
+        return reply.code(cached.status_code).send(cached.response)
+      }
+    }
+
     try {
       const result = await panVerificationAdapter.verify(body.pan)
+      if (iKey) await storeIdempotency(fastify.supabase, req.tenantId, iKey, 'integrations-pan-verify', 200, result)
       return result
     } catch (err: unknown) {
       return serverError(req, reply, err, ErrorCode.COMPUTE_FAILED, 'PAN verification failed')

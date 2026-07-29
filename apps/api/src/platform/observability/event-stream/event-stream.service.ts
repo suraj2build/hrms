@@ -44,7 +44,12 @@ export class EventStreamService {
    * Query the platform event stream with filters.
    */
   async query(q: EventStreamQuery): Promise<EventStreamPage> {
-    const limit  = Math.min(q.limit  ?? 50, 200)
+    // Cap matches PostgREST's own max-rows ceiling — a single .range() call
+    // can never return more than 1000 rows regardless of this value, so this
+    // is a safety bound, not an arbitrary page-size restriction. Callers that
+    // previously requested up to 500 (observability heatmap/summary) were
+    // being silently truncated to 200 with no signal.
+    const limit  = Math.min(q.limit  ?? 50, 1000)
     const offset = q.offset ?? 0
 
     let query = this.supabase

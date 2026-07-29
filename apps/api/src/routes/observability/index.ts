@@ -71,18 +71,21 @@ export default async function observabilityRoutes(fastify: FastifyInstance) {
     const body          = req.body as { events?: ResolvedPlatformEvent[] } | undefined
 
     let events: ResolvedPlatformEvent[]
+    let totalEvents: number
 
     if (Array.isArray(body?.events) && body.events.length > 0) {
-      events = body.events
+      events     = body.events
+      totalEvents = events.length
     } else {
       const from = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
       const svc  = new EventStreamService((fastify as any).supabase)
       const page = await svc.query({ tenant_id: orgId, from, limit: 500 })
       events     = page.events
+      totalEvents = page.total
     }
 
     const cells = eventTraceService.buildHeatmap(events)
-    return reply.send({ cells, total_events: events.length })
+    return reply.send({ cells, total_events: totalEvents })
   })
 
   /**
