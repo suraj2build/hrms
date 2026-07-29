@@ -8,6 +8,7 @@ import {
 } from'lucide-react'
 import { toast } from'sonner'
 import { Button } from'@/components/ui/button'
+import { ConfirmDialog } from'@/components/ui/ConfirmDialog'
 import { api } from'@/lib/api/client'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -235,6 +236,7 @@ export function AdminSurveyDetail() {
  const [tab, setTab] = useState<Tab>('overview')
  const [setup360Form, setSetup360Form] = useState({ peer_count: 3, self_review: true, manager_review: true, deadline_days: 14 })
  const [setup360Loading, setSetup360Loading] = useState(false)
+ const [showCloseConfirm, setShowCloseConfirm] = useState(false)
 
  const { data: survey, isLoading } = useQuery<SurveyDetail>({
  queryKey: ['admin-survey', id],
@@ -255,8 +257,12 @@ export function AdminSurveyDetail() {
  onSuccess: () => {
  qc.invalidateQueries({ queryKey: ['admin-survey', id] })
  qc.invalidateQueries({ queryKey: ['admin-surveys'] })
+ setShowCloseConfirm(false)
  },
- onError: () => toast.error('Could not update survey'),
+ onError: () => {
+ toast.error('Could not update survey')
+ setShowCloseConfirm(false)
+ },
  })
 
  const assignMut = useMutation({
@@ -301,6 +307,7 @@ export function AdminSurveyDetail() {
  const completedCount = survey.assignments.filter(a => a.completed_at).length
 
  return (
+ <>
  <div className="p-6 space-y-6 max-w-4xl">
  {/* Header */}
  <div>
@@ -349,7 +356,7 @@ export function AdminSurveyDetail() {
  size="sm"
  variant="outline"
  className="border-destructive/40 text-destructive hover:bg-destructive/10"
- onClick={() => patchMut.mutate('closed')}
+ onClick={() => setShowCloseConfirm(true)}
  disabled={patchMut.isPending}
  >
  <X className="mr-1.5 h-3.5 w-3.5" />
@@ -580,5 +587,16 @@ export function AdminSurveyDetail() {
  </div>
  )}
  </div>
+
+ <ConfirmDialog
+ open={showCloseConfirm}
+ title="Close Survey"
+ message="Close this survey? No further responses will be accepted and this cannot be undone."
+ confirmLabel="Close Survey"
+ destructive
+ onConfirm={() => patchMut.mutate('closed')}
+ onCancel={() => setShowCloseConfirm(false)}
+ />
+ </>
  )
 }

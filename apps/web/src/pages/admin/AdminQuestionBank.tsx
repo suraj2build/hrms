@@ -31,6 +31,7 @@ import {
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { api }           from '@/lib/api/client'
 import { useAuthStore }  from '@/stores/authStore'
 import { cn }            from '@/lib/utils'
@@ -75,8 +76,7 @@ const DIFF_META: Record<string, { label: string; color: string }> = {
 }
 
 function errMsg(e: unknown, fallback: string): string {
-  const apiErr = e as { response?: { data?: { message?: string } } }
-  return apiErr?.response?.data?.message ?? fallback
+  return e instanceof Error && e.message ? e.message : fallback
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -107,6 +107,9 @@ export function AdminQuestionBank() {
   const [qDiff,        setQDiff]        = useState('medium')
   const [qTags,        setQTags]        = useState('')
   const [qSaving,      setQSaving]      = useState(false)
+
+  const [deleteCatTarget, setDeleteCatTarget] = useState<QBCategory | null>(null)
+  const [deleteQTarget,   setDeleteQTarget]   = useState<QBItem | null>(null)
 
   // ── Queries ────────────────────────────────────────────────────────────────
 
@@ -140,14 +143,14 @@ export function AdminQuestionBank() {
 
   const deleteCatMut = useMutation({
     mutationFn: (id: string) => api.delete(`/recruitment/question-bank/categories/${id}`),
-    onSuccess:  () => { toast.success('Category deleted'); qc.invalidateQueries({ queryKey: ['recruitment', 'qb-categories'] }) },
-    onError:    (e: unknown) => toast.error(errMsg(e, 'Delete failed')),
+    onSuccess:  () => { toast.success('Category deleted'); qc.invalidateQueries({ queryKey: ['recruitment', 'qb-categories'] }); setDeleteCatTarget(null) },
+    onError:    (e: unknown) => { toast.error(errMsg(e, 'Delete failed')); setDeleteCatTarget(null) },
   })
 
   const deleteQMut = useMutation({
     mutationFn: (id: string) => api.delete(`/recruitment/question-bank/items/${id}`),
-    onSuccess:  () => { toast.success('Question deleted'); qc.invalidateQueries({ queryKey: ['recruitment', 'qb-items'] }) },
-    onError:    (e: unknown) => toast.error(errMsg(e, 'Delete failed')),
+    onSuccess:  () => { toast.success('Question deleted'); qc.invalidateQueries({ queryKey: ['recruitment', 'qb-items'] }); setDeleteQTarget(null) },
+    onError:    (e: unknown) => { toast.error(errMsg(e, 'Delete failed')); setDeleteQTarget(null) },
   })
 
   const toggleActiveMut = useMutation({
@@ -313,7 +316,7 @@ export function AdminQuestionBank() {
                           variant="ghost"
                           size="sm"
                           className="h-6 px-2 text-xs text-destructive hover:text-destructive"
-                          onClick={() => deleteCatMut.mutate(cat.id)}
+                          onClick={() => setDeleteCatTarget(cat)}
                           disabled={deleteCatMut.isPending}
                         >
                           <Trash2 className="h-3 w-3 mr-1" />Delete
@@ -443,7 +446,7 @@ export function AdminQuestionBank() {
                               variant="ghost"
                               size="sm"
                               className="h-7 px-2 text-xs text-destructive hover:text-destructive ml-auto"
-                              onClick={() => deleteQMut.mutate(q.id)}
+                              onClick={() => setDeleteQTarget(q)}
                               disabled={deleteQMut.isPending}
                             >
                               <Trash2 className="h-3 w-3 mr-1" />Delete
@@ -563,6 +566,26 @@ export function AdminQuestionBank() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <ConfirmDialog
+        open={!!deleteCatTarget}
+        title="Delete Category"
+        message={deleteCatTarget ? `Delete "${deleteCatTarget.name}"? Questions in this category will need to be reassigned or will also be affected.` : ''}
+        confirmLabel="Delete"
+        destructive
+        onConfirm={() => deleteCatTarget && deleteCatMut.mutate(deleteCatTarget.id)}
+        onCancel={() => setDeleteCatTarget(null)}
+      />
+
+      <ConfirmDialog
+        open={!!deleteQTarget}
+        title="Delete Question"
+        message={deleteQTarget ? `Delete this question? "${deleteQTarget.question.slice(0, 80)}${deleteQTarget.question.length > 80 ? '…' : ''}"` : ''}
+        confirmLabel="Delete"
+        destructive
+        onConfirm={() => deleteQTarget && deleteQMut.mutate(deleteQTarget.id)}
+        onCancel={() => setDeleteQTarget(null)}
+      />
     </PageContainer>
   )
 }

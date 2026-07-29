@@ -110,8 +110,7 @@ const EMP_TYPE_LABELS: Record<string, string> = {
 }
 
 function errMsg(e: unknown, fallback: string): string {
-  const apiErr = e as { response?: { data?: { message?: string } } }
-  return apiErr?.response?.data?.message ?? fallback
+  return e instanceof Error && e.message ? e.message : fallback
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────

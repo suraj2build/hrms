@@ -596,7 +596,8 @@ export function ControlCenter() {
   ], [reconciliation, durable, schedulers])
 
   // Merged dashboard derived
-  const today          = new Date().toISOString().slice(0, 10)
+  const todayDate       = new Date()
+  const today           = `${todayDate.getFullYear()}-${String(todayDate.getMonth() + 1).padStart(2, '0')}-${String(todayDate.getDate()).padStart(2, '0')}`
   const anomalyCount   = anomalyResp?.total ?? (Array.isArray(anomalyResp?.data)     ? anomalyResp!.data.length     : 0)
   const correctionsCount = correctionsResp?.total ?? (Array.isArray(correctionsResp?.data) ? correctionsResp!.data.length : 0)
   const regList        = regResp?.data ?? []
