@@ -99,12 +99,13 @@ export class ReplayIntelligenceService {
 
   /** List recent replay sessions for an org. */
   async listSessions(supabase: SupabaseClient, orgId: string, limit = 20): Promise<ReplaySession[]> {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('replay_sessions')
       .select('*')
       .eq('tenant_id', orgId)
       .order('created_at', { ascending: false })
       .limit(limit)
+    if (error) throw error
     return (data ?? []) as ReplaySession[]
   }
 }

@@ -64,24 +64,26 @@ export class DecisionGraphService {
 
   /** Get all decision nodes for an entity (for lineage view). */
   async getEntityLineage(supabase: SupabaseClient, entityId: string, orgId: string, limit = 50): Promise<DecisionGraphNode[]> {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('decision_graph_nodes')
       .select('*')
       .eq('tenant_id', orgId)
       .eq('entity_id', entityId)
       .order('timestamp', { ascending: false })
       .limit(limit)
+    if (error) throw error
     return (data ?? []) as DecisionGraphNode[]
   }
 
   /** Get recent decision nodes for an org. */
   async getRecentNodes(supabase: SupabaseClient, orgId: string, limit = 50): Promise<DecisionGraphNode[]> {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('decision_graph_nodes')
       .select('*')
       .eq('tenant_id', orgId)
       .order('timestamp', { ascending: false })
       .limit(limit)
+    if (error) throw error
     return (data ?? []) as DecisionGraphNode[]
   }
 
