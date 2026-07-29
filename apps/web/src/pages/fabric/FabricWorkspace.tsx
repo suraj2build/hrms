@@ -7,7 +7,7 @@
  */
 
 import { useState }                                            from 'react'
-import { useQuery, useMutation }                               from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient }               from '@tanstack/react-query'
 import { toast }                                               from 'sonner'
 import {
   Activity, GitBranch, Workflow,
@@ -183,6 +183,7 @@ function ScoreBar({ label, value, invert = false }: { label: string; value: numb
 // ── Main component ────────────────────────────────────────────────────────────
 
 export default function FabricWorkspace() {
+  const qc = useQueryClient()
   const [activeTab, setActiveTab]         = useState('health')
   const [drawerItem, setDrawerItem]       = useState<{ explainability?: Explainability; description?: string; title?: string } | null>(null)
   const [drawerOpen, setDrawerOpen]       = useState(false)
@@ -257,13 +258,22 @@ export default function FabricWorkspace() {
 
   const replayMutation = useMutation<ReplaySession, Error, Record<string, unknown>>({
     mutationFn: (body) => api.post('/fabric/replay', body) as Promise<ReplaySession>,
-    onSuccess: (data) => { setReplayResult(data); toast.success(`Replay complete — ${data.events_replayed} events replayed`) },
+    onSuccess: (data) => {
+      setReplayResult(data)
+      toast.success(`Replay complete — ${data.events_replayed} events replayed`)
+      qc.invalidateQueries({ queryKey: ['fabric-replay-sessions'] })
+    },
     onError: () => toast.error('Replay failed'),
   })
 
   const escalateMutation = useMutation({
     mutationFn: (body: Record<string, unknown>) => api.post('/fabric/orchestration/escalate', body),
-    onSuccess: () => { toast.success('Escalation coordinated'); setEscalateEntityId(''); setEscalateReason(''); },
+    onSuccess: () => {
+      toast.success('Escalation coordinated')
+      setEscalateEntityId('')
+      setEscalateReason('')
+      qc.invalidateQueries({ queryKey: ['fabric-orchestration'] })
+    },
     onError: () => toast.error('Escalation failed'),
   })
 

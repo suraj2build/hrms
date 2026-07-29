@@ -488,6 +488,7 @@ function RegulatoryTab() {
     onSuccess:  () => {
       toast.success('Revision marked as approved. Benchmarks require a separate manual update.')
       queryClient.invalidateQueries({ queryKey: ['trust', 'regulatory'] })
+      queryClient.invalidateQueries({ queryKey: ['enterprise-control-trust', 'regulatory'] })
       setConfirmId(null)
     },
     onError: (e: Error) => {
@@ -501,6 +502,7 @@ function RegulatoryTab() {
     onSuccess:  () => {
       toast.success('Revision rejected.')
       queryClient.invalidateQueries({ queryKey: ['trust', 'regulatory'] })
+      queryClient.invalidateQueries({ queryKey: ['enterprise-control-trust', 'regulatory'] })
       setConfirmId(null)
     },
     onError: (e: Error) => {

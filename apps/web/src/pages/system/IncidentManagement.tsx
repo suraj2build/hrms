@@ -206,6 +206,7 @@ function CreateIncidentDialog({ open, onClose }: CreateIncidentDialogProps) {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['incident-list'] })
       qc.invalidateQueries({ queryKey: ['incident-summary'] })
+      qc.invalidateQueries({ queryKey: ['enterprise-control-governance', 'incidents'] })
       onClose()
       setForm({
         incident_type: '', severity: '', title: '', description: '',
@@ -377,6 +378,7 @@ function EscalateDialog({
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['incident-detail', incidentId] })
       qc.invalidateQueries({ queryKey: ['incident-list'] })
+      qc.invalidateQueries({ queryKey: ['enterprise-control-governance', 'incidents'] })
       onClose()
       setEscalateTo('')
       setReason('')
@@ -477,6 +479,7 @@ function ResolveDialog({
       qc.invalidateQueries({ queryKey: ['incident-detail', incidentId] })
       qc.invalidateQueries({ queryKey: ['incident-list'] })
       qc.invalidateQueries({ queryKey: ['incident-summary'] })
+      qc.invalidateQueries({ queryKey: ['enterprise-control-governance', 'incidents'] })
       onClose()
       setNote('')
       toast.success('Incident resolved')
@@ -550,6 +553,7 @@ function DetailPanel({ incidentId, onClear }: DetailPanelProps) {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['incident-detail', incidentId] })
       qc.invalidateQueries({ queryKey: ['incident-list'] })
+      qc.invalidateQueries({ queryKey: ['enterprise-control-governance', 'incidents'] })
       toast.success('Incident assigned to you')
     },
     onError: (e: Error) => toast.error('Failed to assign incident', { description: e.message }),
