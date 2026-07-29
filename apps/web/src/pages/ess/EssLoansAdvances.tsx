@@ -5,7 +5,7 @@
  * Flow: Employee applies → Manager approves → HR final approval → Deductions start
  */
 
-import { useState }         from 'react'
+import { useState, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Plus, ChevronDown, ChevronRight, Wallet, CreditCard,
@@ -157,6 +157,7 @@ function NewAdvanceForm({ onClose }: { onClose: () => void }) {
   const [amount, setAmount]     = useState('')
   const [months, setMonths]     = useState('3')
   const [purpose, setPurpose]   = useState('')
+  const idemKey = useRef(crypto.randomUUID())
 
   const monthly = amount && months ? fmtINR(Math.round(Number(amount) / Number(months))) : '—'
   const monthsNum = Number(months)
@@ -167,7 +168,7 @@ function NewAdvanceForm({ onClose }: { onClose: () => void }) {
       requested_amount: Number(amount),
       recovery_months:  Number(months),
       purpose,
-    }),
+    }, { headers: { 'Idempotency-Key': idemKey.current } }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['ess-advances'] })
       qc.invalidateQueries({ queryKey: ['manager-loan-pending'] })
@@ -235,6 +236,7 @@ function NewLoanForm({ onClose }: { onClose: () => void }) {
   const [rate, setRate]           = useState('0')
   const [tenure, setTenure]       = useState('12')
   const [purpose, setPurpose]     = useState('')
+  const idemKey = useRef(crypto.randomUUID())
 
   const p = Number(principal), r = Number(rate), t = Number(tenure)
   const emi = p && t ? computeEMI(p, r, t) : 0
@@ -247,7 +249,7 @@ function NewLoanForm({ onClose }: { onClose: () => void }) {
       interest_rate_pct: r,
       tenure_months:     t,
       purpose:           purpose || undefined,
-    }),
+    }, { headers: { 'Idempotency-Key': idemKey.current } }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['ess-loans'] })
       qc.invalidateQueries({ queryKey: ['manager-loan-pending'] })

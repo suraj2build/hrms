@@ -156,9 +156,14 @@ function usePendingCount(employeeId: string | null) {
     enabled:  !!employeeId,
     staleTime: 60_000,
   })
+  // /attendance/corrections/my reads attendance_corrections — a dead table
+  // with no writer anywhere in the app since regularisation replaced it (see
+  // EssApprovals.tsx's identical fix). Regularisation requests use
+  // /attendance/regularisation/my and the 'pending'/'approved'/'rejected'/
+  // 'withdrawn' vocabulary — not 'processing', which was never a valid status.
   const { data: corrData }    = useQuery<{ data: Array<{ status: string }> }>({
-    queryKey: ['sb-corr', employeeId],
-    queryFn:  () => api.get('/attendance/corrections/my?limit=50'),
+    queryKey: ['ess-approvals-corrections'],
+    queryFn:  () => api.get('/attendance/regularisation/my?limit=50'),
     enabled:  !!employeeId,
     staleTime: 60_000,
   })
@@ -180,7 +185,7 @@ function usePendingCount(employeeId: string | null) {
       arr.filter(r => test(r.status)).length
     return (
       pending(leaveData?.data   ?? [], s => s === 'pending') +
-      pending(corrData?.data    ?? [], s => s === 'pending' || s === 'processing') +
+      pending(corrData?.data    ?? [], s => s === 'pending') +
       pending(reimbData         ?? [], s => s === 'draft' || s === 'submitted' || s === 'under_review') +
       pending(compOffData?.data ?? [], s => s === 'pending')
     )

@@ -268,7 +268,12 @@ export function AdminInterviews() {
       round_number:    String(r.round_number),
       title:           r.title ?? '',
       interview_type:  r.interview_type,
-      scheduled_at:    dt ? dt.toISOString().slice(0, 10) : '',
+      // Local-getters, not toISOString() (which converts back to UTC) — must
+      // match the local time used one line below, or the date/time pair
+      // desyncs for any interview scheduled between local midnight and the
+      // UTC offset (e.g. IST 00:00-05:30) — see isToday()/isTomorrow() above,
+      // which already use local getters for the same reason.
+      scheduled_at:    dt ? `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}` : '',
       scheduled_time:  dt ? dt.toTimeString().slice(0, 5) : '10:00',
       duration_mins:   String(r.duration_mins),
       meet_link:       r.meet_link ?? '',

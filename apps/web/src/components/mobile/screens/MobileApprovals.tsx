@@ -20,9 +20,12 @@ export function MobileApprovals({ base: _base }: { base: string }) {
       return { data: (res.data ?? []).map(r => ({ ...r, status: String(r.status ?? '').toLowerCase() })) }
     },
   })
+  // /attendance/corrections/my reads attendance_corrections — a dead table
+  // with no writer anywhere in the app since regularisation replaced it (see
+  // EssApprovals.tsx's identical fix).
   const { data: corrData } = useQuery<{ data: CorrectionReq[] }>({
-    queryKey: ['mobile-approvals-corrections'],
-    queryFn: () => api.get('/attendance/corrections/my?limit=50'),
+    queryKey: ['ess-approvals-corrections'],
+    queryFn: () => api.get('/attendance/regularisation/my?limit=50'),
   })
 
   const pendingLeave = (leaveData?.data ?? []).filter((l) => isPending(l.status))

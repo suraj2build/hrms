@@ -15,6 +15,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { serverError, ErrorCode } from '../../lib/api-errors.js'
+import { checkIdempotency, storeIdempotency } from '../../lib/idempotency.js'
 
 const LOAN_TYPES = ['personal', 'housing', 'vehicle', 'education', 'emergency', 'other'] as const
 
@@ -71,6 +72,15 @@ export default async function essLoansRoutes(fastify: FastifyInstance) {
       return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
     }
 
+    const iKey = (req.headers['idempotency-key'] as string | undefined)?.trim()
+    if (iKey) {
+      const cached = await checkIdempotency(fastify.supabase, req.tenantId, iKey, 'ess-advance-create')
+      if (cached) {
+        reply.header('Idempotency-Replayed', 'true')
+        return reply.code(cached.status_code).send(cached.response)
+      }
+    }
+
     const { data, error } = await fastify.supabase
       .from('advance_salary_requests')
       .insert({
@@ -86,7 +96,9 @@ export default async function essLoansRoutes(fastify: FastifyInstance) {
       .single()
 
     if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create advance request')
-    return reply.code(201).send({ data })
+    const responseBody = { data }
+    if (iKey) await storeIdempotency(fastify.supabase, req.tenantId, iKey, 'ess-advance-create', 201, responseBody)
+    return reply.code(201).send(responseBody)
   })
 
   // ── GET /payroll/ess/my-loans ────────────────────────────────────────────────
@@ -160,6 +172,15 @@ export default async function essLoansRoutes(fastify: FastifyInstance) {
       return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
     }
 
+    const iKey = (req.headers['idempotency-key'] as string | undefined)?.trim()
+    if (iKey) {
+      const cached = await checkIdempotency(fastify.supabase, req.tenantId, iKey, 'ess-loan-create')
+      if (cached) {
+        reply.header('Idempotency-Replayed', 'true')
+        return reply.code(cached.status_code).send(cached.response)
+      }
+    }
+
     const emiAmount = computeEMI(parsed.data.principal_amount, parsed.data.interest_rate_pct, parsed.data.tenure_months)
 
     const { data, error } = await fastify.supabase
@@ -178,7 +199,9 @@ export default async function essLoansRoutes(fastify: FastifyInstance) {
       .single()
 
     if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create loan request')
-    return reply.code(201).send({ data })
+    const responseBody = { data }
+    if (iKey) await storeIdempotency(fastify.supabase, req.tenantId, iKey, 'ess-loan-create', 201, responseBody)
+    return reply.code(201).send(responseBody)
   })
 
   // ── GET /payroll/ess/manager/pending ─────────────────────────────────────────
