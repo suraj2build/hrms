@@ -118,13 +118,15 @@ export default async function contractsRoutes(fastify: FastifyInstance) {
   fastify.delete('/employees/:id/contracts/:contractId', hrAdminAuth, async (req: any, reply) => {
     if (!await verifyEmployee(fastify, req.params.id, req.tenantId))
       return notFound(reply, 'EMPLOYEE_NOT_FOUND', 'Employee not found')
-    const { error } = await fastify.supabase
+    const { data, error } = await fastify.supabase
       .from('employee_contracts')
       .delete()
       .eq('id', req.params.contractId)
       .eq('employee_id', req.params.id)
       .eq('tenant_id', req.tenantId)
+      .select('id')
     if (error) return serverError(req, reply, error, ErrorCode.DELETE_FAILED, 'Failed to delete employee contract')
+    if (!data || data.length === 0) return notFound(reply, 'CONTRACT_NOT_FOUND', 'Contract not found')
     return reply.code(204).send()
   })
 }

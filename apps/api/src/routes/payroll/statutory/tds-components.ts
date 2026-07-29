@@ -141,6 +141,11 @@ export default async function tdsComponentsRoute(fastify: FastifyInstance) {
   fastify.post('/components', adminAuth, async (req: any, reply) => {
     const schema = z.object({
       section_code:       z.string().min(1).max(50),
+      // tax_declaration_components.section_name is NOT NULL with no default
+      // (migration 168) — this endpoint previously never collected or
+      // inserted it, so every POST failed the DB constraint and returned a
+      // generic 500 with no indication of the missing field.
+      section_name:       z.string().min(1).max(255),
       sub_section:        z.string().max(100).nullable().optional(),
       display_name:       z.string().min(1).max(255),
       description:        z.string().optional().nullable(),

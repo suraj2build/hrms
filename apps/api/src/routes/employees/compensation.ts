@@ -127,6 +127,11 @@ async function fetchCompensationPolicy(
 /**
  * Find-or-create the reserved PF salary_component rows for the tenant.
  * Returns a map from code ('PF_EMPLOYEE' | 'PF_EMPLOYER') → salary_component.id.
+ *
+ * Throws on a genuine query/insert error — this used to swallow both,
+ * so a transient failure left the affected code(s) missing from the map,
+ * the caller silently dropped the PF component row(s), and the response
+ * still claimed pf_applied: true despite persisting zero PF line items.
  */
 async function resolvePfSalaryComponents(
   fastify: any,
@@ -135,11 +140,13 @@ async function resolvePfSalaryComponents(
   const codes = [PF_EMPLOYEE_CODE, PF_EMPLOYER_CODE]
 
   // Attempt to find existing rows
-  const { data: existing } = await fastify.supabase
+  const { data: existing, error: fetchErr } = await fastify.supabase
     .from('salary_components')
     .select('id, code')
     .eq('tenant_id', tenantId)
     .in('code', codes)
+
+  if (fetchErr) throw fetchErr
 
   const map = new Map<string, string>()
   for (const row of existing ?? []) {
@@ -166,7 +173,7 @@ async function resolvePfSalaryComponents(
   }
 
   if (missing.length) {
-    const { data: created } = await fastify.supabase
+    const { data: created, error: insertErr } = await fastify.supabase
       .from('salary_components')
       .insert(
         missing.map(m => ({
@@ -184,8 +191,24 @@ async function resolvePfSalaryComponents(
       )
       .select('id, code')
 
-    for (const row of created ?? []) {
-      map.set(row.code as string, row.id as string)
+    if (insertErr) {
+      // 23505: another concurrent first-time-PF-setup request already
+      // created these rows — re-fetch instead of failing the request.
+      if ((insertErr as any).code === '23505') {
+        const { data: retryRows, error: retryErr } = await fastify.supabase
+          .from('salary_components')
+          .select('id, code')
+          .eq('tenant_id', tenantId)
+          .in('code', codes)
+        if (retryErr) throw retryErr
+        for (const row of retryRows ?? []) map.set(row.code as string, row.id as string)
+      } else {
+        throw insertErr
+      }
+    } else {
+      for (const row of created ?? []) {
+        map.set(row.code as string, row.id as string)
+      }
     }
   }
 
@@ -475,6 +498,16 @@ export default async function compensationRoutes(fastify: FastifyInstance) {
         .eq('id', structureId)
         .eq('tenant_id', req.tenantId)
         .maybeSingle()
+
+      // salary_structure_id's FK only checks existence, not tenant ownership
+      // (same class of gap already fixed for salary_component_id above and
+      // for identity_type_id in employees/identity.ts) — a foreign tenant's
+      // structure id would silently fall through to the statutory defaults
+      // below instead of being rejected, and would still be stored on the
+      // compensation row + echoed back via the salary_structures join.
+      if (!structRow) {
+        return validationError(reply, ErrorCode.VALIDATION_ERROR, 'Salary structure not found in your organisation')
+      }
 
       pf_enabled = structRow?.pf_applicable ?? true
       const mode = structRow?.pf_ceiling_mode ?? 'follow_policy'

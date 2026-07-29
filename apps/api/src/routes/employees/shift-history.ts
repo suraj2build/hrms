@@ -16,9 +16,9 @@ import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 async function verifyEmployee(fastify: any, employeeId: string, tenantId: string) {
-  const { data } = await fastify.supabase
+  const { data, error } = await fastify.supabase
     .from('employees').select('id').eq('id', employeeId).eq('tenant_id', tenantId).maybeSingle()
-  return !!data
+  return { exists: !!data, error }
 }
 
 export default async function shiftHistoryRoutes(fastify: FastifyInstance) {
@@ -26,7 +26,9 @@ export default async function shiftHistoryRoutes(fastify: FastifyInstance) {
 
   // GET /employees/:id/shift-history
   fastify.get('/employees/:id/shift-history', auth, async (req: any, reply) => {
-    if (!await verifyEmployee(fastify, req.params.id, req.tenantId))
+    const { exists: employeeExists, error: verifyErr } = await verifyEmployee(fastify, req.params.id, req.tenantId)
+    if (verifyErr) return serverError(req, reply, verifyErr, ErrorCode.QUERY_FAILED, 'Failed to look up employee')
+    if (!employeeExists)
       return reply.code(404).send({ error: 'NOT_FOUND', message: 'Employee not found' })
 
     const { data, error } = await fastify.supabase

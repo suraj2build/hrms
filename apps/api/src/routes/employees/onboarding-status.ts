@@ -20,15 +20,15 @@ import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 async function verifyEmployee(fastify: any, employeeId: string, tenantId: string) {
-  const { data } = await fastify.supabase
+  const { data, error } = await fastify.supabase
     .from('employees').select('id').eq('id', employeeId).eq('tenant_id', tenantId).maybeSingle()
-  return !!data
+  return { exists: !!data, error }
 }
 
-async function resolveCallerEmployeeId(fastify: any, userId: string, tenantId: string): Promise<string | null> {
-  const { data } = await fastify.supabase
+async function resolveCallerEmployeeId(fastify: any, userId: string, tenantId: string): Promise<{ employeeId: string | null; error: unknown }> {
+  const { data, error } = await fastify.supabase
     .from('profiles').select('employee_id').eq('id', userId).eq('tenant_id', tenantId).maybeSingle()
-  return (data as any)?.employee_id ?? null
+  return { employeeId: (data as any)?.employee_id ?? null, error }
 }
 
 export default async function onboardingStatusRoutes(fastify: FastifyInstance) {
@@ -36,13 +36,16 @@ export default async function onboardingStatusRoutes(fastify: FastifyInstance) {
 
   fastify.get('/employees/:id/onboarding-status', auth, async (req: any, reply) => {
     if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
-      const callerEmpId = await resolveCallerEmployeeId(fastify, req.userId, req.tenantId)
+      const { employeeId: callerEmpId, error: callerErr } = await resolveCallerEmployeeId(fastify, req.userId, req.tenantId)
+      if (callerErr) return serverError(req, reply, callerErr, ErrorCode.QUERY_FAILED, 'Failed to resolve your employee record')
       if (!callerEmpId || callerEmpId !== req.params.id) {
         return reply.code(403).send({ error: 'FORBIDDEN', message: 'You can only view your own onboarding status' })
       }
     }
 
-    if (!await verifyEmployee(fastify, req.params.id, req.tenantId))
+    const { exists: employeeExists, error: verifyErr } = await verifyEmployee(fastify, req.params.id, req.tenantId)
+    if (verifyErr) return serverError(req, reply, verifyErr, ErrorCode.QUERY_FAILED, 'Failed to look up employee')
+    if (!employeeExists)
       return reply.code(404).send({ error: 'NOT_FOUND', message: 'Employee not found' })
 
     // Find the most recent draft profile linked to this employee
