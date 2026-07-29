@@ -63,7 +63,13 @@ export async function fetchFullProfile(
       .single(),
   )
   const employee_query_ms = empResult.ms
-  if (empResult.error || !empResult.data) return null
+  // A genuine query error (DB timeout/connection issue) was previously
+  // indistinguishable from "employee doesn't exist" — both returned null,
+  // so callers reported a 404 NOT_FOUND for what was actually a backend
+  // failure. Surface the error via a sentinel so callers can tell the
+  // two cases apart and respond (and log) accordingly.
+  if (empResult.error) return { _error: empResult.error } as any
+  if (!empResult.data) return null
   const employee = empResult.data
 
   // ── 2. Wave 1 — parallel queries; 4 are skipped in light mode ─────────────
@@ -164,8 +170,13 @@ export async function fetchFullProfile(
       .eq('is_current', true)
       .maybeSingle()
     if (rawJob) {
+      // Scoped by tenant_id like every other query in this file — the ids
+      // come from a tenant-scoped job_history row, but this fallback path
+      // was the one exception, which would leak another tenant's row if a
+      // FK ever pointed cross-tenant (the exact "drifted DB" scenario this
+      // fallback exists to handle).
       const lk = async (table: string, idVal: string | null, cols: string) =>
-        idVal ? (await sb.from(table).select(cols).eq('id', idVal).maybeSingle()).data : null
+        idVal ? (await sb.from(table).select(cols).eq('id', idVal).eq('tenant_id', tenantId).maybeSingle()).data : null
       const [dep, des, grd, wl, cc, sh] = await Promise.all([
         lk('departments',    rawJob.department_id,    'id, name, code'),
         lk('designations',   rawJob.designation_id,   'id, name'),

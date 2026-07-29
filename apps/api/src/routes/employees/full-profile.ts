@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify'
 import { fetchFullProfile } from '../../lib/employee-profile.js'
 import { SLOW_THRESHOLD_MS } from '../../lib/constants.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 // ── Light-mode rate limiter ────────────────────────────────────────────────────
 // Prevents clients from polling ?light=true in a tight loop without ever
@@ -122,12 +123,13 @@ export default async function fullProfileRoute(fastify: FastifyInstance) {
     // HR admins may read any employee's profile; others may only read their own.
     const isHr = HR_ADMIN_ROLES.includes(req.userRole)
     if (!isHr) {
-      const { data: callerProfile } = await fastify.supabase
+      const { data: callerProfile, error: callerProfileErr } = await fastify.supabase
         .from('profiles')
         .select('employee_id')
         .eq('id', req.userId)
         .eq('tenant_id', req.tenantId)
         .maybeSingle()
+      if (callerProfileErr) return serverError(req, reply, callerProfileErr, ErrorCode.QUERY_FAILED, 'Failed to verify access')
       if (!callerProfile || (callerProfile as any).employee_id !== req.params.id) {
         return reply.code(403).send({ error: 'FORBIDDEN', message: 'Access denied' })
       }
@@ -180,6 +182,9 @@ export default async function fullProfileRoute(fastify: FastifyInstance) {
       { light },
     )
 
+    if (result && (result as any)._error) {
+      return serverError(req, reply, (result as any)._error, ErrorCode.QUERY_FAILED, 'Failed to fetch employee profile')
+    }
     if (!result) {
       return reply.code(404).send({ error: 'NOT_FOUND', message: 'Employee not found' })
     }

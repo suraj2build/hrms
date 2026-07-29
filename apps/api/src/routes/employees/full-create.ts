@@ -316,7 +316,17 @@ export default async function fullCreateRoute(fastify: FastifyInstance) {
 
     // Strip _timing from the wire body; log timing at debug level regardless.
     let responseBody: Record<string, unknown>
-    if (profileResult) {
+    if (profileResult && (profileResult as any)._error) {
+      // The employee record was already created successfully by the RPC
+      // above — a genuine query error here (vs. "not found") must not turn
+      // into a 500 that implies creation failed. Log it for visibility and
+      // fall back to the RPC's own response, same as the null-result path.
+      fastify.log.warn(
+        { ...ctx, err: (profileResult as any)._error, employee_id: newEmployeeId },
+        'POST /employees/full-create — fetchFullProfile failed after employee creation, falling back to RPC data',
+      )
+      responseBody = rpcData as Record<string, unknown>
+    } else if (profileResult) {
       const { _timing, ...profileData } = profileResult
       fastify.log.debug(
         { ...ctx, _timing, employee_id: newEmployeeId },
