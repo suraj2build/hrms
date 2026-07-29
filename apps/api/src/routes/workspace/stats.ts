@@ -786,7 +786,7 @@ export default async function workspaceStatsRoutes(fastify: FastifyInstance) {
         fastify.supabase
           .from('payroll_slips')
           .select(`
-            employee_id, lop_days, gross_pay,
+            run_id, employee_id, lop_days, gross_pay,
             employees!inner(first_name, last_name, employee_code, department_id,
               departments(name))
           `)
@@ -884,8 +884,18 @@ export default async function workspaceStatsRoutes(fastify: FastifyInstance) {
     }
 
     // ── Build reconciliation items ─────────────────────────────────────────────
+    // Item ids used to be `${prefix}-${empId}-${itemIdx++}`, a running counter
+    // over the fetchAllRows-paginated `slips` array — which has no .order()
+    // clause, so PostgREST doesn't guarantee stable row order across page
+    // requests. Because latestActionMap below looks up persisted
+    // acknowledge/escalate/resolve status by this id, a reordering (or a
+    // different employee gaining/losing an item earlier in the list) shifted
+    // every later index, silently reverting previously-actioned items back to
+    // 'open'. Use slip.run_id instead — payroll_slips has UNIQUE(run_id,
+    // employee_id), so `${prefix}-${empId}-${slip.run_id}` is stable and
+    // unique regardless of array order, including the edge case of multiple
+    // payroll runs existing for the same month.
     const items: any[] = []
-    let itemIdx = 0
 
     for (const slip of slips) {
       const empId   = slip.employee_id
@@ -901,7 +911,7 @@ export default async function workspaceStatsRoutes(fastify: FastifyInstance) {
         const variance = slipLop - attLop
         const pct      = attLop > 0 ? (variance / attLop) * 100 : 100
         items.push({
-          id:             `lop-${empId}-${itemIdx++}`,
+          id:             `lop-${empId}-${slip.run_id}`,
           employee_id:    empId,
           employee_name:  name,
           employee_code:  code,
@@ -924,7 +934,7 @@ export default async function workspaceStatsRoutes(fastify: FastifyInstance) {
       if (totalOtMinutes >= 30) {
         const otHours = parseFloat((totalOtMinutes / 60).toFixed(2))
         items.push({
-          id:             `ot-${empId}-${itemIdx++}`,
+          id:             `ot-${empId}-${slip.run_id}`,
           employee_id:    empId,
           employee_name:  name,
           employee_code:  code,
@@ -950,7 +960,7 @@ export default async function workspaceStatsRoutes(fastify: FastifyInstance) {
         if (!comp.uan?.trim()) missingFields.push('UAN')
         if (missingFields.length > 0) {
           items.push({
-            id:             `comp-${empId}-${itemIdx++}`,
+            id:             `comp-${empId}-${slip.run_id}`,
             employee_id:    empId,
             employee_name:  name,
             employee_code:  code,

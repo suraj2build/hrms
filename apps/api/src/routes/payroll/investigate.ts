@@ -62,25 +62,28 @@ export default async function payrollInvestigateRoute(fastify: FastifyInstance) 
     const prev   = prevMonthStr(month)
 
     // ── Verify employee belongs to tenant ────────────────────────────────────
-    const { data: emp } = await fastify.supabase
+    const { data: emp, error: empErr } = await fastify.supabase
       .from('employees')
       .select('id, first_name, last_name, employee_code')
       .eq('id', employeeId)
       .eq('tenant_id', req.tenantId)
       .maybeSingle()
 
+    if (empErr) return serverError(req, reply, empErr, ErrorCode.QUERY_FAILED, 'Failed to look up employee')
     if (!emp) {
       return reply.code(404).send({ error: 'NOT_FOUND', message: 'Employee not found' })
     }
 
     // Fetch current job info (department/designation)
-    const { data: jobRow } = await fastify.supabase
+    const { data: jobRow, error: jobErr } = await fastify.supabase
       .from('job_history')
       .select('departments(name), designations(name)')
       .eq('tenant_id', req.tenantId)
       .eq('employee_id', employeeId)
       .eq('is_current', true)
       .maybeSingle()
+
+    if (jobErr) return serverError(req, reply, jobErr, ErrorCode.QUERY_FAILED, 'Failed to look up job history')
 
     const deptArr  = jobRow ? (Array.isArray((jobRow as any).departments) ? (jobRow as any).departments : [(jobRow as any).departments]) : []
     const desigArr = jobRow ? (Array.isArray((jobRow as any).designations) ? (jobRow as any).designations : [(jobRow as any).designations]) : []
