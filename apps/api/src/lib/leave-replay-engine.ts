@@ -460,6 +460,7 @@ export async function getSnapshotForLedgerEntry(
     .from(table)
     .select('snapshot_id')
     .eq('id', ledgerEntryId)
+    .eq('tenant_id', tenantId)
     .maybeSingle()
 
   const snapshotId = (entry as { snapshot_id: string | null } | null)?.snapshot_id

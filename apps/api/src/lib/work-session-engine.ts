@@ -729,6 +729,7 @@ export function detectAttendanceAnomalies(
   consecutiveWorkDays: number,
   fatigueRules: Record<string, number> | null,
   authorizedSources: string[],
+  tz: string,
 ): SessionAnomaly[] {
   const anomalies: SessionAnomaly[] = []
 
@@ -837,17 +838,18 @@ export function detectAttendanceAnomalies(
   }
 
   // ── suspicious_timing ─────────────────────────────────────────────────────
-  // Punch before 04:00 local time is likely a device clock sync artefact
+  // Punch before 04:00 tenant-local time is likely a device clock sync
+  // artefact — must use the tenant's timezone, not the server process's.
   for (const session of sessions) {
-    const inLocal = new Date(session.in_punch.punch_time)
-    if (inLocal.getHours() < 4) {
+    const { hour: localHour } = localHourMinute(new Date(session.in_punch.punch_time), tz)
+    if (localHour < 4) {
       anomalies.push({
         anomaly_type: 'suspicious_timing',
         severity: 'info',
         punch_ids: [session.in_punch.id],
         detail: {
           punch_time: session.in_punch.punch_time,
-          local_hour: inLocal.getHours(),
+          local_hour: localHour,
           reason: 'Punch before 04:00 local — possible device clock error',
         },
       })
@@ -1176,6 +1178,7 @@ export async function buildDaySessionReport(
     consecutiveWorkDays,
     fatigueRules,
     ['biometric', 'mobile', 'manual', 'kiosk', 'import'],
+    tz,
   )
 
   // ── 9. Assemble report ─────────────────────────────────────────────────────

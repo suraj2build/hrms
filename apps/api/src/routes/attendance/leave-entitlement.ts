@@ -25,6 +25,7 @@ import {
   runCarryForward,
 }                               from '../../lib/leave-entitlement-service.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { checkIdempotency, storeIdempotency } from '../../lib/idempotency.js'
 
 export default async function leaveEntitlementRoute(fastify: FastifyInstance) {
   const auth = { preHandler: [fastify.authenticate] }
@@ -55,6 +56,18 @@ export default async function leaveEntitlementRoute(fastify: FastifyInstance) {
       })
     }
 
+    // This batch job double-credits every eligible employee if run twice for
+    // the same month (creditEmployeeDays has no run-dedup of its own) — guard
+    // a double-click / client retry with an Idempotency-Key.
+    const iKey = (req.headers['idempotency-key'] as string | undefined)?.trim()
+    if (iKey) {
+      const cached = await checkIdempotency(fastify.supabase, req.tenantId, iKey, 'leave-entitlement-monthly')
+      if (cached) {
+        reply.header('Idempotency-Replayed', 'true')
+        return reply.code(cached.status_code).send(cached.response)
+      }
+    }
+
     const result = await runMonthlyAccrual(
       fastify.supabase,
       req.tenantId,
@@ -62,10 +75,12 @@ export default async function leaveEntitlementRoute(fastify: FastifyInstance) {
       parsed.data.month,
     )
 
-    return reply.send({
+    const responseBody = {
       data: result,
       message: `Monthly accrual complete — ${result.employees_processed} employees credited, ${result.total_days_credited} days total`,
-    })
+    }
+    if (iKey) await storeIdempotency(fastify.supabase, req.tenantId, iKey, 'leave-entitlement-monthly', 200, responseBody)
+    return reply.send(responseBody)
   })
 
   // ── POST /leave/entitlement/yearly ────────────────────────────────────────
@@ -85,16 +100,28 @@ export default async function leaveEntitlementRoute(fastify: FastifyInstance) {
       })
     }
 
+    // Same double-credit risk as /monthly — guard with an Idempotency-Key.
+    const iKey = (req.headers['idempotency-key'] as string | undefined)?.trim()
+    if (iKey) {
+      const cached = await checkIdempotency(fastify.supabase, req.tenantId, iKey, 'leave-entitlement-yearly')
+      if (cached) {
+        reply.header('Idempotency-Replayed', 'true')
+        return reply.code(cached.status_code).send(cached.response)
+      }
+    }
+
     const result = await runYearlyCredit(
       fastify.supabase,
       req.tenantId,
       parsed.data.leave_year,
     )
 
-    return reply.send({
+    const responseBody = {
       data: result,
       message: `Yearly credit complete — ${result.employees_processed} employees credited, ${result.total_days_credited} days total`,
-    })
+    }
+    if (iKey) await storeIdempotency(fastify.supabase, req.tenantId, iKey, 'leave-entitlement-yearly', 200, responseBody)
+    return reply.send(responseBody)
   })
 
   // ── POST /leave/entitlement/carry-forward ─────────────────────────────────
@@ -123,6 +150,19 @@ export default async function leaveEntitlementRoute(fastify: FastifyInstance) {
       })
     }
 
+    // runCarryForward's own docstring: "running it twice would double-credit
+    // ... Run it exactly once." Guard the double-click / client-retry case
+    // with an Idempotency-Key (a deliberate second run days apart is still
+    // an operator responsibility this doesn't protect against).
+    const iKey = (req.headers['idempotency-key'] as string | undefined)?.trim()
+    if (iKey) {
+      const cached = await checkIdempotency(fastify.supabase, req.tenantId, iKey, 'leave-entitlement-carry-forward')
+      if (cached) {
+        reply.header('Idempotency-Replayed', 'true')
+        return reply.code(cached.status_code).send(cached.response)
+      }
+    }
+
     const result = await runCarryForward(
       fastify.supabase,
       req.tenantId,
@@ -130,9 +170,11 @@ export default async function leaveEntitlementRoute(fastify: FastifyInstance) {
       to_year,
     )
 
-    return reply.send({
+    const responseBody = {
       data: result,
       message: `Carry-forward complete — ${result.employees_processed} employees processed, ${result.total_days_credited} days carried`,
-    })
+    }
+    if (iKey) await storeIdempotency(fastify.supabase, req.tenantId, iKey, 'leave-entitlement-carry-forward', 200, responseBody)
+    return reply.send(responseBody)
   })
 }

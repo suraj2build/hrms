@@ -253,14 +253,20 @@ async function checkReplayLineageCorruption(
     (linkedEntries as any[]).map((r: any) => r.orchestrator_lineage_id)
   )]
 
-  const { data: knownEvents } = await supabase
-    .from('workforce_rebuild_events')
-    .select('orchestrator_lineage_id')
-    .eq('tenant_id', tenantId)
-    .in('orchestrator_lineage_id', lineageIds)
+  // Unpaginated .in() would silently cap at PostgREST's 1000-row ceiling if a
+  // tenant has more than 1000 distinct lineage IDs pending/in_progress/failed,
+  // fabricating false-positive corruption issues for lineages that do exist.
+  const knownEvents = await fetchAllRows((from, to) =>
+    supabase
+      .from('workforce_rebuild_events')
+      .select('orchestrator_lineage_id')
+      .eq('tenant_id', tenantId)
+      .in('orchestrator_lineage_id', lineageIds)
+      .range(from, to),
+  )
 
   const knownLineageSet = new Set<string>(
-    (knownEvents ?? []).map((e: any) => e.orchestrator_lineage_id)
+    (knownEvents as any[]).map((e: any) => e.orchestrator_lineage_id)
   )
 
   for (const entry of (linkedEntries as any[])) {

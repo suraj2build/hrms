@@ -16,6 +16,8 @@
  * via a migration, and vice-versa. These two must always agree.
  */
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { fetchTenantTz } from './attendance-engine.js'
+import { getLocalDate } from './org-context.js'
 
 // ── Categories — aligned to notification_templates_category_check (migration 237)
 export const NOTIFICATION_CATEGORIES = [
@@ -109,8 +111,10 @@ export async function resolveNotificationVariables(
 ): Promise<Record<string, string>> {
   const values: Record<string, string> = {}
 
-  // System
-  values.date = new Date().toISOString().slice(0, 10)
+  // System — tenant-local date, not UTC, so a notification rendered near
+  // midnight IST shows the tenant's own calendar day.
+  const tz = await fetchTenantTz(supabase, tenantId)
+  values.date = getLocalDate(new Date().toISOString(), tz)
 
   // Company
   try {

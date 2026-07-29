@@ -199,7 +199,9 @@ async function currentBalance(
  * fails again with a duplicate-key error (treated as already-granted) —
  * the DB physically cannot accept two grant rows for the same event/year.
  *
- * Returns true on success, false on any DB error.
+ * Returns 'granted' for a genuine new grant, 'skipped' for an idempotent
+ * no-op (already granted this year, or lost a duplicate-key race), and
+ * 'error' for a genuine DB failure that needs reconciliation.
  */
 export async function processEventGrant(
   supabase:    SupabaseClient,
@@ -208,7 +210,7 @@ export async function processEventGrant(
   rule:        EventRule,
   grantDate:   Date,
   lineageId?:  string,
-): Promise<boolean> {
+): Promise<'granted' | 'skipped' | 'error'> {
   const today     = toDateStr(grantDate)
   // Derived from the processing date passed in, NOT a fresh clock read — the
   // scheduler reconstructs a deterministic grantDate from a queued dayKey
@@ -224,7 +226,7 @@ export async function processEventGrant(
   const exists = await grantAlreadyExists(
     supabase, tenantId, employeeId, rule.dateTypeId, eventYear,
   )
-  if (exists) return true  // already granted this year — not an error
+  if (exists) return 'skipped'  // already granted this year — not an error
 
   const expiryDate: string | null = rule.validityDays != null
     ? toDateStr(new Date(grantDate.getTime() + rule.validityDays * 86_400_000))
@@ -252,8 +254,8 @@ export async function processEventGrant(
   if (grantErr) {
     // Lost a race to a concurrent insert for the same event/year — already
     // granted, not an error.
-    if (grantErr.message?.includes('duplicate')) return true
-    return false
+    if (grantErr.message?.includes('duplicate')) return 'skipped'
+    return 'error'
   }
 
   // 2. Credit the ledger now that the grant is safely reserved.
@@ -300,10 +302,10 @@ export async function processEventGrant(
       { tenantId, employeeId, dateTypeId: rule.dateTypeId, eventYear, grantId: grantRow.id,
         error: err instanceof Error ? err.message : String(err) },
     )
-    return false
+    return 'error'
   }
 
-  return true
+  return 'granted'
 }
 
 /**
@@ -428,13 +430,15 @@ export async function runEventGrantsForTenant(
         // (the idempotency constraint is per date_type, not per rule).
         // A future iteration can add policy-resolution here.
         try {
-          const ok = await processEventGrant(
+          const outcome = await processEventGrant(
             supabase, tenantId, match.employeeId, rule, today, lineageId,
           )
-          if (ok) {
+          if (outcome === 'granted') {
             result.granted++
-          } else {
+          } else if (outcome === 'skipped') {
             result.skipped++   // already granted this year
+          } else {
+            result.errors++    // genuine DB failure — needs reconciliation
           }
         } catch {
           result.errors++
