@@ -81,15 +81,23 @@ export default async function employmentCategoriesRoutes(fastify: FastifyInstanc
     if (!parsed.success)
       return reply.code(400).send({ error: 'VALIDATION', message: parsed.error.issues[0]?.message })
 
+    // .maybeSingle() (not .single()) — a nonexistent/cross-tenant :id matches
+    // zero rows on UPDATE ... RETURNING, which .single() treats as a
+    // PGRST116 error rather than an empty result, so the 404 branch below
+    // would otherwise be unreachable dead code.
     const { data, error } = await fastify.supabase
       .from('employment_categories')
       .update(parsed.data)
       .eq('id', req.params.id)
       .eq('tenant_id', req.tenantId)
       .select()
-      .single()
+      .maybeSingle()
 
-    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update employment category')
+    if (error) {
+      if (error.code === '23505')
+        return reply.code(409).send({ error: 'DUPLICATE', message: 'A category with this code already exists' })
+      return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update employment category')
+    }
     if (!data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Employment category not found' })
     return reply.send({ data })
   })

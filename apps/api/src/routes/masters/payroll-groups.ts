@@ -75,15 +75,22 @@ export default async function payrollGroupsRoutes(fastify: FastifyInstance) {
     if (!parsed.success)
       return reply.code(400).send({ error: 'VALIDATION', message: parsed.error.issues[0]?.message })
 
+    // .maybeSingle() (not .single()) — a nonexistent/cross-tenant :id matches
+    // zero rows on UPDATE ... RETURNING, which .single() treats as a
+    // PGRST116 error rather than an empty result, so the 404 branch below
+    // would otherwise be unreachable dead code.
     const { data, error } = await fastify.supabase
       .from('payroll_groups')
       .update(parsed.data)
       .eq('id', req.params.id)
       .eq('tenant_id', req.tenantId)
       .select()
-      .single()
+      .maybeSingle()
 
-    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update payroll group')
+    if (error) {
+      if (error.code === '23505') return reply.code(409).send({ error: 'DUPLICATE', message: 'A payroll group with this code already exists' })
+      return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update payroll group')
+    }
     if (!data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Payroll group not found' })
     return reply.send({ data })
   })

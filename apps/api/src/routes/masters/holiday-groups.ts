@@ -57,14 +57,21 @@ export default async function holidayGroupsRoutes(fastify: FastifyInstance) {
     if (!isAdmin(req)) return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
     const parsed = schema.partial().safeParse(req.body)
     if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION', message: parsed.error.issues[0]?.message })
+    // .maybeSingle() (not .single()) — a nonexistent/cross-tenant :id matches
+    // zero rows on UPDATE ... RETURNING, which .single() treats as a
+    // PGRST116 error rather than an empty result, so the 404 branch below
+    // would otherwise be unreachable dead code.
     const { data, error } = await fastify.supabase
       .from('roster_holiday_groups')
       .update(parsed.data)
       .eq('id', (req.params as { id: string }).id)
       .eq('tenant_id', req.tenantId)
       .select('id, name, code, description, state_code, is_active, created_at')
-      .single()
-    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update holiday group')
+      .maybeSingle()
+    if (error) {
+      if (error.code === '23505') return reply.code(409).send({ error: 'DUPLICATE', message: 'A holiday group with that name already exists' })
+      return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update holiday group')
+    }
     if (!data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Holiday group not found' })
     return reply.send({ data })
   })

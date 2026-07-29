@@ -74,15 +74,22 @@ export default async function assetCategoriesRoutes(fastify: FastifyInstance) {
     if (!parsed.success)
       return reply.code(400).send({ error: 'VALIDATION', message: parsed.error.issues[0]?.message })
 
+    // .maybeSingle() (not .single()) — a nonexistent/cross-tenant :id matches
+    // zero rows on UPDATE ... RETURNING, which .single() treats as a
+    // PGRST116 error rather than an empty result, so the 404 branch below
+    // would otherwise be unreachable dead code.
     const { data, error } = await fastify.supabase
       .from('asset_categories')
       .update(parsed.data)
       .eq('id', req.params.id)
       .eq('tenant_id', req.tenantId)
       .select()
-      .single()
+      .maybeSingle()
 
-    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update asset category')
+    if (error) {
+      if (error.code === '23505') return reply.code(409).send({ error: 'DUPLICATE', message: 'An asset category with this code already exists' })
+      return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update asset category')
+    }
     if (!data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Asset category not found' })
     return reply.send({ data })
   })

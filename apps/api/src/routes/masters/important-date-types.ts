@@ -119,6 +119,9 @@ export default async function importantDateTypesRoutes(fastify: FastifyInstance)
       .single()
 
     if (error) {
+      if (error.code === '23505') {
+        return reply.code(409).send({ error: 'DUPLICATE_CODE', message: `An important date type with code '${code}' already exists` })
+      }
       return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create date type')
     }
 
@@ -202,12 +205,18 @@ export default async function importantDateTypesRoutes(fastify: FastifyInstance)
       })
     }
 
-    // Check whether any employee_important_dates reference this type
-    const { count } = await fastify.supabase
+    // Check whether any employee_important_dates reference this type.
+    // Must check this query's own error — a DB failure here would otherwise
+    // silently read as "0 references" and fall through to a hard delete
+    // (mitigated today only by employee_important_dates.date_type_id's
+    // ON DELETE RESTRICT FK, which isn't guaranteed to stay that way).
+    const { count, error: countErr } = await fastify.supabase
       .from('employee_important_dates')
       .select('id', { count: 'exact', head: true })
       .eq('tenant_id', req.tenantId)
       .eq('date_type_id', id)
+
+    if (countErr) return serverError(req, reply, countErr, ErrorCode.QUERY_FAILED, 'Failed to check date type usage')
 
     if ((count ?? 0) > 0) {
       return reply.code(409).send({
