@@ -92,13 +92,18 @@ export async function getAttendanceState(
   employeeId:  string,
   workDate:    string,   // YYYY-MM-DD
 ): Promise<AttendanceProcessingState> {
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from('attendance_processing_states')
     .select('state')
     .eq('tenant_id',   tenantId)
     .eq('employee_id', employeeId)
     .eq('work_date',   workDate)
     .maybeSingle()
+  // A query error must not be conflated with "no row" (→ 'raw') — a date
+  // that's actually 'frozen'/'payroll_locked' (terminal, no transitions
+  // allowed) would then pass VALID_TRANSITIONS checks as if it were a
+  // brand-new date, bypassing the state machine's terminal-state guard.
+  if (error) throw error
 
   return (data as { state: AttendanceProcessingState } | null)?.state ?? 'raw'
 }

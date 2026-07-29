@@ -54,12 +54,19 @@ export async function getLockedMonths(
 ): Promise<Set<string>> {
   const unique = [...new Set(months)]
   if (!unique.length) return new Set()
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from('attendance_period_locks')
     .select('period_month')
     .eq('tenant_id', tenantId)
     .in('period_month', unique)
     .neq('state', 'OPEN')
+  // Fail closed, not open: this is the single source of truth for "is this
+  // month writable?" for the LOCKED/PAYROLL_PROCESSING states, which the
+  // migration 262 DB trigger deliberately does NOT cover (only the terminal
+  // PAYROLL_FINALIZED state has a DB-level backstop). A transient query
+  // error must not silently read as "nothing is locked" — that would strip
+  // all enforcement for a period HR has explicitly closed for payroll prep.
+  if (error) throw error
   return new Set((data ?? []).map((r: any) => r.period_month as string))
 }
 

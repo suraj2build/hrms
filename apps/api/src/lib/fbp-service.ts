@@ -209,7 +209,11 @@ export async function fetchFbpTaxableForEmployee(
     .eq('employee_id', employeeId)
     .eq('financial_year', financialYear)
     .eq('status', 'locked')
-  if (error) return 0
+  // Fails into TDS withholding computation (grossAnnualIncome += this value)
+  // — silently returning 0 on a query error is indistinguishable from a
+  // real "no locked FBP taxable" and under-withholds statutory TDS for an
+  // employee who actually has locked unsubstantiated-FBP income.
+  if (error) throw error
 
   // Per component, keep the highest locked quarter's (cumulative) taxable.
   const latestByComp = new Map<string, { quarter: number; taxable: number }>()
