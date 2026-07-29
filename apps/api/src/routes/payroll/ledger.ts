@@ -12,6 +12,7 @@ import type { FastifyInstance } from 'fastify'
 import { z }                    from 'zod'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { serverError, ErrorCode } from '../../lib/api-errors.js'
+import { checkIdempotency, storeIdempotency } from '../../lib/idempotency.js'
 
 const monthRe = /^\d{4}-\d{2}$/
 
@@ -180,6 +181,17 @@ export default async function payrollLedgerRoute(fastify: FastifyInstance) {
       return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
     }
 
+    // Idempotency: optional header lets callers replay on network retry
+    // instead of creating a duplicate financial ledger entry.
+    const iKey = (req.headers['idempotency-key'] as string | undefined)?.trim()
+    if (iKey) {
+      const cached = await checkIdempotency(fastify.supabase, req.tenantId, iKey, 'payroll-ledger-entry')
+      if (cached) {
+        reply.header('Idempotency-Replayed', 'true')
+        return reply.code(cached.status_code).send(cached.response)
+      }
+    }
+
     // Verify employee belongs to tenant
     const { data: emp } = await fastify.supabase
       .from('employees')
@@ -206,6 +218,9 @@ export default async function payrollLedgerRoute(fastify: FastifyInstance) {
       return reply.code(500).send({ error: 'INSERT_FAILED', message: 'Failed to create ledger entry' })
     }
 
+    if (iKey) {
+      await storeIdempotency(fastify.supabase, req.tenantId, iKey, 'payroll-ledger-entry', 201, { data })
+    }
     return reply.code(201).send({ data })
   })
 }

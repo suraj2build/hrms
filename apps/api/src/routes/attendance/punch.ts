@@ -28,6 +28,7 @@ import { z } from 'zod'
 import { recomputeRange, utcToLocalDate } from '../../lib/attendance-engine.js'
 import { isMonthLocked, monthOf } from '../../lib/period-lock.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { checkIdempotency, storeIdempotency } from '../../lib/idempotency.js'
 
 const bodySchema = z.object({
   employee_id: z.string().uuid().optional(),
@@ -54,6 +55,19 @@ export default async function attendancePunchRoute(fastify: FastifyInstance) {
     const { direction, source, device_id, notes } = parsed.data
     const punchedAt = parsed.data.punched_at ?? new Date().toISOString()
     const isAdmin   = HR_ADMIN_ROLES.includes(req.userRole)
+
+    // Idempotency: when the client omits punched_at (the common kiosk/mobile/
+    // web case), each retry of a dropped response would otherwise compute a
+    // fresh timestamp and never collide with the DB-level unique constraint
+    // below — inserting a duplicate punch instead of being deduped.
+    const iKey = (req.headers['idempotency-key'] as string | undefined)?.trim()
+    if (iKey) {
+      const cached = await checkIdempotency(fastify.supabase, req.tenantId, iKey, 'attendance-punch')
+      if (cached) {
+        reply.header('Idempotency-Replayed', 'true')
+        return reply.code(cached.status_code).send(cached.response)
+      }
+    }
 
     // Resolve employee_id
     let employeeId: string | null = null
@@ -175,6 +189,10 @@ export default async function attendancePunchRoute(fastify: FastifyInstance) {
       }
     })
 
-    return reply.code(201).send({ data: punchRow })
+    const responseBody = { data: punchRow }
+    if (iKey) {
+      await storeIdempotency(fastify.supabase, req.tenantId, iKey, 'attendance-punch', 201, responseBody)
+    }
+    return reply.code(201).send(responseBody)
   })
 }

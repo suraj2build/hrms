@@ -7,6 +7,8 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { serverError, ErrorCode } from '../../lib/api-errors.js'
+import { fetchAllRows } from '../../lib/supabase-paginate.js'
+import { checkIdempotency, storeIdempotency } from '../../lib/idempotency.js'
 
 const EVENT_TYPES = [
   'component_change',
@@ -116,15 +118,20 @@ export default async function payrollLedgerRoutes(fastify: FastifyInstance) {
   fastify.get('/run/:runId', { preHandler: [fastify.authenticate, requireHrAdmin] }, async (req: any, reply) => {
     const { runId } = req.params as { runId: string }
 
-    const { data, error } = await fastify.supabase
-      .from('payroll_explainability_ledger')
-      .select('*')
-      .eq('payroll_run_id', runId)
-      .eq('tenant_id', req.tenantId)
-      .order('ledger_date', { ascending: false })
-
-    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch payroll ledger for run')
-    return reply.send({ data: data ?? [] })
+    try {
+      const data = await fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('payroll_explainability_ledger')
+          .select('*')
+          .eq('payroll_run_id', runId)
+          .eq('tenant_id', req.tenantId)
+          .order('ledger_date', { ascending: false })
+          .range(from, to),
+      )
+      return reply.send({ data })
+    } catch (error) {
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch payroll ledger for run')
+    }
   })
 
   // ── POST /payroll/ledger/entry ────────────────────────────────────────────────
@@ -148,6 +155,17 @@ export default async function payrollLedgerRoutes(fastify: FastifyInstance) {
       return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
     }
 
+    // Idempotency: optional header lets callers replay on network retry
+    // instead of creating a duplicate financial ledger entry.
+    const iKey = (req.headers['idempotency-key'] as string | undefined)?.trim()
+    if (iKey) {
+      const cached = await checkIdempotency(fastify.supabase, req.tenantId, iKey, 'payroll-ledger-entry')
+      if (cached) {
+        reply.header('Idempotency-Replayed', 'true')
+        return reply.code(cached.status_code).send(cached.response)
+      }
+    }
+
     const delta = (parsed.data.after_value ?? 0) - (parsed.data.before_value ?? 0)
 
     const { data, error } = await fastify.supabase
@@ -162,6 +180,10 @@ export default async function payrollLedgerRoutes(fastify: FastifyInstance) {
       .single()
 
     if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create ledger entry')
+
+    if (iKey) {
+      await storeIdempotency(fastify.supabase, req.tenantId, iKey, 'payroll-ledger-entry', 201, { data })
+    }
     return reply.code(201).send({ data })
   })
 
@@ -185,7 +207,7 @@ export default async function payrollLedgerRoutes(fastify: FastifyInstance) {
     const { month } = parsed.data
     const [year, mon] = month.split('-').map(Number)
     const firstOfMonth = `${month}-01`
-    const lastOfMonth = new Date(year, mon, 0).toISOString().slice(0, 10)
+    const lastOfMonth = new Date(Date.UTC(year, mon, 0)).toISOString().slice(0, 10)
 
     const { data, error } = await fastify.supabase
       .from('payroll_explainability_ledger')
