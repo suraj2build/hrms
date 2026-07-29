@@ -667,20 +667,21 @@ export default async function lettersRoutes(fastify: FastifyInstance) {
     }
     const { comments } = parsed.data
 
-    const { data: letter } = await supabase
+    const { data: letter, error: letterErr } = await supabase
       .from('generated_letters')
       .select('*, template:letter_templates(approval_levels)')
       .eq('id', letterId)
       .eq('tenant_id', tenantId)
-      .single()
+      .maybeSingle()
 
+    if (letterErr) return serverError(req, reply, letterErr, ErrorCode.QUERY_FAILED, 'Failed to fetch letter')
     if (!letter) return reply.status(404).send({ error: 'Letter not found' })
     if (letter.approval_status !== 'pending_approval') {
       return reply.status(409).send({ error: 'INVALID_STATE', message: `Letter is not pending approval (status: ${letter.approval_status})` })
     }
 
     const { data: actor } = await supabase
-      .from('profiles').select('id:employee_id').eq('id', userId).eq('tenant_id', tenantId).single()
+      .from('profiles').select('id:employee_id').eq('id', userId).eq('tenant_id', tenantId).maybeSingle()
 
     const maxLevel     = letter.template?.approval_levels ?? 1
     const currentLevel = letter.current_level ?? 1
@@ -759,12 +760,13 @@ export default async function lettersRoutes(fastify: FastifyInstance) {
     const { comments = '' } = parsed.data
 
     const { data: actor } = await supabase
-      .from('profiles').select('id:employee_id').eq('id', userId).eq('tenant_id', tenantId).single()
+      .from('profiles').select('id:employee_id').eq('id', userId).eq('tenant_id', tenantId).maybeSingle()
 
-    const { data: letter } = await supabase
+    const { data: letter, error: letterErr } = await supabase
       .from('generated_letters')
-      .select('current_level, approval_status, template_id').eq('id', letterId).eq('tenant_id', tenantId).single()
+      .select('current_level, approval_status, template_id').eq('id', letterId).eq('tenant_id', tenantId).maybeSingle()
 
+    if (letterErr) return serverError(req, reply, letterErr, ErrorCode.QUERY_FAILED, 'Failed to fetch letter')
     if (!letter) return reply.status(404).send({ error: 'Letter not found' })
     if (letter.approval_status !== 'pending_approval') {
       return reply.status(409).send({ error: 'INVALID_STATE', message: `Letter is not pending approval (status: ${letter.approval_status})` })
@@ -1055,13 +1057,14 @@ export default async function lettersRoutes(fastify: FastifyInstance) {
     }
     const { extra_vars } = parsed.data
 
-    const { data: request } = await supabase
+    const { data: request, error: requestErr } = await supabase
       .from('letter_requests')
       .select('*, template:letter_templates(*)')
       .eq('id', id)
       .eq('tenant_id', tenantId)
-      .single()
+      .maybeSingle()
 
+    if (requestErr) return serverError(req, reply, requestErr, ErrorCode.QUERY_FAILED, 'Failed to fetch letter request')
     if (!request) return reply.status(404).send({ error: 'Request not found' })
     if (request.status !== 'pending') return reply.status(400).send({ error: 'Request already processed' })
 
