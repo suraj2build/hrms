@@ -18,6 +18,15 @@ async function verifyEmployee(fastify: any, employeeId: string, tenantId: string
   return !!data
 }
 
+// employee_identity.identity_type_id only checks existence, not tenant,
+// so this must be verified explicitly before insert — same pattern as
+// verifyRelationshipType in family.ts.
+async function verifyIdentityType(fastify: any, id: string, tenantId: string) {
+  const { data } = await fastify.supabase
+    .from('identity_types').select('id').eq('id', id).eq('tenant_id', tenantId).maybeSingle()
+  return !!data
+}
+
 export default async function identityRoutes(fastify: FastifyInstance) {
   const auth = { preHandler: [fastify.authenticate] }
   // Government-ID PII: writes/deletes are HR-admin only.
@@ -61,6 +70,9 @@ export default async function identityRoutes(fastify: FastifyInstance) {
     if (parsed.data.storage_path && !parsed.data.storage_path.startsWith(`${req.tenantId}/`)) {
       return validationError(reply, ErrorCode.VALIDATION_ERROR, 'storage_path must be within your tenant namespace')
     }
+    if (!await verifyIdentityType(fastify, parsed.data.identity_type_id, req.tenantId)) {
+      return validationError(reply, ErrorCode.VALIDATION_ERROR, 'Invalid identity type')
+    }
     const { data, error } = await fastify.supabase
       .from('employee_identity')
       .insert({ ...parsed.data, employee_id: req.params.id, tenant_id: req.tenantId })
@@ -70,13 +82,15 @@ export default async function identityRoutes(fastify: FastifyInstance) {
   })
 
   fastify.delete('/employees/:id/identity/:identityId', hrAdminAuth, async (req: any, reply) => {
-    const { error } = await fastify.supabase
+    const { data, error } = await fastify.supabase
       .from('employee_identity')
       .delete()
       .eq('id', req.params.identityId)
       .eq('employee_id', req.params.id)
       .eq('tenant_id', req.tenantId)
+      .select('id')
     if (error) return serverError(req, reply, error, ErrorCode.DELETE_FAILED, 'Failed to delete identity record')
+    if (!data || data.length === 0) return notFound(reply, 'NOT_FOUND', 'Identity record not found')
     return reply.code(204).send()
   })
 }
