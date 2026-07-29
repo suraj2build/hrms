@@ -297,17 +297,20 @@ export default async function positionsRoutes(fastify: FastifyInstance) {
     }
 
     if (abolish) {
-      const { error } = await fastify.supabase
+      const { data, error } = await fastify.supabase
         .from('positions')
         .update({ status: 'abolished', abolished_date: await tenantTodayStr(fastify.supabase, tid) })
         .eq('id', id).eq('tenant_id', tid)
+        .select('id').maybeSingle()
       if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to abolish position')
+      if (!data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Position not found' })
       return reply.code(200).send({ data: { abolished: true } })
     }
 
-    const { error } = await fastify.supabase
-      .from('positions').delete().eq('id', id).eq('tenant_id', tid)
+    const { data, error } = await fastify.supabase
+      .from('positions').delete().eq('id', id).eq('tenant_id', tid).select('id').maybeSingle()
     if (error) return serverError(req, reply, error, ErrorCode.DELETE_FAILED, 'Failed to delete position')
+    if (!data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Position not found' })
     return reply.code(204).send()
   })
 }

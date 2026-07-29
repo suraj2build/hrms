@@ -257,6 +257,7 @@ export function AdminSurveyDetail() {
  onSuccess: () => {
  qc.invalidateQueries({ queryKey: ['admin-survey', id] })
  qc.invalidateQueries({ queryKey: ['admin-surveys'] })
+ qc.invalidateQueries({ queryKey: ['my-surveys'] })
  setShowCloseConfirm(false)
  },
  onError: () => {
@@ -269,6 +270,7 @@ export function AdminSurveyDetail() {
  mutationFn: () => api.post(`/surveys/admin/${id}/assign`, { assign_all: true }),
  onSuccess: (_, __, ___) => {
  qc.invalidateQueries({ queryKey: ['admin-survey', id] })
+ qc.invalidateQueries({ queryKey: ['my-surveys'] })
  toast.success('Survey assigned to all active employees')
  },
  onError: () => toast.error('Could not assign survey'),
@@ -297,6 +299,7 @@ export function AdminSurveyDetail() {
  await api.post(`/surveys/admin/${id}/360/setup`, setup360Form)
  toast.success('360° review round created')
  qc.invalidateQueries({ queryKey: ['admin-survey', id] })
+ qc.invalidateQueries({ queryKey: ['my-360-nominations'] })
  } catch (e) {
  toast.error('Failed to set up 360° review', { description: e instanceof Error ? e.message :'Unknown error'})
  } finally {

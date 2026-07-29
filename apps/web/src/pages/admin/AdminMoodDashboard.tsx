@@ -11,6 +11,7 @@ import {
 } from'lucide-react'
 import { toast } from'sonner'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from'@/components/ui/dialog'
+import { ConfirmDialog } from'@/components/ui/ConfirmDialog'
 import { Button } from'@/components/ui/button'
 import { api } from'@/lib/api/client'
 
@@ -133,6 +134,7 @@ export function AdminMoodDashboard() {
  const [optionType, setOptionType] = useState<'choices'|'freetext'>('choices')
  const [pollCategory, setPollCategory] = useState('weekly_pulse')
  const [expandedQ, setExpandedQ] = useState<string | null>(null)
+ const [closeTarget, setCloseTarget] = useState<{ id: string; question: string } | null>(null)
  const [storeMonth, setStoreMonth] = useState(currentYearMonth())
 
  const { data: dashData, isLoading } = useQuery<DashboardData>({
@@ -189,10 +191,11 @@ export function AdminMoodDashboard() {
  mutationFn: ({ id, status }: { id: string; status: string }) =>
  api.patch(`/mood/admin/pulse/${id}`, { status }),
  onSuccess: () => {
+ setCloseTarget(null)
  qc.invalidateQueries({ queryKey: ['mood-admin-pulse'] })
  qc.invalidateQueries({ queryKey: ['mood-admin-dashboard'] })
  },
- onError: () => toast.error('Could not update question'),
+ onError: () => { setCloseTarget(null); toast.error('Could not update question') },
  })
 
  const dash = dashData
@@ -432,7 +435,7 @@ export function AdminMoodDashboard() {
  )}
  {q.status ==='active'&& (
  <button
- onClick={() => patchMut.mutate({ id: q.id, status:'closed'})}
+ onClick={() => setCloseTarget({ id: q.id, question: q.question })}
  disabled={patchMut.isPending}
  className="flex items-center gap-1 rounded-lg bg-destructive/10 px-2.5 py-1 text-xs font-medium text-destructive transition-colors hover:bg-destructive/20 disabled:opacity-50"
  >
@@ -788,6 +791,16 @@ export function AdminMoodDashboard() {
  </DialogFooter>
  </DialogContent>
  </Dialog>
+
+ <ConfirmDialog
+ open={!!closeTarget}
+ title="Close pulse question?"
+ message={closeTarget ? `Close "${closeTarget.question}"? It will stop accepting responses.` : ''}
+ confirmLabel="Close"
+ destructive
+ onConfirm={() => closeTarget && patchMut.mutate({ id: closeTarget.id, status: 'closed' })}
+ onCancel={() => setCloseTarget(null)}
+ />
  </div>
  )
 }

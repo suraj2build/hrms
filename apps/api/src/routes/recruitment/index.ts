@@ -239,13 +239,16 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
     const parsed = schema.safeParse(req.body)
     if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
 
-    const { error } = await fastify.supabase
+    const { data, error } = await fastify.supabase
       .from('recruitment_pipeline_stages')
       .update(parsed.data)
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
+      .select('id')
+      .maybeSingle()
 
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update pipeline stage')
+    if (!data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Pipeline stage not found' })
     return reply.send({ message: 'Stage updated' })
   })
 
@@ -826,13 +829,16 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
     const parsed = schema.safeParse(req.body)
     if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
 
-    const { error } = await fastify.supabase
+    const { data, error } = await fastify.supabase
       .from('candidates')
       .update(parsed.data)
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
+      .select('id')
+      .maybeSingle()
 
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update candidate')
+    if (!data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Candidate not found' })
     await logAction(fastify.supabase, { tenantId: req.tenantId, tableName: 'candidates', recordId: id, action: 'UPDATE', performedBy: req.userId, newData: parsed.data })
     return reply.send({ message: 'Candidate updated' })
   })
@@ -1431,7 +1437,7 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
 
   // ── Interview Rounds ──────────────────────────────────────────────────────
 
-  fastify.get('/interviews', auth, async (req: any, reply) => {
+  fastify.get('/interviews', hrAdminAuth, async (req: any, reply) => {
     const querySchema = z.object({
       application_id:  z.string().uuid().optional(),
       candidate_id:    z.string().uuid().optional(),
@@ -1498,7 +1504,7 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
     return reply.send({ data: data ?? [], total: count ?? 0, limit: parsed.data.limit, offset: parsed.data.offset })
   })
 
-  fastify.get('/interviews/:id', auth, async (req: any, reply) => {
+  fastify.get('/interviews/:id', hrAdminAuth, async (req: any, reply) => {
     const { id } = req.params as { id: string }
 
     const { data, error } = await fastify.supabase
@@ -1860,13 +1866,16 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
       if (!dept) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: 'Department not found' })
     }
 
-    const { error } = await fastify.supabase
+    const { data, error } = await fastify.supabase
       .from('qb_categories')
       .update(parsed.data)
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
+      .select('id')
+      .maybeSingle()
 
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update question bank category')
+    if (!data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Category not found' })
     return reply.send({ message: 'Category updated' })
   })
 
@@ -1964,13 +1973,16 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
       if (!category) return reply.code(400).send({ error: 'INVALID_CATEGORY', message: 'Category not found for this tenant' })
     }
 
-    const { error } = await fastify.supabase
+    const { data, error } = await fastify.supabase
       .from('qb_items')
       .update(parsed.data)
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
+      .select('id')
+      .maybeSingle()
 
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update question bank item')
+    if (!data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Question not found' })
     return reply.send({ message: 'Question updated' })
   })
 
@@ -2317,7 +2329,7 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
       patch.verified_at = new Date().toISOString()
     }
     const { data, error } = await fastify.supabase
-      .from('bgv_checks').update(patch).eq('id', checkId).eq('tenant_id', req.tenantId).select().single()
+      .from('bgv_checks').update(patch).eq('id', checkId).eq('tenant_id', req.tenantId).select().maybeSingle()
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update BGV check')
     if (!data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Check not found' })
     return reply.send({ data })
@@ -2340,7 +2352,7 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
         completed_at: parsed.data.status === 'cancelled' ? null : new Date().toISOString(),
         updated_at: new Date().toISOString(),
       })
-      .eq('id', caseId).eq('tenant_id', req.tenantId).select().single()
+      .eq('id', caseId).eq('tenant_id', req.tenantId).select().maybeSingle()
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to finalize BGV case')
     if (!data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'BGV case not found' })
     return reply.send({ data })

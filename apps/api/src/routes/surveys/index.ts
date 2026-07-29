@@ -842,6 +842,19 @@ export default async function surveyRoutes(fastify: FastifyInstance) {
       .maybeSingle()
     if (!survey) return reply.status(404).send({ error: 'Survey not found' })
 
+    // Guard against a resubmitted "Create 360° Round" click silently creating a
+    // second concurrent round for the same survey (no DB uniqueness constraint
+    // exists on survey_id for this table).
+    const { data: existingRound, error: existingErr } = await supabase
+      .from('feedback_360_rounds')
+      .select('id')
+      .eq('survey_id', id)
+      .eq('tenant_id', tenantId)
+      .eq('status', 'open')
+      .maybeSingle()
+    if (existingErr) return serverError(req, reply, existingErr, ErrorCode.QUERY_FAILED, 'Failed to check for an existing 360 round')
+    if (existingRound) return reply.status(409).send({ error: 'ROUND_EXISTS', message: 'An open 360° review round already exists for this survey' })
+
     const { peer_count = 3, deadline_days, self_review, manager_review } = parsed.data
 
     const deadline_at = deadline_days
