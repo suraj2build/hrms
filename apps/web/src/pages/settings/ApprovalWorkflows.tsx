@@ -353,9 +353,14 @@ export function ApprovalWorkflows() {
     onError: (e: Error) => toast.error('Failed to delete workflow', { description: e.message }),
   })
 
+  // Backend's action enum is past-tense ('approved'|'rejected'|'escalated'),
+  // not the present-tense button labels below — every click 400'd before
+  // this mapping existed.
+  const ACTION_ENUM: Record<string, string> = { approve: 'approved', reject: 'rejected', escalate: 'escalated' }
+
   const actionMutation = useMutation({
     mutationFn: ({ instanceId, action }: { instanceId: string; action: string }) =>
-      api.post(`/approvals/workflows/instances/${instanceId}/action`, { action }),
+      api.post(`/approvals/workflows/instances/${instanceId}/action`, { action: ACTION_ENUM[action] ?? action }),
     onSuccess:  () => {
       qc.invalidateQueries({ queryKey: ['workflow-instances'] })
       setExpandedInst(null)

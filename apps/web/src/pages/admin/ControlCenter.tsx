@@ -176,8 +176,15 @@ function fmtDateTime(s: string) {
 function monthRange() {
   const now = new Date()
   const y = now.getFullYear(), m = now.getMonth()
-  const from = new Date(y, m, 1).toISOString().slice(0, 10)
-  const to   = new Date(y, m + 1, 0).toISOString().slice(0, 10)
+  // Build the date strings from local y/m/d components directly — routing
+  // through .toISOString() converts to UTC first, so for any positive-offset
+  // timezone (IST is UTC+5:30) local midnight of the 1st always lands on the
+  // last day of the *previous* UTC month, silently fetching the wrong
+  // month's muster every single day (not just near a midnight boundary).
+  const pad = (n: number) => String(n).padStart(2, '0')
+  const lastDay = new Date(y, m + 1, 0).getDate()
+  const from = `${y}-${pad(m + 1)}-01`
+  const to   = `${y}-${pad(m + 1)}-${pad(lastDay)}`
   return { from, to, label: now.toLocaleString('default', { month: 'long', year: 'numeric' }) }
 }
 
