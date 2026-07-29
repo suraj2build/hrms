@@ -23,6 +23,8 @@ import { optStr, optDate, optEnum, optUuid } from '../../lib/zod-form.js'
 import { computeLifecycleRisks, summariseLifecycle } from '../../lib/lifecycle-expiry.js'
 import { notifyHrAdmins } from '../../lib/notify.js'
 import { serverError, notFound, forbidden, validationError, conflictError, ErrorCode } from '../../lib/api-errors.js'
+import { fetchTenantTz } from '../../lib/attendance-engine.js'
+import { getLocalDate } from '../../lib/org-context.js'
 
 const STORAGE_BUCKET = 'employee-files'
 const SIGNED_URL_TTL = 3600
@@ -481,6 +483,9 @@ export default async function essSelfServiceRoutes(fastify: FastifyInstance) {
     if (existing)
       return conflictError(reply, 'ALREADY_EXISTS', 'A separation is already in progress. Please track it below or contact HR.')
 
+    const noticeDate = parsed.data.notice_date
+      ?? getLocalDate(new Date().toISOString(), await fetchTenantTz(fastify.supabase, req.tenantId))
+
     const { data, error } = await fastify.supabase
       .from('employee_separation')
       .insert({
@@ -490,14 +495,23 @@ export default async function essSelfServiceRoutes(fastify: FastifyInstance) {
         initiated_by:      'employee',
         lifecycle_stage:   'initiated',
         approval_status:   'pending',
-        notice_date:       parsed.data.notice_date ?? new Date().toISOString().slice(0, 10),
+        notice_date:       noticeDate,
         last_working_date: parsed.data.last_working_date,
         exit_reason:       parsed.data.exit_reason,
         remarks:           parsed.data.remarks ?? null,
         created_by:        req.userId,
       })
       .select().single()
-    if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to submit separation request')
+    if (error) {
+      // 23505 — the read-then-insert above isn't atomic; a genuine double-submit
+      // race (double-click, retry) hits the UNIQUE(tenant_id, employee_id)
+      // constraint here rather than the earlier read, and deserves the same
+      // friendly 409 as the normal "already exists" path, not a raw 500.
+      if ((error as any).code === '23505') {
+        return conflictError(reply, 'ALREADY_EXISTS', 'A separation is already in progress. Please track it below or contact HR.')
+      }
+      return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to submit separation request')
+    }
 
     // Surface to HR through the existing inbox — no new notification framework.
     const { data: emp } = await fastify.supabase
