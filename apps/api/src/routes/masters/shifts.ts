@@ -88,11 +88,13 @@ export default async function shiftsRoutes(fastify: FastifyInstance) {
       })
     }
 
-    const { error } = await fastify.supabase
+    const { data, error } = await fastify.supabase
       .from('shifts')
       .delete()
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
+      .select('id')
+      .maybeSingle()
     if (error) {
       // 23503 = FK violation (a reference created between the check and the delete).
       if ((error as any).code === '23503') {
@@ -100,6 +102,7 @@ export default async function shiftsRoutes(fastify: FastifyInstance) {
       }
       return serverError(req, reply, error, ErrorCode.DELETE_FAILED, 'Failed to delete shift')
     }
+    if (!data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Shift not found' })
     return reply.code(204).send()
   })
 }

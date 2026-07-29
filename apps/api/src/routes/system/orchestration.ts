@@ -483,6 +483,12 @@ export default async function orchestrationRoutes(fastify: FastifyInstance) {
         .gte('completed_at', oneHourAgo),
     ])
 
+    // A failed check must not silently read as "0 — everything's fine": that
+    // let overall_health report 'healthy' while, e.g., the failed-jobs count
+    // itself errored during a real incident. Surface the failure instead.
+    const firstError = [workersRes, queuesRes, stuckRes, failedRes].find(r => r.error)?.error
+    if (firstError) return serverError(req, reply, firstError, ErrorCode.QUERY_FAILED, 'Failed to compute orchestration health')
+
     const workers_active  = workersRes.data?.length ?? 0
     const partitions      = queuesRes.data ?? []
     const max_queue_depth = partitions.length > 0

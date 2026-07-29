@@ -34,10 +34,10 @@ export default async function readinessRoutes(fastify: FastifyInstance) {
 
     if (!tenantId) return reply.code(401).send({ error: 'UNAUTHORIZED' })
 
-    const { data: session } = await fastify.supabase
+    const { data: session, error: sessionErr } = await fastify.supabase
       .from('onboarding_sessions').select('id')
       .eq('id', sessionId).eq('tenant_id', tenantId).maybeSingle()
-
+    if (sessionErr) return serverError(req, reply, sessionErr, ErrorCode.QUERY_FAILED, 'Failed to look up onboarding session')
     if (!session) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Session not found' })
 
     try {
@@ -56,10 +56,10 @@ export default async function readinessRoutes(fastify: FastifyInstance) {
 
     if (!tenantId) return reply.code(401).send({ error: 'UNAUTHORIZED' })
 
-    const { data: emp } = await fastify.supabase
+    const { data: emp, error: empErr } = await fastify.supabase
       .from('employees').select('id')
       .eq('id', employeeId).eq('tenant_id', tenantId).maybeSingle()
-
+    if (empErr) return serverError(req, reply, empErr, ErrorCode.QUERY_FAILED, 'Failed to look up employee')
     if (!emp) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Employee not found' })
 
     try {

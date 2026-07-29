@@ -227,21 +227,27 @@ export async function deleteComponent(
   if (countErr) return dbFail(countErr)
 
   if ((count ?? 0) > 0) {
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from('salary_components')
       .update({ is_active: false })
       .eq('id', id)
       .eq('tenant_id', tenantId)
+      .select('id')
+      .maybeSingle()
     if (error) return dbFail(error)
+    if (!data) return fail(404, 'NOT_FOUND', 'Salary component not found')
     return ok({ message: 'Component deactivated (referenced in salary structures)' }, 200)
   }
 
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from('salary_components')
     .delete()
     .eq('id', id)
     .eq('tenant_id', tenantId)
+    .select('id')
+    .maybeSingle()
   if (error) return dbFail(error)
+  if (!data) return fail(404, 'NOT_FOUND', 'Salary component not found')
   return noData(204)
 }
 
@@ -360,12 +366,21 @@ export async function deleteStructure(
   if (countErr) return dbFail(countErr)
   if ((count ?? 0) > 0)
     return fail(409, 'IN_USE', 'Structure is assigned to employees')
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from('salary_structures')
     .delete()
     .eq('id', id)
     .eq('tenant_id', tenantId)
-  if (error) return dbFail(error)
+    .select('id')
+    .maybeSingle()
+  if (error) {
+    // 23503 = FK violation — an employee got assigned this structure in the
+    // window between the count-check above and this delete. Same race
+    // shifts.ts's DELETE route already guards against.
+    if ((error as any).code === '23503') return fail(409, 'IN_USE', 'Structure is assigned to employees')
+    return dbFail(error)
+  }
+  if (!data) return fail(404, 'NOT_FOUND', 'Salary structure not found')
   return noData(204)
 }
 
@@ -534,12 +549,15 @@ export async function updateStructureComponent(
 export async function removeStructureComponent(
   supabase: SupabaseClient, tenantId: string, structureId: string, componentId: string,
 ): Promise<StoreResult> {
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from('salary_structure_components')
     .delete()
     .eq('id', componentId)
     .eq('salary_structure_id', structureId)
     .eq('tenant_id', tenantId)
+    .select('id')
+    .maybeSingle()
   if (error) return dbFail(error)
+  if (!data) return fail(404, 'NOT_FOUND', 'Component not found')
   return noData(204)
 }

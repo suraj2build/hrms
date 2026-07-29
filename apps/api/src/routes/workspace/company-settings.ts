@@ -51,6 +51,9 @@ export default async function companySettingsRoutes(fastify: FastifyInstance) {
     if (tenantRes.error) {
       return serverError(req, reply, tenantRes.error, ErrorCode.QUERY_FAILED, 'Failed to fetch company settings')
     }
+    if (codeRes.error) {
+      return serverError(req, reply, codeRes.error, ErrorCode.QUERY_FAILED, 'Failed to fetch employee code settings')
+    }
 
     return reply.send({
       data: {

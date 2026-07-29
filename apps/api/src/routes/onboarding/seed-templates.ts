@@ -7,6 +7,7 @@
  */
 import type { FastifyInstance } from 'fastify'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 const DEFAULT_TEMPLATES = [
   {
@@ -78,11 +79,14 @@ export default async function seedOnboardingTemplatesRoutes(fastify: FastifyInst
       return reply.code(403).send({ error: 'FORBIDDEN' })
     }
 
-    // Check if templates already exist
-    const { count } = await fastify.supabase
+    // Check if templates already exist. A failed count must not silently
+    // read as "none exist" — that would re-seed all 3 templates on top of
+    // a tenant's existing ones instead of surfacing the failure.
+    const { count, error: countErr } = await fastify.supabase
       .from('onboarding_checklist_templates')
       .select('id', { count: 'exact', head: true })
       .eq('tenant_id', req.tenantId)
+    if (countErr) return serverError(req, reply, countErr, ErrorCode.QUERY_FAILED, 'Failed to check existing templates')
 
     if ((count ?? 0) > 0) {
       return reply.send({ message: 'Templates already exist — skipped', count })

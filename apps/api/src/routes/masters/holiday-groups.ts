@@ -80,12 +80,15 @@ export default async function holidayGroupsRoutes(fastify: FastifyInstance) {
     if (!isAdmin(req)) return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
     // sites.holiday_group_id and holiday_calendar.holiday_group_id are ON DELETE SET NULL,
     // so deleting a group simply un-scopes its sites/holidays (back to all-India).
-    const { error } = await fastify.supabase
+    const { data, error } = await fastify.supabase
       .from('roster_holiday_groups')
       .delete()
       .eq('id', (req.params as { id: string }).id)
       .eq('tenant_id', req.tenantId)
+      .select('id')
+      .maybeSingle()
     if (error) return serverError(req, reply, error, ErrorCode.DELETE_FAILED, 'Failed to delete holiday group')
+    if (!data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Holiday group not found' })
     return reply.code(204).send()
   })
 }
