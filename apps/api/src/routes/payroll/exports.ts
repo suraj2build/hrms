@@ -100,15 +100,20 @@ export default async function payrollExportsRoutes(fastify: FastifyInstance) {
     const empIds = rows.map(r => r.employee_id)
     let uanMap = new Map<string, string | null>()
     if (empIds.length > 0) {
-      const uanRows = await fetchAllRows<{ employee_id: string; uan: string | null }>((from, to) =>
-        fastify.supabase
-          .from('epf_eligibility_overrides')
-          .select('employee_id, uan')
-          .eq('tenant_id', req.tenantId)
-          .in('employee_id', empIds)
-          .is('effective_to', null)
-          .range(from, to),
-      )
+      let uanRows: Array<{ employee_id: string; uan: string | null }>
+      try {
+        uanRows = await fetchAllRows<{ employee_id: string; uan: string | null }>((from, to) =>
+          fastify.supabase
+            .from('epf_eligibility_overrides')
+            .select('employee_id, uan')
+            .eq('tenant_id', req.tenantId)
+            .in('employee_id', empIds)
+            .is('effective_to', null)
+            .range(from, to),
+        )
+      } catch (err) {
+        return serverError(req, reply, err, ErrorCode.QUERY_FAILED, 'Failed to fetch EPF UANs')
+      }
 
       for (const r of uanRows) {
         uanMap.set(r.employee_id, r.uan ?? null)

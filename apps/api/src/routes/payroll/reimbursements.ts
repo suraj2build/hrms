@@ -10,6 +10,7 @@ import { gateApprove, gateReject } from '../../lib/approval-orchestrator.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { checkIdempotency, storeIdempotency } from '../../lib/idempotency.js'
 import { serverError, validationError, ErrorCode } from '../../lib/api-errors.js'
+import { fetchAllRows } from '../../lib/supabase-paginate.js'
 
 const CATEGORY_TYPES = ['medical', 'travel', 'food', 'telephone', 'internet', 'books', 'uniform', 'other'] as const
 
@@ -56,24 +57,28 @@ export default async function reimbursementsRoutes(fastify: FastifyInstance) {
       return reply.code(400).send({ error: 'NO_EMPLOYEE_LINK', message: 'Profile not linked to an employee record' })
     }
 
-    let q = fastify.supabase
-      .from('reimbursement_claims')
-      .select('*, reimbursement_categories(id, name, code, category_type)', { count: 'exact' })
-      .eq('tenant_id', req.tenantId)
-      .eq('employee_id', profile.employee_id)
-      .order('created_at', { ascending: false })
+    const data = await fetchAllRows((from, to) => {
+      let q = fastify.supabase
+        .from('reimbursement_claims')
+        .select('*, reimbursement_categories(id, name, code, category_type)')
+        .eq('tenant_id', req.tenantId)
+        .eq('employee_id', profile.employee_id)
+        .order('created_at', { ascending: false })
 
-    if (parsed.data.status) q = q.eq('status', parsed.data.status)
-    if (parsed.data.month) {
-      const [year, mon] = parsed.data.month.split('-').map(Number)
-      const firstDay = `${parsed.data.month}-01`
-      const lastDay  = new Date(year, mon, 0).toISOString().slice(0, 10)
-      q = q.gte('expense_date', firstDay).lte('expense_date', lastDay)
-    }
+      if (parsed.data.status) q = q.eq('status', parsed.data.status)
+      if (parsed.data.month) {
+        const [year, mon] = parsed.data.month.split('-').map(Number)
+        const firstDay = `${parsed.data.month}-01`
+        // `.getDate()` keeps this in local calendar terms — see the sibling
+        // fix in GET /pending-payments/:month for the toISOString() bug this
+        // avoids.
+        const lastDay = `${parsed.data.month}-${String(new Date(year, mon, 0).getDate()).padStart(2, '0')}`
+        q = q.gte('expense_date', firstDay).lte('expense_date', lastDay)
+      }
 
-    const { data, count, error } = await q
-    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch reimbursement claims')
-    return reply.send({ data: data ?? [], total: count ?? 0 })
+      return q.range(from, to)
+    })
+    return reply.send({ data, total: data.length })
   })
 
   /**
@@ -183,6 +188,21 @@ export default async function reimbursementsRoutes(fastify: FastifyInstance) {
     const parsed = schema.safeParse(req.body)
     if (!parsed.success) {
       return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+    }
+
+    // category_id is caller-supplied — unlike POST /my above, this was never
+    // re-verified against the tenant, and reimbursement_claims.category_id
+    // has no tenant-compound FK, so a foreign tenant's category id would be
+    // silently accepted.
+    if (parsed.data.category_id) {
+      const { data: category, error: categoryErr } = await fastify.supabase
+        .from('reimbursement_categories')
+        .select('id')
+        .eq('id', parsed.data.category_id)
+        .eq('tenant_id', req.tenantId)
+        .maybeSingle()
+      if (categoryErr) return serverError(req, reply, categoryErr, ErrorCode.QUERY_FAILED, 'Failed to verify reimbursement category')
+      if (!category) return reply.code(404).send({ error: 'CATEGORY_NOT_FOUND', message: 'Reimbursement category not found' })
     }
 
     const { data, error } = await fastify.supabase
@@ -570,6 +590,19 @@ export default async function reimbursementsRoutes(fastify: FastifyInstance) {
     const parsed = schema.safeParse(req.body)
     if (!parsed.success) {
       return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+    }
+
+    // category_id is caller-supplied — same tenant-ownership gap as the ESS
+    // sibling PUT /my/:id above.
+    if (parsed.data.category_id) {
+      const { data: category, error: categoryErr } = await fastify.supabase
+        .from('reimbursement_categories')
+        .select('id')
+        .eq('id', parsed.data.category_id)
+        .eq('tenant_id', req.tenantId)
+        .maybeSingle()
+      if (categoryErr) return serverError(req, reply, categoryErr, ErrorCode.QUERY_FAILED, 'Failed to verify reimbursement category')
+      if (!category) return reply.code(404).send({ error: 'CATEGORY_NOT_FOUND', message: 'Reimbursement category not found' })
     }
 
     // Re-assert status='draft' in the UPDATE's own WHERE clause — the earlier
@@ -967,14 +1000,35 @@ export default async function reimbursementsRoutes(fastify: FastifyInstance) {
     const parsed = schema.safeParse(req.body)
     if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
 
-    const { data: existing } = await fastify.supabase
+    const { data: existing, error: fetchErr } = await fastify.supabase
       .from('reimbursement_claims')
       .select('id, status, employee_id, claimed_amount')
       .eq('id', id).eq('tenant_id', req.tenantId).single()
 
+    if (fetchErr) return serverError(req, reply, fetchErr, ErrorCode.QUERY_FAILED, 'Failed to fetch reimbursement claim')
     if (!existing) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Claim not found' })
     if (!['submitted', 'under_review'].includes((existing as any).status)) {
       return reply.code(409).send({ error: 'INVALID_STATUS', message: `Claim is not in a reviewable state (status: ${(existing as any).status})` })
+    }
+
+    // Multi-level gate (same as /claims/:id/approve and /:id/approve) — this
+    // is the endpoint the admin console's review dialog actually calls, and
+    // it was finalizing directly with no gate call at all, letting any HR
+    // admin bypass a configured approval chain (e.g. a finance-tier
+    // requirement above a threshold amount) that the sibling routes enforce.
+    const gate = await gateApprove(fastify.supabase, {
+      tenantId: req.tenantId, entityType: 'reimbursement_claim', entityId: id,
+      actorId: req.userId, actorRole: req.userRole,
+      targetEmployeeId: (existing as any).employee_id,
+      amount: Number((existing as any).claimed_amount),
+    })
+    if (gate.kind === 'error') {
+      const code = gate.error.type === 'FORBIDDEN' ? 403 : gate.error.type === 'CONFLICT' ? 409 : 400
+      return reply.code(code).send({ error: gate.error.type, message: gate.error.message })
+    }
+    if (gate.kind === 'advanced') {
+      await logAction(fastify.supabase, { tenantId: req.tenantId, tableName: 'reimbursement_claims', recordId: id, action: 'UPDATE', performedBy: req.userId, newData: { status: (existing as any).status, approval_level: gate.nextLevel, total_levels: gate.totalLevels } })
+      return reply.send({ data: { id, status: (existing as any).status, advanced_to_level: gate.nextLevel, total_levels: gate.totalLevels } })
     }
 
     const now = new Date().toISOString()
@@ -1015,11 +1069,12 @@ export default async function reimbursementsRoutes(fastify: FastifyInstance) {
       }
     }
 
-    const { data: existing } = await fastify.supabase
+    const { data: existing, error: fetchErr } = await fastify.supabase
       .from('reimbursement_claims')
       .select('id, status, employee_id, claimed_amount')
       .eq('id', id).eq('tenant_id', req.tenantId).single()
 
+    if (fetchErr) return serverError(req, reply, fetchErr, ErrorCode.QUERY_FAILED, 'Failed to fetch reimbursement claim')
     if (!existing) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Claim not found' })
     if (!['submitted', 'under_review'].includes((existing as any).status)) {
       return reply.code(409).send({ error: 'INVALID_STATUS', message: `Claim is not in a reviewable state (status: ${(existing as any).status})` })
@@ -1071,11 +1126,12 @@ export default async function reimbursementsRoutes(fastify: FastifyInstance) {
     const parsed = schema.safeParse(req.body)
     if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
 
-    const { data: existing } = await fastify.supabase
+    const { data: existing, error: fetchErr } = await fastify.supabase
       .from('reimbursement_claims')
       .select('id, status, employee_id, claimed_amount')
       .eq('id', id).eq('tenant_id', req.tenantId).single()
 
+    if (fetchErr) return serverError(req, reply, fetchErr, ErrorCode.QUERY_FAILED, 'Failed to fetch reimbursement claim')
     if (!existing) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Claim not found' })
     if (!['submitted', 'under_review', 'approved'].includes((existing as any).status)) {
       return reply.code(409).send({ error: 'INVALID_STATUS', message: `Cannot reject claim with status: ${(existing as any).status}` })
@@ -1156,17 +1212,22 @@ export default async function reimbursementsRoutes(fastify: FastifyInstance) {
     const { month } = req.params as { month: string }
     const [year, mon] = month.split('-').map(Number)
     const firstDay = `${month}-01`
-    const lastDay = new Date(year, mon, 0).toISOString().slice(0, 10)
+    // `.getDate()` (not `.toISOString()`) keeps this in local calendar terms —
+    // constructing then re-serializing via toISOString() would shift the
+    // computed last day back one on a positive-UTC-offset host.
+    const lastDayNum = new Date(year, mon, 0).getDate()
+    const lastDay = `${month}-${String(lastDayNum).padStart(2, '0')}`
 
-    const { data, error } = await fastify.supabase
-      .from('reimbursement_claims')
-      .select('*, employees(id, first_name, last_name, employee_code), reimbursement_categories(id, name, code, category_type)')
-      .eq('tenant_id', req.tenantId)
-      .eq('status', 'approved')
-      .or(`claim_date.gte.${firstDay},expense_date.gte.${firstDay}`)
-      .or(`claim_date.lte.${lastDay},expense_date.lte.${lastDay}`)
-
-    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch pending reimbursement payments')
-    return reply.send({ data: data ?? [], month })
+    const data = await fetchAllRows((from, to) =>
+      fastify.supabase
+        .from('reimbursement_claims')
+        .select('*, employees(id, first_name, last_name, employee_code), reimbursement_categories(id, name, code, category_type)')
+        .eq('tenant_id', req.tenantId)
+        .eq('status', 'approved')
+        .or(`claim_date.gte.${firstDay},expense_date.gte.${firstDay}`)
+        .or(`claim_date.lte.${lastDay},expense_date.lte.${lastDay}`)
+        .range(from, to),
+    )
+    return reply.send({ data, month })
   })
 }
