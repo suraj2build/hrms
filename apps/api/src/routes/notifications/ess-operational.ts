@@ -478,7 +478,7 @@ export default async function essOperationalRoutes(fastify: FastifyInstance) {
       balance_score,
       period: {
         from: thirtyDaysAgo,
-        to:   new Date().toISOString().slice(0, 10),
+        to:   todayStr,
       },
     })
   })
