@@ -76,7 +76,7 @@ export function MergeDeleteDialog({
   const [mergeTo, setMergeTo] = useState<string>('')
 
   // Fetch usage when the dialog opens
-  const { data: usageData, isLoading: usageLoading } = useQuery<{ data: { total: number } }>({
+  const { data: usageData, isLoading: usageLoading, isError: usageError } = useQuery<{ data: { total: number } }>({
     queryKey: ['usage', usageUrl],
     queryFn:  () => api.get(usageUrl),
     enabled:  open && !!id,
@@ -85,7 +85,11 @@ export function MergeDeleteDialog({
 
   const usageCount = usageData?.data?.total ?? 0
   const hasUsage   = !usageLoading && usageCount > 0
-  const canConfirm = !usageLoading && (!hasUsage || !!mergeTo)
+  // A failed usage check must never be treated as "zero usage" — that would
+  // silently downgrade a merge-required delete into an unguarded one for a
+  // record that may actually be referenced by hundreds of rows. Block
+  // confirmation entirely until the check succeeds.
+  const canConfirm = !usageLoading && !usageError && (!hasUsage || !!mergeTo)
 
   function handleConfirm() {
     onConfirm(hasUsage && mergeTo ? mergeTo : undefined)
@@ -115,8 +119,18 @@ export function MergeDeleteDialog({
             </div>
           )}
 
+          {/* Usage check failed — block confirmation rather than assume zero usage */}
+          {usageError && (
+            <div className="flex items-start gap-3 rounded-md border border-destructive/40 bg-destructive/5 p-3">
+              <AlertTriangle className="h-4 w-4 text-destructive mt-0.5 flex-shrink-0" />
+              <p className="text-sm text-destructive">
+                Couldn't check whether {entityName} is still in use. Please close this dialog and try again.
+              </p>
+            </div>
+          )}
+
           {/* No usage — simple confirm */}
-          {!usageLoading && !hasUsage && (
+          {!usageLoading && !usageError && !hasUsage && (
             <p className="text-sm text-muted-foreground">
               Are you sure you want to delete{' '}
               <span className="font-semibold text-foreground">"{entityName}"</span>?

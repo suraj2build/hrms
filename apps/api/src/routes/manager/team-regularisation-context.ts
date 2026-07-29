@@ -67,25 +67,30 @@ export default async function managerTeamRegularisationContextRoute(fastify: Fas
     if (empError) return serverError(req, reply, empError, ErrorCode.QUERY_FAILED, 'Failed to fetch employee')
     if (!emp) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Employee not found' })
 
-    const [attendance, { data: current, error: curError }, { data: history, error: histError }] = await Promise.all([
-      fetchAttendanceTrend(fastify.supabase, tenantId, employee_id, 30),
+    let attendance, current, history, curError, histError
+    try {
+      ;[attendance, { data: current, error: curError }, { data: history, error: histError }] = await Promise.all([
+        fetchAttendanceTrend(fastify.supabase, tenantId, employee_id, 30),
 
-      fastify.supabase
-        .from('attendance_daily')
-        .select('date, status, work_hours, late_minutes, overtime_minutes')
-        .eq('tenant_id', tenantId)
-        .eq('employee_id', employee_id)
-        .eq('date', date)
-        .maybeSingle(),
+        fastify.supabase
+          .from('attendance_daily')
+          .select('date, status, work_hours, late_minutes, overtime_minutes')
+          .eq('tenant_id', tenantId)
+          .eq('employee_id', employee_id)
+          .eq('date', date)
+          .maybeSingle(),
 
-      fastify.supabase
-        .from('attendance_regularisation')
-        .select('date, status, reason, created_at')
-        .eq('tenant_id', tenantId)
-        .eq('employee_id', employee_id)
-        .order('created_at', { ascending: false })
-        .limit(6),
-    ])
+        fastify.supabase
+          .from('attendance_regularisation')
+          .select('date, status, reason, created_at')
+          .eq('tenant_id', tenantId)
+          .eq('employee_id', employee_id)
+          .order('created_at', { ascending: false })
+          .limit(6),
+      ])
+    } catch (trendErr) {
+      return serverError(req, reply, trendErr, ErrorCode.QUERY_FAILED, 'Failed to fetch attendance trend')
+    }
     // Silent failure previously fell back to `current: null` / `history: []`,
     // which reads as "no existing attendance record" / "no prior requests" —
     // could bias the approver's decision with no signal the query failed.

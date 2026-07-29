@@ -89,36 +89,41 @@ export default async function managerTeamLeaveContextRoute(fastify: FastifyInsta
     }
 
     // ── Parallel reads: balances, overlapping team leave, history, trend ──────
-    const [{ data: balances, error: balError }, { data: overlap, error: overlapError }, { data: history, error: histError }, attendance] = await Promise.all([
-      fastify.supabase
-        .from('employee_leave_balance')
-        .select('leave_type_id, balance, leave_types(id, name, is_paid)')
-        .eq('tenant_id', tenantId)
-        .eq('employee_id', employee_id)
-        .eq('year', year),
+    let balances, overlap, history, attendance, balError, overlapError, histError
+    try {
+      ;[{ data: balances, error: balError }, { data: overlap, error: overlapError }, { data: history, error: histError }, attendance] = await Promise.all([
+        fastify.supabase
+          .from('employee_leave_balance')
+          .select('leave_type_id, balance, leave_types(id, name, is_paid)')
+          .eq('tenant_id', tenantId)
+          .eq('employee_id', employee_id)
+          .eq('year', year),
 
-      teammateIds.length
-        ? fastify.supabase
-            .from('leave_requests')
-            .select('employee_id, from_date, to_date, computed_days, employees(first_name, last_name, employee_code), leave_types(name)')
-            .eq('tenant_id', tenantId)
-            .eq('status', 'APPROVED')
-            .in('employee_id', teammateIds)
-            .lte('from_date', to)
-            .gte('to_date', from)
-            .order('from_date', { ascending: true })
-        : Promise.resolve({ data: [] as any[], error: null }),
+        teammateIds.length
+          ? fastify.supabase
+              .from('leave_requests')
+              .select('employee_id, from_date, to_date, computed_days, employees(first_name, last_name, employee_code), leave_types(name)')
+              .eq('tenant_id', tenantId)
+              .eq('status', 'APPROVED')
+              .in('employee_id', teammateIds)
+              .lte('from_date', to)
+              .gte('to_date', from)
+              .order('from_date', { ascending: true })
+          : Promise.resolve({ data: [] as any[], error: null }),
 
-      fastify.supabase
-        .from('leave_requests')
-        .select('leave_type_id, from_date, to_date, computed_days, status, leave_types(name)')
-        .eq('tenant_id', tenantId)
-        .eq('employee_id', employee_id)
-        .order('from_date', { ascending: false })
-        .limit(6),
+        fastify.supabase
+          .from('leave_requests')
+          .select('leave_type_id, from_date, to_date, computed_days, status, leave_types(name)')
+          .eq('tenant_id', tenantId)
+          .eq('employee_id', employee_id)
+          .order('from_date', { ascending: false })
+          .limit(6),
 
-      fetchAttendanceTrend(fastify.supabase, tenantId, employee_id, 30),
-    ])
+        fetchAttendanceTrend(fastify.supabase, tenantId, employee_id, 30),
+      ])
+    } catch (trendErr) {
+      return serverError(req, reply, trendErr, ErrorCode.QUERY_FAILED, 'Failed to fetch attendance trend')
+    }
     // A silent failure here previously fell back to `?? []`, returning 200
     // with an empty team_overlap that reads as "no coverage conflict" —
     // actively misleading for an approver deciding whether to approve leave

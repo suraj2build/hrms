@@ -30,13 +30,21 @@ export async function fetchAttendanceTrend(
   since.setDate(since.getDate() - days)
   const sinceStr = since.toISOString().slice(0, 10)
 
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from('attendance_daily')
     .select('date, status, work_hours, late_minutes')
     .eq('tenant_id', tenantId)
     .eq('employee_id', employeeId)
     .gte('date', sinceStr)
     .order('date', { ascending: false })
+
+  // A query failure here previously fell through to an empty `rows` array,
+  // producing a fully-formed "attendance_rate: 0, punctuality_rate: 100"
+  // trend that is indistinguishable from a genuinely spotless-but-absent
+  // employee — this is rendered directly as decision support in the
+  // leave/regularisation approval drawers, so a transient DB error must not
+  // silently masquerade as real attendance data.
+  if (error) throw new Error(`attendance_trend: failed to fetch attendance_daily: ${error.message}`)
 
   const rows = (data ?? []) as Array<{ date: string; status: string; work_hours: number; late_minutes: number }>
 
