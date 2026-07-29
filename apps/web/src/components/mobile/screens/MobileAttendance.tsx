@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useMemo, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { MapPin, Camera, LogIn, LogOut } from 'lucide-react'
 import { toast } from 'sonner'
@@ -57,10 +57,21 @@ export function MobileAttendance({ base: _base }: { base: string }) {
   const checkedIn = !!todayLog?.check_in && !todayLog?.check_out
   const inTime = todayLog?.check_in ? fmtTime(todayLog.check_in) : null
 
+  // Stable per-mount UUID sent as Idempotency-Key — since no punched_at is
+  // sent, a dropped/retried mobile network response would otherwise compute
+  // a fresh timestamp each time and insert a duplicate punch (the backend's
+  // unique constraint only dedupes on punched_at). Rotated after success.
+  const punchKey = useRef(crypto.randomUUID())
+
   const { mutate: punch, isPending } = useMutation({
     mutationFn: (direction: 'IN' | 'OUT') =>
-      api.post<{ data: { punched_at: string } }>('/attendance/punch', { direction, source: 'mobile' }),
+      api.post<{ data: { punched_at: string } }>(
+        '/attendance/punch',
+        { direction, source: 'mobile' },
+        { headers: { 'Idempotency-Key': punchKey.current } },
+      ),
     onSuccess: (_r, dir) => {
+      punchKey.current = crypto.randomUUID()
       toast.success(dir === 'IN' ? 'Punched in' : 'Punched out')
       qc.invalidateQueries({ queryKey: ['mobile-attendance', employeeId, today] })
       qc.invalidateQueries({ queryKey: ['mobile-attendance-week', employeeId, wk.from] })

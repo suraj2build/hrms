@@ -476,13 +476,24 @@ function ActionsTab({
 
   const resolveMutation = useMutation({
     mutationFn: () => api.post(`/attendance/queue/${queueItemId}/resolve`, {}),
-    onSuccess:  () => { toast.success('Marked as resolved'); onClose() },
+    onSuccess:  () => {
+      toast.success('Marked as resolved')
+      // My Work Queue (useOperationalQueue) reads the same queue items under
+      // this key — without it, the resolved item keeps showing as open there
+      // for up to the 60s refetch interval.
+      queryClient.invalidateQueries({ queryKey: ['operational-queue'] })
+      onClose()
+    },
     onError:    () => toast.error('Failed to resolve'),
   })
 
   const escalateMutation = useMutation({
     mutationFn: () => api.post(`/attendance/queue/${queueItemId}/escalate`, {}),
-    onSuccess:  () => { toast.success('Escalated to manager'); onClose() },
+    onSuccess:  () => {
+      toast.success('Escalated to manager')
+      queryClient.invalidateQueries({ queryKey: ['operational-queue'] })
+      onClose()
+    },
     onError:    () => toast.error('Failed to escalate'),
   })
 
@@ -579,6 +590,9 @@ export function EmployeeResolutionWorkspace({
       queryClient.invalidateQueries({ queryKey: ['emp-attendance-queue', employeeId] })
       // The employee's own ESS approvals tracker reads the same record.
       queryClient.invalidateQueries({ queryKey: ['ess-approvals-corrections'] })
+      // My Work Queue (useOperationalQueue) reads the same queue item under
+      // this separate key.
+      queryClient.invalidateQueries({ queryKey: ['operational-queue'] })
       onClose()
     },
     onError:    () => toast.error('Failed to approve'),
@@ -590,6 +604,7 @@ export function EmployeeResolutionWorkspace({
       toast.success('Rejected')
       queryClient.invalidateQueries({ queryKey: ['emp-attendance-queue', employeeId] })
       queryClient.invalidateQueries({ queryKey: ['ess-approvals-corrections'] })
+      queryClient.invalidateQueries({ queryKey: ['operational-queue'] })
       onClose()
     },
     onError:    () => toast.error('Failed to reject'),
@@ -597,13 +612,21 @@ export function EmployeeResolutionWorkspace({
 
   const snoozeMutation = useMutation({
     mutationFn: () => api.post(`/attendance/queue/${queueItem?.id}/snooze`, { hours: 24 }),
-    onSuccess:  () => { toast.success('Snoozed for 24h'); onClose() },
+    onSuccess:  () => {
+      toast.success('Snoozed for 24h')
+      queryClient.invalidateQueries({ queryKey: ['operational-queue'] })
+      onClose()
+    },
     onError:    () => toast.error('Failed to snooze'),
   })
 
   const escalateSummaryMutation = useMutation({
     mutationFn: () => api.post(`/attendance/queue/${queueItem?.id}/escalate`, {}),
-    onSuccess:  () => { toast.success('Escalated'); onClose() },
+    onSuccess:  () => {
+      toast.success('Escalated')
+      queryClient.invalidateQueries({ queryKey: ['operational-queue'] })
+      onClose()
+    },
     onError:    () => toast.error('Failed to escalate'),
   })
 

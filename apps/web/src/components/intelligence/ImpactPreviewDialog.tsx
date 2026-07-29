@@ -77,15 +77,44 @@ export function ImpactPreviewDialog({
 
   const executeMutation = useMutation({
     mutationFn: (ins: DecisionInsight) =>
-      api.post<{ success: boolean; count?: number }>(ins.actionEndpoint, ins.actionBody),
+      // Bulk-action endpoints don't share one response shape — regularisation's
+      // bulk-approve/bulk-reject return { summary: { approved, failed } },
+      // anomalies' bulk-resolve returns { resolved_count, recompute_failed }.
+      // Falling back to affectedEntities.length (as this used to do
+      // unconditionally) reports a fabricated full success even when the
+      // backend only partially applied the batch.
+      api.post<{
+        success?: boolean
+        count?: number
+        summary?: { approved: number; failed: number; total: number }
+        resolved_count?: number
+        recompute_failed?: number
+      }>(ins.actionEndpoint, ins.actionBody),
     onSuccess: (data, ins) => {
-      const count = data?.count ?? ins.affectedEntities.length
-      setStep('done')
-      setResult({ successCount: count, failureCount: 0 })
+      let successCount: number
+      let failureCount: number
+      if (data?.summary) {
+        successCount = data.summary.approved
+        failureCount = data.summary.failed
+      } else if (data?.resolved_count !== undefined) {
+        successCount = data.resolved_count
+        failureCount = data.recompute_failed ?? Math.max(0, ins.affectedEntities.length - data.resolved_count)
+      } else {
+        successCount = data?.count ?? ins.affectedEntities.length
+        failureCount = 0
+      }
+      setStep(failureCount > 0 && successCount === 0 ? 'error' : 'done')
+      setResult({ successCount, failureCount })
       onSuccess?.(ins)
-      toast.success(
-        `${ins.actionLabel} completed — ${count} records updated`,
-      )
+      if (failureCount > 0) {
+        toast.warning(
+          `${ins.actionLabel}: ${successCount} succeeded, ${failureCount} failed`,
+        )
+      } else {
+        toast.success(
+          `${ins.actionLabel} completed — ${successCount} records updated`,
+        )
+      }
     },
     onError: () => {
       setStep('error')
@@ -134,6 +163,7 @@ export function ImpactPreviewDialog({
             <p className="text-base font-semibold">Action Complete</p>
             <p className="text-sm text-muted-foreground">
               {result?.successCount ?? 0} records updated successfully
+              {(result?.failureCount ?? 0) > 0 && ` · ${result?.failureCount} failed`}
             </p>
             <DialogClose asChild>
               <Button className="mt-2" onClick={onClose}>Close</Button>
