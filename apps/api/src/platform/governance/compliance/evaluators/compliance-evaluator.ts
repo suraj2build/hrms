@@ -10,6 +10,14 @@ import type { EventSeverity }          from '../../../events/types/platform-even
 import type { ComplianceValidationResult } from '../benchmarks/compliance-benchmark.service.js'
 import { governanceRuleRegistry }      from '../../rules/registry/governance-rule-registry.js'
 import { explainabilityService }       from '../../../ai/services/explainability.service.js'
+// Side-effect import — registers all 4 statutory compliance rules
+// (attendance/compensation/leave/payroll) onto governanceRuleRegistry.
+// This is the actual runtime-reachable registration point: nothing in the
+// import chain from apps/api/src/index.ts (which imports this evaluator
+// via compliance-governance-listener.ts) previously imported
+// rules/compliance/index.ts, so the registry was permanently empty and
+// evaluate() always returned { compliant: true, violations: [] }.
+import '../../rules/compliance/index.js'
 
 /** Severity ordering for computing max severity. */
 const SEVERITY_ORDER: Record<EventSeverity, number> = {

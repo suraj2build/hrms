@@ -10,9 +10,18 @@ import type { GovernanceListener }    from '../listeners/governance-listener.js'
 
 export class GovernanceEvaluator {
   private readonly listeners: GovernanceListener[] = []
+  // Keyed `${tenant_id}:${listener.name}` — this evaluator is a single
+  // process-global singleton shared by every tenant (see apps/api/src/
+  // index.ts), so unkeyed state let one tenant's noisy/malformed events
+  // (e.g. 5 events that throw inside one listener) disable that listener
+  // for every other tenant until an admin manually reset it.
   private readonly listenerErrors:  Map<string, number>  = new Map()
   private readonly listenerEnabled: Map<string, boolean> = new Map()
   private readonly MAX_LISTENER_ERRORS = 5
+
+  private circuitKey(tenantId: string, listenerName: string): string {
+    return `${tenantId}:${listenerName}`
+  }
 
   /** Register a passive governance listener. */
   register(listener: GovernanceListener): this {
@@ -31,8 +40,10 @@ export class GovernanceEvaluator {
         continue
       }
 
-      // Skip disabled listeners
-      if (this.listenerEnabled.get(listener.name) === false) {
+      const key = this.circuitKey(event.tenant_id, listener.name)
+
+      // Skip disabled listeners (scoped to this tenant only)
+      if (this.listenerEnabled.get(key) === false) {
         continue
       }
 
@@ -40,15 +51,17 @@ export class GovernanceEvaluator {
         .then(() => listener.evaluate(event))
         .catch((err: unknown) => {
           console.warn('[GovernanceEvaluator] listener error', {
+            tenant_id:  event.tenant_id,
             listener:   listener.name,
             event_type: event.event_type,
             error:      err,
           })
-          const current = (this.listenerErrors.get(listener.name) ?? 0) + 1
-          this.listenerErrors.set(listener.name, current)
+          const current = (this.listenerErrors.get(key) ?? 0) + 1
+          this.listenerErrors.set(key, current)
           if (current >= this.MAX_LISTENER_ERRORS) {
-            this.listenerEnabled.set(listener.name, false)
+            this.listenerEnabled.set(key, false)
             console.warn('[GovernanceEvaluator] listener disabled — too many errors', {
+              tenant_id:   event.tenant_id,
               listener:    listener.name,
               error_count: current,
             })
@@ -62,19 +75,23 @@ export class GovernanceEvaluator {
     return this.listeners.map(l => l.name)
   }
 
-  /** Returns health summary for all registered listeners. */
-  listenerHealth(): Array<{ name: string; error_count: number; enabled: boolean }> {
-    return this.listeners.map(l => ({
-      name:        l.name,
-      error_count: this.listenerErrors.get(l.name) ?? 0,
-      enabled:     this.listenerEnabled.get(l.name) !== false,
-    }))
+  /** Returns health summary for all registered listeners, scoped to one tenant. */
+  listenerHealth(tenantId: string): Array<{ name: string; error_count: number; enabled: boolean }> {
+    return this.listeners.map(l => {
+      const key = this.circuitKey(tenantId, l.name)
+      return {
+        name:        l.name,
+        error_count: this.listenerErrors.get(key) ?? 0,
+        enabled:     this.listenerEnabled.get(key) !== false,
+      }
+    })
   }
 
-  /** Reset error count for a listener (admin recovery). */
-  resetListener(name: string): void {
-    this.listenerErrors.delete(name)
-    this.listenerEnabled.delete(name)
+  /** Reset error count for a listener within one tenant (admin recovery). */
+  resetListener(tenantId: string, name: string): void {
+    const key = this.circuitKey(tenantId, name)
+    this.listenerErrors.delete(key)
+    this.listenerEnabled.delete(key)
   }
 }
 

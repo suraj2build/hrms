@@ -20,7 +20,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     try {
       const sla_breaches   = slaService.scanBreaches().filter(b => b.tenant_id === req.tenantId)
       const pending_sla    = slaService.getTracked(req.tenantId)
-      const listener_health = governanceEvaluator.listenerHealth()
+      const listener_health = governanceEvaluator.listenerHealth(req.tenantId)
 
       return reply.send({
         sla_breaches,
@@ -50,7 +50,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
   // GET /enterprise/health
   fastify.get('/health', { preHandler: [fastify.authenticate] }, async (req: any, reply) => {
     try {
-      const listeners     = governanceEvaluator.listenerHealth()
+      const listeners     = governanceEvaluator.listenerHealth(req.tenantId)
       const listenerCount = listeners.length
       const tracked       = slaService.getTracked(req.tenantId)
 
@@ -77,10 +77,10 @@ export default async function adminRoutes(fastify: FastifyInstance) {
   })
 
   // POST /enterprise/listeners/:name/reset
-  fastify.post('/listeners/:name/reset', { preHandler: [fastify.authenticate, requireRole(...HR_ADMIN_ROLES)] }, async (req, reply) => {
+  fastify.post('/listeners/:name/reset', { preHandler: [fastify.authenticate, requireRole(...HR_ADMIN_ROLES)] }, async (req: any, reply) => {
     try {
       const { name } = req.params as { name: string }
-      governanceEvaluator.resetListener(name)
+      governanceEvaluator.resetListener(req.tenantId, name)
       return reply.send({ reset: true, listener: name })
     } catch (err: unknown) {
       return serverError(req, reply, err, ErrorCode.UPDATE_FAILED, 'Failed to reset listener')
