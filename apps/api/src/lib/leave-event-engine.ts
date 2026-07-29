@@ -190,8 +190,19 @@ async function currentBalance(
 /**
  * Credit event-grant days to the balance ledger and record the grant.
  *
- * Both writes happen in sequence; if the ledger write fails the grant row
- * is not created (preserving idempotency on retry).
+ * Write order matters for idempotency: the leave_event_grants insert below
+ * is the one write the DB can actually reject as a duplicate (UNIQUE on
+ * tenant_id/employee_id/date_type_id/event_year), so it must happen BEFORE
+ * the ledger credit, not after. A previous version credited the ledger
+ * first and only inserted the grant row afterward — if that second insert
+ * failed for any reason other than a duplicate-key conflict (a timeout, a
+ * connection blip), the ledger credit had already committed with no
+ * idempotency marker to show for it, so a retry of the same event would
+ * recompute the balance from the ledger (which already included the
+ * orphaned credit) and add the grant days a second time. Reserving the
+ * grant row first means a retry after a transient failure here simply
+ * fails again with a duplicate-key error (treated as already-granted) —
+ * the DB physically cannot accept two grant rows for the same event/year.
  *
  * Returns true on success, false on any DB error.
  */
@@ -207,20 +218,49 @@ export async function processEventGrant(
   const eventYear = currentYear()
   const year      = eventYear
 
-  // Idempotency guard
+  // Cheap pre-check to skip the common case without round-tripping through
+  // an insert — not itself the idempotency guarantee (see below).
   const exists = await grantAlreadyExists(
     supabase, tenantId, employeeId, rule.dateTypeId, eventYear,
   )
   if (exists) return true  // already granted this year — not an error
 
-  // Compute balance_after
+  const expiryDate: string | null = rule.validityDays != null
+    ? toDateStr(new Date(grantDate.getTime() + rule.validityDays * 86_400_000))
+    : null
+
+  // 1. Reserve the grant atomically — the UNIQUE constraint is the real
+  //    idempotency authority, not the pre-check above.
+  const { data: grantRow, error: grantErr } = await supabase
+    .from('leave_event_grants')
+    .insert({
+      tenant_id:      tenantId,
+      employee_id:    employeeId,
+      leave_type_id:  rule.leaveTypeId,
+      date_type_id:   rule.dateTypeId,
+      policy_rule_id: rule.ruleId,
+      event_year:     eventYear,
+      grant_date:     today,
+      days_granted:   rule.grantDays,
+      expiry_date:    expiryDate,
+      status:         'active',
+    })
+    .select('id')
+    .single()
+
+  if (grantErr) {
+    // Lost a race to a concurrent insert for the same event/year — already
+    // granted, not an error.
+    if (grantErr.message?.includes('duplicate')) return true
+    return false
+  }
+
+  // 2. Credit the ledger now that the grant is safely reserved.
   const balBefore = await currentBalance(
     supabase, tenantId, employeeId, rule.leaveTypeId, year,
   )
   const balAfter = balBefore + rule.grantDays
 
-  // 1. Write ledger entry via single authoritative path
-  let ledgerEntryId: string
   try {
     const ledgerRow = await writeBalanceLedgerEntry(supabase, {
       tenantId,
@@ -233,34 +273,34 @@ export async function processEventGrant(
       notes:        `Event grant — date type ${rule.dateTypeId} (policy rule ${rule.ruleId})`,
       lineageId,
     })
-    ledgerEntryId = ledgerRow.id
-  } catch {
+
+    // Best-effort back-reference — the grant and ledger entry are both
+    // already correctly committed even if this link update fails.
+    const { error: linkErr } = await supabase
+      .from('leave_event_grants')
+      .update({ ledger_entry_id: ledgerRow.id })
+      .eq('id', grantRow.id)
+    if (linkErr) {
+      console.error(
+        'leave-event-engine: failed to link grant to ledger entry',
+        { grantId: grantRow.id, ledgerEntryId: ledgerRow.id, error: linkErr.message },
+      )
+    }
+  } catch (err) {
+    // Ledger credit failed after the grant was reserved. We deliberately
+    // do not retry or delete the grant row here: the UNIQUE constraint
+    // means every future run will see it via grantAlreadyExists and skip,
+    // which leaves the employee under-credited until reconciled manually —
+    // but that is a detectable, bounded gap (an 'active' grant row with a
+    // null ledger_entry_id), which is a materially safer failure mode than
+    // the silent double-credit this ordering replaces.
+    console.error(
+      'leave-event-engine: grant reserved but ledger credit failed — needs manual reconciliation',
+      { tenantId, employeeId, dateTypeId: rule.dateTypeId, eventYear, grantId: grantRow.id,
+        error: err instanceof Error ? err.message : String(err) },
+    )
     return false
   }
-
-  // 2. Write grant record (idempotency row)
-  const expiryDate: string | null = rule.validityDays != null
-    ? toDateStr(new Date(grantDate.getTime() + rule.validityDays * 86_400_000))
-    : null
-
-  const { error: grantErr } = await supabase
-    .from('leave_event_grants')
-    .insert({
-      tenant_id:       tenantId,
-      employee_id:     employeeId,
-      leave_type_id:   rule.leaveTypeId,
-      date_type_id:    rule.dateTypeId,
-      policy_rule_id:  rule.ruleId,
-      event_year:      eventYear,
-      grant_date:      today,
-      days_granted:    rule.grantDays,
-      expiry_date:     expiryDate,
-      status:          'active',
-      ledger_entry_id: ledgerEntryId,
-    })
-
-  // On conflict (race condition), treat as success — grant already recorded.
-  if (grantErr && !grantErr.message?.includes('duplicate')) return false
 
   return true
 }
