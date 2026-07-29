@@ -52,7 +52,7 @@ export default async function personalInfoRoutes(fastify: FastifyInstance) {
         .select('employee_id')
         .eq('id', req.userId)
         .eq('tenant_id', req.tenantId)
-        .single()
+        .maybeSingle()
       if (!callerProfile?.employee_id || callerProfile.employee_id !== req.params.id) {
         return forbidden(reply, 'FORBIDDEN', 'You can only view your own personal info')
       }

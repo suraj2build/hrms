@@ -228,8 +228,10 @@ function ChangeManagerDialog({
   const mutation = useMutation({
     mutationFn: ({ empId, managerId }: { empId: string; managerId: string | null }) =>
       api.put(`/employees/${empId}/manager`, { manager_id: managerId }),
-    onSuccess: () => {
+    onSuccess: (_data, vars) => {
       qc.invalidateQueries({ queryKey: ['employees', 'org-tree'] })
+      // Employee Profile's Job tab reads the same manager under a separate key.
+      qc.invalidateQueries({ queryKey: ['employee-full', vars.empId] })
       toast.success(
         picked
           ? `Manager updated — ${target?.name} now reports to ${picked.first_name} ${picked.last_name}`

@@ -18,7 +18,7 @@ import {
   cloneStructure, seedStandardComponents,
 } from '../../lib/salary-config-store.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
-import { serverError, ErrorCode } from '../../lib/api-errors.js'
+import { serverError, notFound, ErrorCode } from '../../lib/api-errors.js'
 
 export default async function compensationMasterRoutes(fastify: FastifyInstance) {
   const auth        = { preHandler: [fastify.authenticate] }
@@ -220,7 +220,7 @@ export default async function compensationMasterRoutes(fastify: FastifyInstance)
         .select('employee_id')
         .eq('id', req.userId)
         .eq('tenant_id', req.tenantId)
-        .single()
+        .maybeSingle()
       if (!callerProfile?.employee_id || callerProfile.employee_id !== employeeId) {
         return reply.code(403).send({ error: 'FORBIDDEN', message: 'You can only view your own compensation' })
       }
@@ -269,6 +269,28 @@ export default async function compensationMasterRoutes(fastify: FastifyInstance)
     }
 
     const { components, ...compensationData } = parsed.data
+
+    // Both FK targets are caller-supplied — verify each belongs to this tenant
+    // before writing, matching employees/compensation.ts's verifyEmployee()
+    // and salary_structures tenant-scoped lookup. Without this, an HR admin
+    // could write an active compensation row for any employee UUID (own
+    // tenant or not — there's no composite FK tying employee_compensations'
+    // employee_id/salary_structure_id to the same tenant_id).
+    const { data: emp } = await fastify.supabase
+      .from('employees')
+      .select('id')
+      .eq('id', employeeId)
+      .eq('tenant_id', req.tenantId)
+      .maybeSingle()
+    if (!emp) return notFound(reply, 'EMPLOYEE_NOT_FOUND', 'Employee not found')
+
+    const { data: structure } = await fastify.supabase
+      .from('salary_structures')
+      .select('id')
+      .eq('id', compensationData.salary_structure_id)
+      .eq('tenant_id', req.tenantId)
+      .maybeSingle()
+    if (!structure) return notFound(reply, 'STRUCTURE_NOT_FOUND', 'Salary structure not found')
 
     // ── Safe activation order ──────────────────────────────────────────────────
     // Deactivate the current active record FIRST, then insert the new one.

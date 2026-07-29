@@ -531,7 +531,10 @@ export function SecurityOpsWorkspace() {
                         size="sm"
                         variant="ghost"
                         className={cn('gap-1.5 flex-shrink-0', r.enabled ? 'text-success' : 'text-muted-foreground')}
-                        onClick={() => toggleRuleMutation.mutate({ id: r.id, enabled: !r.enabled })}
+                        onClick={() => {
+                          if (r.enabled && !window.confirm(`Disable "${r.rule_name}"? This detection rule will stop firing until re-enabled.`)) return
+                          toggleRuleMutation.mutate({ id: r.id, enabled: !r.enabled })
+                        }}
                         disabled={toggleRuleMutation.isPending}
                       >
                         {r.enabled ? <ToggleRight className="h-4 w-4" /> : <ToggleLeft className="h-4 w-4" />}

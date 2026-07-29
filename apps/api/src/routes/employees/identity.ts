@@ -56,6 +56,11 @@ export default async function identityRoutes(fastify: FastifyInstance) {
     const parsed = schema.safeParse(req.body)
     if (!parsed.success)
       return validationError(reply, ErrorCode.VALIDATION_ERROR, parsed.error.issues[0].message)
+    // Storage path must live under this tenant's prefix — matches the check
+    // in employee-documents.ts/documents/index.ts/uploads/index.ts.
+    if (parsed.data.storage_path && !parsed.data.storage_path.startsWith(`${req.tenantId}/`)) {
+      return validationError(reply, ErrorCode.VALIDATION_ERROR, 'storage_path must be within your tenant namespace')
+    }
     const { data, error } = await fastify.supabase
       .from('employee_identity')
       .insert({ ...parsed.data, employee_id: req.params.id, tenant_id: req.tenantId })

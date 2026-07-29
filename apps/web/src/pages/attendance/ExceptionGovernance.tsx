@@ -256,6 +256,9 @@ export function ExceptionGovernance() {
       setPendingId(null)
       qc.invalidateQueries({ queryKey: ['exception-list'] })
       qc.invalidateQueries({ queryKey: ['exception-summary'] })
+      // Control Center reads the same /attendance/exceptions/summary endpoint
+      // under a separate key.
+      qc.invalidateQueries({ queryKey: ['control-center-exceptions-summary'] })
       toast.success('Exception status updated')
     },
     onError: (e: Error) => {

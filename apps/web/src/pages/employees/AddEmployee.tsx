@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useBasePath } from '@/lib/routing'
 import { useForm } from 'react-hook-form'
@@ -78,6 +78,11 @@ export function AddEmployee() {
   const form1 = useForm<Step1>({ resolver: zodResolver(step1Schema), mode: 'onChange' })
   const form2 = useForm<Step2>({ resolver: zodResolver(step2Schema), mode: 'onChange' })
 
+  // Sent as Idempotency-Key on submit — the backend (employees/full-create.ts)
+  // already supports replaying a cached response for this key. Rotated only
+  // after success, so a failed-then-retried submit doesn't create two employees.
+  const createIdempotencyKey = useRef(crypto.randomUUID())
+
   const mutation = useMutation({
     mutationFn: async () => {
       if (!step1Data || !step2Data) throw new Error('Form data missing')
@@ -99,10 +104,11 @@ export function AddEmployee() {
         work_location_id: step2Data.work_location_id || undefined,
         cost_center_id:   step2Data.cost_center_id   || undefined,
         effective_from:  step1Data.joining_date,
-      })
+      }, { headers: { 'Idempotency-Key': createIdempotencyKey.current } })
       return result.employee
     },
     onSuccess: (employee) => {
+      createIdempotencyKey.current = crypto.randomUUID()
       queryClient.invalidateQueries({ queryKey: ['employees'] })
       // full-create makes no profile/auth row, so the employee can't log into
       // ESS yet. Land the admin directly on the "User Account" tab and prompt
