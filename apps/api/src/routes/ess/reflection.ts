@@ -21,6 +21,7 @@
 import type { FastifyInstance } from 'fastify'
 import { fetchTenantTz } from '../../lib/attendance-engine.js'
 import { getLocalDate } from '../../lib/org-context.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 interface Reflection {
   insight: string | null
@@ -45,9 +46,10 @@ export default async function essReflectionRoutes(fastify: FastifyInstance) {
   fastify.get('/reflection', auth, async (req: any, reply) => {
     const tenantId = req.tenantId as string
 
-    const { data: profileRow } = await fastify.supabase
+    const { data: profileRow, error: profileErr } = await fastify.supabase
       .from('profiles').select('employee_id')
       .eq('id', req.userId).eq('tenant_id', tenantId).maybeSingle()
+    if (profileErr) return serverError(req, reply, profileErr, ErrorCode.QUERY_FAILED, 'Failed to resolve employee profile')
     const employeeId = (profileRow as any)?.employee_id as string | null
 
     if (!employeeId) return reply.send({ insight: null } as Reflection)
@@ -115,7 +117,7 @@ export default async function essReflectionRoutes(fastify: FastifyInstance) {
 
     // ── Candidate 3: a clean on-time week
     const att = (attRows as any[]).map(r => String(r.status ?? '').toLowerCase())
-      .filter(s => s !== 'weekend' && s !== 'holiday')
+      .filter(s => s !== 'weekend' && s !== 'holiday' && s !== 'weekly_off')
     if (att.length >= 4 && att.every(s => s === 'present')) {
       return reply.send({
         insight: `You’ve been perfectly on time every working day this week — quietly impressive.`,

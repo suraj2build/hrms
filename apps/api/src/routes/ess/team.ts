@@ -16,6 +16,7 @@
 import type { FastifyInstance } from 'fastify'
 import { fetchTenantTz } from '../../lib/attendance-engine.js'
 import { getLocalDate } from '../../lib/org-context.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 interface Party { id: string; name: string; subtitle?: string }
 
@@ -40,9 +41,10 @@ export default async function essTeamRoutes(fastify: FastifyInstance) {
     const today = getLocalDate(new Date().toISOString(), tz)
     const todayMMDD = today.slice(5)
 
-    const { data: profileRow } = await fastify.supabase
+    const { data: profileRow, error: profileErr } = await fastify.supabase
       .from('profiles').select('employee_id')
       .eq('id', req.userId).eq('tenant_id', tenantId).maybeSingle()
+    if (profileErr) return serverError(req, reply, profileErr, ErrorCode.QUERY_FAILED, 'Failed to resolve employee profile')
     const employeeId = (profileRow as any)?.employee_id ?? null
 
     const empty = { focus: { sentence: 'Your team will appear here.' }, roster: { manager: null, peers: [], reports: [] },

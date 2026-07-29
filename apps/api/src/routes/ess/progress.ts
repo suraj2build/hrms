@@ -22,6 +22,7 @@
 import type { FastifyInstance } from 'fastify'
 import { fetchTenantTz } from '../../lib/attendance-engine.js'
 import { getLocalDate } from '../../lib/org-context.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 interface ProgressHint { label: string; value: string }
 interface ProgressPayload {
@@ -49,7 +50,7 @@ function onTimeStreak(rows: { date: string; status: string }[]): number {
   let streak = 0
   for (const r of sorted) {
     const s = String(r.status ?? '').toLowerCase()
-    if (s === 'weekend' || s === 'holiday') continue
+    if (s === 'weekend' || s === 'holiday' || s === 'weekly_off') continue
     if (s === 'present') { streak++; continue }
     break
   }
@@ -62,9 +63,10 @@ export default async function essProgressRoutes(fastify: FastifyInstance) {
   fastify.get('/progress', auth, async (req: any, reply) => {
     const tenantId = req.tenantId as string
 
-    const { data: profileRow } = await fastify.supabase
+    const { data: profileRow, error: profileErr } = await fastify.supabase
       .from('profiles').select('employee_id')
       .eq('id', req.userId).eq('tenant_id', tenantId).maybeSingle()
+    if (profileErr) return serverError(req, reply, profileErr, ErrorCode.QUERY_FAILED, 'Failed to resolve employee profile')
     const employeeId = (profileRow as any)?.employee_id as string | null
 
     const empty: ProgressPayload = { show: false, heading: '', ambient: '', hints: [] }

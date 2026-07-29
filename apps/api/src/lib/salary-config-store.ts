@@ -333,6 +333,18 @@ export async function updateStructure(
   // The partial-unique index (WHERE is_default = true) only allows one per tenant,
   // so we must clear first to avoid a constraint violation.
   if (parsed.data.is_default === true) {
+    // Verify the target row exists FIRST — clearing every other row's default
+    // and only then discovering `id` is stale/wrong (0 rows matched below)
+    // would leave the tenant with no default structure at all, silently.
+    const { data: existing, error: existErr } = await supabase
+      .from('salary_structures')
+      .select('id')
+      .eq('id', id)
+      .eq('tenant_id', tenantId)
+      .maybeSingle()
+    if (existErr) return dbFail(existErr)
+    if (!existing) return fail(404, 'NOT_FOUND', 'Salary structure not found')
+
     const { error: clearErr } = await supabase
       .from('salary_structures')
       .update({ is_default: false })
