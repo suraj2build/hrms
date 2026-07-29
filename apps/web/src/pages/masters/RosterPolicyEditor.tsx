@@ -664,7 +664,13 @@ export function RosterPolicyEditor() {
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => archiveMut.mutate()}
+                onClick={() => {
+                  if (isActive) {
+                    const affected = impact?.total_employee_count ?? 0
+                    if (!confirm(`Archive this roster policy? It affects ${affected} employee(s) across ${impact?.site_count ?? 0} site(s).`)) return
+                  }
+                  archiveMut.mutate()
+                }}
                 disabled={archiveMut.isPending}
                 className="gap-1.5 text-xs"
               >

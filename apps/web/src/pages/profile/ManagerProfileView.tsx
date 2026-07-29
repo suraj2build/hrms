@@ -274,8 +274,15 @@ export function ManagerProfileView({ employeeId }: { employeeId: string }) {
 
   // ── Mutations ──────────────────────────────────────────────────────────────
 
+  // Mirrors the invalidation set used by the full attendance/ApprovalInbox.tsx
+  // for the same endpoints — this embed (reached via MobileFlowDesk) previously
+  // only invalidated its own local caches, leaving the standalone Approval
+  // Inbox, notification bell, and leave-balance display stale after an
+  // approve/reject performed here.
   function invalidate() {
     qc.invalidateQueries({ queryKey: ['mgr-approvals-pending'] })
+    qc.invalidateQueries({ queryKey: ['approvals-pending'] })
+    qc.invalidateQueries({ queryKey: ['notifications', 'inbox'] })
     // The employee's own ESS approvals tracker reads the same leave/
     // regularisation records under separate keys.
     qc.invalidateQueries({ queryKey: ['ess-approvals-leave'] })
@@ -284,7 +291,11 @@ export function ManagerProfileView({ employeeId }: { employeeId: string }) {
 
   const approveLeaveMutation = useMutation({
     mutationFn: (id: string) => api.post(`/leave-requests/${id}/approve`, {}),
-    onSuccess:  () => { toast.success('Leave approved'); invalidate() },
+    onSuccess:  () => {
+      toast.success('Leave approved')
+      invalidate()
+      qc.invalidateQueries({ queryKey: ['leave-balance'] })
+    },
     onError:    () => toast.error('Failed to approve'),
   })
   const rejectLeaveMutation = useMutation({
@@ -294,12 +305,20 @@ export function ManagerProfileView({ employeeId }: { employeeId: string }) {
   })
   const approveRegMutation = useMutation({
     mutationFn: (id: string) => api.post(`/attendance/regularisation/${id}/approve`, {}),
-    onSuccess:  () => { toast.success('Regularisation approved'); invalidate() },
+    onSuccess:  () => {
+      toast.success('Regularisation approved')
+      invalidate()
+      qc.invalidateQueries({ queryKey: ['attendance-ops-stats'] })
+    },
     onError:    () => toast.error('Failed to approve'),
   })
   const rejectRegMutation = useMutation({
     mutationFn: (id: string) => api.post(`/attendance/regularisation/${id}/reject`, {}),
-    onSuccess:  () => { toast.success('Regularisation rejected'); invalidate() },
+    onSuccess:  () => {
+      toast.success('Regularisation rejected')
+      invalidate()
+      qc.invalidateQueries({ queryKey: ['attendance-ops-stats'] })
+    },
     onError:    () => toast.error('Failed to reject'),
   })
 

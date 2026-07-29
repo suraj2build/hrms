@@ -152,7 +152,11 @@ function PayoutRow({
           {rec.payment_status === 'pending' && (
             <button
               className="text-[10px] text-success hover:underline"
-              onClick={() => onUpdate(rec.id, { payment_status: 'paid', paid_amount: rec.expected_amount })}
+              onClick={() => {
+                if (confirm(`Mark this payout of ${fmtCurrency(rec.expected_amount)} as paid without a UTR/bank reference?`)) {
+                  onUpdate(rec.id, { payment_status: 'paid', paid_amount: rec.expected_amount })
+                }
+              }}
               disabled={isUpdating}
             >
               Mark Paid

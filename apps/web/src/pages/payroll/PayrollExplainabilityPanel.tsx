@@ -367,10 +367,27 @@ export function PayrollExplainabilityPanel() {
   })
   const snapshot = snapshotRaw?.data ?? null
 
-  // Fetch all employee snapshots
+  // Fetch all employee snapshots — the endpoint caps `limit` at 100 (zod
+  // `max(100)`), so a run with more employees requires paging through with
+  // `offset` rather than requesting a single oversized page (which the
+  // backend would reject outright with a 400).
   const { data: empRaw, isLoading: empLoading } = useQuery<{ data: EmployeeSnapshot[]; total: number }>({
     queryKey: ['snapshot-employees', runId],
-    queryFn:  () => api.get(`/payroll/runs/${runId}/snapshot/employees?limit=200`),
+    queryFn:  async () => {
+      const pageSize = 100
+      let offset = 0
+      let total = 0
+      const all: EmployeeSnapshot[] = []
+      do {
+        const page = await api.get<{ data: EmployeeSnapshot[]; total: number }>(
+          `/payroll/runs/${runId}/snapshot/employees?limit=${pageSize}&offset=${offset}`,
+        )
+        all.push(...page.data)
+        total = page.total
+        offset += pageSize
+      } while (offset < total)
+      return { data: all, total }
+    },
     enabled:  !!runId && !!snapshot,
     staleTime: 120_000,
   })

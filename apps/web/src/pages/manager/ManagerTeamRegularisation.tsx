@@ -176,7 +176,11 @@ export function ManagerTeamRegularisation() {
                 variant="destructive"
                 className="h-8 gap-1.5"
                 disabled={isBusy}
-                onClick={() => bulkRejectMut.mutate({ ids: selectedIds, reason: rejectReason || undefined })}
+                onClick={() => {
+                  if (confirm(`Reject ${selected.size} regularisation request(s)? This cannot be undone.`)) {
+                    bulkRejectMut.mutate({ ids: selectedIds, reason: rejectReason || undefined })
+                  }
+                }}
               >
                 {bulkRejectMut.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <X className="h-3.5 w-3.5" />}
                 Reject {selected.size}

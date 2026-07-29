@@ -435,7 +435,10 @@ export function RosterPolicies() {
               isAdmin={isAdmin}
               onEdit={() => navigate(`/admin/masters/rosters/${policy.id}`)}
               onDuplicate={() => duplicateMut.mutate(policy.id)}
-              onToggleActive={() => toggleActiveMut.mutate({ id: policy.id, is_active: !policy.is_active })}
+              onToggleActive={() => {
+                if (policy.is_active && !confirm(`Archive "${policy.name}"? It is assigned to ${policy.site_count ?? 0} site(s) and ${policy.employee_count ?? 0} employee(s).`)) return
+                toggleActiveMut.mutate({ id: policy.id, is_active: !policy.is_active })
+              }}
             />
           ))}
         </div>

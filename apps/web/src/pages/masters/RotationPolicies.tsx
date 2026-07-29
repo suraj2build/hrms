@@ -61,7 +61,7 @@ interface PolicyCardProps {
   policy:      RotationPolicy
   onEdit:      (id: string) => void
   onDuplicate: (id: string) => void
-  onToggle:    (id: string, active: boolean) => void
+  onToggle:    (id: string, active: boolean, name: string, siteCount: number, employeeCount: number) => void
 }
 
 function PolicyCard({ policy, onEdit, onDuplicate, onToggle }: PolicyCardProps) {
@@ -114,7 +114,7 @@ function PolicyCard({ policy, onEdit, onDuplicate, onToggle }: PolicyCardProps) 
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem
-                onClick={(e) => { e.stopPropagation(); onToggle(policy.id, !policy.is_active) }}
+                onClick={(e) => { e.stopPropagation(); onToggle(policy.id, !policy.is_active, policy.name, policy.site_count, policy.employee_count) }}
                 className={policy.is_active ? 'text-destructive' : 'text-success'}
               >
                 {policy.is_active ? (
@@ -251,7 +251,10 @@ export default function RotationPolicies() {
   )
 
   const handleToggle = useCallback(
-    (id: string, active: boolean) => toggleMutation.mutate({ id, is_active: active }),
+    (id: string, active: boolean, name: string, siteCount: number, employeeCount: number) => {
+      if (!active && !confirm(`Archive "${name}"? It is assigned to ${siteCount} site(s) and ${employeeCount} employee(s).`)) return
+      toggleMutation.mutate({ id, is_active: active })
+    },
     [toggleMutation],
   )
 

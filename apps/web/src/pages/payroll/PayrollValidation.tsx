@@ -6,7 +6,7 @@
  * Access: hr_admin and super_admin only.
  */
 
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
@@ -119,16 +119,29 @@ function RunValidationDialog({
 }) {
   const navigate     = useNavigate()
   const queryClient  = useQueryClient()
-  // Default to current month so the field is never blank
-  const todayYM      = new Date().toISOString().slice(0, 7)
+  // Default to current month (browser-local, not UTC — new Date().toISOString()
+  // is a day behind local for timezones ahead of UTC like IST between midnight
+  // and the UTC offset, which would pre-fill the wrong month on the 1st).
+  const todayYM = (() => {
+    const d = new Date()
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+  })()
   const [month, setMonth] = useState(todayYM)
   const [error, setError] = useState<string | null>(null)
+
+  // Mirrors PayrollControlCenter.tsx's runPayrollMutation — sent as
+  // Idempotency-Key so a double-click/network retry doesn't trigger a second
+  // real payroll run for the same month.
+  const runKey = useRef(crypto.randomUUID())
 
   const mutation = useMutation({
     // POST /payroll/runs returns a top-level object { run_id, month, ... } (no { data } wrapper).
     mutationFn: (m: string) =>
-      api.post<{ run_id?: string; id?: string }>('/payroll/runs', { month: m }),
+      api.post<{ run_id?: string; id?: string }>('/payroll/runs', { month: m }, {
+        headers: { 'Idempotency-Key': runKey.current },
+      }),
     onSuccess: (data, _m) => {
+      runKey.current = crypto.randomUUID()
       queryClient.invalidateQueries({ queryKey: ['payroll-runs-history'] })
       onOpenChange(false)
       setMonth(todayYM)

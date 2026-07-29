@@ -45,7 +45,7 @@ interface VariableBatch {
   batch_name:     string
   payout_month:   string
   template_id:    string
-  status:         'draft' | 'processing' | 'approved' | 'paid'
+  status:         'draft' | 'in_review' | 'approved' | 'processing' | 'processed' | 'cancelled'
   total_payout:   number
   employee_count: number
   created_at:     string
@@ -69,9 +69,11 @@ interface VariablePayout {
 
 const BATCH_BADGE: Record<string, 'secondary' | 'outline' | 'success' | 'warning'> = {
   draft:      'secondary',
+  in_review:  'warning',
   processing: 'outline',
+  processed:  'outline',
   approved:   'success',
-  paid:       'outline',
+  cancelled:  'secondary',
 }
 
 const CALC_BASIS   = ['fixed', 'performance_linked', 'revenue_pct', 'attendance_linked']
@@ -190,6 +192,18 @@ function PayoutsDialog({
     enabled:  open && !!batch,
   })
 
+  const submitBatch = useMutation({
+    mutationFn: () => api.post(`/payroll/variable-pay/batches/${batch!.id}/submit`),
+    onSuccess:  () => {
+      toast.success('Batch submitted for review')
+      qc.invalidateQueries({ queryKey: ['vp-batches'] })
+      onClose()
+    },
+    onError: (e: Error) => {
+      toast.error('Failed to submit batch', { description: e.message })
+    },
+  })
+
   const approveBatch = useMutation({
     mutationFn: () => api.post(`/payroll/variable-pay/batches/${batch!.id}/approve`),
     onSuccess:  () => {
@@ -254,7 +268,15 @@ function PayoutsDialog({
               </table>
             </div>
           )}
-          {batch && batch.status !== 'approved' && batch.status !== 'paid' && (
+          {batch && batch.status === 'draft' && (
+            <div className="flex justify-end pt-2">
+              <Button onClick={() => submitBatch.mutate()} disabled={submitBatch.isPending}>
+                {submitBatch.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                Submit for Review
+              </Button>
+            </div>
+          )}
+          {batch && batch.status === 'in_review' && (
             <div className="flex justify-end pt-2">
               <Button onClick={() => approveBatch.mutate()} disabled={approveBatch.isPending}>
                 {approveBatch.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}

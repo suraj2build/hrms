@@ -20,6 +20,7 @@ import { eventBus }             from '../../lib/event-bus.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
 import { serverError, ErrorCode } from '../../lib/api-errors.js'
+import { checkIdempotency, storeIdempotency } from '../../lib/idempotency.js'
 
 const dateRe = /^\d{4}-\d{2}-\d{2}$/
 
@@ -721,6 +722,17 @@ export default async function compensationRevisionsRoute(fastify: FastifyInstanc
       return reply.code(400).send({ error: 'NO_COHORT', message: 'Provide employee_ids, department_id or grade to select a cohort' })
     }
 
+    // Only the real (non-dry-run) path creates rows — a dry-run preview is
+    // read-only and safe to repeat, so it doesn't need idempotency handling.
+    const iKey = !d.dry_run ? (req.headers['idempotency-key'] as string | undefined)?.trim() : undefined
+    if (iKey) {
+      const cached = await checkIdempotency(fastify.supabase, req.tenantId, iKey, 'compensation-revisions-bulk')
+      if (cached) {
+        reply.header('Idempotency-Replayed', 'true')
+        return reply.code(cached.status_code).send(cached.response)
+      }
+    }
+
     // ── Resolve the cohort (active employees only) ────────────────────────────
     // A department_id/grade-only filter can match well over 1000 employees
     // in a large tenant — paginated so a bulk increment/promotion doesn't
@@ -841,12 +853,16 @@ export default async function compensationRevisionsRoute(fastify: FastifyInstanc
       created = (inserted ?? []).map((r: any) => ({ ...r, name: nameFor(r.employee_id) }))
     }
 
-    return reply.code(201).send({
+    const responseBody = {
       created,
       skipped,
       cohort_size:   empIds.length,
       created_count: created.length,
       skipped_count: skipped.length,
-    })
+    }
+    if (iKey) {
+      await storeIdempotency(fastify.supabase, req.tenantId, iKey, 'compensation-revisions-bulk', 201, responseBody)
+    }
+    return reply.code(201).send(responseBody)
   })
 }

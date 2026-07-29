@@ -11,7 +11,7 @@
  * process, no new approval engine.
  */
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useRef } from 'react'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
@@ -97,9 +97,18 @@ export function IncrementCycle() {
     onError: (e: unknown) => toast.error(e instanceof Error ? e.message : 'Preview failed'),
   })
 
+  // Stable per-mount UUID sent as Idempotency-Key to prevent a double-click/
+  // network retry from creating duplicate revision rows for the whole cohort.
+  const commitKey = useRef(crypto.randomUUID())
+
   const commitMut = useMutation({
-    mutationFn: () => api.post<BulkResult>('/compensation/revisions/bulk', { ...basePayload, dry_run: false }),
+    mutationFn: () => api.post<BulkResult>(
+      '/compensation/revisions/bulk',
+      { ...basePayload, dry_run: false },
+      { headers: { 'Idempotency-Key': commitKey.current } },
+    ),
     onSuccess: (res) => {
+      commitKey.current = crypto.randomUUID()
       toast.success(`${res.created_count} revision${res.created_count === 1 ? '' : 's'} created — pending HR approval`)
       navigate('/admin/payroll/compensation-revisions')
     },
