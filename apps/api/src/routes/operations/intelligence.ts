@@ -16,28 +16,38 @@ import { serverError, ErrorCode }         from '../../lib/api-errors.js'
 
 export default async function operationsRoutes(fastify: FastifyInstance) {
 
+  // These endpoints surface company-wide payroll/trust/governance health,
+  // heatmaps keyed by employee/branch id, and automation/SLA audit trails —
+  // the same class of admin-only data as /operations/simulate/* and
+  // /operations/security/signals below, which were already locked to
+  // HR_ADMIN_ROLES for exactly this reason (any employee could otherwise
+  // read which coworkers were risk-flagged). The only frontend caller is
+  // EnterpriseControlCenter.tsx under the admin-only /admin/* shell, so the
+  // API must enforce the same restriction rather than relying on the UI gate.
+  const adminAuth = { preHandler: [fastify.authenticate, requireRole(...HR_ADMIN_ROLES)] }
+
   // GET /operations/summary — overall operational health
-  fastify.get('/operations/summary', { preHandler: [fastify.authenticate] }, async (req, _reply) => {
+  fastify.get('/operations/summary', adminAuth, async (req, _reply) => {
     const tenantId = (req as any).tenantId
     return operationalIntelligenceService.getOperationalSummary(tenantId)
   })
 
   // GET /operations/health — domain health signals
-  fastify.get('/operations/health', { preHandler: [fastify.authenticate] }, async (req, _reply) => {
+  fastify.get('/operations/health', adminAuth, async (req, _reply) => {
     const tenantId = (req as any).tenantId
     const signals = healthSignalService.getAllDomainHealth(tenantId)
     return { signals, total: signals.length }
   })
 
   // GET /operations/heatmaps — all domain heatmaps
-  fastify.get('/operations/heatmaps', { preHandler: [fastify.authenticate] }, async (req, _reply) => {
+  fastify.get('/operations/heatmaps', adminAuth, async (req, _reply) => {
     const tenantId = (req as any).tenantId
     const snapshots = heatmapService.getAllSnapshots(tenantId)
     return { snapshots, total: snapshots.length }
   })
 
   // GET /operations/heatmaps/:domain — specific domain heatmap
-  fastify.get('/operations/heatmaps/:domain', { preHandler: [fastify.authenticate] }, async (req, _reply) => {
+  fastify.get('/operations/heatmaps/:domain', adminAuth, async (req, _reply) => {
     const { domain } = req.params as any
     const tenantId = (req as any).tenantId
     const snapshot = heatmapService.buildDomainHeatmap(domain, tenantId)
@@ -45,7 +55,7 @@ export default async function operationsRoutes(fastify: FastifyInstance) {
   })
 
   // GET /operations/sla — SLA tracking status
-  fastify.get('/operations/sla', { preHandler: [fastify.authenticate] }, async (req, _reply) => {
+  fastify.get('/operations/sla', adminAuth, async (req, _reply) => {
     const tenantId = (req as any).tenantId
     const tracked  = slaService.getTracked(tenantId)
     const breaches = slaService.getBreaches(tenantId)
@@ -54,7 +64,7 @@ export default async function operationsRoutes(fastify: FastifyInstance) {
   })
 
   // GET /operations/automation/activity — recent automation actions
-  fastify.get('/operations/automation/activity', { preHandler: [fastify.authenticate] }, async (req, reply) => {
+  fastify.get('/operations/automation/activity', adminAuth, async (req, reply) => {
     const tenantId = (req as any).tenantId
     const { limit = '50' } = req.query as any
     const { data, error } = await fastify.supabase
@@ -177,7 +187,7 @@ export default async function operationsRoutes(fastify: FastifyInstance) {
   })
 
   // GET /operations/sla/breaches — SLA breach events (also from DB)
-  fastify.get('/operations/sla/breaches', { preHandler: [fastify.authenticate] }, async (req, reply) => {
+  fastify.get('/operations/sla/breaches', adminAuth, async (req, reply) => {
     const tenantId = (req as any).tenantId
     const { limit = '50' } = req.query as any
     const { data, error } = await fastify.supabase
