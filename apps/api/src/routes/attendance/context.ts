@@ -11,6 +11,7 @@ import type { FastifyInstance } from 'fastify'
 import { MANAGER_ROLES } from '../../lib/rbac.js'
 import { fetchTenantTz } from '../../lib/attendance-engine.js'
 import { getLocalDate }  from '../../lib/org-context.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 export default async function attendanceContextRoutes(fastify: FastifyInstance) {
   const auth = {
@@ -45,11 +46,17 @@ export default async function attendanceContextRoutes(fastify: FastifyInstance) 
           .from('employees')
           .select('id', { count: 'exact', head: true })
           .eq('tenant_id', req.tenantId)
-          .eq('status', 'active'),
+          .in('status', ['active', 'on_notice']),
       ])
+      // count/head:true queries resolve (never throw) on failure, so the
+      // surrounding try/catch never sees a DB error here — check explicitly,
+      // otherwise a real failure silently renders as "0 active employees".
+      if (activeRes.error || totalRes.error) {
+        return serverError(req, reply, activeRes.error ?? totalRes.error, ErrorCode.QUERY_FAILED, 'Failed to fetch active-now count')
+      }
       return reply.send({ data: { count: activeRes.count ?? 0, total_employees: totalRes.count ?? 0 } })
-    } catch {
-      return reply.send({ data: { count: 0, total_employees: 0 } })
+    } catch (err: unknown) {
+      return serverError(req, reply, err, ErrorCode.QUERY_FAILED, 'Failed to fetch active-now count')
     }
   })
 
@@ -59,7 +66,7 @@ export default async function attendanceContextRoutes(fastify: FastifyInstance) 
     const today = getLocalDate(new Date().toISOString(), tz)
     try {
       // Employees who have a check_in today but no check_out
-      const { data: logs } = await fastify.supabase
+      const { data: logs, error } = await fastify.supabase
         .from('attendance_logs')
         .select('employee_id, check_in, employees(first_name, last_name)')
         .eq('tenant_id', req.tenantId)
@@ -67,6 +74,7 @@ export default async function attendanceContextRoutes(fastify: FastifyInstance) 
         .lt('check_in', `${today}T23:59:59.999Z`)
         .is('check_out', null)
         .limit(50)
+      if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch missing punches')
 
       const employees = ((logs ?? []) as any[]).map((l: any) => {
         const emp = Array.isArray(l.employees) ? l.employees[0] : l.employees
@@ -91,7 +99,7 @@ export default async function attendanceContextRoutes(fastify: FastifyInstance) 
     const monthStart = today.slice(0, 7) + '-01'
 
     try {
-      const { data } = await fastify.supabase
+      const { data, error } = await fastify.supabase
         .from('overtime_requests')
         .select('employee_id, raw_ot_minutes, attendance_date, employees(first_name, last_name)')
         .eq('tenant_id', req.tenantId)
@@ -99,6 +107,7 @@ export default async function attendanceContextRoutes(fastify: FastifyInstance) 
         .lte('attendance_date', today)
         .order('raw_ot_minutes', { ascending: false })
         .limit(limit * 5) // over-fetch to allow aggregation
+      if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch OT-spike employees')
 
       // Aggregate by employee
       const empMap = new Map<string, { name: string; ot_hours: number; threshold: number }>()

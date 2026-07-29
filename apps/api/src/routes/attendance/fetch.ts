@@ -12,6 +12,7 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { isHrAdmin, resolveCallerEmployeeId, isDirectReport } from '../../lib/manager-scope.js'
 import { fetchTenantTz, utcToLocalDate } from '../../lib/attendance-engine.js'
+import { fetchAllRows } from '../../lib/supabase-paginate.js'
 
 const dateRe = /^\d{4}-\d{2}-\d{2}$/
 
@@ -70,33 +71,44 @@ export default async function fetchRoute(fastify: FastifyInstance) {
         return reply.code(404).send({ error: 'NOT_FOUND', message: 'Employee not found' })
       }
 
-      // Fetch daily summary
-      const { data: daily, error: dailyError } = await fastify.supabase
-        .from('attendance_daily')
-        .select('id, date, work_hours, late_minutes, overtime_minutes, status, is_payable')
-        .eq('tenant_id', req.tenantId)
-        .eq('employee_id', employeeId)
-        .gte('date', from)
-        .lte('date', to)
-        .order('date', { ascending: false })
-
-      if (dailyError) {
-        req.log.error({ err: dailyError, module: 'attendance', route: 'fetch' }, 'daily query failed')
+      // Fetch daily summary — a caller-supplied range has no upper bound, and
+      // attendance_daily/attendance_logs are both prime candidates for
+      // exceeding PostgREST's 1000-row cap on a multi-year range, so page
+      // through fetchAllRows() rather than a single unbounded select.
+      let daily: any[]
+      let logs: any[]
+      try {
+        daily = await fetchAllRows((rangeFrom, rangeTo) =>
+          fastify.supabase
+            .from('attendance_daily')
+            .select('id, date, work_hours, late_minutes, overtime_minutes, status, is_payable')
+            .eq('tenant_id', req.tenantId)
+            .eq('employee_id', employeeId)
+            .gte('date', from)
+            .lte('date', to)
+            .order('date', { ascending: false })
+            .range(rangeFrom, rangeTo),
+        )
+      } catch (err: unknown) {
+        req.log.error({ err, module: 'attendance', route: 'fetch' }, 'daily query failed')
         return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch daily records' })
       }
 
       // Fetch check-in/out log entries
-      const { data: logs, error: logsError } = await fastify.supabase
-        .from('attendance_logs')
-        .select('id, check_in, check_out')
-        .eq('tenant_id', req.tenantId)
-        .eq('employee_id', employeeId)
-        .gte('check_in', `${from}T00:00:00.000Z`)
-        .lte('check_in', `${to}T23:59:59.999Z`)
-        .order('check_in', { ascending: false })
-
-      if (logsError) {
-        req.log.error({ err: logsError, module: 'attendance', route: 'fetch' }, 'logs query failed')
+      try {
+        logs = await fetchAllRows((rangeFrom, rangeTo) =>
+          fastify.supabase
+            .from('attendance_logs')
+            .select('id, check_in, check_out')
+            .eq('tenant_id', req.tenantId)
+            .eq('employee_id', employeeId)
+            .gte('check_in', `${from}T00:00:00.000Z`)
+            .lte('check_in', `${to}T23:59:59.999Z`)
+            .order('check_in', { ascending: false })
+            .range(rangeFrom, rangeTo),
+        )
+      } catch (err: unknown) {
+        req.log.error({ err, module: 'attendance', route: 'fetch' }, 'logs query failed')
         return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch log entries' })
       }
 

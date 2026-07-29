@@ -32,8 +32,9 @@ export default async function ownerErrorReportRoutes(fastify: FastifyInstance) {
     if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch error reports')
 
     // Lightweight open-count summary for the nav badge / header.
-    const { count } = await fastify.supabase
+    const { count, error: countError } = await fastify.supabase
       .from('error_reports').select('id', { count: 'exact', head: true }).eq('status', 'new')
+    if (countError) return serverError(req, reply, countError, ErrorCode.QUERY_FAILED, 'Failed to fetch new error-report count')
 
     return reply.send({ data, meta: { new_count: count ?? 0 } })
   })

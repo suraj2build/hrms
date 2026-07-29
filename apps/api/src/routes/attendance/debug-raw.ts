@@ -25,6 +25,7 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 const querySchema = z.object({
   month: z.string().regex(/^\d{4}-\d{2}$/, 'month must be YYYY-MM'),
@@ -87,6 +88,19 @@ export default async function attendanceDebugRawRoute(fastify: FastifyInstance) 
           .lte('date', toDate)
           .is('status', null),
       ])
+
+      // count/head:true queries and the plain select above resolve (never
+      // throw) on failure — this is a diagnostic endpoint built specifically
+      // to answer "does attendance_daily have data at all?", so a swallowed
+      // error here would render a false "0 rows / no nulls" verdict.
+      if (totalCountResult.error || sampleRowsResult.error || nullStatusResult.error) {
+        return serverError(
+          req, reply,
+          totalCountResult.error ?? sampleRowsResult.error ?? nullStatusResult.error,
+          ErrorCode.QUERY_FAILED,
+          'Failed to fetch attendance debug data',
+        )
+      }
 
       // All active employees and all distinct employee_ids in attendance_daily —
       // use fetchAllRows to bypass the 1000-row PostgREST cap

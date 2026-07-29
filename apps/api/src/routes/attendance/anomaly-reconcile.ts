@@ -41,6 +41,8 @@ import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { normalizeAttendanceStatus } from '../../lib/attendance-utils.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
 import { serverError, ErrorCode } from '../../lib/api-errors.js'
+import { fetchTenantTz } from '../../lib/attendance-engine.js'
+import { getLocalDate } from '../../lib/org-context.js'
 
 // Statuses that definitively prove attendance happened — no "no punch" is possible
 const ATTENDED_STATUSES = new Set<string>([
@@ -64,7 +66,11 @@ export default async function anomalyReconcileRoute(fastify: FastifyInstance) {
     }
 
     const { dry_run } = parsed.data
-    const toDate   = parsed.data.to_date   ?? new Date().toISOString().slice(0, 10)
+    // attendance_anomalies.date is the tenant-local calendar date of the
+    // anomalous day (migration 047) — defaulting to_date from server-UTC
+    // "today" can be off by one day at the UTC/local-midnight boundary.
+    const tz = await fetchTenantTz(fastify.supabase, req.tenantId)
+    const toDate   = parsed.data.to_date   ?? getLocalDate(new Date().toISOString(), tz)
     const fromDate = parsed.data.from_date ?? (() => {
       const d = new Date(`${toDate}T12:00:00.000Z`)
       d.setUTCDate(d.getUTCDate() - 90)

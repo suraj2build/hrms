@@ -27,6 +27,7 @@ import {
   processEncashment,
 } from '../../lib/accrual-engine.js'
 import { checkIdempotency, storeIdempotency } from '../../lib/idempotency.js'
+import { notFound } from '../../lib/api-errors.js'
 
 const dateRe = /^\d{4}-\d{2}-\d{2}$/
 
@@ -127,13 +128,16 @@ export default async function leaveAccrualRoutes(fastify: FastifyInstance) {
   // ── DELETE /leave/accrual/rules/:id ──────────────────────────────────────
   fastify.delete('/leave/accrual/rules/:id', hrAdminAuth, async (req: any, reply) => {
     // Soft-deactivate to preserve history
-    const { error } = await fastify.supabase
+    const { data, error } = await fastify.supabase
       .from('leave_accrual_rules')
       .update({ is_active: false })
       .eq('id', req.params.id)
       .eq('tenant_id', req.tenantId)
+      .select('id')
+      .maybeSingle()
 
     if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: 'Failed to deactivate rule' })
+    if (!data) return notFound(reply, 'NOT_FOUND', 'Accrual rule not found')
     return reply.code(204).send()
   })
 
@@ -368,27 +372,33 @@ export default async function leaveAccrualRoutes(fastify: FastifyInstance) {
     const parsed = schema.safeParse(req.body)
     if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
 
-    const { error } = await fastify.supabase
+    const { data, error } = await fastify.supabase
       .from('leave_encashment_requests')
       .update({ status: 'rejected', approved_by: req.userId, approved_at: new Date().toISOString(), notes: parsed.data.reason ?? null })
       .eq('id', req.params.id)
       .eq('tenant_id', req.tenantId)
       .eq('status', 'pending')
+      .select('id')
+      .maybeSingle()
 
     if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: 'Failed to reject encashment' })
+    if (!data) return notFound(reply, 'NOT_FOUND', 'Pending encashment request not found')
     return reply.send({ message: 'Encashment request rejected' })
   })
 
   // ── POST /leave/encashment/:id/mark-paid ──────────────────────────────────
   fastify.post('/leave/encashment/:id/mark-paid', hrAdminAuth, async (req: any, reply) => {
-    const { error } = await fastify.supabase
+    const { data, error } = await fastify.supabase
       .from('leave_encashment_requests')
       .update({ status: 'paid', paid_at: new Date().toISOString() })
       .eq('id', req.params.id)
       .eq('tenant_id', req.tenantId)
       .eq('status', 'approved')
+      .select('id')
+      .maybeSingle()
 
     if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: 'Failed to mark as paid' })
+    if (!data) return notFound(reply, 'NOT_FOUND', 'Approved encashment request not found')
     return reply.send({ message: 'Marked as paid' })
   })
 }

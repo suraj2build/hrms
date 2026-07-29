@@ -256,8 +256,12 @@ async function ingestRecords(
     const { error } = await fastify.supabase
       .from('attendance_raw_logs')
       .upsert(chunk, { onConflict: 'tenant_id,employee_code,timestamp,direction', ignoreDuplicates: true })
-    if (error) errors.push(`DB insert error: ${error.message}`)
-    else ingested += chunk.length
+    if (error) {
+      fastify.log.error({ err: error, tenantId, sourceId: source.id }, '[api-sources] attendance_raw_logs upsert failed')
+      errors.push(`Failed to store ${chunk.length} record(s) — see server logs`)
+    } else {
+      ingested += chunk.length
+    }
   }
 
   return { ingested, skipped: records.length - ingested, errors }
