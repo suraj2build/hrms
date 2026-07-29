@@ -27,6 +27,7 @@ import { useAuthStore }   from '@/stores/authStore'
 import { cn }             from '@/lib/utils'
 import { SubTabs }        from '@/components/ui/SubTabs'
 import { EmployeeSelector } from '@/components/filters/EmployeeSelector'
+import { ConfirmDialog }  from '@/components/ui/ConfirmDialog'
 import { toast }          from 'sonner'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -347,6 +348,7 @@ function NewMatrixDialog({ open, onClose }: { open: boolean; onClose: () => void
 function MatricesTab() {
   const qc = useQueryClient()
   const [showCreate, setShowCreate] = useState(false)
+  const [deleteTarget, setDeleteTarget] = useState<ApprovalMatrix | null>(null)
 
   const { data, isLoading, isError, refetch } = useQuery<{ data: ApprovalMatrix[] }>({
     queryKey: ['governance-matrices'],
@@ -359,6 +361,7 @@ function MatricesTab() {
     onSuccess:  () => {
       qc.invalidateQueries({ queryKey: ['governance-matrices'] })
       toast.success('Matrix deleted')
+      setDeleteTarget(null)
     },
     onError: (e: Error) => toast.error('Failed to delete matrix', { description: e.message }),
   })
@@ -443,7 +446,7 @@ function MatricesTab() {
                         variant="ghost"
                         className="h-7 text-xs text-destructive hover:text-destructive gap-1"
                         disabled={deleteMutation.isPending}
-                        onClick={() => deleteMutation.mutate(row.id)}
+                        onClick={() => setDeleteTarget(row)}
                       >
                         <Trash2 className="h-3 w-3" />
                         Deactivate
@@ -458,6 +461,20 @@ function MatricesTab() {
       </SectionCard>
 
       <NewMatrixDialog open={showCreate} onClose={() => setShowCreate(false)} />
+
+      <ConfirmDialog
+        open={!!deleteTarget}
+        title="Deactivate Approval Matrix"
+        message={
+          deleteTarget
+            ? `Deactivate "${deleteTarget.name}"? Existing approvals routed through this matrix will need a replacement matrix.`
+            : ''
+        }
+        confirmLabel="Deactivate"
+        destructive
+        onConfirm={() => deleteTarget && deleteMutation.mutate(deleteTarget.id)}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </div>
   )
 }
@@ -606,6 +623,7 @@ function NewDelegationDialog({ open, onClose }: { open: boolean; onClose: () => 
 function DelegationsTab() {
   const qc = useQueryClient()
   const [showCreate, setShowCreate] = useState(false)
+  const [revokeTarget, setRevokeTarget] = useState<Delegation | null>(null)
 
   const { data, isLoading, isError, refetch } = useQuery<{ data: Delegation[] }>({
     queryKey: ['governance-delegations'],
@@ -618,6 +636,7 @@ function DelegationsTab() {
     onSuccess:  () => {
       qc.invalidateQueries({ queryKey: ['governance-delegations'] })
       toast.success('Delegation revoked')
+      setRevokeTarget(null)
     },
     onError: (e: Error) => toast.error('Failed to revoke delegation', { description: e.message }),
   })
@@ -698,7 +717,7 @@ function DelegationsTab() {
                         variant="ghost"
                         className="h-7 text-xs text-destructive hover:text-destructive gap-1"
                         disabled={revokeMutation.isPending}
-                        onClick={() => revokeMutation.mutate(row.id)}
+                        onClick={() => setRevokeTarget(row)}
                       >
                         <Trash2 className="h-3 w-3" />
                         Revoke
@@ -713,6 +732,20 @@ function DelegationsTab() {
       </SectionCard>
 
       <NewDelegationDialog open={showCreate} onClose={() => setShowCreate(false)} />
+
+      <ConfirmDialog
+        open={!!revokeTarget}
+        title="Revoke Delegation"
+        message={
+          revokeTarget
+            ? `Revoke ${revokeTarget.delegator_name} → ${revokeTarget.delegate_name}'s delegation? This takes effect immediately — ${revokeTarget.delegate_name} will no longer be able to approve on ${revokeTarget.delegator_name}'s behalf.`
+            : ''
+        }
+        confirmLabel="Revoke"
+        destructive
+        onConfirm={() => revokeTarget && revokeMutation.mutate(revokeTarget.id)}
+        onCancel={() => setRevokeTarget(null)}
+      />
     </div>
   )
 }

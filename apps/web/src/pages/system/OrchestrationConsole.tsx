@@ -613,7 +613,11 @@ function JobsTab() {
                         variant="outline"
                         className="h-6 text-[10px] px-2 text-destructive border-destructive/40 hover:bg-destructive/5"
                         disabled={cancel.isPending}
-                        onClick={() => cancel.mutate(job.id)}
+                        onClick={() => {
+                          if (confirm(`Cancel this ${job.job_type} job? ${job.status === 'running' ? 'It is currently running — cancelling will abort it mid-execution.' : ''}`)) {
+                            cancel.mutate(job.id)
+                          }
+                        }}
                       >
                         Cancel
                       </Button>

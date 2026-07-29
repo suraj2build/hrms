@@ -499,7 +499,10 @@ export function ObservabilityConsole() {
       qc.invalidateQueries({ queryKey: ['system-observability'], exact: true })
       qc.invalidateQueries({ queryKey: ['durable-dead-jobs'],    exact: true })
       qc.invalidateQueries({ queryKey: ['durable-queue'],        exact: true })
-    } catch { /* ignore */ } finally {
+      toast.success('Dead-letter jobs purged')
+    } catch (e) {
+      toast.error('Failed to purge dead-letter jobs', { description: e instanceof Error ? e.message : String(e) })
+    } finally {
       setPurgingDead(false)
     }
   }

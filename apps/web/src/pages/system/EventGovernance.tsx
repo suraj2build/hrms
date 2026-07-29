@@ -38,6 +38,7 @@ import { Badge }         from '@/components/ui/badge'
 import { Button }        from '@/components/ui/button'
 import { Input }         from '@/components/ui/input'
 import { DateInput }     from '@/components/ui/date-input'
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { api }           from '@/lib/api/client'
 import { useAuthStore }  from '@/stores/authStore'
 import { toast }         from 'sonner'
@@ -701,6 +702,7 @@ function ReplayQueueTab() {
 function RetentionRulesTab() {
   const qc = useQueryClient()
   const [showAdd, setShowAdd] = useState(false)
+  const [deleteTarget, setDeleteTarget] = useState<RetentionRule | null>(null)
 
   const { data, isLoading, isError, refetch } = useQuery<RetentionRule[]>({
     queryKey: ['event-governance-retention'],
@@ -714,6 +716,7 @@ function RetentionRulesTab() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['event-governance-retention'] })
       toast.success('Retention rule removed')
+      setDeleteTarget(null)
     },
     onError: (e: Error) => toast.error('Failed to remove retention rule', { description: e.message }),
   })
@@ -813,7 +816,7 @@ function RetentionRulesTab() {
                         variant="ghost"
                         className="h-6 text-[10px] px-2 text-destructive hover:bg-destructive/5"
                         disabled={remove.isPending}
-                        onClick={() => remove.mutate(rule.id)}
+                        onClick={() => setDeleteTarget(rule)}
                       >
                         Delete
                       </Button>
@@ -825,6 +828,20 @@ function RetentionRulesTab() {
           </div>
         )}
       </SectionCard>
+
+      <ConfirmDialog
+        open={!!deleteTarget}
+        title="Delete Retention Rule"
+        message={
+          deleteTarget
+            ? `Delete the retention rule for "${deleteTarget.event_type ?? 'All Types'}" (${deleteTarget.retention_days}d retention / ${deleteTarget.archive_after_days}d archive)? This cannot be undone.`
+            : ''
+        }
+        confirmLabel="Delete"
+        destructive
+        onConfirm={() => deleteTarget && remove.mutate(deleteTarget.id)}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </>
   )
 }
