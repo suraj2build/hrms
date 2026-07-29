@@ -26,6 +26,7 @@ import type { FastifyInstance } from 'fastify'
 import { z }                   from 'zod'
 import { HR_ADMIN_ROLES }      from '../../lib/rbac.js'
 import { fetchAllRows }        from '../../lib/supabase-paginate.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 type MetricType = 'absent' | 'late' | 'ot' | 'pressure' | 'reliability' | 'leave'
@@ -123,7 +124,7 @@ export default async function workforceDrillRoutes(fastify: FastifyInstance) {
     // Paginated — an unbounded .select() truncates at PostgREST's 1,000-row
     // ceiling for a large tenant, silently dropping employees from every
     // drill-down metric below.
-    let empRows: any[] = []
+    let empRows: any[]
     try {
       empRows = await fetchAllRows((from, to) => {
         let q = fastify.supabase
@@ -149,7 +150,11 @@ export default async function workforceDrillRoutes(fastify: FastifyInstance) {
         return q.range(from, to)
       })
     } catch (err) {
-      fastify.log.warn({ err: (err as Error)?.message }, 'workforce-drill: employee join failed, falling back to simple query')
+      // Manager scoping depends entirely on empMeta being populated (see the
+      // isAllowed() guard below) — silently continuing with an empty set here
+      // would make a manager's drill-down look like a clean "no issues" empty
+      // list instead of surfacing the query failure.
+      return serverError(req, reply, err, ErrorCode.QUERY_FAILED, 'Failed to fetch employee data')
     }
 
     // Build employee lookup map — id → { code, name, department }. When

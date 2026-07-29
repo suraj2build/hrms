@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { requireRole } from '../../lib/rbac.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 export default async function analyticsRoutes(fastify: FastifyInstance) {
   const auth      = { preHandler: [fastify.authenticate] }
@@ -64,6 +65,7 @@ export default async function analyticsRoutes(fastify: FastifyInstance) {
     ])
 
     if (profileRes.error) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Profile not found' })
+    if (tenantRes.error) return serverError(req, reply, tenantRes.error, ErrorCode.QUERY_FAILED, 'Failed to fetch tenant')
 
     return reply.send({ profile: profileRes.data, tenant: tenantRes.data })
   })

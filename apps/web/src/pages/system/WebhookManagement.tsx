@@ -19,6 +19,7 @@ import { PageHeader }    from '@/components/layout/PageHeader'
 import { SectionCard }   from '@/components/layout/SectionCard'
 import { Badge }         from '@/components/ui/badge'
 import { Button }        from '@/components/ui/button'
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { api }           from '@/lib/api/client'
 import { useAuthStore }  from '@/stores/authStore'
 import { cn }            from '@/lib/utils'
@@ -26,7 +27,6 @@ import { toast }         from 'sonner'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
-type WebhookStatus    = 'active' | 'inactive'
 type DeliveryStatus   = 'delivered' | 'failed' | 'pending' | 'retrying' | 'dead_lettered'
 
 interface WebhookRecord {
@@ -34,7 +34,7 @@ interface WebhookRecord {
   name:              string
   url:               string
   event_types:       string[]
-  status:            WebhookStatus
+  is_active:         boolean
   description:       string | null
   max_retries:       number
   timeout_seconds:   number
@@ -308,7 +308,7 @@ interface WebhookCardProps {
   webhook:    WebhookRecord
   isSelected: boolean
   onSelect:   () => void
-  onDelete:   (id: string) => void
+  onDelete:   (webhook: WebhookRecord) => void
   isDeleting: boolean
 }
 
@@ -328,10 +328,10 @@ function WebhookCard({ webhook, isSelected, onSelect, onDelete, isDeleting }: We
           <div className="flex items-center gap-2 mb-0.5">
             <p className="text-sm font-semibold text-foreground truncate">{webhook.name}</p>
             <Badge
-              variant={webhook.status === 'active' ? 'success' : 'secondary'}
+              variant={webhook.is_active ? 'success' : 'secondary'}
               className="rounded-full text-[10px] px-2 shrink-0"
             >
-              {webhook.status}
+              {webhook.is_active ? 'active' : 'inactive'}
             </Badge>
           </div>
           <p className="text-[11px] font-mono text-muted-foreground truncate">
@@ -380,7 +380,7 @@ function WebhookCard({ webhook, isSelected, onSelect, onDelete, isDeleting }: We
           disabled={isDeleting}
           onClick={e => {
             e.stopPropagation()
-            onDelete(webhook.id)
+            onDelete(webhook)
           }}
         >
           {isDeleting ? (
@@ -405,6 +405,7 @@ export function WebhookManagement() {
   const [selectedId,    setSelectedId]    = useState<string | null>(null)
   const [showCreate,    setShowCreate]    = useState(false)
   const [deletingId,    setDeletingId]    = useState<string | null>(null)
+  const [deleteTarget,  setDeleteTarget]  = useState<WebhookRecord | null>(null)
   const [testResult,    setTestResult]    = useState<TestResult | null>(null)
   const [testingId,     setTestingId]     = useState<string | null>(null)
   const [retryingId,    setRetryingId]    = useState<string | null>(null)
@@ -441,12 +442,14 @@ export function WebhookManagement() {
     mutationFn: id => api.delete(`/system/webhooks/${id}`),
     onSuccess: (_, id) => {
       setDeletingId(null)
+      setDeleteTarget(null)
       if (selectedId === id) setSelectedId(null)
       qc.invalidateQueries({ queryKey: ['webhooks'] })
       toast.success('Webhook deleted')
     },
     onError: (e: Error) => {
       setDeletingId(null)
+      setDeleteTarget(null)
       toast.error('Failed to delete webhook', { description: e.message })
     },
   })
@@ -562,10 +565,7 @@ export function WebhookManagement() {
                 setSelectedId(wh.id)
                 setTestResult(null)
               }}
-              onDelete={id => {
-                setDeletingId(id)
-                deleteMutation.mutate(id)
-              }}
+              onDelete={setDeleteTarget}
               isDeleting={deletingId === wh.id && deleteMutation.isPending}
             />
           ))}
@@ -787,6 +787,20 @@ export function WebhookManagement() {
           isPending={createMutation.isPending}
         />
       )}
+
+      <ConfirmDialog
+        open={!!deleteTarget}
+        title="Delete Webhook"
+        message={deleteTarget ? `Delete "${deleteTarget.name}"? It will stop receiving events and disappear from this list.` : ''}
+        confirmLabel="Delete"
+        destructive
+        onConfirm={() => {
+          if (!deleteTarget) return
+          setDeletingId(deleteTarget.id)
+          deleteMutation.mutate(deleteTarget.id)
+        }}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </PageContainer>
   )
 }

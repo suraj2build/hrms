@@ -38,7 +38,9 @@ const createBodySchema = z.object({
   timeout_seconds:  z.coerce.number().int().min(1).max(120).optional(),
 })
 
-const updateBodySchema = createBodySchema.partial()
+const updateBodySchema = createBodySchema.partial().extend({
+  is_active: z.boolean().optional(),
+})
 
 const deliveriesQuerySchema = z.object({
   status: z.enum(['pending', 'delivered', 'failed', 'retrying']).optional(),
@@ -100,9 +102,10 @@ export default async function webhooksRoutes(fastify: FastifyInstance) {
       .order('created_at', { ascending: false })
       .limit(limit)
 
-    if (is_active !== undefined) {
-      q = q.eq('is_active', is_active === 'true')
-    }
+    // Default to active-only when the caller doesn't specify — the frontend
+    // has no "show inactive" toggle and treats DELETE as "remove from list",
+    // so an omitted filter must not silently include deactivated webhooks.
+    q = q.eq('is_active', is_active !== undefined ? is_active === 'true' : true)
 
     const { data, error, count } = await q
 

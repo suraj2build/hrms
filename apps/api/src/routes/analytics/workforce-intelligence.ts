@@ -16,6 +16,7 @@ import type { FastifyInstance } from 'fastify'
 import { z }                   from 'zod'
 import { HR_ADMIN_ROLES }      from '../../lib/rbac.js'
 import { fetchAllRows }        from '../../lib/supabase-paginate.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 // ── Date helpers ──────────────────────────────────────────────────────────────
 
 const dateRe = /^\d{4}-\d{2}-\d{2}$/
@@ -275,6 +276,7 @@ export default async function workforceIntelligenceRoutes(fastify: FastifyInstan
       ),
     ])
 
+    if (typesRes.error) return serverError(req, reply, typesRes.error, ErrorCode.QUERY_FAILED, 'Failed to fetch leave types')
     const types   = typesRes.data   ?? []
 
     // Calculate days taken per leave type

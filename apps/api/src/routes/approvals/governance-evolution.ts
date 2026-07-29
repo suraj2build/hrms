@@ -208,7 +208,7 @@ export default async function governanceEvolutionRoutes(fastify: FastifyInstance
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
       .select('*')
-      .single()
+      .maybeSingle()
 
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update approval matrix')
     if (!data) {
@@ -230,7 +230,7 @@ export default async function governanceEvolutionRoutes(fastify: FastifyInstance
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
       .select('id, is_active')
-      .single()
+      .maybeSingle()
 
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to deactivate approval matrix')
     if (!data) {
@@ -436,7 +436,7 @@ export default async function governanceEvolutionRoutes(fastify: FastifyInstance
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
       .select('id, is_active, revoked_at, revoked_by, revoke_reason')
-      .single()
+      .maybeSingle()
 
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to revoke override')
     if (!data) {
