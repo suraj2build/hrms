@@ -237,7 +237,7 @@ export default async function rotationPoliciesRoutes(fastify: FastifyInstance) {
         .eq('id', req.params.id)
         .eq('tenant_id', req.tenantId)
         .select(POLICY_COLS)
-        .single()
+        .maybeSingle()
       if (error) {
         if (error.code === '23505')
           return reply.code(409).send({ error: 'DUPLICATE', message: 'A policy with this name already exists' })

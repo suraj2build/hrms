@@ -83,9 +83,13 @@ export default async function gradesRoutes(fastify: FastifyInstance) {
       .eq('id', req.params.id)
       .eq('tenant_id', req.tenantId)
       .select()
-      .single()
+      .maybeSingle()
 
-    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update grade')
+    if (error) {
+      if (error.code === '23505')
+        return reply.code(409).send({ error: 'DUPLICATE', message: `Grade code "${parsed.data.code}" already exists` })
+      return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update grade')
+    }
     if (!data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Grade not found' })
     return reply.send({ data })
   })

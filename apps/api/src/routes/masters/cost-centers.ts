@@ -105,9 +105,13 @@ export default async function costCentersRoutes(fastify: FastifyInstance) {
       .eq('id', req.params.id)
       .eq('tenant_id', req.tenantId)
       .select('id, name, code, description, is_active, created_at')
-      .single()
+      .maybeSingle()
 
-    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update cost center')
+    if (error) {
+      if (error.code === '23505')
+        return reply.code(409).send({ error: 'DUPLICATE', message: 'Another cost center already uses that code' })
+      return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update cost center')
+    }
     if (!data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Cost center not found' })
     return reply.send({ data })
   })

@@ -276,7 +276,7 @@ export default async function rostersRoutes(fastify: FastifyInstance) {
       .eq('id', (req.params as any).id)
       .eq('tenant_id', req.tenantId)
       .select(SELECT_COLS)
-      .single()
+      .maybeSingle()
 
     if (error) {
       return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update roster policy')

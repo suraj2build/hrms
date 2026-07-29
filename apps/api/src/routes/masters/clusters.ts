@@ -172,7 +172,7 @@ export default async function clustersRoutes(fastify: FastifyInstance) {
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
       .select(SELECT_COLS)
-      .single()
+      .maybeSingle()
 
     if (error) {
       if (error.code === '23505')

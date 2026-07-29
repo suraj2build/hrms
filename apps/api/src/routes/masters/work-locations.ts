@@ -156,7 +156,7 @@ export default async function workLocationsRoutes(fastify: FastifyInstance) {
       .eq('id', req.params.id)
       .eq('tenant_id', req.tenantId)
       .select('id, name, code, site_id, address, city, state, country, pincode, is_active, created_at')
-      .single()
+      .maybeSingle()
 
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update work location')
     if (!data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Work location not found' })

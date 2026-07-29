@@ -122,7 +122,7 @@ export default async function statesRoutes(fastify: FastifyInstance) {
       .eq('id', req.params.id)
       .eq('tenant_id', req.tenantId)
       .select(SELECT_COLS)
-      .single()
+      .maybeSingle()
 
     if (error) {
       if (error.code === '23505')

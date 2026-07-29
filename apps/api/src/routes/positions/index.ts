@@ -24,6 +24,13 @@ import { z } from 'zod'
 import { generateUniqueCode } from '../../lib/generate-code.js'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { serverError, ErrorCode } from '../../lib/api-errors.js'
+import { fetchTenantTz } from '../../lib/attendance-engine.js'
+import { getLocalDate } from '../../lib/org-context.js'
+
+async function tenantTodayStr(supabase: any, tenantId: string): Promise<string> {
+  const tz = await fetchTenantTz(supabase, tenantId)
+  return getLocalDate(new Date().toISOString(), tz)
+}
 
 const positionSchema = z.object({
   code:             z.string().trim().optional(),
@@ -249,15 +256,16 @@ export default async function positionsRoutes(fastify: FastifyInstance) {
 
     const patch: Record<string, any> = { ...parsed.data }
     // Abolishing stamps the date; un-abolishing clears it.
-    if (patch.status === 'abolished') patch.abolished_date = new Date().toISOString().slice(0, 10)
+    if (patch.status === 'abolished') patch.abolished_date = await tenantTodayStr(fastify.supabase, req.tenantId)
     else if (patch.status && patch.status !== 'abolished') patch.abolished_date = null
 
     const { data, error } = await fastify.supabase
-      .from('positions').update(patch).eq('id', id).eq('tenant_id', req.tenantId).select().single()
+      .from('positions').update(patch).eq('id', id).eq('tenant_id', req.tenantId).select().maybeSingle()
     if (error) {
       if (error.code === '23505') return reply.code(409).send({ error: 'DUPLICATE', message: 'Position code already exists' })
       return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update position')
     }
+    if (!data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Position not found' })
     return reply.send(data)
   })
 
@@ -291,7 +299,7 @@ export default async function positionsRoutes(fastify: FastifyInstance) {
     if (abolish) {
       const { error } = await fastify.supabase
         .from('positions')
-        .update({ status: 'abolished', abolished_date: new Date().toISOString().slice(0, 10) })
+        .update({ status: 'abolished', abolished_date: await tenantTodayStr(fastify.supabase, tid) })
         .eq('id', id).eq('tenant_id', tid)
       if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to abolish position')
       return reply.code(200).send({ data: { abolished: true } })
