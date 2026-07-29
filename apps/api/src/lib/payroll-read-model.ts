@@ -200,6 +200,16 @@ export function buildPayrollVisibilityState(
   }
 }
 
+/**
+ * Label safe to show to the employee themselves when their own slip isn't
+ * employee_visible. `state.label` carries admin-oriented wording for the
+ * specific reason (e.g. "(admin only)", "admin must release") — that detail
+ * is useful in admin UIs but must not leak to the employee it's about.
+ */
+export function employeeVisibilityLabel(state: PayrollVisibilityState): string {
+  return state.employee_visible ? state.label : VISIBILITY_LABELS.not_finalized
+}
+
 // ── buildEmployeePayslipView ──────────────────────────────────────────────────
 
 type RawSlip = {

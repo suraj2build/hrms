@@ -94,7 +94,10 @@ export async function recordShadowDrift(
         { event: 'leave_ledger_drift', tenant_id: tenantId, employee_id: employeeId, year, count: drifts.length, drifts },
         'leave ledger/cache drift detected (shadow)',
       )
-      await supabase.from('leave_ledger_drift_log').insert(drifts)
+      const { error: insertErr } = await supabase.from('leave_ledger_drift_log').insert(drifts)
+      if (insertErr) {
+        logger.warn({ err: insertErr, tenant_id: tenantId, employee_id: employeeId }, 'shadow drift: drift-log insert failed (non-fatal)')
+      }
     }
   } catch (err) {
     logger.warn({ err }, 'shadow drift comparison failed (non-fatal)')

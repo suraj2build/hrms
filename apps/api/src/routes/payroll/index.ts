@@ -358,6 +358,7 @@ async function computeOneEmployee(
 import {
   buildPayrollVisibilityState,
   buildEmployeePayslipView,
+  employeeVisibilityLabel,
 } from '../../lib/payroll-read-model.js'
 import {
   buildPayrollBlockers,
@@ -3310,7 +3311,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       }
 
       if (!visibility.employee_visible) {
-        return forbidden(reply, 'NOT_FINALIZED', visibility.label)
+        return forbidden(reply, 'NOT_FINALIZED', employeeVisibilityLabel(visibility))
       }
     }
 

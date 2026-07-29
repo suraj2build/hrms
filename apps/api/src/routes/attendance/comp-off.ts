@@ -110,6 +110,21 @@ export default async function compOffRoute(fastify: FastifyInstance) {
 
     const { employee_id, from_date, to_date, leave_type_id } = parsed.data
 
+    // leave_type_id is a client-supplied UUID with no other tenant-scoping —
+    // verify it belongs to this tenant before it gets written into
+    // comp_off_requests and later into leave_accrual_ledger on approval,
+    // since the leave_types FK itself carries no tenant check.
+    if (leave_type_id) {
+      const { data: lt, error: ltErr } = await fastify.supabase
+        .from('leave_types')
+        .select('id')
+        .eq('id', leave_type_id)
+        .eq('tenant_id', req.tenantId)
+        .maybeSingle()
+      if (ltErr) return serverError(req, reply, ltErr, ErrorCode.QUERY_FAILED, 'Failed to verify leave type')
+      if (!lt) return reply.code(404).send({ error: 'LEAVE_TYPE_NOT_FOUND', message: 'Leave type not found' })
+    }
+
     // Period protection — don't mint comp-off for a month locked for payroll.
     try {
       await assertRangeOpen(fastify.supabase, req.tenantId, from_date, to_date)

@@ -7,6 +7,7 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { logAction } from '../../lib/audit-service.js'
 import { gateApprove, gateReject } from '../../lib/approval-orchestrator.js'
+import { isSelfApproval } from '../../lib/approval-guards.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { checkIdempotency, storeIdempotency } from '../../lib/idempotency.js'
 import { serverError, validationError, ErrorCode } from '../../lib/api-errors.js'
@@ -684,6 +685,15 @@ export default async function reimbursementsRoutes(fastify: FastifyInstance) {
       })
     }
 
+    // Segregation of duties — an HR admin may not approve their own claim.
+    // gateApprove()'s self-approval guard only fires when a chain IS
+    // configured for reimbursement_claim; the legacy/no-chain path below
+    // (the default state) finalizes on role check alone, so this must be
+    // checked independently (same pattern as leave.ts/comp-off.ts/overtime.ts).
+    if (await isSelfApproval(fastify.supabase, req.tenantId as string, req.userId, (existing as any).employee_id)) {
+      return reply.code(403).send({ error: 'SELF_APPROVAL_FORBIDDEN', message: 'You cannot approve your own reimbursement claim.' })
+    }
+
     // Multi-level gate (threshold routing by claimed amount).
     const gate = await gateApprove(fastify.supabase, {
       tenantId: req.tenantId, entityType: 'reimbursement_claim', entityId: id,
@@ -1011,6 +1021,12 @@ export default async function reimbursementsRoutes(fastify: FastifyInstance) {
       return reply.code(409).send({ error: 'INVALID_STATUS', message: `Claim is not in a reviewable state (status: ${(existing as any).status})` })
     }
 
+    // Segregation of duties — see /claims/:id/approve for why this can't
+    // rely on gateApprove() alone.
+    if (await isSelfApproval(fastify.supabase, req.tenantId as string, req.userId, (existing as any).employee_id)) {
+      return reply.code(403).send({ error: 'SELF_APPROVAL_FORBIDDEN', message: 'You cannot approve your own reimbursement claim.' })
+    }
+
     // Multi-level gate (same as /claims/:id/approve and /:id/approve) — this
     // is the endpoint the admin console's review dialog actually calls, and
     // it was finalizing directly with no gate call at all, letting any HR
@@ -1078,6 +1094,12 @@ export default async function reimbursementsRoutes(fastify: FastifyInstance) {
     if (!existing) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Claim not found' })
     if (!['submitted', 'under_review'].includes((existing as any).status)) {
       return reply.code(409).send({ error: 'INVALID_STATUS', message: `Claim is not in a reviewable state (status: ${(existing as any).status})` })
+    }
+
+    // Segregation of duties — see /claims/:id/approve for why this can't
+    // rely on gateApprove() alone.
+    if (await isSelfApproval(fastify.supabase, req.tenantId as string, req.userId, (existing as any).employee_id)) {
+      return reply.code(403).send({ error: 'SELF_APPROVAL_FORBIDDEN', message: 'You cannot approve your own reimbursement claim.' })
     }
 
     // Multi-level gate (same as /claims/:id/approve) so the admin screen honours a
