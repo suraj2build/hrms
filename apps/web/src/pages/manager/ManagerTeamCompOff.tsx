@@ -157,6 +157,9 @@ export function ManagerTeamCompOff({ embedded = false }: { embedded?: boolean })
       qc.invalidateQueries({ queryKey: ['ess-comp-off'] })
       qc.invalidateQueries({ queryKey: ['ess-compoff-my'] })
       qc.invalidateQueries({ queryKey: ['flowdesk-compoff'] })
+      // The manager sidebar's persistent "Approvals" badge count aggregates
+      // pending comp-off (among others) under this separate key.
+      qc.invalidateQueries({ queryKey: ['manager-pending-approvals-count'] })
     },
     onError:    (e: Error) => {
       if (e instanceof ApiError && e.error === 'PERIOD_LOCKED') {
@@ -177,6 +180,7 @@ export function ManagerTeamCompOff({ embedded = false }: { embedded?: boolean })
       qc.invalidateQueries({ queryKey: ['ess-comp-off'] })
       qc.invalidateQueries({ queryKey: ['ess-compoff-my'] })
       qc.invalidateQueries({ queryKey: ['flowdesk-compoff'] })
+      qc.invalidateQueries({ queryKey: ['manager-pending-approvals-count'] })
     },
     onError:    (e: Error) => {
       if (e instanceof ApiError && e.error === 'PERIOD_LOCKED') {

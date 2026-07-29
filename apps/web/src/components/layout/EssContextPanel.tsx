@@ -127,11 +127,19 @@ function WishButton({ employeeId, name, kind, years }: {
   const [done, setDone] = useState(false)
   const [open, setOpen] = useState(false)
   const [message, setMessage] = useState('')
+  // Stable per-mount UUID sent as Idempotency-Key — a dropped/retried response
+  // would otherwise post the same wish twice. Rotated after success.
+  const wishKey = useRef(crypto.randomUUID())
 
   const mutation = useMutation({
     mutationFn: () =>
-      api.post('/community/wish', { subject_employee_id: employeeId, kind, message: message.trim() }),
+      api.post(
+        '/community/wish',
+        { subject_employee_id: employeeId, kind, message: message.trim() },
+        { headers: { 'Idempotency-Key': wishKey.current } },
+      ),
     onSuccess: () => {
+      wishKey.current = crypto.randomUUID()
       setDone(true); setOpen(false)
       toast.success('Wish posted to Community', { description: `${firstNameOf(name)} will see it in the feed.` })
       invalidateCommunityFeeds(qc)

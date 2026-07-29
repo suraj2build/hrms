@@ -104,6 +104,9 @@ export function EssReimbursements() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['reimbursements', 'my'] })
       qc.invalidateQueries({ queryKey: ['ess-approvals-reimb'] })
+      // EmployeeSidebar's "Approvals" badge count reads the same claims
+      // under this separate key.
+      qc.invalidateQueries({ queryKey: ['sb-reimb'] })
       closeDialog()
       toast.success('Reimbursement claim created')
     },
@@ -115,6 +118,7 @@ export function EssReimbursements() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['reimbursements', 'my'] })
       qc.invalidateQueries({ queryKey: ['ess-approvals-reimb'] })
+      qc.invalidateQueries({ queryKey: ['sb-reimb'] })
       toast.success('Claim submitted for approval')
     },
     onError: (e: Error) => toast.error('Submission failed', { description: e.message }),

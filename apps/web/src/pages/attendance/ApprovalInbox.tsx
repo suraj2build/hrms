@@ -248,6 +248,9 @@ function LeaveRequestsTable({
       queryClient.invalidateQueries({ queryKey: ['leave-balance'] })
       // The employee's own ESS approvals tracker reads the same record.
       queryClient.invalidateQueries({ queryKey: ['ess-approvals-leave'] })
+      // The manager sidebar's persistent "Approvals" badge count aggregates
+      // this same pending set under a separate key.
+      queryClient.invalidateQueries({ queryKey: ['manager-pending-approvals-count'] })
       onRefresh()
     },
     onError: (err: unknown) => {
@@ -270,6 +273,7 @@ function LeaveRequestsTable({
       // Invalidate notification inbox — rejection generates an employee notification
       queryClient.invalidateQueries({ queryKey: ['notifications', 'inbox'] })
       queryClient.invalidateQueries({ queryKey: ['ess-approvals-leave'] })
+      queryClient.invalidateQueries({ queryKey: ['manager-pending-approvals-count'] })
       onRefresh()
     },
     onError: (err: unknown) => {
@@ -492,6 +496,7 @@ function RegularisationTable({
       queryClient.invalidateQueries({ queryKey: ['notifications', 'inbox'] })
       // The employee's own ESS approvals tracker reads the same record.
       queryClient.invalidateQueries({ queryKey: ['ess-approvals-corrections'] })
+      queryClient.invalidateQueries({ queryKey: ['manager-pending-approvals-count'] })
       onRefresh()
     },
     onError: (err: unknown) => {
@@ -515,6 +520,7 @@ function RegularisationTable({
       // Invalidate notification inbox — rejection generates employee notification
       queryClient.invalidateQueries({ queryKey: ['notifications', 'inbox'] })
       queryClient.invalidateQueries({ queryKey: ['ess-approvals-corrections'] })
+      queryClient.invalidateQueries({ queryKey: ['manager-pending-approvals-count'] })
       onRefresh()
     },
     onError: (err: unknown) => {

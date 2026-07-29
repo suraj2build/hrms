@@ -961,6 +961,9 @@ export function LeaveApply({ mode = 'page', onSuccess, onClose }: LeaveApplyProp
       qc.invalidateQueries({ queryKey: ['my-leave-requests'] })
       qc.invalidateQueries({ queryKey: ['ess-leave-history'] })
       qc.invalidateQueries({ queryKey: ['my-leave-balance', employeeId] })
+      // EmployeeSidebar's "Approvals" badge count reads the same pending-leave
+      // data under this separate key.
+      qc.invalidateQueries({ queryKey: ['sb-leave'] })
       if (onSuccess) { onSuccess() } else { navigate('/ess/leave') }
     },
     onError: (err) => {

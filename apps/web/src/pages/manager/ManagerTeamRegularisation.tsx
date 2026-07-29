@@ -108,6 +108,9 @@ export function ManagerTeamRegularisation() {
       qc.invalidateQueries({ queryKey: ['reg-pending'] })
       qc.invalidateQueries({ queryKey: ['ess-approvals-corrections'] })
       qc.invalidateQueries({ queryKey: ['regularization-my'] })
+      // The manager sidebar's persistent "Approvals" badge count aggregates
+      // pending regularisation (among others) under this separate key.
+      qc.invalidateQueries({ queryKey: ['manager-pending-approvals-count'] })
     },
     onError: (err: unknown) => toast.error(err instanceof Error ? err.message : 'Bulk approve failed'),
   })
@@ -124,6 +127,7 @@ export function ManagerTeamRegularisation() {
       qc.invalidateQueries({ queryKey: ['reg-pending'] })
       qc.invalidateQueries({ queryKey: ['ess-approvals-corrections'] })
       qc.invalidateQueries({ queryKey: ['regularization-my'] })
+      qc.invalidateQueries({ queryKey: ['manager-pending-approvals-count'] })
     },
     onError: (err: unknown) => toast.error(err instanceof Error ? err.message : 'Bulk reject failed'),
   })

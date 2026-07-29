@@ -163,7 +163,14 @@ export function ManagerTeamOvertimeRequests({ embedded = false }: { embedded?: b
     // The admin OvertimeManagement.tsx "Requests" tab reads the same
     // /overtime/requests endpoint under ['ot-requests'] — invalidate both so
     // approving here doesn't leave that queue stale.
-    onSuccess:  () => { toast.success('OT request approved'); qc.invalidateQueries({ queryKey: ['manager-team-overtime'] }); qc.invalidateQueries({ queryKey: ['ot-requests'] }) },
+    onSuccess:  () => {
+      toast.success('OT request approved')
+      qc.invalidateQueries({ queryKey: ['manager-team-overtime'] })
+      qc.invalidateQueries({ queryKey: ['ot-requests'] })
+      // The manager sidebar's persistent "Approvals" badge count aggregates
+      // pending overtime (among others) under this separate key.
+      qc.invalidateQueries({ queryKey: ['manager-pending-approvals-count'] })
+    },
     onError:    (e: Error) => {
       if (e instanceof ApiError && e.error === 'PERIOD_LOCKED') {
         toast.error('Period locked', { description: 'Overtime approval is blocked — the attendance period has been finalized for payroll.' })
@@ -175,7 +182,12 @@ export function ManagerTeamOvertimeRequests({ embedded = false }: { embedded?: b
 
   const rejectMut = useMutation({
     mutationFn: ({ id, reason }: { id: string; reason: string }) => api.post(`/overtime/requests/${id}/reject`, { rejection_reason: reason }),
-    onSuccess:  () => { toast.success('OT request rejected'); qc.invalidateQueries({ queryKey: ['manager-team-overtime'] }); qc.invalidateQueries({ queryKey: ['ot-requests'] }) },
+    onSuccess:  () => {
+      toast.success('OT request rejected')
+      qc.invalidateQueries({ queryKey: ['manager-team-overtime'] })
+      qc.invalidateQueries({ queryKey: ['ot-requests'] })
+      qc.invalidateQueries({ queryKey: ['manager-pending-approvals-count'] })
+    },
     onError:    (e: Error) => {
       if (e instanceof ApiError && e.error === 'PERIOD_LOCKED') {
         toast.error('Period locked', { description: 'Overtime rejection is blocked — the attendance period has been finalized for payroll.' })

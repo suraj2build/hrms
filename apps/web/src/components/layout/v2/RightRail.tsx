@@ -34,7 +34,9 @@ interface DashboardStats {
 
 interface AnomalyResp     { total?: number; data?: unknown[] }
 interface CorrectionsResp { total?: number; data?: unknown[] }
-interface RegResp         { data?: unknown[] }
+// GET /attendance/regularisation/pending returns a bare array (reply.send(rows)),
+// not a { data } wrapper — unlike the anomaly/corrections endpoints above.
+type RegResp = unknown[]
 
 interface Holiday         { id: string; name: string; date: string }
 
@@ -73,7 +75,14 @@ interface RightRailProps {
 }
 
 export function RightRail({ show = true }: RightRailProps) {
-  const today = new Date().toISOString().slice(0, 10)
+  // Browser-local date (not UTC) — new Date().toISOString() is a day behind
+  // local for timezones ahead of UTC like IST between midnight and the UTC
+  // offset, which would misalign the "upcoming holidays" filter and the
+  // processing-status staleness check against tenant-local calendar dates.
+  const today = (() => {
+    const d = new Date()
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  })()
   const qc    = useQueryClient()
 
   // staleTime === refetchInterval on every polling query so that shell-level
@@ -146,7 +155,7 @@ export function RightRail({ show = true }: RightRailProps) {
 
   const anomalyCount     = anomalyResp?.total     ?? (Array.isArray(anomalyResp?.data)     ? anomalyResp.data.length     : 0)
   const correctionsCount = correctionsResp?.total ?? (Array.isArray(correctionsResp?.data) ? correctionsResp.data.length : 0)
-  const regCount         = Array.isArray(regResp?.data) ? (regResp.data?.length ?? 0) : 0
+  const regCount         = Array.isArray(regResp) ? regResp.length : 0
 
   const upcomingHolidays = (holidaysResp?.data ?? [])
     .filter(h => h.date >= today)

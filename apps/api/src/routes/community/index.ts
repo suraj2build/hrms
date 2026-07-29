@@ -18,6 +18,7 @@ import { containsProfanity } from '../../lib/profanity.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { serverError, ErrorCode } from '../../lib/api-errors.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
+import { checkIdempotency, storeIdempotency } from '../../lib/idempotency.js'
 const PROFANITY_MSG = 'Your message looks like it contains inappropriate language. Please rephrase.'
 const REACTIONS = ['like', 'celebrate', 'appreciate', 'support'] as const
 
@@ -132,6 +133,15 @@ export default async function communityRoutes(fastify: FastifyInstance) {
       return reply.code(400).send({ error: 'PROFANITY_BLOCKED', message: PROFANITY_MSG })
     }
 
+    const iKey = (req.headers['idempotency-key'] as string | undefined)?.trim()
+    if (iKey) {
+      const cached = await checkIdempotency(fastify.supabase, req.tenantId, iKey, 'community-wish')
+      if (cached) {
+        reply.header('Idempotency-Replayed', 'true')
+        return reply.code(cached.status_code).send(cached.response)
+      }
+    }
+
     // Subject must be a real employee in the caller's tenant.
     const { data: subject } = await fastify.supabase
       .from('employees').select('id')
@@ -152,7 +162,9 @@ export default async function communityRoutes(fastify: FastifyInstance) {
       .select('id')
       .single()
     if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to post wish')
-    return reply.code(201).send({ data })
+    const responseBody = { data }
+    if (iKey) await storeIdempotency(fastify.supabase, req.tenantId, iKey, 'community-wish', 201, responseBody)
+    return reply.code(201).send(responseBody)
   })
 
   // ── POST /community/posts ────────────────────────────────────────────────────
