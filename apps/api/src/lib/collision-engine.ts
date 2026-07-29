@@ -79,12 +79,16 @@ export async function resolveCollisionPolicy(
   tenantId:    string,
   leaveTypeId: string,
 ): Promise<CollisionPolicy> {
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from('leave_policies')
     .select('sandwich_mode, collision_on_holiday, collision_on_weekly_off')
     .eq('tenant_id', tenantId)
     .eq('leave_type_id', leaveTypeId)
     .maybeSingle()
+  // A query error must not silently read as "no policy configured" — that
+  // would substitute the permissive defaults (allow/allow/include) over the
+  // tenant's actual configured policy in the collision preview.
+  if (error) throw error
 
   return {
     sandwich_mode:           ((data as any)?.sandwich_mode          ?? 'include') as SandwichMode,

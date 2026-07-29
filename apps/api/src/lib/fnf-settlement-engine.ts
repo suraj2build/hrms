@@ -81,12 +81,17 @@ export async function computeFnfSettlement(
   let noticePeriodDays = 30
   let categoryGratuityEligible = true
   if ((emp as any).employment_category_id) {
-    const { data: cat } = await supabase
+    const { data: cat, error: catErr } = await supabase
       .from('employment_categories')
       .select('notice_period_days, gratuity_eligible')
       .eq('id', (emp as any).employment_category_id)
       .eq('tenant_id', tenantId)
       .maybeSingle()
+    // A query error must not fall through as "no category configured" — that
+    // would silently substitute the permissive defaults (30-day notice,
+    // gratuity-eligible) over a tenant's actual category config, which could
+    // mark this category notice-period-different or gratuity-ineligible.
+    if (catErr) return { error: `Failed to fetch employment category: ${catErr.message}` }
     if (cat) {
       noticePeriodDays = (cat as any).notice_period_days ?? 30
       categoryGratuityEligible = (cat as any).gratuity_eligible ?? true
@@ -94,11 +99,16 @@ export async function computeFnfSettlement(
   }
 
   // 3. Gratuity config (fall back to statutory defaults)
-  const { data: gc } = await supabase
+  const { data: gc, error: gcErr } = await supabase
     .from('gratuity_config')
     .select('enabled, rate_numerator, rate_denominator, min_years, max_amount, basis')
     .eq('tenant_id', tenantId)
     .maybeSingle()
+  // A query error must not fall through as "no config" — that would silently
+  // substitute the generic statutory defaults (15/26, 5yr, ₹20L cap) over a
+  // tenant's actual configured rate/cap/basis, which could be more
+  // restrictive (e.g. a lower cap) than what gets paid out.
+  if (gcErr) return { error: `Failed to fetch gratuity config: ${gcErr.message}` }
   const cfg = {
     enabled:     (gc as any)?.enabled ?? true,
     numerator:   Number((gc as any)?.rate_numerator ?? 15),

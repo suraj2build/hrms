@@ -121,12 +121,16 @@ export async function assertRangeNotFinalized(
 ): Promise<void> {
   const unique = [...new Set(monthsInRange(fromDate, toDate))]
   if (!unique.length) return
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from('attendance_period_locks')
     .select('period_month')
     .eq('tenant_id', tenantId)
     .in('period_month', unique)
     .eq('state', 'PAYROLL_FINALIZED')
+  // Fail closed, not open — same invariant as getLockedMonths above: a
+  // transient query error must not silently read as "nothing is finalized"
+  // for the one state this helper exists to catch.
+  if (error) throw error
   const finalized = ((data ?? []) as Array<{ period_month: string }>)
     .map((r) => r.period_month)
     .sort()
