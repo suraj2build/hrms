@@ -6,7 +6,7 @@
  * reconciled by HR — the un-billed portion becomes taxable.
  */
 
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Receipt, Loader2, Plus, Send, Paperclip } from 'lucide-react'
 import { toast } from 'sonner'
@@ -111,6 +111,10 @@ export function EssFBP() {
     }
   }
 
+  // Sent as Idempotency-Key on the initial draft-create call, so a retried
+  // submit (network timeout, double-click) doesn't create a second bill.
+  // Rotated only after a successful submit.
+  const submitIdempotencyKey = useRef(crypto.randomUUID())
   const submit = useMutation({
     mutationFn: async () => {
       // 1) create draft → 2) upload + attach bills → 3) submit to HR
@@ -120,6 +124,8 @@ export function EssFBP() {
         quarter,
         amount: Number(amount),
         description: description || undefined,
+      }, {
+        headers: { 'Idempotency-Key': submitIdempotencyKey.current },
       })
       const id = res?.data?.id as string
       if (!id) throw new Error('Submission was not created')
@@ -128,9 +134,12 @@ export function EssFBP() {
       await api.post(`/payroll/fbp/my/${id}/submit`, {})
     },
     onSuccess: () => {
+      submitIdempotencyKey.current = crypto.randomUUID()
       toast.success('Bill submitted to HR')
       reset()
       qc.invalidateQueries({ queryKey: ['ess-fbp-my'] })
+      // FbpReconciliation.tsx (HR) reads the same submitted bills under this key.
+      qc.invalidateQueries({ queryKey: ['fbp-subs', fy, quarter] })
     },
     onError: (e: Error) => { setUploading(false); toast.error('Submit failed', { description: e.message }) },
   })

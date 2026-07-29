@@ -8,6 +8,7 @@
  * Design: design-system tokens only.
  */
 
+import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { CalendarCheck, CheckCircle2, Circle, Info, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
@@ -17,6 +18,7 @@ import { PageHeader }     from '@/components/layout/PageHeader'
 import { SectionCard }    from '@/components/layout/SectionCard'
 import { Badge }          from '@/components/ui/badge'
 import { Button }         from '@/components/ui/button'
+import { ConfirmDialog }  from '@/components/ui/ConfirmDialog'
 import { api }            from '@/lib/api/client'
 import { cn }             from '@/lib/utils'
 
@@ -88,12 +90,14 @@ export function EssOptionalHolidays() {
       api.delete(`/leave/optional-holidays/${poolId}`),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['optional-holidays-ess'] })
+      setRemoveTarget(null)
       toast.success('Optional holiday removed')
     },
-    onError: (e: Error) => toast.error('Failed to remove holiday', { description: e.message }),
+    onError: (e: Error) => { setRemoveTarget(null); toast.error('Failed to remove holiday', { description: e.message }) },
   })
 
   const isPending = selectMutation.isPending || deselectMutation.isPending
+  const [removeTarget, setRemoveTarget] = useState<OptionalHolidayItem | null>(null)
 
   return (
     <PageContainer>
@@ -195,7 +199,7 @@ export function EssOptionalHolidays() {
                       disabled={isPending}
                       onClick={() =>
                         item.is_selected
-                          ? deselectMutation.mutate(item.pool_id)
+                          ? setRemoveTarget(item)
                           : selectMutation.mutate(item.pool_id)
                       }
                     >
@@ -214,6 +218,16 @@ export function EssOptionalHolidays() {
           </SectionCard>
         </>
       )}
+
+      <ConfirmDialog
+        open={!!removeTarget}
+        title="Remove optional holiday?"
+        message={removeTarget?.holiday ? `This will remove ${removeTarget.holiday.name} (${fmtDate(removeTarget.holiday.date)}) from your selection and adjust your leave balance.` : ''}
+        confirmLabel="Remove"
+        destructive
+        onConfirm={() => { if (removeTarget) deselectMutation.mutate(removeTarget.pool_id) }}
+        onCancel={() => setRemoveTarget(null)}
+      />
     </PageContainer>
   )
 }

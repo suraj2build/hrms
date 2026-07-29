@@ -14,6 +14,7 @@ import {
 } from '../../lib/fbp-service.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { serverError, ErrorCode } from '../../lib/api-errors.js'
+import { checkIdempotency, storeIdempotency } from '../../lib/idempotency.js'
 
 const FY_RE = /^\d{4}-\d{2}$/   // e.g. 2026-27
 
@@ -96,6 +97,15 @@ export default async function fbpRoutes(fastify: FastifyInstance) {
     const parsed = schema.safeParse(req.body)
     if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
 
+    const iKey = (req.headers['idempotency-key'] as string | undefined)?.trim()
+    if (iKey) {
+      const cached = await checkIdempotency(fastify.supabase, req.tenantId, iKey, 'fbp-my-create')
+      if (cached) {
+        reply.header('Idempotency-Replayed', 'true')
+        return reply.code(cached.status_code).send(cached.response)
+      }
+    }
+
     // The component must be a reimbursement component for this tenant.
     const { data: comp } = await fastify.supabase
       .from('salary_components').select('id, is_reimbursement')
@@ -110,7 +120,9 @@ export default async function fbpRoutes(fastify: FastifyInstance) {
       .select('*, salary_components(id, name, code)')
       .single()
     if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create FBP submission')
-    return reply.code(201).send({ data })
+    const responseBody = { data }
+    if (iKey) await storeIdempotency(fastify.supabase, req.tenantId, iKey, 'fbp-my-create', 201, responseBody)
+    return reply.code(201).send(responseBody)
   })
 
   // ── ESS: update own draft ────────────────────────────────────────────────────

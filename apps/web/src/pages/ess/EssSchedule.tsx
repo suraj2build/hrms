@@ -75,11 +75,12 @@ const DOW_NAMES_FULL  = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday',
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function monthStart(y: number, m: number) {
-  return new Date(y, m, 1).toISOString().slice(0, 10)
+  return `${y}-${String(m + 1).padStart(2, '0')}-01`
 }
 
 function monthEnd(y: number, m: number) {
-  return new Date(y, m + 1, 0).toISOString().slice(0, 10)
+  const d = new Date(y, m + 1, 0)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
 function buildCalendarDays(y: number, m: number): (number | null)[] {
@@ -216,7 +217,7 @@ export function EssSchedule() {
   const now        = new Date()
   const baseYear   = now.getFullYear()
   const baseMonth  = now.getMonth()
-  const todayStr   = now.toISOString().slice(0, 10)
+  const todayStr   = `${baseYear}-${String(baseMonth + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
 
   // Derive the two months to show (current + next, offset by monthOffset for navigation)
   const m1Year  = baseYear  + Math.floor((baseMonth + monthOffset)     / 12)
@@ -306,8 +307,8 @@ export function EssSchedule() {
     const end   = new Date(y, m + 1, 0)
     const cur   = new Date(start)
     while (cur <= end) {
-      const ds  = cur.toISOString().slice(0, 10)
-      const dow = cur.getUTCDay()
+      const ds  = `${cur.getFullYear()}-${String(cur.getMonth() + 1).padStart(2, '0')}-${String(cur.getDate()).padStart(2, '0')}`
+      const dow = cur.getDay()
       const t   = determineDayType(ds, todayStr, dailyMap.get(ds), holidaySet.has(ds), weeklyOffSet.has(dow))
       if (t === type) count++
       cur.setDate(cur.getDate() + 1)

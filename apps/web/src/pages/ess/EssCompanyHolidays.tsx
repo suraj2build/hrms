@@ -58,7 +58,8 @@ export function EssCompanyHolidays() {
   })
 
   const holidays = data?.data ?? []
-  const today = new Date().toISOString().slice(0, 10)
+  const _now = new Date()
+  const today = `${_now.getFullYear()}-${String(_now.getMonth() + 1).padStart(2, '0')}-${String(_now.getDate()).padStart(2, '0')}`
   const upcoming = holidays.filter(h => h.date >= today).length
 
   return (
