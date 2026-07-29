@@ -71,6 +71,14 @@ export function ssrfCheck(rawUrl: string): string | null {
     if (host === '::1' || host.startsWith('fe80:') || host.startsWith('fc') || host.startsWith('fd')) {
       return 'Private/internal IPv6 is not allowed'
     }
+    // IPv4-mapped IPv6 (::ffff:a.b.c.d, or fully-expanded 0:0:0:0:0:ffff:a.b.c.d)
+    // contains a colon, so it would otherwise skip the dotted-quad range check
+    // above entirely and pass through as "safe" — e.g. ::ffff:169.254.169.254
+    // reaching cloud metadata. Extract the embedded IPv4 and range-check it too.
+    const v4Mapped = host.match(/^(?:::ffff:|0:0:0:0:0:ffff:)(\d+\.\d+\.\d+\.\d+)$/i)
+    if (v4Mapped && isPrivateIPv4(v4Mapped[1])) {
+      return 'Private/internal IP is not allowed'
+    }
   }
   // Internal-only TLDs / single-label hostnames
   if (!host.includes('.') || host.endsWith('.internal') || host.endsWith('.local')) {

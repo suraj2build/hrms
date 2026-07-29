@@ -350,6 +350,20 @@ export async function markRebuildFailed(
     return { willRetry }
   }
 
+  // Exhausted retries on the optimistic-concurrency race itself. Force a
+  // terminal state rather than leave the row stuck at whatever status it had
+  // — otherwise it's invisible to getPendingRebuildQueue's 'pending' filter
+  // and never retried or surfaced as failed to an operator.
+  await supabase
+    .from('retroactive_rebuild_queue')
+    .update({
+      status:     'failed',
+      last_error: `${errorMsg} (also failed to record after repeated concurrent update collisions)`,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id',        queueId)
+    .eq('tenant_id', tenantId)
+
   return { willRetry: false }
 }
 

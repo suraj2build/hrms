@@ -75,11 +75,12 @@ export async function submitRegularisation(
 ): Promise<RegularisationResult<RegularisationRow>> {
   const { tenantId, employeeId, date, regularization_type, requested_check_in, requested_check_out, reason } = opts
 
-  const { data: policy } = await supabase
+  const { data: policy, error: policyErr } = await supabase
     .from('regularisation_policy')
     .select('*')
     .eq('tenant_id', tenantId)
     .maybeSingle()
+  if (policyErr) return { ok: false, error: { type: 'DB_ERROR', message: 'Failed to load regularisation policy' } }
 
   const windowDays      = policy?.submission_window_days ?? 7
   const maxPerPeriod    = policy?.max_per_month ?? 5

@@ -288,6 +288,7 @@ export async function fetchFullProfile(
       const { data: siteRow } = await sb.from('sites')
         .select('state_code')
         .eq('id', siteId)
+        .eq('tenant_id', tenantId)
         .maybeSingle()
       bank_statutory.site_state_code = (siteRow as any)?.state_code ?? null
     }
