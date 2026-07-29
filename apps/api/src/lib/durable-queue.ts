@@ -591,8 +591,14 @@ export class DurableJobQueue {
 
   // ── Observability ──────────────────────────────────────────────────────────────
 
-  /** Returns live queue metrics from the DB. Pass supabase to query before start(). */
-  async getMetrics(sb?: SupabaseClient): Promise<QueueMetrics> {
+  /**
+   * Returns live queue metrics from the DB, scoped to one tenant.
+   * Pass supabase to query before start(). `fastify.supabase` is a
+   * service-role client (bypasses RLS), so tenant scoping must happen here
+   * — without it, any hr_admin calling GET /system/jobs/durable or
+   * /system/metrics would see platform-wide job counts across every tenant.
+   */
+  async getMetrics(sb: SupabaseClient | undefined, tenantId: string): Promise<QueueMetrics> {
     const client = sb ?? this.supabase
     if (!client) {
       return { pending: 0, running: 0, completed: 0, dead: 0, by_type: {} }
@@ -602,6 +608,7 @@ export class DurableJobQueue {
     const { data: activeRows } = await client
       .from('background_jobs')
       .select('job_type, status')
+      .eq('tenant_id', tenantId)
       .in('status', ['pending', 'running'])
 
     // Dead jobs from results table (last 24h for metrics)
@@ -609,12 +616,14 @@ export class DurableJobQueue {
     const { count: deadCount } = await client
       .from('background_job_results')
       .select('id', { count: 'exact', head: true })
+      .eq('tenant_id', tenantId)
       .eq('final_status', 'dead')
       .gte('created_at', since24h)
 
     const { count: completedCount } = await client
       .from('background_job_results')
       .select('id', { count: 'exact', head: true })
+      .eq('tenant_id', tenantId)
       .eq('final_status', 'completed')
       .gte('created_at', since24h)
 
@@ -637,16 +646,25 @@ export class DurableJobQueue {
     }
   }
 
-  /** Returns recent dead-letter jobs from the DB. */
-  async getRecentDead(sb?: SupabaseClient, limit = 20): Promise<DurableJob[]> {
+  /**
+   * Returns recent dead-letter jobs from the DB, scoped to one tenant.
+   * `fastify.supabase` bypasses RLS, so without this filter a hr_admin
+   * would see (and be able to requeue) every tenant's dead jobs.
+   */
+  async getRecentDead(sb: SupabaseClient | undefined, tenantId: string, limit = 20): Promise<DurableJob[]> {
     const client = sb ?? this.supabase
     if (!client) return []
-    const { data } = await client
+    const { data, error } = await client
       .from('background_jobs')
       .select('*')
+      .eq('tenant_id', tenantId)
       .eq('status', 'dead')
       .order('failed_at', { ascending: false })
       .limit(limit)
+    if (error) {
+      this.log?.warn({ err: error.message, tenantId }, '[durable-queue] getRecentDead query failed')
+      return []
+    }
     return (data ?? []) as DurableJob[]
   }
 
@@ -657,7 +675,7 @@ export class DurableJobQueue {
    * times the quarantine flag is set in `poison_job_quarantine` (DB-backed,
    * survives process restarts and multi-instance deployments).
    */
-  async requeueDead(sb: SupabaseClient | undefined, jobId: string): Promise<boolean> {
+  async requeueDead(sb: SupabaseClient | undefined, tenantId: string, jobId: string): Promise<boolean> {
     const client = sb ?? this.supabase
     if (!client) return false
 
@@ -666,6 +684,7 @@ export class DurableJobQueue {
       .from('poison_job_quarantine')
       .select('requeue_count, is_quarantined, job_type')
       .eq('job_id', jobId)
+      .eq('tenant_id', tenantId)
       .maybeSingle()
 
     if (existing?.is_quarantined) {
@@ -677,10 +696,13 @@ export class DurableJobQueue {
     }
 
     // ── Step 2: Fetch job info for quarantine record ──────────────────────────
+    // Tenant-scoped: without this, an hr_admin could requeue another
+    // tenant's dead job by ID.
     const { data: jobRow } = await client
       .from('background_jobs')
       .select('job_type, tenant_id, status')
       .eq('id', jobId)
+      .eq('tenant_id', tenantId)
       .maybeSingle()
 
     if (!jobRow || jobRow.status !== 'dead') return false
@@ -731,6 +753,7 @@ export class DurableJobQueue {
         scheduled_at: new Date().toISOString(),
       })
       .eq('id', jobId)
+      .eq('tenant_id', tenantId)
       .eq('status', 'dead')
       .select('id')
       .maybeSingle()
@@ -741,14 +764,20 @@ export class DurableJobQueue {
     return !!requeued
   }
 
-  /** Purge old completed/dead results older than `days` days (default: 90). */
-  async purgeOldResults(sb?: SupabaseClient, days = 90): Promise<number> {
+  /**
+   * Purge old completed/dead results older than `days` days (default: 90),
+   * scoped to one tenant. Without this filter any hr_admin could
+   * irreversibly purge every tenant's job history via this destructive
+   * DELETE endpoint.
+   */
+  async purgeOldResults(sb: SupabaseClient | undefined, tenantId: string, days = 90): Promise<number> {
     const client = sb ?? this.supabase
     if (!client) return 0
     const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1_000).toISOString()
     const { data } = await client
       .from('background_job_results')
       .delete()
+      .eq('tenant_id', tenantId)
       .lt('created_at', cutoff)
       .select('id')
     return (data ?? []).length
@@ -761,7 +790,7 @@ export class DurableJobQueue {
    * accumulated in the last STORM_WINDOW_MS milliseconds.
    * Detected storms are persisted to `retry_storm_incidents` (DB-backed).
    */
-  async detectRetryStorm(sb?: SupabaseClient): Promise<RetryStormReport[]> {
+  async detectRetryStorm(sb: SupabaseClient | undefined, tenantId: string): Promise<RetryStormReport[]> {
     const client = sb ?? this.supabase
     if (!client) return []
 
@@ -770,6 +799,7 @@ export class DurableJobQueue {
     const { data, error } = await client
       .from('background_job_results')
       .select('job_type, tenant_id, created_at')
+      .eq('tenant_id', tenantId)
       .eq('final_status', 'dead')
       .gte('created_at', since)
       .order('created_at', { ascending: true })
@@ -831,7 +861,7 @@ export class DurableJobQueue {
   // ── Poison job quarantine (DB-backed) ─────────────────────────────────────────
 
   /** Returns DB-backed quarantine status for a job ID. Async — queries DB. */
-  async getPoisonJobStatus(sb: SupabaseClient | undefined, jobId: string): Promise<PoisonJobInfo | null> {
+  async getPoisonJobStatus(sb: SupabaseClient | undefined, tenantId: string, jobId: string): Promise<PoisonJobInfo | null> {
     const client = sb ?? this.supabase
     if (!client) return null
 
@@ -839,6 +869,7 @@ export class DurableJobQueue {
       .from('poison_job_quarantine')
       .select('job_id, job_type, requeue_count, is_quarantined')
       .eq('job_id', jobId)
+      .eq('tenant_id', tenantId)
       .maybeSingle()
 
     if (!data) return null
@@ -856,6 +887,7 @@ export class DurableJobQueue {
    */
   async clearQuarantine(
     sb:        SupabaseClient | undefined,
+    tenantId:  string,
     jobId:     string,
     clearedBy?: string,
     reason?:    string,
@@ -873,6 +905,7 @@ export class DurableJobQueue {
         clear_reason:   reason    ?? null,
       })
       .eq('job_id', jobId)
+      .eq('tenant_id', tenantId)
       .eq('is_quarantined', true)
       .select('job_id')
       .maybeSingle()
@@ -888,14 +921,15 @@ export class DurableJobQueue {
     return true
   }
 
-  /** Returns all currently quarantined jobs from DB. */
-  async getQuarantinedJobs(sb?: SupabaseClient): Promise<PoisonJobInfo[]> {
+  /** Returns all currently quarantined jobs from DB, scoped to one tenant. */
+  async getQuarantinedJobs(sb: SupabaseClient | undefined, tenantId: string): Promise<PoisonJobInfo[]> {
     const client = sb ?? this.supabase
     if (!client) return []
 
     const { data } = await client
       .from('poison_job_quarantine')
       .select('job_id, job_type, requeue_count, is_quarantined')
+      .eq('tenant_id', tenantId)
       .eq('is_quarantined', true)
       .is('cleared_at', null)
       .order('last_requeue_at', { ascending: false })
@@ -911,14 +945,15 @@ export class DurableJobQueue {
 
   // ── Storm incident management ──────────────────────────────────────────────────
 
-  /** Returns all open retry storm incidents from DB. */
-  async getOpenStormIncidents(sb?: SupabaseClient): Promise<any[]> {
+  /** Returns all open retry storm incidents from DB, scoped to one tenant. */
+  async getOpenStormIncidents(sb: SupabaseClient | undefined, tenantId: string): Promise<any[]> {
     const client = sb ?? this.supabase
     if (!client) return []
 
     const { data } = await client
       .from('retry_storm_incidents')
       .select('id, job_type, tenant_id, dead_count, first_dead_at, last_dead_at, detected_at, status')
+      .eq('tenant_id', tenantId)
       .eq('status', 'open')
       .order('dead_count', { ascending: false })
       .limit(50)
@@ -926,8 +961,8 @@ export class DurableJobQueue {
     return (data ?? []) as any[]
   }
 
-  /** Acknowledge a retry storm incident (operator action). */
-  async acknowledgeStorm(sb: SupabaseClient | undefined, incidentId: string, acknowledgedBy: string): Promise<boolean> {
+  /** Acknowledge a retry storm incident (operator action), scoped to one tenant. */
+  async acknowledgeStorm(sb: SupabaseClient | undefined, tenantId: string, incidentId: string, acknowledgedBy: string): Promise<boolean> {
     const client = sb ?? this.supabase
     if (!client) return false
 
@@ -939,6 +974,7 @@ export class DurableJobQueue {
         acknowledged_at: new Date().toISOString(),
       })
       .eq('id', incidentId)
+      .eq('tenant_id', tenantId)
       .eq('status', 'open')
       .select('id')
       .maybeSingle()

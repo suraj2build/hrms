@@ -145,7 +145,7 @@ export default async function operationalHealthRoutes(fastify: FastifyInstance) 
         .order('last_heartbeat_at', { ascending: false }),
 
       // 5. Durable queue metrics
-      durableQueue.getMetrics(fastify.supabase),
+      durableQueue.getMetrics(fastify.supabase, tenantId),
 
       // 6. Current month payroll run
       fastify.supabase

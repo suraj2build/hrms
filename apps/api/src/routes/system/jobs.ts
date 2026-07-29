@@ -361,7 +361,7 @@ export default async function jobQueueRoutes(fastify: FastifyInstance) {
       whFailedResult,
       whPendingResult,
     ] = await Promise.all([
-      durableQueue.getMetrics(fastify.supabase),
+      durableQueue.getMetrics(fastify.supabase, req.tenantId),
       // Cross-tenant leak fix: background_jobs/webhook_deliveries are tenant-scoped
       // tables (webhook_deliveries.tenant_id is NOT NULL per migration 091) — without
       // .eq('tenant_id', ...) a tenant-scoped hr_admin saw platform-wide counts across
@@ -473,7 +473,7 @@ export default async function jobQueueRoutes(fastify: FastifyInstance) {
       return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
     }
 
-    const metrics = await durableQueue.getMetrics(fastify.supabase)
+    const metrics = await durableQueue.getMetrics(fastify.supabase, req.tenantId)
 
     // Detect jobs stuck in 'running' longer than the stale recovery threshold (5 min).
     // These are jobs that a crashed worker held but were not yet recovered by
@@ -525,7 +525,7 @@ export default async function jobQueueRoutes(fastify: FastifyInstance) {
       return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
     }
 
-    const dead = await durableQueue.getRecentDead(fastify.supabase, 100)
+    const dead = await durableQueue.getRecentDead(fastify.supabase, req.tenantId, 100)
     return reply.send({ data: dead, total: dead.length })
   })
 
@@ -537,10 +537,10 @@ export default async function jobQueueRoutes(fastify: FastifyInstance) {
     }
 
     const { id } = req.params as { id: string }
-    const ok = await durableQueue.requeueDead(fastify.supabase, id)
+    const ok = await durableQueue.requeueDead(fastify.supabase, req.tenantId, id)
     if (!ok) {
       // Check if quarantined vs truly not found (DB-backed, async)
-      const poison = await durableQueue.getPoisonJobStatus(fastify.supabase, id)
+      const poison = await durableQueue.getPoisonJobStatus(fastify.supabase, req.tenantId, id)
       if (poison?.is_quarantined) {
         return reply.code(409).send({
           error:         'POISON_JOB_QUARANTINED',
@@ -563,7 +563,7 @@ export default async function jobQueueRoutes(fastify: FastifyInstance) {
     }
 
     const days  = parseInt((req.query as any).days ?? '90', 10) || 90
-    const count = await durableQueue.purgeOldResults(fastify.supabase, days)
+    const count = await durableQueue.purgeOldResults(fastify.supabase, req.tenantId, days)
     fastify.log.warn({ days, count, purgedBy: req.userId }, 'durable job results purged')
     return reply.send({ message: `Purged ${count} result(s) older than ${days} days`, purged: count })
   })
@@ -575,7 +575,7 @@ export default async function jobQueueRoutes(fastify: FastifyInstance) {
       return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
     }
 
-    const reports = await durableQueue.detectRetryStorm(fastify.supabase)
+    const reports = await durableQueue.detectRetryStorm(fastify.supabase, req.tenantId)
     const storms  = reports.filter(r => r.is_storm)
     return reply.send({
       data:         reports,
@@ -595,6 +595,7 @@ export default async function jobQueueRoutes(fastify: FastifyInstance) {
     const { reason } = req.body as { reason?: string } ?? {}
     const cleared = await durableQueue.clearQuarantine(
       fastify.supabase,
+      req.tenantId,
       id,
       req.userId,
       reason,
@@ -615,7 +616,7 @@ export default async function jobQueueRoutes(fastify: FastifyInstance) {
     if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
       return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
     }
-    const incidents = await durableQueue.getOpenStormIncidents(fastify.supabase)
+    const incidents = await durableQueue.getOpenStormIncidents(fastify.supabase, req.tenantId)
     return reply.send({ data: incidents, total: incidents.length })
   })
 
@@ -626,7 +627,7 @@ export default async function jobQueueRoutes(fastify: FastifyInstance) {
       return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
     }
     const { id } = req.params as { id: string }
-    const ok = await durableQueue.acknowledgeStorm(fastify.supabase, id, req.userId)
+    const ok = await durableQueue.acknowledgeStorm(fastify.supabase, req.tenantId, id, req.userId)
     if (!ok) {
       return reply.code(404).send({ error: 'NOT_FOUND', message: `Storm incident '${id}' not found or not open` })
     }
@@ -640,7 +641,7 @@ export default async function jobQueueRoutes(fastify: FastifyInstance) {
     if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
       return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
     }
-    const jobs = await durableQueue.getQuarantinedJobs(fastify.supabase)
+    const jobs = await durableQueue.getQuarantinedJobs(fastify.supabase, req.tenantId)
     return reply.send({ data: jobs, total: jobs.length })
   })
 

@@ -172,17 +172,54 @@ export async function buildDeptSnapshots(args: {
     }
   })
 
-  // Replace this month's rows so the snapshot always reflects the latest run.
-  const { error: delErr } = await supabase
-    .from('payroll_dept_snapshots')
-    .delete()
-    .eq('tenant_id', tenantId)
-    .eq('month', month)
-  if (delErr) return { ok: false, rows: 0, error: delErr.message }
-
-  if (rows.length > 0) {
-    const { error: insErr } = await supabase.from('payroll_dept_snapshots').insert(rows)
-    if (insErr) return { ok: false, rows: 0, error: insErr.message }
+  // Zero departments computed for this run (e.g. a run that produced no
+  // slips) must never silently replace a prior, good snapshot with nothing —
+  // this table is read directly by the executive dashboard, so an empty
+  // rebuild reporting ok:true would erase real numbers with no error surfaced
+  // anywhere. Refuse instead of deleting.
+  if (rows.length === 0) {
+    return { ok: false, rows: 0, error: 'No department rows computed for this run — refusing to replace existing snapshot' }
   }
+
+  // Upsert before deleting anything, so a failed write leaves the prior
+  // month's snapshot intact instead of the old delete-then-insert window
+  // (delete succeeds, insert fails → dashboard reads zero until the next
+  // successful rebuild).
+  //
+  // department_id is nullable (the "Unassigned" bucket) and Postgres unique
+  // constraints treat NULLs as distinct from one another, so upsert's
+  // onConflict can't match against a prior run's null-department row —
+  // delete that single row explicitly first (a narrow, single-row delete,
+  // not the whole month).
+  if (rows.some(r => r.department_id == null)) {
+    const { error: delUnassignedErr } = await supabase
+      .from('payroll_dept_snapshots')
+      .delete()
+      .eq('tenant_id', tenantId)
+      .eq('month', month)
+      .is('department_id', null)
+    if (delUnassignedErr) return { ok: false, rows: 0, error: delUnassignedErr.message }
+  }
+
+  const { error: upsertErr } = await supabase
+    .from('payroll_dept_snapshots')
+    .upsert(rows, { onConflict: 'tenant_id,department_id,month' })
+  if (upsertErr) return { ok: false, rows: 0, error: upsertErr.message }
+
+  // Clean up rows for departments that no longer appear in this run (e.g.
+  // merged/deleted departments) — mirrors the prior delete-all replace
+  // semantics for anything outside the current department set.
+  const currentDeptIds = rows.map(r => r.department_id).filter((id): id is string => id != null)
+  if (currentDeptIds.length > 0) {
+    const { error: staleErr } = await supabase
+      .from('payroll_dept_snapshots')
+      .delete()
+      .eq('tenant_id', tenantId)
+      .eq('month', month)
+      .not('department_id', 'is', null)
+      .not('department_id', 'in', `(${currentDeptIds.join(',')})`)
+    if (staleErr) return { ok: false, rows: rows.length, error: staleErr.message }
+  }
+
   return { ok: true, rows: rows.length }
 }
