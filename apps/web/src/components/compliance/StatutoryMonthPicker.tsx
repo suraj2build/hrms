@@ -9,7 +9,8 @@ import { CalendarDays } from 'lucide-react'
 import { useUIStore } from '@/stores/uiStore'
 
 function currentYM() {
-  return new Date().toISOString().slice(0, 7)
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
 }
 
 /** Resolved statutory month (selected, or current month if unset). */
