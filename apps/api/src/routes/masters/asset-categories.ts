@@ -10,7 +10,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z }                   from 'zod'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
-import { serverError, ErrorCode } from '../../lib/api-errors.js'
+import { serverError, notFound, ErrorCode } from '../../lib/api-errors.js'
 
 const assetCatSchema = z.object({
   code:                  z.string().min(1, 'Code is required').max(50).transform(v => v.toUpperCase().trim()),
@@ -112,13 +112,16 @@ export default async function assetCategoriesRoutes(fastify: FastifyInstance) {
       inUse = (count ?? 0) > 0
     } catch { /* assets table may not exist yet; fall through to deactivate */ }
 
-    const { error: updErr } = await fastify.supabase
+    const { data: updated, error: updErr } = await fastify.supabase
       .from('asset_categories')
       .update({ is_active: false })
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
+      .select('id')
+      .maybeSingle()
 
     if (updErr) return serverError(req, reply, updErr, ErrorCode.UPDATE_FAILED, 'Failed to deactivate asset category')
+    if (!updated) return notFound(reply, 'NOT_FOUND', 'Asset category not found')
     return reply.send({
       deactivated: true,
       message: inUse

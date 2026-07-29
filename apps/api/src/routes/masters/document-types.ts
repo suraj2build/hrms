@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { z } from 'zod'
-import { serverError, ErrorCode } from '../../lib/api-errors.js'
+import { serverError, notFound, ErrorCode } from '../../lib/api-errors.js'
 
 const schema = z.object({
   name:           z.string().min(1, 'Name is required'),
@@ -79,12 +79,15 @@ export default async function documentTypesRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', req.tenantId)
     const inUse = (count ?? 0) > 0
 
-    const { error } = await fastify.supabase
+    const { data: updated, error } = await fastify.supabase
       .from('document_types')
       .update({ is_active: false })
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
+      .select('id')
+      .maybeSingle()
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to deactivate document type')
+    if (!updated) return notFound(reply, 'NOT_FOUND', 'Document type not found')
     return reply.send({
       deactivated: true,
       message: inUse

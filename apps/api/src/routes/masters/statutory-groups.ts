@@ -11,7 +11,7 @@ import type { FastifyInstance } from 'fastify'
 import { z }                   from 'zod'
 import { logAction }           from '../../lib/audit-service.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
-import { serverError, ErrorCode } from '../../lib/api-errors.js'
+import { serverError, notFound, ErrorCode } from '../../lib/api-errors.js'
 
 const statutoryGroupSchema = z.object({
   code:              z.string().min(1, 'Code is required').max(50).transform(v => v.toUpperCase().trim()),
@@ -129,12 +129,15 @@ export default async function statutoryGroupsRoutes(fastify: FastifyInstance) {
     if (countErr) return serverError(req, reply, countErr, ErrorCode.QUERY_FAILED, 'Failed to check statutory group usage')
 
     if ((count ?? 0) > 0) {
-      const { error: updErr } = await fastify.supabase
+      const { data: updated, error: updErr } = await fastify.supabase
         .from('statutory_groups')
         .update({ is_active: false })
         .eq('id', id)
         .eq('tenant_id', req.tenantId)
+        .select('id')
+        .maybeSingle()
       if (updErr) return serverError(req, reply, updErr, ErrorCode.UPDATE_FAILED, 'Failed to deactivate statutory group')
+      if (!updated) return notFound(reply, 'NOT_FOUND', 'Statutory group not found')
       await logAction(fastify.supabase, {
         tenantId:    req.tenantId,
         tableName:   'statutory_groups',
@@ -146,12 +149,15 @@ export default async function statutoryGroupsRoutes(fastify: FastifyInstance) {
       return reply.send({ deactivated: true, message: `Statutory group deactivated — ${count} employee record(s) assigned` })
     }
 
-    const { error: delErr } = await fastify.supabase
+    const { data: deleted, error: delErr } = await fastify.supabase
       .from('statutory_groups')
       .delete()
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
+      .select('id')
+      .maybeSingle()
     if (delErr) return serverError(req, reply, delErr, ErrorCode.DELETE_FAILED, 'Failed to delete statutory group')
+    if (!deleted) return notFound(reply, 'NOT_FOUND', 'Statutory group not found')
     await logAction(fastify.supabase, {
       tenantId:    req.tenantId,
       tableName:   'statutory_groups',

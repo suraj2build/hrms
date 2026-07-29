@@ -14,7 +14,7 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { STANDARD_LEAVE_TYPES } from '../../lib/standard-leave-types.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
-import { serverError, ErrorCode } from '../../lib/api-errors.js'
+import { serverError, notFound, ErrorCode } from '../../lib/api-errors.js'
 
 const schema = z.object({
   name:              z.string().min(1, 'Name is required').max(50, 'Name must be 50 characters or less'),
@@ -171,15 +171,18 @@ export default async function leaveTypesRoutes(fastify: FastifyInstance) {
 
     if ((count ?? 0) > 0) {
       // Soft-deactivate — preserve historical data integrity
-      const { error: updateErr } = await fastify.supabase
+      const { data: updated, error: updateErr } = await fastify.supabase
         .from('leave_types')
         .update({ is_active: false })
         .eq('id', id)
         .eq('tenant_id', req.tenantId)
+        .select('id')
+        .maybeSingle()
 
       if (updateErr) {
         return serverError(req, reply, updateErr, ErrorCode.UPDATE_FAILED, 'Failed to deactivate leave type')
       }
+      if (!updated) return notFound(reply, 'NOT_FOUND', 'Leave type not found')
 
       return reply.send({
         message: 'Leave type deactivated — it has existing leave requests and cannot be deleted',
@@ -188,15 +191,18 @@ export default async function leaveTypesRoutes(fastify: FastifyInstance) {
     }
 
     // Hard delete — no applications reference this type
-    const { error: deleteErr } = await fastify.supabase
+    const { data: deleted, error: deleteErr } = await fastify.supabase
       .from('leave_types')
       .delete()
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
+      .select('id')
+      .maybeSingle()
 
     if (deleteErr) {
       return serverError(req, reply, deleteErr, ErrorCode.DELETE_FAILED, 'Failed to delete leave type')
     }
+    if (!deleted) return notFound(reply, 'NOT_FOUND', 'Leave type not found')
 
     return reply.code(204).send()
   })

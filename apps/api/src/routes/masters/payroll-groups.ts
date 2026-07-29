@@ -11,7 +11,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z }                   from 'zod'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
-import { serverError, ErrorCode } from '../../lib/api-errors.js'
+import { serverError, notFound, ErrorCode } from '../../lib/api-errors.js'
 
 const payrollGroupSchema = z.object({
   code:             z.string().min(1, 'Code is required').max(50).transform(v => v.toUpperCase().trim()),
@@ -110,21 +110,27 @@ export default async function payrollGroupsRoutes(fastify: FastifyInstance) {
     if (countErr) return serverError(req, reply, countErr, ErrorCode.QUERY_FAILED, 'Failed to check payroll group usage')
 
     if ((count ?? 0) > 0) {
-      const { error: updErr } = await fastify.supabase
+      const { data: updated, error: updErr } = await fastify.supabase
         .from('payroll_groups')
         .update({ is_active: false })
         .eq('id', id)
         .eq('tenant_id', req.tenantId)
+        .select('id')
+        .maybeSingle()
       if (updErr) return serverError(req, reply, updErr, ErrorCode.UPDATE_FAILED, 'Failed to deactivate payroll group')
+      if (!updated) return notFound(reply, 'NOT_FOUND', 'Payroll group not found')
       return reply.send({ deactivated: true, message: `Payroll group deactivated — ${count} employee(s) assigned` })
     }
 
-    const { error: delErr } = await fastify.supabase
+    const { data: deleted, error: delErr } = await fastify.supabase
       .from('payroll_groups')
       .delete()
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
+      .select('id')
+      .maybeSingle()
     if (delErr) return serverError(req, reply, delErr, ErrorCode.DELETE_FAILED, 'Failed to delete payroll group')
+    if (!deleted) return notFound(reply, 'NOT_FOUND', 'Payroll group not found')
     return reply.code(204).send()
   })
 }
