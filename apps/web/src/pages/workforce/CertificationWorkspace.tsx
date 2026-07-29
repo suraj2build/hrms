@@ -83,6 +83,11 @@ const STATUS_META: Record<string, { label: string; color: string }> = {
 
 // ── Form helper ───────────────────────────────────────────────────────────────
 
+function todayLocalStr(): string {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
 const EMPTY_FORM = {
   employee_id:  '',
   cert_name:    '',
@@ -437,7 +442,7 @@ function CertTable({
               {c.expiry_date && (
                 <span className={cn(
                   'flex items-center gap-1 text-xs',
-                  new Date(c.expiry_date) < new Date() ? 'text-destructive' : 'text-muted-foreground',
+                  c.expiry_date < todayLocalStr() ? 'text-destructive' : 'text-muted-foreground',
                 )}>
                   <Calendar className="h-3 w-3" />
                   Expires {format(new Date(c.expiry_date), 'dd MMM yyyy')}
