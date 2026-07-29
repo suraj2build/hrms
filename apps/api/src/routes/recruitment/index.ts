@@ -485,20 +485,28 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
       .select('status')
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
-      .single()
+      .maybeSingle()
 
     if (!existing) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Requisition not found' })
     if (!['draft', 'on_hold'].includes((existing as any).status)) {
       return reply.code(422).send({ error: 'INVALID_STATE', message: 'Only draft or on-hold requisitions can be edited' })
     }
 
-    const { error } = await fastify.supabase
+    // Fold the status precondition into the UPDATE's own WHERE — the SELECT
+    // above is only a pre-check; without this, a concurrent approve/hold/cancel
+    // racing this edit could pass the same check and both writes would apply
+    // with no conflict signal. Matches the pattern used by /approve, /hold, etc.
+    const { data: updated, error } = await fastify.supabase
       .from('job_requisitions')
       .update(parsed.data)
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
+      .in('status', ['draft', 'on_hold'])
+      .select('id')
+      .maybeSingle()
 
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update requisition')
+    if (!updated) return reply.code(422).send({ error: 'INVALID_STATE', message: 'Requisition is no longer draft or on-hold' })
 
     await logAction(fastify.supabase, {
       tenantId:    req.tenantId,
@@ -719,15 +727,21 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
     const { id } = req.params as { id: string }
 
     const { data: existing } = await fastify.supabase
-      .from('job_requisitions').select('status').eq('id', id).eq('tenant_id', req.tenantId).single()
+      .from('job_requisitions').select('status').eq('id', id).eq('tenant_id', req.tenantId).maybeSingle()
 
     if (!existing) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Requisition not found' })
     if ((existing as any).status !== 'draft') return reply.code(422).send({ error: 'INVALID_STATE', message: 'Only draft requisitions can be deleted' })
 
-    const { error } = await fastify.supabase
-      .from('job_requisitions').delete().eq('id', id).eq('tenant_id', req.tenantId)
+    // Fold the 'draft' precondition into the DELETE's own WHERE — applications.
+    // requisition_id cascades on delete, so a race where the requisition is
+    // approved between the SELECT above and this DELETE must not be allowed to
+    // cascade-delete a now-live requisition's applications/interviews/offers.
+    const { data: deleted, error } = await fastify.supabase
+      .from('job_requisitions').delete().eq('id', id).eq('tenant_id', req.tenantId).eq('status', 'draft')
+      .select('id').maybeSingle()
 
     if (error) return serverError(req, reply, error, ErrorCode.DELETE_FAILED, 'Failed to delete requisition')
+    if (!deleted) return reply.code(422).send({ error: 'INVALID_STATE', message: 'Requisition is no longer draft' })
     await logAction(fastify.supabase, { tenantId: req.tenantId, tableName: 'job_requisitions', recordId: id, action: 'DELETE', performedBy: req.userId, newData: null })
     return reply.send({ message: 'Requisition deleted' })
   })
@@ -1640,6 +1654,15 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
     if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
 
     const { interviewer_ids, ...roundData } = parsed.data
+
+    // Verify the round belongs to this tenant before touching interview_panel
+    // below — service-role Supabase bypasses RLS, so without this check a
+    // caller could attach their own interviewers to another tenant's round by
+    // guessing/reusing its id (the FK on interview_panel.round_id is satisfied
+    // by the foreign round either way).
+    const { data: owned } = await fastify.supabase
+      .from('interview_rounds').select('id').eq('id', id).eq('tenant_id', req.tenantId).maybeSingle()
+    if (!owned) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Interview not found' })
 
     if (Object.keys(roundData).length > 0) {
       const { error } = await fastify.supabase

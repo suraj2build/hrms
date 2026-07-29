@@ -483,12 +483,12 @@ export default async function policyRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', tenantId)
       .eq('id', id)
       .select('id, title')
-      .single()
+      .maybeSingle()
 
     if (error) {
-      req.log.error({ err: error, tenantId, id }, 'policy/update: update failed')
-      return reply.status(500).send({ error: 'UPDATE_FAILED', message: 'Failed to update policy' })
+      return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update policy')
     }
+    if (!data) return notFound(reply, 'POLICY_NOT_FOUND', 'Policy not found')
 
     await logAction(supabase, {
       tenantId,

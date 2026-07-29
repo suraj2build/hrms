@@ -54,7 +54,7 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { testConnection, effectiveModel, type AssistantConfig } from '../../lib/ai/llm.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
-import { serverError, ErrorCode } from '../../lib/api-errors.js'
+import { serverError, notFound, ErrorCode } from '../../lib/api-errors.js'
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -382,9 +382,10 @@ export default async function ownerRoutes(fastify: FastifyInstance) {
       .update(allowed)
       .eq('id', id)
       .select()
-      .single()
+      .maybeSingle()
 
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update tenant')
+    if (!data) return notFound(reply, 'TENANT_NOT_FOUND', 'Tenant not found')
     return reply.send({ data })
   })
 
@@ -409,9 +410,10 @@ export default async function ownerRoutes(fastify: FastifyInstance) {
       })
       .eq('id', id)
       .select('id, name, status, license_issued_at, license_expires_at')
-      .single()
+      .maybeSingle()
 
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to issue license')
+    if (!data) return notFound(reply, 'TENANT_NOT_FOUND', 'Tenant not found')
     return reply.send({ data })
   })
 
@@ -419,8 +421,9 @@ export default async function ownerRoutes(fastify: FastifyInstance) {
   fastify.post('/owner/tenants/:id/activate', ownerOnlyAuth, async (req: any, reply) => {
     const { id } = req.params
     const { data, error } = await fastify.supabase
-      .from('tenants').update({ status: 'active' }).eq('id', id).select('id, status').single()
+      .from('tenants').update({ status: 'active' }).eq('id', id).select('id, status').maybeSingle()
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to activate tenant')
+    if (!data) return notFound(reply, 'TENANT_NOT_FOUND', 'Tenant not found')
     return reply.send({ data })
   })
 
@@ -434,8 +437,9 @@ export default async function ownerRoutes(fastify: FastifyInstance) {
     const { data, error } = await fastify.supabase
       .from('tenants')
       .update({ status: 'suspended', notes: parsed.data.reason ?? null })
-      .eq('id', id).select('id, status').single()
+      .eq('id', id).select('id, status').maybeSingle()
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to suspend tenant')
+    if (!data) return notFound(reply, 'TENANT_NOT_FOUND', 'Tenant not found')
     return reply.send({ data })
   })
 
@@ -443,8 +447,9 @@ export default async function ownerRoutes(fastify: FastifyInstance) {
   fastify.post('/owner/tenants/:id/cancel', ownerOnlyAuth, async (req: any, reply) => {
     const { id } = req.params
     const { data, error } = await fastify.supabase
-      .from('tenants').update({ status: 'cancelled' }).eq('id', id).select('id, status').single()
+      .from('tenants').update({ status: 'cancelled' }).eq('id', id).select('id, status').maybeSingle()
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to cancel tenant')
+    if (!data) return notFound(reply, 'TENANT_NOT_FOUND', 'Tenant not found')
     return reply.send({ data })
   })
 
@@ -667,9 +672,10 @@ export default async function ownerRoutes(fastify: FastifyInstance) {
       .eq('id', userId)
       .eq('tenant_id', tenantId)
       .select('id, full_name, role, is_active')
-      .single()
+      .maybeSingle()
 
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update admin')
+    if (!data) return notFound(reply, 'ADMIN_NOT_FOUND', 'Admin not found')
     return reply.send({ data })
   })
 
@@ -948,9 +954,10 @@ export default async function ownerRoutes(fastify: FastifyInstance) {
       .update({ is_active: false })
       .eq('id', id)
       .select('id, is_active')
-      .single()
+      .maybeSingle()
 
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to revoke API key')
+    if (!data) return notFound(reply, 'API_KEY_NOT_FOUND', 'API key not found')
     return reply.send({ data })
   })
 
@@ -1209,9 +1216,10 @@ export default async function ownerRoutes(fastify: FastifyInstance) {
       .update(allowed)
       .eq('id', id)
       .select('id, name, email, role, is_active')
-      .single()
+      .maybeSingle()
 
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update platform admin')
+    if (!data) return notFound(reply, 'ADMIN_NOT_FOUND', 'Platform admin not found')
     return reply.send({ data })
   })
 
@@ -1229,9 +1237,10 @@ export default async function ownerRoutes(fastify: FastifyInstance) {
       .update({ is_active: false })
       .eq('id', id)
       .select('id, is_active')
-      .single()
+      .maybeSingle()
 
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to deactivate platform admin')
+    if (!data) return notFound(reply, 'ADMIN_NOT_FOUND', 'Platform admin not found')
     return reply.send({ data, message: 'Admin deactivated' })
   })
 
@@ -1435,8 +1444,9 @@ export default async function ownerRoutes(fastify: FastifyInstance) {
       return reply.code(400).send({ error: 'VALIDATION', message: "ai_mode must be 'self' or 'managed'" })
     }
     const { data, error } = await fastify.supabase
-      .from('tenants').update({ ai_mode: mode }).eq('id', id).select('id, ai_mode').single()
+      .from('tenants').update({ ai_mode: mode }).eq('id', id).select('id, ai_mode').maybeSingle()
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update tenant AI mode')
+    if (!data) return notFound(reply, 'TENANT_NOT_FOUND', 'Tenant not found')
     return reply.send({ data })
   })
 
