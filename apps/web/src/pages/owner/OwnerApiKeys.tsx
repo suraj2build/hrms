@@ -10,6 +10,7 @@ import { Input }  from '@/components/ui/input'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@/components/ui/dialog'
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 
 interface Tenant    { id: string; name: string }
 interface ApiKey    { id: string; tenant_id: string; name: string; key_prefix: string; scopes: string[]; is_active: boolean; last_used_at: string | null; created_at: string }
@@ -31,6 +32,7 @@ export function OwnerApiKeys() {
   const [newKey, setNewKey]         = useState<string | null>(null)
   const [showKey, setShowKey]       = useState(false)
   const [form, setForm]             = useState({ tenant_id: '', name: 'Production', scopes: ['employees:read'] as string[] })
+  const [revokeTarget, setRevokeTarget] = useState<ApiKey | null>(null)
 
   const { data: tenantsData } = useQuery<{ data: Tenant[] }>({
     queryKey: ['owner-tenants-list'],
@@ -58,7 +60,11 @@ export function OwnerApiKeys() {
 
   const revokeMut = useMutation({
     mutationFn: (id: string) => ownerApi.delete(`/owner/api-keys/${id}`),
-    onSuccess: () => { toast.success('Key revoked'); qc.invalidateQueries({ queryKey: ['owner-api-keys'] }) },
+    onSuccess: () => {
+      toast.success('Key revoked')
+      qc.invalidateQueries({ queryKey: ['owner-api-keys'] })
+      setRevokeTarget(null)
+    },
     onError: (e: unknown) => toast.error(e instanceof Error ? e.message : String(e)),
   })
 
@@ -141,7 +147,7 @@ export function OwnerApiKeys() {
                   <td className="px-4 py-2.5">
                     {k.is_active && (
                       <button
-                        onClick={() => revokeMut.mutate(k.id)}
+                        onClick={() => setRevokeTarget(k)}
                         className="text-muted-foreground hover:text-destructive transition-colors"
                         title="Revoke key"
                         aria-label="Revoke key"
@@ -252,6 +258,20 @@ export function OwnerApiKeys() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <ConfirmDialog
+        open={!!revokeTarget}
+        title="Revoke API Key"
+        message={
+          revokeTarget
+            ? `Revoke "${revokeTarget.name}" (${revokeTarget.key_prefix}…)? Any integration currently using this key will immediately stop working. This cannot be undone.`
+            : ''
+        }
+        confirmLabel="Revoke"
+        destructive
+        onConfirm={() => revokeTarget && revokeMut.mutate(revokeTarget.id)}
+        onCancel={() => setRevokeTarget(null)}
+      />
     </div>
   )
 }

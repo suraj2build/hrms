@@ -16,6 +16,7 @@ import {
   Select, SelectContent, SelectItem,
   SelectTrigger, SelectValue,
 }                                                 from '@/components/ui/select'
+import { ConfirmDialog }                          from '@/components/ui/ConfirmDialog'
 import { api }                                    from '@/lib/api/client'
 import { useAuthStore }                           from '@/stores/authStore'
 
@@ -99,6 +100,7 @@ export function PayrollGroups() {
   const [editItem, setEditItem] = useState<PayrollGroup | null>(null)
   const [form, setForm]        = useState(EMPTY)
   const [err, setErr]          = useState('')
+  const [deleteTarget, setDeleteTarget] = useState<PayrollGroup | null>(null)
 
   const { data: groupsData, isLoading } = useQuery<{ data: PayrollGroup[] }>({
     queryKey: ['payroll-groups'],
@@ -150,6 +152,7 @@ export function PayrollGroups() {
     onSuccess: (res) => {
       qc.invalidateQueries({ queryKey: ['payroll-groups'] })
       toast.success(res?.data?.deactivated ? 'Group deactivated (in use)' : 'Payroll group deleted')
+      setDeleteTarget(null)
     },
     onError: (e: Error) => toast.error('Delete failed', { description: e.message }),
   })
@@ -215,7 +218,7 @@ export function PayrollGroups() {
                           <Button
                             size="icon" variant="ghost"
                             className="h-7 w-7 text-destructive hover:text-destructive"
-                            onClick={() => delMut.mutate(g.id)}
+                            onClick={() => setDeleteTarget(g)}
                           >
                             <Trash2 className="h-3.5 w-3.5" />
                           </Button>
@@ -343,6 +346,20 @@ export function PayrollGroups() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <ConfirmDialog
+        open={!!deleteTarget}
+        title="Delete Payroll Group"
+        message={
+          deleteTarget
+            ? `Delete "${deleteTarget.name}" (${deleteTarget.code})? If no employees are currently assigned, this permanently deletes the group — there is no undo. If employees are assigned, it will be deactivated instead.`
+            : ''
+        }
+        confirmLabel="Delete"
+        destructive
+        onConfirm={() => deleteTarget && delMut.mutate(deleteTarget.id)}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </PageContainer>
   )
 }

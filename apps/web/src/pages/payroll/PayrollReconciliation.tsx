@@ -171,7 +171,11 @@ export function PayrollReconciliation() {
   const isAdmin = ['super_admin', 'hr_admin'].includes(profile?.role ?? '')
   const queryClient = useQueryClient()
 
-  const currentMonth = new Date().toISOString().slice(0, 7)
+  // Local y/m components, not .toISOString() — that converts to UTC first,
+  // so for an IST tenant (UTC+5:30) the first ~5.5 hours of every local
+  // calendar month would silently default this page to the previous month.
+  const _now = new Date()
+  const currentMonth = `${_now.getFullYear()}-${String(_now.getMonth() + 1).padStart(2, '0')}`
   const [month, setMonth]       = useState(currentMonth)
   const [search, setSearch]     = useState('')
   const [category, setCategory] = useState<string>('all')

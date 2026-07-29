@@ -185,14 +185,14 @@ export function NotificationTemplates() {
   const createTemplate = useMutation({
     mutationFn: (body: TemplateForm) => api.post('/notifications/templates', body),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['notifications', 'templates'] }); closeDialog(); toast.success('Template created') },
-    onError: (e: Error) => toast.error('Template created', { description: e.message }),
+    onError: (e: Error) => toast.error('Failed to create template', { description: e.message }),
   })
 
   const updateTemplate = useMutation({
     mutationFn: ({ id, body }: { id: string; body: Partial<TemplateForm> }) =>
       api.put(`/notifications/templates/${id}`, body),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['notifications', 'templates'] }); closeDialog(); toast.success('Template updated') },
-    onError: (e: Error) => toast.error('Template updated', { description: e.message }),
+    onError: (e: Error) => toast.error('Failed to update template', { description: e.message }),
   })
 
   const toggleChannel = useMutation({

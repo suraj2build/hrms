@@ -498,7 +498,17 @@ export function OwnerTenantDetail() {
                         <Button
                           size="sm"
                           variant="ghost"
-                          onClick={() => toggleAdminMut.mutate({ adminId: a.id, is_active: !a.is_active })}
+                          onClick={() => {
+                            if (a.is_active) {
+                              setCdlg({
+                                msg: `Deactivate "${displayName}"? They will be immediately locked out of the product until reactivated.`,
+                                act: () => toggleAdminMut.mutate({ adminId: a.id, is_active: false }),
+                                destructive: true,
+                              })
+                            } else {
+                              toggleAdminMut.mutate({ adminId: a.id, is_active: true })
+                            }
+                          }}
                           disabled={toggleAdminMut.isPending}
                           className={`h-6 px-2 text-[10px] gap-1 ${
                             a.is_active
