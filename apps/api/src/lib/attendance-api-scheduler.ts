@@ -18,6 +18,12 @@ import { durableQueue }        from './durable-queue.js'
 // How often the scheduler wakes up and checks for due sources (5 minutes)
 const TICK_MS = 5 * 60 * 1_000
 
+// A source stuck in 'running' longer than this is treated as abandoned (the
+// process that claimed it likely crashed/restarted before recording a
+// terminal status) and becomes eligible for another attempt, instead of being
+// excluded from every future poll forever.
+const STALE_RUNNING_MS = 30 * 60 * 1_000
+
 // Resolve dot-path (same logic as in api-sources.ts — kept local to avoid circular import)
 function resolvePath(obj: unknown, path?: string | null): unknown {
   if (!path) return obj
@@ -46,7 +52,15 @@ export async function runDueSources(supabase: SupabaseClient): Promise<void> {
   }
 
   const due = sources.filter((s: any) => {
-    if (s.last_fetch_status === 'running') return false  // already in-flight
+    if (s.last_fetch_status === 'running') {
+      // `updated_at` auto-bumps on every UPDATE (including the one that set
+      // 'running'), so it doubles as "claimed since". A row stuck here past
+      // the staleness window survived a crash/restart before recording a
+      // terminal status — treat it as abandoned rather than excluding it
+      // from every future poll forever.
+      const claimedSince = s.updated_at ? new Date(s.updated_at).getTime() : 0
+      if (now.getTime() - claimedSince < STALE_RUNNING_MS) return false
+    }
     if (!s.last_fetched_at) return true                  // never fetched
     const next = new Date(s.last_fetched_at).getTime() + s.poll_interval_min * 60_000
     return now.getTime() >= next
@@ -64,12 +78,24 @@ export async function runDueSources(supabase: SupabaseClient): Promise<void> {
 }
 
 async function processSingleSource(supabase: SupabaseClient, source: any): Promise<void> {
-  // Mark as running
-  const { error: runningErr } = await supabase
+  // Atomically claim: guard the WHERE clause on "not currently running" so
+  // two overlapping ticks/instances racing on the same due source can't both
+  // proceed to fetch — only one UPDATE actually matches a row.
+  const { data: claimed, error: runningErr } = await supabase
     .from('attendance_api_sources')
     .update({ last_fetch_status: 'running' })
     .eq('id', source.id)
-  if (runningErr) console.warn(`[att-api-scheduler] source ${source.id} failed to mark running:`, runningErr.message)
+    .or('last_fetch_status.is.null,last_fetch_status.neq.running')
+    .select('id')
+    .maybeSingle()
+  if (runningErr) {
+    console.warn(`[att-api-scheduler] source ${source.id} failed to mark running:`, runningErr.message)
+    return
+  }
+  if (!claimed) {
+    console.log(`[att-api-scheduler] source ${source.id} already claimed by a concurrent run — skipping`)
+    return
+  }
 
   const result = await fetchSourceData(source)
 

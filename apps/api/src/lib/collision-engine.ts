@@ -320,6 +320,9 @@ export async function logCollisions(
     }))
 
   if (rows.length > 0) {
-    await supabase.from('leave_collision_log').insert(rows)
+    const { error } = await supabase.from('leave_collision_log').insert(rows)
+    if (error) {
+      console.warn('[collision-engine] Failed to write collision audit log:', error.message)
+    }
   }
 }

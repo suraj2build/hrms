@@ -472,9 +472,15 @@ export async function writeAccrualEntry(
     if (existing) return { skipped: true }
 
     payload.cycle_key = opts.cycleKey
-    const { error } = await supabase
+    // .select() is required here: ignoreDuplicates alone reports error:null
+    // whether or not a row was actually inserted, so without it two
+    // concurrent callers that both pass the pre-check above (race window)
+    // would both report skipped:false even though only one row was written —
+    // the returned row count is the only reliable insert signal.
+    const { data: insertedRows, error } = await supabase
       .from('leave_accrual_ledger')
       .upsert(payload, { onConflict: 'cycle_key', ignoreDuplicates: true })
+      .select('id')
 
     if (error) {
       throw new Error(
@@ -482,7 +488,7 @@ export async function writeAccrualEntry(
       )
     }
 
-    return { skipped: false }
+    return { skipped: !insertedRows?.length }
   } else {
     // Pre-check the composite idempotency key so the caller can tell whether the
     // row already existed — an ignoreDuplicates upsert can't report that, and the
@@ -500,12 +506,13 @@ export async function writeAccrualEntry(
 
     if (existing) return { skipped: true }
 
-    const { error } = await supabase
+    const { data: insertedRows, error } = await supabase
       .from('leave_accrual_ledger')
       .upsert(payload, {
         onConflict:       'tenant_id,employee_id,leave_type_id,year,accrual_type,accrued_on',
         ignoreDuplicates: true,
       })
+      .select('id')
 
     if (error) {
       throw new Error(
@@ -513,7 +520,7 @@ export async function writeAccrualEntry(
       )
     }
 
-    return { skipped: false }
+    return { skipped: !insertedRows?.length }
   }
 }
 

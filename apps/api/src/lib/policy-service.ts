@@ -100,7 +100,7 @@ class AttendancePolicyService {
     if (cached) return cached
 
     // ── 1. Try employee-specific assignment ────────────────────────────────
-    const { data: empAssignment } = await supabase
+    const { data: empAssignment, error: empErr } = await supabase
       .from('employee_attendance_policies')
       .select(`
         attendance_policies (
@@ -113,6 +113,11 @@ class AttendancePolicyService {
       .eq('tenant_id', tenantId)
       .eq('employee_id', employeeId)
       .maybeSingle()
+    // A query error must not be conflated with "no employee-specific
+    // assignment" — that would fall through to the tenant/built-in default
+    // and CACHE it under this employee's key for the process lifetime,
+    // silently applying the wrong grace/threshold values until restart.
+    if (empErr) throw new Error(`getPolicy: employee_attendance_policies query failed: ${empErr.message}`)
 
     if (empAssignment) {
       const policyData = (empAssignment as unknown as {
@@ -136,7 +141,7 @@ class AttendancePolicyService {
       return cachedDefault
     }
 
-    const { data: defaultRow } = await supabase
+    const { data: defaultRow, error: defaultErr } = await supabase
       .from('attendance_policies')
       .select(
         'id, name, grace_minutes, late_cap_minutes, present_threshold_pct, half_day_threshold_pct, excessive_hours_threshold',
@@ -144,6 +149,7 @@ class AttendancePolicyService {
       .eq('tenant_id', tenantId)
       .eq('is_default', true)
       .maybeSingle()
+    if (defaultErr) throw new Error(`getPolicy: attendance_policies default query failed: ${defaultErr.message}`)
 
     if (defaultRow) {
       const policy = rowToPolicy(defaultRow as PolicyRow)

@@ -184,24 +184,50 @@ export async function transitionAttendanceState(
   if (!allowed.includes(newState)) return false
 
   const now = new Date().toISOString()
+  const payload = {
+    tenant_id:                tenantId,
+    employee_id:              employeeId,
+    work_date:                workDate,
+    state:                    newState,
+    state_reason:             reason                ?? null,
+    orchestrator_lineage_id:  lineageId             ?? null,
+    payroll_period_state_id:  payrollPeriodStateId  ?? null,
+    transitioned_at:          now,
+    updated_at:               now,
+  }
 
-  await supabase
+  // Fold the state we validated against into the UPDATE's own WHERE clause —
+  // otherwise two concurrent transitions can each read the same starting
+  // state and the second writer's blind upsert would silently overwrite
+  // whatever the first writer committed (e.g. reverting a 'frozen' row back
+  // to 'payroll_locked').
+  const { data: updated, error: updateErr } = await supabase
     .from('attendance_processing_states')
-    .upsert({
-      tenant_id:                tenantId,
-      employee_id:              employeeId,
-      work_date:                workDate,
-      state:                    newState,
-      state_reason:             reason                ?? null,
-      orchestrator_lineage_id:  lineageId             ?? null,
-      payroll_period_state_id:  payrollPeriodStateId  ?? null,
-      transitioned_at:          now,
-      updated_at:               now,
-    }, {
-      onConflict: 'tenant_id,employee_id,work_date',
-    })
+    .update(payload)
+    .eq('tenant_id',   tenantId)
+    .eq('employee_id', employeeId)
+    .eq('work_date',   workDate)
+    .eq('state',       currentState)
+    .select('id')
+    .maybeSingle()
+  if (updateErr) throw new Error(`transitionAttendanceState: update failed: ${updateErr.message}`)
+  if (updated) return true
 
-  return true
+  // No existing row matched the guarded UPDATE. If currentState was the
+  // implicit 'raw' default (no row yet), insert one — ignoreDuplicates
+  // guards against a concurrent writer having inserted first, in which case
+  // this correctly reports the race as lost rather than double-applying.
+  if (currentState === 'raw') {
+    const { data: inserted, error: insertErr } = await supabase
+      .from('attendance_processing_states')
+      .upsert(payload, { onConflict: 'tenant_id,employee_id,work_date', ignoreDuplicates: true })
+      .select('id')
+    if (insertErr) throw new Error(`transitionAttendanceState: insert failed: ${insertErr.message}`)
+    return !!inserted?.length
+  }
+
+  // A row existed but its state changed concurrently since our read above.
+  return false
 }
 
 /**

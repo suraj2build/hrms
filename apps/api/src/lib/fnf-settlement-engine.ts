@@ -109,7 +109,7 @@ export async function computeFnfSettlement(
   }
 
   // 4. Salary basis — last finalized payroll slip (gross + BASIC component)
-  const { data: lastSlip } = await supabase
+  const { data: lastSlip, error: slipErr } = await supabase
     .from('payroll_slips')
     .select('gross_pay, component_breakdown')
     .eq('tenant_id', tenantId)
@@ -117,6 +117,10 @@ export async function computeFnfSettlement(
     .order('month', { ascending: false })
     .limit(1)
     .maybeSingle()
+  // A query error must not fall through as "no prior slip" (→ gross/basic=0)
+  // — that would zero out gratuity and notice-shortfall entirely instead of
+  // surfacing the failure, silently understating the settlement.
+  if (slipErr) return { error: `Failed to fetch salary basis: ${slipErr.message}` }
   const gross = Number((lastSlip as any)?.gross_pay ?? 0)
   const components = ((lastSlip as any)?.component_breakdown ?? []) as Array<{ code?: string; monthly_amount?: number }>
   const basic = round2(
@@ -135,11 +139,15 @@ export async function computeFnfSettlement(
   const gratuity = round2(Math.min(cfg.maxAmount, gratuityRaw))
 
   // 6. Leave encashment — encashable types' remaining balance × (basis/26)
-  const { data: rules } = await supabase
+  const { data: rules, error: rulesErr } = await supabase
     .from('leave_accrual_rules')
     .select('leave_type_id')
     .eq('tenant_id', tenantId)
     .eq('encashable', true)
+  // A query error must not fall through as "no encashable leave types" —
+  // that would silently zero out leave_encashment_amount for an employee
+  // who does have encashable balance, rather than surfacing the failure.
+  if (rulesErr) return { error: `Failed to fetch encashable leave types: ${rulesErr.message}` }
   const encashableTypeIds = ((rules ?? []) as any[]).map(r => r.leave_type_id)
   let encashDays = 0
   if (encashableTypeIds.length > 0) {
@@ -173,13 +181,16 @@ export async function computeFnfSettlement(
     }
 
     const year = getLeaveYear(new Date(lastWorking), yearType)
-    const { data: balances } = await supabase
+    const { data: balances, error: balancesErr } = await supabase
       .from('employee_leave_balance')
       .select('balance, leave_type_id')
       .eq('tenant_id', tenantId)
       .eq('employee_id', employeeId)
       .eq('year', year)
       .in('leave_type_id', encashableTypeIds)
+    // Same reasoning as above: a query error here must not silently read as
+    // "zero balance" for a departing employee's leave encashment.
+    if (balancesErr) return { error: `Failed to fetch leave balances: ${balancesErr.message}` }
     encashDays = ((balances ?? []) as any[]).reduce((s, b) => s + Math.max(0, Number(b.balance ?? 0)), 0)
   }
   const encashRate = round2(basisAmount / 26)

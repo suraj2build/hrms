@@ -142,7 +142,7 @@ export async function getMonthDailyRows(
 ): Promise<{ rows: AttendanceDailyRow[]; error: string | null }> {
   const [y, m] = month.split('-').map(Number)
   const fromDate = `${month}-01`
-  const toDate   = new Date(y, m, 0).toISOString().slice(0, 10)  // last day of month
+  const toDate   = new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10)  // last day of month
 
   // A month of attendance_daily for any sizable tenant (thousands of employees
   // × ~30 days) routinely exceeds PostgREST's 1,000-row max-rows ceiling — this
