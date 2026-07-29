@@ -124,13 +124,31 @@ export default async function arrearsRoutes(fastify: FastifyInstance) {
     // record with no prior ownership check — verify it belongs to this
     // tenant (and isn't already approved/processed) before writing, matching
     // the guard the sibling /calculate endpoint already has.
-    const { data: batch } = await fastify.supabase
+    const { data: batch, error: batchErr } = await fastify.supabase
       .from('arrear_batches')
       .select('id, status')
       .eq('id', id).eq('tenant_id', req.tenantId).maybeSingle()
+    if (batchErr) return serverError(req, reply, batchErr, ErrorCode.QUERY_FAILED, 'Failed to verify arrear batch')
     if (!batch) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Batch not found' })
     if ((batch as any).status === 'approved' || (batch as any).status === 'processed') {
       return reply.code(409).send({ error: 'LOCKED', message: 'Batch already approved/processed' })
+    }
+
+    // Each record's employee_id is caller-supplied — fastify.supabase is a
+    // service-role client that bypasses RLS, and employees(id) has no
+    // tenant-compound FK, so verify every id belongs to this tenant before
+    // writing (mirrors the batch_id check above).
+    const recordEmployeeIds = [...new Set(parsed.data.records.map(r => r.employee_id))]
+    const { data: empRows, error: empErr } = await fastify.supabase
+      .from('employees')
+      .select('id')
+      .eq('tenant_id', req.tenantId)
+      .in('id', recordEmployeeIds)
+    if (empErr) return serverError(req, reply, empErr, ErrorCode.QUERY_FAILED, 'Failed to verify employees')
+    const validEmployeeIds = new Set((empRows ?? []).map((e: any) => e.id))
+    const invalidEmployeeId = recordEmployeeIds.find(eid => !validEmployeeIds.has(eid))
+    if (invalidEmployeeId) {
+      return reply.code(400).send({ error: 'VALIDATION_ERROR', message: `employee_id ${invalidEmployeeId} not found in your organisation` })
     }
 
     const recordRows = parsed.data.records.map(r => ({

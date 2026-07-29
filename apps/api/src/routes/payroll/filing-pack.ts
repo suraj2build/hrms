@@ -19,6 +19,8 @@ import { logAction } from '../../lib/audit-service.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
 import { serverError, ErrorCode } from '../../lib/api-errors.js'
+import { fetchTenantTz } from '../../lib/attendance-engine.js'
+import { getLocalDate } from '../../lib/org-context.js'
 
 // ── Shared helpers ────────────────────────────────────────────────────────────
 
@@ -59,9 +61,13 @@ function salaryDueDate(yyyyMM: string): string {
   return `01/${String(nextMonth).padStart(2, '0')}/${nextYear}`
 }
 
-function todayDDMMYYYY(): string {
-  const d = new Date()
-  return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`
+// Formats a tenant-local YYYY-MM-DD (resolved by the caller via
+// fetchTenantTz/getLocalDate) as DD/MM/YYYY — a bare server `new Date()`
+// would report the wrong upload date in this regulator-facing ECR field
+// during the server-UTC-vs-tenant-local day-boundary window.
+function toDDMMYYYY(yyyyMMdd: string): string {
+  const [y, m, d] = yyyyMMdd.split('-')
+  return `${d}/${m}/${y}`
 }
 
 // Quarter helpers (Indian FY: Q1=Apr-Jun, Q2=Jul-Sep, Q3=Oct-Dec, Q4=Jan-Mar)
@@ -111,9 +117,13 @@ async function build24QDataset(supabase: any, tenantId: string, quarter: string,
   const empIds = [...new Set(slips.map(r => r.employee_id))]
   const panMap = new Map<string, string>()
   if (empIds.length) {
-    const { data: panRows } = await supabase
+    const { data: panRows, error: panErr } = await supabase
       .from('employee_bank_statutory').select('employee_id, pan_number')
       .eq('tenant_id', tenantId).in('employee_id', empIds)
+    // Thrown so the caller's route handler (via Fastify's global error
+    // handler) 500s instead of silently defaulting every deductee's
+    // pan_status to MISSING in the 24Q filing output.
+    if (panErr) throw panErr
     for (const p of (panRows ?? []) as any[]) if (p.pan_number) panMap.set(p.employee_id, p.pan_number)
   }
 
@@ -422,6 +432,9 @@ export default async function filingPackRoutes(fastify: FastifyInstance) {
       return serverError(req, reply, epfErr, ErrorCode.QUERY_FAILED, 'Failed to fetch EPF contributions')
     }
 
+    if (regResult.error) return serverError(req, reply, regResult.error, ErrorCode.QUERY_FAILED, 'Failed to fetch EPF registration')
+    if (tenantResult.error) return serverError(req, reply, tenantResult.error, ErrorCode.QUERY_FAILED, 'Failed to fetch tenant details')
+
     const reg      = (regResult.data   as any) ?? {}
     const tenant   = (tenantResult.data as any) ?? {}
 
@@ -429,13 +442,14 @@ export default async function filingPackRoutes(fastify: FastifyInstance) {
     const empIds = rows.map(r => r.employee_id)
     const uanMap = new Map<string, string>()
     if (empIds.length > 0) {
-      const { data: uanRows } = await fastify.supabase
+      const { data: uanRows, error: uanErr } = await fastify.supabase
         .from('epf_eligibility_overrides')
         .select('employee_id, uan')
         .eq('tenant_id', req.tenantId)
         .in('employee_id', empIds)
         .not('uan', 'is', null)
         .is('effective_to', null)
+      if (uanErr) return serverError(req, reply, uanErr, ErrorCode.QUERY_FAILED, 'Failed to fetch EPF UANs')
       for (const u of (uanRows ?? []) as any[]) uanMap.set(u.employee_id, u.uan)
     }
 
@@ -450,7 +464,8 @@ export default async function filingPackRoutes(fastify: FastifyInstance) {
     const estName = tenant.name ?? ''
     const wageMonth = monthToDDMMYYYY(month)
     const dueDate   = salaryDueDate(month)
-    const today     = todayDDMMYYYY()
+    const tz        = await fetchTenantTz(fastify.supabase, req.tenantId)
+    const today     = toDDMMYYYY(getLocalDate(new Date().toISOString(), tz))
 
     // ECR 2.0 format
     const lines: string[] = [
@@ -593,11 +608,12 @@ export default async function filingPackRoutes(fastify: FastifyInstance) {
 
   // ── GET /payroll/filing-pack/deductor — deductor TAN/PAN + status ────────────
   fastify.get('/deductor', adminAuth, async (req: any, reply) => {
-    const { data } = await fastify.supabase
+    const { data, error } = await fastify.supabase
       .from('payroll_statutory_settings')
       .select('deductor_tan, deductor_pan')
       .eq('tenant_id', req.tenantId)
       .maybeSingle()
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch deductor details')
     const tan = (data as any)?.deductor_tan ?? null
     const pan = (data as any)?.deductor_pan ?? null
     // TAN format: 4 letters, 5 digits, 1 letter (e.g. MUMD12345E)
@@ -651,8 +667,9 @@ export default async function filingPackRoutes(fastify: FastifyInstance) {
     const { quarter, financial_year } = parsed.data
 
     // Deductor
-    const { data: settings } = await fastify.supabase
+    const { data: settings, error: settingsErr } = await fastify.supabase
       .from('payroll_statutory_settings').select('deductor_tan, deductor_pan').eq('tenant_id', req.tenantId).maybeSingle()
+    if (settingsErr) return serverError(req, reply, settingsErr, ErrorCode.QUERY_FAILED, 'Failed to fetch deductor details')
     const tan = (settings as any)?.deductor_tan ?? null
     const pan = (settings as any)?.deductor_pan ?? null
     const tanValid = tan ? /^[A-Z]{4}[0-9]{5}[A-Z]$/.test(String(tan).toUpperCase()) : false

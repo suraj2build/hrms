@@ -94,6 +94,20 @@ export default async function compensationRevisionsRoutes(fastify: FastifyInstan
       return validationError(reply, ErrorCode.VALIDATION_ERROR, parsed.error.issues[0]?.message)
     }
 
+    // employee_id is caller-supplied — fastify.supabase is a service-role
+    // client that bypasses RLS, and employees(id) has no tenant-compound FK,
+    // so without this check an HR admin could raise a revision (and, once
+    // approved, a phantom active compensation row) against another tenant's
+    // employee.
+    const { data: empRow, error: empErr } = await fastify.supabase
+      .from('employees')
+      .select('id')
+      .eq('id', parsed.data.employee_id)
+      .eq('tenant_id', req.tenantId)
+      .maybeSingle()
+    if (empErr) return serverError(req, reply, empErr, ErrorCode.QUERY_FAILED, 'Failed to verify employee')
+    if (!empRow) return notFound(reply, 'EMPLOYEE_NOT_FOUND', 'Employee not found')
+
     // Idempotency: prevents a double-submit (network retry, double-click) from
     // creating two pending revisions for the same employee.
     const iKey = (req.headers['idempotency-key'] as string | undefined)?.trim()
@@ -156,8 +170,11 @@ export default async function compensationRevisionsRoutes(fastify: FastifyInstan
 
     const now = new Date().toISOString()
 
-    // Update status to approved
-    const { error: updateErr } = await fastify.supabase
+    // Update status to approved — re-assert the pending precondition in the
+    // WHERE clause itself (not just the earlier SELECT check) so a second
+    // concurrent approve/reject can't both pass the read and both proceed
+    // into the downstream compensation-creation logic below.
+    const { data: approvedRow, error: updateErr } = await fastify.supabase
       .from('compensation_revisions')
       .update({
         status: 'approved',
@@ -167,8 +184,12 @@ export default async function compensationRevisionsRoutes(fastify: FastifyInstan
       })
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
+      .eq('status', 'pending')
+      .select('id')
+      .maybeSingle()
 
     if (updateErr) return serverError(req, reply, updateErr, ErrorCode.UPDATE_FAILED, 'Failed to update revision status')
+    if (!approvedRow) return conflictError(reply, 'INVALID_STATUS', 'Revision is no longer pending')
 
     // ── Fetch current active compensation + components BEFORE creating snapshots ──
     // This allows accurate gross/net computation from real component breakdown
@@ -400,7 +421,7 @@ export default async function compensationRevisionsRoutes(fastify: FastifyInstan
       return conflictError(reply, 'INVALID_STATUS', `Cannot reject revision with status '${(revision as any).status}'`)
     }
 
-    const { error } = await fastify.supabase
+    const { data: rejectedRow, error } = await fastify.supabase
       .from('compensation_revisions')
       .update({
         status: 'rejected',
@@ -409,8 +430,12 @@ export default async function compensationRevisionsRoutes(fastify: FastifyInstan
       })
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
+      .eq('status', 'pending')
+      .select('id')
+      .maybeSingle()
 
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to reject revision')
+    if (!rejectedRow) return conflictError(reply, 'INVALID_STATUS', 'Revision is no longer pending')
 
     await logAction(fastify.supabase, {
       tenantId:    req.tenantId,
