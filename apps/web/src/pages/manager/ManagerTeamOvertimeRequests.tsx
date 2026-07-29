@@ -18,6 +18,7 @@ import { PageContainer }  from '@/components/layout/PageContainer'
 import { PageHeader }     from '@/components/layout/PageHeader'
 import { SectionCard }    from '@/components/layout/SectionCard'
 import { Button }         from '@/components/ui/button'
+import { Input }          from '@/components/ui/input'
 import { cn }             from '@/lib/utils'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -62,12 +63,15 @@ function StatusBadge({ status }: { status: string }) {
 
 // ── Row component ─────────────────────────────────────────────────────────────
 
-function OtRow({ req, onAction, busy }: {
+function OtRow({ req, onApprove, onReject, busy }: {
   req: OtRequest
-  onAction: (id: string, action: 'approve' | 'reject') => void
+  onApprove: (id: string) => void
+  onReject: (id: string, reason: string) => void
   busy: boolean
 }) {
-  const [expanded, setExpanded] = useState(false)
+  const [expanded, setExpanded]   = useState(false)
+  const [rejecting, setRejecting] = useState(false)
+  const [rejectReason, setRejectReason] = useState('')
   const isPending = req.status === 'PENDING'
 
   return (
@@ -97,17 +101,42 @@ function OtRow({ req, onAction, busy }: {
           {req.approved_minutes != null && <p><span className="text-muted-foreground">Approved:</span> {fmtMins(req.approved_minutes)}</p>}
           {req.rejection_reason && <p><span className="text-muted-foreground">Reason:</span> {req.rejection_reason}</p>}
           {req.approved_at && <p><span className="text-muted-foreground">Actioned:</span> {new Date(req.approved_at).toLocaleDateString()}</p>}
-          {isPending && (
+          {isPending && !rejecting && (
             <div className="flex gap-2 pt-2">
               <Button size="sm" variant="default" className="h-7 gap-1 bg-success hover:bg-success/90"
                 disabled={busy}
-                onClick={e => { e.stopPropagation(); onAction(req.id, 'approve') }}>
+                onClick={e => { e.stopPropagation(); onApprove(req.id) }}>
                 <Check className="h-3 w-3" /> Approve
               </Button>
               <Button size="sm" variant="destructive" className="h-7 gap-1"
                 disabled={busy}
-                onClick={e => { e.stopPropagation(); onAction(req.id, 'reject') }}>
+                onClick={e => { e.stopPropagation(); setRejecting(true) }}>
                 <X className="h-3 w-3" /> Reject
+              </Button>
+            </div>
+          )}
+          {isPending && rejecting && (
+            // The backend requires a non-empty rejection_reason
+            // (z.string().min(1)) — this page previously called reject with
+            // an empty body, so every click 400'd and the request stayed
+            // pending forever.
+            <div className="flex items-center gap-2 pt-2" onClick={e => e.stopPropagation()}>
+              <Input
+                value={rejectReason}
+                onChange={e => setRejectReason(e.target.value)}
+                placeholder="Reason for rejection…"
+                className="h-7 text-xs flex-1 max-w-xs"
+                autoFocus
+              />
+              <Button size="sm" variant="destructive" className="h-7 gap-1 text-xs"
+                disabled={busy || !rejectReason.trim()}
+                onClick={() => onReject(req.id, rejectReason.trim())}>
+                {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : <X className="h-3 w-3" />}
+                Confirm Reject
+              </Button>
+              <Button size="sm" variant="ghost" className="h-7 text-xs"
+                onClick={() => { setRejecting(false); setRejectReason('') }}>
+                Cancel
               </Button>
             </div>
           )}
@@ -145,24 +174,19 @@ export function ManagerTeamOvertimeRequests({ embedded = false }: { embedded?: b
   })
 
   const rejectMut = useMutation({
-    mutationFn: (id: string) => api.post(`/overtime/requests/${id}/reject`, {}),
+    mutationFn: ({ id, reason }: { id: string; reason: string }) => api.post(`/overtime/requests/${id}/reject`, { rejection_reason: reason }),
     onSuccess:  () => { toast.success('OT request rejected'); qc.invalidateQueries({ queryKey: ['manager-team-overtime'] }); qc.invalidateQueries({ queryKey: ['ot-requests'] }) },
     onError:    (e: Error) => {
       if (e instanceof ApiError && e.error === 'PERIOD_LOCKED') {
         toast.error('Period locked', { description: 'Overtime rejection is blocked — the attendance period has been finalized for payroll.' })
       } else {
-        toast.error('Failed to reject')
+        toast.error('Failed to reject', { description: e.message })
       }
     },
   })
 
-  function onAction(id: string, action: 'approve' | 'reject') {
-    if (action === 'approve') approveMut.mutate(id)
-    else rejectMut.mutate(id)
-  }
-
   const actioningId = approveMut.isPending ? approveMut.variables
-    : rejectMut.isPending ? rejectMut.variables
+    : rejectMut.isPending ? rejectMut.variables?.id
     : null
 
   const rows = data?.data ?? []
@@ -198,7 +222,15 @@ export function ManagerTeamOvertimeRequests({ embedded = false }: { embedded?: b
           </div>
         ) : (
           <div className="divide-y-0">
-            {rows.map(r => <OtRow key={r.id} req={r} onAction={onAction} busy={actioningId === r.id} />)}
+            {rows.map(r => (
+              <OtRow
+                key={r.id}
+                req={r}
+                onApprove={id => approveMut.mutate(id)}
+                onReject={(id, reason) => rejectMut.mutate({ id, reason })}
+                busy={actioningId === r.id}
+              />
+            ))}
           </div>
         )}
       </SectionCard>

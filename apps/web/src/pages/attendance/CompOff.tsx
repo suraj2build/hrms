@@ -356,7 +356,7 @@ export function CompOff() {
                             <td colSpan={7} className="px-3 py-2">
                               <div className="flex items-center gap-2">
                                 <span className="text-xs text-foreground font-medium">
-                                  {actionType === 'approve' ? 'Add notes (optional):' : 'Reason for rejection (optional):'}
+                                  {actionType === 'approve' ? 'Add notes (optional):' : 'Reason for rejection (required):'}
                                 </span>
                                 <Input
                                   value={notes}
@@ -379,7 +379,9 @@ export function CompOff() {
                                     size="sm"
                                     variant="destructive"
                                     className="h-7 gap-1 text-xs"
-                                    disabled={rejectMutation.isPending}
+                                    // Backend rejectSchema requires notes.min(1) — without this
+                                    // guard, confirming with an empty reason always 400s.
+                                    disabled={rejectMutation.isPending || !notes.trim()}
                                     onClick={() => rejectMutation.mutate({ id: req.id, notes })}
                                   >
                                     {rejectMutation.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <X className="h-3 w-3" />}

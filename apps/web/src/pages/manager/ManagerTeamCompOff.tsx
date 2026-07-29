@@ -18,6 +18,7 @@ import { PageContainer } from '@/components/layout/PageContainer'
 import { PageHeader }    from '@/components/layout/PageHeader'
 import { SectionCard }   from '@/components/layout/SectionCard'
 import { Button }        from '@/components/ui/button'
+import { Input }         from '@/components/ui/input'
 import { cn }            from '@/lib/utils'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -50,12 +51,15 @@ function StatusBadge({ status }: { status: string }) {
   )
 }
 
-function CoRow({ req, onAction, busy }: {
+function CoRow({ req, onApprove, onReject, busy }: {
   req: CoRequest
-  onAction: (id: string, action: 'approve' | 'reject') => void
+  onApprove: (id: string) => void
+  onReject: (id: string, notes: string) => void
   busy: boolean
 }) {
-  const [expanded, setExpanded] = useState(false)
+  const [expanded, setExpanded]   = useState(false)
+  const [rejecting, setRejecting] = useState(false)
+  const [rejectNotes, setRejectNotes] = useState('')
   const isPending = req.status === 'pending'
 
   return (
@@ -83,17 +87,41 @@ function CoRow({ req, onAction, busy }: {
           {req.leave_type && <p><span className="text-muted-foreground">Leave type:</span> {req.leave_type.name}</p>}
           {req.notes && <p><span className="text-muted-foreground">Notes:</span> {req.notes}</p>}
           {req.reviewed_at && <p><span className="text-muted-foreground">Reviewed:</span> {new Date(req.reviewed_at).toLocaleDateString()}</p>}
-          {isPending && (
+          {isPending && !rejecting && (
             <div className="flex gap-2 pt-2">
               <Button size="sm" className="h-7 gap-1 bg-success hover:bg-success/90"
                 disabled={busy}
-                onClick={e => { e.stopPropagation(); onAction(req.id, 'approve') }}>
+                onClick={e => { e.stopPropagation(); onApprove(req.id) }}>
                 <Check className="h-3 w-3" /> Approve
               </Button>
               <Button size="sm" variant="destructive" className="h-7 gap-1"
                 disabled={busy}
-                onClick={e => { e.stopPropagation(); onAction(req.id, 'reject') }}>
+                onClick={e => { e.stopPropagation(); setRejecting(true) }}>
                 <X className="h-3 w-3" /> Reject
+              </Button>
+            </div>
+          )}
+          {isPending && rejecting && (
+            // The backend requires a non-empty rejection reason (rejectSchema:
+            // notes.min(1)) — this page previously called reject with an empty
+            // body, so every click 400'd and the request stayed pending forever.
+            <div className="flex items-center gap-2 pt-2" onClick={e => e.stopPropagation()}>
+              <Input
+                value={rejectNotes}
+                onChange={e => setRejectNotes(e.target.value)}
+                placeholder="Reason for rejection…"
+                className="h-7 text-xs flex-1 max-w-xs"
+                autoFocus
+              />
+              <Button size="sm" variant="destructive" className="h-7 gap-1 text-xs"
+                disabled={busy || !rejectNotes.trim()}
+                onClick={() => onReject(req.id, rejectNotes.trim())}>
+                {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : <X className="h-3 w-3" />}
+                Confirm Reject
+              </Button>
+              <Button size="sm" variant="ghost" className="h-7 text-xs"
+                onClick={() => { setRejecting(false); setRejectNotes('') }}>
+                Cancel
               </Button>
             </div>
           )}
@@ -140,7 +168,7 @@ export function ManagerTeamCompOff({ embedded = false }: { embedded?: boolean })
   })
 
   const rejectMut = useMutation({
-    mutationFn: (id: string) => api.post(`/attendance/comp-off/${id}/reject`, {}),
+    mutationFn: ({ id, notes }: { id: string; notes: string }) => api.post(`/attendance/comp-off/${id}/reject`, { notes }),
     onSuccess:  () => {
       toast.success('Comp-off rejected')
       qc.invalidateQueries({ queryKey: ['manager-team-compoff'] })
@@ -150,13 +178,19 @@ export function ManagerTeamCompOff({ embedded = false }: { embedded?: boolean })
       qc.invalidateQueries({ queryKey: ['ess-compoff-my'] })
       qc.invalidateQueries({ queryKey: ['flowdesk-compoff'] })
     },
-    onError:    () => toast.error('Failed to reject'),
+    onError:    (e: Error) => {
+      if (e instanceof ApiError && e.error === 'PERIOD_LOCKED') {
+        toast.error('Period locked', { description: 'This request belongs to a locked attendance period and can no longer be modified.' })
+      } else {
+        toast.error('Failed to reject', { description: e.message })
+      }
+    },
   })
 
   const rows = data?.data ?? []
   const pendingCount = rows.filter(r => r.status === 'pending').length
   const actioningId = approveMut.isPending ? approveMut.variables
-    : rejectMut.isPending ? rejectMut.variables
+    : rejectMut.isPending ? rejectMut.variables?.id
     : null
 
   const body = (
@@ -189,7 +223,8 @@ export function ManagerTeamCompOff({ embedded = false }: { embedded?: boolean })
             <CoRow
               key={r.id}
               req={r}
-              onAction={(id, action) => action === 'approve' ? approveMut.mutate(id) : rejectMut.mutate(id)}
+              onApprove={id => approveMut.mutate(id)}
+              onReject={(id, notes) => rejectMut.mutate({ id, notes })}
               busy={actioningId === r.id}
             />
           ))
