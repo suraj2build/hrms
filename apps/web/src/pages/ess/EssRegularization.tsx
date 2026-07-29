@@ -28,6 +28,7 @@ import { Badge }         from '@/components/ui/badge'
 import { Button }        from '@/components/ui/button'
 import { Input }         from '@/components/ui/input'
 import { DateInput }     from '@/components/ui/date-input'
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { api }           from '@/lib/api/client'
 import { useAuthStore }  from '@/stores/authStore'
 import { cn }            from '@/lib/utils'
@@ -242,6 +243,7 @@ export function EssRegularization() {
 
   // ── Mutation: cancel pending request ─────────────────────────────────────
   const [cancellingId, setCancellingId] = useState<string | null>(null)
+  const [withdrawTarget, setWithdrawTarget] = useState<string | null>(null)
   const cancelMutation = useMutation({
     mutationFn: (id: string) => api.post(`/attendance/regularisation/${id}/cancel`, {}),
     onSuccess: () => {
@@ -312,7 +314,11 @@ export function EssRegularization() {
                 </label>
                 <DateInput
                   value={date}
-                  max={new Date(Date.now() - 86_400_000).toISOString().slice(0, 10)}
+                  max={(() => {
+                    const yesterday = new Date()
+                    yesterday.setDate(yesterday.getDate() - 1)
+                    return `${yesterday.getFullYear()}-${String(yesterday.getMonth() + 1).padStart(2, '0')}-${String(yesterday.getDate()).padStart(2, '0')}`
+                  })()}
                   onChange={setDate}
                   className="h-9 text-xs max-w-[220px]"
                 />
@@ -519,10 +525,7 @@ export function EssRegularization() {
                             variant="ghost"
                             className="h-6 px-2 text-[10px] text-destructive hover:text-destructive hover:bg-destructive/10"
                             disabled={cancellingId === row.id}
-                            onClick={() => {
-                              setCancellingId(row.id)
-                              cancelMutation.mutate(row.id)
-                            }}
+                            onClick={() => setWithdrawTarget(row.id)}
                           >
                             {cancellingId === row.id
                               ? <Loader2 className="h-3 w-3 animate-spin" />
@@ -598,10 +601,7 @@ export function EssRegularization() {
                                 variant="ghost"
                                 className="h-6 px-2 text-[10px] text-destructive hover:text-destructive hover:bg-destructive/10"
                                 disabled={cancellingId === row.id}
-                                onClick={() => {
-                                  setCancellingId(row.id)
-                                  cancelMutation.mutate(row.id)
-                                }}
+                                onClick={() => setWithdrawTarget(row.id)}
                               >
                                 {cancellingId === row.id
                                   ? <Loader2 className="h-3 w-3 animate-spin" />
@@ -629,6 +629,22 @@ export function EssRegularization() {
           </SectionCard>
         </>
       )}
+
+      <ConfirmDialog
+        open={!!withdrawTarget}
+        title="Withdraw request?"
+        message="This regularization request will be withdrawn and can no longer be reviewed by your manager."
+        confirmLabel="Withdraw"
+        destructive
+        onConfirm={() => {
+          if (withdrawTarget) {
+            setCancellingId(withdrawTarget)
+            cancelMutation.mutate(withdrawTarget)
+          }
+          setWithdrawTarget(null)
+        }}
+        onCancel={() => setWithdrawTarget(null)}
+      />
     </PageContainer>
   )
 }

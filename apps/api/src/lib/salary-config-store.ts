@@ -507,6 +507,17 @@ export async function updateStructureComponent(
 ): Promise<StoreResult> {
   const parsed = structureComponentUpdateSchema.safeParse(body)
   if (!parsed.success) return fail(400, 'VALIDATION', parsed.error.issues[0]?.message ?? 'Invalid component')
+
+  // salary_component_id is caller-supplied and, if re-pointed, must belong to
+  // this tenant — otherwise the update (and its response embed) would read
+  // and link to another tenant's salary_components row.
+  if (parsed.data.salary_component_id) {
+    const { data: comp, error: compErr } = await supabase
+      .from('salary_components').select('id').eq('id', parsed.data.salary_component_id).eq('tenant_id', tenantId).maybeSingle()
+    if (compErr) return dbFail(compErr)
+    if (!comp) return fail(404, 'NOT_FOUND', 'Salary component not found')
+  }
+
   const { data, error } = await supabase
     .from('salary_structure_components')
     .update(parsed.data)

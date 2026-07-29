@@ -100,6 +100,9 @@ export function AdminHiredPipeline() {
       setModalOpen(false)
       setTargetApp(null)
       qc.invalidateQueries({ queryKey: ['recruitment', 'hired'] })
+      // Pre-Joinee Invitations page reads the same new record under these keys.
+      qc.invalidateQueries({ queryKey: ['pre-joinee-list'] })
+      qc.invalidateQueries({ queryKey: ['pre-joinee-stats'] })
     },
     onError: (e: unknown) => toast.error(e instanceof Error ? e.message : 'Failed to initiate preboarding'),
   })
