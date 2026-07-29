@@ -17,12 +17,19 @@ import { eventBus }            from '../../lib/event-bus.js'
 import { aggregateDeptCost, buildDeptSnapshots, SLIP_DEPT_SELECT } from '../../lib/payroll-dept-snapshot.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { fetchTenantTz } from '../../lib/attendance-engine.js'
+import { getLocalDate } from '../../lib/org-context.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 const monthRe = /^\d{4}-\d{2}$/
 
-function currentMonth(): string {
-  const d = new Date()
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+// Tenant-local current month — a bare server-UTC clock would default to the
+// wrong month during the first ~5.5 hours of a new tenant-local month for an
+// IST tenant (the same bug class already fixed via fetchTenantTz/getLocalDate
+// in forecast.ts/simulate.ts).
+async function currentMonth(fastify: FastifyInstance, tenantId: string): Promise<string> {
+  const tz = await fetchTenantTz(fastify.supabase, tenantId)
+  return getLocalDate(new Date().toISOString(), tz).slice(0, 7)
 }
 
 function priorMonth(m: string): string {
@@ -54,7 +61,7 @@ export default async function payrollCostRoute(fastify: FastifyInstance) {
   fastify.get('/analytics/payroll/cost', auth, async (req: any, reply) => {
     if (!requireAdmin(req, reply)) return
 
-    const month = (req.query as any).month || currentMonth()
+    const month = (req.query as any).month || await currentMonth(fastify, req.tenantId)
     if (!monthRe.test(month)) {
       return reply.code(400).send({ error: 'INVALID_PARAM', message: 'month must be YYYY-MM' })
     }
@@ -231,7 +238,7 @@ export default async function payrollCostRoute(fastify: FastifyInstance) {
   fastify.get('/analytics/payroll/cost/insights', auth, async (req: any, reply) => {
     if (!requireAdmin(req, reply)) return
 
-    const month = (req.query as any).month || currentMonth()
+    const month = (req.query as any).month || await currentMonth(fastify, req.tenantId)
 
     const insights: Array<{
       type: string; severity: 'low' | 'medium' | 'high'
@@ -317,13 +324,33 @@ export default async function payrollCostRoute(fastify: FastifyInstance) {
       })
     }
 
-    // Compensation risk: employees with no active compensation
-    const { data: noComp, count: noCompCount } = await fastify.supabase
+    // Compensation risk: employees with no active compensation.
+    // PostgREST's `not.in` only accepts a literal id list, not a SQL
+    // subquery string — `.not('id','in', '(SELECT ...)')` never executes the
+    // subquery, so it silently matched every active employee. Pre-fetch the
+    // set of employee_ids that DO have active compensation (paginated —
+    // this can exceed 1000 rows) and filter against that literal list instead
+    // (same pattern as payroll/index.ts / intelligence/index.ts).
+    const activeCompRows = await fetchAllRows((from, to) =>
+      fastify.supabase
+        .from('employee_compensations')
+        .select('employee_id')
+        .eq('tenant_id', req.tenantId)
+        .eq('is_active', true)
+        .range(from, to),
+    )
+    const activeCompIds = [...new Set(activeCompRows.map((r: any) => r.employee_id))]
+
+    let noCompQuery = fastify.supabase
       .from('employees')
       .select('id', { count: 'exact', head: true })
       .eq('tenant_id', req.tenantId)
       .eq('status', 'active')
-      .not('id', 'in', `(SELECT employee_id FROM employee_compensations WHERE tenant_id = '${req.tenantId}' AND is_active = true)`)
+    if (activeCompIds.length > 0) {
+      noCompQuery = noCompQuery.not('id', 'in', `(${activeCompIds.join(',')})`)
+    }
+    const { count: noCompCount, error: noCompErr } = await noCompQuery
+    if (noCompErr) return serverError(req, reply, noCompErr, ErrorCode.QUERY_FAILED, 'Failed to check compensation gaps')
 
     if ((noCompCount ?? 0) > 0) {
       insights.push({
@@ -347,7 +374,7 @@ export default async function payrollCostRoute(fastify: FastifyInstance) {
   fastify.get('/analytics/payroll/cost/departments', auth, async (req: any, reply) => {
     if (!requireAdmin(req, reply)) return
 
-    const month = (req.query as any).month || currentMonth()
+    const month = (req.query as any).month || await currentMonth(fastify, req.tenantId)
     if (!monthRe.test(month)) {
       return reply.code(400).send({ error: 'INVALID_PARAM', message: 'month must be YYYY-MM' })
     }
@@ -405,9 +432,7 @@ export default async function payrollCostRoute(fastify: FastifyInstance) {
       .order('month', { ascending: true })
       .order('created_at', { ascending: true })
 
-    if (runsErr) {
-      return reply.code(500).send({ error: 'BACKFILL_FAILED', message: runsErr.message })
-    }
+    if (runsErr) return serverError(req, reply, runsErr, ErrorCode.QUERY_FAILED, 'Failed to fetch finalized payroll runs for backfill')
 
     // Latest finalized run per month (later created_at wins within a month).
     const latestPerMonth = new Map<string, string>()

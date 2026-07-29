@@ -23,6 +23,7 @@ import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { fetchTenantTz }  from '../../lib/attendance-engine.js'
 import { getLocalDate }   from '../../lib/org-context.js'
 import { fetchAllRows }   from '../../lib/supabase-paginate.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 const monthRe = /^\d{4}-\d{2}$/
 
@@ -107,7 +108,16 @@ async function generateForecast(
   // ── 3. Pending compensation revisions effective in target month ───────────
   const [y, mo] = targetMonth.split('-').map(Number)
   const monthStart = `${targetMonth}-01`
-  const monthEnd   = new Date(y, mo, 0).toISOString().slice(0, 10)
+  // `new Date(y, mo, 0)` (day 0 of next month = last day of this month) is
+  // constructed in the server's LOCAL timezone, then `.toISOString()` re-
+  // serializes it in UTC — for any positive-UTC-offset host (e.g. IST) that
+  // shifts local midnight back a day, so `monthEnd` silently lands one day
+  // early and excludes revisions effective on the actual last day of the
+  // month. Use `.getDate()` (still local, but never re-interpreted as UTC)
+  // to build the string directly, matching the fix already applied in
+  // workspace/stats.ts / analytics/reports.ts (monthEndDate).
+  const lastDay  = new Date(y, mo, 0).getDate()
+  const monthEnd = `${targetMonth}-${String(lastDay).padStart(2, '0')}`
 
   const { data: pendingRevs } = await fastify.supabase
     .from('compensation_revisions')
@@ -262,9 +272,7 @@ export default async function payrollForecastRoute(fastify: FastifyInstance) {
       .select()
       .single()
 
-    if (error) {
-      return reply.code(500).send({ error: 'FORECAST_FAILED', message: 'Failed to generate forecast' })
-    }
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to generate forecast')
 
     return reply.send({ data: saved, cached: false, age_hours: 0, stale: false })
   })
@@ -295,9 +303,7 @@ export default async function payrollForecastRoute(fastify: FastifyInstance) {
       .select()
       .single()
 
-    if (error) {
-      return reply.code(500).send({ error: 'FORECAST_FAILED', message: 'Failed to save forecast' })
-    }
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to save forecast')
 
     // Emit forecast changed event if significant shift (> 5%)
     if (prior) {

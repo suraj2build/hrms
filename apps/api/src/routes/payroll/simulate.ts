@@ -108,6 +108,30 @@ export default async function payrollSimulateRoute(fastify: FastifyInstance) {
     const tz = await fetchTenantTz(fastify.supabase, tenantId)
     const baseMonth = bm ?? getLocalDate(new Date().toISOString(), tz).slice(0, 7)
 
+    // A scenario's department_id that doesn't resolve to a real department in
+    // this tenant (typo, or a cross-tenant id) would otherwise fall through
+    // the ot_change/headcount_change/allowance_change handlers below as a
+    // silent zero-delta no-op — the response still claims the change was
+    // "applied" with no indication the department was never found. Validate
+    // upfront so a bad id fails loudly instead.
+    const scenarioDeptIds = [...new Set(scenarios.map((s) => (s as any).department_id).filter(Boolean))]
+    if (scenarioDeptIds.length > 0) {
+      const { data: deptRows, error: deptErr } = await fastify.supabase
+        .from('departments')
+        .select('id')
+        .eq('tenant_id', tenantId)
+        .in('id', scenarioDeptIds)
+      if (deptErr) return serverError(req, reply, deptErr, ErrorCode.QUERY_FAILED, 'Failed to validate department_id')
+      const validDeptIds = new Set((deptRows ?? []).map((d: any) => d.id))
+      const invalidId = scenarioDeptIds.find((id) => !validDeptIds.has(id))
+      if (invalidId) {
+        return reply.code(400).send({
+          error: 'INVALID_PARAM',
+          message: `department_id ${invalidId} not found in your organisation`,
+        })
+      }
+    }
+
     // ── 1. Load base payroll data ─────────────────────────────────────────
     // Primary: active compensations (real-time base) — paginated via
     // fetchAllRows since a tenant can have >1000 active compensation rows
@@ -152,12 +176,17 @@ export default async function payrollSimulateRoute(fastify: FastifyInstance) {
       empDeptMap.set(c.employee_id, deptId)
     }
 
-    // Load 3-month avg OT from snapshots
+    // Load 3-month avg OT from snapshots. `new Date(baseMonth + '-01')` parses
+    // the string as UTC midnight, but `.setMonth()`/`.getMonth()` read/write
+    // in the server's LOCAL timezone — for any negative-UTC-offset host that
+    // mismatch shifts the whole list back a month (e.g. base month 2026-03
+    // silently resolves prior3 to Dec/Jan/Feb instead of Dec/Jan/Feb... one
+    // month early). Do the month arithmetic in plain numbers instead.
+    const [baseY, baseM] = baseMonth.split('-').map(Number)
     const prior3: string[] = []
-    for (let i = 1; i <= 3; i++) {
-      const d = new Date(baseMonth + '-01')
-      d.setMonth(d.getMonth() - i)
-      prior3.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`)
+    for (let i = 3; i >= 1; i--) {
+      const d = new Date(Date.UTC(baseY, baseM - 1 - i, 1))
+      prior3.push(`${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`)
     }
 
     const { data: otSnaps, error: otSnapsErr } = await fastify.supabase
