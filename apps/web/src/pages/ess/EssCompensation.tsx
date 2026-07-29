@@ -586,14 +586,20 @@ interface BonusAward {
   approved_at:        string | null
 }
 
+// Keyed on incentive_templates.template_type's real DB values (migration
+// 102) — award_type echoes that column directly, so a label dict keyed on
+// anything else silently falls through to the 'Variable Pay' default below.
 const BONUS_TYPE_LABEL: Record<string, string> = {
-  performance_bonus: 'Performance Bonus',
-  sales_incentive:   'Sales Incentive',
-  referral_bonus:    'Referral Bonus',
-  spot_award:        'Spot Award',
-  retention_bonus:   'Retention Bonus',
-  project_completion:'Project Completion',
-  other:             'Variable Pay',
+  performance: 'Performance Bonus',
+  sales:       'Sales Incentive',
+  referral:    'Referral Bonus',
+  spot_award:  'Spot Award',
+  project:     'Project Completion',
+  quarterly:   'Quarterly Bonus',
+  annual:      'Annual Bonus',
+  festival:    'Festival Bonus',
+  retention:   'Retention Bonus',
+  other:       'Variable Pay',
 }
 
 function MyBonusesTab({ awards, total, loading }: { awards: BonusAward[]; total: number; loading: boolean }) {

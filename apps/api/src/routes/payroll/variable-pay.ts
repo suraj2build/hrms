@@ -9,13 +9,22 @@ import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
 import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
+// incentive_templates.template_type CHECK constraint (migration 102) — the
+// ground truth for valid template types. The zod enum previously used
+// 'performance_bonus'/'sales_incentive'/'referral_bonus'/'retention_bonus'/
+// 'project_completion', none of which the DB CHECK allows — every template
+// create/update with one of those types passed validation here only to fail
+// the DB constraint on insert.
 const TEMPLATE_TYPES = [
-  'performance_bonus',
-  'sales_incentive',
-  'referral_bonus',
+  'performance',
+  'sales',
+  'referral',
   'spot_award',
-  'retention_bonus',
-  'project_completion',
+  'project',
+  'quarterly',
+  'annual',
+  'festival',
+  'retention',
   'other',
 ] as const
 
@@ -41,18 +50,19 @@ export default async function variablePayRoutes(fastify: FastifyInstance) {
       return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
     }
 
-    let q = fastify.supabase
-      .from('incentive_templates')
-      .select('*')
-      .eq('tenant_id', req.tenantId).limit(200)
+    const data = await fetchAllRows((from, to) => {
+      let q = fastify.supabase
+        .from('incentive_templates')
+        .select('*')
+        .eq('tenant_id', req.tenantId)
 
-    if (parsed.data.is_active !== undefined) {
-      q = q.eq('is_active', parsed.data.is_active === 'true')
-    }
+      if (parsed.data.is_active !== undefined) {
+        q = q.eq('is_active', parsed.data.is_active === 'true')
+      }
 
-    const { data, error } = await q
-    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch incentive templates')
-    return reply.send({ data: data ?? [] })
+      return q.range(from, to)
+    })
+    return reply.send({ data })
   })
 
   // ── POST /payroll/variable-pay/templates ──────────────────────────────────────
@@ -132,17 +142,18 @@ export default async function variablePayRoutes(fastify: FastifyInstance) {
       return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
     }
 
-    let q = fastify.supabase
-      .from('variable_payout_batches')
-      .select('*, incentive_templates(id, name, code, template_type)')
-      .eq('tenant_id', req.tenantId).limit(200)
+    const data = await fetchAllRows((from, to) => {
+      let q = fastify.supabase
+        .from('variable_payout_batches')
+        .select('*, incentive_templates(id, name, code, template_type)')
+        .eq('tenant_id', req.tenantId)
 
-    if (parsed.data.payout_month) q = q.eq('payout_month', parsed.data.payout_month)
-    if (parsed.data.status) q = q.eq('status', parsed.data.status)
+      if (parsed.data.payout_month) q = q.eq('payout_month', parsed.data.payout_month)
+      if (parsed.data.status) q = q.eq('status', parsed.data.status)
 
-    const { data, error } = await q
-    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch payout batches')
-    return reply.send({ data: data ?? [] })
+      return q.range(from, to)
+    })
+    return reply.send({ data })
   })
 
   // ── POST /payroll/variable-pay/batches ────────────────────────────────────────
@@ -158,6 +169,20 @@ export default async function variablePayRoutes(fastify: FastifyInstance) {
     if (!parsed.success) {
       return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
     }
+
+    // template_id is caller-supplied — verify it belongs to this tenant
+    // before it's referenced by the batch (and later leaked via the
+    // incentive_templates(...) embed on GET /batches / GET /my /
+    // GET /employee/:employeeId), since the FK only checks the row exists
+    // somewhere, not that it's this tenant's.
+    const { data: tmpl, error: tmplErr } = await fastify.supabase
+      .from('incentive_templates')
+      .select('id')
+      .eq('id', parsed.data.template_id)
+      .eq('tenant_id', req.tenantId)
+      .maybeSingle()
+    if (tmplErr) return serverError(req, reply, tmplErr, ErrorCode.QUERY_FAILED, 'Failed to verify incentive template')
+    if (!tmpl) return reply.code(404).send({ error: 'TEMPLATE_NOT_FOUND', message: 'Incentive template not found' })
 
     const { data, error } = await fastify.supabase
       .from('variable_payout_batches')
@@ -200,13 +225,29 @@ export default async function variablePayRoutes(fastify: FastifyInstance) {
     // payout with no prior ownership check — verify it belongs to this
     // tenant, and block once it's past the pre-approval stage, matching the
     // sibling arrears batch's /records guard.
-    const { data: batch } = await fastify.supabase
+    const { data: batch, error: batchErr } = await fastify.supabase
       .from('variable_payout_batches')
       .select('id, status')
       .eq('id', id).eq('tenant_id', req.tenantId).maybeSingle()
+    if (batchErr) return serverError(req, reply, batchErr, ErrorCode.QUERY_FAILED, 'Failed to verify payout batch')
     if (!batch) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Batch not found' })
     if (!['draft', 'in_review'].includes((batch as any).status)) {
       return reply.code(409).send({ error: 'LOCKED', message: 'Batch is no longer open for new payouts' })
+    }
+
+    // Each payout's employee_id is caller-supplied — same tenant-ownership
+    // risk as template_id/batch_id above.
+    const payoutEmployeeIds = [...new Set(parsed.data.payouts.map(p => p.employee_id))]
+    const { data: empRows, error: empErr } = await fastify.supabase
+      .from('employees')
+      .select('id')
+      .eq('tenant_id', req.tenantId)
+      .in('id', payoutEmployeeIds)
+    if (empErr) return serverError(req, reply, empErr, ErrorCode.QUERY_FAILED, 'Failed to verify employees')
+    const validPayoutEmployeeIds = new Set((empRows ?? []).map((e: any) => e.id))
+    const invalidPayoutEmployeeId = payoutEmployeeIds.find(eid => !validPayoutEmployeeIds.has(eid))
+    if (invalidPayoutEmployeeId) {
+      return reply.code(400).send({ error: 'VALIDATION_ERROR', message: `employee_id ${invalidPayoutEmployeeId} not found in your organisation` })
     }
 
     const payoutRows = parsed.data.payouts.map(p => ({
@@ -378,32 +419,34 @@ export default async function variablePayRoutes(fastify: FastifyInstance) {
   // APPROVED batch are exposed (draft / in_review / cancelled payouts stay invisible
   // to the employee). Read-only — reuses the existing variable pay engine.
   fastify.get('/my', auth, async (req: any, reply) => {
-    const { data: profile } = await fastify.supabase
+    const { data: profile, error: profileErr } = await fastify.supabase
       .from('profiles')
       .select('employee_id')
       .eq('id', req.userId)
       .eq('tenant_id', req.tenantId)
       .maybeSingle()
+    if (profileErr) return serverError(req, reply, profileErr, ErrorCode.QUERY_FAILED, 'Failed to resolve your employee record')
 
     const employeeId = (profile as { employee_id: string | null } | null)?.employee_id ?? null
     if (!employeeId) {
       return reply.send({ data: [], total_awarded: 0 })
     }
 
-    const { data, error } = await fastify.supabase
-      .from('variable_payouts')
-      .select(`
-        id, amount, status, performance_period, performance_notes, created_at,
-        variable_payout_batches!inner(id, batch_name, payout_month, status, approved_at,
-          incentive_templates(id, name, code, template_type, is_taxable))
-      `)
-      .eq('employee_id', employeeId)
-      .eq('tenant_id', req.tenantId)
-      .eq('variable_payout_batches.status', 'approved').limit(100)
+    const data = await fetchAllRows((from, to) =>
+      fastify.supabase
+        .from('variable_payouts')
+        .select(`
+          id, amount, status, performance_period, performance_notes, created_at,
+          variable_payout_batches!inner(id, batch_name, payout_month, status, approved_at,
+            incentive_templates(id, name, code, template_type, is_taxable))
+        `)
+        .eq('employee_id', employeeId)
+        .eq('tenant_id', req.tenantId)
+        .eq('variable_payout_batches.status', 'approved')
+        .range(from, to),
+    )
 
-    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch variable pay awards')
-
-    const rows = (data ?? []).map((p: any) => {
+    const rows = data.map((p: any) => {
       const batch = p.variable_payout_batches
       const tmpl  = batch?.incentive_templates
       return {
@@ -431,16 +474,17 @@ export default async function variablePayRoutes(fastify: FastifyInstance) {
   fastify.get('/employee/:employeeId', { preHandler: [fastify.authenticate, requireHrAdmin] }, async (req: any, reply) => {
     const { employeeId } = req.params as { employeeId: string }
 
-    const { data, error } = await fastify.supabase
-      .from('variable_payouts')
-      .select(`
-        *,
-        variable_payout_batches(id, batch_name, payout_month, status, incentive_templates(id, name, code, template_type))
-      `)
-      .eq('employee_id', employeeId)
-      .eq('tenant_id', req.tenantId).limit(200)
-
-    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch employee variable pay')
-    return reply.send({ data: data ?? [] })
+    const data = await fetchAllRows((from, to) =>
+      fastify.supabase
+        .from('variable_payouts')
+        .select(`
+          *,
+          variable_payout_batches(id, batch_name, payout_month, status, incentive_templates(id, name, code, template_type))
+        `)
+        .eq('employee_id', employeeId)
+        .eq('tenant_id', req.tenantId)
+        .range(from, to),
+    )
+    return reply.send({ data })
   })
 }

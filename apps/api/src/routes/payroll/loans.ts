@@ -44,18 +44,19 @@ export default async function loansRoutes(fastify: FastifyInstance) {
       return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
     }
 
-    let q = fastify.supabase
-      .from('employee_loans')
-      .select('*, employees(id, first_name, last_name, employee_code)')
-      .eq('tenant_id', req.tenantId)
-      .order('created_at', { ascending: false }).limit(500)
+    const data = await fetchAllRows((from, to) => {
+      let q = fastify.supabase
+        .from('employee_loans')
+        .select('*, employees(id, first_name, last_name, employee_code)')
+        .eq('tenant_id', req.tenantId)
+        .order('created_at', { ascending: false })
 
-    if (parsed.data.employee_id) q = q.eq('employee_id', parsed.data.employee_id)
-    if (parsed.data.status) q = q.eq('status', parsed.data.status)
+      if (parsed.data.employee_id) q = q.eq('employee_id', parsed.data.employee_id)
+      if (parsed.data.status) q = q.eq('status', parsed.data.status)
 
-    const { data, error } = await q
-    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch loans')
-    return reply.send({ data: data ?? [] })
+      return q.range(from, to)
+    })
+    return reply.send({ data })
   })
 
   // ── POST /payroll/loans ───────────────────────────────────────────────────────
@@ -76,12 +77,13 @@ export default async function loansRoutes(fastify: FastifyInstance) {
 
     // Self-scoping: non-admins may only raise a loan request for themselves.
     if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
-      const { data: profile } = await fastify.supabase
+      const { data: profile, error: profileErr } = await fastify.supabase
         .from('profiles')
         .select('employee_id')
         .eq('id', req.userId)
         .eq('tenant_id', req.tenantId)
         .single()
+      if (profileErr) return serverError(req, reply, profileErr, ErrorCode.QUERY_FAILED, 'Failed to resolve your employee record')
       if (profile?.employee_id !== parsed.data.employee_id) {
         return reply.code(403).send({ error: 'FORBIDDEN', message: 'You can only request a loan for yourself' })
       }
@@ -89,12 +91,13 @@ export default async function loansRoutes(fastify: FastifyInstance) {
       // HR-admin path: employee_id is caller-supplied — verify it belongs to
       // this tenant before it's used in the insert below (the employee_loans
       // FK only checks the row exists somewhere, not that it's this tenant's).
-      const { data: targetEmp } = await fastify.supabase
+      const { data: targetEmp, error: targetEmpErr } = await fastify.supabase
         .from('employees')
         .select('id')
         .eq('id', parsed.data.employee_id)
         .eq('tenant_id', req.tenantId)
         .maybeSingle()
+      if (targetEmpErr) return serverError(req, reply, targetEmpErr, ErrorCode.QUERY_FAILED, 'Failed to verify employee')
       if (!targetEmp) return reply.code(404).send({ error: 'EMPLOYEE_NOT_FOUND', message: 'Employee not found' })
     }
 
@@ -125,10 +128,11 @@ export default async function loansRoutes(fastify: FastifyInstance) {
     const { id } = req.params as { id: string }
     const now = new Date().toISOString()
 
-    const { data: loan } = await fastify.supabase
+    const { data: loan, error: loanFetchErr } = await fastify.supabase
       .from('employee_loans')
       .select('id, status, employee_id, principal_amount')
       .eq('id', id).eq('tenant_id', req.tenantId).maybeSingle()
+    if (loanFetchErr) return serverError(req, reply, loanFetchErr, ErrorCode.QUERY_FAILED, 'Failed to fetch loan')
     if (!loan) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Loan not found' })
     if (!['pending', 'pending_hr'].includes((loan as any).status)) {
       return reply.code(409).send({ error: 'INVALID_STATE', message: 'Loan not found or not in a pending/pending_hr state' })
@@ -187,10 +191,11 @@ export default async function loansRoutes(fastify: FastifyInstance) {
       return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
     }
 
-    const { data: loan } = await fastify.supabase
+    const { data: loan, error: loanFetchErr } = await fastify.supabase
       .from('employee_loans')
       .select('id, status, employee_id, principal_amount')
       .eq('id', id).eq('tenant_id', req.tenantId).maybeSingle()
+    if (loanFetchErr) return serverError(req, reply, loanFetchErr, ErrorCode.QUERY_FAILED, 'Failed to fetch loan')
     if (!loan) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Loan not found' })
     if ((loan as any).status !== 'pending') {
       return reply.code(409).send({ error: 'INVALID_STATE', message: 'Loan not found or not in a pending state' })
@@ -358,15 +363,18 @@ export default async function loansRoutes(fastify: FastifyInstance) {
   fastify.get('/:id/schedule', { preHandler: [fastify.authenticate, requireHrAdmin] }, async (req: any, reply) => {
     const { id } = req.params as { id: string }
 
-    const { data, error } = await fastify.supabase
-      .from('loan_schedules')
-      .select('*')
-      .eq('loan_id', id)
-      .eq('tenant_id', req.tenantId)
-      .order('installment_number', { ascending: true }).limit(200)
-
-    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch loan schedule')
-    return reply.send({ data: data ?? [] })
+    // tenure_months has no upper bound (a housing loan can run 300+ months),
+    // so a flat .limit(200) can silently truncate the later installments.
+    const data = await fetchAllRows((from, to) =>
+      fastify.supabase
+        .from('loan_schedules')
+        .select('*')
+        .eq('loan_id', id)
+        .eq('tenant_id', req.tenantId)
+        .order('installment_number', { ascending: true })
+        .range(from, to),
+    )
+    return reply.send({ data })
   })
 
   // ── POST /payroll/loans/:id/pause-emi ────────────────────────────────────────
@@ -379,13 +387,23 @@ export default async function loansRoutes(fastify: FastifyInstance) {
       return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
     }
 
-    const { error } = await fastify.supabase
+    // Guard on both tenant and current pause/status state, and check the
+    // write actually touched a row — Supabase returns no error for a filter
+    // that matches zero rows (nonexistent id, another tenant's loan, an
+    // already-paused loan), which would otherwise report success with
+    // nothing changed.
+    const { data: paused, error } = await fastify.supabase
       .from('employee_loans')
       .update({ is_emi_paused: true, pause_reason: parsed.data.pause_reason, updated_at: new Date().toISOString() })
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
+      .in('status', ['disbursed', 'active'])
+      .eq('is_emi_paused', false)
+      .select('id')
+      .maybeSingle()
 
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to pause EMI')
+    if (!paused) return reply.code(409).send({ error: 'INVALID_STATE', message: 'Loan not found, not active, or EMI already paused' })
     return reply.send({ message: 'EMI paused' })
   })
 
@@ -393,13 +411,17 @@ export default async function loansRoutes(fastify: FastifyInstance) {
   fastify.post('/:id/resume-emi', { preHandler: [fastify.authenticate, requireHrAdmin] }, async (req: any, reply) => {
     const { id } = req.params as { id: string }
 
-    const { error } = await fastify.supabase
+    const { data: resumed, error } = await fastify.supabase
       .from('employee_loans')
       .update({ is_emi_paused: false, pause_reason: null, updated_at: new Date().toISOString() })
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
+      .eq('is_emi_paused', true)
+      .select('id')
+      .maybeSingle()
 
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to resume EMI')
+    if (!resumed) return reply.code(409).send({ error: 'INVALID_STATE', message: 'Loan not found or EMI is not currently paused' })
     return reply.send({ message: 'EMI resumed' })
   })
 
@@ -533,13 +555,27 @@ export default async function loansRoutes(fastify: FastifyInstance) {
     // inserting. The FK only checks the loan row exists somewhere, not that
     // it's this tenant's; without this a payment could be permanently
     // recorded against another tenant's loan.
-    const { data: targetLoan } = await fastify.supabase
+    const { data: targetLoan, error: loanLookupErr } = await fastify.supabase
       .from('employee_loans')
       .select('id')
       .eq('id', parsed.data.loan_id)
       .eq('tenant_id', req.tenantId)
       .maybeSingle()
+    if (loanLookupErr) return serverError(req, reply, loanLookupErr, ErrorCode.QUERY_FAILED, 'Failed to verify loan')
     if (!targetLoan) return reply.code(404).send({ error: 'LOAN_NOT_FOUND', message: 'Loan not found' })
+
+    // payroll_run_id is caller-supplied — same tenant-ownership risk as
+    // loan_id above.
+    if (parsed.data.payroll_run_id) {
+      const { data: targetRun, error: runErr } = await fastify.supabase
+        .from('payroll_runs')
+        .select('id')
+        .eq('id', parsed.data.payroll_run_id)
+        .eq('tenant_id', req.tenantId)
+        .maybeSingle()
+      if (runErr) return serverError(req, reply, runErr, ErrorCode.QUERY_FAILED, 'Failed to verify payroll run')
+      if (!targetRun) return reply.code(404).send({ error: 'PAYROLL_RUN_NOT_FOUND', message: 'Payroll run not found' })
+    }
 
     // Insert payment record
     const { data: payment, error: payErr } = await fastify.supabase
@@ -566,6 +602,7 @@ export default async function loansRoutes(fastify: FastifyInstance) {
           paid_at: now,
         })
         .eq('id', parsed.data.schedule_id)
+        .eq('loan_id', parsed.data.loan_id)
         .eq('tenant_id', req.tenantId)
         .eq('status', 'pending')
       if (schedErr) {
