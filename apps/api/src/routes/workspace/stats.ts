@@ -25,6 +25,7 @@ import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
 import { fetchTenantTz } from '../../lib/attendance-engine.js'
 import { getLocalDate }  from '../../lib/org-context.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 /**
  * "Today" in the tenant's own timezone, not the server's (UTC) clock —
@@ -556,6 +557,14 @@ export default async function workspaceStatsRoutes(fastify: FastifyInstance) {
       ),
     ])
 
+    // A failure on any of these must not silently read as 0 — blockers/
+    // anomalies/deduction-gaps/pending-validations all feed the PayrollWorkspace
+    // "safe to process" signal, and a DB error masquerading as "0 blockers"
+    // is the worst-case failure mode for a payroll-processing gate.
+    const firstErr = [latestRunResult, blockersResult, anomaliesResult, ptaxGapResult, validationIssuesResult]
+      .find(r => r.error)
+    if (firstErr?.error) return serverError(req, reply, firstErr.error, ErrorCode.QUERY_FAILED, 'Failed to fetch payroll run stats')
+
     const run     = latestRunResult.data as any
     const isFrozen = run?.status === 'finalized'
 
@@ -644,11 +653,16 @@ export default async function workspaceStatsRoutes(fastify: FastifyInstance) {
     const tenantId: string = req.tenantId
 
     // Count active employees for coverage baseline
-    const { count: totalActive } = await fastify.supabase
+    const { count: totalActive, error: activeErr } = await fastify.supabase
       .from('employees')
       .select('id', { count: 'exact', head: true })
       .eq('tenant_id', tenantId)
       .eq('status', 'active')
+    // A failure here must not silently read as active=0 — every *Missing
+    // below is Math.max(0, active - covered), so active=0 clamps every
+    // missing-count to 0 and *Ready flags all report "compliant" purely
+    // because a query errored, not because coverage is actually complete.
+    if (activeErr) return serverError(req, reply, activeErr, ErrorCode.QUERY_FAILED, 'Failed to fetch active employee count')
 
     const active = totalActive ?? 0
 
@@ -687,21 +701,28 @@ export default async function workspaceStatsRoutes(fastify: FastifyInstance) {
     const ptaxCovered = epfRows.filter((r) => r.pt_applicable === true).length
     const ptaxMissing  = 0 // PTAX coverage depends on state rules, not employee count
 
-    // EPF filing gaps: payroll runs this year that aren't finalized (proxy for unfiled challans)
-    const currentYear = new Date().getFullYear()
-    const { data: payrollRuns } = await fastify.supabase
+    // EPF filing gaps: payroll runs this year that aren't finalized (proxy for unfiled challans).
+    // Tenant-local "today" — near a UTC year boundary a server-clock currentYear
+    // would query the wrong year's payroll_runs and silently report filingGaps: 0.
+    const todayStr    = await tenantTodayStr(fastify.supabase, tenantId)
+    const currentYear = todayStr.slice(0, 4)
+    const { data: payrollRuns, error: runsErr } = await fastify.supabase
       .from('payroll_runs')
       .select('month, status')
       .eq('tenant_id', tenantId)
       .gte('month', `${currentYear}-01`)
       .lte('month', `${currentYear}-12`)
+    if (runsErr) return serverError(req, reply, runsErr, ErrorCode.QUERY_FAILED, 'Failed to fetch payroll runs for compliance stats')
 
     const filingGaps = (payrollRuns ?? []).filter((r: any) => r.status !== 'finalized').length
 
-    const nextDeadline = new Date()
-    nextDeadline.setDate(15) // EPF deadline is typically 15th of each month
-    if (nextDeadline <= new Date()) nextDeadline.setMonth(nextDeadline.getMonth() + 1)
-    const daysToDeadline = Math.ceil((nextDeadline.getTime() - Date.now()) / (1000 * 60 * 60 * 24))
+    // EPF deadline is typically 15th of each month — computed from the same
+    // tenant-local "today", not the server's UTC clock.
+    const [ty, tm, td] = todayStr.split('-').map(Number)
+    const nextDeadline = new Date(Date.UTC(ty, tm - 1, 15, 12))
+    if (td > 15) nextDeadline.setUTCMonth(nextDeadline.getUTCMonth() + 1)
+    const todayUtcNoon = new Date(Date.UTC(ty, tm - 1, td, 12))
+    const daysToDeadline = Math.ceil((nextDeadline.getTime() - todayUtcNoon.getTime()) / (1000 * 60 * 60 * 24))
 
     const epfReady  = epfMissing === 0 && filingGaps === 0
     const esiReady  = esiMissing === 0
@@ -1058,6 +1079,14 @@ export default async function workspaceStatsRoutes(fastify: FastifyInstance) {
         .eq('tenant_id', tenantId)
         .eq('status', 'pending'),
     ])
+
+    // A failure on any of these must not silently read as 0 — this is the
+    // NOC command header, so a DB error masquerading as "0 active incidents /
+    // 0 SLA breaches" is the worst-case failure mode: it fails silently
+    // exactly when something is already wrong.
+    const firstErr = [incidentsResult, inboxResult, jobFailuresResult, slaBreachLeaveResult, slaBreachRegResult, pendingLeaveResult, pendingRegResult]
+      .find(r => r.error)
+    if (firstErr?.error) return serverError(req, reply, firstErr.error, ErrorCode.QUERY_FAILED, 'Failed to fetch operations health stats')
 
     const slaBreaches       = (slaBreachLeaveResult.count ?? 0) + (slaBreachRegResult.count ?? 0)
     const pendingEscalations = (pendingLeaveResult.count ?? 0) + (pendingRegResult.count ?? 0)
