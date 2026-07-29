@@ -354,13 +354,17 @@ export default async function benefitsRoutes(fastify: FastifyInstance) {
     const parsed = planSchema.partial().safeParse(req.body)
     if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
 
+    // .maybeSingle() (not .single()) — a nonexistent/cross-tenant :id matches
+    // zero rows on UPDATE ... RETURNING, which .single() treats as a
+    // PGRST116 error rather than an empty result, so the 404 branch below
+    // would otherwise be unreachable dead code.
     const { data, error } = await fastify.supabase
       .from('benefit_plans')
       .update({ ...parsed.data, updated_at: new Date().toISOString() })
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
       .select()
-      .single()
+      .maybeSingle()
 
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update benefit plan')
     if (!data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Plan not found' })

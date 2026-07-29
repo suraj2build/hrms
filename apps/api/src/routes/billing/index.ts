@@ -51,8 +51,9 @@ export default async function billingRoutes(fastify: FastifyInstance) {
       return reply.code(400).send({ error: 'CONFIG', message: `No Razorpay plan id configured for ${parsed.data.plan}` })
     }
 
-    const { data: tenant } = await fastify.supabase
+    const { data: tenant, error: tenantErr } = await fastify.supabase
       .from('tenants').select('name, billing_email, subscription_status, razorpay_subscription_id').eq('id', req.tenantId).single()
+    if (tenantErr) return serverError(req, reply, tenantErr, ErrorCode.QUERY_FAILED, 'Failed to fetch tenant billing state')
 
     // Fresh audit finding: no precondition check meant a double-click or a
     // retried network timeout created two live Razorpay subscriptions for
@@ -77,11 +78,25 @@ export default async function billingRoutes(fastify: FastifyInstance) {
         notes: { tenant_id: req.tenantId, tenant_name: tenant?.name ?? '' },
       } as any)
 
-      await fastify.supabase.from('tenants').update({
+      const { error: persistErr } = await fastify.supabase.from('tenants').update({
         razorpay_subscription_id: sub.id,
         subscription_status:      sub.status,
         subscription_plan_id:     planId,
       }).eq('id', req.tenantId)
+
+      if (persistErr) {
+        // The line 68 duplicate-subscription guard reads razorpay_subscription_id
+        // off this row — if this write is lost, the tenant looks unsubscribed and
+        // the next checkout attempt creates a second live subscription. Best-effort
+        // cancel the one we just created rather than leaving it orphaned and
+        // untracked; still fail the request either way so the client can retry.
+        try {
+          await getRazorpay().subscriptions.cancel(sub.id, false)
+        } catch (cancelErr: any) {
+          req.log.error({ err: cancelErr, subscriptionId: sub.id }, '[billing] failed to cancel orphaned subscription after DB write failure')
+        }
+        return serverError(req, reply, persistErr, ErrorCode.UPDATE_FAILED, 'Failed to save subscription. Please try again.')
+      }
 
       return reply.send({ configured: true, subscriptionId: sub.id, keyId: PUBLIC_KEY_ID })
     } catch (e: any) {
@@ -153,12 +168,18 @@ export default async function billingRoutes(fastify: FastifyInstance) {
       }
     }
 
-    await fastify.supabase.from('tenant_subscription_events').insert({
+    const { error: eventInsertErr } = await fastify.supabase.from('tenant_subscription_events').insert({
       tenant_id:         tenantId,
       razorpay_event_id: eventId,
       event_type:        type ?? 'unknown',
       payload:           event,
     })
+    // 23505 = a concurrent duplicate delivery already inserted this event id
+    // (the dedup check above is a TOCTOU, not a guarantee) — that's fine, the
+    // row already exists. Anything else is a real audit-trail gap worth logging.
+    if (eventInsertErr && eventInsertErr.code !== '23505') {
+      req.log.error({ err: eventInsertErr, eventId }, '[billing] failed to record subscription event')
+    }
 
     return reply.send({ ok: true })
   })

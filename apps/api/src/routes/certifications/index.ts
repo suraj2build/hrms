@@ -18,6 +18,14 @@ import { z } from 'zod'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
 import { serverError, notFound, ErrorCode } from '../../lib/api-errors.js'
+import { fetchTenantTz } from '../../lib/attendance-engine.js'
+import { addDaysToDateStr } from '../../lib/absconding-engine.js'
+import { getLocalDate } from '../../lib/org-context.js'
+
+async function tenantTodayStr(supabase: any, tenantId: string): Promise<string> {
+  const tz = await fetchTenantTz(supabase, tenantId)
+  return getLocalDate(new Date().toISOString(), tz)
+}
 
 export default async function certificationRoutes(fastify: FastifyInstance) {
   const auth = { preHandler: [fastify.authenticate] }
@@ -73,12 +81,11 @@ export default async function certificationRoutes(fastify: FastifyInstance) {
     if (search)    query = query.ilike('cert_name', `%${search}%`)
 
     if (expiring_in) {
-      const cutoff = new Date()
-      cutoff.setDate(cutoff.getDate() + expiring_in)
+      const today = await tenantTodayStr(fastify.supabase, req.tenantId)
       query = query
         .not('expiry_date', 'is', null)
-        .lte('expiry_date', cutoff.toISOString().split('T')[0])
-        .gte('expiry_date', new Date().toISOString().split('T')[0])
+        .lte('expiry_date', addDaysToDateStr(today, expiring_in))
+        .gte('expiry_date', today)
     }
 
     query = query.range(offset, offset + limit - 1)
@@ -94,10 +101,8 @@ export default async function certificationRoutes(fastify: FastifyInstance) {
     const { days = '30' } = req.query as Record<string, string>
     const n = Math.min(Math.max(parseInt(days, 10) || 30, 1), 365)
 
-    const cutoff = new Date()
-    cutoff.setDate(cutoff.getDate() + n)
-    const today = new Date().toISOString().split('T')[0]
-    const cutoffStr = cutoff.toISOString().split('T')[0]
+    const today = await tenantTodayStr(fastify.supabase, req.tenantId)
+    const cutoffStr = addDaysToDateStr(today, n)
 
     let records: any[]
     try {
@@ -141,9 +146,9 @@ export default async function certificationRoutes(fastify: FastifyInstance) {
     } catch (err: any) {
       return serverError(req, reply, err, ErrorCode.QUERY_FAILED, 'Failed to fetch certification stats')
     }
-    const today = new Date()
-    const in30  = new Date(); in30.setDate(today.getDate() + 30)
-    const in90  = new Date(); in90.setDate(today.getDate() + 90)
+    const today = await tenantTodayStr(fastify.supabase, req.tenantId)
+    const in30  = addDaysToDateStr(today, 30)
+    const in90  = addDaysToDateStr(today, 90)
 
     const byType:   Record<string, number> = {}
     const byStatus: Record<string, number> = {}
@@ -153,9 +158,8 @@ export default async function certificationRoutes(fastify: FastifyInstance) {
       byType[r.cert_type]   = (byType[r.cert_type]   ?? 0) + 1
       byStatus[r.status]    = (byStatus[r.status]     ?? 0) + 1
       if (r.status === 'active' && r.expiry_date) {
-        const d = new Date(r.expiry_date)
-        if (d >= today && d <= in30) expiring30++
-        if (d >= today && d <= in90) expiring90++
+        if (r.expiry_date >= today && r.expiry_date <= in30) expiring30++
+        if (r.expiry_date >= today && r.expiry_date <= in90) expiring90++
       }
     }
 
@@ -196,9 +200,9 @@ export default async function certificationRoutes(fastify: FastifyInstance) {
       .from('employees').select('id').eq('id', parsed.data.employee_id).eq('tenant_id', req.tenantId).maybeSingle()
     if (!emp) return reply.code(404).send({ error: 'EMPLOYEE_NOT_FOUND', message: 'Employee not found for this tenant' })
 
-    const now = new Date().toISOString().split('T')[0]
+    const today = await tenantTodayStr(fastify.supabase, req.tenantId)
     let status = parsed.data.status
-    if (status === 'active' && parsed.data.expiry_date && parsed.data.expiry_date < now) {
+    if (status === 'active' && parsed.data.expiry_date && parsed.data.expiry_date < today) {
       status = 'expired'
     }
 
