@@ -111,17 +111,19 @@ export default async function exitInterviewRoutes(fastify: FastifyInstance) {
     const { data, error } = await fastify.supabase
       .from('exit_interview_questions')
       .update(parsed.data).eq('id', req.params.qid).eq('tenant_id', req.tenantId)
-      .select().single()
+      .select().maybeSingle()
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update exit interview question')
     if (!data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Question not found' })
     return reply.send({ data })
   })
 
   fastify.delete('/exit-interview/questions/:qid', hrAdminAuth, async (req: any, reply) => {
-    const { error } = await fastify.supabase
+    const { data, error } = await fastify.supabase
       .from('exit_interview_questions')
       .update({ is_active: false }).eq('id', req.params.qid).eq('tenant_id', req.tenantId)
+      .select('id').maybeSingle()
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to delete exit interview question')
+    if (!data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Question not found' })
     return reply.code(204).send()
   })
 

@@ -9,7 +9,7 @@ import { logAction } from '../../lib/audit-service.js'
 import { gateApprove, gateReject } from '../../lib/approval-orchestrator.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { checkIdempotency, storeIdempotency } from '../../lib/idempotency.js'
-import { serverError, ErrorCode } from '../../lib/api-errors.js'
+import { serverError, validationError, ErrorCode } from '../../lib/api-errors.js'
 
 const CATEGORY_TYPES = ['medical', 'travel', 'food', 'telephone', 'internet', 'books', 'uniform', 'other'] as const
 
@@ -382,7 +382,7 @@ export default async function reimbursementsRoutes(fastify: FastifyInstance) {
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
       .select()
-      .single()
+      .maybeSingle()
 
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update reimbursement category')
     if (!data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Category not found' })
@@ -874,6 +874,14 @@ export default async function reimbursementsRoutes(fastify: FastifyInstance) {
       if (profile?.employee_id !== claim.employee_id) {
         return reply.code(403).send({ error: 'FORBIDDEN', message: 'You can only attach files to your own claims' })
       }
+    }
+
+    // Storage path must live under this tenant's prefix — the metadata row
+    // carries the correct tenant_id, but the referenced object is signed
+    // later, so a caller could otherwise register (and later sign) another
+    // tenant's file. Matches the check in routes/documents/index.ts.
+    if (!parsed.data.storage_path.startsWith(`${req.tenantId}/`)) {
+      return validationError(reply, ErrorCode.VALIDATION_ERROR, 'storage_path must be within your tenant namespace')
     }
 
     const { data, error } = await fastify.supabase

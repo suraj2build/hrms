@@ -204,11 +204,17 @@ export default async function jobQueueRoutes(fastify: FastifyInstance) {
       return reply.code(409).send({ error: 'JOB_DISABLED', message: `Automation '${automation.name}' is currently disabled` })
     }
 
+    // A double-click or network retry of "Trigger now" would otherwise enqueue
+    // the automation twice (e.g. double-crediting leave accrual for the month).
+    // durableQueue.enqueue() already no-ops when a pending/running job shares
+    // an idempotencyKey — pass the client's key through if it sent one.
+    const iKey = (req.headers['idempotency-key'] as string | undefined)?.trim()
+
     try {
       const enqueuedId = await durableQueue.enqueue(
         automation.job_type,
         { triggered_by: req.userId, manual_trigger: true },
-        { tenantId: req.tenantId, createdBy: req.userId },
+        { tenantId: req.tenantId, createdBy: req.userId, idempotencyKey: iKey || undefined },
       )
 
       fastify.log.info(

@@ -9,6 +9,7 @@
  *   - Manual trigger button per job
  */
 
+import { useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import {
@@ -70,9 +71,16 @@ export function AutomationsConsole() {
     retry:     false,
   })
 
+  // Sent as Idempotency-Key on trigger so a double-click or network retry
+  // doesn't enqueue the same automation twice. Rotated only after success.
+  const triggerIdempotencyKey = useRef(crypto.randomUUID())
+
   const triggerMutation = useMutation({
-    mutationFn: (jobId: string) => api.post(`/system/jobs/${jobId}/trigger`, {}),
+    mutationFn: (jobId: string) => api.post(`/system/jobs/${jobId}/trigger`, {}, {
+      headers: { 'Idempotency-Key': triggerIdempotencyKey.current },
+    }),
     onSuccess: () => {
+      triggerIdempotencyKey.current = crypto.randomUUID()
       qc.invalidateQueries({ queryKey: ['automations-jobs'] })
       toast.success('Job triggered successfully')
     },
@@ -80,6 +88,11 @@ export function AutomationsConsole() {
       toast.error('Failed to trigger job', { description: e.message })
     },
   })
+
+  function handleTrigger(job: AutomationJob) {
+    if (!window.confirm(`Manually trigger "${job.name}" now? This runs the same automation the schedule would run.`)) return
+    triggerMutation.mutate(job.id)
+  }
 
   const jobs: AutomationJob[] = Array.isArray(data?.data) ? (data.data as AutomationJob[]) : []
 
@@ -226,7 +239,7 @@ export function AutomationsConsole() {
                   variant="ghost"
                   className="h-7 px-2 text-xs flex-shrink-0"
                   disabled={!job.is_enabled || triggerMutation.isPending}
-                  onClick={() => triggerMutation.mutate(job.id)}
+                  onClick={() => handleTrigger(job)}
                   title="Trigger now"
                 >
                   <PlayCircle className="h-3.5 w-3.5" />
