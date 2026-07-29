@@ -16,6 +16,7 @@ import { z }                   from 'zod'
 import { HR_ADMIN_ROLES }      from '../../lib/rbac.js'
 import { fetchAllRows }        from '../../lib/supabase-paginate.js'
 import { fetchTenantTz, utcToLocalDate } from '../../lib/attendance-engine.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 // ── Date helpers ──────────────────────────────────────────────────────────────
 
 const dateRe  = /^\d{4}-\d{2}-\d{2}$/
@@ -93,7 +94,7 @@ export default async function rosterIntelligenceRoutes(fastify: FastifyInstance)
     const [
       rosterRows,
       standingRows,
-      { data: shifts },
+      { data: shifts, error: shiftsErr },
       dailyRows,
     ] = await Promise.all([
       // Roster overrides
@@ -131,6 +132,7 @@ export default async function rosterIntelligenceRoutes(fastify: FastifyInstance)
           .range(from, to),
       ),
     ])
+    if (shiftsErr) return serverError(req, reply, shiftsErr, ErrorCode.QUERY_FAILED, 'Failed to fetch shifts')
 
     const shiftMap  = new Map((shifts ?? []).map((s: any) => [s.id, s]))
     const standMap  = new Map(standingRows.map((r: any) => [r.employee_id, r.shift_id]))
@@ -209,7 +211,7 @@ export default async function rosterIntelligenceRoutes(fastify: FastifyInstance)
     const [
       rosterRows,
       standingRows,
-      { data: shifts },
+      { data: shifts, error: shiftsErr },
       dailyRows,
     ] = await Promise.all([
       fetchAllRows((from, to) =>
@@ -243,6 +245,7 @@ export default async function rosterIntelligenceRoutes(fastify: FastifyInstance)
           .range(from, to),
       ),
     ])
+    if (shiftsErr) return serverError(req, reply, shiftsErr, ErrorCode.QUERY_FAILED, 'Failed to fetch shifts')
 
     const shiftMap   = new Map((shifts ?? []).map((s: any) => [s.id, s]))
     const standMap   = new Map(standingRows.map((r: any) => [r.employee_id, r.shift_id]))
@@ -323,7 +326,7 @@ export default async function rosterIntelligenceRoutes(fastify: FastifyInstance)
           .from('employees')
           .select('id, employee_code, first_name, last_name')
           .eq('tenant_id', req.tenantId)
-          .eq('status', 'active')
+          .in('status', ['active', 'on_notice'])
           .range(from2, to2),
       ),
       fetchAllRows((from2, to2) =>
@@ -431,7 +434,7 @@ export default async function rosterIntelligenceRoutes(fastify: FastifyInstance)
     const [
       rosterRows,
       standingRows,
-      { data: shifts },
+      { data: shifts, error: shiftsErr },
       dailyRows,
     ] = await Promise.all([
       fetchAllRows((from2, to2) =>
@@ -465,6 +468,7 @@ export default async function rosterIntelligenceRoutes(fastify: FastifyInstance)
           .range(from2, to2),
       ),
     ])
+    if (shiftsErr) return serverError(req, reply, shiftsErr, ErrorCode.QUERY_FAILED, 'Failed to fetch shifts')
 
     const shiftMap    = new Map((shifts ?? []).map((s: any) => [s.id, s]))
     const standMap    = new Map(standingRows.map((r: any) => [r.employee_id, r.shift_id]))

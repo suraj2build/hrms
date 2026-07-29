@@ -21,20 +21,27 @@ import { z }                    from 'zod'
 import { HR_ADMIN_ROLES }       from '../../lib/rbac.js'
 import { fetchAllRows }         from '../../lib/supabase-paginate.js'
 import { serverError, ErrorCode } from '../../lib/api-errors.js'
+import { fetchTenantTz }        from '../../lib/attendance-engine.js'
+import { getLocalDate }         from '../../lib/org-context.js'
 const dateRe   = /^\d{4}-\d{2}-\d{2}$/
 const monthRe  = /^\d{4}-\d{2}$/
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-function defaultRange(days = 30): { from: string; to: string } {
-  const to  = new Date().toISOString().slice(0, 10)
-  const d   = new Date(); d.setDate(d.getDate() - days)
-  const from = d.toISOString().slice(0, 10)
-  return { from, to }
+// Tenant-local "today" — a bare server-UTC clock would default every
+// "last 30 days"/"this month" boundary below to the wrong day for a
+// tenant ahead of UTC (e.g. IST) during the skew window around midnight.
+async function tenantToday(fastify: FastifyInstance, tenantId: string): Promise<string> {
+  const tz = await fetchTenantTz(fastify.supabase, tenantId)
+  return getLocalDate(new Date().toISOString(), tz)
 }
 
-function currentMonth(): string {
-  return new Date().toISOString().slice(0, 7)
+function daysBeforeISO(today: string, days: number): string {
+  return new Date(new Date(`${today}T00:00:00Z`).getTime() - days * 86_400_000).toISOString().slice(0, 10)
+}
+
+function defaultRange(today: string, days = 30): { from: string; to: string } {
+  return { from: daysBeforeISO(today, days), to: today }
 }
 
 function safeRate(numerator: number, denominator: number, decimals = 1): number {
@@ -69,9 +76,10 @@ export default async function executiveIntelligenceRoutes(fastify: FastifyInstan
       return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
     }
 
+    const today = await tenantToday(fastify, req.tenantId)
     const range = parsed.data.from && parsed.data.to
       ? { from: parsed.data.from, to: parsed.data.to }
-      : defaultRange(30)
+      : defaultRange(today, 30)
 
     const periodDays = Math.round(
       (new Date(range.to).getTime() - new Date(range.from).getTime()) / 86_400_000,
@@ -92,7 +100,7 @@ export default async function executiveIntelligenceRoutes(fastify: FastifyInstan
         .from('employees')
         .select('id', { count: 'exact', head: true })
         .eq('tenant_id', req.tenantId)
-        .eq('status', 'active'),
+        .in('status', ['active', 'on_notice']),
 
       fastify.supabase
         .from('employee_separation')
@@ -101,6 +109,12 @@ export default async function executiveIntelligenceRoutes(fastify: FastifyInstan
         .gte('last_working_date', range.from)
         .lte('last_working_date', range.to),
     ])
+
+    // A transient failure on either would otherwise silently render as a
+    // fabricated 0 employee_count/turnover_rate on this executive KPI.
+    if (employeeRes.error || separationRes.error) {
+      return serverError(req, reply, employeeRes.error ?? separationRes.error, ErrorCode.QUERY_FAILED, 'Failed to fetch workforce stability data')
+    }
 
     const total        = rows.length
     const presentCount = rows.filter((r: any) => r.status === 'present' || r.status === 'late').length
@@ -141,7 +155,7 @@ export default async function executiveIntelligenceRoutes(fastify: FastifyInstan
       return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
     }
 
-    const month = parsed.data.month ?? currentMonth()
+    const month = parsed.data.month ?? (await tenantToday(fastify, req.tenantId)).slice(0, 7)
     const from  = `${month}-01`
     // Last day of month
     const nextMonth = new Date(`${month}-01`)
@@ -170,8 +184,16 @@ export default async function executiveIntelligenceRoutes(fastify: FastifyInstan
       ? parseFloat((rows.reduce((s: number, r: any) => s + (r.coverage_ratio ?? 0), 0) / count).toFixed(3))
       : 0
 
+    // staffing_pressure is a TEXT enum ('low'|'normal'|'elevated'|'critical' —
+    // migration 086), not a number. Averaging/bucketing it as a number
+    // silently coerced every row to NaN (string + number, and every numeric
+    // comparison against a string is always false), so avg_staffing_pressure
+    // was always null and pressure_distribution was always []. Map the real
+    // labels to a numeric weight for the average, and bucket by the actual
+    // DB label for the distribution.
+    const PRESSURE_WEIGHT: Record<string, number> = { low: 0.15, normal: 0.4, elevated: 0.7, critical: 0.95 }
     const avg_staffing_pressure = count > 0
-      ? parseFloat((rows.reduce((s: number, r: any) => s + (r.staffing_pressure ?? 0), 0) / count).toFixed(3))
+      ? parseFloat((rows.reduce((s: number, r: any) => s + (PRESSURE_WEIGHT[r.staffing_pressure] ?? 0), 0) / count).toFixed(3))
       : 0
 
     const understaffed_days = rows.filter((r: any) => (r.coverage_ratio ?? 1) < 1).length
@@ -180,11 +202,14 @@ export default async function executiveIntelligenceRoutes(fastify: FastifyInstan
 
     // Pressure distribution bucketing — returned as array so frontend can .map() it directly.
     // Shape: [{ pressure: string, count: number }] (matches StaffingSustainabilityResponse.pressure_distribution)
-    const pressure_distribution = [
-      { pressure: 'low',      count: rows.filter((r: any) => (r.staffing_pressure ?? 0) < 0.3).length },
-      { pressure: 'moderate', count: rows.filter((r: any) => (r.staffing_pressure ?? 0) >= 0.3 && (r.staffing_pressure ?? 0) < 0.7).length },
-      { pressure: 'high',     count: rows.filter((r: any) => (r.staffing_pressure ?? 0) >= 0.7).length },
-    ].filter(pd => pd.count > 0)
+    const pressureCounts = new Map<string, number>()
+    for (const r of rows as any[]) {
+      const p = r.staffing_pressure ?? 'unknown'
+      pressureCounts.set(p, (pressureCounts.get(p) ?? 0) + 1)
+    }
+    const pressure_distribution = [...pressureCounts.entries()]
+      .map(([pressure, count]) => ({ pressure, count }))
+      .filter(pd => pd.count > 0)
 
     return reply.send({
       month,
@@ -211,16 +236,17 @@ export default async function executiveIntelligenceRoutes(fastify: FastifyInstan
       return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
     }
 
+    const today = await tenantToday(fastify, req.tenantId)
     const range = parsed.data.from && parsed.data.to
       ? { from: parsed.data.from, to: parsed.data.to }
-      : defaultRange(30)
+      : defaultRange(today, 30)
 
     // otRows/allRows are paginated — a date-range attendance_daily fetch
     // across the whole tenant can exceed PostgREST's 1,000-row ceiling,
     // understating OT hours and (worse) the total_records denominator below.
     let otRows: any[]
     let allRows: any[]
-    let lopRes: { count: number | null }
+    let lopRes: { count: number | null; error: any }
     try {
       ;[otRows, lopRes, allRows] = await Promise.all([
         fetchAllRows((from, to) =>
@@ -254,8 +280,14 @@ export default async function executiveIntelligenceRoutes(fastify: FastifyInstan
         ),
       ])
     } catch (err) {
-      req.log.error({ err }, 'payroll volatility OT query failed')
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch OT data' })
+      return serverError(req, reply, err, ErrorCode.QUERY_FAILED, 'Failed to fetch OT data')
+    }
+
+    // lopRes is a plain count query, not fetchAllRows — it resolves (never
+    // throws) on failure, so the try/catch above does not cover it; without
+    // this check a real error here silently fabricates lop_count: 0.
+    if (lopRes.error) {
+      return serverError(req, reply, lopRes.error, ErrorCode.QUERY_FAILED, 'Failed to fetch LOP data')
     }
 
     const lop_count   = lopRes.count ?? 0
@@ -311,9 +343,10 @@ export default async function executiveIntelligenceRoutes(fastify: FastifyInstan
       return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
     }
 
+    const today = await tenantToday(fastify, req.tenantId)
     const range = parsed.data.from && parsed.data.to
       ? { from: parsed.data.from, to: parsed.data.to }
-      : defaultRange(30)
+      : defaultRange(today, 30)
 
     const [excTotalRes, excBreachedRes, excOpenRes, incTotalRes, incBreachedRes, incOpenRes] = await Promise.all([
       // Total exceptions in period
@@ -423,9 +456,10 @@ export default async function executiveIntelligenceRoutes(fastify: FastifyInstan
       return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
     }
 
+    const today = await tenantToday(fastify, req.tenantId)
     const range = parsed.data.from && parsed.data.to
       ? { from: parsed.data.from, to: parsed.data.to }
-      : defaultRange(30)
+      : defaultRange(today, 30)
 
     let rows: any[]
     try {
@@ -518,7 +552,7 @@ export default async function executiveIntelligenceRoutes(fastify: FastifyInstan
       return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
     }
 
-    const period = parsed.data.period ?? currentMonth()
+    const period = parsed.data.period ?? (await tenantToday(fastify, req.tenantId)).slice(0, 7)
     const from   = `${period}-01`
     const nextMonth = new Date(`${period}-01`)
     nextMonth.setMonth(nextMonth.getMonth() + 1)
@@ -611,21 +645,26 @@ export default async function executiveIntelligenceRoutes(fastify: FastifyInstan
     }
 
     const monthCount = parsed.data.months
-    const today      = new Date()
+    const today      = await tenantToday(fastify, req.tenantId)
+    const [todayY, todayM] = today.split('-').map(Number)
 
-    // Build month boundaries (oldest first)
+    // Build month boundaries (oldest first) — pure Date.UTC() arithmetic,
+    // anchored on the tenant-local "today" string, so it never mixes a
+    // UTC-string-parsed date with the server's local getMonth()/setMonth().
     const monthBoundaries: Array<{ month: string; from: string; to: string }> = []
     for (let i = monthCount - 1; i >= 0; i--) {
-      const d = new Date(today.getFullYear(), today.getMonth() - i, 1)
-      const monthStr = d.toISOString().slice(0, 7)
+      const target   = new Date(Date.UTC(todayY, todayM - 1 - i, 1))
+      const y        = target.getUTCFullYear()
+      const m        = target.getUTCMonth()
+      const monthStr = `${y}-${String(m + 1).padStart(2, '0')}`
       const from     = `${monthStr}-01`
-      const lastDay  = new Date(d.getFullYear(), d.getMonth() + 1, 0)
-      const to       = lastDay.toISOString().slice(0, 10)
+      const lastDay  = new Date(Date.UTC(y, m + 1, 0)).getUTCDate()
+      const to       = `${monthStr}-${String(lastDay).padStart(2, '0')}`
       monthBoundaries.push({ month: monthStr, from, to })
     }
 
-    const oldest = monthBoundaries[0]?.from ?? defaultRange(monthCount * 30).from
-    const newest = monthBoundaries[monthBoundaries.length - 1]?.to ?? defaultRange(0).to
+    const oldest = monthBoundaries[0]?.from ?? defaultRange(today, monthCount * 30).from
+    const newest = monthBoundaries[monthBoundaries.length - 1]?.to ?? today
 
     const allRows = await fetchAllRows((from, to) =>
       fastify.supabase
@@ -664,8 +703,9 @@ export default async function executiveIntelligenceRoutes(fastify: FastifyInstan
   fastify.get('/analytics/executive/dashboard', auth, async (req: any, reply) => {
     if (!requireAdmin(req, reply)) return
 
-    const range   = defaultRange(30)
-    const period  = currentMonth()
+    const today   = await tenantToday(fastify, req.tenantId)
+    const range   = defaultRange(today, 30)
+    const period  = today.slice(0, 7)
     const from30  = range.from
     const to30    = range.to
 
@@ -707,7 +747,7 @@ export default async function executiveIntelligenceRoutes(fastify: FastifyInstan
         .from('employees')
         .select('id', { count: 'exact', head: true })
         .eq('tenant_id', req.tenantId)
-        .eq('status', 'active'),
+        .in('status', ['active', 'on_notice']),
 
       fastify.supabase
         .from('employee_separation')
@@ -797,6 +837,12 @@ export default async function executiveIntelligenceRoutes(fastify: FastifyInstan
           .range(from, to),
       ),
     ])
+
+    // A transient failure on any of these plain count queries would otherwise
+    // silently render as a fabricated 0 on this composite executive dashboard.
+    for (const res of [employeeRes, separationRes, lopRes, excTotalRes, excBreachedRes]) {
+      if (res.error) return serverError(req, reply, res.error, ErrorCode.QUERY_FAILED, 'Failed to compute executive dashboard')
+    }
 
     // ── Workforce stability ──
     const totalDaily  = dailyRows.length

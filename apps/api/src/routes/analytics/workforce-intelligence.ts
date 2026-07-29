@@ -17,15 +17,23 @@ import { z }                   from 'zod'
 import { HR_ADMIN_ROLES }      from '../../lib/rbac.js'
 import { fetchAllRows }        from '../../lib/supabase-paginate.js'
 import { serverError, ErrorCode } from '../../lib/api-errors.js'
+import { fetchTenantTz }       from '../../lib/attendance-engine.js'
+import { getLocalDate }        from '../../lib/org-context.js'
 // ── Date helpers ──────────────────────────────────────────────────────────────
 
 const dateRe = /^\d{4}-\d{2}-\d{2}$/
 
-function defaultRange(weeks = 8): { from: string; to: string } {
-  const to  = new Date().toISOString().slice(0, 10)
-  const d   = new Date(); d.setDate(d.getDate() - weeks * 7)
-  const from = d.toISOString().slice(0, 10)
-  return { from, to }
+// Tenant-local "today" — a bare server-UTC clock would default every
+// "last N weeks" boundary below to the wrong day for a tenant ahead of UTC
+// (e.g. IST) during the skew window around midnight.
+async function tenantToday(fastify: FastifyInstance, tenantId: string): Promise<string> {
+  const tz = await fetchTenantTz(fastify.supabase, tenantId)
+  return getLocalDate(new Date().toISOString(), tz)
+}
+
+function defaultRange(today: string, weeks = 8): { from: string; to: string } {
+  const from = new Date(new Date(`${today}T00:00:00Z`).getTime() - weeks * 7 * 86_400_000).toISOString().slice(0, 10)
+  return { from, to: today }
 }
 
 function isoWeek(dateStr: string): string {
@@ -60,9 +68,10 @@ export default async function workforceIntelligenceRoutes(fastify: FastifyInstan
     const parsed = querySchema.safeParse(req.query)
     if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
 
+    const today = await tenantToday(fastify, req.tenantId)
     const range = parsed.data.from && parsed.data.to
       ? { from: parsed.data.from, to: parsed.data.to }
-      : defaultRange(12)
+      : defaultRange(today, 12)
 
     const rows = await fetchAllRows((from, to) =>
       fastify.supabase
@@ -121,9 +130,10 @@ export default async function workforceIntelligenceRoutes(fastify: FastifyInstan
     const parsed = querySchema.safeParse(req.query)
     if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
 
+    const today = await tenantToday(fastify, req.tenantId)
     const range = parsed.data.from && parsed.data.to
       ? { from: parsed.data.from, to: parsed.data.to }
-      : defaultRange(4)
+      : defaultRange(today, 4)
     const threshold = parsed.data.ot_threshold_min
 
     const rows = await fetchAllRows((from, to) =>
@@ -183,9 +193,10 @@ export default async function workforceIntelligenceRoutes(fastify: FastifyInstan
     const parsed = querySchema.safeParse(req.query)
     if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
 
+    const today = await tenantToday(fastify, req.tenantId)
     const range = parsed.data.from && parsed.data.to
       ? { from: parsed.data.from, to: parsed.data.to }
-      : defaultRange(8)
+      : defaultRange(today, 8)
 
     const [weeklyOffRows, holidayRows] = await Promise.all([
       fetchAllRows((from, to) =>
@@ -331,9 +342,10 @@ export default async function workforceIntelligenceRoutes(fastify: FastifyInstan
     const parsed = querySchema.safeParse(req.query)
     if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
 
+    const today = await tenantToday(fastify, req.tenantId)
     const range = parsed.data.from && parsed.data.to
       ? { from: parsed.data.from, to: parsed.data.to }
-      : defaultRange(8)
+      : defaultRange(today, 8)
 
     const rows = await fetchAllRows((from, to) =>
       fastify.supabase
@@ -401,7 +413,8 @@ export default async function workforceIntelligenceRoutes(fastify: FastifyInstan
   fastify.get('/analytics/workforce/summary', auth, async (req: any, reply) => {
     if (!requireAdmin(req, reply)) return
 
-    const range = defaultRange(4)  // last 4 weeks
+    const today = await tenantToday(fastify, req.tenantId)
+    const range = defaultRange(today, 4)  // last 4 weeks
 
     const [daily, otRows, pressureRes, anomalyRes] = await Promise.all([
       fetchAllRows((from, to) =>
@@ -436,6 +449,12 @@ export default async function workforceIntelligenceRoutes(fastify: FastifyInstan
         .eq('tenant_id', req.tenantId)
         .eq('resolved', false),
     ])
+
+    // Both are plain count queries — a transient failure would otherwise
+    // silently render as a fabricated 0 on this dashboard summary widget.
+    if (pressureRes.error || anomalyRes.error) {
+      return serverError(req, reply, pressureRes.error ?? anomalyRes.error, ErrorCode.QUERY_FAILED, 'Failed to compute workforce summary')
+    }
 
     const total = daily.length
     const absent  = daily.filter(d => d.status === 'absent').length
