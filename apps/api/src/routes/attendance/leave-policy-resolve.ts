@@ -28,6 +28,7 @@ import {
 } from '../../lib/leave-policy-service.js'
 import { fetchTenantTz, utcToLocalDate } from '../../lib/attendance-engine.js'
 import { MANAGER_ROLES } from '../../lib/rbac.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
 
@@ -48,13 +49,18 @@ export default async function leavePolicyResolveRoute(fastify: FastifyInstance) 
 
     // Non-admins may only resolve their own policy
     if (!MANAGER_ROLES.includes(req.userRole)) {
-      const { data: profile } = await fastify.supabase
+      const { data: profile, error: profileError } = await fastify.supabase
         .from('profiles')
         .select('employee_id')
         .eq('id', req.userId)
         .eq('tenant_id', req.tenantId)
-        .single()
+        .maybeSingle()
 
+      // A discarded error here previously collapsed into the 403 below,
+      // masking a genuine backend failure as an authorization denial.
+      if (profileError) {
+        return serverError(req, reply, profileError, ErrorCode.QUERY_FAILED, 'Failed to resolve caller identity')
+      }
       if (profile?.employee_id !== employeeId) {
         return reply.code(403).send({
           error:   'FORBIDDEN',
@@ -118,13 +124,18 @@ export default async function leavePolicyResolveRoute(fastify: FastifyInstance) 
 
     // Non-admins may only resolve their own policy
     if (!MANAGER_ROLES.includes(req.userRole)) {
-      const { data: profile } = await fastify.supabase
+      const { data: profile, error: profileError } = await fastify.supabase
         .from('profiles')
         .select('employee_id')
         .eq('id', req.userId)
         .eq('tenant_id', req.tenantId)
-        .single()
+        .maybeSingle()
 
+      // A discarded error here previously collapsed into the 403 below,
+      // masking a genuine backend failure as an authorization denial.
+      if (profileError) {
+        return serverError(req, reply, profileError, ErrorCode.QUERY_FAILED, 'Failed to resolve caller identity')
+      }
       if (profile?.employee_id !== employeeId) {
         return reply.code(403).send({
           error:   'FORBIDDEN',

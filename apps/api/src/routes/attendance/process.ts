@@ -23,6 +23,7 @@ import type { FastifyInstance } from 'fastify'
 import type { SupabaseClient }  from '@supabase/supabase-js'
 import { z } from 'zod'
 import { processAttendanceForDate, writeFailedAuditRun } from '../../lib/attendance-processor.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 import { utcToLocalDate } from '../../lib/attendance-engine.js'
 import { isMonthLocked, monthOf } from '../../lib/period-lock.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
@@ -63,12 +64,17 @@ async function isAdvisoryLockGhost(
   supabase:  SupabaseClient,
   tenantId:  string,
 ): Promise<boolean> {
-  const { data: row } = await supabase
+  const { data: row, error } = await supabase
     .from('attendance_processing_lock')
     .select('is_running, started_at, lock_ttl_seconds')
     .eq('tenant_id', tenantId)
     .maybeSingle()
 
+  // On a read failure, throw rather than swallow — the caller (line ~247)
+  // already treats a thrown error as "not a ghost" (safe: reject with 409
+  // rather than risk a false takeover), but only if we actually throw
+  // instead of silently returning `true` here.
+  if (error) throw new Error(`Advisory-lock ghost check failed: ${error.message}`)
   if (!row || !row.is_running || !row.started_at) return true  // table says not running → ghost
 
   const ageMs = Date.now() - new Date(row.started_at).getTime()
@@ -196,7 +202,7 @@ export default async function processRoute(fastify: FastifyInstance) {
       // ── Step 2: Date-level guard ──────────────────────────────────────────────
       // Block accidental repeated runs for the same date unless force=true.
       if (!force) {
-        const { data: existingRun } = await fastify.supabase
+        const { data: existingRun, error: existingRunError } = await fastify.supabase
           .from('attendance_processing_runs')
           .select('id, completed_at, error_message')
           .eq('tenant_id', tenantId)
@@ -207,6 +213,12 @@ export default async function processRoute(fastify: FastifyInstance) {
           .limit(1)
           .maybeSingle()
 
+        // Discarding this error would silently skip the "already processed"
+        // guard on a transient DB failure, allowing an unintended duplicate
+        // processing run for the date.
+        if (existingRunError) {
+          return serverError(req, reply, existingRunError, ErrorCode.QUERY_FAILED, 'Failed to check for an existing processing run')
+        }
         if (existingRun) {
           return reply.code(409).send({
             error:        'ALREADY_PROCESSED',

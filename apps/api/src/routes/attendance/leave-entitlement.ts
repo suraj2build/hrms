@@ -25,7 +25,8 @@ import {
   runCarryForward,
 }                               from '../../lib/leave-entitlement-service.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
-import { checkIdempotency, storeIdempotency } from '../../lib/idempotency.js'
+import { checkIdempotency, storeIdempotency, claimIdempotency, releaseIdempotencyClaim } from '../../lib/idempotency.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 export default async function leaveEntitlementRoute(fastify: FastifyInstance) {
   const auth = { preHandler: [fastify.authenticate] }
@@ -57,29 +58,45 @@ export default async function leaveEntitlementRoute(fastify: FastifyInstance) {
     }
 
     // This batch job double-credits every eligible employee if run twice for
-    // the same month (creditEmployeeDays has no run-dedup of its own) — guard
-    // a double-click / client retry with an Idempotency-Key.
+    // the same month (creditEmployeeDays has no run-dedup of its own). A
+    // plain check-then-work-then-store Idempotency-Key guard still has a
+    // race window between the check and the eventual store — two requests
+    // with the same key arriving close together (client retry, double-click)
+    // can both miss the cache and both run the accrual. Claim the key
+    // atomically before doing the work so a concurrent duplicate is rejected
+    // outright instead of racing.
     const iKey = (req.headers['idempotency-key'] as string | undefined)?.trim()
+    const scope = 'leave-entitlement-monthly'
     if (iKey) {
-      const cached = await checkIdempotency(fastify.supabase, req.tenantId, iKey, 'leave-entitlement-monthly')
+      const cached = await checkIdempotency(fastify.supabase, req.tenantId, iKey, scope)
       if (cached) {
         reply.header('Idempotency-Replayed', 'true')
         return reply.code(cached.status_code).send(cached.response)
       }
+      const claimed = await claimIdempotency(fastify.supabase, req.tenantId, iKey, scope)
+      if (!claimed) {
+        return reply.code(409).send({ error: 'DUPLICATE_REQUEST', message: 'An identical request is already being processed' })
+      }
     }
 
-    const result = await runMonthlyAccrual(
-      fastify.supabase,
-      req.tenantId,
-      parsed.data.year,
-      parsed.data.month,
-    )
+    let result
+    try {
+      result = await runMonthlyAccrual(
+        fastify.supabase,
+        req.tenantId,
+        parsed.data.year,
+        parsed.data.month,
+      )
+    } catch (err: unknown) {
+      if (iKey) await releaseIdempotencyClaim(fastify.supabase, req.tenantId, iKey, scope)
+      return serverError(req, reply, err, ErrorCode.COMPUTE_FAILED, 'Failed to run monthly accrual')
+    }
 
     const responseBody = {
       data: result,
       message: `Monthly accrual complete — ${result.employees_processed} employees credited, ${result.total_days_credited} days total`,
     }
-    if (iKey) await storeIdempotency(fastify.supabase, req.tenantId, iKey, 'leave-entitlement-monthly', 200, responseBody)
+    if (iKey) await storeIdempotency(fastify.supabase, req.tenantId, iKey, scope, 200, responseBody)
     return reply.send(responseBody)
   })
 
@@ -100,27 +117,40 @@ export default async function leaveEntitlementRoute(fastify: FastifyInstance) {
       })
     }
 
-    // Same double-credit risk as /monthly — guard with an Idempotency-Key.
+    // Same double-credit risk as /monthly — claim the key atomically so a
+    // concurrent duplicate request is rejected instead of racing past the
+    // cache check and running the credit twice.
     const iKey = (req.headers['idempotency-key'] as string | undefined)?.trim()
+    const scope = 'leave-entitlement-yearly'
     if (iKey) {
-      const cached = await checkIdempotency(fastify.supabase, req.tenantId, iKey, 'leave-entitlement-yearly')
+      const cached = await checkIdempotency(fastify.supabase, req.tenantId, iKey, scope)
       if (cached) {
         reply.header('Idempotency-Replayed', 'true')
         return reply.code(cached.status_code).send(cached.response)
       }
+      const claimed = await claimIdempotency(fastify.supabase, req.tenantId, iKey, scope)
+      if (!claimed) {
+        return reply.code(409).send({ error: 'DUPLICATE_REQUEST', message: 'An identical request is already being processed' })
+      }
     }
 
-    const result = await runYearlyCredit(
-      fastify.supabase,
-      req.tenantId,
-      parsed.data.leave_year,
-    )
+    let result
+    try {
+      result = await runYearlyCredit(
+        fastify.supabase,
+        req.tenantId,
+        parsed.data.leave_year,
+      )
+    } catch (err: unknown) {
+      if (iKey) await releaseIdempotencyClaim(fastify.supabase, req.tenantId, iKey, scope)
+      return serverError(req, reply, err, ErrorCode.COMPUTE_FAILED, 'Failed to run yearly credit')
+    }
 
     const responseBody = {
       data: result,
       message: `Yearly credit complete — ${result.employees_processed} employees credited, ${result.total_days_credited} days total`,
     }
-    if (iKey) await storeIdempotency(fastify.supabase, req.tenantId, iKey, 'leave-entitlement-yearly', 200, responseBody)
+    if (iKey) await storeIdempotency(fastify.supabase, req.tenantId, iKey, scope, 200, responseBody)
     return reply.send(responseBody)
   })
 
@@ -151,30 +181,43 @@ export default async function leaveEntitlementRoute(fastify: FastifyInstance) {
     }
 
     // runCarryForward's own docstring: "running it twice would double-credit
-    // ... Run it exactly once." Guard the double-click / client-retry case
-    // with an Idempotency-Key (a deliberate second run days apart is still
-    // an operator responsibility this doesn't protect against).
+    // ... Run it exactly once." Claim the key atomically before doing the
+    // work — a plain check-then-store guard has a race window where two
+    // requests with the same key can both miss the cache and both run the
+    // carry-forward (a deliberate second run days apart is still an
+    // operator responsibility this doesn't protect against).
     const iKey = (req.headers['idempotency-key'] as string | undefined)?.trim()
+    const scope = 'leave-entitlement-carry-forward'
     if (iKey) {
-      const cached = await checkIdempotency(fastify.supabase, req.tenantId, iKey, 'leave-entitlement-carry-forward')
+      const cached = await checkIdempotency(fastify.supabase, req.tenantId, iKey, scope)
       if (cached) {
         reply.header('Idempotency-Replayed', 'true')
         return reply.code(cached.status_code).send(cached.response)
       }
+      const claimed = await claimIdempotency(fastify.supabase, req.tenantId, iKey, scope)
+      if (!claimed) {
+        return reply.code(409).send({ error: 'DUPLICATE_REQUEST', message: 'An identical request is already being processed' })
+      }
     }
 
-    const result = await runCarryForward(
-      fastify.supabase,
-      req.tenantId,
-      from_year,
-      to_year,
-    )
+    let result
+    try {
+      result = await runCarryForward(
+        fastify.supabase,
+        req.tenantId,
+        from_year,
+        to_year,
+      )
+    } catch (err: unknown) {
+      if (iKey) await releaseIdempotencyClaim(fastify.supabase, req.tenantId, iKey, scope)
+      return serverError(req, reply, err, ErrorCode.COMPUTE_FAILED, 'Failed to run carry-forward')
+    }
 
     const responseBody = {
       data: result,
       message: `Carry-forward complete — ${result.employees_processed} employees processed, ${result.total_days_credited} days carried`,
     }
-    if (iKey) await storeIdempotency(fastify.supabase, req.tenantId, iKey, 'leave-entitlement-carry-forward', 200, responseBody)
+    if (iKey) await storeIdempotency(fastify.supabase, req.tenantId, iKey, scope, 200, responseBody)
     return reply.send(responseBody)
   })
 }

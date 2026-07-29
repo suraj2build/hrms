@@ -9,6 +9,8 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { fetchTenantTz } from '../../lib/attendance-engine.js'
+import { getLocalDate } from '../../lib/org-context.js'
 
 const dateRe  = /^\d{4}-\d{2}-\d{2}$/
 const monthRe = /^\d{4}-\d{2}$/
@@ -32,11 +34,6 @@ const employeeQuerySchema = z.object({
   to:   z.string().regex(dateRe).optional(),
 })
 
-function currentMonthStr(): string {
-  const now = new Date()
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
-}
-
 function monthDateRange(month: string): { from: string; to: string } {
   const [year, mon] = month.split('-').map(Number)
   const from = `${month}-01`
@@ -45,14 +42,10 @@ function monthDateRange(month: string): { from: string; to: string } {
   return { from, to }
 }
 
-function nDaysAgo(n: number): string {
-  const d = new Date()
-  d.setDate(d.getDate() - n)
-  return d.toISOString().slice(0, 10)
-}
-
-function today(): string {
-  return new Date().toISOString().slice(0, 10)
+// Pure UTC-ms arithmetic anchored on the tenant-local "today" string, so it
+// never gets reinterpreted through the server's local timezone.
+function daysBeforeISO(today: string, n: number): string {
+  return new Date(new Date(`${today}T00:00:00Z`).getTime() - n * 86_400_000).toISOString().slice(0, 10)
 }
 
 export default async function attendancePolicyConflictsRoute(fastify: FastifyInstance) {
@@ -117,6 +110,12 @@ export default async function attendancePolicyConflictsRoute(fastify: FastifyIns
 
   // ── GET /attendance/policy-conflicts/summary ──────────────────────────────────
   fastify.get('/attendance/policy-conflicts/summary', auth, async (req: any, reply) => {
+    // Sibling routes in this same file gate on HR_ADMIN_ROLES — this one was
+    // missing that check, letting any authenticated employee read tenant-wide
+    // policy-conflict aggregates.
+    if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
+      return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
+    }
     const parsed = summaryQuerySchema.safeParse(req.query)
     if (!parsed.success) {
       return reply.code(400).send({
@@ -125,7 +124,9 @@ export default async function attendancePolicyConflictsRoute(fastify: FastifyIns
       })
     }
 
-    const month = parsed.data.month ?? currentMonthStr()
+    const tz = await fetchTenantTz(fastify.supabase, req.tenantId)
+    const todayStr = getLocalDate(new Date().toISOString(), tz)
+    const month = parsed.data.month ?? todayStr.slice(0, 7)
     const { from, to } = monthDateRange(month)
 
     let rows: Array<{ conflict_type: string; severity: string; payroll_impacting: boolean }>
@@ -177,8 +178,10 @@ export default async function attendancePolicyConflictsRoute(fastify: FastifyIns
       })
     }
 
-    const from = parsed.data.from ?? nDaysAgo(90)
-    const to   = parsed.data.to   ?? today()
+    const tz = await fetchTenantTz(fastify.supabase, req.tenantId)
+    const todayStr = getLocalDate(new Date().toISOString(), tz)
+    const from = parsed.data.from ?? daysBeforeISO(todayStr, 90)
+    const to   = parsed.data.to   ?? todayStr
 
     // Verify employee belongs to tenant
     const { data: emp } = await fastify.supabase

@@ -13,6 +13,8 @@ import { z } from 'zod'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { reconcileTenantMonth, finalizeTenantMonth } from '../../lib/wo-credit-reconciler.js'
 import { serverError, notFound, ErrorCode } from '../../lib/api-errors.js'
+import { fetchTenantTz } from '../../lib/attendance-engine.js'
+import { getLocalDate } from '../../lib/org-context.js'
 
 const ladderRowSchema = z.object({
   present_days: z.number().int().min(1).max(31),
@@ -140,12 +142,13 @@ export default async function woCreditRoutes(fastify: FastifyInstance) {
     // parent structure belongs to the caller's tenant before any mutation —
     // otherwise a body carrying only `ladder` would skip the tenant-scoped
     // metadata update and let replaceLadder() wipe another tenant's ladder.
-    const { data: owned } = await fastify.supabase
+    const { data: owned, error: ownedError } = await fastify.supabase
       .from('wo_credit_structure')
       .select('id')
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
       .maybeSingle()
+    if (ownedError) return serverError(req, reply, ownedError, ErrorCode.QUERY_FAILED, 'Failed to verify WO credit structure')
     if (!owned) return notFound(reply, 'NOT_FOUND', 'Structure not found')
 
     if (Object.keys(fields).length) {
@@ -160,8 +163,10 @@ export default async function woCreditRoutes(fastify: FastifyInstance) {
       if (ladderErr) return serverError(req, reply, ladderErr.error, ladderErr.code, 'Failed to save WO credit ladder')
     }
 
-    const { data } = await fastify.supabase
-      .from('wo_credit_structure').select('*').eq('id', id).eq('tenant_id', req.tenantId).single()
+    const { data, error: refetchError } = await fastify.supabase
+      .from('wo_credit_structure').select('*').eq('id', id).eq('tenant_id', req.tenantId).maybeSingle()
+    if (refetchError) return serverError(req, reply, refetchError, ErrorCode.QUERY_FAILED, 'Failed to reload WO credit structure')
+    if (!data) return notFound(reply, 'NOT_FOUND', 'Structure not found')
     const ladders = await loadLadders([id])
     return reply.send({ data: { ...data, ladder: ladders.get(id) ?? [] } })
   })
@@ -177,9 +182,14 @@ export default async function woCreditRoutes(fastify: FastifyInstance) {
 
   // ── GET /review?year&month ─────────────────────────────────────────────────
   fastify.get('/attendance/wo-credit/review', hrAdminAuth, async (req: any, reply) => {
-    const now = new Date()
-    const year  = parseInt((req.query as any).year  ?? String(now.getUTCFullYear()), 10)
-    const month = parseInt((req.query as any).month ?? String(now.getUTCMonth() + 1), 10)
+    // Default "this month" from the tenant's local calendar, not server UTC —
+    // this is a month-close/payroll-adjacent operation, so a UTC default can
+    // resolve to the wrong month near the UTC/local-midnight boundary.
+    const tz = await fetchTenantTz(fastify.supabase, req.tenantId)
+    const today = getLocalDate(new Date().toISOString(), tz)
+    const [todayYear, todayMonth] = today.split('-').map(Number)
+    const year  = parseInt((req.query as any).year  ?? String(todayYear), 10)
+    const month = parseInt((req.query as any).month ?? String(todayMonth), 10)
 
     const { data, error } = await fastify.supabase
       .from('wo_credit_monthly')
@@ -187,7 +197,7 @@ export default async function woCreditRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', req.tenantId)
       .eq('year', year)
       .eq('month', month)
-    if (error) return reply.send({ data: [], year, month })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch WO credit review data')
 
     // Enrich with employee names
     const rows = (data ?? []) as any[]
@@ -209,10 +219,16 @@ export default async function woCreditRoutes(fastify: FastifyInstance) {
 
   // ── POST /reconcile ────────────────────────────────────────────────────────
   fastify.post('/attendance/wo-credit/reconcile', hrAdminAuth, async (req: any, reply) => {
-    const now = new Date()
     const body = (req.body ?? {}) as { year?: number; month?: number }
-    const year  = body.year  ?? now.getUTCFullYear()
-    const month = body.month ?? now.getUTCMonth() + 1
+    let year = body.year
+    let month = body.month
+    if (year === undefined || month === undefined) {
+      const tz = await fetchTenantTz(fastify.supabase, req.tenantId)
+      const today = getLocalDate(new Date().toISOString(), tz)
+      const [todayYear, todayMonth] = today.split('-').map(Number)
+      year  ??= todayYear
+      month ??= todayMonth
+    }
     try {
       const results = await reconcileTenantMonth(fastify.supabase, req.tenantId, year, month)
       const summary = {
@@ -231,10 +247,16 @@ export default async function woCreditRoutes(fastify: FastifyInstance) {
   // Month-close: credit leftover credit into the WO leave type (carry-over with
   // expiry), record LOP for uncovered absences, and lock the month. Idempotent.
   fastify.post('/attendance/wo-credit/finalize', hrAdminAuth, async (req: any, reply) => {
-    const now = new Date()
     const body = (req.body ?? {}) as { year?: number; month?: number }
-    const year  = body.year  ?? now.getUTCFullYear()
-    const month = body.month ?? now.getUTCMonth() + 1
+    let year = body.year
+    let month = body.month
+    if (year === undefined || month === undefined) {
+      const tz = await fetchTenantTz(fastify.supabase, req.tenantId)
+      const today = getLocalDate(new Date().toISOString(), tz)
+      const [todayYear, todayMonth] = today.split('-').map(Number)
+      year  ??= todayYear
+      month ??= todayMonth
+    }
     try {
       const results = await finalizeTenantMonth(fastify.supabase, req.tenantId, year, month)
       const summary = {

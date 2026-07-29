@@ -160,7 +160,7 @@ export default async function attendancePipelineStatsRoute(fastify: FastifyInsta
     let csvDateRange: { from: string; to: string } | null = null
     if (punchLogCount30d > 0) {
       // Get the latest date in a separate query
-      const { data: latestRow } = await fastify.supabase
+      const { data: latestRow, error: latestRowError } = await fastify.supabase
         .from('attendance_punch_logs')
         .select('date:punched_at')
         .eq('tenant_id', tenantId)
@@ -169,6 +169,7 @@ export default async function attendancePipelineStatsRoute(fastify: FastifyInsta
         .order('punched_at', { ascending: false })
         .limit(1)
         .maybeSingle()
+      if (latestRowError) return serverError(req, reply, latestRowError, ErrorCode.QUERY_FAILED, 'Failed to fetch pipeline stats')
 
       const earliest = punchLogRows[0]?.date
       const latest   = (latestRow as { date: string } | null)?.date

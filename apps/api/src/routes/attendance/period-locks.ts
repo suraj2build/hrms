@@ -67,39 +67,58 @@ export default async function periodLocksRoutes(fastify: FastifyInstance) {
     const parsed = reasonSchema.safeParse(req.body)
     if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
 
-    // Reject locking a period already past LOCKED (in payroll processing or
-    // finalized) — an upsert has no WHERE clause to fold this into, so this
-    // pre-check leaves a narrow race window, but it closes the common case
-    // of re-firing the auto-LOP side effect against a period payroll has
-    // already started against, and stops finalized_at/payroll_started_at
-    // from being silently left dangling once state regresses to LOCKED.
-    const { data: existing } = await fastify.supabase
-      .from('attendance_period_locks')
-      .select('state')
-      .eq('tenant_id', req.tenantId)
-      .eq('period_month', month)
-      .maybeSingle()
-
-    if (existing && ['PAYROLL_PROCESSING', 'PAYROLL_FINALIZED'].includes(existing.state)) {
-      return conflictError(reply, 'INVALID_TRANSITION', `Cannot lock a period in state '${existing.state}'`)
-    }
-
+    // Atomically transition an existing row into LOCKED, but only if it isn't
+    // already past LOCKED — same compare-and-swap pattern as start-payroll/
+    // finalize below. A plain upsert has no WHERE clause to fold this
+    // precondition into, which left a race window where a concurrent
+    // unlock/start-payroll could land between a pre-check and the upsert.
     const now = new Date().toISOString()
-    const { data, error } = await fastify.supabase
+    const { data: updated, error: updateError } = await fastify.supabase
       .from('attendance_period_locks')
-      .upsert({
-        tenant_id:   req.tenantId,
-        period_month: month,
+      .update({
         state:       'LOCKED',
         locked_by:   req.userId,
         locked_at:   now,
         lock_reason: parsed.data.reason ?? null,
         updated_at:  now,
-      }, { onConflict: 'tenant_id,period_month' })
+      })
+      .eq('tenant_id', req.tenantId)
+      .eq('period_month', month)
+      .not('state', 'in', '("PAYROLL_PROCESSING","PAYROLL_FINALIZED")')
       .select('id, period_month, state, locked_at, lock_reason')
-      .single()
+      .maybeSingle()
 
-    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to lock period')
+    if (updateError) return serverError(req, reply, updateError, ErrorCode.UPDATE_FAILED, 'Failed to lock period')
+
+    let data = updated
+    if (!data) {
+      // No row matched — either no lock row exists yet for this period, or
+      // it exists but is in PAYROLL_PROCESSING/PAYROLL_FINALIZED. Try
+      // inserting a fresh row; the unique (tenant_id, period_month)
+      // constraint makes this safe under a concurrent first-lock race, and
+      // a 23505 here means the row exists in a disallowed state.
+      const { data: inserted, error: insertError } = await fastify.supabase
+        .from('attendance_period_locks')
+        .insert({
+          tenant_id:    req.tenantId,
+          period_month: month,
+          state:        'LOCKED',
+          locked_by:    req.userId,
+          locked_at:    now,
+          lock_reason:  parsed.data.reason ?? null,
+          updated_at:   now,
+        })
+        .select('id, period_month, state, locked_at, lock_reason')
+        .maybeSingle()
+
+      if (insertError && insertError.code !== '23505') {
+        return serverError(req, reply, insertError, ErrorCode.INSERT_FAILED, 'Failed to lock period')
+      }
+      if (insertError?.code === '23505') {
+        return conflictError(reply, 'INVALID_TRANSITION', 'Cannot lock a period that is already in payroll processing or finalized')
+      }
+      data = inserted
+    }
 
     // Fire-and-forget: auto-close pending regularisations as LOP
     setImmediate(async () => {

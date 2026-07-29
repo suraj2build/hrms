@@ -23,6 +23,7 @@
 import type { FastifyInstance } from 'fastify'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -203,27 +204,37 @@ export default async function leaveSchedulerStatusRoutes(fastify: FastifyInstanc
       })
 
       // 3. Open reconciliation issues — column is `resolved` (not `is_resolved`)
+      // A count/head:true query resolves rather than throws on failure, so the
+      // try/catch below never actually fires for a real query error — only the
+      // Postgres "relation does not exist" (42P01) case should fall back to 0;
+      // any other error must be surfaced, not silently reported as "0 issues".
       let openIssues = 0
       try {
-        const { count } = await fastify.supabase
+        const { count, error: issuesError } = await fastify.supabase
           .from('leave_reconciliation_issues')
           .select('id', { count: 'exact', head: true })
           .eq('tenant_id', tenantId)
           .eq('resolved', false)
-        openIssues = count ?? 0
+        if (issuesError && issuesError.code !== '42P01') {
+          return serverError(req, reply, issuesError, ErrorCode.QUERY_FAILED, 'Failed to fetch open reconciliation issues')
+        }
+        openIssues = issuesError ? 0 : (count ?? 0)
       } catch { /* table may not exist yet — treat as 0 */ }
 
       // 4. Latest reconciliation report
       let lastRecon: any = null
       try {
-        const { data } = await fastify.supabase
+        const { data, error: reconError } = await fastify.supabase
           .from('leave_reconciliation_reports')
           .select('run_date, severity, issues_found, employees_checked, created_at')
           .eq('tenant_id', tenantId)
           .order('run_date', { ascending: false })
           .limit(1)
           .maybeSingle()
-        lastRecon = data
+        if (reconError && reconError.code !== '42P01') {
+          return serverError(req, reply, reconError, ErrorCode.QUERY_FAILED, 'Failed to fetch latest reconciliation report')
+        }
+        lastRecon = reconError ? null : data
       } catch { /* table may not exist yet */ }
 
       return reply.send({

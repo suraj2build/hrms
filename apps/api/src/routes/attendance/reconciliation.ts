@@ -153,13 +153,13 @@ export default async function attendanceReconciliationRoutes(fastify: FastifyIns
     const { limit, offset, issue_type, severity, resolved } = parsed.data
 
     // Verify run belongs to tenant
-    const { data: run } = await fastify.supabase
+    const { data: run, error: runError } = await fastify.supabase
       .from('attendance_reconciliation_runs')
       .select('id')
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
       .single()
-    if (!run) {
+    if (runError || !run) {
       return reply.code(404).send({ error: 'NOT_FOUND', message: 'Reconciliation run not found' })
     }
 
