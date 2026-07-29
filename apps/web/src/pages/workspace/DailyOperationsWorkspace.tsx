@@ -520,6 +520,8 @@ function OTReviewTab({
   onOpenProfile: (id: string, name: string) => void
   allEvents: OperationalActivityEvent[]
 }) {
+  const qc = useQueryClient()
+
   const { data: otResp, isLoading } = useQuery({
     queryKey: ['daily-ops-ot'],
     queryFn: () =>
@@ -529,12 +531,24 @@ function OTReviewTab({
     staleTime: 60_000,
   })
 
+  // OT requests are also read under ['ot-requests'] (OvertimeManagement.tsx,
+  // ApprovalInbox.tsx via 'manager-team-overtime', MobileFlowDesk.tsx) and
+  // ['manager-team-overtime'] (ManagerTeamOvertimeRequests.tsx) — without
+  // these, an approval here leaves the row visibly pending in every other
+  // view until their own staleness windows expire.
+  const invalidateOt = useCallback(() => {
+    qc.invalidateQueries({ queryKey: ['daily-ops-ot'] })
+    qc.invalidateQueries({ queryKey: ['ot-requests'] })
+    qc.invalidateQueries({ queryKey: ['manager-team-overtime'] })
+  }, [qc])
+
   const bulkMutation = useMutation({
     mutationFn: (ids: string[]) =>
       Promise.all(ids.map((id) => api.post<void>(`/overtime/requests/${id}/approve`, {}))).then(() => undefined),
     onSuccess: () => {
       toast.success('OT bulk approved')
       setSelectedIds(new Set())
+      invalidateOt()
     },
     onError: () => toast.error('Bulk approval failed'),
   })
@@ -543,10 +557,11 @@ function OTReviewTab({
     try {
       await api.post<void>(`/overtime/requests/${itemId}/approve`, {})
       toast.success('OT approved')
+      invalidateOt()
     } catch {
       toast.error('Approval failed')
     }
-  }, [])
+  }, [invalidateOt])
 
   const toggleRow = useCallback((id: string) => {
     setSelectedIds(prev => {
@@ -771,6 +786,8 @@ function LeaveConflictsTab({
   allEvents: OperationalActivityEvent[]
   onOpenProfile: (id: string, name: string) => void
 }) {
+  const qc = useQueryClient()
+
   const { data: collisionResp, isLoading } = useQuery({
     queryKey: ['daily-ops-leave-conflicts'],
     queryFn: () =>
@@ -791,10 +808,14 @@ function LeaveConflictsTab({
     try {
       await api.post<void>(`/leave/collision/log/${id}/resolve`, {})
       toast.success('Leave conflict resolved')
+      qc.invalidateQueries({ queryKey: ['daily-ops-leave-conflicts'] })
+      // The standalone Collision Log page (attendance/CollisionLog.tsx) reads
+      // the same records under this separate key.
+      qc.invalidateQueries({ queryKey: ['collision-log'] })
     } catch {
       toast.error('Failed to resolve conflict')
     }
-  }, [])
+  }, [qc])
 
   return (
     <div className="space-y-4">

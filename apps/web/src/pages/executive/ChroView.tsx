@@ -55,7 +55,7 @@ export default function ChroView() {
       <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <KpiCard label="Leave Utilisation" value={chro ? `${chro.leave_utilization_pct.toFixed(0)}%` : '—'} icon={CalendarCheck} tone="primary" deltaLabel="Of entitlement" />
         <KpiCard label="Diversity · F" value={femalePct == null ? '—' : `${femalePct.toFixed(1)}%`} icon={Sparkles} tone="info" deltaLabel="Org-wide" />
-        <KpiCard label="Trust High-Risk" value={(chro?.trust_high_risk ?? 0).toLocaleString()} icon={ShieldCheck} tone="warning" />
+        <KpiCard label="Trust High-Risk" value={chro ? chro.trust_high_risk.toLocaleString() : '—'} icon={ShieldCheck} tone="warning" />
         <KpiCard label="Identity Verified" value={chro?.trust_verification_pct != null ? `${chro.trust_verification_pct.toFixed(0)}%` : '—'} icon={BadgeCheck} tone="success" deltaLabel="Of workforce" />
       </section>
 

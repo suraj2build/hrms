@@ -86,7 +86,14 @@ export function AdminDashboard() {
   const { tenant }  = useAuthStore()
   const navigate    = useNavigate()
   const { label }   = monthRange()
-  const today       = new Date().toISOString().slice(0, 10)
+  // Browser-local date (not UTC) — attendance_daily.date is a tenant-local
+  // calendar date; new Date().toISOString() is a day behind local for
+  // timezones ahead of UTC like IST between midnight and the UTC offset,
+  // which would misalign "today" lookups against yesterday's muster data.
+  const today = (() => {
+    const d = new Date()
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  })()
 
   // ── Queries ──────────────────────────────────────────────────────────────────
 

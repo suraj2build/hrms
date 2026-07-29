@@ -803,6 +803,8 @@ export function IncidentManagement() {
   const [applied,      setApplied]      = useState<Filters>(INITIAL_FILTERS)
   const [selectedId,   setSelectedId]   = useState<string | null>(null)
   const [showCreate,   setShowCreate]   = useState(false)
+  const [offset,       setOffset]       = useState(0)
+  const PAGE_SIZE = 50
 
   // ── Queries ──────────────────────────────────────────────────────────────────
 
@@ -815,9 +817,9 @@ export function IncidentManagement() {
 
   const { data: listData, isLoading: listLoading, isError, refetch } =
     useQuery<IncidentListResponse>({
-      queryKey: ['incident-list', applied],
+      queryKey: ['incident-list', applied, offset],
       queryFn:  () => {
-        const params = new URLSearchParams({ limit: '50', offset: '0' })
+        const params = new URLSearchParams({ limit: String(PAGE_SIZE), offset: String(offset) })
         if (applied.status)        params.set('status',        applied.status)
         if (applied.severity)      params.set('severity',      applied.severity)
         if (applied.incident_type) params.set('incident_type', applied.incident_type)
@@ -969,7 +971,7 @@ export function IncidentManagement() {
                 <Button
                   size="sm"
                   className="h-8 text-xs"
-                  onClick={() => setApplied({ ...filters })}
+                  onClick={() => { setApplied({ ...filters }); setOffset(0) }}
                 >
                   Apply
                 </Button>
@@ -977,7 +979,7 @@ export function IncidentManagement() {
                   size="sm"
                   variant="ghost"
                   className="h-8 text-xs"
-                  onClick={() => { setFilters(INITIAL_FILTERS); setApplied(INITIAL_FILTERS) }}
+                  onClick={() => { setFilters(INITIAL_FILTERS); setApplied(INITIAL_FILTERS); setOffset(0) }}
                 >
                   Clear
                 </Button>
@@ -1079,6 +1081,34 @@ export function IncidentManagement() {
                   </div>
                 </button>
               ))}
+
+              {!listLoading && !isError && total > PAGE_SIZE && (
+                <div className="flex items-center justify-between pt-2">
+                  <span className="text-[11px] text-muted-foreground">
+                    Showing {offset + 1}–{Math.min(offset + PAGE_SIZE, total)} of {total}
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-7 text-xs"
+                      disabled={offset === 0}
+                      onClick={() => setOffset(o => Math.max(0, o - PAGE_SIZE))}
+                    >
+                      Previous
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-7 text-xs"
+                      disabled={offset + PAGE_SIZE >= total}
+                      onClick={() => setOffset(o => o + PAGE_SIZE)}
+                    >
+                      Next
+                    </Button>
+                  </div>
+                </div>
+              )}
             </div>
           </SectionCard>
         </div>

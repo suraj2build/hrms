@@ -48,7 +48,8 @@ export function OwnerAdmins() {
     onError: (e: unknown) => toast.error(e instanceof Error ? e.message : String(e)),
   })
 
-  function toggleActive(id: string, current: boolean) {
+  function toggleActive(id: string, current: boolean, name: string) {
+    if (current && !confirm(`Deactivate "${name}"? They will immediately lose access to the Owner console.`)) return
     ownerApi.patch(`/owner/admins/${id}`, { is_active: !current })
       .then(() => { toast.success(current ? 'Admin deactivated' : 'Admin activated'); qc.invalidateQueries({ queryKey: ['owner-admins'] }) })
       .catch((e: unknown) => toast.error(e instanceof Error ? e.message : String(e)))
@@ -108,7 +109,7 @@ export function OwnerAdmins() {
             {/* Actions */}
             {isOwner() && a.id !== me?.id && (
               <button
-                onClick={() => toggleActive(a.id, a.is_active)}
+                onClick={() => toggleActive(a.id, a.is_active, a.name)}
                 className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border transition-colors ${
                   a.is_active
                     ? 'border-destructive/30 text-destructive hover:bg-destructive/10'

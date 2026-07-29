@@ -151,13 +151,27 @@ export function OwnerTenantDetail() {
     mutationFn: () => ownerApi.patch(`/owner/tenants/${id}`, {
       ...editForm, per_employee_rate: Number(editForm.per_employee_rate) || 0,
     }),
-    onSuccess: () => { toast.success('Tenant updated'); setEditing(false); qc.invalidateQueries({ queryKey: ['owner-tenant', id] }) },
+    onSuccess: () => {
+      toast.success('Tenant updated')
+      setEditing(false)
+      qc.invalidateQueries({ queryKey: ['owner-tenant', id] })
+      // The list page (/owner/tenants) reads the same plan/rate under a
+      // separate key — without this it shows stale values until its own
+      // staleTime window expires.
+      qc.invalidateQueries({ queryKey: ['owner-tenants'] })
+    },
     onError: (e: unknown) => toast.error(e instanceof Error ? e.message : String(e)),
   })
 
   function doStatusAction(action: 'activate' | 'suspend' | 'cancel') {
     ownerApi.post(`/owner/tenants/${id}/${action}`)
-      .then(() => { toast.success(`Tenant ${action}d`); qc.invalidateQueries({ queryKey: ['owner-tenant', id] }) })
+      .then(() => {
+        toast.success(`Tenant ${action}d`)
+        qc.invalidateQueries({ queryKey: ['owner-tenant', id] })
+        // The tenant list reads status under a separate key — matches the
+        // invalidation already done by issueLicense() below for the same reason.
+        qc.invalidateQueries({ queryKey: ['owner-tenants'] })
+      })
       .catch((e: unknown) => toast.error(e instanceof Error ? e.message : String(e)))
   }
 

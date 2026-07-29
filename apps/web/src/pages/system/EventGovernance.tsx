@@ -178,7 +178,7 @@ function EventDetailDialog({
   const replay = useMutation({
     mutationFn: () =>
       api.post('/system/event-governance/replay', {
-        event_id: row.id,
+        event_log_id: row.id,
         reason,
       }),
     onSuccess: () => {

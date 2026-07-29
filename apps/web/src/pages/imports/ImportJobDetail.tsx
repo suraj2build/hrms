@@ -20,6 +20,8 @@ export default function ImportJobDetail() {
     mutationFn: () => importsApi.retry(jobId!),
     onSuccess:  (res) => {
       queryClient.setQueryData(['import-job', jobId], res.job)
+      // ImportHistory.tsx reads the job list under this separate key.
+      queryClient.invalidateQueries({ queryKey: ['import-jobs'] })
     },
   })
 
@@ -27,8 +29,15 @@ export default function ImportJobDetail() {
     mutationFn: () => importsApi.cancel(jobId!),
     onSuccess:  (res) => {
       queryClient.setQueryData(['import-job', jobId], res.job)
+      queryClient.invalidateQueries({ queryKey: ['import-jobs'] })
     },
   })
+
+  function handleCancel() {
+    if (confirm('Cancel this import job? Any rows not yet processed will not be imported.')) {
+      cancelMutation.mutate()
+    }
+  }
 
   if (!jobId) return null
 
@@ -45,7 +54,7 @@ export default function ImportJobDetail() {
       <ImportJobCard
         jobId={jobId}
         onRetry={retryMutation.isPending ? undefined : () => retryMutation.mutate()}
-        onCancel={cancelMutation.isPending ? undefined : () => cancelMutation.mutate()}
+        onCancel={cancelMutation.isPending ? undefined : handleCancel}
       />
 
       {/* Error table */}
