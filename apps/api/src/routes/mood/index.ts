@@ -256,6 +256,8 @@ export default async function moodRoutes(fastify: FastifyInstance) {
       ) as Promise<any[]>,
     ])
 
+    if (activeResult.error) return serverError(req, reply, activeResult.error, ErrorCode.QUERY_FAILED, 'Failed to fetch active pulse questions')
+
     // 7-day trend: daily average mood
     const trendMap: Record<string, { total: number; count: number }> = {}
     for (const day of days) trendMap[day] = { total: 0, count: 0 }
@@ -281,16 +283,22 @@ export default async function moodRoutes(fastify: FastifyInstance) {
 
     // Active pulse questions with response counts
     const activeQuestions = activeResult.data ?? []
-    const pulseStats = await Promise.all(
-      activeQuestions.map(async (q) => {
-        const { count } = await supabase
-          .from('pulse_responses')
-          .select('id', { count: 'exact', head: true })
-          .eq('tenant_id', tenantId)
-          .eq('question_id', q.id)
-        return { ...q, response_count: count ?? 0 }
-      }),
-    )
+    let pulseStats: any[]
+    try {
+      pulseStats = await Promise.all(
+        activeQuestions.map(async (q) => {
+          const { count, error: countErr } = await supabase
+            .from('pulse_responses')
+            .select('id', { count: 'exact', head: true })
+            .eq('tenant_id', tenantId)
+            .eq('question_id', q.id)
+          if (countErr) throw countErr
+          return { ...q, response_count: count ?? 0 }
+        }),
+      )
+    } catch (err: any) {
+      return serverError(req, reply, err, ErrorCode.QUERY_FAILED, 'Failed to fetch pulse response counts')
+    }
 
     // Sentiment summary for last 7 days
     const sentCounts = { positive: 0, neutral: 0, negative: 0, total_with_notes: sentimentRows.length }
@@ -311,6 +319,7 @@ export default async function moodRoutes(fastify: FastifyInstance) {
       supabase.from('employees').select('id', { count: 'exact', head: true })
         .eq('tenant_id', tenantId).eq('status', 'active'),
     ])
+    if (totalEmpResult.error) return serverError(req, reply, totalEmpResult.error, ErrorCode.QUERY_FAILED, 'Failed to fetch active employee count')
     const distinctRespondents = new Set(respondentRows.map((r: any) => r.employee_id)).size
     const totalActive         = totalEmpResult.count ?? 0
     const participation_rate  = totalActive > 0
@@ -538,15 +547,20 @@ export default async function moodRoutes(fastify: FastifyInstance) {
       return reply.status(400).send({ error: 'No fields to update' })
     }
 
+    // .maybeSingle() (not .single()) — a nonexistent/cross-tenant :id matches
+    // zero rows on UPDATE ... RETURNING, which .single() treats as a
+    // PGRST116 error rather than an empty result, so a 404 branch would
+    // otherwise be unreachable dead code.
     const { data, error } = await supabase
       .from('pulse_questions')
       .update(update)
       .eq('tenant_id', tenantId)
       .eq('id', id)
       .select('id, status')
-      .single()
+      .maybeSingle()
 
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update pulse question')
+    if (!data) return reply.status(404).send({ error: 'NOT_FOUND', message: 'Pulse question not found' })
 
     await logAction(supabase, {
       tenantId,
