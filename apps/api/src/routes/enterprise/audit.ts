@@ -41,11 +41,12 @@ export default async function auditRoutes(fastify: FastifyInstance) {
     const actorIds = Array.from(new Set(rows.map(r => r.performed_by).filter(Boolean)))
     const nameMap = new Map<string, string>()
     if (actorIds.length > 0) {
-      const { data: profs } = await fastify.supabase
+      const { data: profs, error: profsErr } = await fastify.supabase
         .from('profiles')
         .select('id, full_name')
         .in('id', actorIds)
         .eq('tenant_id', tenantId)
+      if (profsErr) return serverError(req, reply, profsErr, ErrorCode.QUERY_FAILED, 'Failed to resolve audit log actor names')
       for (const p of (profs ?? [])) nameMap.set((p as any).id, (p as any).full_name ?? '')
     }
 

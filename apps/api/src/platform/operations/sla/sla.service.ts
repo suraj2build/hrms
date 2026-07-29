@@ -84,6 +84,20 @@ export class SlaService {
     return newBreaches
   }
 
+  /**
+   * Revert the in-memory `breached` flag for the given breach events —
+   * called when persisting them to `sla_breach_events` fails, so the next
+   * scanBreaches() call re-detects and re-attempts persistence instead of
+   * permanently losing the breach (the `!status.breached` guard in
+   * scanBreaches() would otherwise never re-emit it).
+   */
+  unmarkBreached(breaches: SlaBreachEvent[]): void {
+    for (const b of breaches) {
+      const status = this.tracked.get(`${b.sla_id}:${b.entity_id}`)
+      if (status) status.breached = false
+    }
+  }
+
   getTracked(orgId?: string): SlaStatus[] {
     const all = [...this.tracked.values()]
     return orgId ? all.filter(s => s.tenant_id === orgId) : all

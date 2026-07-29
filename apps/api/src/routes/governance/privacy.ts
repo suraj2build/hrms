@@ -18,6 +18,10 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { serverError, notFound, ErrorCode } from '../../lib/api-errors.js'
+import { fetchTenantTz } from '../../lib/attendance-engine.js'
+import { getLocalDate } from '../../lib/org-context.js'
+import { logAction } from '../../lib/audit-service.js'
+import { fetchAllRows } from '../../lib/supabase-paginate.js'
 
 function requireHrAdmin(req: any, reply: any, done: () => void) {
   if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
@@ -140,10 +144,11 @@ export default async function privacyRoutes(fastify: FastifyInstance) {
     const { data, error, count } = await query
     if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch erasure requests')
 
-    const today = new Date()
+    const tz = await fetchTenantTz(fastify.supabase, req.tenantId)
+    const today = getLocalDate(new Date().toISOString(), tz)
     const enriched = (data ?? []).map((r: any) => ({
       ...r,
-      sla_breached: r.status === 'pending' && r.sla_deadline && new Date(r.sla_deadline) < today,
+      sla_breached: r.status === 'pending' && r.sla_deadline && r.sla_deadline < today,
     }))
 
     return reply.send({ data: enriched, total: count ?? 0, limit, offset })
@@ -205,6 +210,17 @@ export default async function privacyRoutes(fastify: FastifyInstance) {
     const parsed = schema.safeParse(req.body)
     if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
 
+    // Record the pre-transition status so the audit trail below actually
+    // shows what changed, not just the new state.
+    const { data: existing, error: existingErr } = await fastify.supabase
+      .from('erasure_requests')
+      .select('status')
+      .eq('id', id)
+      .eq('tenant_id', req.tenantId)
+      .maybeSingle()
+    if (existingErr) return serverError(req, reply, existingErr, ErrorCode.QUERY_FAILED, 'Failed to fetch erasure request')
+    if (!existing) return notFound(reply, 'ERASURE_REQUEST_NOT_FOUND', 'Erasure request not found')
+
     const update: Record<string, any> = { ...parsed.data }
     if (parsed.data.status === 'completed') {
       update.completed_at = new Date().toISOString()
@@ -221,6 +237,21 @@ export default async function privacyRoutes(fastify: FastifyInstance) {
 
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update erasure request')
     if (!data) return notFound(reply, 'ERASURE_REQUEST_NOT_FOUND', 'Erasure request not found')
+
+    // A GDPR/DPDPA erasure-request status transition (approve, reject, put on
+    // hold, mark partial) must be defensible to a regulator — the only prior
+    // audit trail was completed_by/completed_at, leaving every other
+    // transition (rejected/partial/on_hold/in_progress) with no actor record.
+    await logAction(fastify.supabase, {
+      tenantId:    req.tenantId,
+      tableName:   'erasure_requests',
+      recordId:    id,
+      action:      'UPDATE',
+      performedBy: req.userId,
+      oldData:     { status: (existing as any).status },
+      newData:     update,
+    })
+
     return reply.send({ message: 'Erasure request updated' })
   })
 
@@ -287,17 +318,33 @@ export default async function privacyRoutes(fastify: FastifyInstance) {
 
   fastify.get('/privacy/health', auth, async (req: any, reply) => {
     const tenantId = req.tenantId
-    const today = new Date().toISOString().split('T')[0]
+    const tz = await fetchTenantTz(fastify.supabase, tenantId)
+    const today = getLocalDate(new Date().toISOString(), tz)
+
+    let erasure: any[]
+    let flaggedRows: any[] | null
+    let controlRows: any[] | null
+    try {
+      // erasure_requests is a compliance retention table that is never
+      // pruned (right-to-erasure evidence must be kept) — it can exceed
+      // PostgREST's 1,000-row cap over a tenant's lifetime, silently
+      // truncating the exact KPIs (open/breached_sla/completed) this
+      // endpoint exists to compute reliably.
+      erasure = await fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('erasure_requests')
+          .select('status, sla_deadline')
+          .eq('tenant_id', tenantId)
+          .range(from, to),
+      )
+    } catch (err) {
+      return serverError(req, reply, err, ErrorCode.QUERY_FAILED, 'Failed to compute privacy health KPIs')
+    }
 
     const [
-      { data: erasureRows, error: erasureErr },
-      { data: flaggedRows, error: flaggedErr },
-      { data: controlRows, error: controlErr },
+      { data: flaggedData, error: flaggedErr },
+      { data: controlData, error: controlErr },
     ] = await Promise.all([
-      fastify.supabase
-        .from('erasure_requests')
-        .select('status, sla_deadline')
-        .eq('tenant_id', tenantId),
       fastify.supabase
         .from('pii_access_log')
         .select('id')
@@ -310,10 +357,10 @@ export default async function privacyRoutes(fastify: FastifyInstance) {
     ])
     // A failed query here must not be reported as all-zero KPIs — that reads
     // as a clean compliance dashboard when the backend actually failed.
-    const queryErr = erasureErr ?? flaggedErr ?? controlErr
+    const queryErr = flaggedErr ?? controlErr
     if (queryErr) return serverError(req, reply, queryErr, ErrorCode.QUERY_FAILED, 'Failed to compute privacy health KPIs')
-
-    const erasure = (erasureRows ?? []) as any[]
+    flaggedRows = flaggedData
+    controlRows = controlData
     const openErasure    = erasure.filter(r => ['pending','in_progress','on_hold'].includes(r.status)).length
     const breachedSla    = erasure.filter(r => ['pending','in_progress','on_hold'].includes(r.status) && r.sla_deadline && r.sla_deadline < today).length
     const completedTotal = erasure.filter(r => r.status === 'completed').length

@@ -29,6 +29,12 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     )
     if (error) {
       fastify.log.error({ err: error }, '[adminRoutes] failed to persist SLA breach events')
+      // scanBreaches() already flipped these to breached=true in-memory before
+      // persistence was attempted — without reverting that flag, the
+      // `!status.breached` guard in scanBreaches() would never re-detect (and
+      // thus never re-attempt persisting) this breach again, permanently
+      // losing it from sla_breach_events on a single transient DB failure.
+      slaService.unmarkBreached(breaches)
     }
   }
 

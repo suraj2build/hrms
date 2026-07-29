@@ -164,6 +164,23 @@ export default async function benefitsRoutes(fastify: FastifyInstance) {
 
     if (!plan) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Benefit plan not found' })
 
+    // Band eligibility (GET /plans already filters ineligible plans out of the
+    // list, but that's a display-only filter — without re-checking it here,
+    // a caller who already knows/guesses a plan_id for a band they're not in
+    // could enrol directly, bypassing the restriction entirely).
+    if (parsed.data.status === 'enrolled' && (plan as any).eligible_bands?.length) {
+      const { data: emp } = await fastify.supabase
+        .from('employees')
+        .select('designation_band')
+        .eq('id', employeeId)
+        .eq('tenant_id', req.tenantId)
+        .maybeSingle()
+      const empBand = (emp as any)?.designation_band ?? null
+      if (!empBand || !(plan as any).eligible_bands.includes(empBand)) {
+        return reply.code(403).send({ error: 'BAND_INELIGIBLE', message: 'You are not eligible for this benefit plan' })
+      }
+    }
+
     const today = await tenantTodayStr(fastify.supabase, req.tenantId)
     if (!isPlanOpen(plan, today)) {
       return reply.code(409).send({ error: 'ENROLMENT_CLOSED', message: 'This plan is not open for enrolment' })
