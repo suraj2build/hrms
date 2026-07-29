@@ -152,7 +152,7 @@ export default async function policyRoutes(fastify: FastifyInstance) {
     const citedIds = policies.map(p => p.id)
 
     // 4. Log Q&A
-    await supabase.from('policy_qa_logs').insert({
+    const { error: logErr } = await supabase.from('policy_qa_logs').insert({
       tenant_id:        tenantId,
       employee_id:      employeeId,
       question:         question.trim(),
@@ -160,6 +160,7 @@ export default async function policyRoutes(fastify: FastifyInstance) {
       cited_policy_ids: citedIds,
       model_used:       'claude-haiku-4-5-20251001',
     })
+    if (logErr) req.log.warn({ err: logErr, tenantId, employeeId }, 'policy_qa_logs insert failed')
 
     return reply.send({
       data: {

@@ -992,7 +992,7 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to move application')
 
     // Log the move in activity trail
-    await fastify.supabase
+    const { error: logErr } = await fastify.supabase
       .from('application_activity_log')
       .insert({
         tenant_id:      req.tenantId,
@@ -1004,6 +1004,7 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
         actor_id:       req.userId,
         note:           parsed.data.note ?? null,
       })
+    if (logErr) req.log.warn({ err: logErr, applicationId: id }, 'application_activity_log insert failed')
 
     // Stage-change emails: shortlisted (screening) or offer extended (offer)
     void (async () => {

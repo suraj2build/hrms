@@ -66,8 +66,7 @@ import { cn }            from '@/lib/utils'
 
 /** Extract a backend error message from an unknown thrown error, falling back. */
 function errMessage(err: unknown, fallback: string): string {
-  const e = err as { response?: { data?: { message?: string } } } | null
-  return e?.response?.data?.message ?? fallback
+  return err instanceof Error && err.message ? err.message : fallback
 }
 
 // ── Types ─────────────────────────────────────────────────────────────────────
