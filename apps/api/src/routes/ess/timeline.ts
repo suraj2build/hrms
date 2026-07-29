@@ -75,8 +75,10 @@ function tenureWords(join: string | null, now: Date): string | null {
   if (!join) return null
   const jd = new Date(join.length <= 10 ? join + 'T00:00:00Z' : join)
   if (isNaN(jd.getTime())) return null
-  let months = (now.getFullYear() - jd.getFullYear()) * 12 + (now.getMonth() - jd.getMonth())
-  if (now.getDate() < jd.getDate()) months -= 1
+  // now/jd are UTC-anchored — use UTC getters (matching monthYear() below) so
+  // this doesn't silently depend on the server process's OS timezone setting.
+  let months = (now.getUTCFullYear() - jd.getUTCFullYear()) * 12 + (now.getUTCMonth() - jd.getUTCMonth())
+  if (now.getUTCDate() < jd.getUTCDate()) months -= 1
   if (months < 1) return 'less than a month'
   const y = Math.floor(months / 12), m = months % 12
   const yp = y ? `${y} year${y > 1 ? 's' : ''}` : ''
@@ -95,8 +97,8 @@ function chapterOf(at: string, join: string | null, now: Date): { key: string; t
       if (days <= 365) return { key: 'settling', title: 'Settling in' }
     }
   }
-  const y = d.getFullYear()
-  return { key: `y-${y}`, title: y === now.getFullYear() ? 'This year' : String(y) }
+  const y = d.getUTCFullYear()
+  return { key: `y-${y}`, title: y === now.getUTCFullYear() ? 'This year' : String(y) }
 }
 
 export default async function essTimelineRoutes(fastify: FastifyInstance) {

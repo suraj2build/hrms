@@ -14,6 +14,7 @@ import { z } from 'zod'
 import { logJobStart } from '../../lib/notify.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { serverError, ErrorCode } from '../../lib/api-errors.js'
+import { fetchAllRows } from '../../lib/supabase-paginate.js'
 
 export default async function schedulerMonitorRoutes(fastify: FastifyInstance) {
   const adminAuth = { preHandler: [fastify.authenticate, (req: any, reply: any, done: () => void) => {
@@ -68,15 +69,24 @@ export default async function schedulerMonitorRoutes(fastify: FastifyInstance) {
   fastify.get('/status', adminAuth, async (req: any, reply) => {
     const tenantId = req.tenantId as string
 
-    // Fetch recent job log entries (last 30 days) and aggregate in-process
-    const { data: jobs, error } = await fastify.supabase
-      .from('scheduler_job_log')
-      .select('id, job_type, job_name, status, started_at, completed_at, duration_ms, error_message, affected_count, trigger_type')
-      .eq('tenant_id', tenantId)
-      .gte('started_at', new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString())
-      .order('started_at', { ascending: false })
-
-    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch scheduler status')
+    // Fetch recent job log entries (last 30 days) and aggregate in-process.
+    // Paginated — a tenant running several frequent scheduled jobs can exceed
+    // 1000 rows in a 30-day window, which would silently undercount
+    // success/failure/last_30d_runs per job_type past the PostgREST cap.
+    let jobs: any[]
+    try {
+      jobs = await fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('scheduler_job_log')
+          .select('id, job_type, job_name, status, started_at, completed_at, duration_ms, error_message, affected_count, trigger_type')
+          .eq('tenant_id', tenantId)
+          .gte('started_at', new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString())
+          .order('started_at', { ascending: false })
+          .range(from, to),
+      )
+    } catch (error) {
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch scheduler status')
+    }
 
     // Group by job_type, keep last run per type
     const byType: Record<string, {
@@ -169,6 +179,27 @@ export default async function schedulerMonitorRoutes(fastify: FastifyInstance) {
       })
     }
 
+    // Claim the retry atomically: fold the same status precondition into the
+    // UPDATE's WHERE clause (matching imports/index.ts's retry route) so two
+    // concurrent retry calls can't both pass the read-time check above and
+    // both create a duplicate retry log entry / race on retry_count.
+    const { data: claimed, error: claimErr } = await fastify.supabase
+      .from('scheduler_job_log')
+      .update({ retry_count: (orig.retry_count ?? 0) + 1 })
+      .eq('id', jobId)
+      .eq('tenant_id', req.tenantId)
+      .in('status', ['failed', 'timeout', 'cancelled'])
+      .select('id')
+      .maybeSingle()
+
+    if (claimErr) return serverError(req, reply, claimErr, ErrorCode.UPDATE_FAILED, 'Failed to claim job for retry')
+    if (!claimed) {
+      return reply.code(409).send({
+        error: 'INVALID_STATUS',
+        message: 'Job was already retried or its status changed concurrently',
+      })
+    }
+
     // Create a new log entry for the retry
     const newJobId = await logJobStart(fastify.supabase, {
       tenantId:     req.tenantId,
@@ -185,15 +216,6 @@ export default async function schedulerMonitorRoutes(fastify: FastifyInstance) {
 
     if (!newJobId) {
       return reply.code(500).send({ error: 'RETRY_FAILED', message: 'Failed to create retry job log entry' })
-    }
-
-    // Increment retry_count on original
-    const { error: incrErr } = await fastify.supabase
-      .from('scheduler_job_log')
-      .update({ retry_count: (orig.retry_count ?? 0) + 1 })
-      .eq('id', jobId)
-    if (incrErr) {
-      req.log.error({ err: incrErr, jobId }, 'scheduler-monitor: retry job log created but failed to increment original retry_count')
     }
 
     return reply.code(201).send({

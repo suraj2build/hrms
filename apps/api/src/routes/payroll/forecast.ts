@@ -20,13 +20,28 @@
 import type { FastifyInstance } from 'fastify'
 import { eventBus }            from '../../lib/event-bus.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { fetchTenantTz }  from '../../lib/attendance-engine.js'
+import { getLocalDate }   from '../../lib/org-context.js'
+import { fetchAllRows }   from '../../lib/supabase-paginate.js'
 
 const monthRe = /^\d{4}-\d{2}$/
 
-function nextMonthStr(): string {
-  const d = new Date()
-  d.setMonth(d.getMonth() + 1)
+function addMonths(monthStr: string, delta: number): string {
+  const [y, m] = monthStr.split('-').map(Number)
+  const d = new Date(y, m - 1 + delta, 1)
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+}
+
+/**
+ * Default forecast target = next tenant-local calendar month. A bare
+ * server-UTC clock would default to the wrong month during the first ~5.5
+ * hours of a new tenant-local month for an IST tenant (the same bug class
+ * already fixed via fetchTenantTz/getLocalDate in simulate.ts et al.).
+ */
+async function nextMonthStr(fastify: FastifyInstance, tenantId: string): Promise<string> {
+  const tz = await fetchTenantTz(fastify.supabase, tenantId)
+  const currentMonth = getLocalDate(new Date().toISOString(), tz).slice(0, 7)
+  return addMonths(currentMonth, 1)
 }
 
 function priorMonths(base: string, count: number): string[] {
@@ -46,14 +61,19 @@ async function generateForecast(
   generatedBy: string,
 ): Promise<Record<string, unknown>> {
   // ── 1. Active compensation → base expected gross ─────────────────────────
-  const { data: comps } = await fastify.supabase
-    .from('employee_compensations')
-    .select(`
-      id, employee_id, ctc_monthly,
-      employees!inner(id, status, job_history!job_history_employee_id_fkey(department_id, is_current, departments(id, name)))
-    `)
-    .eq('tenant_id', tenantId)
-    .eq('is_active', true)
+  // Paginated — a tenant can have >1000 active compensation rows, and a
+  // silently-truncated base would understate the forecast with no signal.
+  const comps = await fetchAllRows((from, to) =>
+    fastify.supabase
+      .from('employee_compensations')
+      .select(`
+        id, employee_id, ctc_monthly,
+        employees!inner(id, status, job_history!job_history_employee_id_fkey(department_id, is_current, departments(id, name)))
+      `)
+      .eq('tenant_id', tenantId)
+      .eq('is_active', true)
+      .range(from, to),
+  )
 
   const activeComps = ((comps ?? []) as any[]).filter(c => c.employees?.status === 'active')
   const headcount   = activeComps.length
@@ -210,7 +230,7 @@ export default async function payrollForecastRoute(fastify: FastifyInstance) {
   fastify.get('/analytics/payroll/forecast', auth, async (req: any, reply) => {
     if (!requireAdmin(req, reply)) return
 
-    const targetMonth = (req.query as any).month || nextMonthStr()
+    const targetMonth = (req.query as any).month || await nextMonthStr(fastify, req.tenantId)
     if (!monthRe.test(targetMonth)) {
       return reply.code(400).send({ error: 'INVALID_PARAM', message: 'month must be YYYY-MM' })
     }
@@ -254,7 +274,7 @@ export default async function payrollForecastRoute(fastify: FastifyInstance) {
     if (!requireAdmin(req, reply)) return
 
     const { month } = req.body as { month?: string }
-    const targetMonth = month || nextMonthStr()
+    const targetMonth = month || await nextMonthStr(fastify, req.tenantId)
     if (!monthRe.test(targetMonth)) {
       return reply.code(400).send({ error: 'INVALID_PARAM', message: 'month must be YYYY-MM' })
     }

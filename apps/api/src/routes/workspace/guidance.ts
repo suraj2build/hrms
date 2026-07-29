@@ -9,9 +9,41 @@
  *  GET /workspace/guidance/content  — any authenticated; active rows for a page key
  */
 import type { FastifyInstance } from 'fastify'
+import { z } from 'zod'
 import { DEFAULT_GUIDANCE_CONFIG, mergeGuidance } from '../../lib/guidance-defaults.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
-import { serverError, ErrorCode } from '../../lib/api-errors.js'
+import { serverError, validationError, ErrorCode } from '../../lib/api-errors.js'
+
+// Mirrors GuidanceConfig in lib/guidance-defaults.ts — every field optional
+// (this is a partial patch), but keys/types must match exactly so an
+// unknown key or wrong-typed value can't get merged into tenants.settings.
+const guidancePatchSchema = z.object({
+  features: z.object({
+    enable_help_framework:    z.boolean().optional(),
+    enable_process_guides:    z.boolean().optional(),
+    enable_field_guidance:    z.boolean().optional(),
+    enable_why_explanations:  z.boolean().optional(),
+    enable_walkthroughs:      z.boolean().optional(),
+    enable_context_assistant: z.boolean().optional(),
+  }).strict().optional(),
+  roles: z.object({
+    employee_help_enabled: z.boolean().optional(),
+    manager_help_enabled:  z.boolean().optional(),
+    hr_help_enabled:       z.boolean().optional(),
+    admin_help_enabled:    z.boolean().optional(),
+  }).strict().optional(),
+  modules: z.object({
+    employee_master:        z.boolean().optional(),
+    attendance:             z.boolean().optional(),
+    leave:                  z.boolean().optional(),
+    payroll:                z.boolean().optional(),
+    compensation:           z.boolean().optional(),
+    assets:                 z.boolean().optional(),
+    onboarding:             z.boolean().optional(),
+    separation:             z.boolean().optional(),
+    executive_intelligence: z.boolean().optional(),
+  }).strict().optional(),
+}).strict()
 
 export default async function guidanceRoutes(fastify: FastifyInstance) {
   const auth = { preHandler: [fastify.authenticate] }
@@ -38,7 +70,11 @@ export default async function guidanceRoutes(fastify: FastifyInstance) {
   fastify.put('/workspace/guidance/config', auth, async (req: any, reply) => {
     if (!requireAdmin(req, reply)) return
     const tenantId = req.tenantId
-    const body = (req.body ?? {}) as { features?: any; roles?: any; modules?: any }
+    const parsed = guidancePatchSchema.safeParse(req.body ?? {})
+    if (!parsed.success) {
+      return validationError(reply, ErrorCode.VALIDATION_ERROR, parsed.error.issues[0]?.message)
+    }
+    const body = parsed.data
     if (!body.features && !body.roles && !body.modules) {
       return reply.code(400).send({ error: 'NO_FIELDS', message: 'No guidance fields provided' })
     }

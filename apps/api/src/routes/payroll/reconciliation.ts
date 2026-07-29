@@ -31,16 +31,23 @@ import type { FastifyInstance } from 'fastify'
 import { z }                    from 'zod'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { serverError, ErrorCode } from '../../lib/api-errors.js'
+import { fetchTenantTz } from '../../lib/attendance-engine.js'
+import { getLocalDate }  from '../../lib/org-context.js'
 
 /** Derive the target month from a computed item_id.
  *
  *  Item IDs are produced by the GET endpoint as:  "<category>-<empId>-<idx>"
  *  The month comes from the ?month query param (not embedded in the ID), so
- *  callers must always supply it.  We fall back to the current month if absent.
+ *  callers must always supply it.  We fall back to the current tenant-local
+ *  month if absent — a bare server-UTC clock would default to the wrong
+ *  month during the first ~5.5 hours of a new tenant-local month for an IST
+ *  tenant, misfiling the action's month vs. the GET endpoint's tenant-local
+ *  computation in workspace/stats.ts.
  */
-function resolveMonth(raw: string | undefined): string {
+async function resolveMonth(fastify: FastifyInstance, tenantId: string, raw: string | undefined): Promise<string> {
   if (raw && /^\d{4}-\d{2}$/.test(raw)) return raw
-  return new Date().toISOString().slice(0, 7)
+  const tz = await fetchTenantTz(fastify.supabase, tenantId)
+  return getLocalDate(new Date().toISOString(), tz).slice(0, 7)
 }
 
 export default async function payrollReconciliationRoutes(fastify: FastifyInstance) {
@@ -50,7 +57,7 @@ export default async function payrollReconciliationRoutes(fastify: FastifyInstan
   fastify.post('/payroll/reconciliation/:id/acknowledge', hrAdminAuth, async (req: any, reply) => {
     const { id }     = req.params as { id: string }
     const tenantId   = req.tenantId as string
-    const month      = resolveMonth((req.query as any).month)
+    const month      = await resolveMonth(fastify, tenantId, (req.query as any).month)
 
     const bodySchema = z.object({
       notes: z.string().max(500).optional(),
@@ -94,7 +101,7 @@ export default async function payrollReconciliationRoutes(fastify: FastifyInstan
   fastify.post('/payroll/reconciliation/:id/escalate', hrAdminAuth, async (req: any, reply) => {
     const { id }    = req.params as { id: string }
     const tenantId  = req.tenantId as string
-    const month     = resolveMonth((req.query as any).month)
+    const month     = await resolveMonth(fastify, tenantId, (req.query as any).month)
 
     const bodySchema = z.object({
       reason: z.string().max(500).optional(),
@@ -137,7 +144,7 @@ export default async function payrollReconciliationRoutes(fastify: FastifyInstan
   fastify.post('/payroll/reconciliation/:id/resolve', hrAdminAuth, async (req: any, reply) => {
     const { id }    = req.params as { id: string }
     const tenantId  = req.tenantId as string
-    const month     = resolveMonth((req.query as any).month)
+    const month     = await resolveMonth(fastify, tenantId, (req.query as any).month)
 
     const bodySchema = z.object({
       resolution_notes: z.string().max(1000).optional(),

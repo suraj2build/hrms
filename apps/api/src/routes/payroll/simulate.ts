@@ -23,6 +23,7 @@ import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { serverError, ErrorCode } from '../../lib/api-errors.js'
 import { fetchTenantTz } from '../../lib/attendance-engine.js'
 import { getLocalDate } from '../../lib/org-context.js'
+import { fetchAllRows } from '../../lib/supabase-paginate.js'
 
 // ── Zod schemas ───────────────────────────────────────────────────────────────
 
@@ -108,16 +109,25 @@ export default async function payrollSimulateRoute(fastify: FastifyInstance) {
     const baseMonth = bm ?? getLocalDate(new Date().toISOString(), tz).slice(0, 7)
 
     // ── 1. Load base payroll data ─────────────────────────────────────────
-    // Primary: active compensations (real-time base)
-    const { data: comps, error: compsErr } = await fastify.supabase
-      .from('employee_compensations')
-      .select(`
-        id, employee_id, ctc_monthly, ctc_annual,
-        employees!inner(id, status, job_history!job_history_employee_id_fkey(department_id, is_current, departments(id, name)))
-      `)
-      .eq('tenant_id', tenantId)
-      .eq('is_active', true)
-    if (compsErr) return serverError(req, reply, compsErr, ErrorCode.QUERY_FAILED, 'Failed to load compensation data for simulation')
+    // Primary: active compensations (real-time base) — paginated via
+    // fetchAllRows since a tenant can have >1000 active compensation rows
+    // and a silently-truncated base would understate the simulation.
+    let comps: any[]
+    try {
+      comps = await fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('employee_compensations')
+          .select(`
+            id, employee_id, ctc_monthly, ctc_annual,
+            employees!inner(id, status, job_history!job_history_employee_id_fkey(department_id, is_current, departments(id, name)))
+          `)
+          .eq('tenant_id', tenantId)
+          .eq('is_active', true)
+          .range(from, to),
+      )
+    } catch (compsErr) {
+      return serverError(req, reply, compsErr, ErrorCode.QUERY_FAILED, 'Failed to load compensation data for simulation')
+    }
 
     const activeComps = ((comps ?? []) as any[]).filter(
       (c) => c.employees?.status === 'active',
