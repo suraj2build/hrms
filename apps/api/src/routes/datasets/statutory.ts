@@ -26,7 +26,8 @@ async function fetchByIdsChunked<T>(
 ): Promise<T[]> {
   const out: T[] = []
   for (let i = 0; i < ids.length; i += ID_CHUNK) {
-    const { data } = await fn(ids.slice(i, i + ID_CHUNK))
+    const { data, error } = await fn(ids.slice(i, i + ID_CHUNK))
+    if (error) throw error
     if (data) out.push(...data)
   }
   return out
@@ -86,21 +87,26 @@ export default async function statutoryDataset(fastify: FastifyInstance) {
           .range(from, to),
       )
     } catch (empErr) {
-      return reply.code(500).send({ error: 'DB_ERROR', message: empErr instanceof Error ? empErr.message : 'Failed to fetch employees' })
+      return serverError(req, reply, empErr, ErrorCode.QUERY_FAILED, 'Failed to fetch employees')
     }
 
     const ids = empList.map(e => e.id)
 
     const bsMap = new Map<string, any>()
     if (ids.length > 0) {
-      const bs = await fetchByIdsChunked<any>(
-        (chunk) => fastify.supabase
-          .from('employee_bank_statutory')
-          .select('employee_id, pan_number, aadhaar_number, uan_number, esi_number, account_number, ifsc_code')
-          .eq('tenant_id', tid)
-          .in('employee_id', chunk),
-        ids,
-      )
+      let bs: any[]
+      try {
+        bs = await fetchByIdsChunked<any>(
+          (chunk) => fastify.supabase
+            .from('employee_bank_statutory')
+            .select('employee_id, pan_number, aadhaar_number, uan_number, esi_number, account_number, ifsc_code')
+            .eq('tenant_id', tid)
+            .in('employee_id', chunk),
+          ids,
+        )
+      } catch (bsErr) {
+        return serverError(req, reply, bsErr, ErrorCode.QUERY_FAILED, 'Failed to fetch statutory ID records')
+      }
       for (const r of bs) bsMap.set(r.employee_id, r)
     }
 
@@ -167,41 +173,42 @@ export default async function statutoryDataset(fastify: FastifyInstance) {
           .range(from, to),
       )
     } catch (epfErr) {
-      return reply.code(500).send({ error: 'DB_ERROR', message: epfErr instanceof Error ? epfErr.message : 'Failed to fetch EPF contributions' })
+      return serverError(req, reply, epfErr, ErrorCode.QUERY_FAILED, 'Failed to fetch EPF contributions')
     }
 
-    const [
-      esiRows,
-      ptaxRows,
-      lwfRows,
-    ] = await Promise.all([
-      fetchAllRows((from, to) =>
-        fastify.supabase
-          .from('esi_contributions')
-          .select('employee_id, employee_contribution, employer_contribution')
-          .eq('tenant_id', tid)
-          .eq('contribution_month', month)
-          .range(from, to),
-      ).catch(() => []),
+    let esiRows: any[], ptaxRows: any[], lwfRows: any[]
+    try {
+      [esiRows, ptaxRows, lwfRows] = await Promise.all([
+        fetchAllRows((from, to) =>
+          fastify.supabase
+            .from('esi_contributions')
+            .select('employee_id, employee_contribution, employer_contribution')
+            .eq('tenant_id', tid)
+            .eq('contribution_month', month)
+            .range(from, to),
+        ),
 
-      fetchAllRows((from, to) =>
-        fastify.supabase
-          .from('ptax_contributions')
-          .select('employee_id, ptax_amount, state_code')
-          .eq('tenant_id', tid)
-          .eq('contribution_month', month)
-          .range(from, to),
-      ).catch(() => []),
+        fetchAllRows((from, to) =>
+          fastify.supabase
+            .from('ptax_contributions')
+            .select('employee_id, ptax_amount, state_code')
+            .eq('tenant_id', tid)
+            .eq('contribution_month', month)
+            .range(from, to),
+        ),
 
-      fetchAllRows((from, to) =>
-        fastify.supabase
-          .from('lwf_contributions')
-          .select('employee_id, employee_contribution, employer_contribution, state_code')
-          .eq('tenant_id', tid)
-          .eq('contribution_month', month)
-          .range(from, to),
-      ).catch(() => []),
-    ])
+        fetchAllRows((from, to) =>
+          fastify.supabase
+            .from('lwf_contributions')
+            .select('employee_id, employee_contribution, employer_contribution, state_code')
+            .eq('tenant_id', tid)
+            .eq('contribution_month', month)
+            .range(from, to),
+        ),
+      ])
+    } catch (contribErr) {
+      return serverError(req, reply, contribErr, ErrorCode.QUERY_FAILED, 'Failed to fetch statutory contributions')
+    }
 
     const [
       epfRegRes,
@@ -275,16 +282,21 @@ export default async function statutoryDataset(fastify: FastifyInstance) {
     let missingUan = 0
     if (epfRows.length > 0) {
       const epfEmpIds = epfRows.map((r: any) => r.employee_id)
-      const uanData = await fetchByIdsChunked<{ employee_id: string }>(
-        (chunk) => fastify.supabase
-          .from('epf_eligibility_overrides')
-          .select('employee_id')
-          .eq('tenant_id', tid)
-          .in('employee_id', chunk)
-          .not('uan', 'is', null)
-          .is('effective_to', null),
-        epfEmpIds,
-      )
+      let uanData: Array<{ employee_id: string }>
+      try {
+        uanData = await fetchByIdsChunked<{ employee_id: string }>(
+          (chunk) => fastify.supabase
+            .from('epf_eligibility_overrides')
+            .select('employee_id')
+            .eq('tenant_id', tid)
+            .in('employee_id', chunk)
+            .not('uan', 'is', null)
+            .is('effective_to', null),
+          epfEmpIds,
+        )
+      } catch (uanErr) {
+        return serverError(req, reply, uanErr, ErrorCode.QUERY_FAILED, 'Failed to fetch UAN coverage')
+      }
 
       const uanCovered = new Set(uanData.map((r) => r.employee_id))
       missingUan = epfEmpIds.filter((id: string) => !uanCovered.has(id)).length
@@ -293,31 +305,41 @@ export default async function statutoryDataset(fastify: FastifyInstance) {
     // ── TDS: employees with TDS deducted + missing PAN check ───────────────────
     // Paginated — a month's finalized slips with TDS deducted can exceed 1,000
     // rows for a large tenant.
-    const tdsSlipRows = await fetchAllRows((from, to) =>
-      fastify.supabase
-        .from('payroll_slips')
-        .select('employee_id, tds_deducted')
-        .eq('tenant_id', tid)
-        .eq('month', month)
-        .in('status', FINAL_SLIP_STATUSES)
-        .gt('tds_deducted', 0)
-        .range(from, to),
-    )
+    let tdsSlipRows: any[]
+    try {
+      tdsSlipRows = await fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('payroll_slips')
+          .select('employee_id, tds_deducted')
+          .eq('tenant_id', tid)
+          .eq('month', month)
+          .in('status', FINAL_SLIP_STATUSES)
+          .gt('tds_deducted', 0)
+          .range(from, to),
+      )
+    } catch (tdsErr) {
+      return serverError(req, reply, tdsErr, ErrorCode.QUERY_FAILED, 'Failed to fetch TDS-deducted payroll slips')
+    }
 
     const tdsEmpIds    = tdsSlipRows.map((r: any) => r.employee_id)
     const employeesWithTds = tdsEmpIds.length
 
     let missingPan = 0
     if (tdsEmpIds.length > 0) {
-      const panData = await fetchByIdsChunked<{ employee_id: string }>(
-        (chunk) => fastify.supabase
-          .from('employee_bank_statutory')
-          .select('employee_id')
-          .eq('tenant_id', tid)
-          .in('employee_id', chunk)
-          .not('pan_number', 'is', null),
-        tdsEmpIds,
-      )
+      let panData: Array<{ employee_id: string }>
+      try {
+        panData = await fetchByIdsChunked<{ employee_id: string }>(
+          (chunk) => fastify.supabase
+            .from('employee_bank_statutory')
+            .select('employee_id')
+            .eq('tenant_id', tid)
+            .in('employee_id', chunk)
+            .not('pan_number', 'is', null),
+          tdsEmpIds,
+        )
+      } catch (panErr) {
+        return serverError(req, reply, panErr, ErrorCode.QUERY_FAILED, 'Failed to fetch PAN coverage')
+      }
 
       const panCovered = new Set((panData ?? []).map((r: any) => r.employee_id))
       missingPan = tdsEmpIds.filter((id: string) => !panCovered.has(id)).length

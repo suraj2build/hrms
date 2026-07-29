@@ -104,13 +104,19 @@ async function checkEnvVars(): Promise<void> {
   }
 }
 
-async function checkDatabaseConnectivity(supabase: SupabaseClient): Promise<void> {
+async function checkDatabaseConnectivity(supabase: SupabaseClient, log: FastifyBaseLogger): Promise<void> {
   // Lightweight query — just enough to confirm Supabase responds
   const { error } = await supabase
     .from('tenants')
     .select('id')
     .limit(1)
-  if (error) throw new Error(`Database connectivity: ${error.message}`)
+  if (error) {
+    // /ready is intentionally unauthenticated (orchestration probes) and echoes
+    // each check's message back verbatim — the raw Postgres error (table/constraint
+    // names) must stay server-side only; throw a generic message for the client.
+    log.error({ err: error.message }, '[startup] database connectivity check failed')
+    throw new Error('Database connectivity check failed')
+  }
 }
 
 async function checkAuthPlugin(): Promise<void> {
@@ -165,7 +171,7 @@ export async function startupHealthChecks(
   }
 
   // ── REQUIRED: database connectivity ───────────────────────────────────────
-  const dbCheck = await runCheck('database', true, () => checkDatabaseConnectivity(supabase), log)
+  const dbCheck = await runCheck('database', true, () => checkDatabaseConnectivity(supabase, log), log)
   checks.push(dbCheck)
   if (dbCheck.status === 'failed') {
     log.fatal('[startup] Database unreachable — aborting startup')

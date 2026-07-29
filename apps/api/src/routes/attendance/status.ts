@@ -2,7 +2,9 @@
  * GET /attendance/process/status
  *
  * Returns the current processing lock state for the caller's tenant.
- * Protected — requires authenticated user.
+ * Protected — requires HR admin access, matching attendance_processing_lock's
+ * hr_lock_rw RLS policy (the table has no non-admin read grant, unlike the
+ * sibling attendance_processing_runs table).
  *
  * Response:
  *   { is_running: boolean, started_at: string | null, started_by: string | null }
@@ -11,12 +13,17 @@
  * "Processing…" badge while a job is active.
  */
 import type { FastifyInstance } from 'fastify'
+import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 
 export default async function statusRoute(fastify: FastifyInstance) {
   fastify.get(
     '/attendance/process/status',
     { preHandler: [fastify.authenticate] },
-    async (req, reply) => {
+    async (req: any, reply) => {
+      if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
+        return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
+      }
+
       const { data, error } = await fastify.supabase
         .from('attendance_processing_lock')
         .select('is_running, started_at, started_by, lock_ttl_seconds')

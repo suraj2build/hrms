@@ -6,6 +6,7 @@
  * or the query fails (so a single bad table never 500s the whole endpoint).
  */
 import type { FastifyInstance } from 'fastify'
+import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 
 async function safeCount(
   fastify: any,
@@ -33,12 +34,24 @@ export default async function operationalCountsRoutes(fastify: FastifyInstance) 
 
   fastify.get('/operational/counts', auth, async (req: any, reply) => {
     const tenantId: string = req.tenantId
+    const isHrAdmin = (HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)
 
+    // attendance_anomalies' RLS (aa_employee_read) scopes non-admins to their
+    // own employee_id — mirror that here since fastify.supabase is a
+    // service-role client that bypasses RLS entirely. payroll_run_blockers
+    // has no non-admin read policy at all (prb_hr_all is HR/admin-only), so
+    // non-admins get 0 rather than a tenant-wide count.
     const [leaveCount, regCount, unresolved_anomalies, payroll_blockers, missing_punches] = await Promise.all([
       safeCount(fastify, 'leave_requests',            tenantId, q => q.eq('status', 'PENDING')),
       safeCount(fastify, 'attendance_regularisation', tenantId, q => q.eq('status', 'pending')),
-      safeCount(fastify, 'attendance_anomalies',      tenantId, q => q.eq('resolved', false)),
-      safeCount(fastify, 'payroll_run_blockers',      tenantId, q => q.eq('resolved', false)),
+      isHrAdmin
+        ? safeCount(fastify, 'attendance_anomalies', tenantId, q => q.eq('resolved', false))
+        : req.employeeId
+          ? safeCount(fastify, 'attendance_anomalies', tenantId, q => q.eq('resolved', false).eq('employee_id', req.employeeId))
+          : Promise.resolve(0),
+      isHrAdmin
+        ? safeCount(fastify, 'payroll_run_blockers', tenantId, q => q.eq('resolved', false))
+        : Promise.resolve(0),
       safeCount(fastify, 'attendance_corrections',    tenantId, q => q.eq('status', 'pending')),
     ])
     const pending_approvals = leaveCount + regCount

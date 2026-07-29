@@ -374,6 +374,21 @@ export default async function trustIntelligenceRoutes(fastify: FastifyInstance) 
         return reply.status(400).send({ error: 'CONSENT_REQUIRED', message: 'Explicit consent is required to verify Aadhaar.' })
       }
 
+      // employeeId is a path param the caller can set to any UUID — verify it
+      // belongs to this tenant before writing anything, regardless of which
+      // branch below resolves the Aadhaar number (verification_records'
+      // unique constraint is (employee_id, verification_type), not
+      // tenant-scoped, so skipping this for a foreign-tenant id would let the
+      // upsert silently reassign that tenant's existing record to this one).
+      const { data: emp, error: empErr } = await fastify.supabase
+        .from('employees')
+        .select('id')
+        .eq('id', employeeId)
+        .eq('tenant_id', tenantId)
+        .maybeSingle()
+      if (empErr) return serverError(req, reply, empErr, ErrorCode.QUERY_FAILED, 'Failed to verify employee')
+      if (!emp) return notFound(reply, 'EMPLOYEE_NOT_FOUND', 'Employee not found')
+
       // Prefer a number supplied in the request; otherwise use the one on file.
       let aadhaar = (body.aadhaar ?? '').trim()
       if (!aadhaar) {
