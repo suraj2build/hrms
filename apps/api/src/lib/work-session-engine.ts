@@ -20,6 +20,7 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { localToUtc, utcToLocalDate as tzDateStr, fetchTenantTz } from './attendance-engine.js'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Exported types
@@ -152,12 +153,21 @@ function toDateStringUTC(d: Date): string {
   return `${y}-${m}-${dd}`
 }
 
-/** Format a Date object as YYYY-MM-DD using its LOCAL components. */
-function toDateStringLocal(d: Date): string {
-  const y = d.getFullYear()
-  const m = String(d.getMonth() + 1).padStart(2, '0')
-  const dd = String(d.getDate()).padStart(2, '0')
-  return `${y}-${m}-${dd}`
+/** Format a Date object as YYYY-MM-DD in the tenant's local timezone. */
+function toDateStringLocal(d: Date, tz: string): string {
+  return tzDateStr(d, tz)
+}
+
+/** Hour/minute of a Date object as displayed in the tenant's local timezone. */
+function localHourMinute(d: Date, tz: string): { hour: number; minute: number } {
+  const formatted = new Intl.DateTimeFormat('sv-SE', {
+    timeZone: tz,
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).format(d) // "HH:MM"
+  const [hour, minute] = formatted.split(':').map(Number)
+  return { hour, minute }
 }
 
 /**
@@ -194,22 +204,17 @@ function shiftDurationMinutes(shift: ShiftWindow): number {
  * For non-cross-midnight: end is on the same calendar day.
  * For cross-midnight: end is on the next calendar day.
  */
-function shiftEndUTC(attendanceDate: string, shift: ShiftWindow): Date {
-  const e = parseTimeStr(shift.end_time)
-  const base = new Date(`${attendanceDate}T${shift.end_time}`)
-  if (shift.crosses_midnight) {
-    // Move to next calendar day
-    base.setDate(base.getDate() + 1)
-  }
-  return base
+function shiftEndUTC(attendanceDate: string, shift: ShiftWindow, tz: string): Date {
+  const endLocalDate = shift.crosses_midnight ? nextDate(attendanceDate) : attendanceDate
+  return localToUtc(endLocalDate, shift.end_time, tz)
 }
 
 /**
  * Given a date string YYYY-MM-DD and the shift's start_time, return the UTC
  * instant of that shift's start.
  */
-function shiftStartUTC(attendanceDate: string, shift: ShiftWindow): Date {
-  return new Date(`${attendanceDate}T${shift.start_time}`)
+function shiftStartUTC(attendanceDate: string, shift: ShiftWindow, tz: string): Date {
+  return localToUtc(attendanceDate, shift.start_time, tz)
 }
 
 /** Difference in minutes between two ISO timestamps. Result may be negative. */
@@ -280,9 +285,10 @@ function datesInMonth(month: string): string[] {
 export function resolveAttendanceBusinessDate(
   punchTime: string,
   shift: ShiftWindow | null,
+  tz: string,
 ): string {
   const d = new Date(punchTime)
-  const localDateStr = toDateStringLocal(d)
+  const localDateStr = toDateStringLocal(d, tz)
 
   if (!shift || !shift.crosses_midnight) {
     return localDateStr
@@ -290,17 +296,14 @@ export function resolveAttendanceBusinessDate(
 
   // Cross-midnight: check if punch is in the "tail" window (00:00 → shift end_time)
   const e = parseTimeStr(shift.end_time)
-  const localHour = d.getHours()
-  const localMinute = d.getMinutes()
+  const { hour: localHour, minute: localMinute } = localHourMinute(d, tz)
   const localTotalMin = localHour * 60 + localMinute
   const shiftEndMin = e.hours * 60 + e.minutes
 
   // If punch time (local clock) is between midnight and shift end, it belongs
   // to the PREVIOUS business date.
   if (localTotalMin < shiftEndMin) {
-    const prev = new Date(d)
-    prev.setDate(prev.getDate() - 1)
-    return toDateStringLocal(prev)
+    return previousDate(localDateStr)
   }
 
   return localDateStr
@@ -340,7 +343,7 @@ export function resolvePayrollOwnership(attendanceDate: string): string {
  * 5. Stray OUT with no prior open IN: skip (logged in returned compliance_flags).
  * 6. Unpaired IN at end of list: open session (out_punch = null, is_complete = false).
  */
-export function pairPunches(punches: PunchRecord[], shift: ShiftWindow | null): PairedSession[] {
+export function pairPunches(punches: PunchRecord[], shift: ShiftWindow | null, tz: string): PairedSession[] {
   const DEDUP_WINDOW_MS = 3 * 60 * 1000 // 3 minutes
 
   // Step 1: sort ascending
@@ -371,7 +374,7 @@ export function pairPunches(punches: PunchRecord[], shift: ShiftWindow | null): 
     if (punch.punch_type === 'in') {
       if (openIn !== null) {
         // Consecutive IN without OUT — close previous as incomplete
-        const attendanceDate = resolveAttendanceBusinessDate(openIn.punch_time, shift)
+        const attendanceDate = resolveAttendanceBusinessDate(openIn.punch_time, shift, tz)
         sessions.push({
           in_punch: openIn,
           out_punch: null,
@@ -390,10 +393,10 @@ export function pairPunches(punches: PunchRecord[], shift: ShiftWindow | null): 
         // Stray OUT — skip; the caller can inspect via anomaly detection
         continue
       }
-      const inDate = toDateStringLocal(new Date(openIn.punch_time))
-      const outDate = toDateStringLocal(new Date(punch.punch_time))
+      const inDate = toDateStringLocal(new Date(openIn.punch_time), tz)
+      const outDate = toDateStringLocal(new Date(punch.punch_time), tz)
       const isCrossMidnight = inDate !== outDate
-      const attendanceDate = resolveAttendanceBusinessDate(openIn.punch_time, shift)
+      const attendanceDate = resolveAttendanceBusinessDate(openIn.punch_time, shift, tz)
       const workMin = Math.round(diffMinutes(openIn.punch_time, punch.punch_time))
 
       sessions.push({
@@ -412,7 +415,7 @@ export function pairPunches(punches: PunchRecord[], shift: ShiftWindow | null): 
 
   // Leftover open IN → incomplete session
   if (openIn !== null) {
-    const attendanceDate = resolveAttendanceBusinessDate(openIn.punch_time, shift)
+    const attendanceDate = resolveAttendanceBusinessDate(openIn.punch_time, shift, tz)
     sessions.push({
       in_punch: openIn,
       out_punch: null,
@@ -494,6 +497,7 @@ export function repairIncompletePunches(
  */
 export function mergeAdjacentSessions(
   sessions: PairedSession[],
+  tz: string,
   gapMinutes = 5,
 ): PairedSession[] {
   if (sessions.length === 0) return sessions
@@ -530,8 +534,8 @@ export function mergeAdjacentSessions(
       // Merge: replace last with a combined session
       const combinedWorkMinutes = (last.work_minutes ?? 0) + (current.work_minutes ?? 0)
       const isCrossMidnight =
-        toDateStringLocal(new Date(last.in_punch.punch_time)) !==
-        toDateStringLocal(new Date(current.out_punch!.punch_time))
+        toDateStringLocal(new Date(last.in_punch.punch_time), tz) !==
+        toDateStringLocal(new Date(current.out_punch!.punch_time), tz)
 
       merged[merged.length - 1] = {
         ...last,
@@ -568,6 +572,7 @@ export function determineAttendanceState(
   isWeeklyOff: boolean,
   shift: ShiftWindow | null,
   expectedWorkMinutes: number,
+  tz: string,
 ): {
   state: AttendanceState
   reason: string
@@ -653,14 +658,14 @@ export function determineAttendanceState(
     )
 
     // Late minutes: how many minutes AFTER (shift start + grace) did the first punch arrive?
-    const shiftStartMs = shiftStartUTC(firstSession.attendance_date, shift).getTime()
+    const shiftStartMs = shiftStartUTC(firstSession.attendance_date, shift, tz).getTime()
     const graceMs = (shift.grace_minutes ?? 0) * 60_000
     const firstPunchMs = new Date(firstSession.in_punch.punch_time).getTime()
     lateMinutes = Math.max(0, Math.round((firstPunchMs - (shiftStartMs + graceMs)) / 60_000))
 
     // Early exit: if less than 80% of shift was worked AND employee left before shift end
     if (totalWorkMinutes < expectedWorkMinutes * 0.8) {
-      const shiftEndMs = shiftEndUTC(firstSession.attendance_date, shift).getTime()
+      const shiftEndMs = shiftEndUTC(firstSession.attendance_date, shift, tz).getTime()
       const lastOutMs = new Date(lastSession.out_punch!.punch_time).getTime()
       earlyExitMinutes = Math.max(0, Math.round((shiftEndMs - lastOutMs) / 60_000))
     }
@@ -1030,12 +1035,13 @@ async function isHolidayDate(
   tenantId: string,
   dateStr: string,
 ): Promise<boolean> {
-  const { count } = await supabase
+  const { count, error } = await supabase
     .from('holiday_calendar')
     .select('id', { count: 'exact', head: true })
     .eq('tenant_id', tenantId)
     .eq('date', dateStr)
 
+  if (error) throw new Error(`isHolidayDate: ${error.message}`)
   return (count ?? 0) > 0
 }
 
@@ -1065,6 +1071,10 @@ export async function buildDaySessionReport(
   employeeId: string,
   dateStr: string,
 ): Promise<DaySessionReport> {
+  // Tenant-local timezone drives every shift/date boundary below — the server
+  // process's own local time (or UTC) is not the tenant's local time.
+  const tz = await fetchTenantTz(supabase, tenantId)
+
   // ── 1. Resolve shift ────────────────────────────────────────────────────────
   const shift = await resolveShiftForDate(supabase, tenantId, employeeId, dateStr)
 
@@ -1077,11 +1087,11 @@ export async function buildDaySessionReport(
 
   // Keep only punches whose business date resolves to dateStr
   const rawPunches = allPunches.filter(
-    (p) => resolveAttendanceBusinessDate(p.punch_time, shift) === dateStr,
+    (p) => resolveAttendanceBusinessDate(p.punch_time, shift, tz) === dateStr,
   )
 
   // ── 3–5. Pair → repair → merge ─────────────────────────────────────────────
-  const paired = pairPunches(rawPunches, shift)
+  const paired = pairPunches(rawPunches, shift, tz)
 
   // Fetch fatigue rules from roster (best effort)
   let fatigueRules: Record<string, number> | null = null
@@ -1099,7 +1109,7 @@ export async function buildDaySessionReport(
   }
 
   const repaired = repairIncompletePunches(paired, shift, fatigueRules)
-  const sessions = mergeAdjacentSessions(repaired)
+  const sessions = mergeAdjacentSessions(repaired, tz)
 
   // ── 6. Holiday + weekly-off check ─────────────────────────────────────────
   const isHoliday = await isHolidayDate(supabase, tenantId, dateStr)
@@ -1114,16 +1124,17 @@ export async function buildDaySessionReport(
     isWeeklyOff,
     shift,
     shiftDurMin,
+    tz,
   )
 
   // ── 8. Anomaly detection ──────────────────────────────────────────────────
   // Fetch previous day sessions for insufficient-rest check
   const prevPunches = allPunches.filter(
-    (p) => resolveAttendanceBusinessDate(p.punch_time, shift) === prevDay,
+    (p) => resolveAttendanceBusinessDate(p.punch_time, shift, tz) === prevDay,
   )
-  const prevPaired = pairPunches(prevPunches, shift)
+  const prevPaired = pairPunches(prevPunches, shift, tz)
   const prevRepaired = repairIncompletePunches(prevPaired, shift, fatigueRules)
-  const prevSessions = mergeAdjacentSessions(prevRepaired)
+  const prevSessions = mergeAdjacentSessions(prevRepaired, tz)
 
   // Consecutive work days: simple DB count (last N calendar days with work_minutes > 0)
   let consecutiveWorkDays = 0
@@ -1226,6 +1237,9 @@ export async function buildMonthSessionBatch(
   employeeId: string,
   month: string,
 ): Promise<WorkSession[]> {
+  // Tenant-local timezone drives every shift/date boundary below.
+  const tz = await fetchTenantTz(supabase, tenantId)
+
   // ── Pre-fetch shift ─────────────────────────────────────────────────────────
   const firstDay = monthStart(month)
   const shift = await resolveShiftForDate(supabase, tenantId, employeeId, firstDay)
@@ -1237,12 +1251,14 @@ export async function buildMonthSessionBatch(
   const allPunches = await fetchPunches(supabase, tenantId, employeeId, fromIso, toIso)
 
   // ── Pre-fetch holidays for the month ─────────────────────────────────────
-  const { data: holidayRows } = await supabase
+  const { data: holidayRows, error: holidayErr } = await supabase
     .from('holiday_calendar')
     .select('date')
     .eq('tenant_id', tenantId)
     .gte('date', firstDay)
     .lte('date', monthEnd(month))
+
+  if (holidayErr) throw new Error(`buildMonthSessionBatch: holiday fetch failed: ${holidayErr.message}`)
 
   const holidaySet = new Set<string>(
     ((holidayRows ?? []) as Array<{ date: string }>).map((h) => h.date),
@@ -1266,7 +1282,7 @@ export async function buildMonthSessionBatch(
   // ── Group punches by business date ────────────────────────────────────────
   const punchesByDate = new Map<string, PunchRecord[]>()
   for (const punch of allPunches) {
-    const bdate = resolveAttendanceBusinessDate(punch.punch_time, shift)
+    const bdate = resolveAttendanceBusinessDate(punch.punch_time, shift, tz)
     if (!punchesByDate.has(bdate)) punchesByDate.set(bdate, [])
     punchesByDate.get(bdate)!.push(punch)
   }
@@ -1281,9 +1297,9 @@ export async function buildMonthSessionBatch(
     const isHoliday = holidaySet.has(dateStr)
     const isWeeklyOff = isDefaultWeeklyOff(dateStr, [0, 6])
 
-    const paired = pairPunches(dayPunches, shift)
+    const paired = pairPunches(dayPunches, shift, tz)
     const repaired = repairIncompletePunches(paired, shift, fatigueRules)
-    const sessions = mergeAdjacentSessions(repaired)
+    const sessions = mergeAdjacentSessions(repaired, tz)
 
     const stateResult = determineAttendanceState(
       sessions,
@@ -1291,6 +1307,7 @@ export async function buildMonthSessionBatch(
       isWeeklyOff,
       shift,
       shiftDurMin,
+      tz,
     )
 
     // Emit one WorkSession per paired session

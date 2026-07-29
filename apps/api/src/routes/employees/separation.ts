@@ -78,7 +78,8 @@ export default async function separationRoutes(fastify: FastifyInstance) {
     // (a past-dated last_working_date at initiation time), not only via the
     // relieve workflow step.
     if (newStatus === 'separated') {
-      await revokeEmployeeAuth(fastify.supabase, req.params.id, req.tenantId, fastify.log)
+      const revoked = await revokeEmployeeAuth(fastify.supabase, req.params.id, req.tenantId, fastify.log)
+      if (!revoked) fastify.log.error({ employeeId: req.params.id, tenantId: req.tenantId }, 'separation/initiate: auth revocation did not fully succeed — employee may retain live access')
     }
 
     await logAction(fastify.supabase, {
@@ -120,7 +121,8 @@ export default async function separationRoutes(fastify: FastifyInstance) {
       if (statusErr) fastify.log.error({ err: statusErr, employeeId: req.params.id }, 'separation/update: failed to update employee status')
 
       // AF-001: revoke auth access.
-      await revokeEmployeeAuth(fastify.supabase, req.params.id, req.tenantId, fastify.log)
+      const revoked = await revokeEmployeeAuth(fastify.supabase, req.params.id, req.tenantId, fastify.log)
+      if (!revoked) fastify.log.error({ employeeId: req.params.id, tenantId: req.tenantId }, 'separation/update: auth revocation did not fully succeed — employee may retain live access')
     }
 
     await logAction(fastify.supabase, {

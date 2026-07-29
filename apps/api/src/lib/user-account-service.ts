@@ -31,12 +31,19 @@ interface MinimalLogger {
   warn: (obj: unknown, msg?: string) => void
 }
 
+/**
+ * Returns true when the employee has no live auth to revoke, or revocation
+ * fully succeeded. Returns false when either the profile deactivation or the
+ * auth ban failed — callers MUST check this and escalate (log.error / alert),
+ * since a `false` return means the separated employee may still hold a live
+ * session, which is exactly the AF-001 gap this function exists to close.
+ */
 export async function revokeEmployeeAuth(
   supabase:   SupabaseClient,
   employeeId: string,
   tenantId:   string,
   log:        MinimalLogger = console,
-): Promise<void> {
+): Promise<boolean> {
   const { data: profile } = await supabase
     .from('profiles')
     .select('id')
@@ -44,7 +51,7 @@ export async function revokeEmployeeAuth(
     .eq('tenant_id', tenantId)
     .maybeSingle()
 
-  if (!profile) return
+  if (!profile) return true
 
   const { error: profileErr } = await supabase
     .from('profiles')
@@ -67,4 +74,6 @@ export async function revokeEmployeeAuth(
       'revokeEmployeeAuth: auth ban failed — profile deactivated but JWT not immediately revoked',
     )
   }
+
+  return !profileErr && !authErr
 }

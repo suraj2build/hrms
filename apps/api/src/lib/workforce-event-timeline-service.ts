@@ -181,14 +181,17 @@ export async function getTimelineForRebuild(
   tenantId:         string,
   rebuildEventId:   string,
 ): Promise<WorkforceTimelineEvent[]> {
-  const { data } = await supabase
-    .from('workforce_event_timeline')
-    .select('*')
-    .eq('tenant_id',       tenantId)
-    .eq('rebuild_event_id', rebuildEventId)
-    .order('created_at',   { ascending: true })
+  const data = await fetchAllRows<WorkforceTimelineEvent>((from, to) =>
+    supabase
+      .from('workforce_event_timeline')
+      .select('*')
+      .eq('tenant_id',       tenantId)
+      .eq('rebuild_event_id', rebuildEventId)
+      .order('created_at',   { ascending: true })
+      .range(from, to) as any,
+  )
 
-  return (data ?? []) as unknown as WorkforceTimelineEvent[]
+  return data
 }
 
 /**
@@ -200,14 +203,17 @@ export async function getTimelineByLineage(
   tenantId:   string,
   lineageId:  string,
 ): Promise<WorkforceTimelineEvent[]> {
-  const { data } = await supabase
-    .from('workforce_event_timeline')
-    .select('*')
-    .eq('tenant_id',                tenantId)
-    .eq('orchestrator_lineage_id',  lineageId)
-    .order('created_at',            { ascending: true })
+  const data = await fetchAllRows<WorkforceTimelineEvent>((from, to) =>
+    supabase
+      .from('workforce_event_timeline')
+      .select('*')
+      .eq('tenant_id',                tenantId)
+      .eq('orchestrator_lineage_id',  lineageId)
+      .order('created_at',            { ascending: true })
+      .range(from, to) as any,
+  )
 
-  return (data ?? []) as unknown as WorkforceTimelineEvent[]
+  return data
 }
 
 /**

@@ -830,7 +830,8 @@ export default async function separationWorkflowRoutes(fastify: FastifyInstance)
     if (statusErr) fastify.log.error({ err: statusErr, employeeId: req.params.id }, 'separation/relieve: failed to set employee status to separated')
 
     // AF-001: revoke auth access on final separation.
-    await revokeEmployeeAuth(fastify.supabase, req.params.id, req.tenantId, fastify.log)
+    const revoked = await revokeEmployeeAuth(fastify.supabase, req.params.id, req.tenantId, fastify.log)
+    if (!revoked) fastify.log.error({ employeeId: req.params.id, tenantId: req.tenantId }, 'separation/relieve: auth revocation did not fully succeed — employee may retain live access')
 
     await logAction(fastify.supabase, {
       tenantId: req.tenantId, tableName: 'employee_separation', recordId: sep.id,

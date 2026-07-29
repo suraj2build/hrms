@@ -710,7 +710,7 @@ export async function processTermination(
 
   // AF-001: revoke auth access — auto-termination reaches the same terminal
   // status as every other separation path and must revoke the same way.
-  await revokeEmployeeAuth(supabase, cas.employee_id, tenantId)
+  const authRevoked = await revokeEmployeeAuth(supabase, cas.employee_id, tenantId)
 
   // Check asset recovery requirement
   const { data: caseData } = await supabase
@@ -779,7 +779,7 @@ export async function processTermination(
     action:      'UPDATE',
     performedBy: chroUserId,
     onBehalfOf:  cas.employee_id,
-    newData:     { status: 'terminated', separation_id: sepId },
+    newData:     { status: 'terminated', separation_id: sepId, auth_revoked: authRevoked },
   })
 }
 

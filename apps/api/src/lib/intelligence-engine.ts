@@ -16,6 +16,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { fetchAllRows } from './supabase-paginate.js'
+import { fetchTenantTz, utcToLocalDate } from './attendance-engine.js'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -94,8 +95,9 @@ export async function computeIntelligence(
 ): Promise<IntelligenceResult> {
 
   const now      = new Date()
-  const periodTo = now.toISOString().slice(0, 10)
-  const fromDate = new Date(now)
+  const tenantTz = await fetchTenantTz(supabase, tenantId)
+  const periodTo = utcToLocalDate(now, tenantTz)
+  const fromDate = new Date(`${periodTo}T12:00:00.000Z`)
   fromDate.setUTCDate(fromDate.getUTCDate() - LOOKBACK_DAYS)
   const periodFrom = fromDate.toISOString().slice(0, 10)
 

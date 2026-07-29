@@ -25,11 +25,12 @@ const ID_CHUNK = 100
 /** Runs `queryFn` once per chunk of `ids` and concatenates the results. */
 async function fetchChunked<T>(
   ids: string[],
-  queryFn: (chunk: string[]) => PromiseLike<{ data: T[] | null }>,
+  queryFn: (chunk: string[]) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>,
 ): Promise<T[]> {
   const all: T[] = []
   for (let i = 0; i < ids.length; i += ID_CHUNK) {
-    const { data } = await queryFn(ids.slice(i, i + ID_CHUNK))
+    const { data, error } = await queryFn(ids.slice(i, i + ID_CHUNK))
+    if (error) throw new Error(`shift-resolution-engine: fetchChunked query failed: ${error.message}`)
     if (data) all.push(...data)
   }
   return all
@@ -106,13 +107,14 @@ export async function resolveShiftWithAttribution(
 ): Promise<ResolvedShift | null> {
 
   // ── Priority 1: shift_roster date-specific override ───────────────────────
-  const { data: rosterRow } = await supabase
+  const { data: rosterRow, error: rosterErr } = await supabase
     .from('shift_roster')
     .select('shift_id, shifts!inner(id, name, start_time, end_time, grace_minutes, is_night_shift)')
     .eq('tenant_id', tenantId)
     .eq('employee_id', employeeId)
     .eq('date', date)
     .maybeSingle()
+  if (rosterErr) throw new Error(`resolveShiftWithAttribution: shift_roster query failed: ${rosterErr.message}`)
 
   if (rosterRow) {
     const s = (rosterRow as any).shifts as RawShift | null
@@ -123,12 +125,13 @@ export async function resolveShiftWithAttribution(
   // One query fetches everything the lower priorities also need: the site's
   // default rotation policy AND its default shift (snapshot), so the
   // site_default fallback below never has to re-query.
-  const { data: empRow } = await supabase
+  const { data: empRow, error: empErr } = await supabase
     .from('employees')
     .select('site_id, rotation_policy_id, sites!employees_site_id_fkey(default_rotation_policy_id, default_shift_id, shifts!sites_default_shift_id_fkey(id, name, start_time, end_time, grace_minutes, is_night_shift))')
     .eq('id', employeeId)
     .eq('tenant_id', tenantId)
     .maybeSingle()
+  if (empErr) throw new Error(`resolveShiftWithAttribution: employees query failed: ${empErr.message}`)
 
   const emp = empRow as any
   const empSite = emp ? (Array.isArray(emp.sites) ? emp.sites[0] : emp.sites) : null
@@ -144,7 +147,7 @@ export async function resolveShiftWithAttribution(
       // Temporal: pick the rule version effective ON `date` (AHI-3). Falls back
       // to the open version (effective_to IS NULL) and to backfilled rows whose
       // window started in the past.
-      const { data: ruleRow } = await supabase
+      const { data: ruleRow, error: ruleErr } = await supabase
         .from('rotation_policy_rules')
         .select('effective_from, shifts!inner(id, name, start_time, end_time, grace_minutes, is_night_shift)')
         .eq('rotation_policy_id', rotPolicyId)
@@ -154,6 +157,7 @@ export async function resolveShiftWithAttribution(
         .order('effective_from', { ascending: false })
         .limit(1)
         .maybeSingle()
+      if (ruleErr) throw new Error(`resolveShiftWithAttribution: rotation_policy_rules query failed: ${ruleErr.message}`)
 
       const s = (ruleRow as any)?.shifts as RawShift | null
       if (s) return buildResolved(s, 'rotation_policy', rotPolicyId, condition)
@@ -161,7 +165,7 @@ export async function resolveShiftWithAttribution(
   }
 
   // ── Priority 3: employee_shifts — temporal (effective as of date) ─────────
-  const { data: standing } = await supabase
+  const { data: standing, error: standingErr } = await supabase
     .from('employee_shifts')
     .select('shift_id, shifts!inner(id, name, start_time, end_time, grace_minutes, is_night_shift)')
     .eq('tenant_id', tenantId)
@@ -171,6 +175,7 @@ export async function resolveShiftWithAttribution(
     .order('effective_from', { ascending: false })
     .limit(1)
     .maybeSingle()
+  if (standingErr) throw new Error(`resolveShiftWithAttribution: employee_shifts query failed: ${standingErr.message}`)
 
   if (standing) {
     const s = (standing as any).shifts as RawShift | null
@@ -258,7 +263,7 @@ export async function resolveShiftBatch(
     const uniquePolicyIds = [...new Set([...rotationPolicyMap.values()].map(v => v.policyId))]
     // Temporal (AHI-3): fetch all rule versions effective on `date`, newest
     // effective_from first, then keep the first (latest-effective) per policy.
-    const { data: ruleRows } = await supabase
+    const { data: ruleRows, error: ruleRowsErr } = await supabase
       .from('rotation_policy_rules')
       .select('rotation_policy_id, shift_id, effective_from')
       .in('rotation_policy_id', uniquePolicyIds)
@@ -266,6 +271,7 @@ export async function resolveShiftBatch(
       .lte('effective_from', date)
       .or('effective_to.is.null,effective_to.gte.' + date)
       .order('effective_from', { ascending: false })
+    if (ruleRowsErr) throw new Error(`resolveShiftBatch: rotation_policy_rules query failed: ${ruleRowsErr.message}`)
 
     const policyToShift = new Map<string, string>()
     for (const r of (ruleRows ?? []) as any[]) {
@@ -287,7 +293,7 @@ export async function resolveShiftBatch(
   if (needStanding.length) {
     // Temporal query: effective_from <= date AND (effective_to IS NULL OR effective_to >= date)
     // We fetch all candidates then pick the most recent effective_from per employee
-    const { data: standingRows } = await supabase
+    const { data: standingRows, error: standingRowsErr } = await supabase
       .from('employee_shifts')
       .select('employee_id, shift_id, effective_from')
       .eq('tenant_id', tenantId)
@@ -295,6 +301,7 @@ export async function resolveShiftBatch(
       .lte('effective_from', date)
       .or('effective_to.is.null,effective_to.gte.' + date)
       .order('effective_from', { ascending: false })
+    if (standingRowsErr) throw new Error(`resolveShiftBatch: employee_shifts query failed: ${standingRowsErr.message}`)
 
     const seen = new Set<string>()
     for (const r of (standingRows ?? []) as { employee_id: string; shift_id: string; effective_from: string }[]) {
@@ -312,12 +319,13 @@ export async function resolveShiftBatch(
   if (needSiteDefault.length) {
     const siteIds = [...new Set(needSiteDefault.map(id => siteIdMap.get(id)).filter(Boolean))] as string[]
     if (siteIds.length) {
-      const { data: siteRows } = await supabase
+      const { data: siteRows, error: siteRowsErr } = await supabase
         .from('sites')
         .select('id, default_shift_id')
         .eq('tenant_id', tenantId)
         .in('id', siteIds)
         .not('default_shift_id', 'is', null)
+      if (siteRowsErr) throw new Error(`resolveShiftBatch: sites query failed: ${siteRowsErr.message}`)
 
       const siteShiftMap = new Map<string, string>(
         (siteRows ?? []).filter((s: any) => s.default_shift_id).map((s: any) => [s.id, s.default_shift_id])
@@ -341,11 +349,12 @@ export async function resolveShiftBatch(
 
   const shiftDetails = new Map<string, RawShift>()
   if (allShiftIds.size) {
-    const { data: shifts } = await supabase
+    const { data: shifts, error: shiftsErr } = await supabase
       .from('shifts')
       .select('id, name, start_time, end_time, grace_minutes, is_night_shift')
       .eq('tenant_id', tenantId)
       .in('id', [...allShiftIds])
+    if (shiftsErr) throw new Error(`resolveShiftBatch: shifts query failed: ${shiftsErr.message}`)
 
     for (const s of (shifts ?? []) as RawShift[]) {
       shiftDetails.set(s.id, s)

@@ -425,7 +425,10 @@ export async function orchestrateWorkforceEvent(
   const scope = classifyRebuildScope(event.affectedFromDate, event.affectedToDate)
 
   for (const step of steps) {
-    const idempotencyKey = `${orchestratorLineageId}|${step.rebuildStage}|${event.sourceEventId}`
+    // Deliberately excludes orchestratorLineageId — that's fresh per call, so
+    // baking it in here would defeat enqueueRebuild's own dedup (see docstring
+    // above: repeat calls for the same sourceEventId must collide on this key).
+    const idempotencyKey = `${step.rebuildStage}|${event.sourceEventId}`
 
     const { queued, row } = await enqueueRebuild(supabase, {
       tenantId,

@@ -23,6 +23,7 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { fetchAllRows } from './supabase-paginate.js'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -567,12 +568,15 @@ export async function detectPolicyConflicts(
   const conflicts: PolicyConflict[] = []
 
   // 1. Multiple active assignments for the same scope_type + scope_id
-  const { data: assignments } = await supabase
-    .from('leave_policy_assignments')
-    .select('id, policy_id, scope_type, scope_id, effective_from, effective_to')
-    .eq('tenant_id', tenantId)
+  const assignments = await fetchAllRows<{ id: string; scope_type: string; scope_id: string | null }>((from, to) =>
+    supabase
+      .from('leave_policy_assignments')
+      .select('id, policy_id, scope_type, scope_id, effective_from, effective_to')
+      .eq('tenant_id', tenantId)
+      .range(from, to) as any,
+  )
 
-  if (assignments?.length) {
+  if (assignments.length) {
     const seen = new Map<string, string[]>()
     for (const a of assignments as Array<{ id: string; scope_type: string; scope_id: string | null }>) {
       const key = `${a.scope_type}:${a.scope_id ?? '_default'}`

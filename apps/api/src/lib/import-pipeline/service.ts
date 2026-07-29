@@ -241,8 +241,11 @@ export async function resetJobForRetry(
 ): Promise<void> {
   if (job.total_chunks === null) {
     // Phase B incomplete — full reset
-    await supabase.from('import_job_errors').delete().eq('import_job_id', job.id)
-    await supabase.from('import_job_chunks').delete().eq('import_job_id', job.id)
+    const { error: delErrorsErr } = await supabase.from('import_job_errors').delete().eq('import_job_id', job.id)
+    if (delErrorsErr) throw new Error(`resetJobForRetry: failed to clear job errors: ${delErrorsErr.message}`)
+
+    const { error: delChunksErr } = await supabase.from('import_job_chunks').delete().eq('import_job_id', job.id)
+    if (delChunksErr) throw new Error(`resetJobForRetry: failed to clear job chunks: ${delChunksErr.message}`)
 
     await updateJobProgress(supabase, job.id, {
       status:         'queued',
@@ -260,17 +263,19 @@ export async function resetJobForRetry(
   } else {
     // Phase B is done — only reset failed/pending chunks; keep completed ones.
     // Write errors will be re-appended on the retry run.
-    await supabase
+    const { error: delWriteErrorsErr } = await supabase
       .from('import_job_errors')
       .delete()
       .eq('import_job_id', job.id)
       .eq('error_stage', 'write')
+    if (delWriteErrorsErr) throw new Error(`resetJobForRetry: failed to clear write errors: ${delWriteErrorsErr.message}`)
 
-    await supabase
+    const { error: resetChunksErr } = await supabase
       .from('import_job_chunks')
       .update({ status: 'pending', attempt: 0, error_summary: null })
       .eq('import_job_id', job.id)
       .neq('status', 'completed')
+    if (resetChunksErr) throw new Error(`resetJobForRetry: failed to reset chunks: ${resetChunksErr.message}`)
 
     await updateJobProgress(supabase, job.id, {
       status:        'queued',

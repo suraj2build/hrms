@@ -570,7 +570,10 @@ export default async function employeeRoutes(fastify: FastifyInstance) {
     if (error) return serverError(request, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to separate employee')
 
     // AF-001: revoke auth access.
-    await revokeEmployeeAuth(fastify.supabase, id, request.tenantId, fastify.log)
+    const revoked = await revokeEmployeeAuth(fastify.supabase, id, request.tenantId, fastify.log)
+    if (!revoked) {
+      fastify.log.error({ employeeId: id, tenantId: request.tenantId }, 'employees/separate: auth revocation did not fully succeed — employee may retain live access')
+    }
 
     return reply.send({ message: 'Employee separated successfully' })
   })
