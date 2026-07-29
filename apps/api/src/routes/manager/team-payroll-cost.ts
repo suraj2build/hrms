@@ -18,12 +18,17 @@ import {
 import { otFromBreakdown } from '../../lib/payroll-dept-snapshot.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
 import { serverError, ErrorCode } from '../../lib/api-errors.js'
+import { fetchTenantTz } from '../../lib/attendance-engine.js'
+import { getLocalDate } from '../../lib/org-context.js'
 
 const monthRe = /^\d{4}-\d{2}$/
 
-function currentMonth(): string {
-  const d = new Date()
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+// Tenant-local current month — a bare server-UTC clock would default to the
+// wrong month during the first ~5.5 hours of a new tenant-local month for an
+// IST tenant (same bug class fixed in payroll/cost.ts).
+async function currentMonth(fastify: FastifyInstance, tenantId: string): Promise<string> {
+  const tz = await fetchTenantTz(fastify.supabase, tenantId)
+  return getLocalDate(new Date().toISOString(), tz).slice(0, 7)
 }
 
 function prevMonth(m: string): string {
@@ -37,14 +42,15 @@ export default async function managerTeamPayrollCostRoute(fastify: FastifyInstan
 
   fastify.get('/manager/team/payroll-cost', auth, async (req: any, reply) => {
     const qSchema = z.object({
-      month:               z.string().regex(monthRe, 'month must be YYYY-MM').default(currentMonth()),
+      month:               z.string().regex(monthRe, 'month must be YYYY-MM').optional(),
       manager_employee_id: z.string().uuid().optional(),
     })
     const parsed = qSchema.safeParse(req.query)
     if (!parsed.success) {
       return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
     }
-    const { month, manager_employee_id } = parsed.data
+    const month = parsed.data.month ?? await currentMonth(fastify, req.tenantId)
+    const { manager_employee_id } = parsed.data
 
     let employeeIds: string[]
 

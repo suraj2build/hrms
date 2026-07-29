@@ -34,7 +34,7 @@ export default async function managerTeamHelpdeskRoute(fastify: FastifyInstance)
     if (isHrAdmin(req.userRole) && manager_employee_id) {
       employeeIds = await getDirectReportIds(fastify.supabase, req.tenantId, manager_employee_id)
     } else if (isHrAdmin(req.userRole)) {
-      // HR admin without specific manager: show all active employees.
+      // HR admin without specific manager: show all active + on_notice employees.
       // Paginated — an unbounded .select() truncates at PostgREST's
       // 1,000-row ceiling for a large tenant, silently hiding tickets
       // raised by employees past that cutoff.
@@ -43,7 +43,7 @@ export default async function managerTeamHelpdeskRoute(fastify: FastifyInstance)
           .from('employees')
           .select('id')
           .eq('tenant_id', req.tenantId)
-          .eq('status', 'active')
+          .in('status', ['active', 'on_notice'])
           .range(from, to),
       )
       employeeIds = emps.map(e => e.id)
