@@ -27,6 +27,8 @@ import { recomputeRange } from '../../lib/attendance-engine.js'
 import { resolveRotationCondition, dayOfWeekToCondition } from '../../lib/rotation-engine.js'
 import { computeWeeklyOffStatus } from '../../lib/roster-calendar-engine.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
+import { fetchTenantTz } from '../../lib/attendance-engine.js'
+import { getLocalDate } from '../../lib/org-context.js'
 
 const dateRe  = /^\d{4}-\d{2}-\d{2}$/
 const monthRe = /^\d{4}-\d{2}$/
@@ -62,7 +64,8 @@ export default async function rosterRoute(fastify: FastifyInstance) {
   fastify.get('/attendance/roster/employee/:employeeId', adminAuth, async (req, reply) => {
 
     const { employeeId } = req.params as { employeeId: string }
-    const today = new Date().toISOString().slice(0, 10)
+    const tz    = await fetchTenantTz(fastify.supabase, req.tenantId)
+    const today = getLocalDate(new Date().toISOString(), tz)
 
     const { data: row, error } = await fastify.supabase
       .from('shift_roster')
@@ -90,7 +93,7 @@ export default async function rosterRoute(fastify: FastifyInstance) {
 
     const [y, m] = month.split('-').map(Number)
     const fromDate = `${month}-01`
-    const toDate   = new Date(y, m, 0).toISOString().slice(0, 10)
+    const toDate   = new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10)
 
     // Batch-fetch everything needed for the roster grid in parallel.
     // employees is paginated — an unbounded .select() truncates at

@@ -11,6 +11,8 @@ import type { FastifyInstance } from 'fastify'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
 import { serverError, ErrorCode } from '../../lib/api-errors.js'
+import { fetchTenantTz } from '../../lib/attendance-engine.js'
+import { getLocalDate } from '../../lib/org-context.js'
 
 const monthRe = /^\d{4}-\d{2}$/
 const DAYS    = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
@@ -150,7 +152,8 @@ export default async function rosterContextRoutes(fastify: FastifyInstance) {
     }
 
     if (upcoming) {
-      q = q.gte('date', new Date().toISOString().slice(0, 10))
+      const tz = await fetchTenantTz(fastify.supabase, req.tenantId)
+      q = q.gte('date', getLocalDate(new Date().toISOString(), tz))
     }
 
     const { data, error } = await q

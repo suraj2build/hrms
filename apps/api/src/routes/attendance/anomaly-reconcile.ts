@@ -40,6 +40,7 @@ import { z } from 'zod'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { normalizeAttendanceStatus } from '../../lib/attendance-utils.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 // Statuses that definitively prove attendance happened — no "no punch" is possible
 const ATTENDED_STATUSES = new Set<string>([
@@ -105,16 +106,21 @@ export default async function anomalyReconcileRoute(fastify: FastifyInstance) {
     // Build a set of unique employee_id+date pairs
 
     const employeeIds = [...new Set(rows.map(r => r.employee_id))]
-    const { data: dailyRows, error: dErr } = await fastify.supabase
-      .from('attendance_daily')
-      .select('employee_id, date, status, work_hours, confidence_level')
-      .eq('tenant_id', req.tenantId)
-      .in('employee_id', employeeIds)
-      .gte('date', fromDate)
-      .lte('date', toDate)
-
-    if (dErr) {
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: dErr.message })
+    type DailyRow = { employee_id: string; date: string; status: string; work_hours: number; confidence_level: string | null }
+    let dailyRows: DailyRow[]
+    try {
+      dailyRows = await fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('attendance_daily')
+          .select('employee_id, date, status, work_hours, confidence_level')
+          .eq('tenant_id', req.tenantId)
+          .in('employee_id', employeeIds)
+          .gte('date', fromDate)
+          .lte('date', toDate)
+          .range(from, to),
+      ) as DailyRow[]
+    } catch (dErr) {
+      return serverError(req, reply, dErr, ErrorCode.QUERY_FAILED, 'Failed to fetch attendance_daily for reconciliation')
     }
 
     // Build lookup: `${employee_id}:${date}` → daily row

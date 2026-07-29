@@ -36,6 +36,7 @@
 
 import type { FastifyInstance } from 'fastify'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 export default async function attendanceUploadHealthRoute(fastify: FastifyInstance) {
   const adminAuth = { preHandler: [fastify.authenticate, requireRole(...HR_ADMIN_ROLES)] }
@@ -54,8 +55,7 @@ export default async function attendanceUploadHealthRoute(fastify: FastifyInstan
       .limit(200)
 
     if (error) {
-      fastify.log.error(error)
-      return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch upload health summary')
     }
 
     const rows = (sessions ?? []) as Array<{

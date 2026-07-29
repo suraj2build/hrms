@@ -37,7 +37,7 @@ export default async function wfhRoutes(fastify: FastifyInstance) {
         reason: parsed.data.reason ?? null, status: 'pending',
       })
       .select().single()
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to submit WFH request')
     return reply.code(201).send({ data })
   })
 
@@ -47,7 +47,7 @@ export default async function wfhRoutes(fastify: FastifyInstance) {
     const { data, error } = await fastify.supabase
       .from('wfh_requests').select('*').eq('tenant_id', req.tenantId).eq('employee_id', empId)
       .order('from_date', { ascending: false })
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch WFH requests')
     return reply.send({ data: data ?? [] })
   })
 
@@ -66,7 +66,7 @@ export default async function wfhRoutes(fastify: FastifyInstance) {
       q = q.in('employee_id', ids)
     }
     const { data, error } = await q
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch pending WFH requests')
     return reply.send({ data: (data ?? []).map((r: any) => ({
       ...r, employee_name: empName(r.employees), employee_code: r.employees?.employee_code ?? null, employees: undefined,
     })) })
