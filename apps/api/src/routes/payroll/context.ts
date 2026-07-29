@@ -102,28 +102,37 @@ export default async function payrollContextRoutes(fastify: FastifyInstance) {
         return reply.send({ data: { spike_count: 0, top_variances: [] } })
       }
 
+      // Paginated — an unbounded .select() would silently truncate at
+      // PostgREST's 1,000-row ceiling for a run with >1000 slips, hiding
+      // real spikes (or missing employees) past row 1,000.
       const [curSlips, prevSlips] = await Promise.all([
-        fastify.supabase
-          .from('payroll_slips')
-          .select('employee_id, gross_pay, employees(first_name, last_name)')
-          .eq('tenant_id', req.tenantId)
-          .eq('run_id', curRunRes.data.id),
-        fastify.supabase
-          .from('payroll_slips')
-          .select('employee_id, gross_pay')
-          .eq('tenant_id', req.tenantId)
-          .eq('run_id', prevRunRes.data.id),
+        fetchAllRows<{ employee_id: string; gross_pay: number; employees: any }>((from, to) =>
+          fastify.supabase
+            .from('payroll_slips')
+            .select('employee_id, gross_pay, employees(first_name, last_name)')
+            .eq('tenant_id', req.tenantId)
+            .eq('run_id', curRunRes.data.id)
+            .range(from, to),
+        ),
+        fetchAllRows<{ employee_id: string; gross_pay: number }>((from, to) =>
+          fastify.supabase
+            .from('payroll_slips')
+            .select('employee_id, gross_pay')
+            .eq('tenant_id', req.tenantId)
+            .eq('run_id', prevRunRes.data.id)
+            .range(from, to),
+        ),
       ])
 
       const prevMap = new Map<string, number>()
-      for (const s of ((prevSlips.data ?? []) as any[])) {
+      for (const s of (prevSlips as any[])) {
         prevMap.set(s.employee_id, s.gross_pay ?? 0)
       }
 
       const SPIKE_THRESHOLD = 0.15 // flag >= 15% variance
       const variances: { employee_name: string; delta_pct: number; direction: 'up' | 'down' }[] = []
 
-      for (const s of ((curSlips.data ?? []) as any[])) {
+      for (const s of (curSlips as any[])) {
         const prev = prevMap.get(s.employee_id)
         if (!prev || prev === 0) continue
         const delta = (s.gross_pay - prev) / prev

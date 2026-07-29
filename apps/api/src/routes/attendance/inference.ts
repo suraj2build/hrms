@@ -8,6 +8,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { fetchTenantTz, utcToLocalDate } from '../../lib/attendance-engine.js'
 
 const dateRe = /^\d{4}-\d{2}-\d{2}$/
 
@@ -25,14 +26,10 @@ const employeeQuerySchema = z.object({
   to:   z.string().regex(dateRe).optional(),
 })
 
-function nDaysAgo(n: number): string {
-  const d = new Date()
-  d.setDate(d.getDate() - n)
+function nDaysAgo(n: number, todayStr: string): string {
+  const d = new Date(`${todayStr}T12:00:00.000Z`)
+  d.setUTCDate(d.getUTCDate() - n)
   return d.toISOString().slice(0, 10)
-}
-
-function today(): string {
-  return new Date().toISOString().slice(0, 10)
 }
 
 export default async function attendanceInferenceRoute(fastify: FastifyInstance) {
@@ -110,8 +107,10 @@ export default async function attendanceInferenceRoute(fastify: FastifyInstance)
       })
     }
 
-    const from = parsed.data.from ?? nDaysAgo(60)
-    const to   = parsed.data.to   ?? today()
+    const tenantTz  = await fetchTenantTz(fastify.supabase, req.tenantId)
+    const todayStr  = utcToLocalDate(new Date(), tenantTz)
+    const from = parsed.data.from ?? nDaysAgo(60, todayStr)
+    const to   = parsed.data.to   ?? todayStr
 
     // Verify employee belongs to tenant
     const { data: emp } = await fastify.supabase

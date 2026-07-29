@@ -15,7 +15,8 @@ import {
   computeCollision,
   resolveCollisionPolicy,
 } from '../../lib/collision-engine.js'
-import { resolveEmployeeOrgContext } from '../../lib/org-context.js'
+import { resolveEmployeeOrgContext, getLocalDate } from '../../lib/org-context.js'
+import { fetchTenantTz } from '../../lib/attendance-engine.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 
 const dateRe = /^\d{4}-\d{2}-\d{2}$/
@@ -169,7 +170,8 @@ export default async function leaveCollisionRoutes(fastify: FastifyInstance) {
   // ── GET /leave/optional-holidays ────────────────────────────────────────
   // List optional holidays for the current year that the employee can choose from.
   fastify.get('/leave/optional-holidays', auth, async (req: any, reply) => {
-    const year = new Date().getFullYear()
+    const tz = await fetchTenantTz(fastify.supabase, req.tenantId)
+    const year = Number(getLocalDate(new Date().toISOString(), tz).slice(0, 4))
 
     // Get the pool for this tenant/year
     const { data: pool } = await fastify.supabase
@@ -215,7 +217,10 @@ export default async function leaveCollisionRoutes(fastify: FastifyInstance) {
   // location > site > group > global applicability chain (same rules the
   // attendance/payroll engines use). Optional holidays have their own page.
   fastify.get('/leave/holidays', auth, async (req: any, reply) => {
-    const year = Number((req.query as Record<string, string>)?.year ?? new Date().getFullYear())
+    const yearParam = (req.query as Record<string, string>)?.year
+    const year = yearParam
+      ? Number(yearParam)
+      : Number(getLocalDate(new Date().toISOString(), await fetchTenantTz(fastify.supabase, req.tenantId)).slice(0, 4))
     if (!Number.isInteger(year) || year < 2000 || year > 2100) {
       return reply.code(400).send({ error: 'VALIDATION_ERROR', message: 'Invalid year' })
     }
@@ -358,7 +363,10 @@ export default async function leaveCollisionRoutes(fastify: FastifyInstance) {
     if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
       return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
     }
-    const year = Number((req.query as Record<string, string>).year ?? new Date().getFullYear())
+    const poolYearParam = (req.query as Record<string, string>).year
+    const year = poolYearParam
+      ? Number(poolYearParam)
+      : Number(getLocalDate(new Date().toISOString(), await fetchTenantTz(fastify.supabase, req.tenantId)).slice(0, 4))
 
     const { data: pool, error } = await fastify.supabase
       .from('optional_holiday_pool')
@@ -410,7 +418,8 @@ export default async function leaveCollisionRoutes(fastify: FastifyInstance) {
     if (!parsed.success) {
       return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
     }
-    const year = parsed.data.year ?? new Date().getFullYear()
+    const year = parsed.data.year
+      ?? Number(getLocalDate(new Date().toISOString(), await fetchTenantTz(fastify.supabase, req.tenantId)).slice(0, 4))
 
     // holiday_id is caller-supplied — verify it belongs to this tenant's
     // holiday_calendar before inserting. Without this, GET /pool's

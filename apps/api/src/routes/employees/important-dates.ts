@@ -179,16 +179,20 @@ export default async function employeeImportantDatesRoutes(fastify: FastifyInsta
       return reply.code(404).send({ error: 'NOT_FOUND', message: 'Employee not found' })
     }
 
-    const { error } = await fastify.supabase
+    const { data, error } = await fastify.supabase
       .from('employee_important_dates')
       .delete()
       .eq('id', dateId)
       .eq('tenant_id', req.tenantId)
       .eq('employee_id', employeeId)
+      .select('id')
 
     if (error) {
       req.log.error({ err: error }, 'employee important-dates delete failed')
       return reply.code(500).send({ error: 'DELETE_FAILED', message: 'Failed to delete important date' })
+    }
+    if (!data?.length) {
+      return reply.code(404).send({ error: 'NOT_FOUND', message: 'Important date not found' })
     }
 
     return reply.code(204).send()

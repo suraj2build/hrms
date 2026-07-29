@@ -31,6 +31,8 @@ import {
 } from '../../lib/leave-accrual-lifecycle-engine.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { serverError, notFound, conflictError, ErrorCode } from '../../lib/api-errors.js'
+import { fetchAllRows } from '../../lib/supabase-paginate.js'
+import { fetchTenantTz, utcToLocalDate } from '../../lib/attendance-engine.js'
 
 const dateRe = /^\d{4}-\d{2}-\d{2}$/
 
@@ -66,7 +68,8 @@ export default async function leaveAccrualLifecycleRoutes(fastify: FastifyInstan
         }
       }
 
-      const asOf = new Date().toISOString().slice(0, 10)
+      const tenantTz = await fetchTenantTz(fastify.supabase, req.tenantId)
+      const asOf = utcToLocalDate(new Date(), tenantTz)
 
       // Fetch employee
       const { data: emp } = await fastify.supabase
@@ -241,13 +244,14 @@ export default async function leaveAccrualLifecycleRoutes(fastify: FastifyInstan
     // Fold status='active' into the UPDATE's own WHERE clause — the read
     // above is only for a friendly 404 vs 409 distinction; a concurrent
     // lift request can't race past this and double-lift the same freeze.
+    const liftTz = await fetchTenantTz(fastify.supabase, req.tenantId)
     const { data: updated, error } = await fastify.supabase
       .from('leave_accrual_freezes')
       .update({
         status:    'lifted',
         lifted_by: req.userId,
         lifted_at: new Date().toISOString(),
-        freeze_to: new Date().toISOString().slice(0, 10),  // close the range
+        freeze_to: utcToLocalDate(new Date(), liftTz),  // close the range, tenant-local
       })
       .eq('id', freezeId)
       .eq('tenant_id', req.tenantId)
@@ -399,18 +403,23 @@ export default async function leaveAccrualLifecycleRoutes(fastify: FastifyInstan
       return reply.code(403).send({ error: 'FORBIDDEN', message: 'Admin access required' })
     }
 
-    const { data: freezes } = await fastify.supabase
-      .from('leave_accrual_freezes')
-      .select(`
-        id, employee_id, leave_type_id, freeze_from, freeze_to, reason, status,
-        employees!inner(first_name, last_name, employee_code),
-        leave_types(id, name)
-      `)
-      .eq('tenant_id', req.tenantId)
-      .eq('status', 'active')
-      .order('freeze_from', { ascending: false })
+    // Paginated — a governance dashboard billed to return ALL active freezes
+    // must not silently truncate at PostgREST's 1,000-row ceiling.
+    const freezes = await fetchAllRows((from, to) =>
+      fastify.supabase
+        .from('leave_accrual_freezes')
+        .select(`
+          id, employee_id, leave_type_id, freeze_from, freeze_to, reason, status,
+          employees!inner(first_name, last_name, employee_code),
+          leave_types(id, name)
+        `)
+        .eq('tenant_id', req.tenantId)
+        .eq('status', 'active')
+        .order('freeze_from', { ascending: false })
+        .range(from, to),
+    )
 
-    return reply.send({ data: freezes ?? [] })
+    return reply.send({ data: freezes })
   })
 
   // ── GET /leave/lifecycle/held-credits-summary ────────────────────────────────
@@ -421,21 +430,27 @@ export default async function leaveAccrualLifecycleRoutes(fastify: FastifyInstan
       return reply.code(403).send({ error: 'FORBIDDEN', message: 'Admin access required' })
     }
 
-    const today = new Date().toISOString().slice(0, 10)
+    const summaryTz = await fetchTenantTz(fastify.supabase, req.tenantId)
+    const today = utcToLocalDate(new Date(), summaryTz)
 
-    const { data: held } = await fastify.supabase
-      .from('leave_accrual_ledger')
-      .select(`
-        employee_id, leave_type_id, days,
-        consumption_eligible_from, release_trigger,
-        employees!inner(first_name, last_name, employee_code),
-        leave_types(id, name)
-      `)
-      .eq('tenant_id', req.tenantId)
-      .eq('is_expired', false)
-      .gt('consumption_eligible_from', today)
-      .not('consumption_eligible_from', 'is', null)
-      .order('consumption_eligible_from', { ascending: true })
+    // Paginated — a tenant-wide ledger scan can exceed 1,000 rows for a
+    // mid/large tenant with routine advance-accrual holds.
+    const held = await fetchAllRows((from, to) =>
+      fastify.supabase
+        .from('leave_accrual_ledger')
+        .select(`
+          employee_id, leave_type_id, days,
+          consumption_eligible_from, release_trigger,
+          employees!inner(first_name, last_name, employee_code),
+          leave_types(id, name)
+        `)
+        .eq('tenant_id', req.tenantId)
+        .eq('is_expired', false)
+        .gt('consumption_eligible_from', today)
+        .not('consumption_eligible_from', 'is', null)
+        .order('consumption_eligible_from', { ascending: true })
+        .range(from, to),
+    )
 
     // Aggregate by employee + leave type
     const summaryMap = new Map<string, any>()
@@ -483,7 +498,8 @@ export default async function leaveAccrualLifecycleRoutes(fastify: FastifyInstan
       }
     }
 
-    const today = new Date().toISOString().slice(0, 10)
+    const heldTz = await fetchTenantTz(fastify.supabase, req.tenantId)
+    const today = utcToLocalDate(new Date(), heldTz)
 
     const { data: held } = await fastify.supabase
       .from('leave_accrual_ledger')

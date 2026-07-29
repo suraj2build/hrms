@@ -15,6 +15,7 @@ import type { FastifyInstance } from 'fastify'
 import { z }                   from 'zod'
 import { HR_ADMIN_ROLES }      from '../../lib/rbac.js'
 import { fetchAllRows }        from '../../lib/supabase-paginate.js'
+import { fetchTenantTz, utcToLocalDate } from '../../lib/attendance-engine.js'
 // ── Date helpers ──────────────────────────────────────────────────────────────
 
 const dateRe  = /^\d{4}-\d{2}-\d{2}$/
@@ -31,17 +32,26 @@ function expandDateRange(from: string, to: string): string[] {
   return dates
 }
 
-function defaultRange(weeks = 4): { from: string; to: string } {
-  const to  = new Date().toISOString().slice(0, 10)
-  const d   = new Date(); d.setDate(d.getDate() - weeks * 7)
-  return { from: d.toISOString().slice(0, 10), to }
+/** @param todayStr tenant-local "today" (YYYY-MM-DD) — see callers. */
+function defaultRange(todayStr: string, weeks = 4): { from: string; to: string } {
+  const d = new Date(`${todayStr}T12:00:00.000Z`)
+  d.setUTCDate(d.getUTCDate() - weeks * 7)
+  return { from: d.toISOString().slice(0, 10), to: todayStr }
 }
 
 function monthBounds(monthStr: string): { from: string; to: string } {
   const [y, mo] = monthStr.split('-').map(Number)
   const from = `${monthStr}-01`
-  const to   = new Date(y, mo, 0).toISOString().slice(0, 10)
+  // Date.UTC (not new Date(y, mo, 0), which anchors to the process's local TZ)
+  // so month-end is correct regardless of the server process's TZ setting.
+  const to   = new Date(Date.UTC(y, mo, 0)).toISOString().slice(0, 10)
   return { from, to }
+}
+
+/** Tenant-local "today" as YYYY-MM-DD — see ISSUE-154 class UTC-vs-local bugs. */
+async function tenantTodayStr(fastify: FastifyInstance, tenantId: string): Promise<string> {
+  const tz = await fetchTenantTz(fastify.supabase, tenantId)
+  return utcToLocalDate(new Date(), tz)
 }
 
 // ── Route plugin ──────────────────────────────────────────────────────────────
@@ -71,7 +81,9 @@ export default async function rosterIntelligenceRoutes(fastify: FastifyInstance)
     }).safeParse(req.query)
     if (!qs.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: qs.error.issues[0]?.message })
 
-    const { from, to } = qs.data.from ? { from: qs.data.from, to: qs.data.to! } : defaultRange(4)
+    const { from, to } = qs.data.from
+      ? { from: qs.data.from, to: qs.data.to! }
+      : defaultRange(await tenantTodayStr(fastify, req.tenantId), 4)
     const dates = expandDateRange(from, to)
 
     // ── Fetch all data in parallel ─────────────────────────────────────────────
@@ -189,8 +201,7 @@ export default async function rosterIntelligenceRoutes(fastify: FastifyInstance)
     }).safeParse(req.query)
     if (!qs.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: qs.error.issues[0]?.message })
 
-    const now = new Date()
-    const monthStr = qs.data.month ?? `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+    const monthStr = qs.data.month ?? (await tenantTodayStr(fastify, req.tenantId)).slice(0, 7)
     const { from, to } = monthBounds(monthStr)
     const dates = expandDateRange(from, to)
 
@@ -298,8 +309,7 @@ export default async function rosterIntelligenceRoutes(fastify: FastifyInstance)
     }).safeParse(req.query)
     if (!qs.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: qs.error.issues[0]?.message })
 
-    const now = new Date()
-    const monthStr = qs.data.month ?? `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+    const monthStr = qs.data.month ?? (await tenantTodayStr(fastify, req.tenantId)).slice(0, 7)
     const { from, to } = monthBounds(monthStr)
 
     // Paginated — active employees and a month of attendance_daily across
@@ -409,7 +419,9 @@ export default async function rosterIntelligenceRoutes(fastify: FastifyInstance)
     }).safeParse(req.query)
     if (!qs.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: qs.error.issues[0]?.message })
 
-    const { from, to } = qs.data.from ? { from: qs.data.from, to: qs.data.to! } : defaultRange(4)
+    const { from, to } = qs.data.from
+      ? { from: qs.data.from, to: qs.data.to! }
+      : defaultRange(await tenantTodayStr(fastify, req.tenantId), 4)
     const minCovPct = qs.data.min_coverage_pct
 
     // Re-use coverage logic
@@ -537,8 +549,7 @@ export default async function rosterIntelligenceRoutes(fastify: FastifyInstance)
   fastify.get('/analytics/roster/summary', auth, async (req: any, reply) => {
     if (!requireAdmin(req, reply)) return
 
-    const now      = new Date()
-    const monthStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+    const monthStr = (await tenantTodayStr(fastify, req.tenantId)).slice(0, 7)
     const { from, to } = monthBounds(monthStr)
 
     // Paginated for the same reason as /roster/coverage above.

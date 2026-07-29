@@ -11,6 +11,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { isHrAdmin, resolveCallerEmployeeId, isDirectReport } from '../../lib/manager-scope.js'
+import { fetchTenantTz, utcToLocalDate } from '../../lib/attendance-engine.js'
 
 const dateRe = /^\d{4}-\d{2}-\d{2}$/
 
@@ -48,8 +49,11 @@ export default async function fetchRoute(fastify: FastifyInstance) {
         })
       }
 
-      // Default date range: current month
-      const today    = new Date().toISOString().slice(0, 10)
+      // Default date range: current month, in the tenant's local timezone —
+      // a UTC "today" would default to the wrong day/month boundary for a
+      // non-UTC tenant near midnight.
+      const tenantTz = await fetchTenantTz(fastify.supabase, req.tenantId)
+      const today    = utcToLocalDate(new Date(), tenantTz)
       const monthStart = today.slice(0, 7) + '-01'
       const from = parsed.data.from ?? monthStart
       const to   = parsed.data.to   ?? today
