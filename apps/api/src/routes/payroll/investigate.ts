@@ -21,13 +21,16 @@
 import type { FastifyInstance } from 'fastify'
 import { z }                    from 'zod'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
-const monthRe = /^\d{4}-\d{2}$/
+const monthRe = /^\d{4}-(0[1-9]|1[0-2])$/
 
 function monthRange(month: string): { from: string; to: string } {
   const [y, m] = month.split('-').map(Number)
   const from   = `${month}-01`
-  const lastDay = new Date(y, m, 0).toISOString().slice(0, 10)
+  // Date.UTC (not new Date(y, m, 0), which anchors to the process's local TZ)
+  // so month-end is correct regardless of the server process's TZ setting.
+  const lastDay = new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10)
   return { from, to: lastDay }
 }
 
@@ -179,6 +182,12 @@ export default async function payrollInvestigateRoute(fastify: FastifyInstance) 
         .eq('month', month)
         .order('created_at', { ascending: false }),
     ])
+
+    const firstError = [attRes, leaveRes, corrRes, anomalyRes, auditRes, slipRes, prevSlipRes, ledgerRes]
+      .map(r => r.error).find(Boolean)
+    if (firstError) {
+      return serverError(req, reply, firstError, ErrorCode.QUERY_FAILED, 'Failed to load payroll investigation data')
+    }
 
     // ── Compute attendance summary ────────────────────────────────────────────
     const days = (attRes.data ?? []) as Array<{

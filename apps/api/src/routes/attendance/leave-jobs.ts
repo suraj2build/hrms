@@ -23,6 +23,7 @@ import {
   carryForwardJob,
   policyRecalculateJob,
 } from '../../lib/leave-jobs.js'
+import { fetchTenantTz, utcToLocalDate } from '../../lib/attendance-engine.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 
 const dateRe = /^\d{4}-\d{2}-\d{2}$/
@@ -150,9 +151,15 @@ export default async function leaveJobsRoute(fastify: FastifyInstance) {
       return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
     }
 
-    const asOf = parsed.data.as_of
-      ? new Date(`${parsed.data.as_of}T12:00:00.000Z`)
-      : new Date()
+    // Default "today" must reflect the tenant's local calendar day, not the
+    // server's UTC instant — otherwise a run near local midnight expires CO
+    // credits against yesterday's date.
+    let asOfDateStr = parsed.data.as_of
+    if (!asOfDateStr) {
+      const tenantTz = await fetchTenantTz(fastify.supabase, req.tenantId)
+      asOfDateStr = utcToLocalDate(new Date(), tenantTz)
+    }
+    const asOf = new Date(`${asOfDateStr}T12:00:00.000Z`)
 
     const result = await coExpiryJob(
       fastify.supabase, req.tenantId, asOf, req.userId,

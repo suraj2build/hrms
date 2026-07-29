@@ -27,6 +27,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { fetchAllRows } from './supabase-paginate.js'
+import { fetchTenantTz, utcToLocalDate } from './attendance-engine.js'
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -230,7 +231,7 @@ async function checkMissingDailyRows(
       .gte('check_in', `${scanFrom}T00:00:00Z`)
       .lte('check_in', `${scanTo}T23:59:59Z`)
       .range(from, to)
-  )
+  ).catch(() => [])
 
   if (!sessions?.length) return []
 
@@ -245,15 +246,16 @@ async function checkMissingDailyRows(
 
   // Get all employee+date combos in attendance_daily for the same range
   const empIds = [...new Set((sessions as any[]).map((s: any) => s.employee_id))]
-  const { data: dailyRows, error: dailyErr } = await supabase
-    .from('attendance_daily')
-    .select('employee_id, date')
-    .eq('tenant_id', tenantId)
-    .in('employee_id', empIds)
-    .gte('date', scanFrom)
-    .lte('date', scanTo)
-
-  if (dailyErr) return []
+  const dailyRows = await fetchAllRows((from, to) =>
+    supabase
+      .from('attendance_daily')
+      .select('employee_id, date')
+      .eq('tenant_id', tenantId)
+      .in('employee_id', empIds)
+      .gte('date', scanFrom)
+      .lte('date', scanTo)
+      .range(from, to)
+  ).catch(() => [])
 
   const dailySet = new Set<string>(
     (dailyRows ?? []).map((r: any) => `${r.employee_id}|${r.date}`)
@@ -415,8 +417,10 @@ async function checkStaleProcessingGap(
   // Generate expected date range
   const from  = new Date(scanFrom)
   const to    = new Date(scanTo)
-  // Exclude the current day (may not have been processed yet)
-  const today = new Date().toISOString().slice(0, 10)
+  // Exclude the current day (may not have been processed yet) — computed in the
+  // tenant's local timezone, since a UTC "today" near IST midnight is off by one.
+  const tenantTz = await fetchTenantTz(supabase, tenantId)
+  const today = utcToLocalDate(new Date(), tenantTz)
 
   const gaps: string[] = []
   const cursor = new Date(from)

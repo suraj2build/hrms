@@ -23,6 +23,7 @@ import type { FastifyInstance } from 'fastify'
 import type { SupabaseClient }  from '@supabase/supabase-js'
 import { z } from 'zod'
 import { processAttendanceForDate, writeFailedAuditRun } from '../../lib/attendance-processor.js'
+import { utcToLocalDate } from '../../lib/attendance-engine.js'
 import { isMonthLocked, monthOf } from '../../lib/period-lock.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 
@@ -164,10 +165,23 @@ export default async function processRoute(fastify: FastifyInstance) {
         return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
       }
 
-      const date     = parsed.data.date  ?? new Date().toISOString().slice(0, 10)
       const force    = parsed.data.force ?? false
       const tenantId = req.tenantId
       const userId   = req.userId
+
+      // "Today" must be resolved in the tenant's local calendar day, not UTC —
+      // otherwise a run near local midnight (e.g. 04:00 IST = 22:30Z prior day)
+      // processes the wrong date.
+      let date = parsed.data.date
+      if (!date) {
+        const { data: tzRow } = await fastify.supabase
+          .from('tenants')
+          .select('timezone')
+          .eq('id', tenantId)
+          .maybeSingle()
+        const tenantTz: string = (tzRow as { timezone?: string } | null)?.timezone ?? 'UTC'
+        date = utcToLocalDate(new Date(), tenantTz)
+      }
 
       // ── Period protection ─────────────────────────────────────────────────────
       // A locked/finalized month must not be re-processed — that would overwrite

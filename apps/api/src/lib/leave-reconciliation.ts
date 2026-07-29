@@ -47,6 +47,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { detectBalanceDrift }  from './leave-replay-engine.js'
 import { fetchAllRows }        from './supabase-paginate.js'
+import { fetchTenantTz, utcToLocalDate } from './attendance-engine.js'
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -159,8 +160,11 @@ export async function runLeaveReconciliation(
 
   try {
     const issues: LeaveIssue[] = []
-    const today = new Date().toISOString().slice(0, 10)
-    const warnCutoff = new Date(Date.now() + EXPIRY_WARN_DAYS * 86_400_000).toISOString().slice(0, 10)
+    // "Today" must reflect the tenant's local calendar day — a UTC today
+    // near IST midnight would misjudge expiry-window checks by a day.
+    const tenantTz = await fetchTenantTz(supabase, tenantId)
+    const today = utcToLocalDate(new Date(), tenantTz)
+    const warnCutoff = utcToLocalDate(new Date(Date.now() + EXPIRY_WARN_DAYS * 86_400_000), tenantTz)
 
     // ── Fetch all ledger rows for the year ──────────────────────────────────────
     // Completeness is this engine's entire purpose — paginated so drift
