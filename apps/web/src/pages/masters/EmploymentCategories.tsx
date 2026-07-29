@@ -110,10 +110,12 @@ export function EmploymentCategories() {
   })
 
   const delMut = useMutation({
-    mutationFn: (id: string) => api.delete<{ data?: { deactivated?: boolean } }>(`/masters/employment-categories/${id}`),
+    mutationFn: (id: string) => api.delete<{ deactivated?: boolean; message?: string }>(`/masters/employment-categories/${id}`),
     onSuccess: (res) => {
       qc.invalidateQueries({ queryKey: ['employment-categories'] })
-      toast.success(res?.data?.deactivated ? 'Category deactivated (in use)' : 'Category deleted')
+      // api.delete<T>() responses are not `.data`-wrapped — read the
+      // top-level deactivated/message fields directly (see AssetCategories.tsx).
+      toast.success(res?.message ?? (res?.deactivated ? 'Category deactivated (in use)' : 'Category deleted'))
       setDeleteTarget(null)
     },
     onError: (e: Error) => toast.error('Delete failed', { description: e.message }),

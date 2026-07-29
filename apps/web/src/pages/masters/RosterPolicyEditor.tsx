@@ -554,6 +554,11 @@ export function RosterPolicyEditor() {
     onSuccess: (res) => {
       qc.invalidateQueries({ queryKey: ['roster-policies'] })
       qc.invalidateQueries({ queryKey: ['roster-policy', id] })
+      // /masters/rosters is also read under these keys by Rosters.tsx,
+      // Sites.tsx/EmployeeProfile.tsx, and ShiftRoster.tsx.
+      qc.invalidateQueries({ queryKey: ['rosters'] })
+      qc.invalidateQueries({ queryKey: ['rosters-list'] })
+      qc.invalidateQueries({ queryKey: ['roster-templates'] })
       toast.success(isNew ? 'Roster policy created' : 'Roster policy saved')
       setIsDirty(false)
       if (isNew && res?.data?.id) {
@@ -570,6 +575,9 @@ export function RosterPolicyEditor() {
       const next = !isActive
       setIsActive(next)
       qc.invalidateQueries({ queryKey: ['roster-policies'] })
+      qc.invalidateQueries({ queryKey: ['rosters'] })
+      qc.invalidateQueries({ queryKey: ['rosters-list'] })
+      qc.invalidateQueries({ queryKey: ['roster-templates'] })
       toast.success(next ? 'Policy restored' : 'Policy archived')
     },
     onError: (e: Error) => toast.error('Failed to update status', { description: e.message }),

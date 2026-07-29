@@ -117,10 +117,12 @@ export function StatutoryGroups() {
   })
 
   const delMut = useMutation({
-    mutationFn: (id: string) => api.delete<{ data?: { deactivated?: boolean } }>(`/masters/statutory-groups/${id}`),
+    mutationFn: (id: string) => api.delete<{ deactivated?: boolean; message?: string }>(`/masters/statutory-groups/${id}`),
     onSuccess: (res) => {
       qc.invalidateQueries({ queryKey: ['statutory-groups'] })
-      toast.success(res?.data?.deactivated ? 'Group deactivated (in use)' : 'Statutory group deleted')
+      // api.delete<T>() responses are not `.data`-wrapped — read the
+      // top-level deactivated/message fields directly (see AssetCategories.tsx).
+      toast.success(res?.message ?? (res?.deactivated ? 'Group deactivated (in use)' : 'Statutory group deleted'))
       setDeleteTarget(null)
     },
     onError: (e: Error) => toast.error('Delete failed', { description: e.message }),

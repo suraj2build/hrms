@@ -222,6 +222,8 @@ export default function RotationPolicies() {
     onSuccess: () => {
       toast.success('Policy duplicated — it starts as inactive')
       queryClient.invalidateQueries({ queryKey: ['rotation-policies'] })
+      // EmployeeProfile.tsx reads the same list under this separate key.
+      queryClient.invalidateQueries({ queryKey: ['rotation-policies-list'] })
     },
     onError: (err: Error) =>
       toast.error(err.message ?? 'Failed to duplicate policy'),
@@ -233,6 +235,7 @@ export default function RotationPolicies() {
     onSuccess: (_, vars) => {
       toast.success(vars.is_active ? 'Policy restored' : 'Policy archived')
       queryClient.invalidateQueries({ queryKey: ['rotation-policies'] })
+      queryClient.invalidateQueries({ queryKey: ['rotation-policies-list'] })
     },
     onError: () => toast.error('Failed to update policy'),
   })

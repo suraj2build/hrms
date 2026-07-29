@@ -295,6 +295,7 @@ export default function RotationPolicyEditor() {
     onSuccess: () => {
       toast.success(isNew ? 'Rotation policy created' : 'Policy saved')
       queryClient.invalidateQueries({ queryKey: ['rotation-policies'] })
+      queryClient.invalidateQueries({ queryKey: ['rotation-policies-list'] })
       if (isNew) navigate('/admin/masters/rotation-policies')
       else queryClient.invalidateQueries({ queryKey: ['rotation-policy', id] })
     },

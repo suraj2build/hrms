@@ -329,6 +329,11 @@ export function RosterPolicies() {
     mutationFn: (id: string) => api.post<{ data?: { id?: string } }>(`/masters/rosters/${id}/duplicate`, {}),
     onSuccess: (res) => {
       qc.invalidateQueries({ queryKey: ['roster-policies'] })
+      // /masters/rosters is also read under these keys by Rosters.tsx,
+      // Sites.tsx/EmployeeProfile.tsx, and ShiftRoster.tsx.
+      qc.invalidateQueries({ queryKey: ['rosters'] })
+      qc.invalidateQueries({ queryKey: ['rosters-list'] })
+      qc.invalidateQueries({ queryKey: ['roster-templates'] })
       toast.success('Policy duplicated')
       // Navigate to the new copy
       if (res?.data?.id) navigate(`/admin/masters/rosters/${res.data.id}`)
@@ -341,6 +346,9 @@ export function RosterPolicies() {
       api.put(`/masters/rosters/${id}`, { is_active }),
     onSuccess: (_, { is_active }) => {
       qc.invalidateQueries({ queryKey: ['roster-policies'] })
+      qc.invalidateQueries({ queryKey: ['rosters'] })
+      qc.invalidateQueries({ queryKey: ['rosters-list'] })
+      qc.invalidateQueries({ queryKey: ['roster-templates'] })
       toast.success(is_active ? 'Policy restored' : 'Policy archived')
     },
     onError: (e: Error) => toast.error('Failed to update policy', { description: e.message }),
