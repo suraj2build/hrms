@@ -15,6 +15,8 @@ import { api }          from '@/lib/api/client'
 import { toast }        from 'sonner'
 import { cn }           from '@/lib/utils'
 import { PageHeader }   from '@/components/layout/PageHeader'
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
+import { useState }     from 'react'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -56,8 +58,8 @@ function UserRow({
   user:           UserProfile
   currentUserId:  string
   isSuperAdmin:   boolean
-  onRoleChange:   (id: string, role: UserRole) => void
-  onStatusToggle: (id: string, active: boolean) => void
+  onRoleChange:   (user: UserProfile, role: UserRole) => void
+  onStatusToggle: (user: UserProfile, active: boolean) => void
   isPending:      boolean
 }) {
   const isSelf   = user.id === currentUserId
@@ -90,7 +92,7 @@ function UserRow({
           <select
             value={user.role}
             disabled={isPending}
-            onChange={e => onRoleChange(user.id, e.target.value as UserRole)}
+            onChange={e => onRoleChange(user, e.target.value as UserRole)}
             className="h-7 text-xs rounded-md border border-input bg-background pl-2 pr-6 text-foreground outline-none focus:ring-1 ring-primary/50 appearance-none cursor-pointer"
           >
             {ROLE_OPTIONS.map(r => (
@@ -111,7 +113,7 @@ function UserRow({
           className="h-7 w-7 flex-shrink-0"
           disabled={isPending}
           title={user.is_active ? 'Deactivate user' : 'Activate user'}
-          onClick={() => onStatusToggle(user.id, !user.is_active)}
+          onClick={() => onStatusToggle(user, !user.is_active)}
         >
           {user.is_active
             ? <UserX className="h-3.5 w-3.5 text-muted-foreground hover:text-destructive" />
@@ -132,6 +134,9 @@ export function UsersManagement() {
   const isSuperAdmin = me?.role === 'super_admin'
   const isAdmin      = isSuperAdmin || me?.role === 'hr_admin'
 
+  const [pendingRole,   setPendingRole]   = useState<{ user: UserProfile; role: UserRole } | null>(null)
+  const [pendingStatus, setPendingStatus] = useState<{ user: UserProfile; active: boolean } | null>(null)
+
   const { data, isLoading, isFetching, refetch } = useQuery<{ data: UserProfile[] }>({
     queryKey:  ['tenant-users'],
     queryFn:   () => api.get('/users'),
@@ -148,6 +153,7 @@ export function UsersManagement() {
     onSuccess: (_, vars) => {
       qc.invalidateQueries({ queryKey: ['tenant-users'] })
       toast.success('Role updated', { description: `User is now ${ROLE_LABEL[vars.role]}` })
+      setPendingRole(null)
     },
     onError: (e: Error) => toast.error('Role update failed', { description: e.message }),
   })
@@ -158,6 +164,7 @@ export function UsersManagement() {
     onSuccess: (_, vars) => {
       qc.invalidateQueries({ queryKey: ['tenant-users'] })
       toast.success(vars.is_active ? 'User activated' : 'User deactivated')
+      setPendingStatus(null)
     },
     onError: (e: Error) => toast.error('Status update failed', { description: e.message }),
   })
@@ -206,8 +213,8 @@ export function UsersManagement() {
                     key={u.id} user={u}
                     currentUserId={me?.id ?? ''}
                     isSuperAdmin={isSuperAdmin}
-                    onRoleChange={(id, role) => roleMutation.mutate({ id, role })}
-                    onStatusToggle={(id, is_active) => statusMutation.mutate({ id, is_active })}
+                    onRoleChange={(user, role) => setPendingRole({ user, role })}
+                    onStatusToggle={(user, active) => setPendingStatus({ user, active })}
                     isPending={roleMutation.isPending || statusMutation.isPending}
                   />
                 ))}
@@ -223,8 +230,8 @@ export function UsersManagement() {
                       key={u.id} user={u}
                       currentUserId={me?.id ?? ''}
                       isSuperAdmin={isSuperAdmin}
-                      onRoleChange={(id, role) => roleMutation.mutate({ id, role })}
-                      onStatusToggle={(id, is_active) => statusMutation.mutate({ id, is_active })}
+                      onRoleChange={(user, role) => setPendingRole({ user, role })}
+                      onStatusToggle={(user, active) => setPendingStatus({ user, active })}
                       isPending={roleMutation.isPending || statusMutation.isPending}
                     />
                   ))}
@@ -240,6 +247,26 @@ export function UsersManagement() {
           </CardContent>
         </Card>
       )}
+
+      <ConfirmDialog
+        open={!!pendingRole}
+        title="Change role?"
+        message={pendingRole ? `This grants ${pendingRole.user.full_name ?? 'this user'} ${ROLE_LABEL[pendingRole.role]} access, effective on their next login.` : ''}
+        confirmLabel="Change Role"
+        destructive={pendingRole?.role === 'super_admin'}
+        onConfirm={() => pendingRole && roleMutation.mutate({ id: pendingRole.user.id, role: pendingRole.role })}
+        onCancel={() => setPendingRole(null)}
+      />
+
+      <ConfirmDialog
+        open={!!pendingStatus}
+        title={pendingStatus?.active ? 'Activate user?' : 'Deactivate user?'}
+        message={pendingStatus ? `This will ${pendingStatus.active ? 'restore' : 'revoke'} ${pendingStatus.user.full_name ?? 'this user'}'s access to CognixHR.` : ''}
+        confirmLabel={pendingStatus?.active ? 'Activate' : 'Deactivate'}
+        destructive={!pendingStatus?.active}
+        onConfirm={() => pendingStatus && statusMutation.mutate({ id: pendingStatus.user.id, is_active: pendingStatus.active })}
+        onCancel={() => setPendingStatus(null)}
+      />
     </div>
   )
 }

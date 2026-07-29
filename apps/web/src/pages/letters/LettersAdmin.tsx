@@ -201,6 +201,8 @@ function TemplateEditorDialog({
       }
       qc.invalidateQueries({ queryKey: ['letter-templates'] })
       onClose()
+    } catch (err) {
+      toast.error('Failed to save template', { description: err instanceof Error ? err.message : undefined })
     } finally {
       setSaving(false)
     }
@@ -392,6 +394,8 @@ function GenerateLetterDialog({ onClose }: { onClose: () => void }) {
       // employee sees it without a manual refresh.
       qc.invalidateQueries({ queryKey: ['letters-issued'] })
       qc.invalidateQueries({ queryKey: ['ess-my-letters'] })
+    } catch (err) {
+      toast.error('Failed to generate letter', { description: err instanceof Error ? err.message : undefined })
     } finally {
       setGenerating(false)
     }
@@ -405,6 +409,8 @@ function GenerateLetterDialog({ onClose }: { onClose: () => void }) {
       qc.invalidateQueries({ queryKey: ['letters-issued'] })
       qc.invalidateQueries({ queryKey: ['ess-my-letters'] })
       onClose()
+    } catch (err) {
+      toast.error('Failed to submit for approval', { description: err instanceof Error ? err.message : undefined })
     } finally {
       setSubmitting(false)
     }
@@ -418,6 +424,8 @@ function GenerateLetterDialog({ onClose }: { onClose: () => void }) {
       qc.invalidateQueries({ queryKey: ['letters-issued'] })
       qc.invalidateQueries({ queryKey: ['ess-my-letters'] })
       onClose()
+    } catch (err) {
+      toast.error('Failed to issue letter', { description: err instanceof Error ? err.message : undefined })
     } finally {
       setSubmitting(false)
     }
@@ -612,6 +620,8 @@ function LetterDetailDialog({
       qc.invalidateQueries({ queryKey: ['letter-detail', letterId] })
       qc.invalidateQueries({ queryKey: ['ess-my-letters'] })
       onClose()
+    } catch (err) {
+      toast.error(`Failed to ${action} letter`, { description: err instanceof Error ? err.message : undefined })
     } finally {
       setActing(false)
     }
@@ -814,19 +824,35 @@ export function LettersAdmin() {
   })
   const essRequests = reqData?.data ?? []
 
+  const [actingReqId, setActingReqId] = useState<string | null>(null)
+
   const fulfillReq = async (id: string) => {
-    await api.post(`/letters/requests/${id}/fulfill`, {})
-    // ESS reads its own request/letter status under ['my-letter-requests'] and
-    // ['ess-my-letters'] — invalidate so the employee sees the fulfilled
-    // request without a manual refresh.
-    qc.invalidateQueries({ queryKey: ['ess-requests'] })
-    qc.invalidateQueries({ queryKey: ['my-letter-requests'] })
-    qc.invalidateQueries({ queryKey: ['ess-my-letters'] })
+    setActingReqId(id)
+    try {
+      await api.post(`/letters/requests/${id}/fulfill`, {})
+      // ESS reads its own request/letter status under ['my-letter-requests'] and
+      // ['ess-my-letters'] — invalidate so the employee sees the fulfilled
+      // request without a manual refresh.
+      qc.invalidateQueries({ queryKey: ['ess-requests'] })
+      qc.invalidateQueries({ queryKey: ['my-letter-requests'] })
+      qc.invalidateQueries({ queryKey: ['ess-my-letters'] })
+    } catch (err) {
+      toast.error('Failed to fulfill request', { description: err instanceof Error ? err.message : undefined })
+    } finally {
+      setActingReqId(null)
+    }
   }
   const rejectReq = async (id: string) => {
-    await api.post(`/letters/requests/${id}/reject`, { reason: 'Declined by HR' })
-    qc.invalidateQueries({ queryKey: ['ess-requests'] })
-    qc.invalidateQueries({ queryKey: ['my-letter-requests'] })
+    setActingReqId(id)
+    try {
+      await api.post(`/letters/requests/${id}/reject`, { reason: 'Declined by HR' })
+      qc.invalidateQueries({ queryKey: ['ess-requests'] })
+      qc.invalidateQueries({ queryKey: ['my-letter-requests'] })
+    } catch (err) {
+      toast.error('Failed to reject request', { description: err instanceof Error ? err.message : undefined })
+    } finally {
+      setActingReqId(null)
+    }
   }
 
   const TABS = [
@@ -1150,12 +1176,14 @@ export function LettersAdmin() {
                           <Button
                             size="sm" className="h-7 text-xs"
                             onClick={() => fulfillReq(r.id)}
+                            disabled={actingReqId === r.id}
                           >
                             <CheckCircle2 className="h-3 w-3 mr-1" /> Fulfill
                           </Button>
                           <Button
                             variant="outline" size="sm" className="h-7 text-xs text-destructive border-destructive/40 hover:bg-destructive/10"
                             onClick={() => rejectReq(r.id)}
+                            disabled={actingReqId === r.id}
                           >
                             <XCircle className="h-3 w-3 mr-1" /> Reject
                           </Button>

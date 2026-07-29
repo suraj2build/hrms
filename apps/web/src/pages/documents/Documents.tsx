@@ -15,6 +15,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Label } from '@/components/ui/label'
 import { EmployeeSelector } from '@/components/filters/EmployeeSelector'
 import { PageHeader } from '@/components/layout/PageHeader'
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { formatDate } from '@/lib/utils'
 import type { Document, DocType } from '@/types'
 
@@ -51,6 +52,7 @@ export function Documents() {
     expires_at: '',
   })
   const fileRef = useRef<HTMLInputElement>(null)
+  const [deleteTarget, setDeleteTarget] = useState<Document | null>(null)
 
   // Documents list
   const { data, isLoading } = useQuery<{ data: Document[] }>({
@@ -71,6 +73,7 @@ export function Documents() {
       queryClient.invalidateQueries({ queryKey: ['emp-docs'] })
       queryClient.invalidateQueries({ queryKey: ['ess-documents'] })
       toast.success('Document deleted')
+      setDeleteTarget(null)
     },
     onError: (e: Error) => toast.error('Failed to delete document', { description: e.message }),
   })
@@ -275,7 +278,7 @@ export function Documents() {
                             variant="ghost"
                             size="icon"
                             className="h-7 w-7 text-muted-foreground hover:text-destructive"
-                            onClick={() => deleteMutation.mutate(doc.id)}
+                            onClick={() => setDeleteTarget(doc)}
                             disabled={deleteMutation.isPending}
                           >
                             <Trash2 className="h-3.5 w-3.5" />
@@ -371,6 +374,16 @@ export function Documents() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <ConfirmDialog
+        open={!!deleteTarget}
+        title="Delete document?"
+        message={deleteTarget ? `This permanently removes "${deleteTarget.name}" from storage. This cannot be undone.` : ''}
+        confirmLabel="Delete"
+        destructive
+        onConfirm={() => deleteTarget && deleteMutation.mutate(deleteTarget.id)}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </div>
   )
 }
