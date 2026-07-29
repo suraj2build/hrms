@@ -16,6 +16,8 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { serverError, ErrorCode } from '../../lib/api-errors.js'
 import { checkIdempotency, storeIdempotency } from '../../lib/idempotency.js'
+import { fetchTenantTz } from '../../lib/attendance-engine.js'
+import { getLocalDate } from '../../lib/org-context.js'
 
 const LOAN_TYPES = ['personal', 'housing', 'vehicle', 'education', 'emergency', 'other'] as const
 
@@ -81,6 +83,9 @@ export default async function essLoansRoutes(fastify: FastifyInstance) {
       }
     }
 
+    const tz = await fetchTenantTz(fastify.supabase, req.tenantId)
+    const requestedDate = getLocalDate(new Date().toISOString(), tz)
+
     const { data, error } = await fastify.supabase
       .from('advance_salary_requests')
       .insert({
@@ -90,7 +95,7 @@ export default async function essLoansRoutes(fastify: FastifyInstance) {
         status:           'pending_manager',
         submitted_via_ess: true,
         created_by:       req.userId,
-        requested_date:   new Date().toISOString().slice(0, 10),
+        requested_date:   requestedDate,
       })
       .select()
       .single()
@@ -248,25 +253,27 @@ export default async function essLoansRoutes(fastify: FastifyInstance) {
     if (!managerEmpId) return reply.code(403).send({ error: 'FORBIDDEN', message: 'No employee record' })
 
     // Verify ownership: request must belong to a direct report
-    const { data: advance } = await fastify.supabase
+    const { data: advance, error: advanceErr } = await fastify.supabase
       .from('advance_salary_requests')
       .select('id, employee_id, status')
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
-      .single()
+      .maybeSingle()
 
+    if (advanceErr) return serverError(req, reply, advanceErr, ErrorCode.QUERY_FAILED, 'Failed to fetch advance request')
     if (!advance) return reply.code(404).send({ error: 'NOT_FOUND' })
     if ((advance as any).status !== 'pending_manager') {
       return reply.code(409).send({ error: 'INVALID_STATUS', message: 'Request is not pending manager approval' })
     }
 
-    const { data: emp } = await fastify.supabase
+    const { data: emp, error: empErr } = await fastify.supabase
       .from('employees')
       .select('manager_id')
       .eq('id', (advance as any).employee_id)
       .eq('tenant_id', req.tenantId)
-      .single()
+      .maybeSingle()
 
+    if (empErr) return serverError(req, reply, empErr, ErrorCode.QUERY_FAILED, 'Failed to fetch employee record')
     if ((emp as any)?.manager_id !== managerEmpId) {
       return reply.code(403).send({ error: 'FORBIDDEN', message: 'You are not the manager of this employee' })
     }
@@ -296,18 +303,20 @@ export default async function essLoansRoutes(fastify: FastifyInstance) {
     const managerEmpId = await getMyEmployeeId(fastify, req.userId, req.tenantId)
     if (!managerEmpId) return reply.code(403).send({ error: 'FORBIDDEN' })
 
-    const { data: advance } = await fastify.supabase
+    const { data: advance, error: advanceErr } = await fastify.supabase
       .from('advance_salary_requests')
       .select('employee_id, status')
-      .eq('id', id).eq('tenant_id', req.tenantId).single()
+      .eq('id', id).eq('tenant_id', req.tenantId).maybeSingle()
 
+    if (advanceErr) return serverError(req, reply, advanceErr, ErrorCode.QUERY_FAILED, 'Failed to fetch advance request')
     if (!advance || (advance as any).status !== 'pending_manager') {
       return reply.code(409).send({ error: 'INVALID_STATUS' })
     }
 
-    const { data: emp } = await fastify.supabase
-      .from('employees').select('manager_id').eq('id', (advance as any).employee_id).eq('tenant_id', req.tenantId).single()
+    const { data: emp, error: empErr } = await fastify.supabase
+      .from('employees').select('manager_id').eq('id', (advance as any).employee_id).eq('tenant_id', req.tenantId).maybeSingle()
 
+    if (empErr) return serverError(req, reply, empErr, ErrorCode.QUERY_FAILED, 'Failed to fetch employee record')
     if ((emp as any)?.manager_id !== managerEmpId) return reply.code(403).send({ error: 'FORBIDDEN' })
 
     const now = new Date().toISOString()
@@ -330,19 +339,21 @@ export default async function essLoansRoutes(fastify: FastifyInstance) {
     const managerEmpId = await getMyEmployeeId(fastify, req.userId, req.tenantId)
     if (!managerEmpId) return reply.code(403).send({ error: 'FORBIDDEN' })
 
-    const { data: loan } = await fastify.supabase
+    const { data: loan, error: loanErr } = await fastify.supabase
       .from('employee_loans')
       .select('employee_id, status')
-      .eq('id', id).eq('tenant_id', req.tenantId).single()
+      .eq('id', id).eq('tenant_id', req.tenantId).maybeSingle()
 
+    if (loanErr) return serverError(req, reply, loanErr, ErrorCode.QUERY_FAILED, 'Failed to fetch loan request')
     if (!loan) return reply.code(404).send({ error: 'NOT_FOUND' })
     if ((loan as any).status !== 'pending_manager') {
       return reply.code(409).send({ error: 'INVALID_STATUS', message: 'Loan is not pending manager approval' })
     }
 
-    const { data: emp } = await fastify.supabase
-      .from('employees').select('manager_id').eq('id', (loan as any).employee_id).eq('tenant_id', req.tenantId).single()
+    const { data: emp, error: empErr } = await fastify.supabase
+      .from('employees').select('manager_id').eq('id', (loan as any).employee_id).eq('tenant_id', req.tenantId).maybeSingle()
 
+    if (empErr) return serverError(req, reply, empErr, ErrorCode.QUERY_FAILED, 'Failed to fetch employee record')
     if ((emp as any)?.manager_id !== managerEmpId) return reply.code(403).send({ error: 'FORBIDDEN' })
 
     const now = new Date().toISOString()
@@ -369,16 +380,18 @@ export default async function essLoansRoutes(fastify: FastifyInstance) {
     const managerEmpId = await getMyEmployeeId(fastify, req.userId, req.tenantId)
     if (!managerEmpId) return reply.code(403).send({ error: 'FORBIDDEN' })
 
-    const { data: loan } = await fastify.supabase
+    const { data: loan, error: loanErr } = await fastify.supabase
       .from('employee_loans')
       .select('employee_id, status')
-      .eq('id', id).eq('tenant_id', req.tenantId).single()
+      .eq('id', id).eq('tenant_id', req.tenantId).maybeSingle()
 
+    if (loanErr) return serverError(req, reply, loanErr, ErrorCode.QUERY_FAILED, 'Failed to fetch loan request')
     if (!loan || (loan as any).status !== 'pending_manager') return reply.code(409).send({ error: 'INVALID_STATUS' })
 
-    const { data: emp } = await fastify.supabase
-      .from('employees').select('manager_id').eq('id', (loan as any).employee_id).eq('tenant_id', req.tenantId).single()
+    const { data: emp, error: empErr } = await fastify.supabase
+      .from('employees').select('manager_id').eq('id', (loan as any).employee_id).eq('tenant_id', req.tenantId).maybeSingle()
 
+    if (empErr) return serverError(req, reply, empErr, ErrorCode.QUERY_FAILED, 'Failed to fetch employee record')
     if ((emp as any)?.manager_id !== managerEmpId) return reply.code(403).send({ error: 'FORBIDDEN' })
 
     const now = new Date().toISOString()

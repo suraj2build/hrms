@@ -67,7 +67,7 @@ export default async function governanceRoutes(fastify: FastifyInstance) {
     // Idempotency guard: prevent duplicate active freeze records for the same month.
     // Multiple active freeze rows require multiple unfreeze calls to clear — confusing
     // and invisible in the UI.  Return 409 instead of silently stacking freeze records.
-    const { data: existingFreeze } = await fastify.supabase
+    const { data: existingFreeze, error: existingFreezeErr } = await fastify.supabase
       .from('payroll_freeze_log')
       .select('id')
       .eq('tenant_id', req.tenantId)
@@ -75,6 +75,7 @@ export default async function governanceRoutes(fastify: FastifyInstance) {
       .eq('action', 'freeze')
       .is('unfrozen_at', null)
       .maybeSingle()
+    if (existingFreezeErr) return serverError(req, reply, existingFreezeErr, ErrorCode.QUERY_FAILED, 'Failed to check existing freeze status')
 
     if (existingFreeze) {
       return reply.code(409).send({
@@ -125,7 +126,7 @@ export default async function governanceRoutes(fastify: FastifyInstance) {
     //   • If INSERT fails  → freeze is ALREADY lifted; warn in response; no data loss.
 
     // Step 1: Find and verify there is an active freeze to lift
-    const { data: latestFreeze } = await fastify.supabase
+    const { data: latestFreeze, error: latestFreezeErr } = await fastify.supabase
       .from('payroll_freeze_log')
       .select('id')
       .eq('tenant_id', req.tenantId)
@@ -135,6 +136,7 @@ export default async function governanceRoutes(fastify: FastifyInstance) {
       .order('frozen_at', { ascending: false })
       .limit(1)
       .maybeSingle()
+    if (latestFreezeErr) return serverError(req, reply, latestFreezeErr, ErrorCode.QUERY_FAILED, 'Failed to check freeze status')
 
     if (!latestFreeze) {
       return reply.code(409).send({
@@ -250,12 +252,13 @@ export default async function governanceRoutes(fastify: FastifyInstance) {
     // looked like success but never finalized the run — and worse, permanently
     // orphaned the proposal, since the finalize handler's own pending-lookup
     // would no longer find it (creating a fresh, disconnected proposal instead).
-    const { data: entry } = await fastify.supabase
+    const { data: entry, error: entryErr } = await fastify.supabase
       .from('maker_checker_log')
       .select('entity_type, action')
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
       .maybeSingle()
+    if (entryErr) return serverError(req, reply, entryErr, ErrorCode.QUERY_FAILED, 'Failed to fetch maker-checker entry')
     if ((entry as any)?.entity_type === 'payroll_run' && (entry as any)?.action === 'finalize') {
       return reply.code(409).send({
         error:   'USE_FINALIZE_ENDPOINT',
@@ -279,7 +282,7 @@ export default async function governanceRoutes(fastify: FastifyInstance) {
       // overwriting the audit trail if two checkers act simultaneously.
       .eq('status', 'pending')
       .select()
-      .single()
+      .maybeSingle()
 
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to approve maker-checker entry')
     if (!data) return reply.code(409).send({ error: 'ALREADY_ACTIONED', message: 'This entry has already been approved or rejected' })
@@ -315,7 +318,7 @@ export default async function governanceRoutes(fastify: FastifyInstance) {
       // Guard: only update if still pending — prevents concurrent double-rejection
       .eq('status', 'pending')
       .select()
-      .single()
+      .maybeSingle()
 
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to reject maker-checker entry')
     if (!data) return reply.code(409).send({ error: 'ALREADY_ACTIONED', message: 'This entry has already been approved or rejected' })
@@ -365,7 +368,7 @@ export default async function governanceRoutes(fastify: FastifyInstance) {
       // Guard: only update if still pending
       .eq('status', 'pending')
       .select()
-      .single()
+      .maybeSingle()
 
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to approve variance')
     if (!data) return reply.code(409).send({ error: 'ALREADY_ACTIONED', message: 'This variance has already been approved or rejected' })
@@ -401,7 +404,7 @@ export default async function governanceRoutes(fastify: FastifyInstance) {
       // Guard: only update if still pending
       .eq('status', 'pending')
       .select()
-      .single()
+      .maybeSingle()
 
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to reject variance')
     if (!data) return reply.code(409).send({ error: 'ALREADY_ACTIONED', message: 'This variance has already been approved or rejected' })

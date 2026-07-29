@@ -141,7 +141,7 @@ export default async function compensationMasterRoutes(fastify: FastifyInstance)
       .eq('tenant_id', req.tenantId)
       .order('sequence', { ascending: true })
 
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch structure components')
     if (!rows || rows.length === 0)
       return reply.code(400).send({ error: 'NO_COMPONENTS', message: 'Structure has no components to preview' })
 
@@ -159,11 +159,12 @@ export default async function compensationMasterRoutes(fastify: FastifyInstance)
     }))
 
     // Tenant statutory policy (same fallback as the engine helper).
-    const { data: pol } = await fastify.supabase
+    const { data: pol, error: polErr } = await fastify.supabase
       .from('compensation_policies')
       .select('nlc_enabled, pf_enabled, pf_employee_rate, pf_employer_rate, pf_cap_amount')
       .eq('tenant_id', req.tenantId)
       .maybeSingle()
+    if (polErr) return serverError(req, reply, polErr, ErrorCode.QUERY_FAILED, 'Failed to fetch compensation policy')
 
     const policy: CompensationPolicy = pol
       ? {
@@ -237,7 +238,7 @@ export default async function compensationMasterRoutes(fastify: FastifyInstance)
       .eq('tenant_id', req.tenantId)
       .eq('is_active', true)
 
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch employee compensation')
     return reply.send({ data: data ?? [] })
   })
 
@@ -245,9 +246,11 @@ export default async function compensationMasterRoutes(fastify: FastifyInstance)
   fastify.post('/employee/:employeeId', { preHandler: [fastify.authenticate, requireHrAdmin] }, async (req: any, reply) => {
     const { employeeId } = req.params as { employeeId: string }
 
+    // employee_compensation_components.calculation_type CHECK constraint
+    // (migration 221) — the ground truth for valid calculation types.
     const componentSchema = z.object({
       salary_component_id: z.string().uuid(),
-      calculation_type: z.string(),
+      calculation_type: z.enum(['fixed', 'pct_of_basic', 'pct_of_ctc', 'pct_of_gross', 'balance']),
       value: z.number(),
       computed_monthly: z.number(),
       computed_annual: z.number(),
@@ -292,6 +295,37 @@ export default async function compensationMasterRoutes(fastify: FastifyInstance)
       .maybeSingle()
     if (!structure) return notFound(reply, 'STRUCTURE_NOT_FOUND', 'Salary structure not found')
 
+    // approved_by is also caller-supplied and also a real FK
+    // (employee_compensations.approved_by REFERENCES profiles(id)) with no
+    // tenant-compound constraint — verify it too.
+    if (compensationData.approved_by) {
+      const { data: approver } = await fastify.supabase
+        .from('profiles')
+        .select('id')
+        .eq('id', compensationData.approved_by)
+        .eq('tenant_id', req.tenantId)
+        .maybeSingle()
+      if (!approver) return notFound(reply, 'APPROVER_NOT_FOUND', 'Approver not found')
+    }
+
+    // Each component's salary_component_id is caller-supplied too — same
+    // tenant-ownership gap, and (per the join in GET /employee/:employeeId
+    // above) an unverified id would also leak a foreign tenant's component
+    // name/code/type back through that nested salary_components(...) embed.
+    if (components.length > 0) {
+      const componentIds = [...new Set(components.map(c => c.salary_component_id))]
+      const { data: validComponents } = await fastify.supabase
+        .from('salary_components')
+        .select('id')
+        .eq('tenant_id', req.tenantId)
+        .in('id', componentIds)
+      const validComponentIds = new Set((validComponents ?? []).map((c: any) => c.id))
+      const invalidComponentId = componentIds.find(cid => !validComponentIds.has(cid))
+      if (invalidComponentId) {
+        return reply.code(400).send({ error: 'VALIDATION_ERROR', message: `salary_component_id ${invalidComponentId} not found in your organisation` })
+      }
+    }
+
     // ── Safe activation order ──────────────────────────────────────────────────
     // Deactivate the current active record FIRST, then insert the new one.
     // employee_compensations has a partial unique index uidx_comp_one_active on
@@ -327,7 +361,7 @@ export default async function compensationMasterRoutes(fastify: FastifyInstance)
       .single()
 
     if (compError || !newComp) {
-      return reply.code(500).send({ error: 'INSERT_FAILED', message: compError?.message ?? 'Failed to insert compensation' })
+      return serverError(req, reply, compError ?? new Error('insert returned no row'), ErrorCode.INSERT_FAILED, 'Failed to insert compensation')
     }
 
     // Step 2: Insert components
@@ -360,7 +394,7 @@ export default async function compensationMasterRoutes(fastify: FastifyInstance)
             'compensation-master: component insert failed AND rollback failed — orphaned active comp record',
           )
         }
-        return reply.code(500).send({ error: 'COMPONENT_INSERT_FAILED', message: cmpErr.message })
+        return serverError(req, reply, cmpErr, ErrorCode.INSERT_FAILED, 'Failed to insert compensation components')
       }
     }
 

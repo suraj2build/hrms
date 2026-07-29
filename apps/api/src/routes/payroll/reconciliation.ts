@@ -63,7 +63,10 @@ export default async function payrollReconciliationRoutes(fastify: FastifyInstan
       notes: z.string().max(500).optional(),
     })
     const parsed = bodySchema.safeParse(req.body ?? {})
-    const notes  = parsed.success ? parsed.data.notes : undefined
+    if (!parsed.success) {
+      return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+    }
+    const notes = parsed.data.notes
 
     // Persist action — append-only; latest row wins for status resolution.
     const { error: insertErr } = await (fastify as any).supabase
@@ -107,7 +110,10 @@ export default async function payrollReconciliationRoutes(fastify: FastifyInstan
       reason: z.string().max(500).optional(),
     })
     const parsed = bodySchema.safeParse(req.body ?? {})
-    const reason = parsed.success ? parsed.data.reason : undefined
+    if (!parsed.success) {
+      return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+    }
+    const reason = parsed.data.reason
 
     const { error: insertErr } = await (fastify as any).supabase
       .from('payroll_reconciliation_actions')
@@ -149,8 +155,11 @@ export default async function payrollReconciliationRoutes(fastify: FastifyInstan
     const bodySchema = z.object({
       resolution_notes: z.string().max(1000).optional(),
     })
-    const parsed           = bodySchema.safeParse(req.body ?? {})
-    const resolution_notes = parsed.success ? parsed.data.resolution_notes : undefined
+    const parsed = bodySchema.safeParse(req.body ?? {})
+    if (!parsed.success) {
+      return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+    }
+    const resolution_notes = parsed.data.resolution_notes
 
     const { error: insertErr } = await (fastify as any).supabase
       .from('payroll_reconciliation_actions')

@@ -12,6 +12,7 @@ import { z } from 'zod'
 import { checkDeclarationWindow } from './tds.js'
 import { HR_ADMIN_ROLES } from '../../../lib/rbac.js'
 import { serverError, ErrorCode } from '../../../lib/api-errors.js'
+import { fetchAllRows } from '../../../lib/supabase-paginate.js'
 
 // ── Zod schemas ───────────────────────────────────────────────────────────────
 
@@ -36,12 +37,17 @@ const verifyBodySchema = z.object({
 // ── Helper ────────────────────────────────────────────────────────────────────
 
 async function resolveCallerEmployeeId(fastify: FastifyInstance, req: any): Promise<string | null> {
-  const { data } = await fastify.supabase
+  // maybeSingle(), not single() — a genuinely missing profile row is a valid
+  // "no employee link" outcome the caller already handles (400), not an
+  // error condition; a real query error is thrown so it 500s via the global
+  // handler instead of being silently treated the same as "not linked".
+  const { data, error } = await fastify.supabase
     .from('profiles')
     .select('employee_id')
     .eq('id', req.userId)
     .eq('tenant_id', req.tenantId)
-    .single()
+    .maybeSingle()
+  if (error) throw error
   return (data as any)?.employee_id ?? null
 }
 
@@ -243,18 +249,23 @@ export default async function previousEmploymentTdsRoutes(fastify: FastifyInstan
         return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
       }
 
-      let q = fastify.supabase
-        .from('previous_employment_tax_details')
-        .select('*, employees(id, first_name, last_name)')
-        .eq('tenant_id', req.tenantId)
-        .order('created_at', { ascending: false })
+      let data: any[]
+      try {
+        data = await fetchAllRows((from, to) => {
+          let q = fastify.supabase
+            .from('previous_employment_tax_details')
+            .select('*, employees(id, first_name, last_name)')
+            .eq('tenant_id', req.tenantId)
+            .order('created_at', { ascending: false })
 
-      if (parsed.data.financial_year) q = q.eq('financial_year', parsed.data.financial_year)
-      if (parsed.data.status)         q = q.eq('verification_status', parsed.data.status)
+          if (parsed.data.financial_year) q = q.eq('financial_year', parsed.data.financial_year)
+          if (parsed.data.status)         q = q.eq('verification_status', parsed.data.status)
 
-      const { data, error } = await q
-
-      if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch previous employment tax details')
+          return q.range(from, to)
+        })
+      } catch (err) {
+        return serverError(req, reply, err, ErrorCode.QUERY_FAILED, 'Failed to fetch previous employment tax details')
+      }
 
       // Map DB shape → frontend PrevEmployerAdmin shape
       const result = (data ?? []).map((r: any) => ({

@@ -149,9 +149,7 @@ export default async function payrollLedgerRoute(fastify: FastifyInstance) {
 
     const { data, error, count } = await q
 
-    if (error) {
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch ledger' })
-    }
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch ledger')
 
     const rows = ((data ?? []) as any[]).map(e => ({
       id:                e.id,
@@ -214,9 +212,7 @@ export default async function payrollLedgerRoute(fastify: FastifyInstance) {
       .select('id, event_type, event_description, impact_type, impact_amount, created_at')
       .single()
 
-    if (error) {
-      return reply.code(500).send({ error: 'INSERT_FAILED', message: 'Failed to create ledger entry' })
-    }
+    if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create ledger entry')
 
     if (iKey) {
       await storeIdempotency(fastify.supabase, req.tenantId, iKey, 'payroll-ledger-entry', 201, { data })

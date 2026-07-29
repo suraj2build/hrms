@@ -12,6 +12,7 @@ import { z } from 'zod'
 import { checkDeclarationWindow } from './tds.js'
 import { HR_ADMIN_ROLES } from '../../../lib/rbac.js'
 import { serverError, ErrorCode } from '../../../lib/api-errors.js'
+import { fetchAllRows } from '../../../lib/supabase-paginate.js'
 
 // ── Zod schemas ───────────────────────────────────────────────────────────────
 
@@ -35,12 +36,17 @@ const verifyBodySchema = z.object({
 // ── Helper ────────────────────────────────────────────────────────────────────
 
 async function resolveCallerEmployeeId(fastify: FastifyInstance, req: any): Promise<string | null> {
-  const { data } = await fastify.supabase
+  // maybeSingle(), not single() — a genuinely missing profile row is a valid
+  // "no employee link" outcome the caller already handles (400), not an
+  // error condition; a real query error is thrown so it 500s via the global
+  // handler instead of being silently treated the same as "not linked".
+  const { data, error } = await fastify.supabase
     .from('profiles')
     .select('employee_id')
     .eq('id', req.userId)
     .eq('tenant_id', req.tenantId)
-    .single()
+    .maybeSingle()
+  if (error) throw error
   return (data as any)?.employee_id ?? null
 }
 
@@ -53,12 +59,16 @@ async function fetchHraGovernanceSettings(
   tenantId: string,
   financialYear: string,
 ): Promise<{ pan_required_threshold: number; max_houses_allowed: number } | null> {
-  const { data } = await fastify.supabase
+  const { data, error } = await fastify.supabase
     .from('hra_governance_settings')
     .select('pan_required_threshold, max_houses_allowed')
     .eq('tenant_id', tenantId)
     .eq('financial_year', financialYear)
     .maybeSingle()
+  // Thrown, not swallowed — a real query error must not silently look like
+  // "no governance settings configured" and skip PAN/duplicate-house
+  // validation below.
+  if (error) throw error
   return (data as any) ?? null
 }
 
@@ -107,7 +117,8 @@ async function validateHraDeclaration(
         q = q.neq('id', excludeId)
       }
 
-      const { data: existing } = await q.maybeSingle()
+      const { data: existing, error: existingErr } = await q.maybeSingle()
+      if (existingErr) throw existingErr
       if (existing) {
         return {
           code: 409,
@@ -346,18 +357,23 @@ export default async function hraDeclarationsRoutes(fastify: FastifyInstance) {
         return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
       }
 
-      let q = fastify.supabase
-        .from('hra_declarations')
-        .select('*, employees(id, first_name, last_name)')
-        .eq('tenant_id', req.tenantId)
-        .order('created_at', { ascending: false })
+      let data: any[]
+      try {
+        data = await fetchAllRows((from, to) => {
+          let q = fastify.supabase
+            .from('hra_declarations')
+            .select('*, employees(id, first_name, last_name)')
+            .eq('tenant_id', req.tenantId)
+            .order('created_at', { ascending: false })
 
-      if (parsed.data.financial_year) q = q.eq('financial_year', parsed.data.financial_year)
-      if (parsed.data.status)         q = q.eq('status', parsed.data.status)
+          if (parsed.data.financial_year) q = q.eq('financial_year', parsed.data.financial_year)
+          if (parsed.data.status)         q = q.eq('status', parsed.data.status)
 
-      const { data, error } = await q
-
-      if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch HRA declarations')
+          return q.range(from, to)
+        })
+      } catch (err) {
+        return serverError(req, reply, err, ErrorCode.QUERY_FAILED, 'Failed to fetch HRA declarations')
+      }
 
       // Map DB shape → frontend HRAAdmin shape
       const result = (data ?? []).map((r: any) => ({

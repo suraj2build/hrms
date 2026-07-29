@@ -11,6 +11,7 @@
 import type { FastifyInstance } from 'fastify'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 const monthRe = /^\d{4}-\d{2}$/
 
@@ -62,8 +63,8 @@ export default async function payrollContextRoutes(fastify: FastifyInstance) {
         }))
 
       return reply.send({ data: blockers })
-    } catch {
-      return reply.send({ data: [] })
+    } catch (err) {
+      return serverError(req, reply, err, ErrorCode.QUERY_FAILED, 'Failed to compute payroll blockers')
     }
   })
 
@@ -98,6 +99,9 @@ export default async function payrollContextRoutes(fastify: FastifyInstance) {
           .maybeSingle(),
       ])
 
+      if (curRunRes.error || prevRunRes.error) {
+        return serverError(req, reply, curRunRes.error ?? prevRunRes.error, ErrorCode.QUERY_FAILED, 'Failed to fetch payroll runs for variance summary')
+      }
       if (!curRunRes.data?.id || !prevRunRes.data?.id) {
         return reply.send({ data: { spike_count: 0, top_variances: [] } })
       }
@@ -155,8 +159,8 @@ export default async function payrollContextRoutes(fastify: FastifyInstance) {
       return reply.send({
         data: { spike_count: variances.length, top_variances: variances.slice(0, 5) },
       })
-    } catch {
-      return reply.send({ data: { spike_count: 0, top_variances: [] } })
+    } catch (err) {
+      return serverError(req, reply, err, ErrorCode.QUERY_FAILED, 'Failed to compute payroll variance summary')
     }
   })
 
@@ -187,6 +191,10 @@ export default async function payrollContextRoutes(fastify: FastifyInstance) {
           .eq('status', 'pending'),
       ])
 
+      if (locksRes.error || anomaliesRes.error || revisionsRes.error) {
+        return serverError(req, reply, locksRes.error ?? anomaliesRes.error ?? revisionsRes.error, ErrorCode.QUERY_FAILED, 'Failed to compute payroll readiness')
+      }
+
       const attendance_locked  = (locksRes.data ?? []).length > 0
                                    && ((locksRes.data as any[])[0]?.status === 'locked')
       const anomalies_resolved = (anomaliesRes.count ?? 0) === 0
@@ -198,10 +206,8 @@ export default async function payrollContextRoutes(fastify: FastifyInstance) {
       return reply.send({
         data: { attendance_locked, anomalies_resolved, revisions_approved, readiness_pct },
       })
-    } catch {
-      return reply.send({
-        data: { attendance_locked: false, anomalies_resolved: false, revisions_approved: false, readiness_pct: 0 },
-      })
+    } catch (err) {
+      return serverError(req, reply, err, ErrorCode.QUERY_FAILED, 'Failed to compute payroll readiness')
     }
   })
 
@@ -220,23 +226,27 @@ export default async function payrollContextRoutes(fastify: FastifyInstance) {
           .eq('tenant_id', req.tenantId),
         fastify.supabase
           // Period locks are tenant+month scoped (not per-department); there is no
-          // department_id column, so dept-level lock filtering degrades to none.
+          // department_id column, so a lock for this tenant+month covers every
+          // department at once — there is no such thing as a partially-locked month.
           .from('attendance_period_locks')
           .select('id')
           .eq('tenant_id', req.tenantId)
-          .eq('period_month', month),
+          .eq('period_month', month)
+          .limit(1),
       ])
 
-      const lockedDeptIds = new Set(
-        ((lockedRes.data ?? []) as any[]).map((r: any) => r.department_id)
-      )
-      const pendingDepts = ((deptsRes.data ?? []) as any[]).filter((d: any) => !lockedDeptIds.has(d.id))
+      if (deptsRes.error || lockedRes.error) {
+        return serverError(req, reply, deptsRes.error ?? lockedRes.error, ErrorCode.QUERY_FAILED, 'Failed to compute pending payroll locks')
+      }
+
+      const isLocked = (lockedRes.data ?? []).length > 0
+      const pendingDepts = isLocked ? [] : ((deptsRes.data ?? []) as any[])
 
       return reply.send({
         data: { pending_count: pendingDepts.length, departments: pendingDepts.map((d: any) => d.name) },
       })
-    } catch {
-      return reply.send({ data: { pending_count: 0, departments: [] } })
+    } catch (err) {
+      return serverError(req, reply, err, ErrorCode.QUERY_FAILED, 'Failed to compute pending payroll locks')
     }
   })
 }
