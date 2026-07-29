@@ -707,7 +707,10 @@ export default async function sessionRoutes(fastify: FastifyInstance) {
           pf_deduction:         '',
           esi_deduction:        '',
           bank_account_last4:   '',
-          effective_date:       'joining_date',
+          // compensation_letter's effective_date is the CTC-revision date, not
+          // the employee's date of joining — must not collide with joining_date
+          // (which offer_letter populates directly under its own field name).
+          effective_date:       '',
           reference_number:     '',
           date:                 '',
         }
@@ -745,13 +748,17 @@ export default async function sessionRoutes(fastify: FastifyInstance) {
 
         for (const [rawName, fieldData] of Object.entries(fields)) {
           if (!fieldData.value || rawName === 'full_name') continue
-          // Don't let resume first/last overwrite the authoritative full_name split
-          if (haveFullName && (rawName === 'first_name' || rawName === 'last_name')) continue
 
           const colName = FIELD_MAP[rawName] !== undefined ? FIELD_MAP[rawName] : rawName
 
           // Empty string in FIELD_MAP means "skip this field"
           if (!colName || !VALID_COLUMNS.has(colName)) continue
+
+          // Don't let ANY aliased field (resume first_name/last_name, bank
+          // proof's account_holder_name, etc.) overwrite the authoritative
+          // full_name split — checked against the resolved column, not the
+          // raw field name, since account_holder_name maps to first_name too.
+          if (haveFullName && (colName === 'first_name' || colName === 'last_name')) continue
 
           let value: unknown = fieldData.value
 

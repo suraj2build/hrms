@@ -7,6 +7,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { ResolvedPlatformEvent } from '../../events/types/platform-event.js'
+import { fetchAllRows } from '../../../lib/supabase-paginate.js'
 
 export interface EventStreamQuery {
   tenant_id:         string
@@ -79,16 +80,21 @@ export class EventStreamService {
    * Fetch all events for a given correlation chain.
    */
   async getCorrelationChain(orgId: string, correlationId: string): Promise<CorrelationChain> {
-    const { data, error } = await this.supabase
-      .from('platform_events')
-      .select('*')
-      .eq('tenant_id', orgId)
-      .eq('correlation_id', correlationId)
-      .order('timestamp', { ascending: true })
+    // Unpaginated .select() would silently cap at PostgREST's 1000-row
+    // ceiling for a wide fan-out chain (e.g. a bulk payroll run tagging
+    // every child event with the same correlation_id), producing an
+    // incomplete trace with no error surfaced to the caller.
+    const data = await fetchAllRows<ResolvedPlatformEvent>((from, to) =>
+      this.supabase
+        .from('platform_events')
+        .select('*')
+        .eq('tenant_id', orgId)
+        .eq('correlation_id', correlationId)
+        .order('timestamp', { ascending: true })
+        .range(from, to),
+    )
 
-    if (error) throw new Error(`EventStreamService.getCorrelationChain failed: ${error.message}`)
-
-    const events = (data ?? []) as ResolvedPlatformEvent[]
+    const events = data
     const root   = events.find(e => !e.parent_event_id)
 
     return { correlation_id: correlationId, events, root_event: root }

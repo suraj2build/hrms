@@ -60,14 +60,16 @@ export class ObservabilityIntelligenceService {
       .sort((a, b) => b.count - a.count)
   }
 
-  /** Update or replace a module's health signal. */
-  updateHealthSignal(module: string, signal: OperationalHealthSignal): void {
-    this.healthSignals.set(module, signal)
+  /** Update or replace a tenant's health signal for a module. */
+  updateHealthSignal(tenantId: string, module: string, signal: OperationalHealthSignal): void {
+    this.healthSignals.set(`${tenantId}:${module}`, signal)
   }
 
-  /** Get all health signals. */
-  getHealthSignals(): OperationalHealthSignal[] {
-    return [...this.healthSignals.values()]
+  /** Get all health signals for a specific tenant. */
+  getHealthSignals(tenantId: string): OperationalHealthSignal[] {
+    return [...this.healthSignals.entries()]
+      .filter(([key]) => key.startsWith(`${tenantId}:`))
+      .map(([, v]) => v)
   }
 }
 

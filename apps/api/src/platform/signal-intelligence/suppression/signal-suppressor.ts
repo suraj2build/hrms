@@ -31,6 +31,11 @@ export class SignalSuppressor {
 
   record(signal: PlatformSignal): void {
     this.seen.set(this.key(signal), Date.now())
+    // Opportunistic sweep — this class has no scheduler access of its own,
+    // and clearExpired() previously had zero callers, so `seen` grew
+    // unbounded for the lifetime of the process (every tenant's signal
+    // combination, forever) until the shared Node process OOM'd.
+    this.clearExpired()
   }
 
   clearExpired(): void {

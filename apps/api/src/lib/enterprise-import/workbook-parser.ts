@@ -172,12 +172,19 @@ export async function parseWorkbook(
 
   // ── Stage 6: Read raw rows from data sheet ────────────────────────────────
   const wsData = wb.getWorksheet(dataSheetName)!
+  // ExcelJS's row.eachCell({includeEmpty:true}) only iterates up to that
+  // row's own cellCount (the highest column touched on THAT row), not the
+  // worksheet's column count — a row whose trailing optional columns were
+  // never clicked into produces a shorter array than a fully-populated row,
+  // silently shifting any downstream 1-based column-position lookup. Pad
+  // every row to the worksheet's full column count for consistent width.
+  const columnCount = wsData.columnCount
   const rows: unknown[][] = []
   wsData.eachRow(row => {
     const values: unknown[] = []
-    row.eachCell({ includeEmpty: true }, cell => {
-      values.push(cell.value ?? null)
-    })
+    for (let col = 1; col <= columnCount; col++) {
+      values.push(row.getCell(col).value ?? null)
+    }
     rows.push(values)
   })
 

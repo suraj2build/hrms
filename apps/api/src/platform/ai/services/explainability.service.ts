@@ -34,7 +34,10 @@ export class ExplainabilityService {
 
     return {
       summary:              `${context.event_type} — review recommended`,
-      confidence_score:     null as unknown as undefined,
+      // No LLM wired up yet (Sprint 1 placeholder) — omit confidence_score
+      // rather than forcing a literal null through an `as unknown as
+      // undefined` cast, which serialized an explicit "confidence_score":
+      // null in JSON/JSONB unlike every other producer in this file.
       contributing_factors: factors.length > 0 ? factors : undefined,
       recommended_actions:  ['Review the flagged record', 'Verify with HR admin'],
     }

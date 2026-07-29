@@ -92,9 +92,15 @@ function toNode(e: ResolvedPlatformEvent): EventTraceNode {
   }
 }
 
-function treeDepth(node: EventTraceNode): number {
+function treeDepth(node: EventTraceNode, visiting: Set<EventTraceNode> = new Set()): number {
+  // Cycle guard: a self-referencing or circular parent_event_id chain would
+  // otherwise recurse forever and crash the whole shared Node process.
+  if (visiting.has(node)) return 0
   if (node.children.length === 0) return 1
-  return 1 + Math.max(...node.children.map(treeDepth))
+  visiting.add(node)
+  const depth = 1 + Math.max(...node.children.map(c => treeDepth(c, visiting)))
+  visiting.delete(node)
+  return depth
 }
 
 class EventTraceService {
@@ -123,7 +129,9 @@ class EventTraceService {
     let rootNode: EventTraceNode | undefined
     for (const e of events) {
       const node = nodeMap.get(e.event_id)!
-      if (e.parent_event_id) {
+      // Guard a self-referencing parent_event_id — pushing a node into its
+      // own children array would make treeDepth() recurse forever.
+      if (e.parent_event_id && e.parent_event_id !== e.event_id) {
         const parent = nodeMap.get(e.parent_event_id)
         if (parent) {
           parent.children.push(node)

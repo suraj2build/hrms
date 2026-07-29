@@ -17,17 +17,34 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { randomUUID }          from 'crypto'
 import type { PlatformEvent, ResolvedPlatformEvent } from '../types/platform-event.js'
 
+interface CircuitState {
+  consecutiveFailures: number
+  circuitOpen:         boolean
+  lastCircuitWarnAt:   number
+}
+
 export class EventPublisher {
   private readonly supabase: SupabaseClient
 
-  // Circuit breaker state
-  private consecutiveFailures = 0
+  // Circuit breaker state — keyed per tenant. This instance is a single
+  // process-global singleton shared by every tenant's requests (see
+  // plugins/event-publisher.ts), so unkeyed state would let one tenant's
+  // insert failures (e.g. a malformed entity_id) silently black out event
+  // persistence for every other tenant for the 60s cooldown window.
+  private readonly circuits = new Map<string, CircuitState>()
   private readonly MAX_FAILURES = 5
-  private circuitOpen = false
-  private lastCircuitWarnAt = 0
 
   constructor(supabase: SupabaseClient) {
     this.supabase = supabase
+  }
+
+  private getCircuit(tenantId: string): CircuitState {
+    let state = this.circuits.get(tenantId)
+    if (!state) {
+      state = { consecutiveFailures: 0, circuitOpen: false, lastCircuitWarnAt: 0 }
+      this.circuits.set(tenantId, state)
+    }
+    return state
   }
 
   /** Build the insert payload for a resolved event. */
@@ -62,12 +79,15 @@ export class EventPublisher {
 
   /** Persist with retry-once and circuit breaker. */
   private async persistWithResilience(event: ResolvedPlatformEvent): Promise<void> {
-    // Circuit breaker: skip if open
-    if (this.circuitOpen) {
+    const circuit = this.getCircuit(event.tenant_id)
+
+    // Circuit breaker: skip if open (scoped to this tenant only)
+    if (circuit.circuitOpen) {
       const now = Date.now()
-      if (now - this.lastCircuitWarnAt > 60_000) {
-        this.lastCircuitWarnAt = now
+      if (now - circuit.lastCircuitWarnAt > 60_000) {
+        circuit.lastCircuitWarnAt = now
         console.warn('[EventPublisher] circuit open — skipping persist', {
+          tenant_id:  event.tenant_id,
           event_type: event.event_type,
         })
       }
@@ -87,26 +107,30 @@ export class EventPublisher {
 
     if (success) {
       // Reset on success
-      this.consecutiveFailures = 0
+      circuit.consecutiveFailures = 0
     } else {
-      this.consecutiveFailures += 1
+      circuit.consecutiveFailures += 1
       console.warn('[EventPublisher] persist failed after retry', {
+        tenant_id:            event.tenant_id,
         event_type:           event.event_type,
         entity_id:            event.entity_id,
-        consecutive_failures: this.consecutiveFailures,
+        consecutive_failures: circuit.consecutiveFailures,
       })
 
-      if (this.consecutiveFailures >= this.MAX_FAILURES) {
-        this.circuitOpen = true
-        this.lastCircuitWarnAt = Date.now()
+      if (circuit.consecutiveFailures >= this.MAX_FAILURES) {
+        circuit.circuitOpen = true
+        circuit.lastCircuitWarnAt = Date.now()
         console.warn('[EventPublisher] circuit opened — too many consecutive failures', {
-          consecutive_failures: this.consecutiveFailures,
+          tenant_id:            event.tenant_id,
+          consecutive_failures: circuit.consecutiveFailures,
         })
         // Auto-reset after 60 seconds
         setTimeout(() => {
-          this.circuitOpen = false
-          this.consecutiveFailures = 0
-          console.warn('[EventPublisher] circuit reset — resuming persist attempts')
+          circuit.circuitOpen = false
+          circuit.consecutiveFailures = 0
+          console.warn('[EventPublisher] circuit reset — resuming persist attempts', {
+            tenant_id: event.tenant_id,
+          })
         }, 60_000)
       }
     }

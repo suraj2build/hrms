@@ -14,6 +14,12 @@ export class SignalClusterer {
   cluster(signals: PlatformSignal[]): SignalCluster[] {
     // Map from cluster_id → signals
     const clusters: Map<string, PlatformSignal[]> = new Map()
+    // secondaryId → the clusterId it was first registered under. Clusters are
+    // always stored keyed by primaryId, so without this index
+    // `clusters.has(secondaryId)` could never be true and every signal fell
+    // through to its own primary-keyed cluster — the "merge same event_type
+    // within a time window across different entities" behavior never fired.
+    const secondaryIndex: Map<string, string> = new Map()
 
     const WINDOW_MS = 5 * 60 * 1000
 
@@ -35,11 +41,11 @@ export class SignalClusterer {
       let clusterId: string
       if (clusters.has(primaryId)) {
         clusterId = primaryId
-      } else if (clusters.has(secondaryId)) {
-        clusterId = secondaryId
+      } else if (secondaryIndex.has(secondaryId)) {
+        clusterId = secondaryIndex.get(secondaryId)!
       } else {
-        // Check if any existing cluster matches the primary key logic
         clusterId = primaryId
+        secondaryIndex.set(secondaryId, clusterId)
       }
 
       if (!clusters.has(clusterId)) {
