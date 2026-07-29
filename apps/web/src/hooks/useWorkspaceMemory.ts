@@ -63,21 +63,36 @@ export function useWorkspaceMemory(workspaceName: string): UseWorkspaceMemoryRet
 
   // ── Debounced persistence ──────────────────────────────────────────────────
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // Tracks the latest not-yet-written value so an unmount mid-debounce can
+  // flush it synchronously instead of just cancelling the timer and
+  // silently discarding the update (e.g. the user navigates away from the
+  // workspace within the 500ms window).
+  const pendingRef = useRef<WorkspaceMemory | null>(null)
+
+  const writeNow = useCallback(
+    (next: WorkspaceMemory) => {
+      try {
+        localStorage.setItem(storageKey(workspaceName), JSON.stringify(next))
+      } catch {
+        // quota exceeded — silently ignore
+      }
+    },
+    [workspaceName],
+  )
 
   const persist = useCallback(
     (next: WorkspaceMemory) => {
       if (debounceRef.current !== null) {
         clearTimeout(debounceRef.current)
       }
+      pendingRef.current = next
       debounceRef.current = setTimeout(() => {
-        try {
-          localStorage.setItem(storageKey(workspaceName), JSON.stringify(next))
-        } catch {
-          // quota exceeded — silently ignore
-        }
+        debounceRef.current = null
+        pendingRef.current = null
+        writeNow(next)
       }, 500)
     },
-    [workspaceName],
+    [writeNow],
   )
 
   const update = useCallback(
@@ -129,7 +144,9 @@ export function useWorkspaceMemory(workspaceName: string): UseWorkspaceMemoryRet
   const resetMemory = useCallback(() => {
     if (debounceRef.current !== null) {
       clearTimeout(debounceRef.current)
+      debounceRef.current = null
     }
+    pendingRef.current = null
     try {
       localStorage.removeItem(storageKey(workspaceName))
     } catch {
@@ -138,14 +155,17 @@ export function useWorkspaceMemory(workspaceName: string): UseWorkspaceMemoryRet
     setMemory({})
   }, [workspaceName])
 
-  // ── Cleanup debounce on unmount ────────────────────────────────────────────
+  // ── Flush any pending debounced write on unmount ───────────────────────────
+  // Cancelling the timer alone would silently drop the update if the user
+  // navigates away within the 500ms debounce window.
   useEffect(
     () => () => {
       if (debounceRef.current !== null) {
         clearTimeout(debounceRef.current)
+        if (pendingRef.current !== null) writeNow(pendingRef.current)
       }
     },
-    [],
+    [writeNow],
   )
 
   return {

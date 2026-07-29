@@ -27,7 +27,10 @@ const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 
 export function ScheduleCard({ shift, todayRoster, upcomingDates, className }: ScheduleCardProps) {
   const activeShift = todayRoster ?? shift
-  const todayDow = new Date().getUTCDay()
+  // Local calendar day, not UTC — weekly_off_days are business/local days;
+  // getUTCDay() would read as the previous day for IST tenants during the
+  // 00:00-05:29 local window, misreporting a work day as the weekly off.
+  const todayDow = new Date().getDay()
   const isWeeklyOff = activeShift?.weekly_off_days?.includes(todayDow)
 
   return (
