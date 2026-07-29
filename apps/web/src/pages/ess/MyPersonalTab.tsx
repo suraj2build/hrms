@@ -21,6 +21,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Button }      from '@/components/ui/button'
 import { Input }       from '@/components/ui/input'
 import { Badge }       from '@/components/ui/badge'
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { api }         from '@/lib/api/client'
 import { cn }          from '@/lib/utils'
 
@@ -138,6 +139,7 @@ function EmergencyContactsSection() {
   })
   const [adding, setAdding] = useState(false)
   const [form, setForm] = useState({ name: '', relationship: '', phone: '', alternate_phone: '', email: '', is_primary: false })
+  const [deleteTarget, setDeleteTarget] = useState<EmergencyContact | null>(null)
 
   const reset = () => { setForm({ name: '', relationship: '', phone: '', alternate_phone: '', email: '', is_primary: false }); setAdding(false) }
   const invalidate = () => qc.invalidateQueries({ queryKey: ['ess-me-emergency'] })
@@ -202,7 +204,7 @@ function EmergencyContactsSection() {
                     <p className="text-xs text-foreground mt-1 tabular-nums">{c.phone}{c.alternate_phone ? ` · ${c.alternate_phone}` : ''}</p>
                     {c.email && <p className="text-xs text-muted-foreground truncate">{c.email}</p>}
                   </div>
-                  <button onClick={() => delMut.mutate(c.id)} className="p-1 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive shrink-0" title="Remove">
+                  <button onClick={() => setDeleteTarget(c)} className="p-1 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive shrink-0" title="Remove">
                     <Trash2 className="h-3.5 w-3.5" />
                   </button>
                 </div>
@@ -211,6 +213,15 @@ function EmergencyContactsSection() {
           ))}
         </div>
       )}
+      <ConfirmDialog
+        open={!!deleteTarget}
+        title="Remove emergency contact?"
+        message={`${deleteTarget?.name ?? 'This contact'} will be removed from your emergency contacts.`}
+        confirmLabel="Remove"
+        destructive
+        onConfirm={() => { if (deleteTarget) delMut.mutate(deleteTarget.id); setDeleteTarget(null) }}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </SectionCard>
   )
 }
@@ -305,6 +316,7 @@ function FamilySection({ relTypes }: { relTypes: RelationshipType[] }) {
   })
   const [adding, setAdding] = useState(false)
   const [form, setForm] = useState({ name: '', relationship_type_id: '', dob: '', gender: '', is_dependent: false, occupation: '' })
+  const [deleteTarget, setDeleteTarget] = useState<FamilyMember | null>(null)
   const reset = () => { setForm({ name: '', relationship_type_id: '', dob: '', gender: '', is_dependent: false, occupation: '' }); setAdding(false) }
   const invalidate = () => qc.invalidateQueries({ queryKey: ['ess-me-family'] })
 
@@ -372,7 +384,7 @@ function FamilySection({ relTypes }: { relTypes: RelationshipType[] }) {
                     </div>
                     <p className="text-xs text-muted-foreground">{m.relationship_types?.name ?? '—'}{m.occupation ? ` · ${m.occupation}` : ''}</p>
                   </div>
-                  <button onClick={() => delMut.mutate(m.id)} className="p-1 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive shrink-0" title="Remove">
+                  <button onClick={() => setDeleteTarget(m)} className="p-1 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive shrink-0" title="Remove">
                     <Trash2 className="h-3.5 w-3.5" />
                   </button>
                 </div>
@@ -381,6 +393,15 @@ function FamilySection({ relTypes }: { relTypes: RelationshipType[] }) {
           ))}
         </div>
       )}
+      <ConfirmDialog
+        open={!!deleteTarget}
+        title="Remove family member?"
+        message={`${deleteTarget?.name ?? 'This family member'} will be removed from your family records.`}
+        confirmLabel="Remove"
+        destructive
+        onConfirm={() => { if (deleteTarget) delMut.mutate(deleteTarget.id); setDeleteTarget(null) }}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </SectionCard>
   )
 }
@@ -398,6 +419,7 @@ function NomineesSection({ relTypes }: { relTypes: RelationshipType[] }) {
   })
   const [adding, setAdding] = useState(false)
   const [form, setForm] = useState({ scheme: 'pf', nominee_name: '', relationship_type_id: '', share_percentage: '', is_minor: false, guardian_name: '' })
+  const [deleteTarget, setDeleteTarget] = useState<Nomination | null>(null)
   const reset = () => { setForm({ scheme: 'pf', nominee_name: '', relationship_type_id: '', share_percentage: '', is_minor: false, guardian_name: '' }); setAdding(false) }
   const invalidate = () => qc.invalidateQueries({ queryKey: ['ess-me-nominations'] })
 
@@ -470,13 +492,22 @@ function NomineesSection({ relTypes }: { relTypes: RelationshipType[] }) {
                 </div>
                 <p className="text-xs text-muted-foreground">{n.relationship_types?.name ?? '—'}{n.is_minor ? ` · Minor (guardian: ${n.guardian_name ?? '—'})` : ''}</p>
               </div>
-              <button onClick={() => delMut.mutate(n.id)} className="p-1 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive shrink-0" title="Remove">
+              <button onClick={() => setDeleteTarget(n)} className="p-1 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive shrink-0" title="Remove">
                 <Trash2 className="h-3.5 w-3.5" />
               </button>
             </div>
           ))}
         </div>
       )}
+      <ConfirmDialog
+        open={!!deleteTarget}
+        title="Remove nominee?"
+        message={`${deleteTarget?.nominee_name ?? 'This nominee'} will be removed from your ${deleteTarget ? SCHEME_LABEL[deleteTarget.scheme] : ''} nomination.`}
+        confirmLabel="Remove"
+        destructive
+        onConfirm={() => { if (deleteTarget) delMut.mutate(deleteTarget.id); setDeleteTarget(null) }}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </SectionCard>
   )
 }

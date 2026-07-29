@@ -556,7 +556,11 @@ export function AttendancePolicy() {
                         size="icon"
                         variant="ghost"
                         className="h-6 w-6 text-muted-foreground hover:text-destructive"
-                        onClick={() => removeAssignMutation.mutate(a.id)}
+                        onClick={() => {
+                          if (confirm(`Remove policy assignment for ${a.employees.first_name} ${a.employees.last_name}?`)) {
+                            removeAssignMutation.mutate(a.id)
+                          }
+                        }}
                         disabled={removeAssignMutation.isPending}
                       >
                         <Trash2 className="h-3 w-3" />

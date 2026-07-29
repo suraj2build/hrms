@@ -6,7 +6,7 @@
  * once calibration is complete.
  */
 
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   ClipboardList, Plus, ChevronRight, Loader2, X, Check,
@@ -86,6 +86,11 @@ export function AdminCalibration() {
   const [changeNotes,      setChangeNotes]      = useState('')
   const [cdlg, setCdlg] = useState<{ msg: string; act: () => void } | null>(null)
 
+  // Stable per-mount UUIDs sent as Idempotency-Key to prevent duplicate
+  // submissions on double-click/network retry. Rotated after each success.
+  const createSessionKey = useRef(crypto.randomUUID())
+  const addChangeKey     = useRef(crypto.randomUUID())
+
   // ── Queries ────────────────────────────────────────────────────────────────
 
   const { data: sessions = [], isLoading } = useQuery<CalibrationSession[]>({
@@ -104,8 +109,9 @@ export function AdminCalibration() {
 
   const createSession = useMutation({
     mutationFn: (title: string) =>
-      api.post('/succession/calibration', { title }),
+      api.post('/succession/calibration', { title }, { headers: { 'Idempotency-Key': createSessionKey.current } }),
     onSuccess: () => {
+      createSessionKey.current = crypto.randomUUID()
       qc.invalidateQueries({ queryKey: ['calibration-sessions'] })
       toast.success('Calibration session created')
       setCreateOpen(false)
@@ -129,8 +135,9 @@ export function AdminCalibration() {
         old_value:     payload.old_value  || undefined,
         new_value:     payload.new_value  || undefined,
         notes:         payload.notes      || undefined,
-      }),
+      }, { headers: { 'Idempotency-Key': addChangeKey.current } }),
     onSuccess: () => {
+      addChangeKey.current = crypto.randomUUID()
       qc.invalidateQueries({ queryKey: ['calibration-session', detailId] })
       toast.success('Change recorded')
       setAddChangeOpen(false)

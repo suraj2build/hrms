@@ -110,6 +110,7 @@ export function ShiftMaster() {
         : api.post('/masters/shifts', body),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['shifts'] })
+      qc.invalidateQueries({ queryKey: ['shifts-list'] })
       toast.success(editId ? 'Shift updated' : 'Shift created')
       closeForm()
     },
@@ -120,6 +121,7 @@ export function ShiftMaster() {
     mutationFn: (id: string) => api.delete(`/masters/shifts/${id}`),
     onSuccess:  () => {
       qc.invalidateQueries({ queryKey: ['shifts'] })
+      qc.invalidateQueries({ queryKey: ['shifts-list'] })
       toast.success('Shift deleted')
     },
     onError: (e: Error) => toast.error('Failed to delete shift', { description: e.message }),

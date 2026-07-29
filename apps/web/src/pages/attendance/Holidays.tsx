@@ -102,6 +102,19 @@ export function Holidays() {
 
   // ── Matrix query ───────────────────────────────────────────────────────────
   const MATRIX_KEY = ['holiday-matrix', year]
+
+  // Structural changes (add/edit/delete holiday, add group, seed) affect several
+  // other pages' independent holiday caches — invalidate all of them alongside
+  // the matrix, not just MATRIX_KEY, or those views go stale until a hard refresh.
+  const invalidateHolidayCaches = useCallback(() => {
+    qc.invalidateQueries({ queryKey: MATRIX_KEY })
+    qc.invalidateQueries({ queryKey: ['holidays'] })
+    qc.invalidateQueries({ queryKey: ['holidays-rail'] })
+    qc.invalidateQueries({ queryKey: ['holidays', year] })
+    qc.invalidateQueries({ queryKey: ['holidays-calendar'] })
+    qc.invalidateQueries({ queryKey: ['holiday-groups-list'] })
+    qc.invalidateQueries({ queryKey: ['holiday-groups'] })
+  }, [qc, year, MATRIX_KEY])
   const { data: matrix, isLoading, refetch } = useQuery<{
     holidays: Holiday[]; groups: HolidayGroup[]; assignments: Assignment[]
   }>({
@@ -172,7 +185,7 @@ export function Holidays() {
       date: addDate, name: addName.trim(), is_optional: addOptional, holiday_group_id: null,
     }),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: MATRIX_KEY })
+      invalidateHolidayCaches()
       setAssignLoaded(false)
       setAddName(''); setAddDate(todayStr()); setAddOptional(false); setAddErr('')
       toast.success('Holiday added')
@@ -185,7 +198,7 @@ export function Holidays() {
     mutationFn: ({ id, name, date, is_optional }: { id: string; name: string; date: string; is_optional: boolean }) =>
       api.patch(`/masters/holidays/${id}`, { name, date, is_optional }),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: MATRIX_KEY })
+      invalidateHolidayCaches()
       setEditId(null)
       toast.success('Holiday updated')
     },
@@ -196,7 +209,7 @@ export function Holidays() {
   const deleteMutation = useMutation({
     mutationFn: (id: string) => api.delete(`/masters/holidays/${id}`),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: MATRIX_KEY })
+      invalidateHolidayCaches()
       setPendingDelete(null)
       toast.success('Holiday removed')
     },
@@ -210,7 +223,7 @@ export function Holidays() {
       state_code: newGroupState.trim().toUpperCase() || null,
     }),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: MATRIX_KEY })
+      invalidateHolidayCaches()
       setNewGroupName(''); setNewGroupState(''); setShowAddGroup(false)
       toast.success('Group created')
     },
@@ -221,7 +234,7 @@ export function Holidays() {
   const seedMutation = useMutation({
     mutationFn: () => api.post<{ data?: { created?: number; skipped?: number } }>('/masters/holidays/seed-standard', {}),
     onSuccess: (res: { data?: { created?: number; skipped?: number } }) => {
-      qc.invalidateQueries({ queryKey: MATRIX_KEY })
+      invalidateHolidayCaches()
       const { created, skipped } = res?.data ?? {}
       toast.success('Government holidays loaded', {
         description: (created ?? 0) > 0 ? `${created} added, ${skipped} already existed` : 'All already loaded',

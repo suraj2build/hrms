@@ -30,6 +30,7 @@ import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { logAction } from '../../lib/audit-service.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
 import { serverError, notFound, validationError, ErrorCode } from '../../lib/api-errors.js'
+import { checkIdempotency, storeIdempotency } from '../../lib/idempotency.js'
 
 /** Weighted readiness score (0–10 scale) from the 6 scorecard dimensions. */
 function computeWeightedScore(c: {
@@ -769,6 +770,15 @@ export default async function successionRoutes(fastify: FastifyInstance) {
     if (!parsed.success) return reply.status(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message ?? 'Invalid request body' })
     const { title, participants } = parsed.data
 
+    const iKey = (req.headers['idempotency-key'] as string | undefined)?.trim()
+    if (iKey) {
+      const cached = await checkIdempotency(supabase, tenantId, iKey, 'calibration-session-create')
+      if (cached) {
+        reply.header('Idempotency-Replayed', 'true')
+        return reply.code(cached.status_code).send(cached.response)
+      }
+    }
+
     const { data, error } = await supabase
       .from('calibration_sessions')
       .insert({
@@ -782,6 +792,10 @@ export default async function successionRoutes(fastify: FastifyInstance) {
       .single()
 
     if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create calibration session')
+
+    if (iKey) {
+      await storeIdempotency(supabase, tenantId, iKey, 'calibration-session-create', 201, { data })
+    }
     return reply.status(201).send({ data })
   })
 
@@ -836,6 +850,15 @@ export default async function successionRoutes(fastify: FastifyInstance) {
     const parsed = CalibrationChangeSchema.safeParse(req.body)
     if (!parsed.success) return reply.status(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message ?? 'Invalid request body' })
     const { employee_id, field_changed, old_value, new_value, notes } = parsed.data
+
+    const iKey = (req.headers['idempotency-key'] as string | undefined)?.trim()
+    if (iKey) {
+      const cached = await checkIdempotency(supabase, tenantId, iKey, 'calibration-change')
+      if (cached) {
+        reply.header('Idempotency-Replayed', 'true')
+        return reply.code(cached.status_code).send(cached.response)
+      }
+    }
 
     if (field_changed && new_value !== undefined) {
       const validationErr = validateCandidateFieldValue(field_changed, new_value)
@@ -894,6 +917,9 @@ export default async function successionRoutes(fastify: FastifyInstance) {
       }
     }
 
+    if (iKey) {
+      await storeIdempotency(supabase, tenantId, iKey, 'calibration-change', 201, { data })
+    }
     return reply.status(201).send({ data })
   })
 

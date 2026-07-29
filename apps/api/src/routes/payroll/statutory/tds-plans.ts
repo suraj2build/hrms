@@ -23,6 +23,7 @@ import { computeTaxWithDB } from '../../../lib/statutory/tax-computation-engine.
 import { logAction } from '../../../lib/audit-service.js'
 import { checkDeclarationWindow } from './tds.js'
 import { serverError, ErrorCode } from '../../../lib/api-errors.js'
+import { checkIdempotency, storeIdempotency } from '../../../lib/idempotency.js'
 import { fetchTenantTz } from '../../../lib/attendance-engine.js'
 import { getLocalDate } from '../../../lib/org-context.js'
 
@@ -676,6 +677,15 @@ export default async function tdsPlansRoute(fastify: FastifyInstance) {
 
     const { planId } = req.params as { planId: string }
 
+    const iKey = (req.headers['idempotency-key'] as string | undefined)?.trim()
+    if (iKey) {
+      const cached = await checkIdempotency(fastify.supabase, req.tenantId, iKey, 'tds-plan-submit')
+      if (cached) {
+        reply.header('Idempotency-Replayed', 'true')
+        return reply.code(cached.status_code).send(cached.response)
+      }
+    }
+
     // Load plan
     const { data: plan } = await fastify.supabase
       .from('tax_declaration_plans')
@@ -840,11 +850,15 @@ export default async function tdsPlansRoute(fastify: FastifyInstance) {
       newData:     { status: 'submitted', is_primary: true, projected_tax: taxResult.annualTaxLiability } as Record<string, unknown>,
     })
 
-    return reply.send({
+    const responseBody = {
       data: updatedPlan,
       projected_tax:            taxResult.annualTaxLiability,
       projected_monthly_tds:    taxResult.monthlyTDS,
       projected_taxable_income: taxResult.taxableIncome,
-    })
+    }
+    if (iKey) {
+      await storeIdempotency(fastify.supabase, req.tenantId, iKey, 'tds-plan-submit', 200, responseBody)
+    }
+    return reply.send(responseBody)
   })
 }

@@ -99,10 +99,19 @@ const EMPTY_FORM: AssignForm = {
   employee_id:    '',
   employee_name:  '',
   shift_id:       '',
-  effective_from: new Date().toISOString().slice(0, 10),
+  effective_from: todayStr(),
 }
 
 // ── Helper ────────────────────────────────────────────────────────────────────
+
+// Browser-local date (not UTC) — new Date().toISOString() converts to UTC first,
+// which is a day behind local for timezones ahead of UTC (e.g. IST) between
+// midnight and the UTC offset, silently submitting yesterday's date as the
+// override's effective_from.
+function todayStr() {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
 
 function fmtTime(t: string | null) {
   return t ? t.slice(0, 5) : ''

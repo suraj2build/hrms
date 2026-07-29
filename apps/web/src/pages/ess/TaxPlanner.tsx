@@ -698,15 +698,23 @@ export function TaxPlanner() {
     onError: () => toast.error('Failed to create plan'),
   })
 
+  // Stable per-mount UUID sent as Idempotency-Key to prevent a double-click/
+  // network retry from re-running the submit (recomputation + declaration
+  // upsert + regime-election sync) a second time. Rotated after success.
+  const submitPlanKey = useRef(crypto.randomUUID())
+
   const submitMutation = useMutation({
     mutationFn: async () => {
       if (!activePlanId) throw new Error('No active plan')
       const res = await api.post<{ data: { plan_id: string; status: string } }>(
-        `/payroll/statutory/tds/plans/my/${activePlanId}/submit`
+        `/payroll/statutory/tds/plans/my/${activePlanId}/submit`,
+        {},
+        { headers: { 'Idempotency-Key': submitPlanKey.current } },
       )
       return res.data
     },
     onSuccess: () => {
+      submitPlanKey.current = crypto.randomUUID()
       toast.success('Plan submitted as active declaration')
       qc.invalidateQueries({ queryKey: ['tax-plans', fy] })
     },

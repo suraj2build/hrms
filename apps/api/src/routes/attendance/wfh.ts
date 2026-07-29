@@ -8,6 +8,7 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { isHrAdmin, resolveCallerEmployeeId } from '../../lib/manager-scope.js'
 import { serverError, ErrorCode } from '../../lib/api-errors.js'
+import { checkIdempotency, storeIdempotency } from '../../lib/idempotency.js'
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
 function dayCount(from: string, to: string): number {
@@ -28,6 +29,15 @@ export default async function wfhRoutes(fastify: FastifyInstance) {
     if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION', message: parsed.error.issues[0]?.message })
     if (parsed.data.to_date < parsed.data.from_date) return reply.code(400).send({ error: 'VALIDATION', message: 'to_date is before from_date' })
 
+    const iKey = (req.headers['idempotency-key'] as string | undefined)?.trim()
+    if (iKey) {
+      const cached = await checkIdempotency(fastify.supabase, req.tenantId, iKey, 'wfh-request')
+      if (cached) {
+        reply.header('Idempotency-Replayed', 'true')
+        return reply.code(cached.status_code).send(cached.response)
+      }
+    }
+
     const { data, error } = await fastify.supabase
       .from('wfh_requests')
       .insert({
@@ -38,6 +48,10 @@ export default async function wfhRoutes(fastify: FastifyInstance) {
       })
       .select().single()
     if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to submit WFH request')
+
+    if (iKey) {
+      await storeIdempotency(fastify.supabase, req.tenantId, iKey, 'wfh-request', 201, { data })
+    }
     return reply.code(201).send({ data })
   })
 

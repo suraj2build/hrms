@@ -3,7 +3,7 @@
  * Request work-from-home in advance + track status. Managers/HR also see and
  * action their team's pending WFH requests on the same page.
  */
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { Home, Plus } from 'lucide-react'
@@ -41,9 +41,20 @@ export function EssWfh() {
   const myReqs = mine?.data ?? []
   const pend   = pending?.data ?? []
 
+  // Stable per-mount UUID sent as Idempotency-Key to prevent a double-click/
+  // network retry from creating a duplicate WFH request. Rotated on success.
+  const submitKey = useRef(crypto.randomUUID())
+
   const submitMut = useMutation({
-    mutationFn: () => api.post('/attendance/wfh/my', { from_date: from, to_date: to || from, reason: reason || undefined }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['wfh-my'] }); setFrom(''); setTo(''); setReason(''); toast.success('WFH request submitted') },
+    mutationFn: () => api.post(
+      '/attendance/wfh/my',
+      { from_date: from, to_date: to || from, reason: reason || undefined },
+      { headers: { 'Idempotency-Key': submitKey.current } },
+    ),
+    onSuccess: () => {
+      submitKey.current = crypto.randomUUID()
+      qc.invalidateQueries({ queryKey: ['wfh-my'] }); setFrom(''); setTo(''); setReason(''); toast.success('WFH request submitted')
+    },
     onError: (e: Error) => toast.error('Failed to submit', { description: e.message }),
   })
   const decideMut = useMutation({
