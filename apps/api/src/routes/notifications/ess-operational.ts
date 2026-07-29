@@ -207,7 +207,11 @@ export default async function essOperationalRoutes(fastify: FastifyInstance) {
     // a. Workforce optimization hints: shift_overload / ot_concentration
     const { data: hints } = await fastify.supabase
       .from('workforce_optimization_hints')
-      .select('hint_type, created_at')
+      // 'details' does not exist on this table (migration 086) — it has
+      // explanation/affected_dates/metric_value/threshold_value/payroll_impact
+      // instead; selecting a nonexistent column silently produced
+      // metadata: undefined on every notification.
+      .select('hint_type, created_at, explanation, affected_dates, metric_value, threshold_value, payroll_impact')
       .eq('employee_id', employeeId)
       .eq('tenant_id', req.tenantId)
       .in('hint_type', ['consecutive_shift_overload', 'ot_concentration'])
@@ -215,6 +219,13 @@ export default async function essOperationalRoutes(fastify: FastifyInstance) {
       .limit(5)
 
     for (const hint of (hints ?? []) as any[]) {
+      const metadata = {
+        explanation:     hint.explanation ?? undefined,
+        affected_dates:  hint.affected_dates ?? undefined,
+        metric_value:    hint.metric_value ?? undefined,
+        threshold_value: hint.threshold_value ?? undefined,
+        payroll_impact:  hint.payroll_impact ?? undefined,
+      }
       if (hint.hint_type === 'consecutive_shift_overload') {
         notifications.push({
           type:        'shift_overload',
@@ -223,7 +234,7 @@ export default async function essOperationalRoutes(fastify: FastifyInstance) {
           message:     'You have been assigned consecutive overloaded shifts. Consider requesting a schedule adjustment.',
           action_hint: 'Contact your manager or HR to review your shift schedule.',
           date:        hint.created_at?.slice(0, 10),
-          metadata:    hint.details ?? undefined,
+          metadata,
         })
       } else if (hint.hint_type === 'ot_concentration') {
         notifications.push({
@@ -233,7 +244,7 @@ export default async function essOperationalRoutes(fastify: FastifyInstance) {
           message:     'Your overtime hours are concentrated in a short period, which may affect your health and work-life balance.',
           action_hint: 'Review your overtime schedule and discuss workload distribution with your manager.',
           date:        hint.created_at?.slice(0, 10),
-          metadata:    hint.details ?? undefined,
+          metadata,
         })
       }
     }

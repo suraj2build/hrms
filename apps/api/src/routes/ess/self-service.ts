@@ -336,12 +336,19 @@ export default async function essSelfServiceRoutes(fastify: FastifyInstance) {
     if (!parsed.success) return validationError(reply, ErrorCode.VALIDATION_ERROR, parsed.error.issues[0].message)
     if (parsed.data.relationship_type_id && !await verifyRelationshipType(parsed.data.relationship_type_id, req.tenantId))
       return validationError(reply, ErrorCode.VALIDATION_ERROR, 'Invalid relationship type')
-    if (parsed.data.share_percentage) {
-      const { data: existing } = await fastify.supabase
-        .from('employee_nominations').select('scheme').eq('id', req.params.nomId)
-        .eq('employee_id', empId).eq('tenant_id', req.tenantId).single()
-      const scheme = parsed.data.scheme ?? existing?.scheme
-      if (scheme && !await validateShareTotal(empId, req.tenantId, scheme, parsed.data.share_percentage, req.params.nomId))
+    // Re-validate the 100%-share-cap whenever EITHER scheme or share_percentage
+    // changes — checking only share_percentage let a scheme-only change move
+    // the nomination's existing share into the new scheme with zero check
+    // against that scheme's running total.
+    if (parsed.data.share_percentage !== undefined || parsed.data.scheme !== undefined) {
+      const { data: existing, error: existingErr } = await fastify.supabase
+        .from('employee_nominations').select('scheme, share_percentage').eq('id', req.params.nomId)
+        .eq('employee_id', empId).eq('tenant_id', req.tenantId).maybeSingle()
+      if (existingErr) return serverError(req, reply, existingErr, ErrorCode.QUERY_FAILED, 'Failed to fetch nomination')
+      if (!existing) return notFound(reply, 'NOT_FOUND', 'Nomination not found')
+      const scheme = parsed.data.scheme ?? existing.scheme
+      const sharePct = parsed.data.share_percentage ?? existing.share_percentage
+      if (!await validateShareTotal(empId, req.tenantId, scheme, sharePct, req.params.nomId))
         return validationError(reply, ErrorCode.VALIDATION_ERROR, `Total share for ${scheme} would exceed 100%`)
     }
     const { data, error } = await fastify.supabase

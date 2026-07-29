@@ -127,7 +127,7 @@ export default async function essCompanyRoutes(fastify: FastifyInstance) {
     }
 
     // ── happening — the company feed, time-grouped Today / This week / Earlier ─
-    const startOfToday = new Date(today + 'T00:00:00').getTime()
+    const startOfToday = new Date(today + 'T00:00:00Z').getTime()
     const startOfWeek = Date.now() - 7 * 86_400_000
     const groups: HappeningGroup[] = [
       { key: 'today', label: 'Today', events: [] },

@@ -16,6 +16,9 @@
 
 import type { FastifyInstance } from 'fastify'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
+import { fetchTenantTz } from '../../lib/attendance-engine.js'
+import { getLocalDate } from '../../lib/org-context.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 type ActivityType = 'attendance' | 'leave' | 'payroll' | 'recognition' | 'birthday' | 'announcement'
 
@@ -29,9 +32,12 @@ interface ActivityEvent {
   person?: string
 }
 
-function todayISO(): string { return new Date().toISOString().slice(0, 10) }
-function daysAgoISO(n: number): string {
-  const d = new Date(); d.setDate(d.getDate() - n); return d.toISOString()
+async function resolveToday(fastify: FastifyInstance, tenantId: string): Promise<string> {
+  const tz = await fetchTenantTz(fastify.supabase, tenantId)
+  return getLocalDate(new Date().toISOString(), tz)
+}
+function daysAgoISO(today: string, n: number): string {
+  return new Date(new Date(`${today}T00:00:00Z`).getTime() - n * 24 * 60 * 60 * 1000).toISOString()
 }
 function fullName(e: { first_name?: string | null; last_name?: string | null } | null | undefined): string {
   if (!e) return 'A colleague'
@@ -47,13 +53,14 @@ export default async function essActivityRoutes(fastify: FastifyInstance) {
   fastify.get('/activity', auth, async (req: any, reply) => {
     const tenantId = req.tenantId as string
 
-    const { data: profileRow } = await fastify.supabase
+    const { data: profileRow, error: profileErr } = await fastify.supabase
       .from('profiles').select('employee_id')
       .eq('id', req.userId).eq('tenant_id', tenantId).maybeSingle()
+    if (profileErr) return serverError(req, reply, profileErr, ErrorCode.QUERY_FAILED, 'Failed to resolve employee profile')
     const employeeId = (profileRow as any)?.employee_id as string | null
 
-    const today  = todayISO()
-    const since  = daysAgoISO(2)
+    const today  = await resolveToday(fastify, tenantId)
+    const since  = daysAgoISO(today, 2)
     const todayMMDD = today.slice(5)  // MM-DD
 
     const [todayAtt, approvedLeave, salary, kudos, announcements, colleagues] = await Promise.all([
@@ -76,7 +83,7 @@ export default async function essActivityRoutes(fastify: FastifyInstance) {
         ? safe(fastify.supabase.from('payroll_slips')
             .select('id, month, net_pay, status, updated_at')
             .eq('employee_id', employeeId).eq('tenant_id', tenantId)
-            .eq('status', 'finalized').gte('updated_at', daysAgoISO(7))
+            .eq('status', 'finalized').gte('updated_at', daysAgoISO(today, 7))
             .order('updated_at', { ascending: false }).limit(1)
             .then(r => (r.data ?? []) as any[]), [] as any[])
         : Promise.resolve([] as any[]),

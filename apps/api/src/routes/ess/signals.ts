@@ -20,6 +20,9 @@
 import type { FastifyInstance } from 'fastify'
 import { getDirectReportIds } from '../../lib/manager-scope.js'
 import { MANAGER_ROLES } from '../../lib/rbac.js'
+import { fetchTenantTz } from '../../lib/attendance-engine.js'
+import { getLocalDate } from '../../lib/org-context.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 type Severity = 'info' | 'warning' | 'critical'
 type Intent   = 'needs_you' | 'can_wait' | 'waiting' | 'info_only'
@@ -36,12 +39,15 @@ interface Signal {
   action?:  { label: string; href: string }
 }
 
-function todayISO(): string { return new Date().toISOString().slice(0, 10) }
-function offsetISO(days: number): string {
-  const d = new Date(); d.setDate(d.getDate() + days); return d.toISOString().slice(0, 10)
+async function resolveToday(fastify: FastifyInstance, tenantId: string): Promise<string> {
+  const tz = await fetchTenantTz(fastify.supabase, tenantId)
+  return getLocalDate(new Date().toISOString(), tz)
 }
-function isWeekend(): boolean {
-  const dow = new Date().getDay()
+function offsetISO(today: string, days: number): string {
+  return new Date(new Date(`${today}T00:00:00Z`).getTime() + days * 86_400_000).toISOString().slice(0, 10)
+}
+function isWeekend(today: string): boolean {
+  const dow = new Date(`${today}T12:00:00Z`).getDay()
   return dow === 0 || dow === 6
 }
 function daysBetween(from?: string, to?: string): number {
@@ -64,17 +70,18 @@ export default async function essSignalsRoutes(fastify: FastifyInstance) {
   fastify.get('/signals', auth, async (req: any, reply) => {
     const tenantId = req.tenantId as string
 
-    const { data: profileRow } = await fastify.supabase
+    const { data: profileRow, error: profileErr } = await fastify.supabase
       .from('profiles').select('employee_id, role')
       .eq('id', req.userId).eq('tenant_id', tenantId).maybeSingle()
+    if (profileErr) return serverError(req, reply, profileErr, ErrorCode.QUERY_FAILED, 'Failed to resolve employee profile')
 
     const employeeId = (profileRow as any)?.employee_id as string | null
     const role       = (profileRow as any)?.role as string | null
     const isManager  = (MANAGER_ROLES as readonly string[]).includes(role ?? '')
     const isAdmin    = ['hr_admin', 'super_admin'].includes(role ?? '')
 
-    const today    = todayISO()
-    const in30Days = offsetISO(30)
+    const today    = await resolveToday(fastify, tenantId)
+    const in30Days = offsetISO(today, 30)
 
     const [todayAtt, ownPendingLeave, ownPendingReg, expiringDocs, leaveBal, mgrLeaveRows, mgrReg] =
       await Promise.all([
@@ -177,7 +184,7 @@ export default async function essSignalsRoutes(fastify: FastifyInstance) {
     }
 
     // 3. Attendance — punch state (suppressed on weekends).
-    if (employeeId && !isWeekend()) {
+    if (employeeId && !isWeekend(today)) {
       if (!todayAtt?.check_in) {
         signals.push({
           id: 'no_check_in', type: 'attendance', severity: 'warning', priority: 90, intent: 'needs_you',

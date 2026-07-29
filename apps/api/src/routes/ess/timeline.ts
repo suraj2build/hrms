@@ -27,6 +27,7 @@ import { projectEvents, type ExperienceEvent } from './events.js'
 import { projectJourney, type JourneyStep } from './journey.js'
 import { fetchTenantTz } from '../../lib/attendance-engine.js'
 import { getLocalDate } from '../../lib/org-context.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 // The Story-view item — Patterns §3.3 Event projection. No href: memories don't eject.
 interface StoryItem {
@@ -106,9 +107,10 @@ export default async function essTimelineRoutes(fastify: FastifyInstance) {
 
   fastify.get('/timeline', auth, async (req: any, reply) => {
     const tenantId = req.tenantId as string
-    const { data: profileRow } = await fastify.supabase
+    const { data: profileRow, error: profileErr } = await fastify.supabase
       .from('profiles').select('employee_id')
       .eq('id', req.userId).eq('tenant_id', tenantId).maybeSingle()
+    if (profileErr) return serverError(req, reply, profileErr, ErrorCode.QUERY_FAILED, 'Failed to resolve employee profile')
     const employeeId = (profileRow as any)?.employee_id ?? null
 
     const cursor = (req.query?.cursor as string) || null

@@ -25,6 +25,7 @@ import { ensureTodaysCelebrations } from '../../lib/community-celebrations.js'
 import { getDirectReportIds } from '../../lib/manager-scope.js'
 import { MANAGER_ROLES } from '../../lib/rbac.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 // Run the (idempotent, write-heavy) celebration generation at most once per tenant
 // per day per instance, and OFF the GET response critical path — it was previously
@@ -69,12 +70,13 @@ export default async function essHomeRoutes(fastify: FastifyInstance) {
     const tenantId = req.tenantId as string
 
     // Resolve employee_id + role from profiles
-    const { data: profileRow } = await fastify.supabase
+    const { data: profileRow, error: profileErr } = await fastify.supabase
       .from('profiles')
       .select('employee_id, role')
       .eq('id', req.userId)
       .eq('tenant_id', tenantId)
       .maybeSingle()
+    if (profileErr) return serverError(req, reply, profileErr, ErrorCode.QUERY_FAILED, 'Failed to resolve employee profile')
 
     const employeeId = (profileRow as any)?.employee_id as string | null
     const role       = (profileRow as any)?.role as string | null
