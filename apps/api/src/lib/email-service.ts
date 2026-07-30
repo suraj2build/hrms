@@ -314,6 +314,7 @@ export function interviewScheduledEmail(opts: {
   durationMins:  number
   meetLink?:     string | null
   roundTitle?:   string | null
+  tenantTz?:     string
 }): { subject: string; html: string } {
   const { primary, teal } = brandConfig.colors
   const firstName = opts.candidateName.split(' ')[0] || 'there'
@@ -329,11 +330,11 @@ export function interviewScheduledEmail(opts: {
     const d = new Date(opts.scheduledAt)
     const formatted = d.toLocaleString('en-IN', {
       weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
-      hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata',
+      hour: '2-digit', minute: '2-digit', timeZone: opts.tenantTz ?? 'Asia/Kolkata', timeZoneName: 'short',
     })
     dateBlock = `<tr>
       <td style="padding:8px 12px;background:#f8fafc;border:1px solid #e2e8f0;font-weight:600;width:40%;">Date &amp; Time</td>
-      <td style="padding:8px 12px;border:1px solid #e2e8f0;">${formatted} IST</td>
+      <td style="padding:8px 12px;border:1px solid #e2e8f0;">${formatted}</td>
     </tr>`
   }
 
@@ -386,6 +387,7 @@ export function panelInterviewNotificationEmail(opts: {
   scheduledAt?:  string | null
   durationMins:  number
   meetLink?:     string | null
+  tenantTz?:     string
 }): { subject: string; html: string } {
   const { primary, teal } = brandConfig.colors
   const typeLabel: Record<string, string> = {
@@ -400,11 +402,11 @@ export function panelInterviewNotificationEmail(opts: {
     const d = new Date(opts.scheduledAt)
     const formatted = d.toLocaleString('en-IN', {
       weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
-      hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata',
+      hour: '2-digit', minute: '2-digit', timeZone: opts.tenantTz ?? 'Asia/Kolkata', timeZoneName: 'short',
     })
     dateBlock = `<tr>
       <td style="padding:8px 12px;background:#f8fafc;border:1px solid #e2e8f0;font-weight:600;width:40%;">Date &amp; Time</td>
-      <td style="padding:8px 12px;border:1px solid #e2e8f0;">${formatted} IST</td>
+      <td style="padding:8px 12px;border:1px solid #e2e8f0;">${formatted}</td>
     </tr>`
   }
 

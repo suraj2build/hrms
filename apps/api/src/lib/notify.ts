@@ -118,7 +118,15 @@ export async function notifyHrAdmins(
       metadata:     opts.metadata    ?? {},
     }))
 
-    await supabase.from('inbox_items').insert(rows)
+    const { error } = await supabase.from('inbox_items').insert(rows)
+    if (error) {
+      console.warn('[notify] notifyHrAdmins insert failed', {
+        tenantId:  opts.tenantId,
+        itemType:  opts.item_type,
+        count:     rows.length,
+        error:     error.message,
+      })
+    }
   } catch {
     // Non-throwing — notification failures must never block primary operations
   }

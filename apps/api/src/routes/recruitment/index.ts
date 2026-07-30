@@ -1609,6 +1609,8 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
         const ctx = await getAppEmailCtx(fastify.supabase, req.tenantId, parsed.data.application_id)
         if (!ctx) return
 
+        const tenantTz = await fetchTenantTz(fastify.supabase, req.tenantId)
+
         const emailOpts = {
           candidateName: ctx.candidateName,
           jobTitle:      ctx.jobTitle,
@@ -1619,6 +1621,7 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
           scheduledAt:   parsed.data.scheduled_at ?? null,
           durationMins:  parsed.data.duration_mins,
           meetLink:      parsed.data.meet_link ?? null,
+          tenantTz,
         }
 
         // Email candidate

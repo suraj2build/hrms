@@ -121,12 +121,16 @@ export class WhatsAppProvider {
     }
   }
 
-  /** Send a free-form text message (utility for inbound reply acknowledgement). */
+  /**
+   * Send a free-form text message (utility for inbound reply acknowledgement).
+   * Returns whether delivery actually succeeded — callers must not assume
+   * promise fulfillment means the message was sent (mirrors sendTemplate()).
+   */
   async sendText(
     tenantId: string,
     phone: string,
     text: string,
-  ): Promise<void> {
+  ): Promise<boolean> {
     const { data: outboxRow, error: insertError } = await this.supabase
       .from('whatsapp_outbox')
       .insert({
@@ -142,7 +146,7 @@ export class WhatsAppProvider {
 
     if (insertError) {
       console.error('[WhatsApp] outbox insert failed:', insertError.message)
-      return
+      return false
     }
 
     const apiToken   = process.env.WHATSAPP_API_TOKEN
@@ -151,7 +155,7 @@ export class WhatsAppProvider {
 
     if (!apiToken || !phoneNumId) {
       // Logged to outbox; no live delivery until credentials are set
-      return
+      return false
     }
 
     try {
@@ -174,12 +178,14 @@ export class WhatsAppProvider {
           .from('whatsapp_outbox')
           .update({ status: 'sent', sent_at: new Date().toISOString() })
           .eq('id', outboxId)
+        return true
       } else {
         const body = await res.text()
         await this.supabase
           .from('whatsapp_outbox')
           .update({ status: 'failed', error_message: body.slice(0, 500) })
           .eq('id', outboxId)
+        return false
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err)
@@ -187,6 +193,7 @@ export class WhatsAppProvider {
         .from('whatsapp_outbox')
         .update({ status: 'failed', error_message: msg.slice(0, 500) })
         .eq('id', outboxId)
+      return false
     }
   }
 }

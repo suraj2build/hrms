@@ -716,17 +716,19 @@ export function computePayrollRunHealth(
     }
   }
 
-  // Critical+blocking open blockers prevent retry
-  const critical_blocking_open = blockers.filter(
-    b => b.status === 'open' && b.severity === 'critical' && b.blocking,
+  // Any open blocker with blocking=true prevents retry — severity is just a
+  // display/coloring dimension and carries no DB-level guarantee of matching
+  // blocking (a rule can be configured with severity='warning', blocking=true).
+  const blocking_open = blockers.filter(
+    b => b.status === 'open' && b.blocking,
   ).length
 
-  const retry_eligible    = critical_blocking_open === 0
+  const retry_eligible    = blocking_open === 0
   const finalize_eligible = retry_eligible && warning_open === 0
 
   const health_label =
     total_open === 0       ? 'All blockers resolved — ready to retry'
-    : !retry_eligible      ? `${critical_open} critical blocker${critical_open !== 1 ? 's' : ''} must be resolved before retry`
+    : !retry_eligible      ? `${blocking_open} blocking issue${blocking_open !== 1 ? 's' : ''} must be resolved before retry`
     : warning_open > 0     ? `${warning_open} warning${warning_open !== 1 ? 's' : ''} pending — retry allowed`
                            : 'Ready to retry'
 
