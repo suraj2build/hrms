@@ -24,6 +24,7 @@ import { z } from 'zod'
 import { generateUniqueCode } from '../../lib/generate-code.js'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { serverError, ErrorCode } from '../../lib/api-errors.js'
+import { fetchAllRows } from '../../lib/supabase-paginate.js'
 import { fetchTenantTz } from '../../lib/attendance-engine.js'
 import { getLocalDate } from '../../lib/org-context.js'
 
@@ -93,15 +94,21 @@ export default async function positionsRoutes(fastify: FastifyInstance) {
   }
 
   // Count current occupants (is_current job_history rows) per position id.
+  // fetchAllRows: total occupants across all positions can exceed the
+  // PostgREST 1000-row cap for a large multi-site tenant, silently
+  // under-counting filled_count/open_vacancies with no truncation signal.
   async function fillCounts(tenantId: string, positionIds: string[]): Promise<Record<string, number>> {
     const out: Record<string, number> = {}
     if (positionIds.length === 0) return out
-    const { data } = await fastify.supabase
-      .from('job_history')
-      .select('position_id')
-      .eq('tenant_id', tenantId)
-      .eq('is_current', true)
-      .in('position_id', positionIds)
+    const data = await fetchAllRows((from, to) =>
+      fastify.supabase
+        .from('job_history')
+        .select('position_id')
+        .eq('tenant_id', tenantId)
+        .eq('is_current', true)
+        .in('position_id', positionIds)
+        .range(from, to),
+    )
     for (const row of (data ?? []) as any[]) {
       const pid = row.position_id
       if (pid) out[pid] = (out[pid] ?? 0) + 1
@@ -114,20 +121,28 @@ export default async function positionsRoutes(fastify: FastifyInstance) {
     const tid = req.tenantId
     const q   = req.query as Record<string, string>
 
-    let query = fastify.supabase
-      .from('positions')
-      .select(POSITION_SELECT)
-      .eq('tenant_id', tid)
-      .order('code') as any
+    // fetchAllRows: sanctioned positions can exceed the PostgREST 1000-row
+    // cap for a large multi-site tenant — this list feeds fillCounts() and
+    // the per-position open_vacancies/is_overfilled computation below, so a
+    // silent truncation here would silently drop positions from the register.
+    let rows: any[]
+    try {
+      rows = await fetchAllRows((from, to) => {
+        let query = fastify.supabase
+          .from('positions')
+          .select(POSITION_SELECT)
+          .eq('tenant_id', tid)
+          .order('code')
+          .range(from, to) as any
+        if (q.status)        query = query.eq('status', q.status)
+        if (q.department_id) query = query.eq('department_id', q.department_id)
+        if (q.site_id)       query = query.eq('site_id', q.site_id)
+        return query
+      })
+    } catch (error: any) {
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch positions')
+    }
 
-    if (q.status)        query = query.eq('status', q.status)
-    if (q.department_id) query = query.eq('department_id', q.department_id)
-    if (q.site_id)       query = query.eq('site_id', q.site_id)
-
-    const { data, error } = await query
-    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch positions')
-
-    const rows = (data ?? []) as any[]
     const filled = await fillCounts(tid, rows.map(r => r.id))
 
     const data2 = rows.map(r => {
@@ -146,14 +161,22 @@ export default async function positionsRoutes(fastify: FastifyInstance) {
   fastify.get('/summary', auth, async (req: any, reply) => {
     const tid = req.tenantId
 
-    const { data: posData, error } = await fastify.supabase
-      .from('positions')
-      .select('id, sanctioned_count, status, department_id, effective_date, departments(name)')
-      .eq('tenant_id', tid)
-      .eq('status', 'active')
-    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch position summary')
-
-    const positions = (posData ?? []) as any[]
+    // fetchAllRows: same 1000-row cap risk as GET / above — this feeds the
+    // sanctioned_strength/vacancies/fill_rate_pct KPIs, so a silent
+    // truncation here would under-report the true tenant-wide vacancy count.
+    let positions: any[]
+    try {
+      positions = await fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('positions')
+          .select('id, sanctioned_count, status, department_id, effective_date, departments(name)')
+          .eq('tenant_id', tid)
+          .eq('status', 'active')
+          .range(from, to),
+      )
+    } catch (error: any) {
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch position summary')
+    }
     const filled = await fillCounts(tid, positions.map(p => p.id))
 
     let sanctioned = 0

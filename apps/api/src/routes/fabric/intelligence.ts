@@ -84,11 +84,18 @@ export default async function fabricRoutes(fastify: FastifyInstance) {
       estimated_admin_hours: Number(body.estimated_admin_hours) || 0,
       created_by:       (req as any).userId,
     })
+    // Fresh audit finding: .then(undefined, errHandler) only fires on a
+    // rejected promise (hard network/fetch failure) — supabase-js resolves
+    // (not rejects) on ordinary PostgREST errors (constraint violation, RLS
+    // denial, bad FK), so this never logged the overwhelming majority of
+    // real insert failures. Read the resolved `error` field instead.
     fastify.supabase.from('simulation_runs').insert({
       tenant_id: run.tenant_id, simulation_type: run.simulation_type, label: run.label,
       input_params: run.input_params, result_summary: run.result_summary,
       created_at: run.created_at, created_by: run.created_by ?? null,
-    }).then(undefined, (err: any) => fastify.log.warn({ err }, 'simulation_runs insert failed (fabric policy)'))
+    }).then(({ error }: any) => {
+      if (error) fastify.log.warn({ err: error }, 'simulation_runs insert failed (fabric policy)')
+    }, () => {})
     return run
   })
 
@@ -103,11 +110,16 @@ export default async function fabricRoutes(fastify: FastifyInstance) {
       weeks_ahead:        Number(body.weeks_ahead) || 12,
       created_by:         (req as any).userId,
     })
+    // Same fix as the policy-simulation route above — read the resolved
+    // `error` field, since supabase-js resolves rather than rejects on
+    // ordinary PostgREST errors.
     fastify.supabase.from('simulation_runs').insert({
       tenant_id: run.tenant_id, simulation_type: run.simulation_type, label: run.label,
       input_params: run.input_params, result_summary: run.result_summary,
       created_at: run.created_at, created_by: run.created_by ?? null,
-    }).then(undefined, (err: any) => fastify.log.warn({ err }, 'simulation_runs insert failed (fabric governance-drift)'))
+    }).then(({ error }: any) => {
+      if (error) fastify.log.warn({ err: error }, 'simulation_runs insert failed (fabric governance-drift)')
+    }, () => {})
     return run
   })
 

@@ -66,7 +66,7 @@ const createSessionSchema = z.object({
 
 const completeSessionSchema = z.object({
   storage_path:   z.string().min(1).max(1000),
-  file_size:      z.number().int().positive().optional(),
+  file_size:      z.number().int().positive().max(MAX_FILE_SIZE).optional(),
   result_summary: z.record(z.unknown()).optional(),
 })
 

@@ -291,15 +291,26 @@ export default async function communityRoutes(fastify: FastifyInstance) {
   // ── GET /community/posts/:id/comments ────────────────────────────────────────
   fastify.get('/community/posts/:id/comments', auth, async (req: any, reply) => {
     const { id } = req.params as { id: string }
-    const { data: rows, error } = await fastify.supabase
-      .from('feed_comments')
-      .select('id, employee_id, body, created_at')
-      .eq('tenant_id', req.tenantId).eq('post_id', id)
-      .order('created_at', { ascending: true }).limit(200)
-    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to load comments')
+    // fetchAllRows: the feed's own comment_count badge (line 114) is already
+    // computed from the full set — a .limit(200) cap here made the newest
+    // comments on a long-lived post permanently unreachable through this API
+    // (oldest-first ordering), with no pagination path to reach them.
+    let rows: any[]
+    try {
+      rows = await fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('feed_comments')
+          .select('id, employee_id, body, created_at')
+          .eq('tenant_id', req.tenantId).eq('post_id', id)
+          .order('created_at', { ascending: true })
+          .range(from, to),
+      )
+    } catch (error: any) {
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to load comments')
+    }
 
-    const names = await namesFor(fastify, req.tenantId, (rows ?? []).map((c: any) => c.employee_id))
-    const data = (rows ?? []).map((c: any) => ({ ...c, author_name: c.employee_id ? names.get(c.employee_id) : null }))
+    const names = await namesFor(fastify, req.tenantId, rows.map((c: any) => c.employee_id))
+    const data = rows.map((c: any) => ({ ...c, author_name: c.employee_id ? names.get(c.employee_id) : null }))
     return reply.send({ data })
   })
 
@@ -314,6 +325,7 @@ export default async function communityRoutes(fastify: FastifyInstance) {
     }
 
     const me = await resolveEmployeeId(fastify, req.userId, req.tenantId)
+    if (!me) return reply.code(400).send({ error: 'NO_EMPLOYEE_LINK', message: 'Your account is not linked to an employee record' })
     const { data: post } = await fastify.supabase
       .from('feed_posts').select('id').eq('id', id).eq('tenant_id', req.tenantId).maybeSingle()
     if (!post) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Post not found' })
@@ -358,14 +370,22 @@ export default async function communityRoutes(fastify: FastifyInstance) {
     if (!HR_ADMIN_ROLES.includes(req.userRole)) {
       return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR access required' })
     }
-    const { data: reports, error } = await fastify.supabase
-      .from('feed_reports')
-      .select('id, post_id, reporter_employee, reason, created_at')
-      .eq('tenant_id', req.tenantId).eq('status', 'open')
-      .order('created_at', { ascending: false }).limit(200)
-    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to load reports')
+    // fetchAllRows: open moderation reports beyond 200 would silently drop
+    // off this HR queue with no pagination path or truncation signal.
+    let rows: any[]
+    try {
+      rows = await fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('feed_reports')
+          .select('id, post_id, reporter_employee, reason, created_at')
+          .eq('tenant_id', req.tenantId).eq('status', 'open')
+          .order('created_at', { ascending: false })
+          .range(from, to),
+      )
+    } catch (error: any) {
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to load reports')
+    }
 
-    const rows = reports ?? []
     const postIds = [...new Set(rows.map((r: any) => r.post_id))]
     if (!postIds.length) return reply.send({ data: [] })
 
