@@ -23,12 +23,15 @@ export class TrustGovernanceListener extends GovernanceListener {
   }
 
   private async handleEmployeeEvent(event: ResolvedPlatformEvent): Promise<void> {
-    // payload may contain pan, bank details (injected by route on fire-and-forget)
-    const payload = event.payload as Record<string, unknown>
-    const pan            = payload.pan_number as string | undefined
-    const accountNumber  = payload.account_number as string | undefined
-    const ifscCode       = payload.ifsc_code as string | undefined
-    const phone          = payload.phone as string | undefined
+    // payload may contain pan, bank details (injected by route on fire-and-forget).
+    // Defensive optional-chaining, matching every sibling rule file — payload
+    // is typed as required, but a replayed/hand-constructed event could still
+    // arrive with it null/undefined at runtime, bypassing the type contract.
+    const payload = event.payload as Record<string, unknown> | undefined
+    const pan            = payload?.pan_number as string | undefined
+    const accountNumber  = payload?.account_number as string | undefined
+    const ifscCode       = payload?.ifsc_code as string | undefined
+    const phone          = payload?.phone as string | undefined
 
     // Need supabase — skip if not available in passive listener context
     // In Sprint 3, trust intelligence is exposed via REST routes instead

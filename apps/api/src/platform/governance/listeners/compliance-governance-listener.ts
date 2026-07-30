@@ -18,6 +18,17 @@ export class ComplianceGovernanceListener extends GovernanceListener {
   readonly name    = 'ComplianceGovernanceListener'
   readonly handles = ['*']   // handles all events
 
+  // supabase is not injected in listeners by default — set at startup from
+  // apps/api/src/index.ts, same pattern as OperationalIntelligenceListener /
+  // FabricOrchestrationListener. Without it, violations/drift are still
+  // detected and logged but not persisted (best-effort — never blocks or
+  // throws on registration).
+  private supabase: import('@supabase/supabase-js').SupabaseClient | null = null
+
+  setSupabase(supabase: import('@supabase/supabase-js').SupabaseClient): void {
+    this.supabase = supabase
+  }
+
   async evaluate(event: ResolvedPlatformEvent): Promise<void> {
     // 1. Record in observability intelligence (never throws)
     try {
@@ -33,9 +44,23 @@ export class ComplianceGovernanceListener extends GovernanceListener {
           violations: complianceResult.violations,
           severity:   complianceResult.severity,
         })
-        // Future sprint: persist to compliance_evaluations table
+        if (this.supabase) {
+          const { error } = await this.supabase.from('compliance_evaluations').insert({
+            tenant_id:   event.tenant_id,
+            event_id:    event.event_id,
+            entity_type: event.entity_type,
+            entity_id:   event.entity_id,
+            compliant:   false,
+            severity:    complianceResult.severity,
+            violations:  complianceResult.violations,
+            explainability: complianceResult.explainability ?? null,
+          })
+          if (error) console.warn('[ComplianceGovernanceListener] compliance_evaluations insert failed', error.message)
+        }
       }
-    } catch { /* non-fatal */ }
+    } catch (err) {
+      console.warn('[ComplianceGovernanceListener] compliance evaluation step failed', err)
+    }
 
     // 3. Drift detection
     try {
@@ -45,9 +70,24 @@ export class ComplianceGovernanceListener extends GovernanceListener {
           signal: drift.signal,
           module: drift.affected_module,
         })
-        // Future sprint: persist to governance_drift_events table
+        if (this.supabase) {
+          const { error } = await this.supabase.from('governance_drift_events').insert({
+            tenant_id:       event.tenant_id,
+            signal:          drift.signal,
+            severity:        drift.severity,
+            affected_module: drift.affected_module,
+            description:     drift.description,
+            entity_id:       drift.entity_id ?? null,
+            entity_type:     drift.entity_id ? event.entity_type : null,
+            explainability:  drift.explainability ?? null,
+            source_event_id: event.event_id,
+          })
+          if (error) console.warn('[ComplianceGovernanceListener] governance_drift_events insert failed', error.message)
+        }
       }
-    } catch { /* non-fatal */ }
+    } catch (err) {
+      console.warn('[ComplianceGovernanceListener] drift detection step failed', err)
+    }
 
     // 4. Risk classification
     try {
@@ -55,7 +95,9 @@ export class ComplianceGovernanceListener extends GovernanceListener {
       if (risk) {
         riskScoreService.upsertFromClassification(risk)
       }
-    } catch { /* non-fatal */ }
+    } catch (err) {
+      console.warn('[ComplianceGovernanceListener] risk classification step failed', err)
+    }
   }
 }
 

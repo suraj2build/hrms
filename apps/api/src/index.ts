@@ -395,6 +395,10 @@ async function start() {
   await fastify.register(import('./plugins/event-publisher.js'))
 
   // ── Governance Intelligence: register passive compliance listener ─────────
+  // Without setSupabase(), detected violations/drift were only console.info'd
+  // and never persisted to compliance_evaluations/governance_drift_events
+  // (the tables migration 186 created specifically to hold them).
+  complianceGovernanceListener.setSupabase(fastify.supabase)
   governanceEvaluator.register(complianceGovernanceListener)
   governanceEvaluator.register(trustGovernanceListener)
 

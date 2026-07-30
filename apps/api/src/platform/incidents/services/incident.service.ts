@@ -21,6 +21,18 @@ function toIncidentSeverity(s: EventSeverity): IncidentSeverity {
   return s  // 'high' | 'critical' pass through
 }
 
+// Must match operational_incidents.incident_type's CHECK constraint exactly
+// (supabase/migrations/090_operational_incidents.sql) — createFromGovernance
+// takes incident_type as a bare string with no caller-side validation, and
+// a violating value would otherwise fail the INSERT silently (the error is
+// logged and swallowed, returning null with no signal to the governance
+// action that triggered it).
+const VALID_INCIDENT_TYPES = new Set([
+  'payroll_impact', 'staffing_shortage', 'attendance_integrity', 'sla_breach_escalated',
+  'workforce_overload', 'shift_imbalance', 'system_outage', 'compliance_breach',
+  'data_anomaly', 'integration_failure',
+])
+
 export interface CreateIncidentInput {
   tenantId:            string
   incident_type:       string
@@ -43,6 +55,13 @@ export class IncidentService {
    * Non-fatal — errors are logged and swallowed.
    */
   async createFromGovernance(input: CreateIncidentInput): Promise<string | null> {
+    if (!VALID_INCIDENT_TYPES.has(input.incident_type)) {
+      console.warn('[IncidentService] refusing to create incident with unknown incident_type', {
+        incident_type: input.incident_type,
+      })
+      return null
+    }
+
     const { data, error } = await this.supabase
       .from('operational_incidents')
       .insert({

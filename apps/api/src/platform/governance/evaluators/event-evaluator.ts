@@ -8,6 +8,8 @@
 import type { ResolvedPlatformEvent } from '../../events/types/platform-event.js'
 import type { GovernanceListener }    from '../listeners/governance-listener.js'
 
+const ERROR_WINDOW_MS = 15 * 60 * 1000 // 15 minutes
+
 export class GovernanceEvaluator {
   private readonly listeners: GovernanceListener[] = []
   // Keyed `${tenant_id}:${listener.name}` — this evaluator is a single
@@ -15,12 +17,26 @@ export class GovernanceEvaluator {
   // index.ts), so unkeyed state let one tenant's noisy/malformed events
   // (e.g. 5 events that throw inside one listener) disable that listener
   // for every other tenant until an admin manually reset it.
-  private readonly listenerErrors:  Map<string, number>  = new Map()
-  private readonly listenerEnabled: Map<string, boolean> = new Map()
+  //
+  // Sliding window, not a lifetime counter — the same fix already applied to
+  // drift-detection.service.ts's spike counter for the same reason: a bare
+  // lifetime counter never decays, so 5 unrelated errors spread over months
+  // would permanently disable a listener after the 5th, with no way to
+  // recover short of an admin manually calling resetListener().
+  private readonly listenerErrors:  Map<string, number[]> = new Map()
+  private readonly listenerEnabled: Map<string, boolean>  = new Map()
   private readonly MAX_LISTENER_ERRORS = 5
 
   private circuitKey(tenantId: string, listenerName: string): string {
     return `${tenantId}:${listenerName}`
+  }
+
+  private bumpErrors(key: string): number {
+    const now = Date.now()
+    const recent = (this.listenerErrors.get(key) ?? []).filter(t => now - t < ERROR_WINDOW_MS)
+    recent.push(now)
+    this.listenerErrors.set(key, recent)
+    return recent.length
   }
 
   /** Register a passive governance listener. */
@@ -56,8 +72,7 @@ export class GovernanceEvaluator {
             event_type: event.event_type,
             error:      err,
           })
-          const current = (this.listenerErrors.get(key) ?? 0) + 1
-          this.listenerErrors.set(key, current)
+          const current = this.bumpErrors(key)
           if (current >= this.MAX_LISTENER_ERRORS) {
             this.listenerEnabled.set(key, false)
             console.warn('[GovernanceEvaluator] listener disabled — too many errors', {
@@ -79,9 +94,11 @@ export class GovernanceEvaluator {
   listenerHealth(tenantId: string): Array<{ name: string; error_count: number; enabled: boolean }> {
     return this.listeners.map(l => {
       const key = this.circuitKey(tenantId, l.name)
+      const now = Date.now()
+      const recentErrors = (this.listenerErrors.get(key) ?? []).filter(t => now - t < ERROR_WINDOW_MS)
       return {
         name:        l.name,
-        error_count: this.listenerErrors.get(key) ?? 0,
+        error_count: recentErrors.length,
         enabled:     this.listenerEnabled.get(key) !== false,
       }
     })
