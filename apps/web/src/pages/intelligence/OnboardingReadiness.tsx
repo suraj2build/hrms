@@ -36,10 +36,9 @@ export function OnboardingReadiness({ sessionId }: { sessionId: string }) {
 
   const { data, isLoading, isError } = useQuery<ReadinessData>({
     queryKey: ['onboarding-readiness', sessionId],
-    queryFn: async () => {
-      const res = await api.get<{ data: ReadinessData }>(`/intelligence/onboarding/${sessionId}/readiness`)
-      return res.data
-    },
+    // GET /intelligence/onboarding/:sessionId/readiness sends a bare
+    // ReadinessData object, not { data: ReadinessData }.
+    queryFn: () => api.get<ReadinessData>(`/intelligence/onboarding/${sessionId}/readiness`),
     enabled: !!sessionId,
     staleTime: 60_000,
   })

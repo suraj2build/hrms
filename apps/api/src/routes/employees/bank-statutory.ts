@@ -108,6 +108,39 @@ export default async function bankStatutoryRoutes(fastify: FastifyInstance) {
     } })
   })
 
+  // GET /employees/bank-completeness-summary
+  // Tenant-wide count (not per-employee data) backing the Payroll readiness
+  // dashboard's "Employee bank details complete" blocker — see
+  // apps/web/src/lib/readiness/hooks.ts's usePayrollReadiness(), which
+  // previously had no way to populate employeesWithBank at all (the check
+  // always evaluated to 'unknown' and was silently excluded from scoring).
+  // Uses count:'exact'+head:true (aggregate, not row-fetching) so this stays
+  // correct at any tenant size — no PostgREST max-rows truncation risk.
+  fastify.get('/employees/bank-completeness-summary', hrAdminAuth, async (req: any, reply) => {
+    const tenantId = req.tenantId as string
+    const [activeRes, bankRes] = await Promise.all([
+      fastify.supabase
+        .from('employees')
+        .select('id', { count: 'exact', head: true })
+        .eq('tenant_id', tenantId)
+        .in('status', ['active', 'on_notice']),
+      fastify.supabase
+        .from('employee_bank_statutory')
+        .select('id, employees!inner(status)', { count: 'exact', head: true })
+        .eq('tenant_id', tenantId)
+        .in('employees.status', ['active', 'on_notice'])
+        .not('bank_name', 'is', null)
+        .not('account_number', 'is', null)
+        .not('ifsc_code', 'is', null),
+    ])
+    if (activeRes.error) return serverError(req, reply, activeRes.error, ErrorCode.QUERY_FAILED, 'Failed to count active employees')
+    if (bankRes.error)   return serverError(req, reply, bankRes.error,   ErrorCode.QUERY_FAILED, 'Failed to count employees with bank details')
+    return reply.send({
+      active_employee_count:     activeRes.count ?? 0,
+      employees_with_bank_count: bankRes.count   ?? 0,
+    })
+  })
+
   // PUT /employees/:id/bank-statutory  (upsert)
   fastify.put('/employees/:id/bank-statutory', hrAdminAuth, async (req: any, reply) => {
     if (!await verifyEmployee(fastify, req.params.id, req.tenantId))

@@ -136,26 +136,27 @@ export function usePayrollReadiness(): DomainReadiness {
     staleTime: STALE.payroll,
     retry: 1,
   })
-  const { data: empData } = useQuery<{ data: EmpItem[] }>({
-    queryKey: ['employees'],
-    queryFn:  () => api.get('/employees'),
-    staleTime: STALE.workforce,
+  const { data: bankSummary, isLoading: bl } = useQuery<{ active_employee_count: number; employees_with_bank_count: number }>({
+    queryKey: ['employees', 'bank-completeness-summary'],
+    queryFn:  () => api.get('/employees/bank-completeness-summary'),
+    staleTime: STALE.payroll,
+    retry: 1,
   })
 
-  const isLoading = sl || cl || rl
+  const isLoading = sl || cl || rl || bl
 
   return useMemo(() => {
     if (isLoading) return computeDomainReadiness('payroll', [], true)
-    const employeeCount = empData?.data.length ?? 0
+    const employeeCount = bankSummary?.active_employee_count ?? 0
     const checks = evaluatePayroll({
       salaryStructures: structData?.data  ?? [],
       salaryComponents: compData?.data    ?? [],
       recentRuns:       runsData?.data,
       employeeCount,
-      // employeesWithBank: not derivable from list endpoint — marked unknown
+      employeesWithBank: bankSummary?.employees_with_bank_count,
     })
     return computeDomainReadiness('payroll', checks)
-  }, [structData, compData, runsData, empData, isLoading])
+  }, [structData, compData, runsData, bankSummary, isLoading])
 }
 
 // ── useAttendanceReadiness ────────────────────────────────────────────────────
