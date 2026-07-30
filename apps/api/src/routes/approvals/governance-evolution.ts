@@ -29,6 +29,7 @@ import type { FastifyInstance } from 'fastify'
 import { z }                    from 'zod'
 import { HR_ADMIN_ROLES }       from '../../lib/rbac.js'
 import { serverError, ErrorCode } from '../../lib/api-errors.js'
+import { fetchAllRows } from '../../lib/supabase-paginate.js'
 const SUPER_ADMIN = ['super_admin']             as const
 
 // Fresh audit finding: entity_type/override_type were previously
@@ -262,10 +263,13 @@ export default async function governanceEvolutionRoutes(fastify: FastifyInstance
       .eq('is_active', parsed.data.is_active === 'true')
       .order('created_at', { ascending: false })
 
-    if (error) {
-      req.log.warn({ err: error }, 'delegations query failed — returning empty')
-      return reply.send({ data: [] })
-    }
+    // Fresh audit finding: this used to swallow a genuine query failure and
+    // return 200 {data: []} — indistinguishable from "no active delegations
+    // exist." Unlike the sibling /overrides and /rollbacks endpoints below,
+    // this gave an HR admin no way to tell a broken query apart from a truly
+    // empty delegation list, while approvals could be silently stalling on
+    // an unrenderable delegation.
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch delegations')
 
     return reply.send({ data: data ?? [] })
   })
@@ -285,6 +289,17 @@ export default async function governanceEvolutionRoutes(fastify: FastifyInstance
     if (!parsed.success) {
       return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
     }
+
+    // Fresh audit finding: delegate_id only checked as a well-formed UUID —
+    // approval_delegations.delegate_id REFERENCES profiles(id) with no
+    // tenant scoping, so an id belonging to a DIFFERENT tenant's profile
+    // would pass the FK and insert a cross-tenant delegation, matching the
+    // "verify FK belongs to your tenant" pattern used everywhere else in
+    // the codebase (departments/index.ts, employees/manager.ts, etc.).
+    const { data: delegateProfile, error: delegateErr } = await fastify.supabase
+      .from('profiles').select('id').eq('id', parsed.data.delegate_id).eq('tenant_id', req.tenantId).maybeSingle()
+    if (delegateErr) return serverError(req, reply, delegateErr, ErrorCode.QUERY_FAILED, 'Failed to validate delegate')
+    if (!delegateProfile) return reply.code(400).send({ error: 'INVALID_REFERENCE', message: 'delegate_id not found in your organisation' })
 
     const { data, error } = await fastify.supabase
       .from('approval_delegations')
@@ -358,16 +373,26 @@ export default async function governanceEvolutionRoutes(fastify: FastifyInstance
       return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
     }
 
-    const { data, error } = await fastify.supabase
-      .from('operational_overrides')
-      .select('*')
-      .eq('tenant_id', req.tenantId)
-      .eq('is_active', parsed.data.is_active === 'true')
-      .order('created_at', { ascending: false })
+    // Fresh audit finding: unpaginated .select() — operational_overrides is
+    // an append-only governance log with no retention/archival; a mature
+    // tenant exceeding PostgREST's 1000-row cap would have older overrides
+    // silently truncated with no signal. fetchAllRows() paginates fully.
+    let data: any[]
+    try {
+      data = await fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('operational_overrides')
+          .select('*')
+          .eq('tenant_id', req.tenantId)
+          .eq('is_active', parsed.data.is_active === 'true')
+          .order('created_at', { ascending: false })
+          .range(from, to),
+      )
+    } catch (error: any) {
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch overrides')
+    }
 
-    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch overrides')
-
-    return reply.send({ data: data ?? [] })
+    return reply.send({ data })
   })
 
   // ── POST /approvals/governance/overrides ──────────────────────────────────
@@ -388,6 +413,13 @@ export default async function governanceEvolutionRoutes(fastify: FastifyInstance
     if (!parsed.success) {
       return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
     }
+
+    // Fresh audit finding: same cross-tenant FK gap as /delegations above —
+    // granted_to REFERENCES profiles(id) with no tenant scoping.
+    const { data: granteeProfile, error: granteeErr } = await fastify.supabase
+      .from('profiles').select('id').eq('id', parsed.data.granted_to).eq('tenant_id', req.tenantId).maybeSingle()
+    if (granteeErr) return serverError(req, reply, granteeErr, ErrorCode.QUERY_FAILED, 'Failed to validate grantee')
+    if (!granteeProfile) return reply.code(400).send({ error: 'INVALID_REFERENCE', message: 'granted_to not found in your organisation' })
 
     const { data, error } = await fastify.supabase
       .from('operational_overrides')
@@ -551,20 +583,28 @@ export default async function governanceEvolutionRoutes(fastify: FastifyInstance
 
     const { entity_type, is_completed } = parsed.data
 
-    let q = fastify.supabase
-      .from('governance_rollbacks')
-      .select('*')
-      .eq('tenant_id', req.tenantId)
-      .order('created_at', { ascending: false })
+    // Fresh audit finding: unpaginated .select() — governance_rollbacks is
+    // an append-only audit log with no retention/archival; a mature tenant
+    // exceeding PostgREST's 1000-row cap would have older rollback history
+    // silently truncated with no signal. fetchAllRows() paginates fully.
+    let data: any[]
+    try {
+      data = await fetchAllRows((from, to) => {
+        let q = fastify.supabase
+          .from('governance_rollbacks')
+          .select('*')
+          .eq('tenant_id', req.tenantId)
+          .order('created_at', { ascending: false })
+          .range(from, to) as any
+        if (entity_type)  q = q.eq('entity_type', entity_type)
+        if (is_completed !== undefined) q = q.eq('is_completed', is_completed === 'true')
+        return q
+      })
+    } catch (error: any) {
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch rollbacks')
+    }
 
-    if (entity_type)  q = q.eq('entity_type', entity_type)
-    if (is_completed !== undefined) q = q.eq('is_completed', is_completed === 'true')
-
-    const { data, error } = await q
-
-    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch rollbacks')
-
-    return reply.send({ data: data ?? [] })
+    return reply.send({ data })
   })
 
   // ── POST /approvals/governance/rollbacks ──────────────────────────────────

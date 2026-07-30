@@ -159,6 +159,21 @@ export default async function uploadSessionRoutes(fastify: FastifyInstance) {
       })
     }
 
+    // Fresh audit finding: reference_id/reference_type had no tenant check
+    // at all. upload_sessions.reference_id is a polymorphic bare UUID (no
+    // DB-level FK), and GET /uploads/sessions/:id/url below actively uses
+    // reference_type === 'employee' && reference_id === ownEmployeeId to
+    // grant a non-admin caller access to their own upload — an unchecked
+    // cross-tenant employee id here would corrupt that access-control
+    // signal with a foreign employee id that can never legitimately match
+    // anyone in this tenant.
+    if (parsed.data.reference_type === 'employee' && parsed.data.reference_id) {
+      const { data: refEmp, error: refErr } = await (fastify as any).supabase
+        .from('employees').select('id').eq('id', parsed.data.reference_id).eq('tenant_id', req.tenantId).maybeSingle()
+      if (refErr) return serverError(req, reply, refErr, ErrorCode.QUERY_FAILED, 'Failed to validate reference_id')
+      if (!refEmp) return reply.code(400).send({ error: 'INVALID_REFERENCE', message: 'reference_id does not match an employee in your organisation' })
+    }
+
     const initialStatus = storage_path ? 'uploaded' : 'pending'
 
     const { data, error } = await (fastify as any).supabase

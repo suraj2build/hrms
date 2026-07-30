@@ -275,7 +275,12 @@ export async function getPendingWorkflowInstances(
     .order('created_at', { ascending: false })
     .range(offset, offset + limit - 1)
 
-  if (error) return { data: [], total: 0 }
+  // Fresh audit finding: this used to swallow the error entirely (no log,
+  // no throw) and return {data: [], total: 0} — indistinguishable from a
+  // genuinely empty pending-approvals queue. Throwing lets the caller route
+  // it to serverError() instead of silently telling an HR admin the queue
+  // is empty when the query actually failed.
+  if (error) throw new Error(`getPendingWorkflowInstances: ${error.message}`)
   return { data: (data ?? []) as WorkflowInstance[], total: count ?? 0 }
 }
 

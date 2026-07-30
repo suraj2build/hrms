@@ -66,7 +66,7 @@ export default async function workflowsRoute(fastify: FastifyInstance) {
     if (parsed.data.workflow_type) q = q.eq('workflow_type', parsed.data.workflow_type)
 
     const { data, error } = await q
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch workflow config' })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch workflow config')
     return reply.send({ data: data ?? [] })
   })
 
@@ -99,7 +99,7 @@ export default async function workflowsRoute(fastify: FastifyInstance) {
       .select('id, workflow_type, level, approver_type, label, is_active')
       .single()
 
-    if (error) return reply.code(500).send({ error: 'UPSERT_FAILED', message: 'Failed to save workflow config' })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to save workflow config')
     return reply.code(201).send({ data })
   })
 
@@ -142,10 +142,14 @@ export default async function workflowsRoute(fastify: FastifyInstance) {
     const parsed = querySchema.safeParse(req.query)
     if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
 
-    const result = await getPendingWorkflowInstances(
-      fastify.supabase, req.tenantId, parsed.data.limit, parsed.data.offset,
-    )
-    return reply.send(result)
+    try {
+      const result = await getPendingWorkflowInstances(
+        fastify.supabase, req.tenantId, parsed.data.limit, parsed.data.offset,
+      )
+      return reply.send(result)
+    } catch (error: any) {
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch pending workflow instances')
+    }
   })
 
   // ── GET /approvals/workflows/instances/:instanceId ───────────────────────────
