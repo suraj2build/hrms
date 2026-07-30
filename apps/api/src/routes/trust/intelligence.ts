@@ -131,7 +131,7 @@ export default async function trustIntelligenceRoutes(fastify: FastifyInstance) 
 
     let q = fastify.supabase
       .from('workforce_trust_scores')
-      .select('id, entity_id, score_type, score, severity, factors, computed_at')
+      .select('id, entity_id, entity_type, score_type, score, severity, factors, computed_at')
       .eq('tenant_id', tenantId)
       .order('score', { ascending: true })  // lowest trust first
       .limit(Number(limit))

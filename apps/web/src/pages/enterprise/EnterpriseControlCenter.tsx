@@ -77,8 +77,8 @@ function humanizeType(t?: string | null): string {
  * User-facing label for an entity reference — NEVER a raw UUID.
  * Prefers a resolved name from the API, falling back to the humanized type.
  */
-function entityLabel(e: { entity_type?: string | null; entity_name?: string | null }): string {
-  return e.entity_name ?? humanizeType(e.entity_type)
+function entityLabel(e: { entity_type?: string | null; entity_name?: string | null; employee_name?: string | null }): string {
+  return e.entity_name ?? e.employee_name ?? humanizeType(e.entity_type)
 }
 
 function ScoreBar({ score, severity, invert = false }: { score: number; severity?: string; invert?: boolean }) {
@@ -143,6 +143,10 @@ interface TrustScore {
   factors:     string[]
   computed_at: string
   explainability?: Explainability
+  // GET /trust/scores enriches score_type='employee' rows with a resolved
+  // name/code — the API's field is employee_name, not entity_name.
+  employee_name?: string | null
+  employee_code?: string | null
 }
 
 interface VerificationEvent {
@@ -250,11 +254,16 @@ interface ReplaySession {
   created_at?:     string
 }
 
+// Matches GET /enterprise/audit/stats's actual (unwrapped) response shape —
+// there's no day-granularity "events today" field, only a 30-day rolling
+// window broken down by severity/module/event_type.
 interface AuditStats {
-  total_events:    number
-  events_today:    number
-  critical_count:  number
-  modules_covered: number
+  total:        number
+  by_severity:  Record<string, number>
+  by_module:    Record<string, number>
+  by_event_type: Record<string, number>
+  top_actors:   Array<{ actor_id: string; count: number }>
+  computed_at:  string
 }
 
 interface EventCluster {
@@ -490,8 +499,13 @@ function TrustTab({ onDrawerOpen }: { onDrawerOpen: (item: DrawerItem) => void }
 
   const { data: integrationsData, isLoading: integrationsLoading } = useQuery({
     queryKey: ['enterprise-control-trust', 'integrations'],
-    queryFn:  () => api.get<{ providers: Record<string, string> }>('/integrations/status'),
+    // /integrations/status returns { integrations: [{provider, status}] }, not
+    // a { providers: {...} } map.
+    queryFn:  () => api.get<{ integrations: Array<{ provider: string; status: string }> }>('/integrations/status'),
   })
+  const providerStatus = Object.fromEntries(
+    (integrationsData?.integrations ?? []).map(i => [i.provider, i.status]),
+  )
 
   const scores     = scoresData?.scores     ?? []
   const verifications = verificationsData?.verifications ?? []
@@ -704,7 +718,7 @@ function TrustTab({ onDrawerOpen }: { onDrawerOpen: (item: DrawerItem) => void }
               )}
 
               {/* Provider status pills */}
-              {integrationsData?.providers && (() => {
+              {integrationsData && (() => {
                 const PAN_BANK_PROVIDERS = ['surepass_pan', 'decentro_pan', 'signzy_pan', 'razorpay_ifsc']
                 const PROVIDER_LABELS: Record<string, string> = {
                   surepass_pan: 'PAN',
@@ -712,12 +726,12 @@ function TrustTab({ onDrawerOpen }: { onDrawerOpen: (item: DrawerItem) => void }
                   signzy_pan:   'PAN',
                   razorpay_ifsc: 'Bank Account',
                 }
-                const filtered = PAN_BANK_PROVIDERS.filter(p => integrationsData.providers![p] !== undefined)
+                const filtered = PAN_BANK_PROVIDERS.filter(p => providerStatus[p] !== undefined)
                 if (filtered.length === 0) return null
                 return (
                   <div className="flex flex-wrap gap-1.5">
                     {filtered.map(p => {
-                      const status = integrationsData.providers![p]
+                      const status = providerStatus[p]
                       const isActive = status === 'active'
                       return (
                         <span
@@ -764,12 +778,14 @@ function OperationsTab({ onDrawerOpen }: { onDrawerOpen: (item: DrawerItem) => v
 
   const { data: heatmapData, isLoading: heatmapLoading } = useQuery({
     queryKey: ['enterprise-control-operations', 'heatmap'],
-    queryFn:  () => api.get<{ cells: HeatmapCell[] }>('/operations/heatmaps'),
+    // /operations/heatmaps returns { snapshots: [{domain, period, cells, computed_at}], total }
+    // — cells are nested per-domain, not a flat top-level array.
+    queryFn:  () => api.get<{ snapshots: Array<{ domain: string; cells: HeatmapCell[] }> }>('/operations/heatmaps'),
   })
 
   const signals  = healthData?.signals  ?? []
   const breaches = slaData?.breaches    ?? []
-  const cells    = heatmapData?.cells   ?? []
+  const cells    = (heatmapData?.snapshots ?? []).flatMap(s => s.cells)
 
   return (
     <div className="space-y-4">
@@ -871,7 +887,7 @@ function OperationsTab({ onDrawerOpen }: { onDrawerOpen: (item: DrawerItem) => v
                   </tr>
                 </thead>
                 <tbody className="divide-y">
-                  {cells.slice(0, 8).map(cell => (
+                  {[...cells].sort((a, b) => b.value - a.value).slice(0, 8).map(cell => (
                     <tr key={cell.dimension_id} className="hover:bg-muted/20 transition-colors">
                       <td className="py-2 pr-4 font-mono">{cell.dimension_label}</td>
                       <td className="py-2 pr-4"><ScoreBar score={cell.value} invert /></td>
@@ -1062,10 +1078,10 @@ function AuditReplayTab({ onDrawerOpen }: { onDrawerOpen: (item: DrawerItem) => 
       <OperationalSummary
         loading={statsLoading}
         items={[
-          { label: 'Total Events',      value: auditStats?.total_events    ?? '—', severity: 'info' },
-          { label: 'Events Today',      value: auditStats?.events_today    ?? '—', severity: 'info' },
-          { label: 'Critical Events',   value: auditStats?.critical_count  ?? '—', severity: (auditStats?.critical_count ?? 0) > 0 ? 'critical' : 'info' },
-          { label: 'Modules Covered',   value: auditStats?.modules_covered ?? '—', severity: 'info' },
+          { label: 'Total Events (30d)', value: auditStats?.total ?? '—', severity: 'info' },
+          { label: 'High Severity',      value: auditStats?.by_severity?.high ?? '—', severity: (auditStats?.by_severity?.high ?? 0) > 0 ? 'warning' : 'info' },
+          { label: 'Critical Events',    value: auditStats?.by_severity?.critical ?? '—', severity: (auditStats?.by_severity?.critical ?? 0) > 0 ? 'critical' : 'info' },
+          { label: 'Modules Covered',    value: auditStats ? Object.keys(auditStats.by_module).length : '—', severity: 'info' },
         ]}
       />
 
