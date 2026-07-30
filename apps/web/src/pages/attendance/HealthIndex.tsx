@@ -11,7 +11,7 @@ import { useState }              from 'react'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import { toast }                 from 'sonner'
 import {
-  ShieldAlert, Activity, TrendingUp, TrendingDown,
+  ShieldAlert, Activity,
   Loader2, RefreshCw, AlertTriangle, Building2,
 } from 'lucide-react'
 
@@ -42,7 +42,7 @@ interface ScoreBreakdown {
 
 interface HealthScore {
   id: string
-  scope: 'employee' | 'department' | 'site' | 'org'
+  scope: 'employee' | 'department' | 'site' | 'tenant'
   scope_id: string | null
   scope_name: string | null
   period_month: string
@@ -56,10 +56,14 @@ interface HealthScore {
   computed_at: string
 }
 
+// Matches GET /attendance/health-index/summary's actual (unwrapped, no
+// `data` key) response shape.
 interface HealthSummary {
-  org_health_score: number
-  trend: string
-  at_risk_departments: number
+  period_month:     string
+  avg_health_score: number
+  by_grade:         Record<'A' | 'B' | 'C' | 'D' | 'F', number>
+  total_employees:  number
+  at_risk:          number
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -108,7 +112,7 @@ function fmtDatetime(iso: string): string {
   return `${String(d.getDate()).padStart(2,'0')}-${M[d.getMonth()]}-${d.getFullYear()} ${hr}:${mn}`
 }
 
-type ScopeFilter = 'all' | 'employee' | 'department' | 'site' | 'org'
+type ScopeFilter = 'all' | 'employee' | 'department' | 'site' | 'tenant'
 
 // ── Health Score Card ──────────────────────────────────────────────────────────
 
@@ -221,7 +225,7 @@ export function HealthIndex() {
     staleTime: 60_000,
   })
 
-  const { data: summaryData, refetch: refetchSummary } = useQuery<{ data: HealthSummary }>({
+  const { data: summary, refetch: refetchSummary } = useQuery<HealthSummary>({
     queryKey: ['health-index-summary', periodMonth],
     queryFn:  () => api.get(`/attendance/health-index/summary?period_month=${periodMonth}`),
     enabled:  isAdmin,
@@ -269,10 +273,6 @@ export function HealthIndex() {
   }
 
   const entries  = listData?.data ?? []
-  const summary  = summaryData?.data
-  const trend    = summary?.trend ?? ''
-  const trendUp  = trend.toLowerCase().includes('improv') || trend === 'up'
-  const trendDown = trend.toLowerCase().includes('declin') || trend === 'down'
 
   return (
     <PageContainer>
@@ -296,57 +296,39 @@ export function HealthIndex() {
 
       {/* Summary row */}
       {summary && (
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           {/* Org health score */}
           <SectionCard>
             <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide mb-1">
               Org Health Score
             </p>
             <div className="flex items-end gap-2">
-              <p className={cn('text-4xl font-bold tabular-nums', healthScoreColor(summary.org_health_score))}>
-                {(summary.org_health_score ?? 0).toFixed(0)}
+              <p className={cn('text-4xl font-bold tabular-nums', healthScoreColor(summary.avg_health_score))}>
+                {(summary.avg_health_score ?? 0).toFixed(0)}
               </p>
               <span className="text-muted-foreground text-sm mb-1">/ 100</span>
             </div>
             <div className="h-1.5 w-full bg-muted rounded-full overflow-hidden mt-2">
               <div
-                className={cn('h-full rounded-full', healthScoreBarCls(summary.org_health_score))}
-                style={{ width: `${Math.min(100, summary.org_health_score)}%` }}
+                className={cn('h-full rounded-full', healthScoreBarCls(summary.avg_health_score))}
+                style={{ width: `${Math.min(100, summary.avg_health_score)}%` }}
               />
             </div>
           </SectionCard>
 
-          {/* Trend */}
+          {/* At-risk employees */}
           <SectionCard>
             <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide mb-1">
-              Trend
+              At-Risk Employees
             </p>
             <div className="flex items-center gap-2 mt-1">
-              {trendUp && <TrendingUp className="h-6 w-6 text-success" />}
-              {trendDown && <TrendingDown className="h-6 w-6 text-destructive" />}
-              {!trendUp && !trendDown && <Activity className="h-6 w-6 text-muted-foreground" />}
-              <p className={cn(
-                'text-lg font-semibold capitalize',
-                trendUp ? 'text-success' : trendDown ? 'text-destructive' : 'text-muted-foreground',
-              )}>
-                {trend || '—'}
-              </p>
-            </div>
-          </SectionCard>
-
-          {/* At-risk departments */}
-          <SectionCard>
-            <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide mb-1">
-              At-Risk Departments
-            </p>
-            <div className="flex items-center gap-2 mt-1">
-              <Building2 className={cn('h-5 w-5', summary.at_risk_departments > 0 ? 'text-destructive' : 'text-success')} />
-              <p className={cn('text-3xl font-bold tabular-nums', summary.at_risk_departments > 0 ? 'text-destructive' : 'text-success')}>
-                {summary.at_risk_departments}
+              <Building2 className={cn('h-5 w-5', summary.at_risk > 0 ? 'text-destructive' : 'text-success')} />
+              <p className={cn('text-3xl font-bold tabular-nums', summary.at_risk > 0 ? 'text-destructive' : 'text-success')}>
+                {summary.at_risk}
               </p>
             </div>
             <p className="text-[10px] text-muted-foreground mt-0.5">
-              {summary.at_risk_departments > 0 ? 'Departments need attention' : 'All departments healthy'}
+              {summary.at_risk > 0 ? 'Employees need attention' : 'All employees healthy'}
             </p>
           </SectionCard>
         </div>
@@ -375,7 +357,7 @@ export function HealthIndex() {
               <option value="employee">Employee</option>
               <option value="department">Department</option>
               <option value="site">Site</option>
-              <option value="org">Org</option>
+              <option value="tenant">Org</option>
             </select>
           </div>
           {computeError && (

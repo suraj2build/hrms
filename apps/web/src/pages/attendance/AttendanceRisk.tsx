@@ -48,10 +48,13 @@ interface RiskProfile {
   }
 }
 
+// Matches GET /attendance/risk/summary's actual (unwrapped, no `data` key)
+// response shape — by_level is an object keyed by level, not an array.
 interface RiskSummary {
-  avg_risk_score: number
-  high_risk_count: number
-  employees_by_level: Array<{ level: string; count: number }>
+  by_level:         Record<'low' | 'medium' | 'high' | 'critical', number>
+  total_employees:  number
+  avg_risk_score:   number
+  elevated_pct:     number
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -122,7 +125,7 @@ export function AttendanceRisk() {
     staleTime: 60_000,
   })
 
-  const { data: summaryData, refetch: refetchSummary } = useQuery<{ data: RiskSummary }>({
+  const { data: summary, refetch: refetchSummary } = useQuery<RiskSummary>({
     queryKey: ['risk-summary', loadedPeriod],
     queryFn:  () => api.get(`/attendance/risk/summary?period_end=${loadedPeriod}`),
     enabled:  isAdmin,
@@ -172,7 +175,6 @@ export function AttendanceRisk() {
   }
 
   const profiles = listData?.data ?? []
-  const summary  = summaryData?.data
 
   const levelOrder: RiskLevel[] = ['critical', 'high', 'medium', 'low']
 
@@ -212,41 +214,37 @@ export function AttendanceRisk() {
           />
           <MetricCard
             label="High-Risk Employees"
-            value={summary.high_risk_count}
+            value={summary.by_level.high + summary.by_level.critical}
             subtitle="high + critical level"
             icon={AlertTriangle}
-            variant={summary.high_risk_count > 0 ? 'destructive' : 'success'}
+            variant={(summary.by_level.high + summary.by_level.critical) > 0 ? 'destructive' : 'success'}
           />
-          {levelOrder.slice(0, 2).map(lvl => {
-            const entry = summary.employees_by_level.find(e => e.level === lvl)
-            return (
-              <MetricCard
-                key={lvl}
-                label={`${lvl.charAt(0).toUpperCase() + lvl.slice(1)} Risk`}
-                value={entry?.count ?? 0}
-                subtitle="employees"
-                icon={Users}
-                variant={
-                  lvl === 'critical' || lvl === 'high' ? 'destructive'
-                  : lvl === 'medium' ? 'warning'
-                  : 'success'
-                }
-              />
-            )
-          })}
+          {levelOrder.slice(0, 2).map(lvl => (
+            <MetricCard
+              key={lvl}
+              label={`${lvl.charAt(0).toUpperCase() + lvl.slice(1)} Risk`}
+              value={summary.by_level[lvl] ?? 0}
+              subtitle="employees"
+              icon={Users}
+              variant={
+                lvl === 'critical' || lvl === 'high' ? 'destructive'
+                : lvl === 'medium' ? 'warning'
+                : 'success'
+              }
+            />
+          ))}
         </MetricRow>
       )}
 
       {/* Distribution mini-bar */}
-      {summary?.employees_by_level && summary.employees_by_level.length > 0 && (
+      {summary && summary.total_employees > 0 && (
         <SectionCard
           title="Risk Level Distribution"
           icon={<TrendingUp className="h-4 w-4 text-muted-foreground" />}
         >
           <div className="flex flex-wrap gap-4">
             {levelOrder.map(lvl => {
-              const entry = summary.employees_by_level.find(e => e.level === lvl)
-              const count = entry?.count ?? 0
+              const count = summary.by_level[lvl] ?? 0
               return (
                 <div key={lvl} className="flex items-center gap-2">
                   <Badge

@@ -13,6 +13,7 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -115,7 +116,41 @@ export default async function attendanceHealthIndexRoute(fastify: FastifyInstanc
       return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch health scores' })
     }
 
-    return reply.send({ data: data ?? [], total: count ?? 0, limit, offset })
+    // scope_id is a bare string whose meaning depends on scope (employee_id /
+    // department_id / site_id / tenant_id) — resolve a human-readable name
+    // per scope type so the UI isn't stuck rendering raw UUIDs.
+    const rows = (data ?? []) as any[]
+    const idsByScope: Record<string, Set<string>> = { employee: new Set(), department: new Set(), site: new Set() }
+    for (const r of rows) {
+      if (r.scope === 'employee' || r.scope === 'department' || r.scope === 'site') {
+        idsByScope[r.scope].add(r.scope_id)
+      }
+    }
+    const nameMap = new Map<string, string>()
+    const [empRes, deptRes, siteRes] = await Promise.all([
+      idsByScope.employee.size
+        ? fastify.supabase.from('employees').select('id, first_name, last_name, employee_code').eq('tenant_id', req.tenantId).in('id', [...idsByScope.employee])
+        : Promise.resolve({ data: [], error: null }),
+      idsByScope.department.size
+        ? fastify.supabase.from('departments').select('id, name').eq('tenant_id', req.tenantId).in('id', [...idsByScope.department])
+        : Promise.resolve({ data: [], error: null }),
+      idsByScope.site.size
+        ? fastify.supabase.from('sites').select('id, name').eq('tenant_id', req.tenantId).in('id', [...idsByScope.site])
+        : Promise.resolve({ data: [], error: null }),
+    ])
+    if (empRes.error) return serverError(req, reply, empRes.error, ErrorCode.QUERY_FAILED, 'Failed to resolve employee names')
+    if (deptRes.error) return serverError(req, reply, deptRes.error, ErrorCode.QUERY_FAILED, 'Failed to resolve department names')
+    if (siteRes.error) return serverError(req, reply, siteRes.error, ErrorCode.QUERY_FAILED, 'Failed to resolve site names')
+    for (const e of (empRes.data ?? []) as any[]) nameMap.set(e.id, `${e.first_name} ${e.last_name} (${e.employee_code})`)
+    for (const d of (deptRes.data ?? []) as any[]) nameMap.set(d.id, d.name)
+    for (const s of (siteRes.data ?? []) as any[]) nameMap.set(s.id, s.name)
+
+    const enriched = rows.map(r => ({
+      ...r,
+      scope_name: r.scope === 'tenant' ? 'Organization' : (nameMap.get(r.scope_id) ?? null),
+    }))
+
+    return reply.send({ data: enriched, total: count ?? 0, limit, offset })
   })
 
   // ── GET /attendance/health-index/summary ──────────────────────────────────
