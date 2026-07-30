@@ -32,7 +32,9 @@ export class OperationalIntelligenceListener extends GovernanceListener {
           severity:    securitySignal.severity,
         })
       }
-    } catch { /* non-fatal */ }
+    } catch (err) {
+      console.warn('[OperationalIntelligenceListener] security intelligence step failed', { tenant_id: event.tenant_id, event_type: event.event_type, err })
+    }
 
     // 2. SLA tracking for leave/approval events
     try {
@@ -42,13 +44,17 @@ export class OperationalIntelligenceListener extends GovernanceListener {
       if (event.event_type === 'leave.approved' || event.event_type === 'leave.rejected' || event.event_type === 'leave.cancelled') {
         slaService.resolve('approval-pending', event.entity_id)
       }
-    } catch { /* non-fatal */ }
+    } catch (err) {
+      console.warn('[OperationalIntelligenceListener] SLA tracking step failed', { tenant_id: event.tenant_id, event_type: event.event_type, err })
+    }
 
     // 3. Automation execution (needs supabase for audit log)
     if (this.supabase) {
       try {
         automationExecutor.execute(this.supabase, event)
-      } catch { /* non-fatal */ }
+      } catch (err) {
+        console.warn('[OperationalIntelligenceListener] automation execution step failed', { tenant_id: event.tenant_id, event_type: event.event_type, err })
+      }
     }
   }
 }

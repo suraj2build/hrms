@@ -45,7 +45,9 @@ export class FabricOrchestrationListener extends GovernanceListener {
         actor_id:    event.actor_id,
         metadata:    { event_type: event.event_type, module: event.module, severity: event.severity },
       })
-    } catch { /* non-fatal */ }
+    } catch (err) {
+      console.warn('[FabricOrchestrationListener] decision-graph record failed', { tenant_id: event.tenant_id, event_type: event.event_type, err })
+    }
   }
 
   private mapEventToNodeType(eventType: string): DecisionNodeType | null {

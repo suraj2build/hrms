@@ -127,6 +127,7 @@ class EventTraceService {
 
     // Wire parent→child relationships
     let rootNode: EventTraceNode | undefined
+    let rootEvent: ResolvedPlatformEvent | undefined
     for (const e of events) {
       const node = nodeMap.get(e.event_id)!
       // Guard a self-referencing parent_event_id — pushing a node into its
@@ -136,8 +137,15 @@ class EventTraceService {
         if (parent) {
           parent.children.push(node)
         }
-      } else {
-        rootNode = node
+      } else if (!rootEvent || new Date(e.timestamp).getTime() < new Date(rootEvent.timestamp).getTime()) {
+        // A chain can have more than one parentless event (independently
+        // fired signals sharing a correlation_id with no explicit link) —
+        // keep the earliest one as root, matching getCorrelationChain()'s
+        // own `.find(e => !e.parent_event_id)` semantics, rather than
+        // letting the chronologically last one silently win and orphan an
+        // earlier (possibly deeper) subtree from the rendered tree.
+        rootNode  = node
+        rootEvent = e
       }
     }
 

@@ -33,11 +33,15 @@ export class ComplianceEvaluator {
     const matches = governanceRuleRegistry.evaluate(event)
     const violations = matches.map(m => m.reason)
 
-    // Compute highest severity across all matches
+    // Compute highest severity across all matches, and track which match
+    // is actually responsible for it — explainability must cite that rule,
+    // not just whichever rule happened to be registered first.
     let maxSeverity: EventSeverity = 'info'
+    let maxSeverityMatch: typeof matches[number] | undefined
     for (const m of matches) {
-      if (SEVERITY_ORDER[m.severity] > SEVERITY_ORDER[maxSeverity]) {
+      if (!maxSeverityMatch || SEVERITY_ORDER[m.severity] > SEVERITY_ORDER[maxSeverity]) {
         maxSeverity = m.severity
+        maxSeverityMatch = m
       }
     }
 
@@ -47,7 +51,7 @@ export class ComplianceEvaluator {
           entity_type: event.entity_type,
           entity_id:   event.entity_id,
           payload:     event.payload,
-          rule_name:   matches[0]?.rule.name,
+          rule_name:   maxSeverityMatch?.rule.name,
           severity:    maxSeverity,
         })
       : undefined

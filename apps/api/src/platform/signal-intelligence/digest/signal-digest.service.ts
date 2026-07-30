@@ -1,8 +1,29 @@
 import type { PlatformSignal, SignalDigest } from '../types/signal-types.js'
 
+const PERIOD_RE = /^last_(\d+)([hdm])$/
+
+/** Parse a "last_Nh"/"last_Nd"/"last_Nm" period label into milliseconds, or null if unrecognized. */
+function periodToMs(period: string): number | null {
+  const m = PERIOD_RE.exec(period)
+  if (!m) return null
+  const n = Number(m[1])
+  const unitMs = m[2] === 'h' ? 3_600_000 : m[2] === 'd' ? 86_400_000 : 60_000
+  return n * unitMs
+}
+
 export class SignalDigestService {
   compute(orgId: string, signals: PlatformSignal[], period = 'last_1h'): SignalDigest {
-    const orgSignals = signals.filter(s => s.tenant_id === orgId)
+    const windowMs = periodToMs(period)
+    // The response labels itself with `period` — the aggregation must actually
+    // be bounded to that window, or a caller sending signals spanning days
+    // while claiming "last_1h" gets a digest that silently over-reports
+    // relative to its own stated window. Unrecognized period labels fall back
+    // to no time filtering (tenant-scoping still applies) since there's no
+    // window to enforce.
+    const cutoff = windowMs != null ? Date.now() - windowMs : null
+    const orgSignals = signals.filter(s =>
+      s.tenant_id === orgId && (cutoff == null || new Date(s.timestamp).getTime() >= cutoff),
+    )
 
     const by_severity: Record<string, number> = {}
     const by_source:   Record<string, number> = {}
