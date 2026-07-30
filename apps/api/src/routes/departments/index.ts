@@ -109,39 +109,33 @@ export default async function orgRoutes(fastify: FastifyInstance) {
     const parsed = deptSchema.safeParse(req.body)
     if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION', message: parsed.error.errors[0]?.message })
 
-    // Circular-reference guard (fresh audit finding) — unlike
-    // employees/manager.ts's manager_id update, this had no self-parent
-    // check and no ancestor-chain walk. Two successive edits (set A's
-    // parent to B, then B's parent to A) create a cycle that silently
-    // drops both departments from the org-chart tree (Organization.tsx's
-    // buildTree() pushes each into the other's children and neither ends
-    // up in roots), with no error surfaced anywhere.
-    if (parsed.data.parent_id) {
-      if (parsed.data.parent_id === id) {
-        return reply.code(422).send({ error: 'CIRCULAR_REFERENCE', message: 'A department cannot be its own parent.' })
-      }
+    // reassign_department_parent_atomic() (migration 415) does the
+    // ancestor-chain walk and the parent_id update inside one transaction,
+    // serialized against every other department reassignment for this
+    // tenant via an advisory lock — an app-layer chain-walk followed by a
+    // separate UPDATE (the old shape) left a gap where two concurrent PUTs
+    // could together form a cycle neither one individually would create.
+    const { parent_id, ...rest } = parsed.data
+    if (parent_id !== undefined) {
+      const { data: rpcData, error: rpcErr } = await fastify.supabase
+        .rpc('reassign_department_parent_atomic', {
+          p_tenant_id:     req.tenantId,
+          p_department_id: id,
+          p_new_parent_id: parent_id,
+          p_max_depth:     MAX_PARENT_DEPTH,
+        })
+        .single()
+      if (rpcErr) return serverError(req, reply, rpcErr, ErrorCode.UPDATE_FAILED, 'Failed to update department')
 
-      const { data: newParent } = await fastify.supabase
-        .from('departments').select('id').eq('id', parsed.data.parent_id).eq('tenant_id', req.tenantId).maybeSingle()
-      if (!newParent) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Parent department not found in this tenant' })
-
-      let cursor: string | null = parsed.data.parent_id
-      let depth = 0
-      while (cursor && depth < MAX_PARENT_DEPTH) {
-        const { data: node } = await fastify.supabase
-          .from('departments').select('parent_id').eq('id', cursor).eq('tenant_id', req.tenantId).maybeSingle()
-        const nodeRow = node as { parent_id: string | null } | null
-        if (!nodeRow) break
-        cursor = nodeRow.parent_id
-        depth++
-        if (cursor === id) {
-          return reply.code(422).send({ error: 'CIRCULAR_REFERENCE', message: 'Setting this parent would create a circular department hierarchy.' })
-        }
-      }
+      const outcome = (rpcData as { outcome: string } | null)?.outcome
+      if (outcome === 'not_found')        return reply.code(404).send({ error: 'NOT_FOUND', message: 'Department not found' })
+      if (outcome === 'parent_not_found') return reply.code(404).send({ error: 'NOT_FOUND', message: 'Parent department not found in this tenant' })
+      if (outcome === 'self_reference')   return reply.code(422).send({ error: 'CIRCULAR_REFERENCE', message: 'A department cannot be its own parent.' })
+      if (outcome === 'cycle')            return reply.code(422).send({ error: 'CIRCULAR_REFERENCE', message: 'Setting this parent would create a circular department hierarchy.' })
     }
 
     const { data, error } = await fastify.supabase
-      .from('departments').update(parsed.data).eq('id', id).eq('tenant_id', req.tenantId).select().single()
+      .from('departments').update(rest).eq('id', id).eq('tenant_id', req.tenantId).select().single()
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update department')
     return reply.send(data)
   })

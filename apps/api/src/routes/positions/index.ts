@@ -310,27 +310,6 @@ export default async function positionsRoutes(fastify: FastifyInstance) {
     const tid = req.tenantId
     const abolish = (req.body as any)?.abolish === true
 
-    const [reqRes, jhRes] = await Promise.all([
-      fastify.supabase.from('job_requisitions').select('*', { count: 'exact', head: true })
-        .eq('position_id', id).eq('tenant_id', tid),
-      fastify.supabase.from('job_history').select('*', { count: 'exact', head: true })
-        .eq('position_id', id).eq('tenant_id', tid).eq('is_current', true),
-    ])
-    if (reqRes.error) return serverError(req, reply, reqRes.error, ErrorCode.QUERY_FAILED, 'Failed to check position usage')
-    if (jhRes.error)  return serverError(req, reply, jhRes.error, ErrorCode.QUERY_FAILED, 'Failed to check position usage')
-
-    const usageCount = (reqRes.count ?? 0) + (jhRes.count ?? 0)
-
-    // Referenced positions are soft-retired (abolished) so history/requisitions
-    // keep their FK intact (ON DELETE SET NULL would orphan them otherwise).
-    if (usageCount > 0 && !abolish) {
-      return reply.code(409).send({
-        error: 'IN_USE',
-        usageCount,
-        message: 'Position is referenced by requisitions or current occupants. Pass abolish=true to retire it instead.',
-      })
-    }
-
     if (abolish) {
       const { data, error } = await fastify.supabase
         .from('positions')
@@ -342,10 +321,25 @@ export default async function positionsRoutes(fastify: FastifyInstance) {
       return reply.code(200).send({ data: { abolished: true } })
     }
 
+    // delete_position_atomic() (migration 410) folds the "still referenced?"
+    // check and the delete into one transaction — a row lock on the position
+    // serializes this against a concurrent hire/requisition insert, which
+    // would otherwise race the check and get silently orphaned by
+    // ON DELETE SET NULL once this proceeds to delete.
     const { data, error } = await fastify.supabase
-      .from('positions').delete().eq('id', id).eq('tenant_id', tid).select('id').maybeSingle()
+      .rpc('delete_position_atomic', { p_tenant_id: tid, p_position_id: id })
+      .single()
     if (error) return serverError(req, reply, error, ErrorCode.DELETE_FAILED, 'Failed to delete position')
-    if (!data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Position not found' })
+
+    const result = data as { outcome: string; usage_count: number } | null
+    if (result?.outcome === 'not_found') return reply.code(404).send({ error: 'NOT_FOUND', message: 'Position not found' })
+    if (result?.outcome === 'in_use') {
+      return reply.code(409).send({
+        error: 'IN_USE',
+        usageCount: result.usage_count,
+        message: 'Position is referenced by requisitions or current occupants. Pass abolish=true to retire it instead.',
+      })
+    }
     return reply.code(204).send()
   })
 }

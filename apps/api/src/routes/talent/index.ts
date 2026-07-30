@@ -254,59 +254,36 @@ export default async function talentRoutes(fastify: FastifyInstance) {
     if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message ?? 'Invalid request body' })
     const { role_id, cover_note, skills, availability } = parsed.data
 
-    // Verify role is open
-    const { data: role } = await supabase
-      .from('talent_roles')
-      .select('id, is_open')
-      .eq('id', role_id)
-      .eq('tenant_id', req.tenantId)
-      .maybeSingle()
-    if (!role) return reply.code(404).send({ error: 'Role not found' })
-    if (!role.is_open) return reply.code(409).send({ error: 'This role is no longer accepting interest' })
-
     const VALID_AVAIL = ['immediate', '1_month', '3_months', 'open']
-    const rowFields = {
-      cover_note:  cover_note   ?? null,
-      skills:      skills        ?? [],
-      availability: availability != null && VALID_AVAIL.includes(availability) ? availability : 'open',
-      status:      'interested',
-    }
 
-    // An existing row that HR has already reviewed (shortlisted/selected/
-    // not_selected) must not be silently reset to 'interested' by the
-    // applicant re-registering — the RLS UPDATE policy only checks
-    // employee_id ownership, not status, so the app layer is the only gate.
-    const { data: existing, error: existingErr } = await supabase
-      .from('talent_interests')
-      .select('id, status')
-      .eq('tenant_id', req.tenantId).eq('role_id', role_id).eq('employee_id', employeeId)
-      .maybeSingle()
-    if (existingErr) return serverError(req, reply, existingErr, ErrorCode.QUERY_FAILED, 'Failed to check existing interest')
-
-    if (existing) {
-      if (!['interested', 'withdrawn'].includes(existing.status)) {
-        return reply.code(409).send({ error: 'ALREADY_REVIEWED', message: 'This role has already been reviewed for you — your interest can no longer be edited.' })
-      }
-      const { data, error } = await supabase
-        .from('talent_interests')
-        .update(rowFields)
-        .eq('id', existing.id)
-        .in('status', ['interested', 'withdrawn'])
-        .select('id')
-        .maybeSingle()
-      if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to register interest')
-      if (!data) return reply.code(409).send({ error: 'ALREADY_REVIEWED', message: 'This role has already been reviewed for you — your interest can no longer be edited.' })
-      return reply.code(201).send({ data })
-    }
-
+    // register_talent_interest_atomic() (migration 413) checks
+    // talent_roles.is_open and does the interest insert/update in one
+    // transaction, taking a row lock on the role so a concurrent "close
+    // role" update can't land in the gap between the check and the write —
+    // the role-open check and the app-layer already-reviewed guard (an
+    // applicant re-registering must not silently reset a reviewed
+    // shortlisted/selected/not_selected row back to 'interested') both move
+    // inside the same atomic call.
     const { data, error } = await supabase
-      .from('talent_interests')
-      .insert({ tenant_id: req.tenantId, role_id, employee_id: employeeId, ...rowFields })
-      .select('id')
+      .rpc('register_talent_interest_atomic', {
+        p_tenant_id:    req.tenantId,
+        p_role_id:      role_id,
+        p_employee_id:  employeeId,
+        p_cover_note:   cover_note ?? null,
+        p_skills:       skills ?? [],
+        p_availability: availability != null && VALID_AVAIL.includes(availability) ? availability : 'open',
+        p_status:       'interested',
+      })
       .single()
-
     if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to register interest')
-    return reply.code(201).send({ data })
+
+    const result = data as { outcome: string; interest_id: string | null } | null
+    if (result?.outcome === 'role_not_found') return reply.code(404).send({ error: 'Role not found' })
+    if (result?.outcome === 'role_not_open')  return reply.code(409).send({ error: 'This role is no longer accepting interest' })
+    if (result?.outcome === 'already_reviewed') {
+      return reply.code(409).send({ error: 'ALREADY_REVIEWED', message: 'This role has already been reviewed for you — your interest can no longer be edited.' })
+    }
+    return reply.code(201).send({ data: { id: result?.interest_id } })
   })
 
   // ── ESS: my interests ────────────────────────────────────────────────────────

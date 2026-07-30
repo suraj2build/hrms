@@ -182,19 +182,28 @@ export default async function essSelfServiceRoutes(fastify: FastifyInstance) {
     return reply.send({ data })
   })
 
+  // Neither route ever writes is_primary=true directly — the partial unique
+  // index backing "at most one primary contact per employee" (migration 412)
+  // would reject a plain insert/update doing so whenever another contact is
+  // already primary. set_primary_emergency_contact_atomic() clears the old
+  // primary and sets the new one in a single transaction instead.
   fastify.post('/ess/me/emergency-contacts', auth, async (req: any, reply) => {
     const empId = await selfOr400(req, reply); if (!empId) return
     const parsed = emergencyContactSchema.safeParse(req.body)
     if (!parsed.success) return validationError(reply, ErrorCode.VALIDATION_ERROR, parsed.error.issues[0].message)
-    if (parsed.data.is_primary) {
-      await fastify.supabase.from('emergency_contacts')
-        .update({ is_primary: false }).eq('employee_id', empId).eq('tenant_id', req.tenantId)
-    }
+    const { is_primary, ...rest } = parsed.data
     const { data, error } = await fastify.supabase
       .from('emergency_contacts')
-      .insert({ ...parsed.data, employee_id: empId, tenant_id: req.tenantId })
+      .insert({ ...rest, is_primary: false, employee_id: empId, tenant_id: req.tenantId })
       .select().single()
     if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create emergency contact')
+    if (is_primary) {
+      const { error: primErr } = await fastify.supabase.rpc('set_primary_emergency_contact_atomic', {
+        p_tenant_id: req.tenantId, p_employee_id: empId, p_contact_id: data.id,
+      })
+      if (primErr) return serverError(req, reply, primErr, ErrorCode.UPDATE_FAILED, 'Failed to set primary contact')
+      data.is_primary = true
+    }
     return reply.code(201).send(data)
   })
 
@@ -202,17 +211,22 @@ export default async function essSelfServiceRoutes(fastify: FastifyInstance) {
     const empId = await selfOr400(req, reply); if (!empId) return
     const parsed = emergencyContactSchema.partial().safeParse(req.body)
     if (!parsed.success) return validationError(reply, ErrorCode.VALIDATION_ERROR, parsed.error.issues[0].message)
-    if (parsed.data.is_primary) {
-      await fastify.supabase.from('emergency_contacts')
-        .update({ is_primary: false }).eq('employee_id', empId).eq('tenant_id', req.tenantId)
-        .neq('id', req.params.contactId)
-    }
+    const { is_primary, ...rest } = parsed.data
+    const updatePayload: Record<string, unknown> = { ...rest }
+    if (is_primary !== undefined) updatePayload.is_primary = false
     const { data, error } = await fastify.supabase
-      .from('emergency_contacts').update(parsed.data)
+      .from('emergency_contacts').update(updatePayload)
       .eq('id', req.params.contactId).eq('employee_id', empId).eq('tenant_id', req.tenantId)
       .select().single()
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update emergency contact')
     if (!data) return notFound(reply, 'NOT_FOUND', 'Contact not found')
+    if (is_primary) {
+      const { error: primErr } = await fastify.supabase.rpc('set_primary_emergency_contact_atomic', {
+        p_tenant_id: req.tenantId, p_employee_id: empId, p_contact_id: req.params.contactId,
+      })
+      if (primErr) return serverError(req, reply, primErr, ErrorCode.UPDATE_FAILED, 'Failed to set primary contact')
+      data.is_primary = true
+    }
     return reply.send(data)
   })
 

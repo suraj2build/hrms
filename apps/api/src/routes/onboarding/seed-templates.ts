@@ -95,17 +95,22 @@ export default async function seedOnboardingTemplatesRoutes(fastify: FastifyInst
     const created: string[] = []
 
     for (const tpl of DEFAULT_TEMPLATES) {
-      const { data: template, error: tplErr } = await fastify.supabase
+      // ignoreDuplicates + the unique (tenant_id, name) index (migration 411)
+      // makes a concurrent seed request's insert of an already-created
+      // template a no-op instead of a duplicate row — .select() then
+      // returns no data for a skipped row, so the loser of the race falls
+      // through the `!template` guard below without inserting items again.
+      const { data: templates, error: tplErr } = await fastify.supabase
         .from('onboarding_checklist_templates')
-        .insert({
+        .upsert({
           tenant_id:   req.tenantId,
           name:        tpl.name,
           description: tpl.description,
           is_default:  tpl.is_default,
           is_active:   true,
-        })
+        }, { onConflict: 'tenant_id,name', ignoreDuplicates: true })
         .select('id')
-        .single()
+      const template = templates?.[0]
 
       if (tplErr || !template) continue
 

@@ -215,39 +215,26 @@ export async function seedStandardComponents(
   return ok({ created, skipped: rows.length - created, total: rows.length }, 201)
 }
 
-/** Soft-delete when referenced by a structure; hard-delete otherwise. */
+/**
+ * Soft-delete when referenced by a structure; hard-delete otherwise.
+ *
+ * The reference-check and the delete/deactivate happen inside one RPC
+ * transaction (delete_salary_component_atomic, migration 409) — a row lock
+ * on the component serializes this against a concurrent
+ * addStructureComponent() insert, which would otherwise race the check and
+ * get silently cascade-deleted once this proceeds to a hard delete.
+ */
 export async function deleteComponent(
   supabase: SupabaseClient, tenantId: string, id: string,
 ): Promise<StoreResult> {
-  const { count, error: countErr } = await supabase
-    .from('salary_structure_components')
-    .select('id', { count: 'exact', head: true })
-    .eq('salary_component_id', id)
-    .eq('tenant_id', tenantId)
-  if (countErr) return dbFail(countErr)
-
-  if ((count ?? 0) > 0) {
-    const { data, error } = await supabase
-      .from('salary_components')
-      .update({ is_active: false })
-      .eq('id', id)
-      .eq('tenant_id', tenantId)
-      .select('id')
-      .maybeSingle()
-    if (error) return dbFail(error)
-    if (!data) return fail(404, 'NOT_FOUND', 'Salary component not found')
-    return ok({ message: 'Component deactivated (referenced in salary structures)' }, 200)
-  }
-
   const { data, error } = await supabase
-    .from('salary_components')
-    .delete()
-    .eq('id', id)
-    .eq('tenant_id', tenantId)
-    .select('id')
-    .maybeSingle()
+    .rpc('delete_salary_component_atomic', { p_tenant_id: tenantId, p_component_id: id })
+    .single()
   if (error) return dbFail(error)
-  if (!data) return fail(404, 'NOT_FOUND', 'Salary component not found')
+
+  const outcome = (data as { outcome: string } | null)?.outcome
+  if (outcome === 'not_found')   return fail(404, 'NOT_FOUND', 'Salary component not found')
+  if (outcome === 'deactivated') return ok({ message: 'Component deactivated (referenced in salary structures)' }, 200)
   return noData(204)
 }
 
