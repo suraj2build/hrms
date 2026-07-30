@@ -18,6 +18,36 @@ function requireHrAdmin(req: any, reply: any, done: () => void) {
   done()
 }
 
+// Batch-resolves entity_id -> employee name/code for entity_type === 'employee'
+// rows, so compliance-alert/risk-summary panels show who a row is about
+// instead of a raw entity_type:entity_id grouping key. platform_events has
+// no denormalized name column, so this is a runtime join against employees.
+async function buildEmployeeNameMap(
+  fastify: FastifyInstance,
+  tenantId: string,
+  rows: Array<{ entity_id: string; entity_type: string }>,
+): Promise<Record<string, { name: string; employee_code: string }>> {
+  const employeeIds = rows
+    .filter(r => r.entity_type === 'employee')
+    .map(r => r.entity_id)
+
+  const nameMap: Record<string, { name: string; employee_code: string }> = {}
+  if (employeeIds.length === 0) return nameMap
+
+  const { data: emps } = await fastify.supabase
+    .from('employees')
+    .select('id, first_name, last_name, employee_code')
+    .eq('tenant_id', tenantId)
+    .in('id', employeeIds)
+  for (const e of (emps ?? []) as any[]) {
+    nameMap[e.id] = {
+      name:          [e.first_name, e.last_name].filter(Boolean).join(' ') || `Employee ${e.employee_code ?? ''}`,
+      employee_code: e.employee_code ?? '',
+    }
+  }
+  return nameMap
+}
+
 export default async function intelligenceRoutes(fastify: FastifyInstance) {
   // These are company-wide governance/compliance feeds (platform events,
   // risk scores, open incidents across all employees) — contrast with
@@ -64,7 +94,15 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
     ])
     if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch compliance alerts')
     if (countError) return serverError(req, reply, countError, ErrorCode.QUERY_FAILED, 'Failed to count compliance alerts')
-    return { alerts: data ?? [], total: count ?? (data ?? []).length }
+
+    const alerts = data ?? []
+    const nameMap = await buildEmployeeNameMap(fastify, tenantId, alerts)
+    const enriched = alerts.map((a: any) => ({
+      ...a,
+      employee_name: nameMap[a.entity_id]?.name          ?? null,
+      employee_code: nameMap[a.entity_id]?.employee_code ?? null,
+    }))
+    return { alerts: enriched, total: count ?? enriched.length }
   })
 
   // ── GET /governance/risk/summary ──────────────────────────────────────────
@@ -108,7 +146,14 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
     const risks = [...entityMap.values()]
       .sort((a, b) => b.score - a.score)
       .slice(0, 20)
-    return { risks, total: totalEntities }
+
+    const nameMap = await buildEmployeeNameMap(fastify, tenantId, risks)
+    const enrichedRisks = risks.map(r => ({
+      ...r,
+      employee_name: nameMap[r.entity_id]?.name          ?? null,
+      employee_code: nameMap[r.entity_id]?.employee_code ?? null,
+    }))
+    return { risks: enrichedRisks, total: totalEntities }
   })
 
   // ── GET /governance/incidents ─────────────────────────────────────────────

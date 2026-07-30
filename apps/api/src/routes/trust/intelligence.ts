@@ -15,6 +15,37 @@ import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { serverError, notFound, ErrorCode } from '../../lib/api-errors.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
 
+// Batch-resolves entity_id -> employee name/code for score_type/entity_type
+// === 'employee' rows, so identity-fraud panels (trust scores, verification
+// events, duplicate-detection events) show who a row is about instead of a
+// bare UUID/generic type label. None of these tables store a denormalized
+// name column, so this is a runtime join against employees.
+async function buildEmployeeNameMap(
+  fastify: FastifyInstance,
+  tenantId: string,
+  rows: Array<{ entity_id: string; entity_type?: string; score_type?: string }>,
+): Promise<Record<string, { name: string; employee_code: string }>> {
+  const employeeIds = rows
+    .filter(r => (r.entity_type ?? r.score_type) === 'employee')
+    .map(r => r.entity_id)
+
+  const nameMap: Record<string, { name: string; employee_code: string }> = {}
+  if (employeeIds.length === 0) return nameMap
+
+  const { data: emps } = await fastify.supabase
+    .from('employees')
+    .select('id, first_name, last_name, employee_code')
+    .eq('tenant_id', tenantId)
+    .in('id', employeeIds)
+  for (const e of (emps ?? []) as any[]) {
+    nameMap[e.id] = {
+      name:          [e.first_name, e.last_name].filter(Boolean).join(' ') || `Employee ${e.employee_code ?? ''}`,
+      employee_code: e.employee_code ?? '',
+    }
+  }
+  return nameMap
+}
+
 export default async function trustIntelligenceRoutes(fastify: FastifyInstance) {
   // Almost every route below is tenant-wide or takes an arbitrary
   // employeeId with no ownership check — trust scores, duplicate-detection
@@ -98,7 +129,15 @@ export default async function trustIntelligenceRoutes(fastify: FastifyInstance) 
       .order('detected_at', { ascending: false })
       .limit(Number(limit))
     if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch duplicate detection events')
-    return { duplicates: data ?? [], total: (data ?? []).length }
+
+    const duplicates = data ?? []
+    const nameMap = await buildEmployeeNameMap(fastify, tenantId, duplicates)
+    const enriched = duplicates.map((d: any) => ({
+      ...d,
+      employee_name: nameMap[d.entity_id]?.name          ?? null,
+      employee_code: nameMap[d.entity_id]?.employee_code ?? null,
+    }))
+    return { duplicates: enriched, total: enriched.length }
   })
 
   /**
@@ -117,7 +156,15 @@ export default async function trustIntelligenceRoutes(fastify: FastifyInstance) 
     if (employee_id) q = q.eq('entity_id', employee_id)
     const { data, error } = await q
     if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch verification events')
-    return { verifications: data ?? [], total: (data ?? []).length }
+
+    const verifications = data ?? []
+    const nameMap = await buildEmployeeNameMap(fastify, tenantId, verifications)
+    const enriched = verifications.map((v: any) => ({
+      ...v,
+      employee_name: nameMap[v.entity_id]?.name          ?? null,
+      employee_code: nameMap[v.entity_id]?.employee_code ?? null,
+    }))
+    return { verifications: enriched, total: enriched.length }
   })
 
   /**
@@ -142,26 +189,7 @@ export default async function trustIntelligenceRoutes(fastify: FastifyInstance) 
     if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch trust scores')
 
     const scores = data ?? []
-
-    // Enrich employee-type rows with name + code from the employees table
-    const employeeIds = scores
-      .filter((s: any) => s.score_type === 'employee')
-      .map((s: any) => s.entity_id)
-
-    let nameMap: Record<string, { name: string; employee_code: string }> = {}
-    if (employeeIds.length > 0) {
-      const { data: emps } = await fastify.supabase
-        .from('employees')
-        .select('id, first_name, last_name, employee_code')
-        .eq('tenant_id', tenantId)
-        .in('id', employeeIds)
-      for (const e of (emps ?? []) as any[]) {
-        nameMap[e.id] = {
-          name:          [e.first_name, e.last_name].filter(Boolean).join(' ') || `Employee ${e.employee_code ?? ''}`,
-          employee_code: e.employee_code ?? '',
-        }
-      }
-    }
+    const nameMap = await buildEmployeeNameMap(fastify, tenantId, scores)
 
     const enriched = scores.map((s: any) => ({
       ...s,
