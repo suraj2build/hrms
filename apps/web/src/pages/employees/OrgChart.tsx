@@ -28,6 +28,7 @@ import { Button }        from '@/components/ui/button'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
 } from '@/components/ui/dialog'
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar'
 import {
   DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel,
@@ -216,6 +217,7 @@ function ChangeManagerDialog({
   const qc = useQueryClient()
   const [managerSearch, setManagerSearch] = useState('')
   const [picked, setPicked] = useState<EmployeeSearchResult | null>(null)
+  const [confirmRemove, setConfirmRemove] = useState(false)
 
   const { data: searchResp, isFetching } = useQuery<{ data: EmployeeSearchResult[] }>({
     queryKey: ['emp-search-manager', managerSearch],
@@ -251,6 +253,7 @@ function ChangeManagerDialog({
     onClose()
     setManagerSearch('')
     setPicked(null)
+    setConfirmRemove(false)
   }
 
   if (!target) return null
@@ -340,7 +343,7 @@ function ChangeManagerDialog({
               variant="outline"
               className="text-destructive border-destructive/40 hover:bg-destructive/5"
               disabled={mutation.isPending}
-              onClick={() => mutation.mutate({ empId: target.id, managerId: null })}
+              onClick={() => setConfirmRemove(true)}
             >
               Remove Manager
             </Button>
@@ -354,6 +357,16 @@ function ChangeManagerDialog({
           </Button>
         </DialogFooter>
       </DialogContent>
+
+      <ConfirmDialog
+        open={confirmRemove}
+        title="Remove reporting manager"
+        message={`Remove ${target.name}'s reporting manager? They will have no manager until reassigned, and this changes who approves their leave/attendance.`}
+        confirmLabel="Remove Manager"
+        destructive
+        onConfirm={() => { setConfirmRemove(false); mutation.mutate({ empId: target.id, managerId: null }) }}
+        onCancel={() => setConfirmRemove(false)}
+      />
     </Dialog>
   )
 }
