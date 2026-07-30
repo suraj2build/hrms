@@ -51,6 +51,24 @@ export default async function assetsRoutes(fastify: FastifyInstance) {
   const empName = (e: any) =>
     e ? `${e.first_name ?? ''} ${e.last_name ?? ''}`.trim() : null
 
+  // Fresh audit finding: category_id was accepted straight from the request
+  // body with no tenant check on POST/PUT /assets and POST /ess/me/asset-
+  // requests. fastify.supabase runs with the service-role key (bypasses
+  // RLS), so a cross-tenant category_id would insert/update successfully —
+  // permanently cross-linking a record to another tenant's master-data row,
+  // and leaking that tenant's category name back via the asset_categories(name)
+  // FK-embed on every subsequent list read. Mirrors the same "verify FK
+  // belongs to your tenant" check already applied in reimbursements.ts and
+  // recruitment/index.ts for the identical category_id pattern.
+  async function validateCategoryId(categoryId: string | null | undefined, tenantId: string): Promise<{ error: unknown } | { notFound: true } | null> {
+    if (!categoryId) return null
+    const { data, error } = await fastify.supabase
+      .from('asset_categories').select('id').eq('id', categoryId).eq('tenant_id', tenantId).maybeSingle()
+    if (error) return { error }
+    if (!data) return { notFound: true }
+    return null
+  }
+
   // ── GET /assets — list with optional filters ──────────────────────────────
   fastify.get('/assets', auth, async (req: any, reply) => {
     const { status, category_id, search } = req.query as {
@@ -101,6 +119,12 @@ export default async function assetsRoutes(fastify: FastifyInstance) {
     if (!parsed.success)
       return reply.code(400).send({ error: 'VALIDATION', message: parsed.error.issues[0]?.message })
 
+    const catErr = await validateCategoryId(parsed.data.category_id, req.tenantId)
+    if (catErr) {
+      if ('error' in catErr) return serverError(req, reply, catErr.error, ErrorCode.QUERY_FAILED, 'Failed to validate category')
+      return reply.code(400).send({ error: 'INVALID_REFERENCE', message: 'category_id not found in your organisation' })
+    }
+
     const { data, error } = await fastify.supabase
       .from('assets')
       .insert({
@@ -131,6 +155,12 @@ export default async function assetsRoutes(fastify: FastifyInstance) {
     const parsed = updateSchema.safeParse(req.body)
     if (!parsed.success)
       return reply.code(400).send({ error: 'VALIDATION', message: parsed.error.issues[0]?.message })
+
+    const catErr = await validateCategoryId(parsed.data.category_id, req.tenantId)
+    if (catErr) {
+      if ('error' in catErr) return serverError(req, reply, catErr.error, ErrorCode.QUERY_FAILED, 'Failed to validate category')
+      return reply.code(400).send({ error: 'INVALID_REFERENCE', message: 'category_id not found in your organisation' })
+    }
 
     const { data, error } = await fastify.supabase
       .from('assets')
@@ -170,13 +200,28 @@ export default async function assetsRoutes(fastify: FastifyInstance) {
     if (asset.status === 'assigned')
       return reply.code(409).send({ error: 'ASSET_ASSIGNED', message: 'Cannot delete an asset that is currently assigned. Return it first.' })
 
-    const { error } = await fastify.supabase
+    // Fresh audit finding: TOCTOU — the status check above and this DELETE
+    // are separate round-trips with no re-verification. A concurrent
+    // POST /assets/:id/assign between them would flip status to 'assigned'
+    // and this delete would still proceed, cascade-deleting the asset's
+    // entire employee_asset_ledger history (ON DELETE CASCADE) including
+    // the just-created assignment — leaving the employee holding a
+    // physical asset that no longer exists anywhere in the system, with no
+    // audit trail. Folding the status into the WHERE clause makes the
+    // delete a no-op (0 rows affected) if it was assigned in the interim.
+    const { data: deleted, error } = await fastify.supabase
       .from('assets')
       .delete()
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
+      .neq('status', 'assigned')
+      .select('id')
+      .maybeSingle()
 
     if (error) return serverError(req, reply, error, ErrorCode.DELETE_FAILED, 'Failed to delete asset')
+    if (!deleted) {
+      return reply.code(409).send({ error: 'ASSET_ASSIGNED', message: 'Cannot delete an asset that is currently assigned. Return it first.' })
+    }
 
     await logAction(fastify.supabase, {
       tenantId: req.tenantId, tableName: 'assets', recordId: id,
@@ -411,6 +456,11 @@ export default async function assetsRoutes(fastify: FastifyInstance) {
     if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION', message: parsed.error.issues[0]?.message })
     if (!parsed.data.category_id && !parsed.data.item_name) {
       return reply.code(400).send({ error: 'VALIDATION', message: 'Pick a category or describe the item' })
+    }
+    const catErr = await validateCategoryId(parsed.data.category_id, req.tenantId)
+    if (catErr) {
+      if ('error' in catErr) return serverError(req, reply, catErr.error, ErrorCode.QUERY_FAILED, 'Failed to validate category')
+      return reply.code(400).send({ error: 'INVALID_REFERENCE', message: 'category_id not found in your organisation' })
     }
     const { data, error } = await fastify.supabase
       .from('asset_requests')

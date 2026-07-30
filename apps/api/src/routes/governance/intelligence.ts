@@ -41,17 +41,30 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
   })
 
   // ── GET /governance/compliance/alerts ─────────────────────────────────────
+  // Fresh audit finding: `total` was `data.length`, which can never exceed
+  // the `.limit(50)` the query itself requested — a tenant with more than
+  // 50 high/critical events saw the count silently capped with no
+  // truncation signal on a compliance monitoring surface. Parallel
+  // count:'exact',head:true query gives the real total.
   fastify.get('/compliance/alerts', adminAuth, async (req, reply) => {
     const tenantId = (req as any).tenantId
-    const { data, error } = await fastify.supabase
-      .from('platform_events')
-      .select('*')
-      .eq('tenant_id', tenantId)
-      .in('severity', ['high', 'critical'])
-      .order('timestamp', { ascending: false })
-      .limit(50)
+    const [{ data, error }, { count, error: countError }] = await Promise.all([
+      fastify.supabase
+        .from('platform_events')
+        .select('*')
+        .eq('tenant_id', tenantId)
+        .in('severity', ['high', 'critical'])
+        .order('timestamp', { ascending: false })
+        .limit(50),
+      fastify.supabase
+        .from('platform_events')
+        .select('*', { count: 'exact', head: true })
+        .eq('tenant_id', tenantId)
+        .in('severity', ['high', 'critical']),
+    ])
     if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch compliance alerts')
-    return { alerts: data ?? [], total: (data ?? []).length }
+    if (countError) return serverError(req, reply, countError, ErrorCode.QUERY_FAILED, 'Failed to count compliance alerts')
+    return { alerts: data ?? [], total: count ?? (data ?? []).length }
   })
 
   // ── GET /governance/risk/summary ──────────────────────────────────────────
@@ -88,10 +101,14 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
         })
       }
     }
+    // Fresh audit finding: `total` was risks.length, computed AFTER the
+    // top-20 slice below — a tenant with more than 20 distinct at-risk
+    // entities always reported total: 20 regardless of the real count.
+    const totalEntities = entityMap.size
     const risks = [...entityMap.values()]
       .sort((a, b) => b.score - a.score)
       .slice(0, 20)
-    return { risks, total: risks.length }
+    return { risks, total: totalEntities }
   })
 
   // ── GET /governance/incidents ─────────────────────────────────────────────
