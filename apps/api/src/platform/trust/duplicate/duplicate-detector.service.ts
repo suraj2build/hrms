@@ -30,7 +30,11 @@ export class DuplicateDetectorService {
       .eq('pan_number', params.pan.toUpperCase().trim())
       .neq('employee_id', params.employee_id)
 
-    if (error || !data || data.length === 0) return null
+    // A query failure must not be indistinguishable from "no duplicate
+    // found" — this is a passive fraud-detection signal, and silently
+    // treating an error as "clean" inflates the trust score by omission.
+    if (error) throw error
+    if (!data || data.length === 0) return null
 
     return this.buildResult('pan', params.employee_id, 'employee', params.tenant_id,
       (data as any[]).map((r: any) => r.employee_id as string),
@@ -51,19 +55,16 @@ export class DuplicateDetectorService {
     // server-side — it must scan every other employee's row for this tenant
     // and match client-side. Paginated so a large tenant doesn't silently
     // miss duplicate-account matches past PostgREST's 1000-row cap.
-    let data: any[]
-    try {
-      data = await fetchAllRows<any>((from, to) =>
-        supabase
-          .from('employee_bank_statutory')
-          .select('employee_id, account_number')
-          .eq('tenant_id', params.tenant_id)
-          .neq('employee_id', params.employee_id)
-          .range(from, to),
-      )
-    } catch {
-      return null
-    }
+    // A fetchAllRows() failure must propagate, not be treated as "no
+    // duplicate found" — see detectDuplicatePan()'s comment above.
+    const data = await fetchAllRows<any>((from, to) =>
+      supabase
+        .from('employee_bank_statutory')
+        .select('employee_id, account_number')
+        .eq('tenant_id', params.tenant_id)
+        .neq('employee_id', params.employee_id)
+        .range(from, to),
+    )
 
     // Client-side normalize match (DB stores masked values)
     const matches = (data as any[]).filter(r =>
@@ -94,20 +95,17 @@ export class DuplicateDetectorService {
     // both should be flagged. Also paginated (employees is a table known to
     // exceed 1,000 rows at enterprise scale), so a large tenant doesn't
     // silently miss duplicate-phone matches past PostgREST's 1000-row cap.
-    let data: any[]
-    try {
-      data = await fetchAllRows<any>((from, to) =>
-        supabase
-          .from('employees')
-          .select('id, phone')
-          .eq('tenant_id', params.tenant_id)
-          .neq('id', params.employee_id)
-          .not('phone', 'is', null)
-          .range(from, to),
-      )
-    } catch {
-      return null
-    }
+    // A fetchAllRows() failure must propagate, not be treated as "no
+    // duplicate found" — see detectDuplicatePan()'s comment above.
+    const data = await fetchAllRows<any>((from, to) =>
+      supabase
+        .from('employees')
+        .select('id, phone')
+        .eq('tenant_id', params.tenant_id)
+        .neq('id', params.employee_id)
+        .not('phone', 'is', null)
+        .range(from, to),
+    )
 
     const matches = (data as any[]).filter(r =>
       r.phone && r.phone.replace(/[\s\-\+]/g, '') === normalized

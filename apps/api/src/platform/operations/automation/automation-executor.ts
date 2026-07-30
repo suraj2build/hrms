@@ -45,8 +45,10 @@ export class AutomationExecutor {
       }),
     }
 
-    // Persist audit log
-    const insertResult = supabase
+    // Persist audit log. supabase-js resolves (doesn't reject) on ordinary
+    // Postgrest errors, so a .then(resolve, reject) pair never catches a
+    // real insert failure — must destructure { error } instead.
+    const { error } = await supabase
       .from('automation_activity_logs')
       .insert({
         tenant_id:        record.tenant_id,
@@ -59,10 +61,7 @@ export class AutomationExecutor {
         explainability: record.explainability,
         metadata:      action.metadata ?? null,
       })
-    await insertResult.then(
-      () => {},
-      (err: unknown) => console.warn('[AutomationExecutor] audit log failed', err),
-    )
+    if (error) console.warn('[AutomationExecutor] audit log failed', error.message)
   }
 }
 

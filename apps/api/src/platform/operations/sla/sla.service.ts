@@ -6,6 +6,11 @@
 import type { SlaDefinition, SlaStatus, SlaBreachEvent } from '../types/operations-types.js'
 import { explainabilityService }                          from '../../ai/services/explainability.service.js'
 
+// The DB (sla_breach_events) is the durable source of truth for breach
+// history; this in-memory copy only needs to serve recent/live reads, so
+// cap it the same way security-intelligence.service.ts caps its event log.
+const MAX_BREACHES = 2000
+
 const DEFAULT_SLAS: SlaDefinition[] = [
   { sla_id: 'approval-pending',     name: 'Approval Pending',          entity_type: 'leave_request',  threshold_hours: 48,  severity_on_breach: 'high' },
   { sla_id: 'incident-open',        name: 'Open Incident',             entity_type: 'incident',        threshold_hours: 72,  severity_on_breach: 'high' },
@@ -79,6 +84,9 @@ export class SlaService {
         }
         newBreaches.push(breach)
         this.breaches.push(breach)
+        if (this.breaches.length > MAX_BREACHES) {
+          this.breaches.splice(0, this.breaches.length - MAX_BREACHES)
+        }
       }
     }
     return newBreaches
