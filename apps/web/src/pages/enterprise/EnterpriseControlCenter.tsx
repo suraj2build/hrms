@@ -293,14 +293,6 @@ interface EnterpriseHealth {
   services?:    Array<{ name: string; status: string }>
 }
 
-interface QueueStatus {
-  queue_depth:     number
-  listeners:       number
-  dead_letter:     number
-  processing_rate: number
-  listeners_detail?: Array<{ name: string; active: boolean; lag: number }>
-}
-
 // ── Tab 1: Governance ─────────────────────────────────────────────────────────
 
 function GovernanceTab({ onDrawerOpen }: { onDrawerOpen: (item: DrawerItem) => void }) {
@@ -918,9 +910,12 @@ function SecurityTab({ onDrawerOpen }: { onDrawerOpen: (item: DrawerItem) => voi
     queryFn:  () => api.get<EnterpriseHealth>('/enterprise/health'),
   })
 
-  const { data: queueData, isLoading: queueLoading } = useQuery({
-    queryKey: ['enterprise-control-security', 'queue'],
-    queryFn:  () => api.get<QueueStatus>('/enterprise/queue'),
+  // /enterprise/queue returns SLA-breach-tracking data, not job-queue metrics —
+  // the real queue depth/dead-letter counts live at /metrics (PlatformMetrics,
+  // defined below), already consumed correctly by OperationalHealthCard.
+  const { data: metricsData, isLoading: metricsLoading } = useQuery({
+    queryKey: ['enterprise-control-security', 'metrics'],
+    queryFn:  () => api.get<PlatformMetrics>('/metrics'),
   })
 
   const signals = signalsData?.signals ?? []
@@ -930,13 +925,14 @@ function SecurityTab({ onDrawerOpen }: { onDrawerOpen: (item: DrawerItem) => voi
     <div className="space-y-4">
       {/* Platform health summary */}
       <OperationalSummary
-        loading={platformLoading && queueLoading && signalsLoading}
+        loading={platformLoading && metricsLoading && signalsLoading}
         items={[
-          { label: 'Platform Status',  value: platformHealth?.status ?? '—',       severity: platformHealth?.status === 'healthy' ? 'info' : 'warning' },
-          { label: 'Security Signals', value: signals.length,                       severity: signals.length > 0 ? 'warning' : 'info' },
-          { label: 'High/Critical',    value: highCritical.length,                  severity: highCritical.length > 0 ? 'critical' : 'info' },
-          { label: 'Queue Depth',      value: queueData?.queue_depth ?? '—',        severity: (queueData?.queue_depth ?? 0) > 100 ? 'warning' : 'info' },
-          { label: 'Dead Letter',      value: queueData?.dead_letter ?? '—',        severity: (queueData?.dead_letter ?? 0) > 0 ? 'high' : 'info' },
+          { label: 'Platform Status',  value: platformHealth?.status ?? '—',            severity: platformHealth?.status === 'healthy' ? 'info' : 'warning' },
+          { label: 'Security Signals', value: signals.length,                            severity: signals.length > 0 ? 'warning' : 'info' },
+          { label: 'High/Critical',    value: highCritical.length,                       severity: highCritical.length > 0 ? 'critical' : 'info' },
+          { label: 'Queue Depth',      value: metricsData?.queue.pending ?? '—',         severity: (metricsData?.queue.pending ?? 0) > 100 ? 'warning' : 'info' },
+          { label: 'Dead Letter',      value: metricsData?.queue.dead_24h ?? '—',        severity: (metricsData?.queue.dead_24h ?? 0) > 0 ? 'high' : 'info' },
+          { label: 'Event Listeners',  value: metricsData?.event_bus.handler_count ?? '—', severity: 'info' },
         ]}
       />
 
@@ -999,36 +995,6 @@ function SecurityTab({ onDrawerOpen }: { onDrawerOpen: (item: DrawerItem) => voi
                 </div>
               </button>
             ))}
-          </div>
-        </SectionCard>
-      )}
-
-      {/* Listener health */}
-      {queueData?.listeners_detail && queueData.listeners_detail.length > 0 && (
-        <SectionCard title="Queue Listener Health" description="Event listener status and consumer lag">
-          <div className="overflow-x-auto">
-            <table className="w-full text-xs">
-              <thead>
-                <tr className="border-b text-muted-foreground">
-                  <th className="text-left font-medium pb-2 pr-4">Listener</th>
-                  <th className="text-left font-medium pb-2 pr-4">Status</th>
-                  <th className="text-left font-medium pb-2">Lag</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y">
-                {queueData.listeners_detail.map((l, i) => (
-                  <tr key={i} className="hover:bg-muted/20">
-                    <td className="py-2 pr-4 font-mono">{l.name}</td>
-                    <td className="py-2 pr-4">
-                      <Badge variant={l.active ? 'default' : 'destructive'} className="text-xs">
-                        {l.active ? 'Active' : 'Inactive'}
-                      </Badge>
-                    </td>
-                    <td className="py-2 tabular-nums">{l.lag}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
           </div>
         </SectionCard>
       )}
