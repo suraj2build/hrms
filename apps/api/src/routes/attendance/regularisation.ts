@@ -16,6 +16,7 @@ import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { approveRegularisation, rejectRegularisation } from '../../lib/approval-service.js'
 import { recomputeRange } from '../../lib/attendance-engine.js'
 import { emitEvent } from '../../lib/event-emitter.js'
+import { eventBus } from '../../lib/event-bus.js'
 import { writeLedgerEntry, dateToMonth } from '../../lib/ledger-writer.js'
 import { orchestrateWorkforceEvent } from '../../lib/workforce-orchestrator.js'
 import {
@@ -512,6 +513,22 @@ export default async function regularisationRoute(fastify: FastifyInstance) {
       targetId:   approved.employee_id,
     }).catch(() => {/* non-fatal */})
 
+    // In-process event bus (PEND-75 follow-up) — drives webhook fan-out and
+    // SLA-resolution automation; this route (not corrections.ts) is the one
+    // actually called by the live regularisation approval UI.
+    eventBus.emit({
+      type:          'correction.approved',
+      tenantId:      req.tenantId,
+      correlationId: req.correlationId,
+      payload: {
+        tenantId:     req.tenantId,
+        employeeId:   approved.employee_id,
+        correctionId: approved.id,
+        approverId:   req.userId,
+        date:         approved.date,
+      },
+    })
+
     // Write explainability ledger entry (non-fatal)
     void writeLedgerEntry(fastify.supabase, {
       tenant_id:          req.tenantId,
@@ -600,6 +617,20 @@ export default async function regularisationRoute(fastify: FastifyInstance) {
         targetType: 'employee',
         targetId:   regForEvent.employee_id,
       }).catch(() => {/* non-fatal */})
+
+      // In-process event bus (PEND-75 follow-up) — see approve handler above.
+      eventBus.emit({
+        type:          'correction.rejected',
+        tenantId:      req.tenantId,
+        correlationId: req.correlationId,
+        payload: {
+          tenantId:     req.tenantId,
+          employeeId:   regForEvent.employee_id,
+          correctionId: regForEvent.id,
+          approverId:   req.userId,
+          reason:       parsed.data.rejection_reason,
+        },
+      })
     }
 
     return reply.send({ message: 'Rejected successfully', data: result.value })

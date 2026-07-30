@@ -7,6 +7,7 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { logAction } from '../../lib/audit-service.js'
 import { EventType, MODULE } from '../../platform/events/index.js'
+import { eventBus } from '../../lib/event-bus.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { serverError, notFound, forbidden, validationError, conflictError, ErrorCode } from '../../lib/api-errors.js'
 import { checkIdempotency, storeIdempotency } from '../../lib/idempotency.js'
@@ -390,6 +391,32 @@ export default async function compensationRevisionsRoutes(fastify: FastifyInstan
       payload:     { employee_id: rev.employee_id, new_ctc_annual: rev.new_ctc_annual, effective_date: rev.effective_date },
       correlation_id: req.correlationId ?? undefined,
     })
+
+    // In-process event bus (PEND-75 follow-up) — this route and
+    // compensation/revisions.ts both write compensation_revisions and are
+    // both live (HR-admin/profile-page approvals here; the standalone
+    // revisions admin page + manager submission flow there), but only the
+    // latter emitted on eventBus — meaning approvals made through here never
+    // reached event-bus-automation.ts's employee-notification handler or the
+    // webhook allow-list. rev.delta_pct is typically null for revisions
+    // created via this file's own POST / (which doesn't populate it).
+    eventBus.emit({
+      type:          'compensation.revised',
+      tenantId:      req.tenantId,
+      correlationId: req.correlationId,
+      payload: {
+        tenantId:        req.tenantId,
+        employeeId:      rev.employee_id,
+        revisionId:      id,
+        revisionType:    rev.revision_type,
+        effectiveDate:   rev.effective_date,
+        beforeCtcAnnual: previousCtcAnnual > 0 ? previousCtcAnnual : null,
+        afterCtcAnnual:  Number(rev.new_ctc_annual),
+        deltaPct:        rev.delta_pct != null ? Number(rev.delta_pct) : null,
+        approvedBy:      req.userId,
+      },
+    })
+
     return reply.send({ message: 'Revision approved', revision_id: id })
   })
 
