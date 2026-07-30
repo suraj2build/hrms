@@ -44,8 +44,8 @@ interface AttendanceStats {
 
 interface AttendancePeriod {
   id:           string
-  month:        string
-  state:        'OPEN' | 'LOCKED' | 'CLOSED'
+  period_month: string
+  state:        'OPEN' | 'LOCKED' | 'PAYROLL_PROCESSING' | 'PAYROLL_FINALIZED'
   locked_at:    string | null
   locked_by:    string | null
 }
@@ -307,10 +307,10 @@ export function AttendanceOperationsCenter() {
                   <CalendarClock className="h-4 w-4 text-muted-foreground flex-shrink-0" />
                   <div>
                     <p className="text-xs font-medium text-foreground">
-                      {currentPeriod ? currentPeriod.month : 'Current Period'}
+                      {currentPeriod ? currentPeriod.period_month : 'Current Period'}
                     </p>
                     <p className="text-[10px] text-muted-foreground">
-                      {periodState === 'LOCKED' || periodState === 'CLOSED'
+                      {periodState !== 'OPEN'
                         ? `Locked · payroll can be finalized`
                         : 'Open · lock before running payroll'}
                     </p>

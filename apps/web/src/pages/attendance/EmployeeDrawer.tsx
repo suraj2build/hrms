@@ -79,11 +79,11 @@ interface DailyRecord {
 }
 
 interface AnomalyItem {
-  id:           string
-  date:         string
-  anomaly_type: string
-  description?: string
-  severity?:    string
+  id:       string
+  date:     string
+  type:     string
+  message?: string
+  severity?: string
 }
 
 // ── Props ─────────────────────────────────────────────────────────────────────
@@ -398,7 +398,7 @@ export function EmployeeDrawer({
               {/* ── Section 2b: Decision Context ─────────────────────────────── */}
               {(() => {
                 const lateCount    = daily.filter(d => d.status === 'late').length
-                const missingCount = anomalies.filter(a => a.anomaly_type === 'missing_punch').length
+                const missingCount = anomalies.filter(a => a.type === 'missing_punch').length
                 const anomalyTotal = anomalies.length
                 if (lateCount === 0 && missingCount === 0 && anomalyTotal === 0) return null
 
@@ -557,13 +557,13 @@ export function EmployeeDrawer({
                         <AlertTriangle className="h-3 w-3 text-destructive flex-shrink-0 mt-0.5" />
                         <div className="min-w-0 flex-1">
                           <span className="font-medium text-foreground capitalize">
-                            {(a.anomaly_type ?? '').replace(/_/g, ' ')}
+                            {(a.type ?? '').replace(/_/g, ' ')}
                           </span>
                           <span className="text-muted-foreground ml-1.5 tabular-nums">
                             {fmtDate(a.date)}
                           </span>
-                          {a.description && (
-                            <p className="text-muted-foreground/70 truncate mt-0.5">{a.description}</p>
+                          {a.message && (
+                            <p className="text-muted-foreground/70 truncate mt-0.5">{a.message}</p>
                           )}
                         </div>
                       </div>
