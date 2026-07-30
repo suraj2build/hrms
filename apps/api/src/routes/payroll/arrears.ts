@@ -8,6 +8,7 @@ import { z } from 'zod'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
 import { serverError, ErrorCode } from '../../lib/api-errors.js'
+import { checkIdempotency, storeIdempotency } from '../../lib/idempotency.js'
 
 const ARREAR_TYPES = ['salary_revision', 'bonus_revision', 'component_change', 'correction', 'other'] as const
 
@@ -64,6 +65,17 @@ export default async function arrearsRoutes(fastify: FastifyInstance) {
       return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
     }
 
+    // Idempotency: prevents a double-submit (network retry, double-click)
+    // from creating two duplicate batches for the same period.
+    const iKey = (req.headers['idempotency-key'] as string | undefined)?.trim()
+    if (iKey) {
+      const cached = await checkIdempotency(fastify.supabase, req.tenantId, iKey, 'arrear-batch-create')
+      if (cached) {
+        reply.header('Idempotency-Replayed', 'true')
+        return reply.code(cached.status_code).send(cached.response)
+      }
+    }
+
     const { data, error } = await fastify.supabase
       .from('arrear_batches')
       .insert({
@@ -78,7 +90,9 @@ export default async function arrearsRoutes(fastify: FastifyInstance) {
       .single()
 
     if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create arrear batch')
-    return reply.code(201).send({ data })
+    const responseBody = { data }
+    if (iKey) await storeIdempotency(fastify.supabase, req.tenantId, iKey, 'arrear-batch-create', 201, responseBody)
+    return reply.code(201).send(responseBody)
   })
 
   // ── GET /payroll/arrears/batches/:id ─────────────────────────────────────────

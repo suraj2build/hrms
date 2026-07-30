@@ -5,7 +5,7 @@
  * Access: admin only (super_admin, hr_admin).
  */
 
-import { useState }                                from 'react'
+import { useState, useRef, useEffect }             from 'react'
 import { useQuery, useMutation, useQueryClient }   from '@tanstack/react-query'
 import {
   Loader2, RefreshCw, Plus, Calculator,
@@ -35,8 +35,8 @@ interface ArrearBatch {
   batch_name:          string
   from_period:         string
   to_period:           string
-  trigger_type:        string
-  status:              'pending' | 'calculating' | 'calculated' | 'approved' | 'paid'
+  arrear_type:         string
+  status:              'draft' | 'calculated' | 'approved' | 'processing' | 'processed' | 'cancelled'
   total_arrear_amount: number
   employee_count:      number
   created_at:          string
@@ -60,14 +60,17 @@ interface ArrearRecord {
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
 const STATUS_BADGE: Record<string, 'secondary' | 'outline' | 'warning' | 'success'> = {
-  pending:    'secondary',
-  calculating:'outline',
+  draft:      'secondary',
   calculated: 'warning',
   approved:   'success',
-  paid:       'outline',
+  processing: 'outline',
+  processed:  'success',
+  cancelled:  'secondary',
 }
 
-const TRIGGER_TYPES = ['compensation_revision', 'structure_change', 'manual']
+// Must match ARREAR_TYPES in apps/api/src/routes/payroll/arrears.ts (also
+// the arrear_batches.arrear_type CHECK constraint).
+const ARREAR_TYPES = ['salary_revision', 'bonus_revision', 'component_change', 'correction', 'other']
 
 const fmt = (n: number) =>
   new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(n)
@@ -88,22 +91,30 @@ const labelify = (s: string) =>
 function CreateBatchDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   const qc = useQueryClient()
   const [form, setForm] = useState({
-    batch_name:   '',
-    from_period:  '',
-    to_period:    '',
-    trigger_type: 'compensation_revision',
-    notes:        '',
+    batch_name:  '',
+    from_period: '',
+    to_period:   '',
+    arrear_type: 'salary_revision',
+    notes:       '',
   })
+
+  // New key each time the dialog opens, so a double-click on "Create Batch"
+  // within one open/submit cycle is deduped without also deduping the next
+  // legitimate batch creation after this dialog is reopened.
+  const idempotencyKey = useRef(crypto.randomUUID())
+  useEffect(() => {
+    if (open) idempotencyKey.current = crypto.randomUUID()
+  }, [open])
 
   const set = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }))
 
   const mutation = useMutation({
-    mutationFn: () => api.post('/payroll/arrears/batches', form),
+    mutationFn: () => api.post('/payroll/arrears/batches', form, { headers: { 'Idempotency-Key': idempotencyKey.current } }),
     onSuccess:  () => {
       toast.success('Arrear batch created')
       qc.invalidateQueries({ queryKey: ['arrear-batches'] })
       onClose()
-      setForm({ batch_name: '', from_period: '', to_period: '', trigger_type: 'compensation_revision', notes: '' })
+      setForm({ batch_name: '', from_period: '', to_period: '', arrear_type: 'salary_revision', notes: '' })
     },
     onError: (e: Error) => {
       toast.error('Failed to create arrear batch', { description: e.message })
@@ -146,13 +157,13 @@ function CreateBatchDialog({ open, onClose }: { open: boolean; onClose: () => vo
             </div>
           </div>
           <div className="space-y-1">
-            <label className="text-sm font-medium text-foreground">Trigger Type</label>
+            <label className="text-sm font-medium text-foreground">Arrear Type</label>
             <select
-              value={form.trigger_type}
-              onChange={e => set('trigger_type', e.target.value)}
+              value={form.arrear_type}
+              onChange={e => set('arrear_type', e.target.value)}
               className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground"
             >
-              {TRIGGER_TYPES.map(t => (
+              {ARREAR_TYPES.map(t => (
                 <option key={t} value={t}>{labelify(t)}</option>
               ))}
             </select>
@@ -327,7 +338,7 @@ export function ArrearEngine() {
                 <tr className="border-b border-border text-muted-foreground">
                   <th className="text-left py-3 px-4 font-medium">Batch Name</th>
                   <th className="text-left py-3 px-4 font-medium">Period</th>
-                  <th className="text-left py-3 px-4 font-medium">Trigger</th>
+                  <th className="text-left py-3 px-4 font-medium">Arrear Type</th>
                   <th className="text-left py-3 px-4 font-medium">Status</th>
                   <th className="text-right py-3 px-4 font-medium">Employees</th>
                   <th className="text-right py-3 px-4 font-medium">Total Arrear</th>
@@ -342,7 +353,7 @@ export function ArrearEngine() {
                     <td className="py-3 px-4 text-muted-foreground">
                       {b.from_period} → {b.to_period}
                     </td>
-                    <td className="py-3 px-4 text-foreground">{labelify(b.trigger_type)}</td>
+                    <td className="py-3 px-4 text-foreground">{labelify(b.arrear_type)}</td>
                     <td className="py-3 px-4">
                       <Badge variant={STATUS_BADGE[b.status] ?? 'secondary'}>
                         {labelify(b.status)}
@@ -356,7 +367,7 @@ export function ArrearEngine() {
                     {isAdmin && (
                       <td className="py-3 px-4">
                         <div className="flex items-center gap-2 flex-wrap">
-                          {(b.status === 'pending' || b.status === 'calculated') && (
+                          {(b.status === 'draft' || b.status === 'calculated') && (
                             <Button
                               size="sm"
                               variant="outline"

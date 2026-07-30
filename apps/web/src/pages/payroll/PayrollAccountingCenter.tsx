@@ -314,6 +314,11 @@ export function PayrollAccountingCenter() {
       toast.success('Financial ledger generated')
       queryClient.invalidateQueries({ queryKey: ['run-ledger', selectedRunId] })
       queryClient.invalidateQueries({ queryKey: ['accounting-summary'] })
+      // Ledger generation writes both payroll_ledger_entries (GL Accounts
+      // tab) and payroll_cost_allocations (Cost Centers tab) — those tabs
+      // were left showing stale/empty data until staleTime expired.
+      queryClient.invalidateQueries({ queryKey: ['gl-summary'] })
+      queryClient.invalidateQueries({ queryKey: ['cost-allocations', selectedRunId] })
     },
     onError: (e: unknown) => {
       // 409 SNAPSHOT_REQUIRED is actionable: the run has no immutable snapshot to
@@ -343,6 +348,8 @@ export function PayrollAccountingCenter() {
     onSuccess: () => {
       toast.success('Ledger posted')
       queryClient.invalidateQueries({ queryKey: ['run-ledger', selectedRunId] })
+      // posted_ledger_count in the accounting-summary KPI strip changes too.
+      queryClient.invalidateQueries({ queryKey: ['accounting-summary'] })
     },
     onError: (e: unknown) => toast.error(e instanceof Error ? e.message : 'Post failed'),
   })
@@ -354,6 +361,11 @@ export function PayrollAccountingCenter() {
       setReverseLedgerId(null)
       setReverseReason('')
       queryClient.invalidateQueries({ queryKey: ['run-ledger', selectedRunId] })
+      // Reversal changes total_payroll_liability/posted_ledger_count (the
+      // backend excludes reversed ledgers from the liability sum) and writes
+      // new GL entries, so both the summary strip and GL Accounts tab go stale.
+      queryClient.invalidateQueries({ queryKey: ['accounting-summary'] })
+      queryClient.invalidateQueries({ queryKey: ['gl-summary'] })
     },
     onError: (e: unknown) => toast.error(e instanceof Error ? e.message : 'Reversal failed'),
   })

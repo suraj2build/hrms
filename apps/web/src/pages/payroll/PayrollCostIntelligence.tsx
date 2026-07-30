@@ -110,7 +110,7 @@ export function PayrollCostIntelligence() {
 
   // ── Queries ──────────────────────────────────────────────────────────────
 
-  const summaryQ = useQuery<CostSummary>({
+  const summaryQ = useQuery<{ data: CostSummary }>({
     queryKey: ['payroll-cost', month],
     queryFn:  () => api.get(`/analytics/payroll/cost?month=${month}`),
     enabled:  isAdmin,
@@ -174,7 +174,7 @@ export function PayrollCostIntelligence() {
     )
   }
 
-  const summary  = summaryQ.data
+  const summary  = summaryQ.data?.data
   const trends   = trendsQ.data?.data ?? []
   const insights = insightsQ.data?.data ?? []
   const depts    = deptsQ.data?.data ?? []
