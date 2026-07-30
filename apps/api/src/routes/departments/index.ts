@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { generateUniqueCode } from '../../lib/generate-code.js'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { serverError, ErrorCode } from '../../lib/api-errors.js'
+import { fetchAllRows } from '../../lib/supabase-paginate.js'
 
 const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const MAX_PARENT_DEPTH = 20   // maximum parent_id chain depth before aborting cycle check
@@ -17,11 +18,14 @@ const desigSchema = z.object({
   name: z.string().min(1),
 })
 
+// grades.min_salary/max_salary were renamed to ctc_min_annual/ctc_max_annual
+// by migration 136_grades_schema_align.sql — the old column names no longer
+// exist. Matches the canonical /masters/grades schema.
 const gradeSchema = z.object({
   name: z.string().min(1),
   code: z.string().optional(),
-  min_salary: z.number().optional(),
-  max_salary: z.number().optional(),
+  ctc_min_annual: z.number().optional(),
+  ctc_max_annual: z.number().optional(),
 })
 
 export default async function orgRoutes(fastify: FastifyInstance) {
@@ -31,13 +35,19 @@ export default async function orgRoutes(fastify: FastifyInstance) {
 
   // ── Departments ───────────────────────────────────────────────────────────
   fastify.get('/departments', auth, async (req, reply) => {
-    const { data, error } = await fastify.supabase
-      .from('departments')
-      .select('*')
-      .eq('tenant_id', req.tenantId)
-      .order('name')
-
-    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch departments')
+    let data: any[]
+    try {
+      data = await fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('departments')
+          .select('*')
+          .eq('tenant_id', req.tenantId)
+          .order('name')
+          .range(from, to),
+      )
+    } catch (error: any) {
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch departments')
+    }
     return reply.send({ data })
   })
 
@@ -214,9 +224,19 @@ export default async function orgRoutes(fastify: FastifyInstance) {
 
   // ── Designations ──────────────────────────────────────────────────────────
   fastify.get('/designations', auth, async (req, reply) => {
-    const { data, error } = await fastify.supabase
-      .from('designations').select('*').eq('tenant_id', req.tenantId).order('name')
-    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch designations')
+    let data: any[]
+    try {
+      data = await fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('designations')
+          .select('*')
+          .eq('tenant_id', req.tenantId)
+          .order('name')
+          .range(from, to),
+      )
+    } catch (error: any) {
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch designations')
+    }
     return reply.send({ data })
   })
 
@@ -318,9 +338,19 @@ export default async function orgRoutes(fastify: FastifyInstance) {
 
   // ── Grades ────────────────────────────────────────────────────────────────
   fastify.get('/grades', auth, async (req, reply) => {
-    const { data, error } = await fastify.supabase
-      .from('grades').select('*').eq('tenant_id', req.tenantId).order('name')
-    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch grades')
+    let data: any[]
+    try {
+      data = await fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('grades')
+          .select('*')
+          .eq('tenant_id', req.tenantId)
+          .order('name')
+          .range(from, to),
+      )
+    } catch (error: any) {
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch grades')
+    }
     return reply.send({ data })
   })
 

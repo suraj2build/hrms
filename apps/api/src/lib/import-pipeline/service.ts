@@ -66,7 +66,7 @@ export async function createImportJob(
 
 export type JobProgressUpdate = Partial<{
   status:         ImportJobStatus
-  current_stage:  string
+  current_stage:  string | null
   total_rows:     number
   parsed_rows:    number
   validated_rows: number
@@ -74,9 +74,9 @@ export type JobProgressUpdate = Partial<{
   success_rows:   number
   failed_rows:    number
   skipped_rows:   number
-  current_chunk:  number
-  total_chunks:   number
-  error_summary:  string
+  current_chunk:  number | null
+  total_chunks:   number | null
+  error_summary:  string | null
   started_at:     string
   completed_at:   string
 }>
@@ -249,16 +249,19 @@ export async function resetJobForRetry(
 
     await updateJobProgress(supabase, job.id, {
       status:         'queued',
-      current_stage:  undefined,
+      // null, not undefined — supabase-js JSON.stringifies the update body,
+      // which silently DROPS undefined-valued keys, so they'd never be sent
+      // and these fields would keep their stale pre-retry values.
+      current_stage:  null,
       parsed_rows:    0,
       validated_rows: 0,
       processed_rows: 0,
       success_rows:   0,
       failed_rows:    0,
       skipped_rows:   0,
-      current_chunk:  undefined,
-      total_chunks:   undefined,
-      error_summary:  undefined,
+      current_chunk:  null,
+      total_chunks:   null,
+      error_summary:  null,
     })
   } else {
     // Phase B is done — only reset failed/pending chunks; keep completed ones.
@@ -279,8 +282,8 @@ export async function resetJobForRetry(
 
     await updateJobProgress(supabase, job.id, {
       status:        'queued',
-      current_stage: undefined,
-      error_summary: undefined,
+      current_stage: null,
+      error_summary: null,
     })
   }
 }

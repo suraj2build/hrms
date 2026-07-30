@@ -16,7 +16,7 @@ import { z }                    from 'zod'
 import { durableQueue }         from '../../lib/durable-queue.js'
 import { HR_ADMIN_ROLES }       from '../../lib/rbac.js'
 import { conflictError, serverError, ErrorCode } from '../../lib/api-errors.js'
-import { checkIdempotency, storeIdempotency } from '../../lib/idempotency.js'
+import { checkIdempotency, storeIdempotency, claimIdempotency, releaseIdempotencyClaim } from '../../lib/idempotency.js'
 import {
   createImportJob,
   getImportJob,
@@ -97,46 +97,61 @@ export default async function importsRoutes(fastify: FastifyInstance) {
       })
     }
 
-    const iKey = (req.headers['idempotency-key'] as string | undefined)?.trim()
+    const iKey  = (req.headers['idempotency-key'] as string | undefined)?.trim()
+    const scope = 'import-create-job'
     if (iKey) {
-      const cached = await checkIdempotency(fastify.supabase, tenantId, iKey, 'import-create-job')
+      const cached = await checkIdempotency(fastify.supabase, tenantId, iKey, scope)
       if (cached) {
         reply.header('Idempotency-Replayed', 'true')
         return reply.code(cached.status_code).send(cached.response)
       }
+      // Claim before creating the job row — the plain check-then-work-then-
+      // store pattern above has a race window wide enough for a fast
+      // double-submit (double-click, client retry) to see no cached hit
+      // twice and create two separate import_jobs rows for the same file,
+      // each enqueuing its own worker and importing the data twice.
+      const claimed = await claimIdempotency(fastify.supabase, tenantId, iKey, scope)
+      if (!claimed) {
+        return reply.code(409).send({ error: 'DUPLICATE_REQUEST', message: 'An identical request is already being processed' })
+      }
     }
 
-    const job = await createImportJob(fastify.supabase, {
-      tenant_id:         tenantId,
-      created_by:        userId,
-      module,
-      import_type,
-      file_name,
-      file_storage_path,
-      file_size_bytes,
-      mime_type,
-      metadata: metadata as Record<string, unknown> | undefined,
-    })
+    try {
+      const job = await createImportJob(fastify.supabase, {
+        tenant_id:         tenantId,
+        created_by:        userId,
+        module,
+        import_type,
+        file_name,
+        file_storage_path,
+        file_size_bytes,
+        mime_type,
+        metadata: metadata as Record<string, unknown> | undefined,
+      })
 
-    await updateJobProgress(fastify.supabase, job.id, {
-      status: 'queued',
-    })
+      await updateJobProgress(fastify.supabase, job.id, {
+        status: 'queued',
+      })
 
-    await durableQueue.enqueue(
-      'import_job',
-      { import_job_id: job.id, tenant_id: tenantId },
-      {
-        idempotencyKey: `import_job:${job.id}`,
-        tenantId,
-        createdBy:      userId,
-        timeoutMs:      IMPORT_JOB_TIMEOUT_MS,
-        maxRetries:     1,
-      },
-    )
+      await durableQueue.enqueue(
+        'import_job',
+        { import_job_id: job.id, tenant_id: tenantId },
+        {
+          idempotencyKey: `import_job:${job.id}`,
+          tenantId,
+          createdBy:      userId,
+          timeoutMs:      IMPORT_JOB_TIMEOUT_MS,
+          maxRetries:     1,
+        },
+      )
 
-    const responseBody = { job }
-    if (iKey) await storeIdempotency(fastify.supabase, tenantId, iKey, 'import-create-job', 201, responseBody)
-    return reply.code(201).send(responseBody)
+      const responseBody = { job }
+      if (iKey) await storeIdempotency(fastify.supabase, tenantId, iKey, scope, 201, responseBody)
+      return reply.code(201).send(responseBody)
+    } catch (err: unknown) {
+      if (iKey) await releaseIdempotencyClaim(fastify.supabase, tenantId, iKey, scope)
+      return serverError(req, reply, err, ErrorCode.INSERT_FAILED, 'Failed to create import job')
+    }
   })
 
   // ── GET /imports ──────────────────────────────────────────────────────────
