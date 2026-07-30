@@ -26,7 +26,7 @@
 
 import { useState, useCallback, useMemo, useEffect, useRef } from 'react'
 import { Link }                           from 'react-router-dom'
-import { useQuery }                       from '@tanstack/react-query'
+import { useQuery, keepPreviousData }      from '@tanstack/react-query'
 import { toast }                          from 'sonner'
 import {
   Download, Users, Clock, Briefcase, ShieldCheck,
@@ -536,6 +536,7 @@ function HeadcountReport({ departments, basePath }: { departments: Department[];
       return r
     },
     staleTime: 60_000,
+    placeholderData: keepPreviousData,
   })
 
   const filtered = useMemo(() =>
@@ -579,6 +580,7 @@ function HeadcountReport({ departments, basePath }: { departments: Department[];
             <option value="contract">Contract</option>
             <option value="probation">Probation</option>
             <option value="intern">Intern</option>
+            <option value="consultant">Consultant</option>
           </select>
         </FilterField>
         <DeptSelect value={deptId} onChange={setDeptId} departments={departments} />
@@ -734,6 +736,7 @@ function AttendanceReport({ departments, basePath }: { departments: Department[]
       return r
     },
     staleTime: 60_000,
+    placeholderData: keepPreviousData,
   })
 
   const filtered = useMemo(() => {
@@ -940,6 +943,7 @@ function SalaryRegister({ departments, basePath }: { departments: Department[]; 
       return r
     },
     staleTime: 60_000,
+    placeholderData: keepPreviousData,
   })
 
   const filtered = useMemo(() =>
@@ -994,6 +998,7 @@ function SalaryRegister({ departments, basePath }: { departments: Department[]; 
             <option value="contract">Contract</option>
             <option value="probation">Probation</option>
             <option value="intern">Intern</option>
+            <option value="consultant">Consultant</option>
           </select>
         </FilterField>
         <DeptSelect value={deptId} onChange={setDeptId} departments={departments} />
@@ -1114,6 +1119,7 @@ function StatutoryReport({ departments, basePath }: { departments: Department[];
       return r
     },
     staleTime: 60_000,
+    placeholderData: keepPreviousData,
   })
 
   const filtered = useMemo(() =>
@@ -1187,6 +1193,7 @@ function StatutoryReport({ departments, basePath }: { departments: Department[];
             <option value="contract">Contract</option>
             <option value="probation">Probation</option>
             <option value="intern">Intern</option>
+            <option value="consultant">Consultant</option>
           </select>
         </FilterField>
         <DeptSelect value={deptId} onChange={setDeptId} departments={departments} />
@@ -1337,6 +1344,7 @@ function MusterRollReport({ departments, basePath }: { departments: Department[]
       return r
     },
     staleTime: 120_000,
+    placeholderData: keepPreviousData,
   })
 
   // Preview: compact employee × day summary (not the full grid — too wide for browser)
@@ -1496,15 +1504,20 @@ function SalarySheetReport({ departments, basePath }: { departments: Department[
   const [genAt,       setGenAt]       = useState<Date | null>(null)
   const [downloading, setDownloading] = useState(false)
 
-  // Load most recent payroll run for the month (for preview metadata)
+  // Load the payroll run for the selected month. `q` scopes the query
+  // server-side to this month — without it, /payroll/runs only ever returns
+  // the 5 most recently created runs tenant-wide, so any month older than
+  // that window would falsely report "no run found" even when a finalized
+  // run exists.
   const { data: runsData, isLoading, isFetching, refetch } = useQuery<{ data: PayrollRunSummary[]; total: number }>({
     queryKey: ['report-salary-sheet-run', month],
     queryFn:  async () => {
-      const r = await api.get<{ data: PayrollRunSummary[]; total: number }>(`/payroll/runs?limit=5`)
+      const r = await api.get<{ data: PayrollRunSummary[]; total: number }>(`/payroll/runs?q=${month}&limit=5`)
       setGenAt(new Date())
       return r
     },
     staleTime: 60_000,
+    placeholderData: keepPreviousData,
   })
 
   // Most recent run for this month
@@ -1681,6 +1694,7 @@ function LeaveRegisterReport({ departments, basePath }: { departments: Departmen
       return r
     },
     staleTime: 60_000,
+    placeholderData: keepPreviousData,
   })
 
   const allRows = useMemo(() => previewData?.data ?? [], [previewData])
@@ -1914,6 +1928,7 @@ function PayrollRegisterReport({ departments, basePath }: { departments: Departm
       return r
     },
     staleTime: 60_000,
+    placeholderData: keepPreviousData,
   })
 
   const allRows = useMemo(() => data?.rows ?? [], [data])
@@ -2240,6 +2255,7 @@ function AttendancePayrollReport({ departments, basePath }: { departments: Depar
       return r
     },
     staleTime: 60_000,
+    placeholderData: keepPreviousData,
   })
 
   const allRows = useMemo(() => data?.rows ?? [], [data])

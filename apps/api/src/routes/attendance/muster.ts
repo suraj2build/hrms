@@ -17,7 +17,8 @@ import { fetchAllRows } from '../../lib/supabase-paginate.js'
 const MUSTER_ROW_LIMIT = 200_000
 
 const querySchema = z.object({
-  month: z.string().regex(/^\d{4}-\d{2}$/, 'month must be YYYY-MM'),
+  month:         z.string().regex(/^\d{4}-\d{2}$/, 'month must be YYYY-MM'),
+  department_id: z.string().uuid().optional(),
 })
 
 export default async function musterRoute(fastify: FastifyInstance) {
@@ -39,7 +40,7 @@ export default async function musterRoute(fastify: FastifyInstance) {
         })
       }
 
-      const { month } = parsed.data
+      const { month, department_id } = parsed.data
       const fromDate = `${month}-01`
       // Last day of the month
       const [y, m] = month.split('-').map(Number)
@@ -63,7 +64,10 @@ export default async function musterRoute(fastify: FastifyInstance) {
       // Fetch active employees — for managers, only direct reports.
       // PostgREST caps results at max-rows (default 1000) so we paginate in
       // batches of 1000 until the page is shorter than the batch size.
-      type EmpRow = { id: string; first_name: string; last_name: string; employee_code: string; joining_date: string | null }
+      type EmpRow = {
+        id: string; first_name: string; last_name: string; employee_code: string; joining_date: string | null
+        job_history?: { department_id: string | null } | { department_id: string | null }[] | null
+      }
 
       let reportIdFilter: string[] | null = null
       if (isMgr && managerEmployeeId) {
@@ -89,17 +93,32 @@ export default async function musterRoute(fastify: FastifyInstance) {
         employees = await fetchAllRows<EmpRow>((from, to) => {
           let q = fastify.supabase
             .from('employees')
-            .select('id, first_name, last_name, employee_code, joining_date')
+            .select('id, first_name, last_name, employee_code, joining_date' +
+              (department_id ? ', job_history!job_history_employee_id_fkey(department_id, is_current)' : ''))
             .eq('tenant_id', req.tenantId)
             .eq('status', 'active')
             .order('employee_code')
             .range(from, to)
+          if (department_id) q = q.eq('job_history.is_current', true)
           if (reportIdFilter) q = q.in('id', reportIdFilter)
           return q as any
         })
       } catch (empError: any) {
         req.log.error({ err: empError }, 'muster employees query failed')
         return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch employees' })
+      }
+
+      // Department filter — post-fetch, not .eq('job_history.department_id', …).
+      // job_history is embedded without !inner, so a filter on the embed only
+      // nulls out the nested JSON for non-matching rows; it never removes the
+      // parent employees row. Filtering server-side there would silently return
+      // every employee regardless of department_id (same pattern already used
+      // by /reports/muster-roll/export for this exact table).
+      if (department_id) {
+        employees = employees.filter(e => {
+          const jh = Array.isArray(e.job_history) ? e.job_history[0] : e.job_history
+          return jh?.department_id === department_id
+        })
       }
 
       if (employees.length === 0) {
