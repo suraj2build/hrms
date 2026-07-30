@@ -124,17 +124,22 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
       const sepEmpIds = (pendingSep ?? []).map((s: any) => s.employee_id as string)
       let assetsAtRiskCount = 0
       if (sepEmpIds.length > 0) {
-        // assets.assigned_to is the denormalized current holder; status='assigned'
+        // Same fix as pendingSepCount above: .limit(50) only bounds a sample —
+        // the exact count backs the severity/KPI so a tenant with >50 at-risk
+        // assets isn't silently reported as capped at 50.
         const { data: assetRisk } = await fastify.supabase
           .from('assets').select('id, assigned_to')
           .eq('tenant_id', tenantId).eq('status', 'assigned').in('assigned_to', sepEmpIds).limit(50)
+        const { count: assetRiskCount } = await fastify.supabase
+          .from('assets').select('id', { count: 'exact', head: true })
+          .eq('tenant_id', tenantId).eq('status', 'assigned').in('assigned_to', sepEmpIds)
         if (assetRisk && assetRisk.length > 0) {
-          assetsAtRiskCount = assetRisk.length
+          assetsAtRiskCount = assetRiskCount ?? assetRisk.length
           observations.push({
             id: 'assets-at-risk', category: 'assets', severity: 'critical',
-            title: assetRisk.length + ' asset' + (assetRisk.length > 1 ? 's' : '') + ' assigned to employees under separation',
+            title: assetsAtRiskCount + ' asset' + (assetsAtRiskCount > 1 ? 's' : '') + ' assigned to employees under separation',
             body: 'Company assets remain with employees in the separation process. Must be recovered before final clearance.',
-            source_records: [{ table: 'assets', count: assetRisk.length }],
+            source_records: [{ table: 'assets', count: assetsAtRiskCount }],
             generated_at: now.toISOString(),
           })
         }
@@ -1431,6 +1436,11 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
         interpreted_as,
         employees: normalizedEmployees,
         count: normalizedEmployees.length,
+        // Every filter branch above caps its query at 50 rows — signal when
+        // that cap was hit so the UI doesn't present count as the true match
+        // total (a tenant with 80 matches would otherwise silently show "50
+        // results found" with no indication 30 more exist).
+        truncated: normalizedEmployees.length === 50,
         sources,
       })
     } catch (err: unknown) {

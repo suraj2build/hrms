@@ -28,6 +28,7 @@ interface SearchResult {
   interpreted_as: string
   employees:      SearchEmployee[]
   count:          number
+  truncated:      boolean
   sources:        string[]
 }
 
@@ -176,7 +177,8 @@ export function WorkforceSearch() {
       {state.kind === 'result' && (
         <>
           <p className="text-sm text-muted-foreground">
-            {state.data.count} result{state.data.count !== 1 ? 's' : ''} found
+            {state.data.truncated ? `${state.data.count}+` : state.data.count} result{state.data.count !== 1 ? 's' : ''} found
+            {state.data.truncated && ' — refine your search to see more'}
           </p>
           {state.data.count === 0 ? (
             <div className="text-center py-12 text-muted-foreground border border-dashed rounded-lg">
