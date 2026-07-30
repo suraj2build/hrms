@@ -82,7 +82,13 @@ export default async function auditRoutes(fastify: FastifyInstance) {
       const query = req.query as Record<string, string | undefined>
       const tenant_id = (req as any).tenantId as string | undefined
 
-      const EXPORT_CAP = Math.min(Number(query.limit ?? 200), 5000)
+      // Fresh audit finding: query.limit was never validated — a non-numeric
+      // value (e.g. ?limit=abc) made Number() produce NaN, which propagated
+      // through Math.min() and Array.prototype.slice(0, NaN) (NaN coerces to
+      // 0 per spec) to silently export ZERO events instead of erroring or
+      // falling back to the default, with no signal to the caller.
+      const parsedLimit = Number(query.limit)
+      const EXPORT_CAP = Math.min(Number.isFinite(parsedLimit) && parsedLimit > 0 ? parsedLimit : 200, 5000)
       const format  = query.format === 'csv' ? 'csv' : 'json'
       const from    = query.from
       const to      = query.to

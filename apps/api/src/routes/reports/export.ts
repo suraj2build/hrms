@@ -47,6 +47,12 @@ const STATUS_CODE: Record<string, string> = {
   leave:      'LV',
   holiday:    'HO',
   weekly_off: 'WO',
+  // 'weekend' is a distinct, actively-written status (attendance-processor.ts,
+  // attendance_daily_status_check CHECK constraint) that the app's own
+  // muster-codes.ts already treats identically to weekly_off ('WO') —
+  // without this, a weekend-status cell fell through to "WE" (inconsistent
+  // with the rest of the app) and was never counted in any tally below.
+  weekend:    'WO',
 }
 
 const DOW_SHORT = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa']
@@ -376,7 +382,12 @@ async function fetchComparisonRows(
 ): Promise<{ rows: CompRow[]; runRow: any | null; error?: string }> {
   const [year, mon] = month.split('-').map(Number)
   const fromDate    = `${month}-01`
-  const toDate      = new Date(year, mon, 0).toISOString().slice(0, 10)
+  // UTC-anchored month-end instead of new Date(year, mon, 0).toISOString() —
+  // that constructs a LOCAL-TZ Date then serializes via UTC, so on a server
+  // with a positive UTC offset local midnight of the last day rolls back to
+  // the previous day in UTC, silently dropping the month's last calendar day
+  // from every .lte('date', toDate) bound below.
+  const toDate = new Date(Date.UTC(year, mon, 0)).toISOString().slice(0, 10)
 
   // ── 1. Active employees (optionally filtered by department) ───────────────
   // Paginated — an unbounded .select() truncates at PostgREST's 1,000-row
@@ -445,7 +456,14 @@ async function fetchComparisonRows(
   }
 
   // ── 3. Most recent payroll run for the month ──────────────────────────────
-  const { data: runRow } = await supabase
+  // A transient query failure here must not fall through silently — the
+  // sibling employees/anomalies/leaves queries above all check their error
+  // and bail/log; this one previously discarded `error` entirely, so a
+  // failed lookup meant runRow stayed undefined, slipMap stayed empty, and
+  // EVERY employee in the report was flagged "NO SLIP" — indistinguishable
+  // from "no payroll run exists yet for this month" on a finance
+  // reconciliation report.
+  const { data: runRow, error: runErr } = await supabase
     .from('payroll_runs')
     .select('id, status, finalized_at, created_at')
     .eq('tenant_id', tenantId)
@@ -453,6 +471,10 @@ async function fetchComparisonRows(
     .order('created_at', { ascending: false })
     .limit(1)
     .maybeSingle()
+  if (runErr) {
+    logger?.error({ err: runErr }, 'comparison: payroll run query failed')
+    return { rows: [], runRow: null, error: 'Failed to fetch payroll run' }
+  }
 
   type SlipAgg = { payable_days: number; lop_days: number }
   const slipMap = new Map<string, SlipAgg>()
@@ -605,7 +627,9 @@ export default async function reportExportRoutes(fastify: FastifyInstance) {
 
     const [year, mon] = month.split('-').map(Number)
     const fromDate    = `${month}-01`
-    const toDate      = new Date(year, mon, 0).toISOString().slice(0, 10)
+    // UTC-anchored month-end — see fetchComparisonRows() above for why
+    // new Date(year, mon, 0).toISOString() is unsafe on a non-UTC server.
+    const toDate = new Date(Date.UTC(year, mon, 0)).toISOString().slice(0, 10)
 
     // Build ordered date list for the month
     const allDates: string[] = []
@@ -733,6 +757,7 @@ export default async function reportExportRoutes(fastify: FastifyInstance) {
             case 'leave':      LV++; break
             case 'holiday':    HO++; break
             case 'weekly_off': WO++; break
+            case 'weekend':    WO++; break
           }
           payable  = r2(payable + frac)
           lop      = r2(lop + Math.max(0, 1.0 - frac))
@@ -844,17 +869,22 @@ export default async function reportExportRoutes(fastify: FastifyInstance) {
     const tenantId = req.tenantId as string
 
     // ── Resolve payroll run ────────────────────────────────────────────────────
+    // Fresh audit finding: neither branch checked `error` — a transient DB
+    // failure was silently treated the same as "no payroll run exists" and
+    // returned to the caller as a 404 NO_RUN, masking a real server failure
+    // as a data-not-found condition on a payroll/salary export endpoint.
     let runRow: any
     if (run_id) {
-      const { data } = await fastify.supabase
+      const { data, error } = await fastify.supabase
         .from('payroll_runs')
         .select('id, month, status, total_gross, total_net, total_deductions, total_lop_amount, employee_count, finalized_at, created_at')
         .eq('id', run_id)
         .eq('tenant_id', tenantId)
-        .single()
+        .maybeSingle()
+      if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch payroll run')
       runRow = data
     } else {
-      const { data } = await fastify.supabase
+      const { data, error } = await fastify.supabase
         .from('payroll_runs')
         .select('id, month, status, total_gross, total_net, total_deductions, total_lop_amount, employee_count, finalized_at, created_at')
         .eq('tenant_id', tenantId)
@@ -862,6 +892,7 @@ export default async function reportExportRoutes(fastify: FastifyInstance) {
         .order('created_at', { ascending: false })
         .limit(1)
         .maybeSingle()
+      if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch payroll run')
       runRow = data
     }
 

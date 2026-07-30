@@ -173,6 +173,19 @@ export default async function billingRoutes(fastify: FastifyInstance) {
           updates.subscription_status = 'cancelled'
           updates.status = 'cancelled'
           break
+        // Fresh audit finding: fired when a subscription with a fixed
+        // total_count (configured as 12 at checkout) finishes its cycles.
+        // Without this case, `updates` stayed empty and subscription_status
+        // was permanently stuck at 'active' — which both hides that billing
+        // actually ended, and (since the double-subscription guard above
+        // only allows re-checkout when subscription_status is 'cancelled'
+        // or 'completed') would have permanently blocked the tenant from
+        // ever re-subscribing. tenants.status has no 'completed' value in
+        // its CHECK constraint, so it maps to 'cancelled' like the case above.
+        case 'subscription.completed':
+          updates.subscription_status = 'completed'
+          updates.status = 'cancelled'
+          break
       }
       if (Object.keys(updates).length) {
         const { error: tenantUpdateError } = await fastify.supabase.from('tenants').update(updates).eq('id', tenantId)
