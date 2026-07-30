@@ -9,7 +9,7 @@
  */
 
 import { useState }        from 'react'
-import { useQuery, useMutation } from '@tanstack/react-query'
+import { useQuery, useMutation, keepPreviousData } from '@tanstack/react-query'
 import { toast }            from 'sonner'
 import { EmployeeLabel }    from '@/components/employee/EmployeeLabel'
 import {
@@ -123,6 +123,7 @@ export function AttendanceRisk() {
     queryFn:  () => api.get(`/attendance/risk?period_end=${loadedPeriod}&limit=50`),
     enabled:  isAdmin,
     staleTime: 60_000,
+    placeholderData: keepPreviousData,
   })
 
   const { data: summary, refetch: refetchSummary } = useQuery<RiskSummary>({

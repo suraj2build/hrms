@@ -8,7 +8,7 @@
  */
 
 import { useState }              from 'react'
-import { useQuery, useMutation } from '@tanstack/react-query'
+import { useQuery, useMutation, keepPreviousData } from '@tanstack/react-query'
 import { toast }                 from 'sonner'
 import {
   ShieldAlert, Activity,
@@ -223,6 +223,7 @@ export function HealthIndex() {
     },
     enabled: isAdmin,
     staleTime: 60_000,
+    placeholderData: keepPreviousData,
   })
 
   const { data: summary, refetch: refetchSummary } = useQuery<HealthSummary>({
