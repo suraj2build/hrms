@@ -124,27 +124,44 @@ export default async function fabricRoutes(fastify: FastifyInstance) {
   })
 
   // GET /fabric/decisions — recent decision graph nodes
+  //
+  // Fresh audit finding: `total` was previously `nodes.length`, which can
+  // never exceed the `limit` the query itself requested — a tenant with
+  // more decision-graph nodes than `limit` saw the count silently capped
+  // with no truncation signal. Parallel count:'exact',head:true query gives
+  // the real total, matching the pattern already used elsewhere (e.g.
+  // operations/intelligence.ts, intelligence/index.ts).
   fastify.get('/fabric/decisions', adminAuth, async (req, _reply) => {
     const orgId = (req as any).tenantId
     const { limit = '50' } = req.query as any
-    const nodes = await decisionGraphService.getRecentNodes(fastify.supabase, orgId, Number(limit))
-    return { nodes, total: nodes.length }
+    const [nodes, { count }] = await Promise.all([
+      decisionGraphService.getRecentNodes(fastify.supabase, orgId, Number(limit)),
+      fastify.supabase.from('decision_graph_nodes').select('*', { count: 'exact', head: true }).eq('tenant_id', orgId),
+    ])
+    return { nodes, total: count ?? nodes.length }
   })
 
   // GET /fabric/decisions/lineage/:entityId — entity decision lineage
   fastify.get('/fabric/decisions/lineage/:entityId', adminAuth, async (req, _reply) => {
     const { entityId } = req.params as any
     const orgId = (req as any).tenantId
-    const nodes = await decisionGraphService.getEntityLineage(fastify.supabase, entityId, orgId)
-    return { nodes, entity_id: entityId, total: nodes.length }
+    const [nodes, { count }] = await Promise.all([
+      decisionGraphService.getEntityLineage(fastify.supabase, entityId, orgId),
+      fastify.supabase.from('decision_graph_nodes').select('*', { count: 'exact', head: true })
+        .eq('tenant_id', orgId).eq('entity_id', entityId),
+    ])
+    return { nodes, entity_id: entityId, total: count ?? nodes.length }
   })
 
   // GET /fabric/orchestration — recent orchestration activities
   fastify.get('/fabric/orchestration', adminAuth, async (req, _reply) => {
     const orgId = (req as any).tenantId
     const { limit = '20' } = req.query as any
-    const activities = await workflowOrchestrationService.getRecentActivities(fastify.supabase, orgId, Number(limit))
-    return { activities, total: activities.length }
+    const [activities, { count }] = await Promise.all([
+      workflowOrchestrationService.getRecentActivities(fastify.supabase, orgId, Number(limit)),
+      fastify.supabase.from('orchestration_activity_logs').select('*', { count: 'exact', head: true }).eq('tenant_id', orgId),
+    ])
+    return { activities, total: count ?? activities.length }
   })
 
   const EscalateSchema = z.object({
@@ -196,8 +213,11 @@ export default async function fabricRoutes(fastify: FastifyInstance) {
   fastify.get('/fabric/replay/sessions', adminAuth, async (req, _reply) => {
     const orgId = (req as any).tenantId
     const { limit = '20' } = req.query as any
-    const sessions = await replayIntelligenceService.listSessions(fastify.supabase, orgId, Number(limit))
-    return { sessions, total: sessions.length }
+    const [sessions, { count }] = await Promise.all([
+      replayIntelligenceService.listSessions(fastify.supabase, orgId, Number(limit)),
+      fastify.supabase.from('replay_sessions').select('*', { count: 'exact', head: true }).eq('tenant_id', orgId),
+    ])
+    return { sessions, total: count ?? sessions.length }
   })
 
   // GET /fabric/knowledge — search knowledge layer

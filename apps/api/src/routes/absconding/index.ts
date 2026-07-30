@@ -19,6 +19,7 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { serverError, notFound, ErrorCode } from '../../lib/api-errors.js'
+import { fetchAllRows } from '../../lib/supabase-paginate.js'
 
 // absconding_cases.response_channel CHECK (migration 323) — the ground truth
 // for valid channel values. absconding_communications.channel has no CHECK
@@ -33,7 +34,11 @@ import {
   scanAndEscalate,
 } from '../../lib/absconding-engine.js'
 
-const OPEN_STATUSES = ['flagged', 'wl1_sent', 'wl2_sent', 'termination_pending'] as const
+// Fresh audit finding: 'second_escalation' (the Day-5 escalation rung set by
+// absconding-engine.ts's scanAndEscalate()/escalateSecond()) was missing from
+// both lists — ?status=second_escalation 400'd, and the dashboard's
+// total_open/avg_ua_days silently excluded every case sitting at that stage.
+const OPEN_STATUSES = ['flagged', 'second_escalation', 'wl1_sent', 'wl2_sent', 'termination_pending'] as const
 const ALL_STATUSES  = [...OPEN_STATUSES, 'terminated', 'resolved', 'closed'] as const
 
 export default async function abscondingRoutes(fastify: FastifyInstance) {
@@ -66,19 +71,29 @@ export default async function abscondingRoutes(fastify: FastifyInstance) {
           designation:designations(name)
         ),
         assigned_to_profile:profiles!assigned_to(id, full_name, avatar_url)
-      `, { count: 'exact' })
+      `)
       .eq('tenant_id', req.tenantId)
-      .order('updated_at', { ascending: false })
-      .range(offset, offset + limit - 1)
+      .order('updated_at', { ascending: false }) as any
 
     if (status !== 'all') q = q.eq('status', status)
 
-    // basic name search — filter in-memory if search provided (small sets)
-    const { data, count, error } = await q
+    // Fresh audit finding: search was previously applied in-memory AFTER
+    // .range(offset, offset+limit-1) had already paginated at the DB layer —
+    // a matching case outside the current page was invisible, and `total`
+    // reflected the unfiltered count instead of the search-matched count.
+    // Fetch the full (tenant+status-filtered) set, search-filter, THEN
+    // paginate in JS — absconding_cases is a small, bounded compliance
+    // dataset, so this mirrors the same fetch-all-then-filter pattern
+    // already used for the /datasets/leave and /datasets/separation
+    // endpoints.
+    let allRows: any[]
+    try {
+      allRows = await fetchAllRows((from, to) => (q as any).range(from, to))
+    } catch (error: any) {
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch absconding cases')
+    }
 
-    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch absconding cases')
-
-    let rows = (data ?? []) as any[]
+    let rows = allRows
     if (search) {
       const term = search.toLowerCase()
       rows = rows.filter((r: any) => {
@@ -91,7 +106,10 @@ export default async function abscondingRoutes(fastify: FastifyInstance) {
       })
     }
 
-    return reply.send({ data: rows, total: count ?? 0, page, limit })
+    const total = rows.length
+    const paged = rows.slice(offset, offset + limit)
+
+    return reply.send({ data: paged, total, page, limit })
   })
 
   // ── GET /absconding/dashboard ─────────────────────────────────────────────
@@ -149,9 +167,10 @@ export default async function abscondingRoutes(fastify: FastifyInstance) {
       `)
       .eq('id', req.params.caseId)
       .eq('tenant_id', req.tenantId)
-      .single()
+      .maybeSingle()
 
-    if (error) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Case not found' })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch absconding case')
+    if (!data) return notFound(reply, 'NOT_FOUND', 'Case not found')
     return reply.send({ data })
   })
 

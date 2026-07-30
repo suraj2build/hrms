@@ -38,6 +38,24 @@ async function namesFor(fastify: FastifyInstance, tenantId: string, ids: string[
   return new Map((data ?? []).map((e: any) => [e.id, `${e.first_name ?? ''} ${e.last_name ?? ''}`.trim()]))
 }
 
+// Resolve an employee's current department_id + site_id, used to enforce
+// feed_posts.audience_scope ('department'/'site') visibility.
+async function resolveEmployeeScope(
+  fastify: FastifyInstance, employeeId: string, tenantId: string,
+): Promise<{ departmentId: string | null; siteId: string | null }> {
+  const { data: emp } = await fastify.supabase
+    .from('employees')
+    .select('site_id, job_history!job_history_employee_id_fkey(department_id, is_current)')
+    .eq('id', employeeId).eq('tenant_id', tenantId).maybeSingle()
+  if (!emp) return { departmentId: null, siteId: null }
+  const jhArr = (emp as any).job_history
+  const jh = Array.isArray(jhArr) ? (jhArr.find((j: any) => j.is_current) ?? jhArr[0]) : jhArr
+  return {
+    departmentId: jh?.department_id ?? null,
+    siteId:       (emp as any).site_id ?? null,
+  }
+}
+
 export default async function communityRoutes(fastify: FastifyInstance) {
   const auth = { preHandler: [fastify.authenticate] }
 
@@ -49,15 +67,43 @@ export default async function communityRoutes(fastify: FastifyInstance) {
     // Lazily ensure today's birthday/anniversary system posts exist (idempotent).
     await ensureTodaysCelebrations(fastify.supabase, req.tenantId)
 
-    const { data: posts, error } = await fastify.supabase
-      .from('feed_posts')
-      .select('id, author_employee, subject_employee, type, title, body, pinned, created_at')
-      .eq('tenant_id', req.tenantId).eq('status', 'active')
-      .order('pinned', { ascending: false }).order('created_at', { ascending: false })
-      .limit(limit)
-    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to load feed')
+    // Fresh audit finding: audience_scope/audience_ref were captured on
+    // create but never enforced here — a "department"-scoped post was
+    // visible identically to a "company"-scoped one, broadcasting content
+    // HR intended to restrict (e.g. a department reorg notice) tenant-wide.
+    // Fetch the full active set (feed_posts is a small, bounded engagement
+    // table, same fetch-all-then-filter pattern as the reactions/comments
+    // queries below) and filter by the caller's own department/site before
+    // ranking + truncating to `limit`.
+    let allPosts: any[]
+    try {
+      allPosts = await fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('feed_posts')
+          .select('id, author_employee, subject_employee, type, title, body, pinned, created_at, audience_scope, audience_ref')
+          .eq('tenant_id', req.tenantId).eq('status', 'active')
+          .range(from, to),
+      )
+    } catch (error) {
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to load feed')
+    }
 
-    const rows = posts ?? []
+    const { departmentId: callerDeptId, siteId: callerSiteId } = me
+      ? await resolveEmployeeScope(fastify, me, req.tenantId)
+      : { departmentId: null, siteId: null }
+
+    const visible = allPosts.filter((p: any) => {
+      if (p.audience_scope === 'department') return !!callerDeptId && p.audience_ref === callerDeptId
+      if (p.audience_scope === 'site')       return !!callerSiteId && p.audience_ref === callerSiteId
+      return true   // 'company' (or unset, defensively)
+    })
+
+    visible.sort((a: any, b: any) => {
+      if (a.pinned !== b.pinned) return a.pinned ? -1 : 1
+      return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+    })
+
+    const rows = visible.slice(0, limit)
     const postIds = rows.map((p: any) => p.id)
 
     // Reactions + comment counts, fully paginated (a post can accumulate well
@@ -174,6 +220,13 @@ export default async function communityRoutes(fastify: FastifyInstance) {
       title:          z.string().max(200).optional(),
       type:           z.enum(['update', 'announcement']).default('update'),
       audience_scope: z.enum(['company', 'department', 'site']).default('company'),
+      // Fresh audit finding: audience_scope was accepted but audience_ref
+      // never was, so a 'department'/'site'-scoped post was never actually
+      // tied to any department/site — the column stayed NULL forever and
+      // GET /community/feed (fixed above) had nothing to filter on, so the
+      // post was silently visible tenant-wide regardless of the scope the
+      // author picked.
+      audience_ref:   z.string().uuid().optional(),
       pinned:         z.boolean().optional(),
     })
     const parsed = schema.safeParse(req.body)
@@ -181,11 +234,26 @@ export default async function communityRoutes(fastify: FastifyInstance) {
     if (containsProfanity(parsed.data.body) || containsProfanity(parsed.data.title)) {
       return reply.code(400).send({ error: 'PROFANITY_BLOCKED', message: PROFANITY_MSG })
     }
+    if (parsed.data.audience_scope !== 'company' && !parsed.data.audience_ref) {
+      return reply.code(400).send({ error: 'VALIDATION_ERROR', message: 'audience_ref is required for department/site-scoped posts' })
+    }
 
     const isHr = HR_ADMIN_ROLES.includes(req.userRole)
     // Announcements + pinning are HR-only; everyone else posts plain updates.
     if ((parsed.data.type === 'announcement' || parsed.data.pinned) && !isHr) {
       return reply.code(403).send({ error: 'FORBIDDEN', message: 'Only HR can post announcements or pin posts' })
+    }
+
+    // audience_ref must resolve to a real department/site in this tenant —
+    // otherwise a typo'd or cross-tenant UUID would silently make the post
+    // invisible to everyone (it would never match any caller's scope).
+    if (parsed.data.audience_ref) {
+      const table = parsed.data.audience_scope === 'department' ? 'departments' : 'sites'
+      const { data: ref } = await fastify.supabase
+        .from(table).select('id').eq('id', parsed.data.audience_ref).eq('tenant_id', req.tenantId).maybeSingle()
+      if (!ref) {
+        return reply.code(400).send({ error: 'VALIDATION_ERROR', message: `audience_ref does not match a ${parsed.data.audience_scope} in your organisation` })
+      }
     }
 
     // Fresh audit finding: unlike the sibling /community/wish above, this
@@ -210,6 +278,7 @@ export default async function communityRoutes(fastify: FastifyInstance) {
         title:           parsed.data.title ?? null,
         body:            parsed.data.body,
         audience_scope:  parsed.data.audience_scope,
+        audience_ref:    parsed.data.audience_ref ?? null,
         pinned:          parsed.data.pinned ?? false,
       })
       .select('id')

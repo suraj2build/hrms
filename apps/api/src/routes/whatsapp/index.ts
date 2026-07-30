@@ -81,12 +81,17 @@ const whatsappRoutes: FastifyPluginAsync = async (fastify) => {
       // `.limit(1)` silently picking an arbitrary row and writing this
       // message's mood/note/ack against the wrong employee and tenant.
       const supabase = fastify.supabase
-      const { data: employees } = await supabase
+      const { data: employees, error: empErr } = await supabase
         .from('employees')
         .select('id, tenant_id, first_name')
         .eq('phone', from)
         .eq('status', 'active')
         .limit(2)
+
+      if (empErr) {
+        req.log.error({ err: empErr, from }, '[whatsapp] employee lookup by phone failed — dropping message')
+        return reply.code(200).send('ok')
+      }
 
       const matches = (employees as { id: string; tenant_id: string; first_name: string }[] | null) ?? []
       if (matches.length > 1) {
@@ -135,7 +140,7 @@ const whatsappRoutes: FastifyPluginAsync = async (fastify) => {
         // into the free-text message body (guessed, enumerated, or leaked from
         // another tenant) would be upserted verbatim, corrupting this tenant's
         // ack register with a reference to a policy that isn't even theirs.
-        const { data: policy } = await supabase
+        const { data: policy, error: policyErr } = await supabase
           .from('hr_policies')
           .select('id')
           .eq('id', policyId)
@@ -143,6 +148,11 @@ const whatsappRoutes: FastifyPluginAsync = async (fastify) => {
           .eq('status', 'published')
           .maybeSingle()
 
+        if (policyErr) {
+          req.log.error({ err: policyErr, tenantId, policyId }, '[whatsapp] policy lookup failed')
+          await wa.sendText(tenantId, from, `Sorry, something went wrong looking up that policy. Please try again later.`)
+          return reply.code(200).send('ok')
+        }
         if (!policy) {
           await wa.sendText(tenantId, from, `Sorry, we couldn't find that policy. Please check the link and try again.`)
           return reply.code(200).send('ok')
@@ -171,7 +181,7 @@ const whatsappRoutes: FastifyPluginAsync = async (fastify) => {
       // ── Free text → update note on today's check-in if exists ────────────────
       if (text.length > 0) {
         const today = await tenantTodayStr(supabase, tenantId)
-        const { data: existing } = await supabase
+        const { data: existing, error: existingErr } = await supabase
           .from('mood_checkins')
           .select('id')
           .eq('tenant_id', tenantId)
@@ -179,7 +189,10 @@ const whatsappRoutes: FastifyPluginAsync = async (fastify) => {
           .eq('checkin_date', today)
           .maybeSingle()
 
-        if (existing) {
+        if (existingErr) {
+          req.log.error({ err: existingErr, tenantId, employeeId }, '[whatsapp] existing check-in lookup failed')
+          await wa.sendText(tenantId, from, `Sorry, something went wrong. Please try again later.`)
+        } else if (existing) {
           const { error: noteErr } = await supabase
             .from('mood_checkins')
             .update({ note: text.slice(0, 1000) })
