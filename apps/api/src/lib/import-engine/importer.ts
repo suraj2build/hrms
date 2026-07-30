@@ -1121,21 +1121,37 @@ async function batchInsert(
   records: Record<string, unknown>[],
   uniqueColumn: string,
   mode: ImportMode,
-): Promise<{ created: number; updated: number; failed: number; skipped: number; errors: Array<{ index: number; message: string }> }> {
+): Promise<{ created: number; updated: number; failed: number; skipped: number; errors: Array<{ index: number; message: string }>; updatedIndices: Set<number> }> {
   let created = 0
   let updated = 0
   let failed  = 0
   let skipped = 0
   const errors: Array<{ index: number; message: string }> = []
+  // Indices (into `records`) that were classified as updates under 'upsert' mode —
+  // determined from a live pre-write existence check, not the caller's validation-time
+  // isDuplicate flag, so a same-batch-or-earlier-batch row sharing a unique key with
+  // this row is classified correctly even though neither existed in the DB when
+  // validation ran (PEND-22).
+  const updatedIndices = new Set<number>()
 
   for (let i = 0; i < records.length; i += BATCH_SIZE) {
     const batch = records.slice(i, i + BATCH_SIZE)
 
     if (mode === 'upsert') {
-      const { data, error } = await supabase
+      const tenantId = batch[0]?.tenant_id as string | undefined
+      const keys = batch.map((r) => r[uniqueColumn])
+      const { data: existingRows } = tenantId
+        ? await supabase
+            .from(table)
+            .select(uniqueColumn)
+            .eq('tenant_id', tenantId)
+            .in(uniqueColumn, keys)
+        : { data: null }
+      const existingKeys = new Set((existingRows ?? []).map((r: any) => r[uniqueColumn]))
+
+      const { error } = await supabase
         .from(table)
         .upsert(batch, { onConflict: `tenant_id,${uniqueColumn}` })
-        .select()
 
       if (error) {
         // Batch-level error — mark all rows in the batch as failed
@@ -1144,9 +1160,14 @@ async function batchInsert(
           failed++
         }
       } else {
-        // PostgREST returns all upserted rows; count from caller's duplicate flag
-        // (records array carries isDuplicate info indirectly — caller maps statuses after)
-        created += data?.length ?? batch.length
+        for (let j = 0; j < batch.length; j++) {
+          if (existingKeys.has(batch[j][uniqueColumn])) {
+            updated++
+            updatedIndices.add(i + j)
+          } else {
+            created++
+          }
+        }
       }
     } else if (mode === 'create_only') {
       const { data, error } = await supabase
@@ -1183,7 +1204,7 @@ async function batchInsert(
     }
   }
 
-  return { created, updated, failed, skipped, errors }
+  return { created, updated, failed, skipped, errors, updatedIndices }
 }
 
 // ── Types that cannot be chunked ─────────────────────────────────────────────
@@ -1217,7 +1238,11 @@ async function batchChunk(
       vr.isValid = false
       failed++
     } else if (!failedSet.has(i)) {
-      if (mode === 'update_only' || (mode === 'upsert' && vr.isDuplicate)) updated++
+      // 'upsert' classification comes from batchInsert's live pre-write existence
+      // check (result.updatedIndices), not vr.isDuplicate — the latter is a
+      // validation-time snapshot that misclassifies a row whose unique key was
+      // only created by an earlier batch in this same import run (PEND-22).
+      if (mode === 'update_only' || (mode === 'upsert' && result.updatedIndices.has(i))) updated++
       else created++
     }
   }
