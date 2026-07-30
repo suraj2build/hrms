@@ -133,6 +133,14 @@ export default async function workspaceStatsRoutes(fastify: FastifyInstance) {
 
     ])
 
+    // A failure here must not silently read as 0 — these feed the
+    // WorkforceWorkspace command header's pending/SLA/duplicate counters.
+    const firstErr = [
+      pendingResult, hrReviewResult, slaBreachResult, duplicateResult,
+      confidenceResult, completedTodayResult, completedWeekResult,
+    ].find(r => r.error)
+    if (firstErr?.error) return serverError(req, reply, firstErr.error, ErrorCode.QUERY_FAILED, 'Failed to fetch onboarding stats')
+
     // payroll_backlog: active employees with no active compensation record.
     // Paginated separately (fetchAllRows, not a plain .select()) — this query
     // filters on a joined table's null column, which can't combine with
@@ -168,13 +176,14 @@ export default async function workspaceStatsRoutes(fastify: FastifyInstance) {
     const tenantId: string = req.tenantId
     const limit = Math.min(Number((req.query as any).limit ?? 15), 50)
 
-    const { data: sessions } = await fastify.supabase
+    const { data: sessions, error } = await fastify.supabase
       .from('onboarding_sessions')
       .select('id, candidate_name, status, updated_at, created_at')
       .eq('tenant_id', tenantId)
       .neq('status', 'archived')
       .order('updated_at', { ascending: false })
       .limit(limit)
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch onboarding events')
 
     const severityMap: Record<string, string> = {
       employee_created: 'success',
@@ -232,6 +241,9 @@ export default async function workspaceStatsRoutes(fastify: FastifyInstance) {
         .eq('status', 'active')
         .is('documents.id', null),
     ])
+
+    const firstErr = [activeResult, inactiveResult, missingBankResult, missingDocsResult].find(r => r.error)
+    if (firstErr?.error) return serverError(req, reply, firstErr.error, ErrorCode.QUERY_FAILED, 'Failed to fetch employees overview')
 
     return reply.send({
       active_employees:    activeResult.count   ?? 0,
@@ -340,6 +352,14 @@ export default async function workspaceStatsRoutes(fastify: FastifyInstance) {
       buildLatestDaySnapshot(fastify.supabase, tenantId),
     ])
 
+    // A failure on any of these must not silently read as 0 — these feed the
+    // AttendanceWorkspace command header's action-queue/processing-health tiles.
+    const firstErr = [
+      anomaliesResult, correctionsResult, overnightResult, confidenceResult,
+      processorResult, staffingPressureResult, recentRegResult, missingCompResult,
+    ].find(r => r.error)
+    if (firstErr?.error) return serverError(req, reply, firstErr.error, ErrorCode.QUERY_FAILED, 'Failed to fetch attendance stats')
+
     const activePeriod = 'error' in activePeriodResult ? null : activePeriodResult
     const daySnapshot  = 'error' in daySnapshotResult ? null : daySnapshotResult
 
@@ -370,7 +390,7 @@ export default async function workspaceStatsRoutes(fastify: FastifyInstance) {
     const tenantId: string = req.tenantId
     const limit = Math.min(Number((req.query as any).limit ?? 15), 50)
 
-    const { data: auditRows } = await fastify.supabase
+    const { data: auditRows, error } = await fastify.supabase
       .from('attendance_audit_log')
       .select(`
         id, date, source, after_status, created_at,
@@ -379,6 +399,7 @@ export default async function workspaceStatsRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', tenantId)
       .order('created_at', { ascending: false })
       .limit(limit)
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch attendance events')
 
     const severityMap: Record<string, string> = {
       present:    'success',
@@ -410,17 +431,18 @@ export default async function workspaceStatsRoutes(fastify: FastifyInstance) {
 
     try {
       // Find most recent date with data
-      const { data: latestRow } = await fastify.supabase
+      const { data: latestRow, error: latestErr } = await fastify.supabase
         .from('attendance_daily')
         .select('date')
         .eq('tenant_id', tenantId)
         .order('date', { ascending: false })
         .limit(1)
         .maybeSingle()
+      if (latestErr) return serverError(req, reply, latestErr, ErrorCode.QUERY_FAILED, 'Failed to fetch attendance live status')
 
       if (!latestRow?.date) return reply.send({ data: [] })
 
-      const { data: rows } = await fastify.supabase
+      const { data: rows, error: rowsErr } = await fastify.supabase
         .from('attendance_daily')
         .select(`
           employee_id, status, late_minutes,
@@ -430,6 +452,7 @@ export default async function workspaceStatsRoutes(fastify: FastifyInstance) {
         .eq('date', latestRow.date)
         .order('late_minutes', { ascending: false })
         .limit(limit)
+      if (rowsErr) return serverError(req, reply, rowsErr, ErrorCode.QUERY_FAILED, 'Failed to fetch attendance live status')
 
       const result = ((rows ?? []) as any[]).map(r => {
         const emp = Array.isArray(r.employees) ? r.employees[0] : r.employees
@@ -618,12 +641,13 @@ export default async function workspaceStatsRoutes(fastify: FastifyInstance) {
     const tenantId: string = req.tenantId
     const limit = Math.min(Number((req.query as any).limit ?? 15), 50)
 
-    const { data: runs } = await fastify.supabase
+    const { data: runs, error } = await fastify.supabase
       .from('payroll_runs')
       .select('id, month, status, employee_count, created_at, updated_at')
       .eq('tenant_id', tenantId)
       .order('updated_at', { ascending: false })
       .limit(limit)
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch payroll events')
 
     const severityMap: Record<string, string> = {
       completed:  'success',
@@ -1121,12 +1145,13 @@ export default async function workspaceStatsRoutes(fastify: FastifyInstance) {
     const tenantId: string = req.tenantId
     const limit = Math.min(Number((req.query as any).limit ?? 15), 50)
 
-    const { data: incidents } = await fastify.supabase
+    const { data: incidents, error } = await fastify.supabase
       .from('operational_incidents')
       .select('id, title, severity, status, created_at, updated_at')
       .eq('tenant_id', tenantId)
       .order('updated_at', { ascending: false })
       .limit(limit)
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch operations events')
 
     const severityMap: Record<string, string> = {
       p1:       'critical',
