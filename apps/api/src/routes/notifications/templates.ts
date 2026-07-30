@@ -187,13 +187,19 @@ export default async function notificationTemplatesRoutes(fastify: FastifyInstan
       updatePayload.placeholders = extractPlaceholders(parsed.data.subject, parsed.data.body_template)
     }
 
+    // Fresh audit finding: .single() on an UPDATE matching zero rows
+    // (nonexistent id, or an id belonging to another tenant) causes
+    // PostgREST to return a PGRST116 error rather than an empty result, so
+    // this fell into the `if (error)` branch and returned a generic 500
+    // instead of the intended 404 — the `if (!data)` line below was dead
+    // code. Matches the same fix already applied to benefits/index.ts.
     const { data, error } = await fastify.supabase
       .from('notification_templates')
       .update(updatePayload)
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
       .select()
-      .single()
+      .maybeSingle()
 
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update notification template')
     if (!data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Template not found' })

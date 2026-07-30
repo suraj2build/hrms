@@ -8,6 +8,7 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { serverError, notFound, forbidden, validationError, ErrorCode } from '../../lib/api-errors.js'
+import { fetchAllRows } from '../../lib/supabase-paginate.js'
 
 // Must mirror inbox_items.item_type's CHECK constraint (107_operational_inbox.sql).
 const ITEM_TYPES = [
@@ -293,15 +294,24 @@ export default async function notificationInboxRoutes(fastify: FastifyInstance) 
       return validationError(reply, ErrorCode.VALIDATION_ERROR, parsed.error.issues[0]?.message)
     }
 
-    let q = fastify.supabase
-      .from('inbox_escalations')
-      .select('*, inbox_items(id, title, item_type, status)')
-      .eq('tenant_id', req.tenantId)
-
-    if (parsed.data.inbox_item_id) q = q.eq('inbox_item_id', parsed.data.inbox_item_id)
-
-    const { data, error } = await q
-    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch escalations')
-    return reply.send({ data: data ?? [] })
+    // Fresh audit finding: unpaginated .select() — inbox_escalations is an
+    // append-only log of every escalation hop tenant-wide; a mature tenant
+    // exceeding PostgREST's 1000-row cap would have older escalations
+    // silently truncated with no signal. fetchAllRows() paginates fully.
+    let data: any[]
+    try {
+      data = await fetchAllRows((from, to) => {
+        let q = fastify.supabase
+          .from('inbox_escalations')
+          .select('*, inbox_items(id, title, item_type, status)')
+          .eq('tenant_id', req.tenantId)
+          .range(from, to) as any
+        if (parsed.data.inbox_item_id) q = q.eq('inbox_item_id', parsed.data.inbox_item_id)
+        return q
+      })
+    } catch (error: any) {
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch escalations')
+    }
+    return reply.send({ data })
   })
 }

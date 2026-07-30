@@ -50,10 +50,12 @@ export default async function notificationsRoutes(fastify: FastifyInstance) {
       .order('created_at', { ascending: false })
       .range(offset, offset + limit - 1)
 
-    if (error) {
-      fastify.log.warn({ event: 'notifications.fetch_failed', err: error.message })
-      return reply.send({ data: [], unread_count: 0, pagination: { offset, limit, returned: 0 } })
-    }
+    // Fresh audit finding: a genuine query failure was previously reported
+    // identically to "you have zero notifications" (200, empty list) — the
+    // bell badge silently showed 0 unread with no client-visible error, and
+    // the user could miss time-sensitive alerts (leave approvals, payroll
+    // blockers) with no indication anything went wrong.
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch notifications')
     return reply.send({
       data:         data ?? [],
       unread_count: (data ?? []).filter((n: any) => !n.is_read).length,
@@ -70,10 +72,9 @@ export default async function notificationsRoutes(fastify: FastifyInstance) {
       .eq('recipient_id', req.userId)
       .eq('is_read', false)
 
-    if (error) {
-      fastify.log.warn({ event: 'notifications.count_failed', err: error.message })
-      return reply.send({ unread_count: 0 })
-    }
+    // Fresh audit finding: same fabricated-success class as GET / above —
+    // a query failure was reported as "0 unread" instead of an error.
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch unread count')
     return reply.send({ unread_count: count ?? 0 })
   })
 
@@ -169,10 +170,10 @@ export default async function notificationsRoutes(fastify: FastifyInstance) {
       .order('created_at', { ascending: false })
       .limit(limit)
 
-    if (error) {
-      fastify.log.warn({ err: error.message }, 'digest/status query failed')
-      return reply.send({ data: [] })
-    }
+    // Fresh audit finding: same fabricated-success class — a query failure
+    // was reported as "no digest deliveries" instead of an error, hiding
+    // delivery-audit failures from HR admins.
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch digest status')
 
     return reply.send({ data: data ?? [] })
   })

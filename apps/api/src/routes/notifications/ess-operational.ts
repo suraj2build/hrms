@@ -16,6 +16,7 @@ import type { FastifyInstance } from 'fastify'
 import type { SupabaseClient }  from '@supabase/supabase-js'
 import { fetchTenantTz } from '../../lib/attendance-engine.js'
 import { getLocalDate }  from '../../lib/org-context.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -386,13 +387,17 @@ export default async function essOperationalRoutes(fastify: FastifyInstance) {
     const { from, to, year, month, dayOfMonth } = currentMonthRange(todayStr)
 
     // Attendance for current month
-    const { data: attendance } = await fastify.supabase
+    const { data: attendance, error: attErr } = await fastify.supabase
       .from('attendance_daily')
       .select('status, is_payable, total_ot_hours:overtime_minutes, date')
       .eq('employee_id', employeeId)
       .eq('tenant_id', req.tenantId)
       .gte('date', from)
       .lte('date', to)
+
+    // A transient query failure must not silently present as "zero LOP risk"
+    // — this feeds an employee-facing payroll-impact preview.
+    if (attErr) return serverError(req, reply, attErr, ErrorCode.QUERY_FAILED, 'Failed to fetch attendance for payroll impact')
 
     const rows = (attendance ?? []) as any[]
 
@@ -408,10 +413,17 @@ export default async function essOperationalRoutes(fastify: FastifyInstance) {
       current_ot_hours += Number(r.total_ot_hours ?? 0) / 60   // overtime_minutes → hours
     }
 
-    // Also count absent days where is_payable is not set (treat as LOP-eligible)
-    // This handles cases where is_payable hasn't been explicitly set
+    // Fresh audit finding: this used to overwrite current_lop_days with
+    // Math.max(current_lop_days, <count of ALL absent-status rows>) — since
+    // "all absent rows" is always >= the "absent AND not-payable" subset,
+    // that always resolved to the total absent-day count, meaning an absent
+    // day explicitly marked is_payable=true (an approved/compensated
+    // absence) was still counted as LOP, contradicting the is_payable flag
+    // it just checked. Also count absent days where is_payable is not set
+    // (undetermined) as LOP-eligible, per this comment's original intent —
+    // but NOT days explicitly marked payable.
     const plainAbsentDays = rows.filter((r) => r.status === 'absent' && r.is_payable == null).length
-    current_lop_days = Math.max(current_lop_days, rows.filter((r) => r.status === 'absent').length)
+    current_lop_days += plainAbsentDays
 
     // Projected LOP: extrapolate current rate to end of month
     const totalMonthDays = new Date(Date.UTC(year, month, 0, 12)).getUTCDate()
