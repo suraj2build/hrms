@@ -88,18 +88,20 @@ export default async function setupRoute(fastify: FastifyInstance) {
     }
 
     // ── 2. Idempotency: check if profile already exists ────────────────────────
-    const { data: existingProfile } = await fastify.supabase
+    const { data: existingProfile, error: existingProfileErr } = await fastify.supabase
       .from('profiles')
       .select('id, tenant_id, role')
       .eq('id', user_id)
       .maybeSingle()
+    if (existingProfileErr) return serverError(req, reply, existingProfileErr, ErrorCode.QUERY_FAILED, 'Failed to check for existing setup')
 
     if (existingProfile) {
-      const { data: existingTenant } = await fastify.supabase
+      const { data: existingTenant, error: existingTenantErr } = await fastify.supabase
         .from('tenants')
         .select('*')
         .eq('id', existingProfile.tenant_id)
         .maybeSingle()
+      if (existingTenantErr) return serverError(req, reply, existingTenantErr, ErrorCode.QUERY_FAILED, 'Failed to fetch existing tenant')
 
       return reply.send({ profile: existingProfile, tenant: existingTenant })
     }
@@ -146,6 +148,31 @@ export default async function setupRoute(fastify: FastifyInstance) {
       .single()
 
     if (profileErr || !profile) {
+      // A concurrent /setup call for the same user_id (double-click, retried
+      // client) can win the race between the idempotency check above and
+      // this insert — profiles.id is the PK, so the loser hits 23505 here,
+      // not a genuine failure. Treat it the same as the idempotent-hit path
+      // above instead of rolling back and erroring on a setup that actually
+      // already succeeded via the other request.
+      if ((profileErr as any)?.code === '23505') {
+        await fastify.supabase.from('tenants').delete().eq('id', tenant.id)
+        const { data: winnerProfile, error: winnerErr } = await fastify.supabase
+          .from('profiles')
+          .select('id, tenant_id, role')
+          .eq('id', user_id)
+          .maybeSingle()
+        if (winnerErr) return serverError(req, reply, winnerErr, ErrorCode.QUERY_FAILED, 'Failed to fetch existing setup after conflict')
+        if (winnerProfile) {
+          const { data: winnerTenant, error: winnerTenantErr } = await fastify.supabase
+            .from('tenants')
+            .select('*')
+            .eq('id', winnerProfile.tenant_id)
+            .maybeSingle()
+          if (winnerTenantErr) return serverError(req, reply, winnerTenantErr, ErrorCode.QUERY_FAILED, 'Failed to fetch existing tenant after conflict')
+          return reply.send({ profile: winnerProfile, tenant: winnerTenant })
+        }
+      }
+
       // Roll back tenant on profile failure (best-effort)
       await fastify.supabase.from('tenants').delete().eq('id', tenant.id)
       // Fresh audit finding: same unauthenticated-route error-leak fix as
