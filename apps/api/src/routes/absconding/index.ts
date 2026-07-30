@@ -38,8 +38,15 @@ import {
 // absconding-engine.ts's scanAndEscalate()/escalateSecond()) was missing from
 // both lists — ?status=second_escalation 400'd, and the dashboard's
 // total_open/avg_ua_days silently excluded every case sitting at that stage.
-const OPEN_STATUSES = ['flagged', 'second_escalation', 'wl1_sent', 'wl2_sent', 'termination_pending'] as const
-const ALL_STATUSES  = [...OPEN_STATUSES, 'terminated', 'resolved', 'closed'] as const
+//
+// 'open' and 'rejoined' are also in the live CHECK constraint (migration 389)
+// but no code path currently sets either — added here so ?status=open/rejoined
+// doesn't 400 and dashboard counts don't silently drop them if a future
+// caller (or manual DB update) produces a case in either state. 'open' groups
+// with the other not-yet-resolved statuses; 'rejoined' is a resolution
+// outcome, grouped with terminated/resolved/closed.
+const OPEN_STATUSES = ['open', 'flagged', 'second_escalation', 'wl1_sent', 'wl2_sent', 'termination_pending'] as const
+const ALL_STATUSES  = [...OPEN_STATUSES, 'terminated', 'resolved', 'rejoined', 'closed'] as const
 
 export default async function abscondingRoutes(fastify: FastifyInstance) {
   const hrAuth   = { preHandler: [fastify.authenticate, requireRole(...HR_ADMIN_ROLES)] }
