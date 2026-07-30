@@ -30,6 +30,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { validateBalance, expandDateRange }     from './leave-engine.js'
 import { logAction }                            from './audit-service.js'
 import { eventService }                         from './event-service.js'
+import { eventBus }                             from './event-bus.js'
 import { getLeaveRequest }                      from './leave-request-service.js'
 import { recomputeRange }                       from './attendance-engine.js'
 import { isSelfApproval }                       from './approval-guards.js'
@@ -324,6 +325,31 @@ export async function approveLeaveRequest(
     leave_type:    lt?.name,
     from_date:     req.from_date,
     to_date:       req.to_date,
+  })
+
+  // Also emit on the in-process eventBus (PEND-75) — this is the system that
+  // actually drives tenant-configured webhook fan-out (WEBHOOK_EVENT_TYPES
+  // includes 'leave.approved') and the SLA/balance-low automation in
+  // event-bus-automation.ts. This route previously only published through
+  // EventPublisher (→ platform_events, an admin observability sink with no
+  // webhook/automation subscribers), so approvals made through this —
+  // the actual UI-driven approval path — silently produced zero webhook
+  // deliveries and zero SLA/balance escalation, unlike the other (unused by
+  // the web UI) /attendance/leave/:id/approve route which already emits here.
+  eventBus.emit({
+    type:          'leave.approved',
+    tenantId,
+    correlationId: 'system',
+    payload: {
+      tenantId,
+      employeeId:  req.employee_id,
+      leaveId:     requestId,
+      approverId:  ctx.approverId,
+      leaveTypeId: req.leave_type_id,
+      fromDate:    req.from_date,
+      toDate:      req.to_date,
+      days:        req.computed_days,
+    },
   })
 
   return { ok: true, value: approved }
