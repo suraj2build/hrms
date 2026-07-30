@@ -3,6 +3,8 @@ import { z } from 'zod'
 import { requireRole } from '../../lib/rbac.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
 import { serverError, ErrorCode } from '../../lib/api-errors.js'
+import { fetchTenantTz } from '../../lib/attendance-engine.js'
+import { getLocalDate } from '../../lib/org-context.js'
 
 export default async function analyticsRoutes(fastify: FastifyInstance) {
   const auth      = { preHandler: [fastify.authenticate] }
@@ -10,8 +12,9 @@ export default async function analyticsRoutes(fastify: FastifyInstance) {
 
   fastify.get('/analytics/dashboard', auth, async (req, reply) => {
     const tid = req.tenantId
-    const now = new Date()
-    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString()
+    const tz = await fetchTenantTz(fastify.supabase, tid)
+    const todayLocal = getLocalDate(new Date().toISOString(), tz)
+    const monthStart = `${todayLocal.slice(0, 7)}-01T00:00:00.000Z`
 
     // deptRows/typeRows are paginated — a plain row-returning .select() (no
     // count:exact/head:true) truncates at PostgREST's 1,000-row ceiling for a

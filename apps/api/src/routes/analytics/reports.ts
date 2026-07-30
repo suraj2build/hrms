@@ -19,6 +19,17 @@ import type { FastifyInstance } from 'fastify'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { fetchAllRows }  from '../../lib/supabase-paginate.js'
 import { serverError, ErrorCode } from '../../lib/api-errors.js'
+import { fetchTenantTz } from '../../lib/attendance-engine.js'
+import { getLocalDate } from '../../lib/org-context.js'
+
+// Tenant-local "now", anchored at UTC midnight of the tenant's local calendar
+// date — so callers must use the UTC getters (getUTCFullYear/getUTCMonth) to
+// stay in the tenant's timezone rather than the server's.
+async function tenantNow(fastify: FastifyInstance, tenantId: string): Promise<Date> {
+  const tz = await fetchTenantTz(fastify.supabase, tenantId)
+  const todayLocal = getLocalDate(new Date().toISOString(), tz)
+  return new Date(todayLocal + 'T00:00:00Z')
+}
 
 // Not every month has 31 days — a bare `${month}-31` literal against a
 // TIMESTAMPTZ column throws "date/time field value out of range" for
@@ -57,10 +68,10 @@ export default async function reportsRoutes(fastify: FastifyInstance) {
     const q   = req.query as Record<string, string>
 
     // Date range — default last 12 months
-    const now      = new Date()
-    const toMonth  = q.to   ? `${q.to}-01`   : `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`
-    const fromDate = q.from ? new Date(`${q.from}-01`) : new Date(now.getFullYear() - 1, now.getMonth(), 1)
-    const fromMonth = `${fromDate.getFullYear()}-${String(fromDate.getMonth() + 1).padStart(2, '0')}-01`
+    const now      = await tenantNow(fastify, tid)
+    const toMonth  = q.to   ? `${q.to}-01`   : `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}-01`
+    const fromDate = q.from ? new Date(`${q.from}-01`) : new Date(Date.UTC(now.getUTCFullYear() - 1, now.getUTCMonth(), 1))
+    const fromMonth = `${fromDate.getUTCFullYear()}-${String(fromDate.getUTCMonth() + 1).padStart(2, '0')}-01`
 
     // Build employee query
     let empQuery = fastify.supabase
@@ -104,9 +115,9 @@ export default async function reportsRoutes(fastify: FastifyInstance) {
     const d = new Date(fromMonth)
     const end = new Date(toMonth)
     while (d <= end) {
-      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+      const key = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`
       months[key] = { month: key, joiners: 0, separations: 0 }
-      d.setMonth(d.getMonth() + 1)
+      d.setUTCMonth(d.getUTCMonth() + 1)
     }
 
     for (const emp of employees) {
@@ -170,9 +181,9 @@ export default async function reportsRoutes(fastify: FastifyInstance) {
     const tid = req.tenantId
     const q   = req.query as Record<string, string>
 
-    const now   = new Date()
+    const now   = await tenantNow(fastify, tid)
     const today = now.toISOString().slice(0, 10)
-    const fromDate = q.from ?? `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`
+    const fromDate = q.from ?? `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}-01`
     const toDate   = q.to   ?? today
 
     // Fetch attendance_daily rows in range
@@ -315,8 +326,8 @@ export default async function reportsRoutes(fastify: FastifyInstance) {
     const tid = req.tenantId
     const q   = req.query as Record<string, string>
 
-    const now   = new Date()
-    const month = q.month ?? `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+    const now   = await tenantNow(fastify, tid)
+    const month = q.month ?? `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}`
 
     // Fetch active compensations with their components
     let comps: any[]
