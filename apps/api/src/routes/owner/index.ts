@@ -434,9 +434,15 @@ export default async function ownerRoutes(fastify: FastifyInstance) {
     if (!parsed.success) {
       return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message ?? 'Invalid request body' })
     }
+    // Fresh audit finding: notes was previously always set to
+    // `reason ?? null`, so suspending with no reason (or the default empty
+    // body) silently wiped any existing CS/business notes on the tenant.
+    // Only touch notes when a reason was actually supplied.
+    const update: Record<string, unknown> = { status: 'suspended' }
+    if (parsed.data.reason) update.notes = parsed.data.reason
     const { data, error } = await fastify.supabase
       .from('tenants')
-      .update({ status: 'suspended', notes: parsed.data.reason ?? null })
+      .update(update)
       .eq('id', id).select('id, status').maybeSingle()
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to suspend tenant')
     if (!data) return notFound(reply, 'TENANT_NOT_FOUND', 'Tenant not found')
@@ -460,8 +466,9 @@ export default async function ownerRoutes(fastify: FastifyInstance) {
     const { id } = req.params as { id: string }
 
     // Verify tenant exists
-    const { data: tenant } = await fastify.supabase
+    const { data: tenant, error: tenantErr } = await fastify.supabase
       .from('tenants').select('id, name').eq('id', id).single()
+    if (tenantErr && tenantErr.code !== 'PGRST116') return serverError(req, reply, tenantErr, ErrorCode.QUERY_FAILED, 'Failed to fetch tenant')
     if (!tenant) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Tenant not found' })
 
     // Collect this tenant's profile user-ids so we can free their auth accounts
@@ -565,8 +572,9 @@ export default async function ownerRoutes(fastify: FastifyInstance) {
     }
 
     // Verify tenant exists
-    const { data: tenant } = await fastify.supabase
+    const { data: tenant, error: tenantErr } = await fastify.supabase
       .from('tenants').select('id, name').eq('id', tenantId).single()
+    if (tenantErr && tenantErr.code !== 'PGRST116') return serverError(req, reply, tenantErr, ErrorCode.QUERY_FAILED, 'Failed to fetch tenant')
     if (!tenant) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Tenant not found' })
 
     // Duplicate check: find auth user by email → check if they already have a profile here
@@ -592,6 +600,15 @@ export default async function ownerRoutes(fastify: FastifyInstance) {
     })
 
     let userId: string | null = authData?.user?.id ?? null
+    // Fresh audit finding (CRITICAL): tracks whether THIS request actually
+    // created the auth user, vs. reusing a pre-existing account discovered
+    // in the "already registered" recovery branch below. The rollback after
+    // a failed profile insert must only ever delete an account this request
+    // itself created — deleting a pre-existing account (which may belong to
+    // a real admin/employee of a DIFFERENT tenant whose email happened to
+    // collide) would cascade-delete that unrelated tenant's user via
+    // profiles.id's ON DELETE CASCADE FK to auth.users.
+    const createdNewAuthUser = !authErr
 
     if (authErr) {
       if (authErr.message?.includes('already been registered') || authErr.status === 422) {
@@ -636,8 +653,15 @@ export default async function ownerRoutes(fastify: FastifyInstance) {
       .single()
 
     if (profileErr) {
-      // Roll back auth user if profile insert fails
-      await (fastify.supabase.auth as any).admin.deleteUser(userId).catch(() => {})
+      // Roll back the auth user ONLY if this request created it — userId may
+      // instead be a pre-existing account discovered via the "already
+      // registered" recovery branch above (e.g. the email collides with a
+      // real admin/employee of a DIFFERENT tenant); deleting that account
+      // would cascade-delete their profile via ON DELETE CASCADE and lock
+      // an unrelated tenant's user out of their own account.
+      if (createdNewAuthUser) {
+        await (fastify.supabase.auth as any).admin.deleteUser(userId).catch(() => {})
+      }
       return serverError(req, reply, profileErr, ErrorCode.INSERT_FAILED, 'Failed to create admin profile')
     }
 
@@ -916,8 +940,9 @@ export default async function ownerRoutes(fastify: FastifyInstance) {
     if (!tenantId) return reply.code(400).send({ error: 'VALIDATION', message: 'tenant_id is required' })
 
     // Verify tenant exists
-    const { data: tenant } = await fastify.supabase
+    const { data: tenant, error: tenantErr } = await fastify.supabase
       .from('tenants').select('id').eq('id', tenantId).single()
+    if (tenantErr && tenantErr.code !== 'PGRST116') return serverError(req, reply, tenantErr, ErrorCode.QUERY_FAILED, 'Failed to fetch tenant')
     if (!tenant) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Tenant not found' })
 
     const { key, prefix, hash } = generateApiKey()
@@ -1368,14 +1393,28 @@ export default async function ownerRoutes(fastify: FastifyInstance) {
 
   // ── PUT /owner/ai-config — replace the master chain ────────────────────────────
   // Per entry: omit api_key to keep the saved one; send '' to clear it.
-  fastify.put('/owner/ai-config', ownerAuth, async (req: any, reply) => {
+  // Fresh audit finding: this sets the master LLM provider API key used to
+  // route EVERY tenant's managed-mode AI traffic — the same "high-blast-radius"
+  // class this file already restricts to ownerOnlyAuth elsewhere (tenant
+  // create/delete/suspend, license issuance, admin provisioning). A regular
+  // (non-owner) platform admin rotating in an attacker-controlled key would
+  // be a cross-tenant confidentiality risk, not just a billing one.
+  fastify.put('/owner/ai-config', ownerOnlyAuth, async (req: any, reply) => {
     const body = req.body as any
     if (!Array.isArray(body?.chain)) return reply.code(400).send({ error: 'VALIDATION', message: 'chain must be an array' })
     if (body.chain.length > 5)       return reply.code(400).send({ error: 'VALIDATION', message: 'at most 5 providers' })
 
     // Load existing keys so an omitted api_key preserves the saved value.
-    const { data: existing } = await fastify.supabase
+    // Fresh audit finding: error was previously unchecked — a transient
+    // read failure silently emptied savedKey, so any caller that PATCHes
+    // the chain without resending an unchanged provider's key (the
+    // documented "omit api_key to keep the saved one" contract) would have
+    // that key computed as null and upserted, permanently wiping the
+    // platform's managed-mode AI credential for every tenant with no error
+    // surfaced.
+    const { data: existing, error: existingErr } = await fastify.supabase
       .from('ai_managed_config').select('providers_json').eq('id', 1).maybeSingle()
+    if (existingErr) return serverError(req, reply, existingErr, ErrorCode.QUERY_FAILED, 'Failed to load existing AI config')
     const savedKey = new Map<string, string>()
     for (const e of ((existing as any)?.providers_json ?? [])) {
       if (e?.provider && e?.api_key) savedKey.set(e.provider, e.api_key)
@@ -1536,7 +1575,9 @@ export default async function ownerRoutes(fastify: FastifyInstance) {
 
   // ── PUT /owner/ai-pricing — upsert price rows ──────────────────────────────────
   // Body: { rows: [{ provider, model, prompt_per_mtok, completion_per_mtok, currency? }] }
-  fastify.put('/owner/ai-pricing', ownerAuth, async (req: any, reply) => {
+  // Fresh audit finding: platform-wide billing rates — same high-blast-radius
+  // class as /owner/ai-config above, restricted to ownerOnlyAuth.
+  fastify.put('/owner/ai-pricing', ownerOnlyAuth, async (req: any, reply) => {
     const rows = (req.body as any)?.rows
     if (!Array.isArray(rows) || rows.length === 0) return reply.code(400).send({ error: 'VALIDATION', message: 'rows must be a non-empty array' })
     if (rows.length > 100) return reply.code(400).send({ error: 'VALIDATION', message: 'too many rows' })
