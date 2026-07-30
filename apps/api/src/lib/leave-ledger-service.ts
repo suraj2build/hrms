@@ -157,6 +157,9 @@ export async function getBalanceSummary(
       .eq('leave_type_id', leaveTypeId),
   ])
 
+  if (accrualRes.error) throw new Error(`Failed to read accrual ledger for employee ${employeeId}: ${accrualRes.error.message}`)
+  if (balanceRes.error) throw new Error(`Failed to read balance ledger for employee ${employeeId}: ${balanceRes.error.message}`)
+
   const accrualRows  = (accrualRes.data  ?? []) as Record<string, unknown>[]
   const balanceRows  = (balanceRes.data  ?? []) as Record<string, unknown>[]
 
@@ -237,6 +240,9 @@ export async function getLedgerHistory(
       .eq('leave_type_id', leaveTypeId),
   ])
 
+  if (accrualRes.error) throw new Error(`Failed to read accrual ledger for employee ${employeeId}: ${accrualRes.error.message}`)
+  if (balanceRes.error) throw new Error(`Failed to read balance ledger for employee ${employeeId}: ${balanceRes.error.message}`)
+
   const accrualEntries = ((accrualRes.data ?? []) as Record<string, unknown>[]).map(normaliseAccrualRow)
   const balanceEntries = ((balanceRes.data ?? []) as Record<string, unknown>[]).map(normaliseBalanceRow)
 
@@ -270,6 +276,9 @@ export async function getAllBalancesForEmployee(
       .eq('tenant_id',   tenantId)
       .eq('employee_id', employeeId),
   ])
+
+  if (accrualRes.error) throw new Error(`Failed to read accrual ledger for employee ${employeeId}: ${accrualRes.error.message}`)
+  if (balanceRes.error) throw new Error(`Failed to read balance ledger for employee ${employeeId}: ${balanceRes.error.message}`)
 
   const allRows = [
     ...((accrualRes.data ?? []) as Array<{ leave_type_id: string }>),

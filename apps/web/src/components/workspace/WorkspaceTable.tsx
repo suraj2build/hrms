@@ -37,6 +37,7 @@ export interface WorkspaceTableProps<T extends { id: string }> {
   page?: number
   pageSize?: number
   onPageChange?: (page: number) => void
+  onPageSizeChange?: (pageSize: number) => void
   searchable?: boolean
   searchPlaceholder?: string
   onSearch?: (q: string) => void
@@ -199,6 +200,7 @@ export function WorkspaceTable<T extends { id: string }>({
   page = 1,
   pageSize = 25,
   onPageChange,
+  onPageSizeChange,
   searchable = false,
   searchPlaceholder = 'Search…',
   onSearch,
@@ -581,8 +583,11 @@ export function WorkspaceTable<T extends { id: string }>({
                 aria-label="Page size"
                 value={pageSize}
                 className="h-7 rounded border border-border bg-background px-1.5 text-xs text-foreground"
-                onChange={() => {
-                  // page size is controlled by parent; reset to page 1
+                onChange={(e) => {
+                  // Page size is controlled by parent; reset to page 1 so
+                  // the new page size doesn't leave the view on an
+                  // out-of-range page.
+                  onPageSizeChange?.(Number(e.target.value))
                   goToPage(1)
                 }}
               >

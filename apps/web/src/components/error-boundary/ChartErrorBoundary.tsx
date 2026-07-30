@@ -5,10 +5,19 @@ interface Props {
   children: ReactNode
   /** Short label shown in the fallback, e.g. "Reliability Trends" */
   label?: string
+  /**
+   * When this value changes, the boundary clears the crashed state and
+   * re-renders its children — e.g. pass the data/date-range driving the
+   * chart so a new query result gets a fresh render attempt instead of
+   * staying stuck on the placeholder forever (mirrors ErrorBoundary.tsx's
+   * resetKey pattern).
+   */
+  resetKey?: string | number
 }
 
 interface State {
   crashed: boolean
+  prevResetKey?: string | number
 }
 
 /**
@@ -17,15 +26,22 @@ interface State {
  * data-mapping helper throws during render.
  *
  * @example
- *   <ChartErrorBoundary label="Reliability Trends">
+ *   <ChartErrorBoundary label="Reliability Trends" resetKey={data}>
  *     <ReliabilityTrends data={data} />
  *   </ChartErrorBoundary>
  */
 export class ChartErrorBoundary extends Component<Props, State> {
   state: State = { crashed: false }
 
-  static getDerivedStateFromError(): State {
+  static getDerivedStateFromError(): Partial<State> {
     return { crashed: true }
+  }
+
+  static getDerivedStateFromProps(props: Props, state: State): Partial<State> | null {
+    if (props.resetKey !== state.prevResetKey) {
+      return { crashed: false, prevResetKey: props.resetKey }
+    }
+    return null
   }
 
   componentDidCatch(error: Error, info: ErrorInfo) {
