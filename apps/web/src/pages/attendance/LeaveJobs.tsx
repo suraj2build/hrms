@@ -73,6 +73,12 @@ interface SchedulerStatus {
   }
 }
 
+interface LeaveType {
+  id:        string
+  name:      string
+  is_active: boolean
+}
+
 interface JobLog {
   id:            string
   job_type:      string
@@ -290,7 +296,7 @@ const RECOVERY_JOBS = [
   },
   { id: 'recalculate', label: 'Policy Recalculate', endpoint: '/leave/jobs/recalculate',
     fields: [
-      { key: 'leave_type_id', label: 'Leave Type ID (UUID)', type: 'text', default: () => '' },
+      { key: 'leave_type_id', label: 'Leave Type', type: 'leave-type', default: () => '' },
       { key: 'year', label: 'Year', type: 'number', default: () => String(new Date().getFullYear()) },
     ],
   },
@@ -308,6 +314,14 @@ function AdvancedRecoveryPanel() {
   const qc = useQueryClient()
 
   const job = RECOVERY_JOBS.find(j => j.id === selectedJob)!
+
+  const { data: leaveTypesResp } = useQuery<{ data: LeaveType[] }>({
+    queryKey:  ['leave-types'],
+    queryFn:   () => api.get('/masters/leave-types'),
+    enabled:   job.fields.some(f => f.type === 'leave-type'),
+    staleTime: 60_000,
+  })
+  const leaveTypes = (leaveTypesResp?.data ?? []).filter(lt => lt.is_active)
 
   const triggerMutation = useMutation({
     mutationFn: ({ endpoint, body }: { endpoint: string; body: Record<string, unknown> }) =>
@@ -405,12 +419,25 @@ function AdvancedRecoveryPanel() {
               {job.fields.map(f => (
                 <div key={f.key} className="space-y-1">
                   <label className="text-xs font-medium text-muted-foreground">{f.label}</label>
-                  <Input
-                    type={f.type}
-                    value={fieldValues[f.key] ?? f.default()}
-                    onChange={e => setFieldValues(p => ({ ...p, [f.key]: e.target.value }))}
-                    className="h-8 text-xs"
-                  />
+                  {f.type === 'leave-type' ? (
+                    <select
+                      value={fieldValues[f.key] ?? f.default()}
+                      onChange={e => setFieldValues(p => ({ ...p, [f.key]: e.target.value }))}
+                      className="flex h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground outline-none focus:ring-1 ring-primary/50"
+                    >
+                      <option value="">Select a leave type…</option>
+                      {leaveTypes.map(lt => (
+                        <option key={lt.id} value={lt.id}>{lt.name}</option>
+                      ))}
+                    </select>
+                  ) : (
+                    <Input
+                      type={f.type}
+                      value={fieldValues[f.key] ?? f.default()}
+                      onChange={e => setFieldValues(p => ({ ...p, [f.key]: e.target.value }))}
+                      className="h-8 text-xs"
+                    />
+                  )}
                 </div>
               ))}
             </div>
