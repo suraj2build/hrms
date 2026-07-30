@@ -155,13 +155,13 @@ export default async function benefitsRoutes(fastify: FastifyInstance) {
     if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
 
     // Plan must exist, belong to tenant, and be open for enrolment.
-    const { data: plan } = await fastify.supabase
+    const { data: plan, error: planErr } = await fastify.supabase
       .from('benefit_plans')
       .select('*')
       .eq('id', parsed.data.plan_id)
       .eq('tenant_id', req.tenantId)
       .maybeSingle()
-
+    if (planErr) return serverError(req, reply, planErr, ErrorCode.QUERY_FAILED, 'Failed to fetch benefit plan')
     if (!plan) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Benefit plan not found' })
 
     // Band eligibility (GET /plans already filters ineligible plans out of the
@@ -197,13 +197,19 @@ export default async function benefitsRoutes(fastify: FastifyInstance) {
     // their own coverage, which then ships to the insurer via
     // InsuranceProvider.syncEnrolment() as part of this enrolment.
     if (dependentIds.length > 0) {
-      const { data: ownDeps } = await fastify.supabase
+      const { data: ownDeps, error: depsErr } = await fastify.supabase
         .from('employee_family')
         .select('id')
         .in('id', dependentIds)
         .eq('tenant_id', req.tenantId)
         .eq('employee_id', employeeId)
         .eq('is_dependent', true)
+      // Fresh audit finding: error was previously unchecked — a transient
+      // DB failure silently emptied ownDepIds, so every requested dependent
+      // was dropped and the enrolment was saved (and synced to the
+      // insurer) with zero dependents while still returning 200, as if the
+      // full request had succeeded.
+      if (depsErr) return serverError(req, reply, depsErr, ErrorCode.QUERY_FAILED, 'Failed to verify dependents')
       const ownDepIds = new Set(((ownDeps ?? []) as any[]).map(d => d.id))
       dependentIds = dependentIds.filter((id: string) => ownDepIds.has(id))
     }

@@ -522,8 +522,15 @@ export default async function policyRoutes(fastify: FastifyInstance) {
       .select('title, requires_acknowledgement')
       .single()
 
-    if (error || !policy) {
-      return reply.status(422).send({ error: error?.message ?? 'Policy not found or already archived' })
+    // Fresh audit finding: a genuine DB error's raw error.message was sent
+    // straight to the client instead of being logged server-side — PGRST116
+    // (.single() with 0 matching rows, i.e. not found or already archived)
+    // is the only case that should surface as this route's own 422.
+    if (error && error.code !== 'PGRST116') {
+      return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to publish policy')
+    }
+    if (!policy) {
+      return reply.status(422).send({ error: 'NOT_PUBLISHABLE', message: 'Policy not found or already archived' })
     }
 
     // Notify all active employees if acknowledgement is required

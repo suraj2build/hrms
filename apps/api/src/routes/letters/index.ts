@@ -46,6 +46,7 @@ import { z } from 'zod'
 import { serverError, notFound, ErrorCode } from '../../lib/api-errors.js'
 import { fetchTenantTz } from '../../lib/attendance-engine.js'
 import { getLocalDate } from '../../lib/org-context.js'
+import { checkIdempotency, storeIdempotency } from '../../lib/idempotency.js'
 
 // ── Embedded-employee normaliser ──────────────────────────────────────────────
 // employees has no `full_name` / `designation` columns (name is first+last,
@@ -522,6 +523,20 @@ export default async function lettersRoutes(fastify: FastifyInstance) {
       .from('employees').select('id').eq('id', employee_id).eq('tenant_id', tenantId).maybeSingle()
     if (!emp) return reply.status(404).send({ error: 'Employee not found in your organisation' })
 
+    // Fresh audit finding: generated_letters has no unique constraint on
+    // (tenant_id, template_id, employee_id) unlike certifications' upsert
+    // constraint — a double-click or client retry on "Generate Letter"
+    // creates two identical official documents with independent approval
+    // workflows, with no idempotency guard closing the gap.
+    const iKey = (req.headers['idempotency-key'] as string | undefined)?.trim()
+    if (iKey) {
+      const cached = await checkIdempotency(supabase, tenantId, iKey, 'letters-generate')
+      if (cached) {
+        reply.header('Idempotency-Replayed', 'true')
+        return reply.code(cached.status_code).send(cached.response)
+      }
+    }
+
     // Resolve variables
     const empVars = await resolveEmployeeVars(supabase, tenantId, employee_id)
     const { body, subject, missing } = renderTemplate(
@@ -563,7 +578,9 @@ export default async function lettersRoutes(fastify: FastifyInstance) {
       newData:     { template_id, employee_id, subject, approval_status, letter_type: tmpl.letter_type },
     })
 
-    return reply.status(201).send({ data: letter, missing_vars: missing })
+    const responseBody = { data: letter, missing_vars: missing }
+    if (iKey) await storeIdempotency(supabase, tenantId, iKey, 'letters-generate', 201, responseBody)
+    return reply.status(201).send(responseBody)
   })
 
   // GET /letters/issued

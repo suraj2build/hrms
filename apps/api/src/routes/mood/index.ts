@@ -588,9 +588,14 @@ export default async function moodRoutes(fastify: FastifyInstance) {
     const limit  = qs.success ? qs.data.limit  : 50
     const offset = qs.success ? qs.data.offset : 0
 
+    // Fresh audit finding: employee_id was previously selected and shipped
+    // in this response, breaking the anonymity this module deliberately
+    // guarantees elsewhere (/admin/sentiment-report explicitly strips
+    // employee identity from recent_negatives) — the frontend contract
+    // (AdminMoodDashboard.tsx) never reads or expects an employee_id here.
     const { data, count, error } = await supabase
       .from('pulse_responses')
-      .select('id, response, created_at, employee_id', { count: 'exact' })
+      .select('id, response, created_at', { count: 'exact' })
       .eq('tenant_id', tenantId)
       .eq('question_id', id)
       .order('created_at', { ascending: false })

@@ -77,7 +77,15 @@ export default async function operationsRoutes(fastify: FastifyInstance) {
       .order('fired_at', { ascending: false })
       .limit(Number(limit))
     if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch automation activity')
-    return { activities: data ?? [], total: (data ?? []).length }
+    // Fresh audit finding: total was array.length of the already-.limit()'d
+    // result, silently capping the reported total at `limit` with no
+    // truncation signal — same fabricated-KPI pattern already fixed
+    // elsewhere via count:'exact'+head:true (operations/counts.ts).
+    const { count } = await fastify.supabase
+      .from('automation_activity_logs')
+      .select('id', { count: 'exact', head: true })
+      .eq('tenant_id', tenantId)
+    return { activities: data ?? [], total: count ?? (data ?? []).length }
   })
 
   // GET /operations/automation/triggers — list registered triggers
@@ -109,7 +117,12 @@ export default async function operationsRoutes(fastify: FastifyInstance) {
       months_in_period:  Number(body.months_in_period) || 1,
       created_by:        (req as any).userId,
     })
-    // Persist simulation run (fire-and-forget — result is still returned on failure)
+    // Persist simulation run (fire-and-forget — result is still returned on
+    // failure). Fresh audit finding, same class already fixed in
+    // fabric/intelligence.ts: .then(undefined, errHandler) only fires on a
+    // rejected promise — supabase-js resolves (not rejects) on ordinary
+    // PostgREST errors, so this never logged real insert failures. Read the
+    // resolved `error` field instead.
     fastify.supabase.from('simulation_runs').insert({
       tenant_id:           run.tenant_id,
       simulation_type:  run.simulation_type,
@@ -118,7 +131,9 @@ export default async function operationsRoutes(fastify: FastifyInstance) {
       result_summary:   run.result_summary,
       created_at:       run.created_at,
       created_by:       run.created_by ?? null,
-    }).then(undefined, (err: any) => fastify.log.warn({ err }, 'simulation_runs insert failed (payroll)'))
+    }).then(({ error }: any) => {
+      if (error) fastify.log.warn({ err: error }, 'simulation_runs insert failed (payroll)')
+    }, () => {})
     return run
   })
 
@@ -134,11 +149,14 @@ export default async function operationsRoutes(fastify: FastifyInstance) {
       affected_count:  Number(body.affected_count) || 0,
       created_by:      (req as any).userId,
     })
+    // Same fix as the payroll-simulation route above.
     fastify.supabase.from('simulation_runs').insert({
       tenant_id: run.tenant_id, simulation_type: run.simulation_type, label: run.label,
       input_params: run.input_params, result_summary: run.result_summary,
       created_at: run.created_at, created_by: run.created_by ?? null,
-    }).then(undefined, (err: any) => fastify.log.warn({ err }, 'simulation_runs insert failed (compliance)'))
+    }).then(({ error }: any) => {
+      if (error) fastify.log.warn({ err: error }, 'simulation_runs insert failed (compliance)')
+    }, () => {})
     return run
   })
 
@@ -154,11 +172,14 @@ export default async function operationsRoutes(fastify: FastifyInstance) {
       weeks:                 Number(body.weeks) || 4,
       created_by:            (req as any).userId,
     })
+    // Same fix as the payroll-simulation route above.
     fastify.supabase.from('simulation_runs').insert({
       tenant_id: run.tenant_id, simulation_type: run.simulation_type, label: run.label,
       input_params: run.input_params, result_summary: run.result_summary,
       created_at: run.created_at, created_by: run.created_by ?? null,
-    }).then(undefined, (err: any) => fastify.log.warn({ err }, 'simulation_runs insert failed (overtime)'))
+    }).then(({ error }: any) => {
+      if (error) fastify.log.warn({ err: error }, 'simulation_runs insert failed (overtime)')
+    }, () => {})
     return run
   })
 
@@ -173,7 +194,12 @@ export default async function operationsRoutes(fastify: FastifyInstance) {
       .order('created_at', { ascending: false })
       .limit(Number(limit))
     if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch simulation history')
-    return { runs: data ?? [], total: (data ?? []).length }
+    // Same fix as /operations/automation/activity above.
+    const { count } = await fastify.supabase
+      .from('simulation_runs')
+      .select('id', { count: 'exact', head: true })
+      .eq('tenant_id', tenantId)
+    return { runs: data ?? [], total: count ?? (data ?? []).length }
   })
 
   // GET /operations/security/signals — security intelligence events
@@ -200,6 +226,11 @@ export default async function operationsRoutes(fastify: FastifyInstance) {
       .order('breached_at', { ascending: false })
       .limit(Number(limit))
     if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch SLA breaches')
-    return { breaches: data ?? [], total: (data ?? []).length }
+    // Same fix as /operations/automation/activity above.
+    const { count } = await fastify.supabase
+      .from('sla_breach_events')
+      .select('id', { count: 'exact', head: true })
+      .eq('tenant_id', tenantId)
+    return { breaches: data ?? [], total: count ?? (data ?? []).length }
   })
 }

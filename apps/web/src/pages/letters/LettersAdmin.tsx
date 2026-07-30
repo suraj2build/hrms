@@ -9,7 +9,7 @@
  *  5. ESS Requests    — pending employee requests (fulfill / reject)
  */
 
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Plus, Search, Eye, CheckCircle2, XCircle,
@@ -366,6 +366,10 @@ function GenerateLetterDialog({ onClose }: { onClose: () => void }) {
   const [generated, setGenerated]     = useState<GeneratedLetter | null>(null)
   const [generating, setGenerating]   = useState(false)
   const [submitting, setSubmitting]   = useState(false)
+  // Stable per-mount UUID sent as Idempotency-Key — a dropped response or
+  // double-click retries the identical generate request instead of
+  // creating a duplicate official document.
+  const generateKey = useRef(crypto.randomUUID())
 
   const { data: tmplData } = useQuery({
     queryKey: ['letter-templates-active'],
@@ -386,7 +390,8 @@ function GenerateLetterDialog({ onClose }: { onClose: () => void }) {
     try {
       const res = await api.post<{ data: GeneratedLetter; missing_vars: string[] }>('/letters/generate', {
         template_id: templateId, employee_id: employeeId, extra_vars: extraVars,
-      })
+      }, { headers: { 'Idempotency-Key': generateKey.current } })
+      generateKey.current = crypto.randomUUID()
       setGenerated(res.data)
       setStep(3)
       // ESS's letters list reads the same generated/issued letters under
