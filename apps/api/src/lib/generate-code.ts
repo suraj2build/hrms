@@ -31,11 +31,13 @@ export async function generateUniqueCode(
     .slice(0, 5) || 'X'
 
   // Fetch all codes that start with `base` in one query (avoids N+1)
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from(table)
     .select('code')
     .eq('tenant_id', tenantId)
     .ilike('code', `${base}%`)
+
+  if (error) throw new Error(`generateUniqueCode: failed to check existing codes in ${table}: ${error.message}`)
 
   const taken = new Set<string>(
     (data ?? []).map((r: any) => (r.code ?? '').toUpperCase()),
