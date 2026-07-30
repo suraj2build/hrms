@@ -10,6 +10,7 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { computeComplianceCalendar, computeUpcoming } from '../../lib/compliance-calendar.js'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { validationError, ErrorCode } from '../../lib/api-errors.js'
 
 export default async function complianceRoutes(fastify: FastifyInstance) {
   // HR admin only — this surfaces statutory registration numbers and filing
@@ -25,10 +26,17 @@ export default async function complianceRoutes(fastify: FastifyInstance) {
       back_months: z.coerce.number().int().min(0).max(12).optional(),
       fwd_months:  z.coerce.number().int().min(0).max(12).optional(),
     }).safeParse(req.query)
+    // Fresh audit finding (same class as workforce/index.ts's /expiry fix):
+    // an invalid param used to silently fall through to computeComplianceCalendar's
+    // defaults with a 200, rather than 400ing — a typo'd back_months/fwd_months
+    // was invisible to the caller.
+    if (!qs.success) {
+      return validationError(reply, ErrorCode.VALIDATION_ERROR, qs.error.issues[0]?.message ?? 'Invalid query parameters')
+    }
 
     const deadlines = await computeComplianceCalendar(fastify.supabase, req.tenantId, {
-      backMonths: qs.success ? qs.data.back_months : undefined,
-      fwdMonths:  qs.success ? qs.data.fwd_months : undefined,
+      backMonths: qs.data.back_months,
+      fwdMonths:  qs.data.fwd_months,
     })
 
     const counts = {
@@ -44,7 +52,10 @@ export default async function complianceRoutes(fastify: FastifyInstance) {
   // GET /compliance/calendar/upcoming — actionable (due within N days + all overdue)
   fastify.get('/calendar/upcoming', auth, async (req: any, reply) => {
     const qs = z.object({ within_days: z.coerce.number().int().min(1).max(120).optional() }).safeParse(req.query)
-    const within = qs.success && qs.data.within_days ? qs.data.within_days : 30
+    if (!qs.success) {
+      return validationError(reply, ErrorCode.VALIDATION_ERROR, qs.error.issues[0]?.message ?? 'Invalid query parameters')
+    }
+    const within = qs.data.within_days ?? 30
     const deadlines = await computeUpcoming(fastify.supabase, req.tenantId, within)
     return reply.send({ data: deadlines, within_days: within })
   })

@@ -48,8 +48,14 @@ export default async function observabilityRoutes(fastify: FastifyInstance) {
     if (Array.isArray(body?.events) && body.events.length > 0) {
       events = body.events
     } else {
-      const from = (req.query as any).from as string | undefined
-      const to   = (req.query as any).to   as string | undefined
+      // Fresh audit finding: unlike the sibling /observability/heatmap
+      // handler below (which defaults `from` to 24h ago), this endpoint let
+      // an unsupplied `from` fall through to EventStreamService.query()'s
+      // no-op filter — returning the most recent 200 events across ALL time,
+      // still labeled `period: "last_24h"` in the response.
+      const from = ((req.query as any).from as string | undefined)
+        ?? new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
+      const to   = (req.query as any).to as string | undefined
 
       const svc  = new EventStreamService((fastify as any).supabase)
       const page = await svc.query({ tenant_id: orgId, from, to, limit: 200 })

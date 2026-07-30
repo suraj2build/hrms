@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Megaphone, Send, MessageCircle, Pin, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
@@ -48,6 +48,9 @@ export function MobileCommunity({ base: _base }: { base: string }) {
 
   const [body, setBody] = useState('')
   const [announce, setAnnounce] = useState(false)
+  // Stable per-mount UUID sent as Idempotency-Key — a dropped response or
+  // double-click retries the identical post instead of creating a duplicate.
+  const postKey = useRef(crypto.randomUUID())
 
   const { data, isLoading } = useQuery<{ data: Post[] }>({
     queryKey: ['mobile-community-feed'], queryFn: () => api.get('/community/feed?limit=30'),
@@ -59,8 +62,11 @@ export function MobileCommunity({ base: _base }: { base: string }) {
       body: body.trim(),
       type: isHr && announce ? 'announcement' : 'update',
       pinned: isHr && announce ? true : undefined,
-    }),
-    onSuccess: () => { setBody(''); setAnnounce(false); toast.success('Posted'); invalidateCommunityFeeds(qc) },
+    }, { headers: { 'Idempotency-Key': postKey.current } }),
+    onSuccess: () => {
+      postKey.current = crypto.randomUUID()
+      setBody(''); setAnnounce(false); toast.success('Posted'); invalidateCommunityFeeds(qc)
+    },
     onError: (e: Error) => toast.error('Could not post', { description: e.message }),
   })
 

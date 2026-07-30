@@ -3,7 +3,7 @@
  * A company feed: post updates, react, and comment. HR can post announcements
  * and pin. Backed by /community/* (migration 307).
  */
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { Megaphone, Pin, PinOff, MessageCircle, Send, MoreHorizontal, Flag, EyeOff, Trash2 } from 'lucide-react'
@@ -230,14 +230,18 @@ function Composer() {
   const isHr = role === 'hr_admin' || role === 'super_admin'
   const [body, setBody] = useState('')
   const [announce, setAnnounce] = useState(false)
+  // Stable per-mount UUID sent as Idempotency-Key — a dropped response or
+  // double-click retries the identical post instead of creating a duplicate.
+  const postKey = useRef(crypto.randomUUID())
 
   const post = useMutation({
     mutationFn: () => api.post('/community/posts', {
       body: body.trim(),
       type: announce ? 'announcement' : 'update',
       pinned: announce,
-    }),
+    }, { headers: { 'Idempotency-Key': postKey.current } }),
     onSuccess: () => {
+      postKey.current = crypto.randomUUID()
       invalidateCommunityFeeds(qc)
       toast.success('Posted')
       setBody(''); setAnnounce(false)

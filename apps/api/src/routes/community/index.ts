@@ -188,6 +188,18 @@ export default async function communityRoutes(fastify: FastifyInstance) {
       return reply.code(403).send({ error: 'FORBIDDEN', message: 'Only HR can post announcements or pin posts' })
     }
 
+    // Fresh audit finding: unlike the sibling /community/wish above, this
+    // route had no idempotency support at all — a retried/double-clicked
+    // request duplicated the post, worse for tenant-wide pinned announcements.
+    const iKey = (req.headers['idempotency-key'] as string | undefined)?.trim()
+    if (iKey) {
+      const cached = await checkIdempotency(fastify.supabase, req.tenantId, iKey, 'community-post')
+      if (cached) {
+        reply.header('Idempotency-Replayed', 'true')
+        return reply.code(cached.status_code).send(cached.response)
+      }
+    }
+
     const authorEmployee = await resolveEmployeeId(fastify, req.userId, req.tenantId)
     const { data, error } = await fastify.supabase
       .from('feed_posts')
@@ -203,7 +215,9 @@ export default async function communityRoutes(fastify: FastifyInstance) {
       .select('id')
       .single()
     if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create post')
-    return reply.code(201).send({ data })
+    const responseBody = { data }
+    if (iKey) await storeIdempotency(fastify.supabase, req.tenantId, iKey, 'community-post', 201, responseBody)
+    return reply.code(201).send(responseBody)
   })
 
   // ── PATCH /community/posts/:id (moderation — HR only) ────────────────────────
