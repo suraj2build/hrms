@@ -5,12 +5,15 @@
  * Sprint 2: Governance Intelligence Layer.
  */
 
+import type { SupabaseClient }        from '@supabase/supabase-js'
 import type { ResolvedPlatformEvent } from '../../../events/types/platform-event.js'
 import type { EventSeverity }         from '../../../events/types/platform-event.js'
 import type {
   GovernanceRuleV2,
   RuleCategory,
 }                                     from '../types/governance-rule-v2.js'
+import { fetchTenantTz } from '../../../../lib/attendance-engine.js'
+import { getLocalDate }  from '../../../../lib/org-context.js'
 
 export interface GovernanceRuleMatch {
   rule:     GovernanceRuleV2
@@ -29,21 +32,37 @@ export class GovernanceRuleRegistry {
 
   /**
    * Get all active rules as of a given ISO date.
-   * Defaults to today.
+   * Defaults to today. When `supabase` + `tenantId` are supplied and `asOf`
+   * is not, "today" resolves to the tenant's local calendar date (PEND-31/74)
+   * instead of the bare server-UTC date — consistent with every other
+   * effective-dated check in this codebase (fetchTenantTz + getLocalDate).
+   * Falls back to UTC if the tenant-tz lookup fails — this must never throw.
    */
-  getActiveRules(asOf?: string): GovernanceRuleV2[] {
-    const date = asOf ?? new Date().toISOString().slice(0, 10)
+  async getActiveRules(asOf?: string, supabase?: SupabaseClient, tenantId?: string): Promise<GovernanceRuleV2[]> {
+    let date = asOf
+    if (!date) {
+      if (supabase && tenantId) {
+        try {
+          date = getLocalDate(new Date().toISOString(), await fetchTenantTz(supabase, tenantId))
+        } catch {
+          date = new Date().toISOString().slice(0, 10)
+        }
+      } else {
+        date = new Date().toISOString().slice(0, 10)
+      }
+    }
     return this.rules.filter(r => {
       if (!r.enabled) return false
-      if (r.effective_from > date) return false
-      if (r.effective_to && r.effective_to < date) return false
+      if (r.effective_from > date!) return false
+      if (r.effective_to && r.effective_to < date!) return false
       return true
     })
   }
 
   /** Get active rules that match a specific event type. */
-  getRulesForEvent(eventType: string, asOf?: string): GovernanceRuleV2[] {
-    return this.getActiveRules(asOf).filter(r =>
+  async getRulesForEvent(eventType: string, asOf?: string, supabase?: SupabaseClient, tenantId?: string): Promise<GovernanceRuleV2[]> {
+    const active = await this.getActiveRules(asOf, supabase, tenantId)
+    return active.filter(r =>
       r.event_types.includes('*') || r.event_types.includes(eventType),
     )
   }
@@ -55,11 +74,13 @@ export class GovernanceRuleRegistry {
 
   /**
    * Evaluate a platform event against all currently-active rules.
-   * Returns matches — caller decides what to do with them.
+   * Returns matches — caller decides what to do with them. Pass `supabase`
+   * to resolve the effective-date check against the event's tenant's local
+   * date rather than server UTC (see getActiveRules).
    */
-  evaluate(event: ResolvedPlatformEvent): GovernanceRuleMatch[] {
+  async evaluate(event: ResolvedPlatformEvent, supabase?: SupabaseClient): Promise<GovernanceRuleMatch[]> {
     const matches: GovernanceRuleMatch[] = []
-    const candidates = this.getRulesForEvent(event.event_type)
+    const candidates = await this.getRulesForEvent(event.event_type, undefined, supabase, event.tenant_id)
 
     for (const rule of candidates) {
       try {

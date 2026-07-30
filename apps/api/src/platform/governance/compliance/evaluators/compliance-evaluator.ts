@@ -5,6 +5,7 @@
  * Sprint 2: Governance Intelligence Layer.
  */
 
+import type { SupabaseClient }         from '@supabase/supabase-js'
 import type { ResolvedPlatformEvent }  from '../../../events/types/platform-event.js'
 import type { EventSeverity }          from '../../../events/types/platform-event.js'
 import type { ComplianceValidationResult } from '../benchmarks/compliance-benchmark.service.js'
@@ -29,8 +30,8 @@ export class ComplianceEvaluator {
    * Evaluate a platform event against all active compliance rules.
    * Returns a ComplianceValidationResult — never throws.
    */
-  async evaluate(event: ResolvedPlatformEvent): Promise<ComplianceValidationResult> {
-    const matches = governanceRuleRegistry.evaluate(event)
+  async evaluate(event: ResolvedPlatformEvent, supabase?: SupabaseClient): Promise<ComplianceValidationResult> {
+    const matches = await governanceRuleRegistry.evaluate(event, supabase)
     const violations = matches.map(m => m.reason)
 
     // Compute highest severity across all matches, and track which match

@@ -37,7 +37,7 @@ export class ComplianceGovernanceListener extends GovernanceListener {
 
     // 2. Compliance evaluation — passive alerts only
     try {
-      const complianceResult = await complianceEvaluator.evaluate(event)
+      const complianceResult = await complianceEvaluator.evaluate(event, this.supabase ?? undefined)
       if (!complianceResult.compliant) {
         console.info('[ComplianceGovernanceListener] compliance violation', {
           event_type: event.event_type,
