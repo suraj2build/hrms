@@ -527,11 +527,26 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
           .select('leave_type_id, balance, year, leave_types(name)')
           .eq('employee_id', employeeId).eq('tenant_id', tenantId).limit(20)
         if (!leaveErr && leavRows && leavRows.length > 0) {
+          // used = annual entitlement (sum of positive accrual-ledger days for
+          // the balance row's own year) minus the remaining balance — same
+          // formula as team-balances' per-employee `used` field
+          // (routes/attendance/leave.ts), never derived from a stored column.
+          const years = [...new Set((leavRows as any[]).map(r => r.year))]
+          const { data: accrualRows } = await fastify.supabase
+            .from('leave_accrual_ledger')
+            .select('leave_type_id, year, days')
+            .eq('employee_id', employeeId).eq('tenant_id', tenantId)
+            .in('year', years).gt('days', 0)
+          const accrualMap: Record<string, number> = {}
+          for (const row of (accrualRows ?? []) as any[]) {
+            const key = `${row.leave_type_id}:${row.year}`
+            accrualMap[key] = (accrualMap[key] ?? 0) + Number(row.days)
+          }
           leavePayload = { balances: leavRows.map((r: any) => ({
             // Resolve the human-readable leave type name; never expose the raw id.
             leave_type: (Array.isArray(r.leave_types) ? r.leave_types[0]?.name : r.leave_types?.name) ?? 'Leave',
             balance:    Number(r.balance ?? 0),
-            used:       0,
+            used:       (accrualMap[`${r.leave_type_id}:${r.year}`] ?? 0) - Number(r.balance ?? 0),
           })) }
           sources.push('employee_leave_balance')
         }

@@ -8,7 +8,7 @@
  */
 
 import { useState, useMemo, useCallback } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, keepPreviousData } from '@tanstack/react-query'
 import {
   Layers, ChevronRight, Download, FileSpreadsheet, Bookmark, X,
   Loader2, AlertTriangle, Users, Search, Link2, Check,
@@ -193,6 +193,7 @@ export function DataExplorer() {
     staleTime: 5 * 60 * 1000,
     enabled:  !showEmployees,
     retry: 1,
+    placeholderData: keepPreviousData,
   })
 
   const { data: employees, isLoading: empLoading } = useQuery({
@@ -201,6 +202,7 @@ export function DataExplorer() {
     staleTime: 5 * 60 * 1000,
     enabled:  showEmployees,
     retry: 1,
+    placeholderData: keepPreviousData,
   })
 
   const rows = useMemo(() => result?.rows ?? [], [result?.rows])
