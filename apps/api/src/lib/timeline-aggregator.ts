@@ -134,12 +134,13 @@ export async function fetchTimeline(
 
   let resolvedSessionIds: string[] = []
   if (employeeId && !sessionId) {
-    const { data: linked } = await supabase
+    const { data: linked, error: linkedError } = await supabase
       .from('onboarding_lifecycle_events')
       .select('session_id')
       .eq('tenant_id', tenantId)
       .eq('employee_id', employeeId)
       .not('session_id', 'is', null)
+    if (linkedError) throw new Error(`timeline_session_resolve_failed: ${linkedError.message}`)
     resolvedSessionIds = [...new Set((linked ?? []).map((r: any) => r.session_id as string).filter(Boolean))]
   }
 
@@ -256,10 +257,14 @@ async function resolveActorNames(
   const map = new Map<string, string>()
   if (actorIds.length === 0) return map
 
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from('profiles')
     .select('id, full_name, email')
     .in('id', actorIds)
+  if (error) {
+    console.warn('[timeline-aggregator] failed to resolve actor names:', error.message)
+    return map
+  }
 
   for (const p of data ?? []) {
     map.set(p.id, (p.full_name as string | null) ?? (p.email as string | null) ?? p.id)

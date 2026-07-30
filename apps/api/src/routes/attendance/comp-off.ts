@@ -180,8 +180,8 @@ export default async function compOffRoute(fastify: FastifyInstance) {
       )
       created = result.created
       skipped = result.skipped
-    } catch (e: any) {
-      return reply.code(500).send({ error: 'INSERT_FAILED', message: e?.message ?? 'comp-off generation failed' })
+    } catch (e: unknown) {
+      return serverError(req, reply, e, ErrorCode.INSERT_FAILED, 'Failed to generate comp-off requests')
     }
 
     await logAction(fastify.supabase, {

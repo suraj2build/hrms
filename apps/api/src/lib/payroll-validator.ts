@@ -63,6 +63,7 @@ const NUMERIC_FIELDS = [
   'total_deductions',
   'net_pay',
   'employer_contributions',
+  'tds_deducted',
 ] as const
 
 type SlipNumericField = (typeof NUMERIC_FIELDS)[number]
