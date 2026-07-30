@@ -5,7 +5,7 @@
  * Razorpay Checkout. Degrades gracefully when billing isn't configured
  * (configured:false from the API) — see BILLING.md.
  */
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { Check, CreditCard, ShieldCheck } from 'lucide-react'
@@ -64,10 +64,21 @@ export function Billing() {
   })
   const s = data?.data
 
+  // Stable per-mount UUID sent as Idempotency-Key — a dropped response or
+  // double-click retries the identical checkout request rather than
+  // creating a second live Razorpay subscription. Rotated only after a
+  // successful payment, since a retry before then should safely resume the
+  // same pending subscription rather than start a new one.
+  const checkoutKey = useRef(crypto.randomUUID())
+
   async function subscribe(plan: Tier) {
     try {
       setBusy(plan)
-      const res = await api.post<{ configured: boolean; subscriptionId?: string; keyId?: string }>('/billing/checkout', { plan })
+      const res = await api.post<{ configured: boolean; subscriptionId?: string; keyId?: string }>(
+        '/billing/checkout',
+        { plan },
+        { headers: { 'Idempotency-Key': checkoutKey.current } },
+      )
       if (!res.configured) {
         toast.error('Billing is not configured yet. Please contact sales.')
         return
@@ -84,7 +95,11 @@ export function Billing() {
         name: 'CognixHR',
         description: `${plan[0].toUpperCase()}${plan.slice(1)} subscription`,
         theme: { color: '#1A4D8F' },
-        handler: () => { toast.success('Payment received — activating your subscription…'); setTimeout(() => refetch(), 2500) },
+        handler: () => {
+          checkoutKey.current = crypto.randomUUID()
+          toast.success('Payment received — activating your subscription…')
+          setTimeout(() => refetch(), 2500)
+        },
         modal: { ondismiss: () => toast.message('Checkout cancelled') },
       })
       rzp.open()

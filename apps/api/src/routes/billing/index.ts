@@ -16,6 +16,7 @@ import {
 } from '../../lib/razorpay.js'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { serverError, ErrorCode } from '../../lib/api-errors.js'
+import { checkIdempotency, storeIdempotency } from '../../lib/idempotency.js'
 
 const checkoutSchema = z.object({ plan: z.enum(['standard', 'enterprise']) })
 
@@ -49,6 +50,19 @@ export default async function billingRoutes(fastify: FastifyInstance) {
     const planId = PLAN_IDS[parsed.data.plan]
     if (!planId) {
       return reply.code(400).send({ error: 'CONFIG', message: `No Razorpay plan id configured for ${parsed.data.plan}` })
+    }
+
+    // A dropped response / double-click retries the identical checkout
+    // request — without this, the line 68 status-based guard only narrows
+    // the double-subscription window, it doesn't close it (two concurrent
+    // requests can both read the tenant row before either write lands).
+    const iKey = (req.headers['idempotency-key'] as string | undefined)?.trim()
+    if (iKey) {
+      const cached = await checkIdempotency(fastify.supabase, req.tenantId, iKey, 'billing-checkout')
+      if (cached) {
+        reply.header('Idempotency-Replayed', 'true')
+        return reply.code(cached.status_code).send(cached.response)
+      }
     }
 
     const { data: tenant, error: tenantErr } = await fastify.supabase
@@ -98,7 +112,9 @@ export default async function billingRoutes(fastify: FastifyInstance) {
         return serverError(req, reply, persistErr, ErrorCode.UPDATE_FAILED, 'Failed to save subscription. Please try again.')
       }
 
-      return reply.send({ configured: true, subscriptionId: sub.id, keyId: PUBLIC_KEY_ID })
+      const responseBody = { configured: true, subscriptionId: sub.id, keyId: PUBLIC_KEY_ID }
+      if (iKey) await storeIdempotency(fastify.supabase, req.tenantId, iKey, 'billing-checkout', 200, responseBody)
+      return reply.send(responseBody)
     } catch (e: any) {
       req.log.error({ err: e }, '[billing] checkout failed')
       return reply.code(502).send({ error: 'RAZORPAY', message: 'Failed to create subscription. Please try again or contact support.' })
