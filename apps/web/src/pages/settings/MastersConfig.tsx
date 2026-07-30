@@ -1,14 +1,19 @@
 /**
  * MastersConfig — /admin/masters
  *
- * Unified admin page for managing all HR master data tables:
- *  • Work Locations        (/masters/work-locations)
- *  • Cost Centers          (/masters/cost-centers)
+ * Unified admin page for managing reference/lookup master data that has no
+ * dedicated page elsewhere:
  *  • Identity Types        (/masters/identity-types)
  *  • Relationship Types    (/masters/relationship-types)
  *  • Document Types        (/masters/document-types)
  *  • Salary Components     (/masters/salary-components)
  *  • Salary Structures     (/masters/salary-structures)
+ *
+ * Work Locations, Cost Centers, and Important Date Types each have their own
+ * dedicated page (WorkLocations.tsx, CostCenters.tsx,
+ * LeaveGovernanceWorkspace.tsx) and were removed from here — this page
+ * previously duplicated that CRUD under a different React Query cache key,
+ * so editing via one surface left the other showing stale data.
  *
  * Access: super_admin, hr_admin only.
  * Design rules: design system tokens only — no raw hex / bg-gray-*.
@@ -19,15 +24,14 @@ import { useState, useEffect, Fragment }         from 'react'
 import { useSearchParams, useNavigate }          from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
-  MapPin, Banknote, FileText, Users, ShieldAlert,
+  Banknote, FileText, Users, ShieldAlert,
   Plus, Pencil, Trash2, Loader2, Check, X, ToggleLeft,
-  Building2, DollarSign, CreditCard, CalendarDays,
+  DollarSign, CreditCard,
 } from 'lucide-react'
 
 import { PageContainer }        from '@/components/layout/PageContainer'
 import { PageHeader }           from '@/components/layout/PageHeader'
 import { SectionCard }          from '@/components/layout/SectionCard'
-import { OrgGovernancePanel }   from '@/components/org/OrgGovernancePanel'
 import { Badge }         from '@/components/ui/badge'
 import { Button }        from '@/components/ui/button'
 import { Input }         from '@/components/ui/input'
@@ -47,11 +51,8 @@ interface MasterRecord {
 // ── Tab definitions ────────────────────────────────────────────────────────────
 
 type TabId =
-  | 'work-locations'
-  | 'cost-centers'
   | 'identity-types'
   | 'relationship-types'
-  | 'important-date-types'
   | 'document-types'
   | 'salary-components'
   | 'salary-structures'
@@ -89,35 +90,6 @@ const COMP_TYPE_BADGE: Record<string, 'success' | 'destructive' | 'secondary'> =
 
 const TABS: TabDef[] = [
   {
-    id:       'work-locations',
-    label:    'Work Locations',
-    icon:     MapPin,
-    endpoint: '/masters/work-locations',
-    fields: [
-      { key: 'name',    label: 'Name',    type: 'text', required: true },
-      { key: 'code',    label: 'Code',    type: 'text', placeholder: 'e.g. HO' },
-      { key: 'city',    label: 'City',    type: 'text' },
-      { key: 'state',   label: 'State',   type: 'text' },
-      { key: 'country', label: 'Country', type: 'text', placeholder: 'India' },
-      { key: 'pincode', label: 'Pincode', type: 'text' },
-    ],
-    extraCols: [
-      { key: 'city',  label: 'City',  render: (r) => r.city  as string || '—' },
-      { key: 'state', label: 'State', render: (r) => r.state as string || '—' },
-    ],
-  },
-  {
-    id:       'cost-centers',
-    label:    'Cost Centers',
-    icon:     Building2,
-    endpoint: '/masters/cost-centers',
-    fields: [
-      { key: 'name',        label: 'Name',        type: 'text', required: true },
-      { key: 'code',        label: 'Code',        type: 'text' },
-      { key: 'description', label: 'Description', type: 'text', placeholder: 'Optional' },
-    ],
-  },
-  {
     id:       'identity-types',
     label:    'Identity Types',
     icon:     CreditCard,
@@ -136,17 +108,6 @@ const TABS: TabDef[] = [
     fields: [
       { key: 'name', label: 'Name', type: 'text', required: true },
       { key: 'code', label: 'Code', type: 'text', required: true },
-    ],
-  },
-  {
-    id:       'important-date-types',
-    label:    'Important Date Types',
-    icon:     CalendarDays,
-    endpoint: '/masters/important-date-types',
-    fields: [
-      { key: 'name',        label: 'Name',        type: 'text', required: true },
-      { key: 'code',        label: 'Code',        type: 'text', required: true },
-      { key: 'description', label: 'Description', type: 'text' },
     ],
   },
   {
@@ -621,19 +582,12 @@ export function MastersConfig() {
     }
   }, [searchParams, navigate])
 
-  const isOrgTab = ['work-locations', 'cost-centers'].includes(currentTab.id)
-
   return (
     <PageContainer>
-      <div className="flex items-start justify-between gap-4">
-        <PageHeader
-          title={currentTab.label}
-          subtitle="Master data configuration — managed from the Setup sidebar"
-        />
-        {isOrgTab && (
-          <OrgGovernancePanel className="shrink-0 w-52 mt-1" />
-        )}
-      </div>
+      <PageHeader
+        title={currentTab.label}
+        subtitle="Master data configuration — managed from the Setup sidebar"
+      />
 
       {/* Access guard */}
       {!isAdmin && (
