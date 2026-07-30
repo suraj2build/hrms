@@ -7,6 +7,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { ComplianceRevisionEvent } from '../../trust/types/trust-types.js'
 import { explainabilityService } from '../../ai/services/explainability.service.js'
+import { fetchAllRows } from '../../../lib/supabase-paginate.js'
 
 export class RegulatoryIngestionService {
   /**
@@ -95,19 +96,21 @@ export class RegulatoryIngestionService {
    * List pending revisions.
    */
   async listPending(supabase: SupabaseClient, tenantId?: string): Promise<ComplianceRevisionEvent[]> {
-    let q = supabase
-      .from('compliance_revision_events')
-      .select('*')
-      .eq('status', 'pending_review')
-      .order('ingested_at', { ascending: false })
+    const data = await fetchAllRows((from, to) => {
+      let q = supabase
+        .from('compliance_revision_events')
+        .select('*')
+        .eq('status', 'pending_review')
+        .order('ingested_at', { ascending: false })
+        .range(from, to)
 
-    if (tenantId) {
-      q = q.or(`tenant_id.eq.${tenantId},tenant_id.is.null`)
-    }
+      if (tenantId) {
+        q = q.or(`tenant_id.eq.${tenantId},tenant_id.is.null`)
+      }
 
-    const { data, error } = await q
-    if (error) throw error
-    return (data ?? []) as ComplianceRevisionEvent[]
+      return q
+    })
+    return data as unknown as ComplianceRevisionEvent[]
   }
 }
 

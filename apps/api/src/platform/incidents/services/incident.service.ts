@@ -178,8 +178,15 @@ export class IncidentService {
     thresholdCount = 3,
   ): Promise<boolean> {
     const incidents   = await this.getEntityIncidents(tenantId, entityType, entityId, 50)
+    // Must exclude every terminal/non-actionable status, matching the
+    // terminal-status list routes/system/incidents.ts already uses — not
+    // just 'resolved' — otherwise a 'closed' or 'false_positive' incident
+    // still counts toward the escalation threshold.
     const matchCount  = incidents.filter(
-      i => i.incident_type === incidentType && i.status !== 'resolved',
+      i => i.incident_type === incidentType
+        && i.status !== 'resolved'
+        && i.status !== 'closed'
+        && i.status !== 'false_positive',
     ).length
     return matchCount >= thresholdCount
   }

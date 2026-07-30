@@ -67,6 +67,23 @@ export class RiskScoreService {
       .slice(0, limit)
   }
 
+  /**
+   * Count all tracked entities per type for a tenant. Unlike getTopRisks(),
+   * this scans the full per-tenant score set rather than a pre-sliced top-N,
+   * so callers deriving per-type totals (not just "top N overall") get an
+   * accurate count instead of an undercount hidden behind a global slice.
+   */
+  countByType(tenantId?: string): Record<RiskScoreType, number> {
+    const all = tenantId
+      ? [...this.scores.values()].filter(s => s.tenant_id === tenantId)
+      : [...this.scores.values()]
+    const counts: Record<RiskScoreType, number> = {
+      employee: 0, branch: 0, payroll: 0, attendance: 0, governance_drift: 0,
+    }
+    for (const s of all) counts[s.type]++
+    return counts
+  }
+
   private mapEntityTypeToScoreType(entityType: string): RiskScoreType {
     if (entityType === 'employee')    return 'employee'
     if (entityType === 'branch')      return 'branch'
