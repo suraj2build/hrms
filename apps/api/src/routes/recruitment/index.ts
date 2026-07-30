@@ -255,14 +255,17 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
   fastify.delete('/pipeline/stages/:id', hrAdminAuth, async (req: any, reply) => {
     const { id } = req.params as { id: string }
 
-    const { error } = await fastify.supabase
+    const { data, error } = await fastify.supabase
       .from('recruitment_pipeline_stages')
       .delete()
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
       .eq('is_system', false)
+      .select('id')
+      .maybeSingle()
 
     if (error) return serverError(req, reply, error, ErrorCode.DELETE_FAILED, 'Failed to delete pipeline stage')
+    if (!data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Pipeline stage not found' })
     return reply.send({ message: 'Stage deleted' })
   })
 
@@ -289,7 +292,10 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
       .insert(defaults.map(s => ({ ...s, tenant_id: req.tenantId })))
       .select()
 
-    if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to seed pipeline stages')
+    if (error) {
+      if (error.code === '23505') return reply.code(409).send({ error: 'ALREADY_SEEDED', message: 'Pipeline stages already exist for this tenant' })
+      return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to seed pipeline stages')
+    }
     return reply.code(201).send({ data })
   })
 
@@ -1884,13 +1890,16 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
 
   fastify.delete('/question-bank/categories/:id', hrAdminAuth, async (req: any, reply) => {
     const { id } = req.params as { id: string }
-    const { error } = await fastify.supabase
+    const { data, error } = await fastify.supabase
       .from('qb_categories')
       .delete()
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
+      .select('id')
+      .maybeSingle()
 
     if (error) return serverError(req, reply, error, ErrorCode.DELETE_FAILED, 'Failed to delete question bank category')
+    if (!data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Category not found' })
     return reply.send({ message: 'Category deleted' })
   })
 
@@ -1991,13 +2000,16 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
 
   fastify.delete('/question-bank/items/:id', hrAdminAuth, async (req: any, reply) => {
     const { id } = req.params as { id: string }
-    const { error } = await fastify.supabase
+    const { data, error } = await fastify.supabase
       .from('qb_items')
       .delete()
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
+      .select('id')
+      .maybeSingle()
 
     if (error) return serverError(req, reply, error, ErrorCode.DELETE_FAILED, 'Failed to delete question bank item')
+    if (!data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Question not found' })
     return reply.send({ message: 'Question deleted' })
   })
 
