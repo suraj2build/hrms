@@ -343,7 +343,7 @@ export async function processAttendanceCorrection(
     const appliedAt  = new Date().toISOString()
     const durationMs = Date.now() - workerStart
 
-    await supabase
+    const { error: applyUpdateErr } = await supabase
       .from('attendance_corrections')
       .update({
         status:         'applied',
@@ -352,6 +352,26 @@ export async function processAttendanceCorrection(
       })
       .eq('id', correctionId)
       .eq('tenant_id', tenantId)
+
+    if (applyUpdateErr) {
+      // The recompute itself succeeded — only the status write failed. Log
+      // this distinctly from an engine failure so operators don't mistake
+      // it for the recompute never having run: the stale-processing sweep
+      // will otherwise pick this row up later and misreport it as a
+      // "server crash / worker termination" timeout.
+      log.error(
+        {
+          event:         LOG_EVENTS.APPLIED,
+          correction_id: correctionId,
+          tenant_id:     tenantId,
+          employee_id:   employeeId,
+          date,
+          err:           applyUpdateErr.message,
+        },
+        'correction-processor: recompute succeeded but status update to applied failed',
+      )
+      return
+    }
 
     // ── Step 8: structured log — applied ──────────────────────────────────
     log.info(

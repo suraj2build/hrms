@@ -135,21 +135,30 @@ const authPlugin: FastifyPluginAsync = async (fastify) => {
         const hitMethod = request.method
         const hitIsWrite = hitMethod === 'POST' || hitMethod === 'PUT' || hitMethod === 'PATCH' || hitMethod === 'DELETE'
         if (hitIsWrite && !request.url.startsWith('/billing') && !request.url.startsWith('/support')) {
-          const { data: freshTenant } = await fastify.supabase
+          const { data: freshTenant, error: tenantErr } = await fastify.supabase
             .from('tenants')
             .select('status, trial_ends_at')
             .eq('id', cached.tenantId)
             .single()
-          if (freshTenant) {
-            const { blocked, trialExpired } = isTenantBlocked(freshTenant)
-            if (blocked) {
-              return reply.code(402).send({
-                error: 'SUBSCRIPTION_REQUIRED',
-                message: trialExpired
-                  ? 'Your free trial has ended. Please subscribe to continue.'
-                  : `Your workspace is ${freshTenant.status}. Please update your subscription to continue.`,
-              })
-            }
+          // Fail closed, matching the is_active recheck above — a query
+          // error here must not be treated as "not blocked", or a transient
+          // DB blip silently lets a suspended/expired tenant write through
+          // with no gate at all.
+          if (tenantErr || !freshTenant) {
+            request.log.error({ err: tenantErr, tenantId: cached.tenantId }, 'auth: subscription recheck failed')
+            return reply.code(402).send({
+              error:   'SUBSCRIPTION_CHECK_FAILED',
+              message: 'Unable to verify your subscription status. Please try again shortly.',
+            })
+          }
+          const { blocked, trialExpired } = isTenantBlocked(freshTenant)
+          if (blocked) {
+            return reply.code(402).send({
+              error: 'SUBSCRIPTION_REQUIRED',
+              message: trialExpired
+                ? 'Your free trial has ended. Please subscribe to continue.'
+                : `Your workspace is ${freshTenant.status}. Please update your subscription to continue.`,
+            })
           }
         }
         return
