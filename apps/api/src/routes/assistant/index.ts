@@ -116,9 +116,12 @@ export default async function assistantRoutes(fastify: FastifyInstance) {
       }, () => {})
     }
 
+    // Track the active config across the tool loop — may switch to a
+    // fallback mid-session. Hoisted above the try so the catch block below
+    // can still meter any usage accrued in earlier, successfully-completed
+    // hops before a later hop threw.
+    let activeConfig = cfgList[0]!
     try {
-      // Track the active config across the tool loop — may switch to a fallback mid-session.
-      let activeConfig = cfgList[0]!
       let usedFallback = false
 
       // Tool loop — bounded to avoid runaway.
@@ -172,6 +175,14 @@ export default async function assistantRoutes(fastify: FastifyInstance) {
       if (e instanceof AssistantNotConfiguredError) {
         return reply.code(200).send({ data: { reply: null, not_configured: true } })
       }
+      // Fresh audit finding: usageTotals accumulates real token usage across
+      // every successfully-completed hop via addUsage(), but meter() was
+      // only ever called on the success paths above — if a LATER hop (or
+      // executeTool, or the final no-tools call) threw, execution landed
+      // here and any tokens already incurred by the provider in earlier
+      // hops were silently never recorded in ai_usage_log, undercounting
+      // the tenant's AI usage/billing.
+      meter(activeConfig)
       req.log.warn({
         err: e?.message, status: e?.status,
         tried: cfgList.map(c => `${c.provider}:${effectiveModel(c)}`),

@@ -70,7 +70,7 @@ export default async function positionsRoutes(fastify: FastifyInstance) {
   async function validatePositionFks(
     data: Record<string, any>,
     tenantId: string,
-  ): Promise<{ field: string; message: string } | null> {
+  ): Promise<{ field: string; message: string; queryError?: unknown } | null> {
     const checks: Array<[string, string, string]> = [
       ['designation_id',   'designations',   'Designation'],
       ['grade_id',         'grades',         'Grade'],
@@ -82,12 +82,16 @@ export default async function positionsRoutes(fastify: FastifyInstance) {
     for (const [field, table, label] of checks) {
       const id = data[field]
       if (!id) continue
-      const { data: row } = await fastify.supabase
+      const { data: row, error } = await fastify.supabase
         .from(table)
         .select('id')
         .eq('id', id)
         .eq('tenant_id', tenantId)
         .maybeSingle()
+      // A transient query failure must not be reported identically to a
+      // genuine missing FK — that would masquerade a DB outage as "this
+      // department doesn't exist" and hide the real failure from logs.
+      if (error) return { field, message: `Failed to validate ${label.toLowerCase()}`, queryError: error }
       if (!row) return { field, message: `${label} not found in your organisation` }
     }
     return null
@@ -184,7 +188,9 @@ export default async function positionsRoutes(fastify: FastifyInstance) {
     let openPositions = 0      // positions with at least one vacant seat
     let agedVacancyDays = 0    // sum of age for positions that have any vacancy
     const byDept: Record<string, { department: string; sanctioned: number; filled: number; vacancies: number }> = {}
-    const today = new Date()
+    // Tenant-local "today", not the server's (UTC) clock — this file already
+    // uses tenantTodayStr() for abolished_date below; this KPI was missed.
+    const todayMs = Date.parse(`${await tenantTodayStr(fastify.supabase, tid)}T00:00:00Z`)
 
     for (const p of positions) {
       const f = filled[p.id] ?? 0
@@ -194,7 +200,7 @@ export default async function positionsRoutes(fastify: FastifyInstance) {
       if (vac > 0) {
         openPositions++
         if (p.effective_date) {
-          agedVacancyDays += Math.floor((today.getTime() - new Date(p.effective_date).getTime()) / 86_400_000)
+          agedVacancyDays += Math.floor((todayMs - new Date(p.effective_date).getTime()) / 86_400_000)
         }
       }
       const dk = p.department_id ?? '__none__'
@@ -247,7 +253,10 @@ export default async function positionsRoutes(fastify: FastifyInstance) {
     if (!req.tenantId)   return reply.code(403).send({ error: 'NO_TENANT', message: 'No tenant context' })
 
     const fkErr = await validatePositionFks(parsed.data, req.tenantId)
-    if (fkErr) return reply.code(400).send({ error: 'INVALID_REFERENCE', message: fkErr.message, field: fkErr.field })
+    if (fkErr) {
+      if (fkErr.queryError) return serverError(req, reply, fkErr.queryError, ErrorCode.QUERY_FAILED, fkErr.message)
+      return reply.code(400).send({ error: 'INVALID_REFERENCE', message: fkErr.message, field: fkErr.field })
+    }
 
     const code = parsed.data.code?.trim() ||
       await generateUniqueCode(fastify.supabase, 'positions', req.tenantId, parsed.data.title)
@@ -275,7 +284,10 @@ export default async function positionsRoutes(fastify: FastifyInstance) {
     if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION', message: parsed.error.errors[0]?.message })
 
     const fkErr = await validatePositionFks(parsed.data, req.tenantId)
-    if (fkErr) return reply.code(400).send({ error: 'INVALID_REFERENCE', message: fkErr.message, field: fkErr.field })
+    if (fkErr) {
+      if (fkErr.queryError) return serverError(req, reply, fkErr.queryError, ErrorCode.QUERY_FAILED, fkErr.message)
+      return reply.code(400).send({ error: 'INVALID_REFERENCE', message: fkErr.message, field: fkErr.field })
+    }
 
     const patch: Record<string, any> = { ...parsed.data }
     // Abolishing stamps the date; un-abolishing clears it.

@@ -82,6 +82,35 @@ export class EventStreamService {
   }
 
   /**
+   * Fetch EVERY event matching the given filters (no result cap) — for
+   * callers that build an aggregate/breakdown (summary, heatmap) where a
+   * sample rather than the complete window would silently under-report.
+   * query() above caps at 1000 by design (a page for interactive browsing);
+   * this fully paginates instead.
+   */
+  async queryAll(q: Omit<EventStreamQuery, 'limit' | 'offset'>): Promise<ResolvedPlatformEvent[]> {
+    return fetchAllRows<ResolvedPlatformEvent>((from, to) => {
+      let query = this.supabase
+        .from('platform_events')
+        .select('*')
+        .eq('tenant_id', q.tenant_id)
+        .order('timestamp', { ascending: false })
+        .range(from, to) as any
+
+      if (q.event_type)    query = query.eq('event_type', q.event_type)
+      if (q.module)        query = query.eq('module', q.module)
+      if (q.entity_type)   query = query.eq('entity_type', q.entity_type)
+      if (q.entity_id)     query = query.eq('entity_id', q.entity_id)
+      if (q.actor_id)      query = query.eq('actor_id', q.actor_id)
+      if (q.correlation_id) query = query.eq('correlation_id', q.correlation_id)
+      if (q.severity)      query = query.eq('severity', q.severity)
+      if (q.from)          query = query.gte('timestamp', q.from)
+      if (q.to)            query = query.lte('timestamp', q.to)
+      return query
+    })
+  }
+
+  /**
    * Fetch all events for a given correlation chain.
    */
   async getCorrelationChain(orgId: string, correlationId: string): Promise<CorrelationChain> {

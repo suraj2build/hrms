@@ -57,9 +57,14 @@ export default async function observabilityRoutes(fastify: FastifyInstance) {
         ?? new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
       const to   = (req.query as any).to as string | undefined
 
+      // Fresh audit finding: this previously called .query({..., limit: 200}),
+      // silently capping the summary's total/by_module/by_severity breakdown
+      // at 200 events with no truncation signal — a tenant generating more
+      // than 200 events in the window (very plausible: attendance, approvals,
+      // compensation revisions, payroll runs) got a wrong operational summary.
+      // queryAll() fully paginates instead.
       const svc  = new EventStreamService((fastify as any).supabase)
-      const page = await svc.query({ tenant_id: orgId, from, to, limit: 200 })
-      events     = page.events
+      events     = await svc.queryAll({ tenant_id: orgId, from, to })
     }
 
     const summary = eventTraceService.summarize(orgId, events, period)
@@ -83,11 +88,16 @@ export default async function observabilityRoutes(fastify: FastifyInstance) {
       events     = body.events
       totalEvents = events.length
     } else {
+      // Fresh audit finding: total_events was the real count (from
+      // .query()'s count:'exact'), but `cells` was still built only from the
+      // 500-row-capped sample — once a tenant exceeds 500 events/day the
+      // heatmap became internally inconsistent (total_events said e.g. 1,400
+      // but cell counts only ever summed to 500), with no truncation signal.
+      // queryAll() fully paginates so cells and total_events agree.
       const from = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
       const svc  = new EventStreamService((fastify as any).supabase)
-      const page = await svc.query({ tenant_id: orgId, from, limit: 500 })
-      events     = page.events
-      totalEvents = page.total
+      events      = await svc.queryAll({ tenant_id: orgId, from })
+      totalEvents = events.length
     }
 
     const cells = eventTraceService.buildHeatmap(events)
