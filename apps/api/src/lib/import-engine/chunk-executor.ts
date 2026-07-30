@@ -48,10 +48,13 @@ export interface ExecuteInChunksOptions {
 }
 
 export interface ExecuteInChunksResult {
-  created: number
-  updated: number
-  failed:  number
-  skipped: number
+  created:   number
+  updated:   number
+  failed:    number
+  skipped:   number
+  /** True if the job was cancelled (DELETE /jobs/:id) mid-run — the caller
+   *  must not overwrite status back to 'completed' when this is set. */
+  cancelled: boolean
 }
 
 // ── Error classification ──────────────────────────────────────────────────────
@@ -221,10 +224,11 @@ export async function executeInChunks({
   // 3. Nothing eligible to process
   if (eligibleRows.length === 0) {
     return {
-      created: 0,
-      updated: 0,
-      failed:  invalidRows.length,
-      skipped: skippedCount,
+      created:   0,
+      updated:   0,
+      failed:    invalidRows.length,
+      skipped:   skippedCount,
+      cancelled: false,
     }
   }
 
@@ -322,6 +326,7 @@ export async function executeInChunks({
   let totalChunkMs  = 0
   let peakChunkMs   = 0
   let chunksRan     = 0
+  let cancelled     = false
 
   try {
     // 9. Process each chunk
@@ -332,6 +337,20 @@ export async function executeInChunks({
 
       // Checkpoint: skip already-completed chunks
       if (meta?.status === 'completed') continue
+
+      // Cancellation check — DELETE /jobs/:id sets status='cancelled' on a
+      // dispatched job; without this check remaining chunks kept writing and
+      // the job's final status silently flipped back to 'completed' at the
+      // end of the run, erasing the evidence a cancel was ever requested.
+      const { data: liveJob } = await supabase
+        .from('import_jobs')
+        .select('status')
+        .eq('id', jobId)
+        .single()
+      if (liveJob?.status === 'cancelled') {
+        cancelled = true
+        break
+      }
 
       const chunkStartMs = Date.now()
       const startedAt    = new Date(chunkStartMs).toISOString()
@@ -476,9 +495,10 @@ export async function executeInChunks({
   }
 
   return {
-    created: totalCreated,
-    updated: totalUpdated,
-    failed:  totalFailed,
-    skipped: totalSkipped,
+    created:   totalCreated,
+    updated:   totalUpdated,
+    failed:    totalFailed,
+    skipped:   totalSkipped,
+    cancelled,
   }
 }

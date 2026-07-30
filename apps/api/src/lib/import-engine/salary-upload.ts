@@ -1351,16 +1351,18 @@ export async function runSalaryUploadJob(
     }
     await writeJobRows(supabase, jobId, tenantId, validation.rows, rowStatuses)
 
+    // A cancellation mid-run must not be overwritten back to 'completed' —
+    // leave status as the 'cancelled' DELETE /jobs/:id already set, only
+    // syncing the counts/progress columns for what actually got written.
     await supabase
       .from('import_jobs')
       .update({
-        status:       'completed',
+        ...(result.cancelled ? {} : { status: 'completed', completed_at: new Date().toISOString() }),
         created_rows: result.created,
         updated_rows: result.updated,
         failed_rows:  result.failed,
         skipped_rows: result.skipped,
         duration_ms:  duration,
-        completed_at: new Date().toISOString(),
       })
       .eq('id', jobId)
 

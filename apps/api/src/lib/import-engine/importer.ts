@@ -1377,6 +1377,7 @@ export async function runImport(
     let totalUpdated: number
     let totalFailed:  number
     let totalSkipped: number
+    let cancelled = false
 
     if (UNCHUNKED_TYPES.has(masterType)) {
       // ── 6a. Unchunked path (rotation_policies) ───────────────────────
@@ -1422,22 +1423,25 @@ export async function runImport(
       totalUpdated = result.updated
       totalFailed  = result.failed
       totalSkipped = result.skipped
+      cancelled    = result.cancelled
     }
 
     const duration_ms = Date.now() - startedAt
 
     // ── 7. Finalise job ──────────────────────────────────────────────────
+    // A cancellation mid-run must not be overwritten back to 'completed' —
+    // leave status as the 'cancelled' DELETE /jobs/:id already set, only
+    // syncing the counts/progress columns for what actually got written.
     await supabase
       .from('import_jobs')
       .update({
-        status:          'completed',
+        ...(cancelled ? {} : { status: 'completed', completed_at: new Date().toISOString() }),
         processed_rows:  eligibleRows.length,
         created_rows:    totalCreated,
         updated_rows:    totalUpdated,
         failed_rows:     totalFailed,
         skipped_rows:    totalSkipped,
         duration_ms,
-        completed_at:    new Date().toISOString(),
         last_activity_at: new Date().toISOString(),
       })
       .eq('id', jobId)
