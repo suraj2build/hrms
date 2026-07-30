@@ -33,6 +33,7 @@ import { Button }         from '@/components/ui/button'
 import { ConfirmDialog }  from '@/components/ui/ConfirmDialog'
 import { api }            from '@/lib/api/client'
 import { useAuthStore }   from '@/stores/authStore'
+import { usePeriodLock }  from '@/hooks/usePeriodLock'
 import { cn }             from '@/lib/utils'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -52,12 +53,6 @@ interface ChecklistItem {
   status:      'ok' | 'warning' | 'error' | 'loading'
   action?:     string
   href?:       string
-}
-
-interface PeriodLockState {
-  is_locked:    boolean
-  locked_at:    string | null
-  locked_by:    string | null
 }
 
 // ── Helper ─────────────────────────────────────────────────────────────────────
@@ -177,15 +172,20 @@ export function PayrollReadiness() {
     staleTime: 60_000,
   })
 
-  const { data: periodLockData, isLoading: lockLoading } = useQuery<{ data: PeriodLockState }>({
-    queryKey: ['period-lock', month],
-    queryFn:  () => api.get(`/attendance/period-locks?month=${month}`),
-    enabled:  isAdmin,
-    staleTime: 30_000,
-  })
-
-  const lockState    = periodLockData?.data
-  const isLocked     = lockState?.is_locked ?? false
+  // Fresh audit finding: this used to run its own useQuery under the exact
+  // same key (['period-lock', month]) as the shared usePeriodLock() hook
+  // (used by 8 other pages) and WeeklyOffCredit.tsx's own query — React
+  // Query caches by key only, so whichever of the three ran last for a
+  // given month would silently overwrite the cache with its own
+  // differently-shaped response for the others to misread. This one was
+  // also independently broken on its own: it hit GET /attendance/period-locks
+  // (the list-all-periods endpoint, which ignores query-string params
+  // entirely) instead of GET /attendance/period-locks/:month, so
+  // `data` was actually an array and `is_locked` (not even a real field —
+  // the source of truth is `state`) was always undefined, meaning this
+  // page's own lock check always reported "not locked" regardless of the
+  // period's real state. Now shares the same hook/query as everywhere else.
+  const { isLocked, isLoading: lockLoading, lockedAt } = usePeriodLock(month)
   const payrollSum   = payrollSummaryData?.summary
 
   const [confirmLock, setConfirmLock] = useState(false)
@@ -221,7 +221,7 @@ export function PayrollReadiness() {
       id:          'period-lock',
       label:       'Period Locked',
       description: isLocked
-        ? `Period locked on ${lockState?.locked_at ? (() => { const _d = new Date(lockState.locked_at); const _M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; return isNaN(_d.getTime()) ? '—' : `${String(_d.getDate()).padStart(2,'0')}-${_M[_d.getMonth()]}-${_d.getFullYear()}` })() : '—'}`
+        ? `Period locked on ${lockedAt ? (() => { const _d = new Date(lockedAt); const _M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; return isNaN(_d.getTime()) ? '—' : `${String(_d.getDate()).padStart(2,'0')}-${_M[_d.getMonth()]}-${_d.getFullYear()}` })() : '—'}`
         : 'Period is not yet locked — employees can still submit requests',
       count:       isLocked ? 0 : 1,
       status:      lockLoading ? 'loading' : isLocked ? 'ok' : 'warning',
@@ -396,10 +396,10 @@ export function PayrollReadiness() {
                 }
               </div>
 
-              {isLocked && lockState?.locked_at && (
+              {isLocked && lockedAt && (
                 <div className="text-xs space-y-0.5">
                   <p className="text-muted-foreground">
-                    Locked on {(() => { const _d = new Date(lockState.locked_at); const _M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; return isNaN(_d.getTime()) ? '—' : `${String(_d.getDate()).padStart(2,'0')}-${_M[_d.getMonth()]}-${_d.getFullYear()}` })()}
+                    Locked on {(() => { const _d = new Date(lockedAt); const _M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; return isNaN(_d.getTime()) ? '—' : `${String(_d.getDate()).padStart(2,'0')}-${_M[_d.getMonth()]}-${_d.getFullYear()}` })()}
                   </p>
                 </div>
               )}

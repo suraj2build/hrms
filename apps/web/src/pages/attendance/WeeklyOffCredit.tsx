@@ -18,6 +18,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { api, ApiError } from '@/lib/api/client'
+import { usePeriodLock } from '@/hooks/usePeriodLock'
 
 interface LadderRow { present_days: number; wo_credit: number }
 interface WoStructure {
@@ -88,17 +89,13 @@ export function WeeklyOffCredit() {
   })
 
   const monthKey = `${year}-${String(month).padStart(2, '0')}`
-  const { data: periodLock } = useQuery<{ state: string } | null>({
-    queryKey: ['period-lock', monthKey],
-    queryFn: () =>
-      api.get<{ data?: { state: string }; state?: string } | null>(`/attendance/period-locks/${monthKey}`)
-        .then(r => (r?.data ?? r ?? null) as { state: string } | null)
-        .catch(() => null),
-    enabled: tab === 'review',
-    staleTime: 30_000,
-  })
-  const periodLocked = periodLock ? periodLock.state !== 'OPEN' : false
-  const periodState  = periodLock?.state ?? null
+  // Fresh audit finding: this used to run its own useQuery under the exact
+  // same key (['period-lock', monthKey]) as the shared usePeriodLock() hook
+  // used by 8 other pages and PayrollReadiness.tsx's own query — React Query
+  // caches by key only, so whichever query ran last for a given month would
+  // silently overwrite the shared cache entry with its own response shape
+  // for the others to misread. Now shares the same hook/query everywhere.
+  const { state: periodState, isLocked: periodLocked } = usePeriodLock(monthKey)
 
   const saveStructure = useMutation({
     mutationFn: (s: Partial<WoStructure>) =>

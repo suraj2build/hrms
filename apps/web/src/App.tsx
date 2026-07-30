@@ -6,6 +6,7 @@ import { ErrorBoundary } from '@/components/error-boundary/ErrorBoundary'
 import { captureError } from '@/lib/observability/sentry'
 import { supabase } from '@/lib/supabase/client'
 import { useAuthStore } from '@/stores/authStore'
+import { useUIStore } from '@/stores/uiStore'
 import { api } from '@/lib/api/client'
 import { DEMO_MODE } from '@/lib/demo'
 import { demoProfile, demoTenant } from '@/lib/demo/fixtures'
@@ -570,6 +571,15 @@ function AuthProvider({ children }: { children: React.ReactNode }) {
           setTenant(null)
           setLoading(false)
           setBootstrapping(false)
+
+          // Fresh audit finding: these are all session-only UI/context state
+          // that survive a client-side logout (no full page reload), so a
+          // different account signing in on the same tab immediately
+          // inherited the previous account's workspace impersonation state,
+          // selected-employee/site context, and payroll-deadline-mode flag.
+          useUIStore.getState().clearWorkspaceContext()
+          sessionStorage.removeItem('ux3_op_context')
+          localStorage.removeItem('ux6_payroll_deadline')
         }
       },
     )

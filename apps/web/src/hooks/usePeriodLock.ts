@@ -11,12 +11,16 @@ type PeriodState = 'OPEN' | 'LOCKED' | 'PAYROLL_PROCESSING' | 'PAYROLL_FINALIZED
 interface PeriodLockData {
   period_month: string
   state:        PeriodState
+  locked_at?:   string | null
+  locked_by?:   string | null
 }
 
 interface UsePeriodLockResult {
   state:     PeriodState
   isLocked:  boolean
   isLoading: boolean
+  lockedAt:  string | null
+  lockedBy:  string | null
 }
 
 export function usePeriodLock(month: string): UsePeriodLockResult {
@@ -31,5 +35,5 @@ export function usePeriodLock(month: string): UsePeriodLockResult {
   const state    = data?.data?.state ?? 'OPEN'
   const isLocked = state !== 'OPEN'
 
-  return { state, isLocked, isLoading }
+  return { state, isLocked, isLoading, lockedAt: data?.data?.locked_at ?? null, lockedBy: data?.data?.locked_by ?? null }
 }

@@ -143,8 +143,10 @@ function detectWorkspace(pathname: string): WorkspaceContext {
 
 // ── Context ────────────────────────────────────────────────────────────────────
 
+// Only used to seed the fallback context value below (for a useContext()
+// call outside a real provider); the provider itself recomputes both fresh
+// per mount — see OperationalContextProvider.
 const now = currentYearMonth()
-const persisted = loadPersistedState()
 
 const defaultContextValue: OperationalContextValue = {
   selectedEmployeeId:      null,
@@ -176,6 +178,17 @@ export const OperationalContext =
 export function OperationalContextProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient()
   const location    = useLocation()
+
+  // Fresh audit finding: the module-scope `now`/`persisted` above are
+  // computed exactly once, the first time this module is ever imported in
+  // the page's lifetime — not once per provider mount. A logout/login on
+  // the same tab (no full reload) remounts this provider but reused that
+  // frozen snapshot, so it neither picked up a real month rollover during a
+  // long-lived session nor re-read sessionStorage after ISSUE-478's
+  // SIGNED_OUT cleanup cleared it. Recomputing per-mount (lazy useState
+  // initializers only run once per mount, not per render) fixes both.
+  const [now]       = useState(() => currentYearMonth())
+  const [persisted] = useState(() => loadPersistedState())
 
   // ── State — initialise from sessionStorage ─────────────────────────────────
   const [selectedEmployeeId, setSelectedEmployeeIdState] =

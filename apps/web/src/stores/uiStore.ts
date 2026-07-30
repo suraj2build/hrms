@@ -110,6 +110,13 @@ export const useUIStore = create<UIState>()(
           activeRole:           null,
           impersonatedEmployee: null,
           impersonatedManager:  null,
+          // Fresh audit finding: statutoryMonth/executiveMode are also
+          // session-only UI persona state, same class as activeRole/
+          // impersonated identities — must reset together on logout, or a
+          // different account signing in on the same tab (no full page
+          // reload) inherits the previous account's leftover UI state.
+          statutoryMonth:       null,
+          executiveMode:        false,
         }),
 
       // ── shared statutory month (session-only) ─────────────────────────────────
