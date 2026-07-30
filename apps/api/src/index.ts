@@ -38,7 +38,6 @@ import {
   execLeaveReconciliationJob,
 } from './lib/leave-scheduler.js'
 import { monthlyAccrualJob }             from './lib/leave-jobs.js'
-import { jobQueue }                      from './lib/job-queue.js'
 import { eventBus }                      from './lib/event-bus.js'
 import type { HrmsEventType }            from './lib/event-bus.js'
 import { durableQueue }                  from './lib/durable-queue.js'
@@ -441,7 +440,6 @@ async function start() {
   await fastify.register(import('./plugins/error-sanitizer.js'))
 
   // ── Wire loggers into in-process infrastructure ──────────────────────────────
-  jobQueue.setLogger(fastify.log as any)
   eventBus.setLogger(fastify.log as any)
 
   // ── Startup health checks — run before serving any traffic ────────────────
@@ -945,7 +943,7 @@ async function start() {
   await fastify.register(uploadSessionRoutes)            // GET/POST /uploads/sessions, PATCH /uploads/sessions/:id/complete|fail, GET /uploads/sessions/:id/url
 
   // ── System observability endpoints (authenticated) ────────────────────────
-  await fastify.register(jobQueueRoutes)                 // GET/DELETE /system/jobs, /system/jobs/dead/*
+  await fastify.register(jobQueueRoutes)                 // GET /system/jobs/durable/*, /system/jobs/automations, /system/observability
   await fastify.register(operationalHealthRoutes)        // GET /system/operational-health, /attendance/freshness/*
 
   const port = parseInt(process.env.PORT ?? '2001')

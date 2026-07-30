@@ -16,19 +16,16 @@
  *  8. Module Registry (in-memory)
  *  9. Startup Health Checks (in-memory)
  * 10. Event Bus — Emission by Type (in-memory)
- * 11. Job Queue — Metrics by Type (in-memory)
- * 12. Dead-Letter Queue — legacy in-memory
  *
  * Refresh: every 30s (auto) + manual refresh button.
  * Access: super_admin / hr_admin only.
  */
 
-import { useState }                              from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Activity, Zap, AlertTriangle, CheckCircle2, XCircle,
   RefreshCw, ShieldAlert, Server, Clock, Database,
-  Radio, Box, Trash2, Heart, RotateCcw, Ban, CloudLightning, Cpu, Upload, ScrollText,
+  Radio, Box, Trash2, Heart, RotateCcw, Ban, CloudLightning, Upload, ScrollText,
 } from 'lucide-react'
 
 import { PageContainer } from '@/components/layout/PageContainer'
@@ -58,24 +55,6 @@ interface EventBusType {
   failurePct:  number
 }
 
-interface JobMetricRow {
-  type:      string
-  enqueued:  number
-  started:   number
-  completed: number
-  failed:    number
-  retried:   number
-  dead:      number
-}
-
-interface DeadJob {
-  id:       string
-  type:     string
-  error:    string | null
-  failedAt: string | null
-  attempts: number
-}
-
 interface ObservabilityData {
   timestamp: string
   platform: {
@@ -91,14 +70,6 @@ interface ObservabilityData {
     total_failed:     number
     failure_rate_pct: number
     by_type:          EventBusType[]
-  }
-  job_queue: {
-    pending:     number
-    running:     number
-    completed:   number
-    dead_letter: number
-    by_type:     JobMetricRow[]
-    recent_dead: DeadJob[]
   }
 }
 
@@ -320,8 +291,6 @@ export function ObservabilityConsole() {
   const { profile } = useAuthStore()
   const isAdmin = ['super_admin', 'hr_admin'].includes(profile?.role ?? '')
 
-  const [purgingDead, setPurgingDead] = useState(false)
-
   // ── Existing in-memory observability query ───────────────────────────────────
   const {
     data: resp,
@@ -490,23 +459,6 @@ export function ObservabilityConsole() {
     )
   }
 
-  async function handlePurgeDead() {
-    if (!confirm('Purge all dead-letter jobs? This cannot be undone.')) return
-    setPurgingDead(true)
-    try {
-      await api.delete('/system/jobs/dead')
-      // Invalidate both the in-memory obs snapshot AND the durable dead-jobs table
-      qc.invalidateQueries({ queryKey: ['system-observability'], exact: true })
-      qc.invalidateQueries({ queryKey: ['durable-dead-jobs'],    exact: true })
-      qc.invalidateQueries({ queryKey: ['durable-queue'],        exact: true })
-      toast.success('Dead-letter jobs purged')
-    } catch (e) {
-      toast.error('Failed to purge dead-letter jobs', { description: e instanceof Error ? e.message : String(e) })
-    } finally {
-      setPurgingDead(false)
-    }
-  }
-
   if (!isAdmin) {
     return (
       <PageContainer>
@@ -610,10 +562,10 @@ export function ObservabilityConsole() {
               },
               {
                 label: 'Dead-Letter Jobs',
-                value: obs.job_queue.dead_letter,
+                value: durableMetrics?.dead ?? 0,
                 icon:  AlertTriangle,
-                sub:   `${obs.job_queue.pending} pending, ${obs.job_queue.running} running`,
-                cls:   obs.job_queue.dead_letter > 0 ? 'text-warning' : 'text-success',
+                sub:   `${durableMetrics?.pending ?? 0} pending, ${durableMetrics?.running ?? 0} running`,
+                cls:   (durableMetrics?.dead ?? 0) > 0 ? 'text-warning' : 'text-success',
               },
               {
                 label: 'Orphaned Uploads',
@@ -1014,102 +966,6 @@ export function ObservabilityConsole() {
               </div>
             )}
           </SectionCard>
-
-          {/* ── Job queue by type (legacy in-memory) ─────────────────────── */}
-          {obs.job_queue.by_type.length > 0 && (
-            <SectionCard
-              title="Job Queue — Metrics by Type (In-Memory)"
-              icon={<Cpu className="h-4 w-4 text-muted-foreground" />}
-            >
-              <div className="overflow-x-auto">
-                <table className="w-full text-xs">
-                  <thead>
-                    <tr className="border-b border-border">
-                      {['Job Type', 'Enqueued', 'Started', 'Completed', 'Failed', 'Retried', 'Dead'].map(h => (
-                        <th key={h} className="text-left text-muted-foreground font-semibold px-3 py-2">{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {obs.job_queue.by_type.map(row => (
-                      <tr key={row.type} className="border-b border-border/50">
-                        <td className="px-3 py-2 font-mono text-foreground">{row.type}</td>
-                        <td className="px-3 py-2 tabular-nums">{row.enqueued}</td>
-                        <td className="px-3 py-2 tabular-nums">{row.started}</td>
-                        <td className="px-3 py-2 tabular-nums text-success">{row.completed}</td>
-                        <td className={cn(
-                          'px-3 py-2 tabular-nums',
-                          row.failed > 0 ? 'text-destructive font-semibold' : 'text-muted-foreground',
-                        )}>
-                          {row.failed}
-                        </td>
-                        <td className={cn(
-                          'px-3 py-2 tabular-nums',
-                          row.retried > 0 ? 'text-warning' : 'text-muted-foreground',
-                        )}>
-                          {row.retried}
-                        </td>
-                        <td className={cn(
-                          'px-3 py-2 tabular-nums',
-                          row.dead > 0 ? 'text-destructive font-bold' : 'text-muted-foreground',
-                        )}>
-                          {row.dead}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </SectionCard>
-          )}
-
-          {/* ── Dead-letter jobs (legacy in-memory) ──────────────────────── */}
-          {obs.job_queue.recent_dead.length > 0 && (
-            <SectionCard
-              title={`Dead-Letter Queue — In-Memory (${obs.job_queue.dead_letter} total)`}
-              icon={<XCircle className="h-4 w-4 text-destructive" />}
-              action={
-                <Button
-                  size="sm"
-                  variant="destructive"
-                  className="h-7 text-[10px] gap-1"
-                  onClick={handlePurgeDead}
-                  disabled={purgingDead}
-                >
-                  <Trash2 className="h-3 w-3" />
-                  {purgingDead ? 'Purging…' : 'Purge All'}
-                </Button>
-              }
-            >
-              <div className="overflow-x-auto">
-                <table className="w-full text-xs">
-                  <thead>
-                    <tr className="border-b border-border">
-                      {['Job Type', 'Error', 'Failed At', 'Attempts'].map(h => (
-                        <th key={h} className="text-left text-muted-foreground font-semibold px-3 py-2">{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {obs.job_queue.recent_dead.map(job => (
-                      <tr key={job.id} className="border-b border-border/50 bg-destructive/5">
-                        <td className="px-3 py-2 font-mono text-foreground">{job.type}</td>
-                        <td className="px-3 py-2 text-destructive max-w-xs truncate" title={job.error ?? ''}>
-                          {job.error ?? '—'}
-                        </td>
-                        <td className="px-3 py-2 text-muted-foreground tabular-nums">
-                          {fmtTs(job.failedAt)}
-                        </td>
-                        <td className="px-3 py-2 tabular-nums font-semibold text-destructive">
-                          {job.attempts}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </SectionCard>
-          )}
 
           {/* ── Upload Sessions ───────────────────────────────────────────── */}
           <SectionCard

@@ -1,15 +1,12 @@
 /**
  * Job Queue Visibility API
  *
- * Exposes both the legacy in-process job queue and the new durable
- * Postgres-backed queue state to operators. Scheduler heartbeat health
- * is surfaced through the combined observability endpoint.
+ * Exposes the durable Postgres-backed queue state to operators. Scheduler
+ * heartbeat health is surfaced through the combined observability endpoint.
  *
- * Legacy queue (in-memory, cleared on restart):
- *   GET    /system/jobs           — queue snapshot (counts + metrics by type)
- *   GET    /system/jobs/dead      — dead-letter job list (last 200)
- *   POST   /system/jobs/dead/:id/retry
- *   DELETE /system/jobs/dead
+ * (The legacy in-process JobQueue this file used to also expose was removed —
+ * nothing ever enqueued into it once the codebase migrated to the durable
+ * queue below, so its endpoints/KPIs always reported empty/zero.)
  *
  * Durable queue (Postgres-backed, crash-safe):
  *   GET    /system/jobs/durable                     — live DB counts (pending/running/dead)
@@ -30,7 +27,6 @@
  */
 
 import type { FastifyInstance } from 'fastify'
-import { jobQueue }             from '../../lib/job-queue.js'
 import { durableQueue }         from '../../lib/durable-queue.js'
 import { eventBus }             from '../../lib/event-bus.js'
 import { platformHealth }       from '../../lib/startup-health.js'
@@ -108,80 +104,28 @@ const AUTOMATION_REGISTRY: AutomationJob[] = [
 export default async function jobQueueRoutes(fastify: FastifyInstance) {
   const auth = { preHandler: [fastify.authenticate] }
 
-  // ── GET /system/jobs ────────────────────────────────────────────────────────
-  // Returns a real-time snapshot of the job queue state.
-  fastify.get('/system/jobs', auth, async (req: any, reply) => {
-    if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
-      return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
-    }
-
-    const snapshot     = jobQueue.getQueueSnapshot()
-    const busMetrics   = eventBus.getMetrics()
-    const busHandlers  = eventBus.getHandlerCount()
-
-    return reply.send({
-      data: {
-        queue:   snapshot,
-        summary: {
-          pending:    snapshot.pending,
-          running:    snapshot.running,
-          completed:  snapshot.completed,
-          deadLetter: snapshot.deadLetter,
-        },
-        metrics: snapshot.metrics,
-        event_bus: {
-          handler_count: busHandlers,
-          by_type:       busMetrics,
-          total_emitted: Object.values(busMetrics).reduce((s, m) => s + m.emitted, 0),
-          total_failed:  Object.values(busMetrics).reduce((s, m) => s + m.failed, 0),
-        },
-      },
-    })
-  })
-
-  // ── GET /system/jobs/dead ────────────────────────────────────────────────────
-  // Returns all dead-letter jobs for inspection.
-  fastify.get('/system/jobs/dead', auth, async (req: any, reply) => {
-    if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
-      return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
-    }
-
-    const dead = jobQueue.getDeadLetterJobs()
-    return reply.send({
-      data:  dead,
-      total: dead.length,
-    })
-  })
-
   // ── GET /system/jobs/automations ───────────────────────────────────────────
-  // Returns the static automation registry enriched with live queue metrics.
+  // Returns the static automation registry. last_run_at/last_status/next_run_at
+  // aren't tracked anywhere yet (the legacy in-memory job queue that used to
+  // supply a best-effort last_status was removed — nothing ever enqueued into
+  // it, so it always reported null/empty; extend with a real DB-backed run-log
+  // if this needs populating).
   fastify.get('/system/jobs/automations', auth, async (req: any, reply) => {
     if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
       return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
     }
 
-    const snapshot = jobQueue.getQueueSnapshot()
-
-    const jobs = AUTOMATION_REGISTRY.map(job => {
-      const metrics = snapshot.metrics[job.job_type]
-      // Check if this job type has any recent completed or failed metrics
-      const lastStatus: 'success' | 'failed' | null =
-        metrics
-          ? metrics.failed > 0 ? 'failed' : metrics.completed > 0 ? 'success' : null
-          : null
-
-      return {
-        id:          job.id,
-        name:        job.name,
-        description: job.description,
-        schedule:    job.schedule,
-        owner:       job.owner,
-        is_enabled:  job.is_enabled,
-        last_run_at: null,    // not tracked in-memory queue; extend with DB if needed
-        last_status: lastStatus,
-        next_run_at: null,
-      }
-    })
+    const jobs = AUTOMATION_REGISTRY.map(job => ({
+      id:          job.id,
+      name:        job.name,
+      description: job.description,
+      schedule:    job.schedule,
+      owner:       job.owner,
+      is_enabled:  job.is_enabled,
+      last_run_at: null,
+      last_status: null,
+      next_run_at: null,
+    }))
 
     return reply.send({ data: jobs, total: jobs.length })
   })
@@ -231,54 +175,19 @@ export default async function jobQueueRoutes(fastify: FastifyInstance) {
     }
   })
 
-  // ── POST /system/jobs/dead/:id/retry ────────────────────────────────────────
-  // Manually re-enqueue a dead-letter job. The job handler is reconstructed from
-  // the job's `type` field — only works for jobs whose handlers are registered in
-  // the handler registry below. Novel one-off jobs cannot be retried this way.
-  fastify.post('/system/jobs/dead/:id/retry', auth, async (req: any, reply) => {
-    if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
-      return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
-    }
-
-    const { id } = req.params as { id: string }
-    const dead   = jobQueue.getDeadLetterJobs()
-    const job    = dead.find(j => j.id === id)
-
-    if (!job) {
-      return reply.code(404).send({ error: 'NOT_FOUND', message: `Dead-letter job '${id}' not found` })
-    }
-
-    // Attempt to re-enqueue with a no-op handler (operator must supply real handler).
-    // This endpoint is primarily a diagnostic tool — the operator verifies the job
-    // can be retried and then restores the handler externally if needed.
-    // For known retriable types we log a warning.
-    fastify.log.warn(
-      { jobId: id, type: job.type, meta: job.meta },
-      'manual dead-letter retry requested via /system/jobs API — re-enqueueing with stub handler',
-    )
-
-    // Stub handler — in production, wire real handlers through a handler registry.
-    const stubHandler = async () => {
-      fastify.log.info({ jobId: id, type: job.type }, 'stub retry handler executed — job marked complete')
-    }
-
-    const ok = jobQueue.retryDead(id, stubHandler)
-    if (!ok) {
-      return reply.code(404).send({ error: 'NOT_FOUND', message: `Job '${id}' not found in dead-letter queue` })
-    }
-
-    return reply.send({ message: `Job '${id}' re-enqueued successfully`, jobId: id })
-  })
-
   // ── GET /system/observability ────────────────────────────────────────────────
-  // Combined observability dashboard — event bus + job queue + platform health.
-  // For hr_admin / super_admin only.
+  // Combined observability dashboard — event bus + platform health. The
+  // job_queue section that used to appear here (backed by the legacy
+  // in-memory JobQueue) was removed — nothing ever enqueued into that queue,
+  // so it always reported pending/running/completed/dead_letter as 0, a
+  // structurally-guaranteed false "all clear" next to the real durable-queue
+  // metrics shown elsewhere on this same dashboard (GET /metrics, GET
+  // /system/jobs/durable). For hr_admin / super_admin only.
   fastify.get('/system/observability', auth, async (req: any, reply) => {
     if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
       return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
     }
 
-    const snapshot   = jobQueue.getQueueSnapshot()
     const busMetrics = eventBus.getMetrics()
     const busHandlers= eventBus.getHandlerCount()
 
@@ -296,11 +205,6 @@ export default async function jobQueueRoutes(fastify: FastifyInstance) {
       }))
       .sort((a, b) => b.emitted - a.emitted)
 
-    // Job metrics sorted by total activity
-    const jobMetrics = Object.entries(snapshot.metrics)
-      .map(([type, m]) => ({ type, ...m }))
-      .sort((a, b) => (b.enqueued - a.enqueued))
-
     return reply.send({
       data: {
         timestamp: new Date().toISOString(),
@@ -317,20 +221,6 @@ export default async function jobQueueRoutes(fastify: FastifyInstance) {
           total_failed:  totalFailed,
           failure_rate_pct: failureRate,
           by_type:       eventsByType,
-        },
-        job_queue: {
-          pending:    snapshot.pending,
-          running:    snapshot.running,
-          completed:  snapshot.completed,
-          dead_letter: snapshot.deadLetter,
-          by_type:    jobMetrics,
-          recent_dead: snapshot.recentDead.slice(-5).map(j => ({
-            id:        j.id,
-            type:      j.type,
-            error:     j.error,
-            failedAt:  j.failedAt,
-            attempts:  j.attempt,
-          })),
         },
       },
     })
@@ -438,25 +328,6 @@ export default async function jobQueueRoutes(fastify: FastifyInstance) {
         pending:        whPending,
         status:         webhookStatus,
       },
-    })
-  })
-
-  // ── DELETE /system/jobs/dead ─────────────────────────────────────────────────
-  // Purges the entire dead-letter queue. Irreversible — use with care.
-  fastify.delete('/system/jobs/dead', auth, async (req: any, reply) => {
-    if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
-      return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
-    }
-
-    const count = jobQueue.purgeDeadLetter()
-    fastify.log.warn(
-      { count, purgedBy: req.userId },
-      'dead-letter queue purged via /system/jobs API',
-    )
-
-    return reply.send({
-      message: `Dead-letter queue purged — ${count} job(s) removed`,
-      purged:  count,
     })
   })
 
