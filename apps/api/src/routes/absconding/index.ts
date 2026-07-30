@@ -344,36 +344,6 @@ export default async function abscondingRoutes(fastify: FastifyInstance) {
     }
   })
 
-  // ── POST /absconding/run-auto-escalation ──────────────────────────────────
-  // Was previously a second, hand-rolled copy of the Day 3/7/14/21 escalation
-  // ladder that computed "today" from the server's own UTC clock (not the
-  // tenant's timezone — the ISSUE-154 class this exact engine was already
-  // fixed for elsewhere) and, worse, flipped a case straight to 'wl1_sent'/
-  // 'wl2_sent' without ever calling sendWarningLetter1/2 — no letter PDF, no
-  // `letters` row, no ref_number — while logging a communications entry that
-  // falsely claimed a warning letter was generated. That let a case reach
-  // 'termination_pending' → CHRO-approved termination despite the employee
-  // never having legally received either warning letter, and the unconditioned
-  // status update (no `.eq('status', c.status)` precondition) meant two
-  // concurrent runs could double-process the same case. Delegate to the same
-  // scanAndEscalate() the cron job and /scan use — it re-derives tenant-local
-  // "today", drives the real WL1/WL2/termination-flag functions, and folds
-  // its own preconditions into each write.
-  fastify.post('/run-auto-escalation', hrAuth, async (req: any, reply) => {
-    try {
-      const result = await scanAndEscalate(fastify.supabase, req.tenantId)
-      return reply.send({
-        data: {
-          processed:       result.cases_scanned,
-          escalated_count: result.cases_wl1 + result.cases_wl2 + result.cases_term,
-          detail:          result,
-        },
-      })
-    } catch (e: any) {
-      return serverError(req, reply, e, ErrorCode.COMPUTE_FAILED, 'Auto-escalation failed')
-    }
-  })
-
   // ── GET /absconding/cases/:caseId/letters/:letterId/download ─────────────
 
   fastify.get('/cases/:caseId/letters/:letterId/download', hrAuth, async (req: any, reply) => {

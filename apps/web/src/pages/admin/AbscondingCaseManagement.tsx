@@ -211,16 +211,21 @@ export function AbscondingCaseManagement() {
  })
 
  const autoEscalateMutation = useMutation({
- mutationFn: () => api.post<{ data: { processed: number; escalated_count: number } }>('/absconding/run-auto-escalation'),
+ // Runs the same scanAndEscalate() engine as "Run Scan" below — was
+ // previously a separate /run-auto-escalation route that duplicated the
+ // ladder logic and had already drifted out of sync with the real engine
+ // once. Both buttons now hit the single source of truth; only the
+ // response formatting/toast differs.
+ mutationFn: () => api.post<{ data: { cases_scanned: number; cases_wl1: number; cases_wl2: number; cases_term: number } }>('/absconding/scan'),
  onSuccess: (res) => {
  // eslint-disable-next-line @typescript-eslint/no-explicit-any
- const result = (res as any)?.data ?? { processed: 0, escalated_count: 0 }
- const count = result.escalated_count ?? 0
+ const result = (res as any)?.data ?? { cases_scanned: 0, cases_wl1: 0, cases_wl2: 0, cases_term: 0 }
+ const count = (result.cases_wl1 ?? 0) + (result.cases_wl2 ?? 0) + (result.cases_term ?? 0)
  toast.success(
  count > 0
  ? `${count} case${count !== 1 ?'s':''} escalated automatically`
  :'Auto-escalation complete — no cases needed escalation',
- { description: `${result.processed ?? 0} open cases scanned.` },
+ { description: `${result.cases_scanned ?? 0} open cases scanned.` },
  )
  qc.invalidateQueries({ queryKey: ['absconding-cases'] })
  qc.invalidateQueries({ queryKey: ['absconding-dashboard'] })
