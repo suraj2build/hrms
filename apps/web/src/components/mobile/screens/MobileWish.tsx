@@ -6,7 +6,7 @@
  * desktop context-panel Wish flow so phone + desktop behave identically.
  */
 
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { PartyPopper, Send, Check, Loader2, X } from 'lucide-react'
@@ -33,9 +33,19 @@ export function MobileWishButton({ subjectEmployeeId, name, kind, years }: {
   const [done, setDone] = useState(false)
   const [message, setMessage] = useState('')
 
+  // Stable per-mount UUID sent as Idempotency-Key — a dropped/retried response
+  // would otherwise post the same wish twice. Rotated after success.
+  const wishKey = useRef(crypto.randomUUID())
+
   const mutation = useMutation({
-    mutationFn: () => api.post('/community/wish', { subject_employee_id: subjectEmployeeId, kind, message: message.trim() }),
+    mutationFn: () =>
+      api.post(
+        '/community/wish',
+        { subject_employee_id: subjectEmployeeId, kind, message: message.trim() },
+        { headers: { 'Idempotency-Key': wishKey.current } },
+      ),
     onSuccess: () => {
+      wishKey.current = crypto.randomUUID()
       setDone(true); setOpen(false)
       toast.success('Wish posted', { description: `${firstNameOf(name)} will see it in the feed.` })
       invalidateCommunityFeeds(qc)

@@ -15,6 +15,7 @@ import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { WhatsAppProvider } from '../../lib/whatsapp-provider.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
 import { serverError, ErrorCode } from '../../lib/api-errors.js'
+import { checkIdempotency, storeIdempotency } from '../../lib/idempotency.js'
 
 const CreateAwardSchema = z.object({
   name:                 z.string().min(1),
@@ -276,6 +277,15 @@ export default async function recognitionRoutes(fastify: FastifyInstance) {
     const parsed = schema.safeParse(req.body)
     if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
 
+    const iKey = (req.headers['idempotency-key'] as string | undefined)?.trim()
+    if (iKey) {
+      const cached = await checkIdempotency(fastify.supabase, req.tenantId, iKey, 'recognition-give')
+      if (cached) {
+        reply.header('Idempotency-Replayed', 'true')
+        return reply.code(cached.status_code).send(cached.response)
+      }
+    }
+
     const fromEmployee = await resolveEmployeeId(fastify, req.userId, req.tenantId)
     if (!fromEmployee) return reply.code(400).send({ error: 'NO_EMPLOYEE_LINK', message: 'Your account is not linked to an employee record' })
     if (fromEmployee === parsed.data.to_employee) return reply.code(400).send({ error: 'SELF_RECOGNITION', message: 'You cannot recognize yourself' })
@@ -358,7 +368,9 @@ export default async function recognitionRoutes(fastify: FastifyInstance) {
       }
     }
 
-    return reply.code(201).send({ data })
+    const responseBody = { data }
+    if (iKey) await storeIdempotency(fastify.supabase, req.tenantId, iKey, 'recognition-give', 201, responseBody)
+    return reply.code(201).send(responseBody)
   })
 
   // ── Admin: analytics dashboard ─────────────────────────────────────────────

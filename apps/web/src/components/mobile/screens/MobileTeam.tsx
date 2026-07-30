@@ -39,12 +39,20 @@ export function MobileTeam() {
 
   const approve = useMutation({
     mutationFn: (id: string) => api.post('/attendance/regularisation/bulk-approve', { ids: [id] }) as Promise<BulkResult>,
-    onSuccess: () => { toast.success('Approved'); invalidateRegularisationViews() },
+    onSuccess: (data) => {
+      invalidateRegularisationViews()
+      if (data.results[0]?.ok) toast.success('Approved')
+      else toast.error('Failed', { description: data.results[0]?.error ?? 'Could not approve this request' })
+    },
     onError: (e: Error) => toast.error('Failed', { description: e.message }),
   })
   const reject = useMutation({
     mutationFn: (id: string) => api.post('/attendance/regularisation/bulk-reject', { ids: [id] }) as Promise<BulkResult>,
-    onSuccess: () => { toast.success('Rejected'); invalidateRegularisationViews() },
+    onSuccess: (data) => {
+      invalidateRegularisationViews()
+      if (data.results[0]?.ok) toast.success('Rejected')
+      else toast.error('Failed', { description: data.results[0]?.error ?? 'Could not reject this request' })
+    },
     onError: (e: Error) => toast.error('Failed', { description: e.message }),
   })
 

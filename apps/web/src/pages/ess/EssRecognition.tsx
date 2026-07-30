@@ -3,7 +3,7 @@
  * Give peer recognition (badge + message) and see the company recognition feed.
  * Backed by /recognition/* (migration 306) and /recognition/awards/* (migration 334).
  */
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import {
@@ -79,12 +79,17 @@ function GiveDialog({ open, onOpenChange, badges, budget }: {
   const selectedCost = badges.find(b => b.code === badgeCode)?.points ?? 0
   const overBudget  = selectedCost > remaining
 
+  // Stable Idempotency-Key regenerated on each dialog-open — a dropped/retried
+  // response would otherwise double-charge the giver's monthly points budget.
+  const giveKey = useRef(crypto.randomUUID())
+  useEffect(() => { if (open) giveKey.current = crypto.randomUUID() }, [open])
+
   const give = useMutation({
     mutationFn: () => api.post('/recognition', {
       to_employee: toEmployee,
       badge_code:  badgeCode || undefined,
       message:     message.trim(),
-    }),
+    }, { headers: { 'Idempotency-Key': giveKey.current } }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['recognition-feed'] })
       qc.invalidateQueries({ queryKey: ['recognition-me'] })

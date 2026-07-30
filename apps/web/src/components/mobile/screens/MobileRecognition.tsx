@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Award, Heart, Users, Lightbulb, Wrench, Sparkles, Trophy, Gift, X, Send,
@@ -160,9 +160,18 @@ function GiveSheet({ onClose, onDone }: { onClose: () => void; onDone: () => voi
   })
   const badges = badgeData?.data ?? []
 
+  // Stable per-mount UUID sent as Idempotency-Key — a dropped/retried response
+  // would otherwise double-charge the giver's monthly points budget.
+  const giveKey = useRef(crypto.randomUUID())
+
   const give = useMutation({
-    mutationFn: () => api.post('/recognition', { to_employee: toEmployee, badge_code: badgeCode || undefined, message: message.trim() }),
-    onSuccess: () => { toast.success('Recognition sent 🎉'); onDone(); onClose() },
+    mutationFn: () =>
+      api.post(
+        '/recognition',
+        { to_employee: toEmployee, badge_code: badgeCode || undefined, message: message.trim() },
+        { headers: { 'Idempotency-Key': giveKey.current } },
+      ),
+    onSuccess: () => { giveKey.current = crypto.randomUUID(); toast.success('Recognition sent 🎉'); onDone(); onClose() },
     onError: (e: Error) => toast.error('Could not send', { description: e.message }),
   })
   const canSubmit = !!toEmployee && message.trim().length > 0 && !give.isPending

@@ -22,8 +22,17 @@ export function MobilePayslip({ base }: { base: string }) {
 
   const slips = data?.data ?? []
   const latest = slips[0]
-  const ytdNet = slips.reduce((s, x) => s + (x.net_pay ?? 0), 0)
-  const ytdGross = slips.reduce((s, x) => s + (x.gross_pay ?? 0), 0)
+
+  // FY tiles must sum the current fiscal year only (Apr–Mar), not the
+  // employee's entire payslip history — matches EssCompensation.tsx's
+  // YTDSummary computation for the same data.
+  const now     = new Date()
+  const fyYear  = now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1
+  const fyStart = `${fyYear}-04`
+  const fyEnd   = `${fyYear + 1}-03`
+  const fySlips = slips.filter(s => s.month >= fyStart && s.month <= fyEnd)
+  const ytdNet = fySlips.reduce((s, x) => s + (x.net_pay ?? 0), 0)
+  const ytdGross = fySlips.reduce((s, x) => s + (x.gross_pay ?? 0), 0)
 
   return (
     <div className="space-y-3">
@@ -46,7 +55,7 @@ export function MobilePayslip({ base }: { base: string }) {
       </div>
 
       {/* YTD summary */}
-      {slips.length > 0 && (
+      {fySlips.length > 0 && (
         <div className="grid grid-cols-2 gap-2.5">
           <div className="rounded-2xl bg-white p-3.5 shadow-[0_2px_12px_-4px_rgba(26,77,143,0.12)]">
             <span className="block h-1.5 w-6 rounded-full bg-[#1A8050]" />
