@@ -3,7 +3,9 @@ import { PartyPopper } from 'lucide-react'
 import { api } from '@/lib/api/client'
 import { glossy } from '../glossy'
 
-interface HolidayRow { id: string; date: string; name: string; is_optional?: boolean }
+// GET /leave/holidays only ever returns is_optional=false rows and doesn't
+// even send the field — no is_optional here to match.
+interface HolidayRow { id: string; date: string; name: string }
 
 const fmtDay = (d: string) => {
   const dt = new Date(d + 'T12:00:00Z')
@@ -41,7 +43,7 @@ export function UpcomingHolidays({ limit = 3 }: { limit?: number }) {
               </span>
               <div className="min-w-0">
                 <p className="truncate text-xs font-semibold text-foreground">{h.name}</p>
-                <p className="text-[10px] text-muted-foreground">{h.is_optional ? 'Optional holiday' : 'Company holiday'}</p>
+                <p className="text-[10px] text-muted-foreground">Company holiday</p>
               </div>
             </div>
           )
