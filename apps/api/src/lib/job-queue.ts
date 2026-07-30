@@ -217,30 +217,35 @@ export class JobQueue extends EventEmitter {
     this.emit('started', job)
     this.log?.debug({ jobId: id, type: job.type, attempt: job.attempt }, 'job started')
 
-    const handler = this._popHandler(id)
-    if (!handler) {
-      this.log?.error({ jobId: id }, 'job handler not found — discarding')
-      this._finalize(job, new Error('Handler not found'))
-      return
-    }
-
-    // Race handler against timeout
-    let timer: ReturnType<typeof setTimeout> | null = null
-    const timeoutPromise = new Promise<never>((_, reject) => {
-      timer = setTimeout(
-        () => reject(Object.assign(new Error(`Job timed out after ${job.timeoutMs}ms`), { name: 'AbortError' })),
-        job.timeoutMs,
-      )
-    })
-
     try {
-      await Promise.race([handler(), timeoutPromise])
-      if (timer) clearTimeout(timer)
-      this._succeed(job)
-    } catch (rawErr) {
-      if (timer) clearTimeout(timer)
-      this._finalize(job, rawErr instanceof Error ? rawErr : new Error(String(rawErr)), handler)
+      const handler = this._popHandler(id)
+      if (!handler) {
+        this.log?.error({ jobId: id }, 'job handler not found — discarding')
+        this._finalize(job, new Error('Handler not found'))
+        return
+      }
+
+      // Race handler against timeout
+      let timer: ReturnType<typeof setTimeout> | null = null
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () => reject(Object.assign(new Error(`Job timed out after ${job.timeoutMs}ms`), { name: 'AbortError' })),
+          job.timeoutMs,
+        )
+      })
+
+      try {
+        await Promise.race([handler(), timeoutPromise])
+        if (timer) clearTimeout(timer)
+        this._succeed(job)
+      } catch (rawErr) {
+        if (timer) clearTimeout(timer)
+        this._finalize(job, rawErr instanceof Error ? rawErr : new Error(String(rawErr)), handler)
+      }
     } finally {
+      // Must run for every exit path, including the "handler not found" early
+      // return above — otherwise _activeSlots/running never decrement and
+      // this slot is leaked forever, eventually stalling the whole queue.
       this.running.delete(id)
       this._activeSlots = Math.max(0, this._activeSlots - 1)
       setImmediate(() => this._drain())

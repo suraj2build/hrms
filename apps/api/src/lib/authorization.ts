@@ -85,29 +85,41 @@ export function authorize(
       const params    = req.params as Record<string, string>
       const subjectId = params[opts.subjectParam]
 
-      if (subjectId) {
-        const fastify   = (req as any).server
-        const evaluator = new ScopeEvaluator(fastify?.supabase ?? (req as any).supabase)
-        const result    = await evaluator.evaluate({
-          actorId:   userId,
-          actorRole: userRole,
-          tenantId,
-          subjectId,
+      if (!subjectId) {
+        // A subjectParam was configured but the route didn't actually supply
+        // it (wrong param name, optional param, empty string) — deny rather
+        // than silently falling through to "permission check only", which
+        // would let authorizeOwn()/authorizeTeam() degrade into unrestricted
+        // access for any actor holding the base permission.
+        await reply.code(403).send({
+          error:   'SCOPE_DENIED',
+          message: opts.message ?? 'You do not have organizational scope to access this resource.',
+          reason:  'MISSING_SUBJECT',
         })
-
-        if (!result.allowed) {
-          await reply.code(403).send({
-            error:   'SCOPE_DENIED',
-            message: opts.message ?? 'You do not have organizational scope to access this resource.',
-            scope:   result.scope,
-            reason:  result.reason,
-          })
-          return
-        }
-
-        // Attach scope to request for downstream use
-        ;(req as any).accessScope = result.scope
+        return
       }
+
+      const fastify   = (req as any).server
+      const evaluator = new ScopeEvaluator(fastify?.supabase ?? (req as any).supabase)
+      const result    = await evaluator.evaluate({
+        actorId:   userId,
+        actorRole: userRole,
+        tenantId,
+        subjectId,
+      })
+
+      if (!result.allowed) {
+        await reply.code(403).send({
+          error:   'SCOPE_DENIED',
+          message: opts.message ?? 'You do not have organizational scope to access this resource.',
+          scope:   result.scope,
+          reason:  result.reason,
+        })
+        return
+      }
+
+      // Attach scope to request for downstream use
+      ;(req as any).accessScope = result.scope
     }
   }
 }

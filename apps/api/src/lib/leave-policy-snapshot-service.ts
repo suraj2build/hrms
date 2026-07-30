@@ -193,6 +193,7 @@ export async function getSnapshot(
     .eq('tenant_id', tenantId)
     .maybeSingle()
 
+  if (error) console.warn('[leave-policy-snapshot] getSnapshot query failed:', error.message)
   if (error || !data) return null
   return data as unknown as PolicySnapshotRow
 }
@@ -205,12 +206,14 @@ export async function getSnapshotForRequest(
   tenantId:       string,
   leaveRequestId: string,
 ): Promise<PolicySnapshotRow | null> {
-  const { data: req } = await supabase
+  const { data: req, error } = await supabase
     .from('leave_requests')
     .select('policy_snapshot_id')
     .eq('id', leaveRequestId)
     .eq('tenant_id', tenantId)
     .maybeSingle()
+
+  if (error) console.warn('[leave-policy-snapshot] getSnapshotForRequest lookup failed:', error.message)
 
   const snapshotId = (req as { policy_snapshot_id: string | null } | null)?.policy_snapshot_id
   if (!snapshotId) return null
@@ -243,6 +246,7 @@ export async function findLatestSnapshotAsOf(
     .limit(1)
     .maybeSingle()
 
+  if (error) console.warn('[leave-policy-snapshot] findLatestSnapshotAsOf query failed:', error.message)
   if (error || !data) return null
   return data as unknown as PolicySnapshotRow
 }
@@ -258,7 +262,7 @@ export async function listSnapshotsForEmployee(
   leaveTypeId: string,
   limit        = 20,
 ): Promise<PolicySnapshotRow[]> {
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from('leave_policy_snapshots')
     .select('*')
     .eq('tenant_id', tenantId)
@@ -267,6 +271,7 @@ export async function listSnapshotsForEmployee(
     .order('resolved_as_of', { ascending: false })
     .limit(limit)
 
+  if (error) console.warn('[leave-policy-snapshot] listSnapshotsForEmployee query failed:', error.message)
   return (data ?? []) as unknown as PolicySnapshotRow[]
 }
 
