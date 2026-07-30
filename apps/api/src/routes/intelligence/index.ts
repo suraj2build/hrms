@@ -9,7 +9,7 @@
 import type { FastifyInstance } from 'fastify'
 import { computeUpcoming } from '../../lib/compliance-calendar.js'
 import { computeLifecycleRisks, type LifecycleCategory } from '../../lib/lifecycle-expiry.js'
-import { buildDailyDigest, buildWeeklyDigest, buildMonthlyDigest } from '../../lib/digest-builder.js'
+import { buildDailyDigest, buildWeeklyDigest, buildMonthlyDigest, tenantTodayStr, shiftDateStr } from '../../lib/digest-builder.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
 import { isHrAdmin, resolveCallerEmployeeId, isDirectReport } from '../../lib/manager-scope.js'
 import { serverError, ErrorCode } from '../../lib/api-errors.js'
@@ -53,7 +53,11 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
     const now           = new Date()
     const sevenDaysAgo  = new Date(now.getTime() - 7  * 24 * 60 * 60 * 1000).toISOString()
     const threeDaysAgo  = new Date(now.getTime() - 3  * 24 * 60 * 60 * 1000).toISOString()
-    const monthStart    = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10)
+    // Tenant-local "today" — a raw server-UTC month boundary shifts "this
+    // month" comparisons by a day right at every month start for a non-UTC
+    // tenant (e.g. IST), same class as ISSUE-154/digest-builder.ts.
+    const todayStr      = await tenantTodayStr(fastify.supabase, tenantId)
+    const monthStart    = todayStr.slice(0, 7) + '-01'
 
     try {
       // 1. Employees missing joining_date
@@ -389,8 +393,8 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
       return reply.code(403).send({ error: 'FORBIDDEN' })
     }
     const tenantId: string = req.tenantId
-    const now = new Date()
-    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10)
+    // Tenant-local month boundary — see workforce-command's monthStart above.
+    const monthStart = (await tenantTodayStr(fastify.supabase, tenantId)).slice(0, 7) + '-01'
     try {
       const { data: profile } = await fastify.supabase.from('profiles').select('employee_id').eq('id', req.userId).eq('tenant_id', tenantId).maybeSingle()
       const managerId: string | null = profile?.employee_id ?? null
@@ -425,7 +429,7 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
         if (pendingLeave > 0) parts.push(pendingLeave + ' leave request' + (pendingLeave > 1 ? 's' : '') + ' pending approval.')
         if (probDue === 0 && pendingLeave === 0) parts.push('No compliance concerns detected.')
       }
-      return reply.send({ data: { summary: parts.join(' '), team_size: teamSize, new_joiners_this_month: newJoiners, probation_due: probDue, pending_leave_approvals: pendingLeave, generated_at: now.toISOString() } })
+      return reply.send({ data: { summary: parts.join(' '), team_size: teamSize, new_joiners_this_month: newJoiners, probation_due: probDue, pending_leave_approvals: pendingLeave, generated_at: new Date().toISOString() } })
     } catch (err: unknown) {
       return serverError(req, reply, err, ErrorCode.COMPUTE_FAILED, 'Failed to compute manager summary')
     }
@@ -438,7 +442,8 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
     }
     const tenantId: string = req.tenantId
     const now = new Date()
-    const monthParam    = ((req.query as any).month as string) || (now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0'))
+    // Tenant-local default month — see workforce-command's monthStart above.
+    const monthParam    = ((req.query as any).month as string) || (await tenantTodayStr(fastify.supabase, tenantId)).slice(0, 7)
     const [yr, mo]      = monthParam.split('-').map(Number)
     const periodStart   = new Date(yr, mo - 1, 1).toISOString().slice(0, 10)
     const periodEnd     = new Date(yr, mo, 0).toISOString().slice(0, 10)
@@ -762,7 +767,8 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
       return reply.code(403).send({ error: 'FORBIDDEN' })
     }
     const tenantId: string = req.tenantId
-    const now = new Date()
+    // Tenant-local anchor month — see workforce-command's monthStart above.
+    const [anchorYear, anchorMonth] = (await tenantTodayStr(fastify.supabase, tenantId)).slice(0, 7).split('-').map(Number)
 
     // Fetch all employees once (lean schema has no termination_date)
     let allEmp: any[] = []
@@ -797,12 +803,15 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
 
     const months: { period: string; headcount: number; joiners: number; exits: number }[] = []
     for (let i = 5; i >= 0; i--) {
-      const d          = new Date(now.getFullYear(), now.getMonth() - i, 1)
-      const year       = d.getFullYear()
-      const month      = d.getMonth() + 1
+      // UTC-anchored month arithmetic (not `new Date(y, m, d)` local components)
+      // so the result doesn't depend on the server process's own TZ setting —
+      // same precedent as digest-builder.ts's shiftDateStr().
+      const totalMonths = (anchorYear * 12 + (anchorMonth - 1)) - i
+      const year       = Math.floor(totalMonths / 12)
+      const month      = (totalMonths % 12) + 1
       const periodStr  = `${year}-${String(month).padStart(2, '0')}`
-      const monthStart = new Date(year, month - 1, 1).toISOString().slice(0, 10)
-      const monthEnd   = new Date(year, month, 0).toISOString().slice(0, 10)   // last day of month
+      const monthStart = `${year}-${String(month).padStart(2, '0')}-01`
+      const monthEnd   = new Date(Date.UTC(year, month, 0)).toISOString().slice(0, 10)   // last day of month
 
       const headcount = allEmp.filter(e => {
         if (!e.joining_date) return false
@@ -1156,7 +1165,8 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
       return reply.code(400).send({ error: 'MISSING_QUERY' })
     }
     const q = query.trim().toLowerCase()
-    const now = new Date()
+    // Tenant-local "today" — see workforce-command's monthStart above.
+    const todayStr = await tenantTodayStr(fastify.supabase, tenantId)
 
     const SUGGESTIONS = [
       'employees joining this month',
@@ -1225,7 +1235,7 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
       let employees: any[] = []
 
       if (filterType === 'joining_this_month') {
-        const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10)
+        const monthStart = todayStr.slice(0, 7) + '-01'
         interpreted_as = `joining_date >= ${monthStart}`
         const { data } = await fastify.supabase
           .from('employees')
@@ -1236,9 +1246,11 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
         employees = data ?? []
 
       } else if (filterType === 'joining_this_week') {
-        const dayOfWeek = now.getDay() === 0 ? 6 : now.getDay() - 1 // Monday=0
-        const monday = new Date(now.getTime() - dayOfWeek * 24 * 60 * 60 * 1000)
-        const weekStart = monday.toISOString().slice(0, 10)
+        // getUTCDay() on a plain YYYY-MM-DD (parsed as UTC midnight) gives the
+        // tenant-local weekday regardless of the server process's own TZ.
+        const dow    = new Date(todayStr + 'T00:00:00Z').getUTCDay()
+        const dayOfWeek = dow === 0 ? 6 : dow - 1 // Monday=0
+        const weekStart = shiftDateStr(todayStr, -dayOfWeek)
         interpreted_as = `joining_date >= ${weekStart} (Monday of current week)`
         const { data } = await fastify.supabase
           .from('employees')
@@ -1296,7 +1308,7 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
         employees = data ?? []
 
       } else if (filterType === 'probation') {
-        const ninetyDaysAgo = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
+        const ninetyDaysAgo = shiftDateStr(todayStr, -90)
         interpreted_as = `joining_date <= ${ninetyDaysAgo} AND status = 'active'`
         const { data } = await fastify.supabase
           .from('employees')

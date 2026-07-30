@@ -27,7 +27,7 @@ export async function tenantTodayStr(supabase: SupabaseClient, tenantId: string)
 
 // Add/subtract whole days from a YYYY-MM-DD string, staying UTC-anchored so
 // the result doesn't depend on the server process's local TZ setting.
-function shiftDateStr(dateStr: string, days: number): string {
+export function shiftDateStr(dateStr: string, days: number): string {
   const [y, m, d] = dateStr.split('-').map(Number)
   const dt = new Date(Date.UTC(y, m - 1, d))
   dt.setUTCDate(dt.getUTCDate() + days)
