@@ -51,14 +51,19 @@ export default async function workforceRoutes(fastify: FastifyInstance) {
       categories: f.category ? [f.category] : undefined,
     })
 
-    if (f.bucket)        items = items.filter(i => i.bucket === f.bucket)
-    if (f.department_id) items = items.filter(i => i.department_id === f.department_id)
-    if (f.employee_id)   items = items.filter(i => i.employee_id === f.employee_id)
+    if (f.bucket)      items = items.filter(i => i.bucket === f.bucket)
+    if (f.employee_id) items = items.filter(i => i.employee_id === f.employee_id)
 
     // Distinct departments present (for the filter dropdown) — derived from the
-    // unfiltered-by-department set so the option list is stable.
+    // unfiltered-by-department set so the option list is stable. Must be
+    // captured BEFORE the department_id filter below, otherwise selecting a
+    // department collapses the dropdown to that one department (or empties
+    // it entirely), making it impossible to switch departments without
+    // clearing the filter first.
     const deptOptions = new Map<string, string>()
     for (const i of items) if (i.department_id) deptOptions.set(i.department_id, i.department_name ?? 'Unknown')
+
+    if (f.department_id) items = items.filter(i => i.department_id === f.department_id)
 
     return reply.send({
       data:    items,

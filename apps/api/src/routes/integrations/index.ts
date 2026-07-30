@@ -8,7 +8,7 @@ import {
 import type { AccountingFormat, PayrollExportInput } from '../../platform/integrations/index.js'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { serverError, ErrorCode } from '../../lib/api-errors.js'
-import { checkIdempotency, storeIdempotency } from '../../lib/idempotency.js'
+import { checkIdempotency, storeIdempotency, claimIdempotency, releaseIdempotencyClaim } from '../../lib/idempotency.js'
 
 export default async function integrationRoutes(fastify: FastifyInstance) {
   const auth = { preHandler: [fastify.authenticate] }
@@ -40,19 +40,29 @@ export default async function integrationRoutes(fastify: FastifyInstance) {
     }
 
     const iKey = (req.headers['idempotency-key'] as string | undefined)?.trim()
+    const scope = 'integrations-pan-verify'
     if (iKey) {
-      const cached = await checkIdempotency(fastify.supabase, req.tenantId, iKey, 'integrations-pan-verify')
+      const cached = await checkIdempotency(fastify.supabase, req.tenantId, iKey, scope)
       if (cached) {
         reply.header('Idempotency-Replayed', 'true')
         return reply.code(cached.status_code).send(cached.response)
+      }
+      // Claim before calling the paid external provider — the plain
+      // check-then-work-then-store pattern above has a race window wide
+      // enough for a fast double-submit (double-click, client retry) to see
+      // no cached hit twice and pay for the same PAN lookup twice.
+      const claimed = await claimIdempotency(fastify.supabase, req.tenantId, iKey, scope)
+      if (!claimed) {
+        return reply.code(409).send({ error: 'DUPLICATE_REQUEST', message: 'An identical request is already being processed' })
       }
     }
 
     try {
       const result = await panVerificationAdapter.verify(body.pan)
-      if (iKey) await storeIdempotency(fastify.supabase, req.tenantId, iKey, 'integrations-pan-verify', 200, result)
+      if (iKey) await storeIdempotency(fastify.supabase, req.tenantId, iKey, scope, 200, result)
       return result
     } catch (err: unknown) {
+      if (iKey) await releaseIdempotencyClaim(fastify.supabase, req.tenantId, iKey, scope)
       return serverError(req, reply, err, ErrorCode.COMPUTE_FAILED, 'PAN verification failed')
     }
   })
