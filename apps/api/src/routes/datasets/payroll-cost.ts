@@ -16,11 +16,14 @@ import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
 import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
-// Payroll slips advance finalized → processed → paid through the pay cycle.
-// All of these are "final" data for reporting; only 'draft' is excluded.
-const FINAL_SLIP_STATUSES = ['finalized', 'processed', 'paid', 'completed']
-// A finalized run is the authoritative signal that a month's payroll is locked.
-const FINAL_RUN_STATUSES = ['finalized', 'completed', 'paid', 'processed']
+// payroll_slips.status CHECK constraint (074_payroll_engine.sql) only allows
+// 'draft' | 'finalized' | 'held' — 'processed'/'paid'/'completed' are dead
+// values that can never appear in the table.
+const FINAL_SLIP_STATUSES = ['finalized']
+// payroll_runs.status CHECK constraint (382_payroll_runs_status_check_restore_frozen_reopened.sql)
+// allows 'queued'|'draft'|'processing'|'finalized'|'failed'|'partial_failed'|'frozen'|'reopened'.
+// 'frozen' is the authoritative "locked" signal; 'completed'/'paid'/'processed' are dead values.
+const FINAL_RUN_STATUSES = ['finalized', 'frozen']
 
 function r2(n: number): number { return Math.round(n * 100) / 100 }
 
@@ -408,7 +411,7 @@ export default async function payrollCostDataset(fastify: FastifyInstance) {
         total_ot_cost:          totalOtCost,
         headcount,
         avg_cost_per_employee:  avgCostPerEmployee,
-        finalized:              run ? run.status === 'finalized' || run.status === 'completed' : false,
+        finalized:              run ? run.status === 'finalized' || run.status === 'frozen' : false,
         run_status:             run?.status ?? null,
       },
       by_department: byDepartment,

@@ -16,6 +16,7 @@ import type { FastifyInstance } from 'fastify'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
 import { serverError, ErrorCode } from '../../lib/api-errors.js'
+import { tenantTodayStr } from '../../lib/digest-builder.js'
 
 // R5 — site/region/zone/site_type added so headcount can be disaggregated by the
 // retail geography dimensions (migration 248). Same KPI, new GROUP BY axis.
@@ -63,13 +64,23 @@ export default async function employeesDataset(fastify: FastifyInstance) {
     const filterRegion  = q.filter_region         ?? null
     const filterZone    = q.filter_zone           ?? null
 
-    const now        = new Date()
-    const curYYYYMM  = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+    // Tenant-local "current month", not the server's (UTC) clock — see
+    // ISSUE-457/digest-builder.ts's tenantTodayStr for the day/month-
+    // boundary class this avoids.
+    const now         = new Date()
+    const todayStr    = await tenantTodayStr(fastify.supabase, tid)
+    const [curY, curM] = todayStr.slice(0, 7).split('-').map(Number)
+    const curYYYYMM  = `${curY}-${String(curM).padStart(2, '0')}`
     const toYYYYMM   = q.to ?? curYYYYMM
-    const fromDate   = q.from
-      ? new Date(`${q.from}-01`)
-      : new Date(now.getFullYear() - 1, now.getMonth(), 1)
-    const fromYYYYMM = `${fromDate.getFullYear()}-${String(fromDate.getMonth() + 1).padStart(2, '0')}`
+    let fromYYYYMM: string
+    if (q.from) {
+      fromYYYYMM = q.from
+    } else {
+      const totalMonths = curY * 12 + (curM - 1) - 12
+      const y = Math.floor(totalMonths / 12)
+      const m = (totalMonths % 12) + 1
+      fromYYYYMM = `${y}-${String(m).padStart(2, '0')}`
+    }
     const fromFirst  = `${fromYYYYMM}-01`
     const toLast     = lastDayOf(toYYYYMM)
 

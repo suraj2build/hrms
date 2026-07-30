@@ -16,6 +16,7 @@ import type { FastifyInstance } from 'fastify'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
 import { serverError, ErrorCode } from '../../lib/api-errors.js'
+import { tenantTodayStr } from '../../lib/digest-builder.js'
 
 function r2(n: number): number { return Math.round(n * 100) / 100 }
 
@@ -45,13 +46,22 @@ export default async function headcountDataset(fastify: FastifyInstance) {
     const q   = req.query as Record<string, string>
 
     // ── Date range ──────────────────────────────────────────────────────────────
-    const now       = new Date()
-    const curYYYYMM = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+    // Tenant-local "current month", not the server's (UTC) clock — see
+    // ISSUE-457/digest-builder.ts's tenantTodayStr for the day/month-
+    // boundary class this avoids.
+    const todayStr    = await tenantTodayStr(fastify.supabase, tid)
+    const [curY, curM] = todayStr.slice(0, 7).split('-').map(Number)
+    const curYYYYMM = `${curY}-${String(curM).padStart(2, '0')}`
     const toYYYYMM  = q.to   ?? curYYYYMM
-    const fromDate  = q.from
-      ? new Date(`${q.from}-01`)
-      : new Date(now.getFullYear() - 1, now.getMonth(), 1)
-    const fromYYYYMM = `${fromDate.getFullYear()}-${String(fromDate.getMonth() + 1).padStart(2, '0')}`
+    let fromYYYYMM: string
+    if (q.from) {
+      fromYYYYMM = q.from
+    } else {
+      const totalMonths = curY * 12 + (curM - 1) - 12
+      const y = Math.floor(totalMonths / 12)
+      const m = (totalMonths % 12) + 1
+      fromYYYYMM = `${y}-${String(m).padStart(2, '0')}`
+    }
 
     const fromFirst = `${fromYYYYMM}-01`
     const toLast    = lastDayOf(toYYYYMM)
@@ -88,20 +98,30 @@ export default async function headcountDataset(fastify: FastifyInstance) {
       .eq('tenant_id', tid)
       .eq('job_history.is_current', true)
 
-    // 2) Separations in range (for exits + monthly trend)
+    // 2) Separations in range (for exits + monthly trend). Sourced from
+    // employee_separation (not employees.status='separated') so department/
+    // location/grade drill-down filters can be applied the same way the
+    // sibling /datasets/separation endpoint does — job_history is joined via
+    // employees!inner so a department filter actually scopes the exit count,
+    // instead of the previous unfiltered employees.updated_at scan whose
+    // exitCount silently ignored deptFilter/filterDeptId/filterLocId/
+    // filterGradeId, producing a mismatched numerator/denominator
+    // attrition_rate whenever a drill-down filter was active.
     let sepQuery = fastify.supabase
-      .from('employees')
-      .select('id, updated_at')
+      .from('employee_separation')
+      .select(`
+        id, employee_id, last_working_date,
+        employees!inner (
+          id,
+          job_history!job_history_employee_id_fkey (
+            department_id, work_location_id, grade_id, is_current,
+            departments ( id, name )
+          )
+        )
+      `)
       .eq('tenant_id', tid)
-      .eq('status', 'separated')
-      .gte('updated_at', fromFirst)
-      .lte('updated_at', `${toLast}T23:59:59.999Z`)
-
-    if (deptFilter) {
-      // we'll filter separations by department below after fetching job_history
-      // but for a clean approximation, we simply skip the filter here since
-      // separated employees may no longer have is_current=true job_history
-    }
+      .gte('last_working_date', fromFirst)
+      .lte('last_working_date', toLast) as any
 
     let fetchedEmployees: any[]
     let allSeps: any[]
@@ -134,6 +154,22 @@ export default async function headcountDataset(fastify: FastifyInstance) {
       return true
     })
 
+    // Same department/location/grade job_history embed, but for a separation
+    // row (employee_separation -> employees!inner -> job_history), matching
+    // the pattern the sibling /datasets/separation endpoint uses.
+    const sepJh = (sep: any) => {
+      const jhArr = sep.employees?.job_history ?? []
+      return Array.isArray(jhArr) ? jhArr.find((j: any) => j.is_current) ?? jhArr[0] ?? {} : jhArr ?? {}
+    }
+    const allSepsFiltered = allSeps.filter((sep) => {
+      const h = sepJh(sep)
+      if (deptFilter    && h.department_id    !== deptFilter)    return false
+      if (filterDeptId  && h.department_id    !== filterDeptId)  return false
+      if (filterLocId   && h.work_location_id !== filterLocId)   return false
+      if (filterGradeId && h.grade_id         !== filterGradeId) return false
+      return true
+    })
+
     // ── Snapshot counts ─────────────────────────────────────────────────────────
     const activeCount    = allEmployees.filter(e => e.status === 'active').length
     const onNoticeCount  = allEmployees.filter(e => e.status === 'on_notice').length
@@ -146,7 +182,7 @@ export default async function headcountDataset(fastify: FastifyInstance) {
     })
 
     const joinerCount = joiners.length
-    const exitCount   = allSeps.length
+    const exitCount   = allSepsFiltered.length
 
     const avgActive    = Math.max(1, activeCount)
     const attritionRate = r2((exitCount / avgActive) * 100)
@@ -172,6 +208,13 @@ export default async function headcountDataset(fastify: FastifyInstance) {
       if (deptMap[deptId]) deptMap[deptId].joiners++
     }
 
+    // Exits per dept (was a dead field, always 0 — never incremented)
+    for (const sep of allSepsFiltered) {
+      const h      = sepJh(sep)
+      const deptId = h.department_id ?? '__none__'
+      if (deptMap[deptId]) deptMap[deptId].exits++
+    }
+
     // ── By employment type ──────────────────────────────────────────────────────
     const typeMap: Record<string, number> = {}
     for (const emp of allEmployees) {
@@ -182,13 +225,21 @@ export default async function headcountDataset(fastify: FastifyInstance) {
     }
 
     // ── Monthly trend ───────────────────────────────────────────────────────────
+    // Integer month-index arithmetic instead of new Date(y,m,d) local-component
+    // construction — a date-only string parses as UTC midnight, but
+    // getFullYear()/getMonth() read it back in the server's local TZ, which
+    // can silently roll the month back by one when the server isn't UTC
+    // (same class fixed in ISSUE-457's org/headcount-trend endpoint).
     const months: Record<string, { month: string; joiners: number; exits: number; net: number }> = {}
-    const cur = new Date(`${fromYYYYMM}-01`)
-    const end = new Date(`${toYYYYMM}-01`)
-    while (cur <= end) {
-      const key = `${cur.getFullYear()}-${String(cur.getMonth() + 1).padStart(2, '0')}`
+    const [fromY, fromM] = fromYYYYMM.split('-').map(Number)
+    const [toY, toM]     = toYYYYMM.split('-').map(Number)
+    const fromIdx = fromY * 12 + (fromM - 1)
+    const toIdx   = toY   * 12 + (toM   - 1)
+    for (let idx = fromIdx; idx <= toIdx; idx++) {
+      const y = Math.floor(idx / 12)
+      const m = (idx % 12) + 1
+      const key = `${y}-${String(m).padStart(2, '0')}`
       months[key] = { month: key, joiners: 0, exits: 0, net: 0 }
-      cur.setMonth(cur.getMonth() + 1)
     }
 
     for (const emp of allEmployees) {
@@ -197,9 +248,9 @@ export default async function headcountDataset(fastify: FastifyInstance) {
       if (months[key]) months[key].joiners++
     }
 
-    for (const sep of allSeps) {
-      if (!sep.updated_at) continue
-      const key = sep.updated_at.slice(0, 7)
+    for (const sep of allSepsFiltered) {
+      if (!sep.last_working_date) continue
+      const key = sep.last_working_date.slice(0, 7)
       if (months[key]) months[key].exits++
     }
 

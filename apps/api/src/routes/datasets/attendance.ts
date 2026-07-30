@@ -17,6 +17,7 @@ import type { FastifyInstance } from 'fastify'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
 import { serverError, ErrorCode } from '../../lib/api-errors.js'
+import { tenantTodayStr } from '../../lib/digest-builder.js'
 
 function r2(n: number): number { return Math.round(n * 100) / 100 }
 function r1(n: number): number { return Math.round(n * 10) / 10 }
@@ -56,8 +57,11 @@ export default async function attendanceDataset(fastify: FastifyInstance) {
       fromDate   = `${q.month}-01`
       toDate     = lastDayOf(q.month)
     } else {
-      const now  = new Date()
-      const curM = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+      // Tenant-local "current month", not the server's (UTC) clock — see
+      // ISSUE-457/digest-builder.ts's tenantTodayStr for the day/month-
+      // boundary class this avoids.
+      const todayStr = await tenantTodayStr(fastify.supabase, tid)
+      const curM     = todayStr.slice(0, 7)
       fromDate   = q.from ?? `${curM}-01`
       toDate     = q.to   ?? lastDayOf(curM)
     }
@@ -131,9 +135,15 @@ export default async function attendanceDataset(fastify: FastifyInstance) {
     const eligibleIds = new Set(Object.keys(empMap))
 
     // ── working_days = distinct dates in the filtered result set ────────────────
+    // attendance-engine.ts writes an attendance_daily row for EVERY employee on
+    // EVERY calendar day, including non-working days ('holiday'/'weekly_off').
+    // Counting those rows' dates here converges working_days on the full
+    // calendar-day count instead of actual scheduled working days, which
+    // systematically understates attendance_rate/overstates absenteeism_pct.
+    const NON_WORKING_STATUSES = new Set(['holiday', 'weekly_off'])
     const distinctDates = new Set<string>()
     for (const row of attRows as any[]) {
-      if (eligibleIds.has(row.employee_id)) distinctDates.add(row.date)
+      if (eligibleIds.has(row.employee_id) && !NON_WORKING_STATUSES.has(row.status)) distinctDates.add(row.date)
     }
     const workingDays = distinctDates.size || 1   // avoid /0
 
