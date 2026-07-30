@@ -64,7 +64,7 @@ export interface CalculationTrace {
  * Evaluate a formula string with variable substitution.
  * Only alphanumeric variable names and standard arithmetic operators allowed.
  */
-export function evaluateFormula(formula: string, variables: Record<string, number>): number {
+export function evaluateFormula(formula: string, variables: Record<string, number>, warnings?: string[]): number {
   try {
     let expr = formula
     // Replace variable names (word boundary) with their numeric values
@@ -77,12 +77,16 @@ export function evaluateFormula(formula: string, variables: Record<string, numbe
     }
     // Only allow numbers, operators, parentheses, spaces, and decimal points
     if (!/^[\d\s+\-*/().%]+$/.test(expr)) {
+      warnings?.push(`Formula '${formula}' contains a disallowed character after variable substitution ('${expr}') — defaulted to 0`)
       return 0
     }
     // eslint-disable-next-line no-new-func
     const result = Function('return ' + expr)()
-    return typeof result === 'number' && isFinite(result) ? result : 0
-  } catch {
+    if (typeof result === 'number' && isFinite(result)) return result
+    warnings?.push(`Formula '${formula}' did not evaluate to a finite number — defaulted to 0`)
+    return 0
+  } catch (err) {
+    warnings?.push(`Formula '${formula}' failed to evaluate (${err instanceof Error ? err.message : String(err)}) — defaulted to 0`)
     return 0
   }
 }
@@ -129,7 +133,7 @@ export function computeComponent(component: ComponentInput, ctx: CalculationCont
         variables[key] = val
       })
       const formulaStr = component.formula ?? '0'
-      computedValue = evaluateFormula(formulaStr, variables)
+      computedValue = evaluateFormula(formulaStr, variables, warnings)
       inputValues['formula'] = formulaStr
       inputValues['ctcAnnual'] = ctx.ctcAnnual
       inputValues['ctcMonthly'] = ctx.ctcMonthly
