@@ -24,6 +24,8 @@ import {
 } from '../../lib/manager-scope.js'
 import { fetchAttendanceTrend } from '../../lib/attendance-trend.js'
 import { serverError, ErrorCode } from '../../lib/api-errors.js'
+import { fetchTenantTz } from '../../lib/attendance-engine.js'
+import { getLocalDate } from '../../lib/org-context.js'
 
 const dateRe = /^\d{4}-\d{2}-\d{2}$/
 
@@ -41,7 +43,8 @@ export default async function managerTeamLeaveContextRoute(fastify: FastifyInsta
     }
     const { employee_id, from, to } = parsed.data
     const tenantId = req.tenantId as string
-    const year = new Date().getFullYear()
+    const tz = await fetchTenantTz(fastify.supabase, tenantId)
+    const year = Number(getLocalDate(new Date().toISOString(), tz).slice(0, 4))
 
     // ── Authorise: HR admin, or the employee is anywhere in the caller's org
     // subtree ── Previously used isDirectReport() (literal one-level manager_id

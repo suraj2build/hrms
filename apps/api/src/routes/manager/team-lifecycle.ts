@@ -31,11 +31,18 @@ import { computeReadiness } from '../../lib/readiness-engine.js'
 import { notifyHrAdmins } from '../../lib/notify.js'
 import { resolveManagerEmployeeId, resolveCallerEmployeeId, isDirectReport } from '../../lib/manager-scope.js'
 import { serverError, ErrorCode } from '../../lib/api-errors.js'
+import { fetchTenantTz } from '../../lib/attendance-engine.js'
+import { getLocalDate } from '../../lib/org-context.js'
 
 const NEW_JOINER_WINDOW_DAYS = 90
 
-const isoDaysAgo = (n: number) =>
-  new Date(Date.now() - n * 86_400_000).toISOString().slice(0, 10)
+async function isoDaysAgo(supabase: FastifyInstance['supabase'], tenantId: string, n: number) {
+  const tz = await fetchTenantTz(supabase, tenantId)
+  const todayLocal = getLocalDate(new Date().toISOString(), tz)
+  const d = new Date(todayLocal + 'T00:00:00Z')
+  d.setUTCDate(d.getUTCDate() - n)
+  return d.toISOString().slice(0, 10)
+}
 
 export default async function managerTeamLifecycleRoute(fastify: FastifyInstance) {
   const auth = { preHandler: [fastify.authenticate] }
@@ -69,7 +76,7 @@ export default async function managerTeamLifecycleRoute(fastify: FastifyInstance
     const teamIdSet = new Set(teamIds)
 
     // ── Parallel reads — every source already exists ────────────────────────────
-    const joinerCutoff = isoDaysAgo(NEW_JOINER_WINDOW_DAYS)
+    const joinerCutoff = await isoDaysAgo(fastify.supabase, req.tenantId, NEW_JOINER_WINDOW_DAYS)
     const [lifecycleAll, jobHistoryRes, separationsRes, trustScoresRes] = await Promise.all([
       // Program 3A — the single expiry source, then filter to the team.
       computeLifecycleRisks(fastify.supabase, req.tenantId, { withinDays: 90 }),
