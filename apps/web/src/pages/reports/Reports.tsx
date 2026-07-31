@@ -1678,18 +1678,21 @@ function LeaveRegisterReport({ departments, basePath }: { departments: Departmen
   const leaveTypes = leaveTypesData?.data ?? [] // reserved for leave-type filter dropdown
   void leaveTypes
 
-  // Preview data from leave-requests JSON endpoint
+  // Preview data — mirrors /reports/leave-register/export's own filter
+  // contract (from/to/department_id/status), so the department filter and
+  // KPI totals below match what the Excel export actually produces, unlike
+  // GET /leave-requests which has no department_id and is capped at 200 rows.
   const previewParams = new URLSearchParams({
-    from_date: from,
-    to_date:   to,
-    limit:     '200',
-    ...(leaveStatus !== 'ALL' ? { status: leaveStatus } : {}),
+    from,
+    to,
+    status: leaveStatus,
+    ...(deptId ? { department_id: deptId } : {}),
   })
 
   const { data: previewData, isLoading, isFetching, refetch } = useQuery<{ data: LeaveRegisterRow[] }>({
     queryKey: ['report-leave-register', from, to, deptId, leaveStatus],
     queryFn:  async () => {
-      const r = await api.get<{ data: LeaveRegisterRow[] }>(`/leave-requests?${previewParams}`)
+      const r = await api.get<{ data: LeaveRegisterRow[] }>(`/reports/leave-register/preview?${previewParams}`)
       setGenAt(new Date())
       return r
     },

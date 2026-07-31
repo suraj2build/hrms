@@ -1090,6 +1090,93 @@ export default async function reportExportRoutes(fastify: FastifyInstance) {
   })
 
   // ════════════════════════════════════════════════════════════════════════════
+  // LEAVE REGISTER PREVIEW (PEND-83)
+  //
+  // Backs the Reports page's Leave Register tab. GET /leave-requests (the
+  // paginated general-purpose endpoint) has no department_id filter — adding
+  // one there would mean pushing a nested employees→job_history filter
+  // through a function shared by 2 other callers' offset/limit pagination,
+  // or restructuring its count-then-paginate flow. Instead this mirrors
+  // /reports/leave-register/export's own already-working approach: fetch
+  // the full date-range result set via fetchAllRows (no 1000-row PostgREST
+  // ceiling) and filter department post-fetch, since job_history can't be
+  // pushed into an `!inner` filter without risking rows silently dropping.
+  // Returning the complete filtered set (not a 200-row cap) also fixes the
+  // KPI chips, which the frontend computes from the full response.
+  // ════════════════════════════════════════════════════════════════════════════
+
+  fastify.get('/reports/leave-register/preview', hrAuth, async (req: any, reply) => {
+    const schema = z.object({
+      from:          z.string().regex(dateRe, 'from must be YYYY-MM-DD'),
+      to:            z.string().regex(dateRe, 'to must be YYYY-MM-DD'),
+      department_id: z.string().uuid().optional(),
+      status:        z.enum(['PENDING', 'APPROVED', 'REJECTED', 'CANCELLED', 'ALL']).default('ALL'),
+    })
+    const parsed = schema.safeParse(req.query)
+    if (!parsed.success) {
+      return validationError(reply, ErrorCode.VALIDATION_ERROR, parsed.error.issues[0]?.message)
+    }
+    const { from, to, department_id, status } = parsed.data
+    const tenantId = req.tenantId as string
+
+    let requests: any[]
+    try {
+      requests = await fetchAllRows((rangeFrom, rangeTo) => {
+        let q = fastify.supabase
+          .from('leave_requests')
+          .select(`
+            id, from_date, to_date, computed_days, half_day, session, hours_requested,
+            status, created_at,
+            leave_types(id, name),
+            employees!inner(
+              id, first_name, last_name, employee_code,
+              job_history!job_history_employee_id_fkey(department_id, is_current)
+            )
+          `)
+          .eq('tenant_id', tenantId)
+          .gte('from_date', from)
+          .lte('to_date', to)
+          .order('created_at', { ascending: false })
+
+        if (status !== 'ALL') q = q.eq('status', status)
+
+        return q.range(rangeFrom, rangeTo)
+      })
+    } catch (lrErr) {
+      return serverError(req, reply, lrErr, ErrorCode.QUERY_FAILED, 'Failed to fetch leave requests')
+    }
+
+    // Department filter — post-fetch, same reasoning as the export route
+    // above: job_history is embedded without !inner, so filtering the nested
+    // relation directly would silently null it out rather than filter rows.
+    let filtered = requests as any[]
+    if (department_id) {
+      filtered = filtered.filter((r: any) => {
+        const jh = Array.isArray(r.employees?.job_history) ? r.employees.job_history[0] : r.employees?.job_history
+        return jh?.department_id === department_id
+      })
+    }
+
+    const data = filtered.map((r: any) => ({
+      id:              r.id,
+      employee:        r.employees ? {
+        employee_code: r.employees.employee_code,
+        first_name:    r.employees.first_name,
+        last_name:     r.employees.last_name,
+      } : null,
+      leave_type_name: (Array.isArray(r.leave_types) ? r.leave_types[0] : r.leave_types)?.name ?? null,
+      from_date:       r.from_date,
+      to_date:         r.to_date,
+      computed_days:   r.computed_days,
+      session:         r.session,
+      status:          r.status,
+      created_at:      r.created_at,
+    }))
+
+    return reply.send({ data })
+  })
+
+  // ════════════════════════════════════════════════════════════════════════════
   // 3. LEAVE REGISTER EXPORT
   //
   // Sheet 1 — Leave Register: one row per leave request, chronological.
