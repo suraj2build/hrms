@@ -997,6 +997,44 @@ function mapShiftRow(row: Record<string, unknown>): ShiftWindow {
 }
 
 /**
+ * Resolve the fatigue_rules that actually apply to this employee.
+ * Priority: employees.roster_id → sites.default_roster_id — same precedence
+ * used for roster resolution elsewhere (org-context.ts, roster-calendar-engine.ts's
+ * _fetchEmpRosterCtx). A plain `rosters` query scoped only by tenant_id (the
+ * previous approach here) returns PGRST116 "multiple rows" for any tenant with
+ * 2+ named rosters, silently discarding real fatigue thresholds for a
+ * hardcoded default instead of resolving the roster this employee is
+ * actually on.
+ */
+async function resolveFatigueRules(
+  supabase: SupabaseClient,
+  tenantId: string,
+  employeeId: string,
+): Promise<Record<string, number> | null> {
+  try {
+    const { data: emp } = await supabase
+      .from('employees')
+      .select(`
+        roster_id,
+        emp_roster:rosters!roster_id(fatigue_rules),
+        site:sites!site_id(default_roster_id, site_roster:rosters!default_roster_id(fatigue_rules))
+      `)
+      .eq('id', employeeId)
+      .eq('tenant_id', tenantId)
+      .maybeSingle()
+
+    if (!emp) return null
+    type RosterSnap = { fatigue_rules?: Record<string, number> | null }
+    const er   = (emp as Record<string, unknown>).emp_roster as RosterSnap | null
+    const site = (emp as Record<string, unknown>).site as { site_roster?: RosterSnap | null } | null
+    const eff  = er ?? site?.site_roster ?? null
+    return eff?.fatigue_rules ?? null
+  } catch {
+    return null
+  }
+}
+
+/**
  * Fetch raw punches for an employee within a time range (inclusive).
  */
 async function fetchPunches(
@@ -1095,20 +1133,8 @@ export async function buildDaySessionReport(
   // ── 3–5. Pair → repair → merge ─────────────────────────────────────────────
   const paired = pairPunches(rawPunches, shift, tz)
 
-  // Fetch fatigue rules from roster (best effort)
-  let fatigueRules: Record<string, number> | null = null
-  try {
-    const { data: rosterData } = await supabase
-      .from('rosters')
-      .select('fatigue_rules')
-      .eq('tenant_id', tenantId)
-      .maybeSingle()
-    if (rosterData) {
-      fatigueRules = (rosterData as { fatigue_rules?: Record<string, number> }).fatigue_rules ?? null
-    }
-  } catch {
-    // non-fatal — proceed without fatigue rules
-  }
+  // Fetch fatigue rules from the employee's actual roster (best effort)
+  const fatigueRules = await resolveFatigueRules(supabase, tenantId, employeeId)
 
   const repaired = repairIncompletePunches(paired, shift, fatigueRules)
   const sessions = mergeAdjacentSessions(repaired, tz)
@@ -1267,20 +1293,8 @@ export async function buildMonthSessionBatch(
     ((holidayRows ?? []) as Array<{ date: string }>).map((h) => h.date),
   )
 
-  // ── Fetch fatigue rules ───────────────────────────────────────────────────
-  let fatigueRules: Record<string, number> | null = null
-  try {
-    const { data: rosterData } = await supabase
-      .from('rosters')
-      .select('fatigue_rules')
-      .eq('tenant_id', tenantId)
-      .maybeSingle()
-    if (rosterData) {
-      fatigueRules = (rosterData as { fatigue_rules?: Record<string, number> }).fatigue_rules ?? null
-    }
-  } catch {
-    // non-fatal
-  }
+  // ── Fetch fatigue rules from the employee's actual roster ─────────────────
+  const fatigueRules = await resolveFatigueRules(supabase, tenantId, employeeId)
 
   // ── Group punches by business date ────────────────────────────────────────
   const punchesByDate = new Map<string, PunchRecord[]>()
@@ -1419,20 +1433,8 @@ export async function detectMonthAnomalies(
     byDate.get(s.attendance_date)!.push(s)
   }
 
-  // Fetch fatigue rules once
-  let fatigueRules: Record<string, number> | null = null
-  try {
-    const { data: rosterData } = await supabase
-      .from('rosters')
-      .select('fatigue_rules')
-      .eq('tenant_id', tenantId)
-      .maybeSingle()
-    if (rosterData) {
-      fatigueRules = (rosterData as { fatigue_rules?: Record<string, number> }).fatigue_rules ?? null
-    }
-  } catch {
-    // non-fatal
-  }
+  // Fetch fatigue rules from the employee's actual roster
+  const fatigueRules = await resolveFatigueRules(supabase, tenantId, employeeId)
 
   const maxOtHours = fatigueRules?.max_ot_hours ?? 4
   const minRestHours = fatigueRules?.min_rest_hours ?? 8
