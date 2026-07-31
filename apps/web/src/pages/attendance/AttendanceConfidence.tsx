@@ -19,39 +19,36 @@ import { SectionCard }   from '@/components/layout/SectionCard'
 import { Badge }         from '@/components/ui/badge'
 import { Button }        from '@/components/ui/button'
 import { Input }         from '@/components/ui/input'
-import { DateInput }     from '@/components/ui/date-input'
 import { api }           from '@/lib/api/client'
 import { useAuthStore }  from '@/stores/authStore'
 import { cn }            from '@/lib/utils'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
-
-interface ConfidenceSummary {
-  avg_score:           number
-  employees_at_risk:   number
-  level_distribution:  Array<{ level: string; count: number }>
-}
+// Mirrors apps/api/src/routes/attendance/confidence.ts's actual response
+// shapes — both /summary and /low are month-bucketed (not date-range) and
+// /low is grouped per employee (not one row per day).
 
 interface LowConfidenceRow {
-  employee_id:       string
-  date:              string
-  confidence_score:  number
-  confidence_level:  string
-  confidence_factors: Record<string, number>
-  employees: {
-    first_name:    string
-    last_name:     string
-    employee_code: string
-  }
+  employee_id:     string
+  employee_code:   string
+  name:            string
+  days_with_issue: number
+  avg_score:       number | null
+  dates:           string[]
 }
 
 interface SummaryApiResponse {
-  data: ConfidenceSummary
+  month:                string
+  avg_confidence_score: number | null
+  by_level:             Record<'high' | 'medium' | 'low' | 'critical', number>
+  total_records:        number
 }
 
 interface LowConfidenceApiResponse {
   data: LowConfidenceRow[]
 }
+
+type ConfidenceLevelFilter = 'all' | 'low' | 'critical'
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -83,20 +80,24 @@ function levelBadgeVariant(level: string): BadgeVariant {
   }
 }
 
+// Same fixed score bands attendance-processor.ts uses to assign
+// confidence_level at write time — used here to color an aggregated row's
+// avg_score, since /low groups multiple days (each with its own level) per
+// employee rather than returning one confidence_level per row.
+function bandForScore(score: number | null): ConfidenceLevel {
+  const s = score ?? 0
+  if (s >= 80) return 'high'
+  if (s >= 60) return 'medium'
+  if (s >= 40) return 'low'
+  return 'critical'
+}
+
 function fmtDate(iso: string) {
   const s = iso
   const d = new Date(s.length === 10 ? s + 'T12:00:00Z' : s)
   const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
   if (isNaN(d.getTime())) return '—'
   return `${String(d.getUTCDate()).padStart(2,'0')}-${M[d.getUTCMonth()]}-${d.getUTCFullYear()}`
-}
-
-/** Return the top N factor keys by value, formatted as "factor_name (0.xx)" */
-function topFactors(factors: Record<string, number>, n = 2): string[] {
-  return Object.entries(factors)
-    .sort(([, a], [, b]) => b - a)
-    .slice(0, n)
-    .map(([k, v]) => `${k.replace(/_/g, ' ')} (${(v ?? 0).toFixed(2)})`)
 }
 
 // ── Level distribution card ────────────────────────────────────────────────────
@@ -130,56 +131,46 @@ export function AttendanceConfidence() {
   const { profile } = useAuthStore()
   const isAdmin = profile?.role === 'super_admin' || profile?.role === 'hr_admin'
 
-  // Filter state
-  const today     = new Date().toISOString().slice(0, 10)
-  const monthAgo  = new Date(Date.now() - 30 * 86_400_000).toISOString().slice(0, 10)
+  // Filter state — both /summary and /low are month-bucketed server-side
+  // (apps/api/src/routes/attendance/confidence.ts), not date-range based.
+  const currentMonth = new Date().toISOString().slice(0, 7)
 
-  const [dateFrom,   setDateFrom]   = useState(monthAgo)
-  const [dateTo,     setDateTo]     = useState(today)
-  const [threshold,  setThreshold]  = useState(60)
-  const [applied, setApplied] = useState<{
-    dateFrom: string; dateTo: string; threshold: number
-  }>({ dateFrom: monthAgo, dateTo: today, threshold: 60 })
+  const [month,       setMonth]       = useState(currentMonth)
+  const [levelFilter, setLevelFilter] = useState<ConfidenceLevelFilter>('all')
+  const [applied, setApplied] = useState<{ month: string; level: ConfidenceLevelFilter }>(
+    { month: currentMonth, level: 'all' },
+  )
 
   // ── Queries ──────────────────────────────────────────────────────────────────
 
-  const { data: summaryData, isLoading: summaryLoading } =
+  const { data: summary, isLoading: summaryLoading } =
     useQuery<SummaryApiResponse>({
-      queryKey: ['confidence-summary', applied.dateFrom, applied.dateTo],
-      queryFn:  () => {
-        const params = new URLSearchParams()
-        if (applied.dateFrom) params.set('date_from', applied.dateFrom)
-        if (applied.dateTo)   params.set('date_to',   applied.dateTo)
-        return api.get<SummaryApiResponse>(`/attendance/confidence/summary?${params}`)
-      },
+      queryKey: ['confidence-summary', applied.month],
+      queryFn:  () => api.get<SummaryApiResponse>(`/attendance/confidence/summary?month=${applied.month}`),
       staleTime: 60_000,
       enabled: isAdmin,
     })
 
   const { data: lowData, isLoading: lowLoading, isError, refetch } =
     useQuery<LowConfidenceApiResponse>({
-      queryKey: ['confidence-low', applied.threshold],
-      queryFn:  () => {
-        const params = new URLSearchParams({
-          threshold: String(applied.threshold),
-          limit:     '50',
-        })
-        return api.get<LowConfidenceApiResponse>(`/attendance/confidence/low?${params}`)
-      },
+      queryKey: ['confidence-low', applied.month, applied.level],
+      queryFn:  () => api.get<LowConfidenceApiResponse>(
+        `/attendance/confidence/low?month=${applied.month}&level=${applied.level}`,
+      ),
       staleTime: 60_000,
       enabled: isAdmin,
     })
 
   // ── Derived ───────────────────────────────────────────────────────────────────
 
-  const summary  = summaryData?.data
-  const lowRows  = lowData?.data ?? []
+  const lowRows = lowData?.data ?? []
+  // Employees at risk reflects whatever level filter is currently applied
+  // (defaults to 'all' = low + critical) — /low is already grouped per
+  // employee, so its row count is the distinct at-risk employee count.
+  const employeesAtRisk = lowRows.length
 
   const orderedDist = summary
-    ? LEVEL_ORDER.map(lvl => {
-        const found = summary.level_distribution.find(d => normaliseLevel(d.level) === lvl)
-        return { level: lvl, count: found?.count ?? 0 }
-      })
+    ? LEVEL_ORDER.map(lvl => ({ level: lvl, count: summary.by_level[lvl] ?? 0 }))
     : []
 
   // ── Access guard ──────────────────────────────────────────────────────────────
@@ -242,14 +233,14 @@ export function AttendanceConfidence() {
                   className={cn(
                     'text-4xl font-bold tabular-nums',
                     scoreTextClass(
-                      summary.avg_score >= 80 ? 'high'
-                      : summary.avg_score >= 60 ? 'medium'
-                      : summary.avg_score >= 40 ? 'low'
+                      (summary.avg_confidence_score ?? 0) >= 80 ? 'high'
+                      : (summary.avg_confidence_score ?? 0) >= 60 ? 'medium'
+                      : (summary.avg_confidence_score ?? 0) >= 40 ? 'low'
                       : 'critical',
                     ),
                   )}
                 >
-                  {(summary.avg_score ?? 0).toFixed(1)}
+                  {(summary.avg_confidence_score ?? 0).toFixed(1)}
                 </p>
                 <p className="text-xs text-muted-foreground mt-1">out of 100</p>
               </div>
@@ -257,13 +248,13 @@ export function AttendanceConfidence() {
                 <div
                   className={cn(
                     'h-full rounded-full transition-all',
-                    summary.avg_score >= 80
+                    (summary.avg_confidence_score ?? 0) >= 80
                       ? 'bg-success'
-                      : summary.avg_score >= 60
+                      : (summary.avg_confidence_score ?? 0) >= 60
                       ? 'bg-warning'
                       : 'bg-destructive',
                   )}
-                  style={{ width: `${Math.min(100, summary.avg_score)}%` }}
+                  style={{ width: `${Math.min(100, summary.avg_confidence_score ?? 0)}%` }}
                 />
               </div>
             </div>
@@ -277,14 +268,16 @@ export function AttendanceConfidence() {
                 <p
                   className={cn(
                     'text-4xl font-bold',
-                    summary.employees_at_risk > 0 ? 'text-destructive' : 'text-success',
+                    employeesAtRisk > 0 ? 'text-destructive' : 'text-success',
                   )}
                 >
-                  {summary.employees_at_risk}
+                  {employeesAtRisk}
                 </p>
-                <p className="text-xs text-muted-foreground mt-1">below threshold</p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  {applied.level === 'all' ? 'low or critical' : applied.level} this month, 3+ affected days
+                </p>
               </div>
-              {summary.employees_at_risk > 0 ? (
+              {employeesAtRisk > 0 ? (
                 <AlertTriangle className="h-6 w-6 text-destructive/70 mt-1" />
               ) : (
                 <CheckCircle2 className="h-6 w-6 text-success/70 mt-1" />
@@ -311,47 +304,36 @@ export function AttendanceConfidence() {
       >
         {/* Filter bar */}
         <div className="flex flex-wrap items-end gap-3 px-4 py-3 border-b border-border">
-          {/* Date from */}
+          {/* Month */}
           <div className="space-y-1">
-            <label className="text-xs text-muted-foreground font-medium">Date From</label>
-            <DateInput
-              className="h-8 text-xs"
-              value={dateFrom}
-              onChange={setDateFrom}
-            />
-          </div>
-
-          {/* Date to */}
-          <div className="space-y-1">
-            <label className="text-xs text-muted-foreground font-medium">Date To</label>
-            <DateInput
-              className="h-8 text-xs"
-              value={dateTo}
-              min={dateFrom}
-              onChange={setDateTo}
-            />
-          </div>
-
-          {/* Threshold */}
-          <div className="space-y-1">
-            <label className="text-xs text-muted-foreground font-medium">
-              Threshold (0–100)
-            </label>
+            <label className="text-xs text-muted-foreground font-medium">Month</label>
             <Input
-              type="number"
-              className="h-8 text-xs w-24"
-              min={0}
-              max={100}
-              value={threshold}
-              onChange={e => setThreshold(Math.max(0, Math.min(100, Number(e.target.value))))}
+              type="month"
+              className="h-8 text-xs"
+              value={month}
+              onChange={e => setMonth(e.target.value)}
             />
+          </div>
+
+          {/* Level */}
+          <div className="space-y-1">
+            <label className="text-xs text-muted-foreground font-medium">Level</label>
+            <select
+              value={levelFilter}
+              onChange={e => setLevelFilter(e.target.value as ConfidenceLevelFilter)}
+              className="h-8 rounded-md border border-border bg-background px-2 text-xs text-foreground"
+            >
+              <option value="all">Low or Critical</option>
+              <option value="low">Low only</option>
+              <option value="critical">Critical only</option>
+            </select>
           </div>
 
           {/* Apply */}
           <Button
             size="sm"
             className="h-8 text-xs"
-            onClick={() => setApplied({ dateFrom, dateTo, threshold })}
+            onClick={() => setApplied({ month, level: levelFilter })}
           >
             Apply
           </Button>
@@ -378,7 +360,7 @@ export function AttendanceConfidence() {
               <CheckCircle2 className="h-8 w-8 text-success opacity-60" />
               <p className="text-sm font-medium text-foreground">No low-confidence records</p>
               <p className="text-xs text-muted-foreground">
-                All records are at or above the {applied.threshold} threshold.
+                No employees had 3+ {applied.level === 'all' ? 'low/critical' : applied.level}-confidence days in {applied.month}.
               </p>
             </div>
           )}
@@ -388,7 +370,7 @@ export function AttendanceConfidence() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-border">
-                    {['Employee', 'Date', 'Score', 'Level', 'Key Factors'].map(h => (
+                    {['Employee', 'Days with Issue', 'Avg Score', 'Level', 'Date Range'].map(h => (
                       <th
                         key={h}
                         className="text-left text-xs font-semibold text-muted-foreground py-2 px-3 whitespace-nowrap"
@@ -399,64 +381,48 @@ export function AttendanceConfidence() {
                   </tr>
                 </thead>
                 <tbody>
-                  {lowRows.map((row, idx) => {
-                    const factors = topFactors(row.confidence_factors)
+                  {lowRows.map(row => {
+                    const band = bandForScore(row.avg_score)
                     return (
                       <tr
-                        key={`${row.employee_id}-${row.date}-${idx}`}
+                        key={row.employee_id}
                         className="border-b border-border/50 hover:bg-muted/20 transition-colors"
                       >
                         {/* Employee */}
                         <td className="py-2.5 px-3">
                           <p className="text-xs font-medium text-foreground leading-tight">
-                            {row.employees.first_name} {row.employees.last_name}
+                            {row.name}
                           </p>
                           <p className="text-[10px] text-muted-foreground font-mono">
-                            {row.employees.employee_code}
+                            {row.employee_code}
                           </p>
                         </td>
 
-                        {/* Date */}
+                        {/* Days with issue */}
                         <td className="py-2.5 px-3 whitespace-nowrap text-xs text-foreground tabular-nums">
-                          {fmtDate(row.date)}
+                          {row.days_with_issue}
                         </td>
 
-                        {/* Score */}
+                        {/* Avg score */}
                         <td className="py-2.5 px-3 whitespace-nowrap">
-                          <span
-                            className={cn(
-                              'text-sm font-bold tabular-nums',
-                              scoreTextClass(row.confidence_level),
-                            )}
-                          >
-                            {(row.confidence_score ?? 0).toFixed(1)}
+                          <span className={cn('text-sm font-bold tabular-nums', scoreTextClass(band))}>
+                            {(row.avg_score ?? 0).toFixed(1)}
                           </span>
                         </td>
 
                         {/* Level badge */}
                         <td className="py-2.5 px-3 whitespace-nowrap">
                           <Badge
-                            variant={levelBadgeVariant(row.confidence_level)}
+                            variant={levelBadgeVariant(band)}
                             className="rounded-full text-[10px] px-2 capitalize"
                           >
-                            {row.confidence_level}
+                            {band}
                           </Badge>
                         </td>
 
-                        {/* Key factors */}
-                        <td className="py-2.5 px-3">
-                          <div className="flex flex-wrap gap-1">
-                            {factors.length > 0 ? factors.map(f => (
-                              <span
-                                key={f}
-                                className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground"
-                              >
-                                {f}
-                              </span>
-                            )) : (
-                              <span className="text-[10px] text-muted-foreground/50">—</span>
-                            )}
-                          </div>
+                        {/* Date range */}
+                        <td className="py-2.5 px-3 whitespace-nowrap text-xs text-foreground tabular-nums">
+                          {fmtDate(row.dates[0])}{row.dates.length > 1 ? ` – ${fmtDate(row.dates[row.dates.length - 1])}` : ''}
                         </td>
                       </tr>
                     )

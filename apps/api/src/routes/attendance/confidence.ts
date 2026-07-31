@@ -24,7 +24,7 @@ const summaryQuerySchema = z.object({
 
 const lowQuerySchema = z.object({
   month: z.string().regex(monthRe).optional(),
-  level: z.enum(['low', 'critical']).default('low'),
+  level: z.enum(['low', 'critical', 'all']).default('low'),
 })
 
 function currentMonthStr(): string {
@@ -202,17 +202,22 @@ export default async function attendanceConfidenceRoute(fastify: FastifyInstance
     const level = parsed.data.level
     const { from, to } = monthDateRange(month)
 
-    const { data, error } = await fastify.supabase
+    let query = fastify.supabase
       .from('attendance_daily')
       .select(`
         employee_id, date, confidence_score, confidence_level,
         employees!inner(id, first_name, last_name, employee_code)
       `)
       .eq('tenant_id', req.tenantId)
-      .eq('confidence_level', level)
       .gte('date', from)
       .lte('date', to)
       .order('date', { ascending: true })
+
+    query = level === 'all'
+      ? query.in('confidence_level', ['low', 'critical'])
+      : query.eq('confidence_level', level)
+
+    const { data, error } = await query
 
     if (error) {
       req.log.error({ err: error }, 'confidence low query failed')
