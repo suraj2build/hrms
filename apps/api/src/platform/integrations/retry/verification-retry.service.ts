@@ -1,63 +1,39 @@
-type VerificationType = 'pan' | 'bank_account' | 'aadhaar'
+/**
+ * Verification retry policy (PEND-29/76).
+ *
+ * Retry state lives on `verification_records.retry_count`/`degraded_reason`
+ * (migration 191) — not an in-process queue. That means it survives restarts
+ * and stays consistent across horizontally-scaled instances, and "is this
+ * entry due for retry" is just a query, answered by the scheduled consumer
+ * in `lib/verification-retry-scanner.ts` (registered in index.ts, matching
+ * the sla-scanner.ts/poll-scheduler.ts pattern) rather than a dedicated
+ * enqueue/dequeue API.
+ *
+ * `verification-orchestrator.service.ts` writes `retry_count`/`degraded_reason`
+ * directly as part of its normal upsert — see its `retryFields()` helper.
+ *
+ * Aadhaar is intentionally excluded from automatic retry: Aadhaar Act §8 /
+ * DPDP Act require explicit consent per verification action, so only PAN and
+ * bank-account entries are auto-retried by the scanner.
+ */
 
-interface RetryEntry {
-  tenant_id:         string
-  employee_id:       string
-  verification_type: VerificationType
-  attempts:          number
-  last_attempt_ms:   number
-  next_retry_ms:     number
-  last_error?:       string
-  exhausted:         boolean
-}
+import type { VerificationType } from '../../trust/types/trust-types.js'
 
-const MAX_ATTEMPTS = 3
+/** Auto-retried types — Aadhaar requires fresh per-action consent (see module doc). */
+export const AUTO_RETRY_TYPES: readonly VerificationType[] = ['pan', 'bank_account']
+
+export const MAX_ATTEMPTS   = 3
 const BASE_DELAY_MS = 30_000   // 30s
 const MAX_DELAY_MS  = 300_000  // 5min
 
-export class VerificationRetryService {
-  private readonly queue = new Map<string, RetryEntry>()
-
-  private key(tenantId: string, employeeId: string, type: VerificationType): string {
-    return `${tenantId}:${employeeId}:${type}`
-  }
-
-  private backoff(attempts: number): number {
-    return Math.min(BASE_DELAY_MS * Math.pow(2, attempts - 1), MAX_DELAY_MS)
-  }
-
-  enqueue(tenantId: string, employeeId: string, type: VerificationType, error: string): void {
-    const k = this.key(tenantId, employeeId, type)
-    const existing = this.queue.get(k)
-    if (existing?.exhausted) return  // do not re-enqueue exhausted entries
-
-    const attempts = (existing?.attempts ?? 0) + 1
-    const exhausted = attempts >= MAX_ATTEMPTS
-    this.queue.set(k, {
-      tenant_id: tenantId, employee_id: employeeId, verification_type: type,
-      attempts, last_attempt_ms: Date.now(),
-      next_retry_ms: Date.now() + this.backoff(attempts),
-      last_error: error, exhausted,
-    })
-  }
-
-  dequeue(tenantId: string, employeeId: string, type: VerificationType): void {
-    this.queue.delete(this.key(tenantId, employeeId, type))
-  }
-
-  getDueRetries(tenantId: string): RetryEntry[] {
-    const now = Date.now()
-    return [...this.queue.values()].filter(e => e.tenant_id === tenantId && !e.exhausted && e.next_retry_ms <= now)
-  }
-
-  stats(tenantId: string): { total: number; pending: number; exhausted: number } {
-    const all = [...this.queue.values()].filter(e => e.tenant_id === tenantId)
-    return {
-      total:     all.length,
-      pending:   all.filter(e => !e.exhausted).length,
-      exhausted: all.filter(e => e.exhausted).length,
-    }
-  }
+/** Exponential backoff (attempts is the retry_count AFTER the failed attempt). */
+export function backoffMs(attempts: number): number {
+  return Math.min(BASE_DELAY_MS * Math.pow(2, attempts - 1), MAX_DELAY_MS)
 }
 
-export const verificationRetryService = new VerificationRetryService()
+/** Whether a degraded record with this retry_count/last-attempt time is due for another attempt now. */
+export function isDueForRetry(retryCount: number, lastAttemptIso: string, now = Date.now()): boolean {
+  if (retryCount <= 0 || retryCount >= MAX_ATTEMPTS) return false
+  const lastAttemptMs = new Date(lastAttemptIso).getTime()
+  return lastAttemptMs + backoffMs(retryCount) <= now
+}

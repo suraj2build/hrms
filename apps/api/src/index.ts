@@ -18,11 +18,13 @@ import { registerLeaveScheduler }            from './lib/leave-scheduler.js'
 import { registerAttendanceApiScheduler }    from './lib/attendance-api-scheduler.js'
 import { registerEventBusAutomation }    from './lib/event-bus-automation.js'
 import { registerSlaScanner }            from './lib/sla-scanner.js'
+import { registerVerificationRetryScanner } from './lib/verification-retry-scanner.js'
 import { registerIntelligenceScanner }   from './lib/intelligence-scanner.js'
 import { registerDigestScheduler }       from './lib/digest-scheduler.js'
 import { registerWoCreditScheduler }     from './lib/wo-credit-reconciler.js'
 import { registerPollScheduler }         from './lib/poll-scheduler.js'
 import { scan as runSlaScan }            from './lib/sla-scanner.js'
+import { scan as runVerificationRetryScan } from './lib/verification-retry-scanner.js'
 import { runAllScans as runIntelligenceScan } from './lib/intelligence-scanner.js'
 import { runDueSources as runAttendanceSources } from './lib/attendance-api-scheduler.js'
 import { tick as runDigestTick }         from './lib/digest-scheduler.js'
@@ -483,6 +485,12 @@ async function start() {
     registerSlaScanner(fastify.supabase)
   }, fastify.log)
 
+  // Verification retry scanner (PEND-29/76) — re-attempts degraded PAN/bank
+  // verifications on backoff, every 5 minutes
+  await safeRegisterModule('verification-retry-scanner', async () => {
+    registerVerificationRetryScanner(fastify.supabase)
+  }, fastify.log)
+
   // Intelligence scanner — emits Phase 4 operational events every 6 hours
   await safeRegisterModule('intelligence-scanner', async () => {
     registerIntelligenceScanner(fastify.supabase)
@@ -534,6 +542,9 @@ async function start() {
   })
   durableQueue.register('sla-scan', async (_payload, _job) => {
     await runSlaScan(fastify.supabase)
+  })
+  durableQueue.register('verification-retry-scan', async (_payload, _job) => {
+    await runVerificationRetryScan(fastify.supabase)
   })
   // detect-anomalies is event-driven (registerAnomalyHandlers wires bus listeners);
   // no standalone scan function exists — complete without action on manual trigger.

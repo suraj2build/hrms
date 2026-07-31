@@ -9,7 +9,7 @@ import { trustIntelligenceService }    from '../../platform/trust/intelligence/t
 import { workforceGraphService }       from '../../platform/trust/graph/workforce-graph.service.js'
 import { regulatoryIngestionService }  from '../../platform/regulatory/ingestion/regulatory-ingestion.service.js'
 import { verificationOrchestrator }    from '../../platform/trust/orchestrator/verification-orchestrator.service.js'
-import { verificationRetryService }    from '../../platform/integrations/retry/verification-retry.service.js'
+import { MAX_ATTEMPTS }                from '../../platform/integrations/retry/verification-retry.service.js'
 import { aadhaarVerificationService }  from '../../platform/trust/verification/aadhaar/aadhaar-verification.service.js'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { serverError, notFound, ErrorCode } from '../../lib/api-errors.js'
@@ -541,26 +541,35 @@ export default async function trustIntelligenceRoutes(fastify: FastifyInstance) 
    */
   fastify.get('/trust/verifications/stats', adminAuth, async (req, reply) => {
     const tenantId = (req as any).tenantId
-    let records: Array<{ status: string; verification_type: string }>
+    let records: Array<{ status: string; verification_type: string; retry_count: number }>
     try {
       records = await fetchAllRows((from, to) =>
         fastify.supabase
           .from('verification_records')
-          .select('status, verification_type')
+          .select('status, verification_type, retry_count')
           .eq('tenant_id', tenantId)
           .range(from, to),
       )
     } catch (error) {
       return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch verification statistics')
     }
+    // Retry state lives on this same table (retry_count, PEND-29/76) rather
+    // than a separate queue — "in the retry queue" is any degraded record;
+    // "exhausted" is one that hit MAX_ATTEMPTS and the scanner will no
+    // longer auto-retry (it still shows here so HR can manually re-verify).
+    const degraded = records.filter(r => r.status === 'degraded')
     return {
       total:        records.length,
       verified:     records.filter(r => r.status === 'verified').length,
       pending:      records.filter(r => r.status === 'pending').length,
-      degraded:     records.filter(r => r.status === 'degraded').length,
+      degraded:     degraded.length,
       needs_review: records.filter(r => r.status === 'needs_review').length,
       failed:       records.filter(r => r.status === 'failed').length,
-      retry_queue:  verificationRetryService.stats(tenantId),
+      retry_queue: {
+        total:     degraded.length,
+        pending:   degraded.filter(r => r.retry_count < MAX_ATTEMPTS).length,
+        exhausted: degraded.filter(r => r.retry_count >= MAX_ATTEMPTS).length,
+      },
     }
   })
 }

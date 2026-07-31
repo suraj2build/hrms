@@ -2,7 +2,6 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { panVerificationAdapter }            from '../../integrations/adapters/pan-verification.adapter.js'
 import { bankVerificationAdapter }           from '../../integrations/adapters/bank-verification.adapter.js'
 import { aadhaarVerificationAdapter }        from '../../integrations/adapters/aadhaar-verification.adapter.js'
-import { verificationRetryService }          from '../../integrations/retry/verification-retry.service.js'
 import { verificationExplainabilityService } from '../explainability/verification-explainability.service.js'
 import type { VerificationStatus }           from '../types/trust-types.js'
 import type { IntegrationAdapterResult }     from '../../integrations/types/integration-types.js'
@@ -65,6 +64,33 @@ export class VerificationOrchestrator {
     }
   }
 
+  /**
+   * Retry-tracking fields for the upsert payload (PEND-29/76). Retry state
+   * lives on this row (retry_count/degraded_reason) rather than a separate
+   * in-process queue, so it survives restarts and stays correct across
+   * replicas — verification-retry-scanner.ts reads it directly to decide
+   * what's due for another attempt.
+   */
+  private async retryFields(
+    supabase: SupabaseClient,
+    employeeId: string,
+    type: 'pan' | 'bank_account' | 'aadhaar',
+    status: VerificationStatus,
+    error: string | undefined,
+  ): Promise<{ retry_count: number; degraded_reason: string | null }> {
+    if (status !== 'degraded') return { retry_count: 0, degraded_reason: null }
+
+    const { data } = await supabase
+      .from('verification_records')
+      .select('retry_count')
+      .eq('employee_id', employeeId)
+      .eq('verification_type', type)
+      .maybeSingle()
+    const priorCount = (data as { retry_count: number } | null)?.retry_count ?? 0
+
+    return { retry_count: priorCount + 1, degraded_reason: error ?? 'provider unavailable' }
+  }
+
   private async verifyPan(params: VerifyEmployeeParams): Promise<void> {
     try {
       const result: IntegrationAdapterResult<PanVerificationData> =
@@ -72,6 +98,7 @@ export class VerificationOrchestrator {
 
       const status      = this.adapterToVerificationStatus(result.status, result.data?.is_valid ?? false)
       const explanation = verificationExplainabilityService.pan(result)
+      const retry       = await this.retryFields(params.supabase, params.employee_id, 'pan', status, result.error)
 
       await this.upsert(params.supabase, {
         employee_id:           params.employee_id,
@@ -86,13 +113,8 @@ export class VerificationOrchestrator {
         explanation,
         last_error:            result.error ?? null,
         verified_at:           new Date().toISOString(),
+        ...retry,
       })
-
-      if (status === 'degraded') {
-        verificationRetryService.enqueue(params.tenant_id, params.employee_id, 'pan', result.error ?? 'provider unavailable')
-      } else {
-        verificationRetryService.dequeue(params.tenant_id, params.employee_id, 'pan')
-      }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err)
       console.warn('[VerificationOrchestrator] PAN verify error (silent):', msg)
@@ -120,6 +142,8 @@ export class VerificationOrchestrator {
         status = 'pending'
       }
 
+      const retry = await this.retryFields(params.supabase, params.employee_id, 'bank_account', status, result.error)
+
       await this.upsert(params.supabase, {
         employee_id:        params.employee_id,
         tenant_id:          params.tenant_id,
@@ -132,13 +156,8 @@ export class VerificationOrchestrator {
         explanation,
         last_error:         result.error ?? null,
         verified_at:        new Date().toISOString(),
+        ...retry,
       })
-
-      if (status === 'degraded') {
-        verificationRetryService.enqueue(params.tenant_id, params.employee_id, 'bank_account', result.error ?? 'provider unavailable')
-      } else {
-        verificationRetryService.dequeue(params.tenant_id, params.employee_id, 'bank_account')
-      }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err)
       console.warn('[VerificationOrchestrator] Bank verify error (silent):', msg)
@@ -152,6 +171,12 @@ export class VerificationOrchestrator {
 
       const status      = this.adapterToVerificationStatus(result.status, result.data?.is_valid ?? false)
       const explanation = verificationExplainabilityService.aadhaar(result, params.aadhaar_consent ?? false)
+      // retry_count is still tracked for dashboard visibility, but the
+      // scanner excludes 'aadhaar' from auto-retry — Aadhaar Act §8/DPDP Act
+      // require fresh explicit consent per verification action, which an
+      // unattended background job cannot provide. A degraded Aadhaar entry
+      // stays visible as pending and is only cleared by a manual re-verify.
+      const retry = await this.retryFields(params.supabase, params.employee_id, 'aadhaar', status, result.error)
 
       await this.upsert(params.supabase, {
         employee_id:        params.employee_id,
@@ -165,13 +190,8 @@ export class VerificationOrchestrator {
         explanation,
         last_error:         result.error ?? null,
         verified_at:        new Date().toISOString(),
+        ...retry,
       })
-
-      if (status === 'degraded') {
-        verificationRetryService.enqueue(params.tenant_id, params.employee_id, 'aadhaar', result.error ?? 'provider unavailable')
-      } else {
-        verificationRetryService.dequeue(params.tenant_id, params.employee_id, 'aadhaar')
-      }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err)
       console.warn('[VerificationOrchestrator] Aadhaar verify error (silent):', msg)
