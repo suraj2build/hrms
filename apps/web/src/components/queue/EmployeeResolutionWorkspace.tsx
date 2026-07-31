@@ -32,6 +32,7 @@ export interface EmployeeResolutionWorkspaceProps {
   onClose:    () => void
   employeeId: string | null
   queueItem:  OperationalQueueItem | null
+  onSnooze?:  (id: string) => void
 }
 
 type TabId = 'summary' | 'attendance' | 'ot' | 'leave' | 'payroll' | 'actions'
@@ -574,6 +575,7 @@ export function EmployeeResolutionWorkspace({
   onClose,
   employeeId,
   queueItem,
+  onSnooze,
 }: EmployeeResolutionWorkspaceProps) {
   const queryClient = useQueryClient()
   const [activeTab, setActiveTab] = useState<TabId>('summary')
@@ -610,15 +612,11 @@ export function EmployeeResolutionWorkspace({
     onError:    () => toast.error('Failed to reject'),
   })
 
-  const snoozeMutation = useMutation({
-    mutationFn: () => api.post(`/attendance/queue/${queueItem?.id}/snooze`, { hours: 24 }),
-    onSuccess:  () => {
-      toast.success('Snoozed for 24h')
-      queryClient.invalidateQueries({ queryKey: ['operational-queue'] })
-      onClose()
-    },
-    onError:    () => toast.error('Failed to snooze'),
-  })
+  const handleSnooze = () => {
+    if (!queueItem) return
+    onSnooze?.(queueItem.id)
+    onClose()
+  }
 
   const escalateSummaryMutation = useMutation({
     mutationFn: () => api.post(`/attendance/queue/${queueItem?.id}/escalate`, {}),
@@ -661,7 +659,7 @@ export function EmployeeResolutionWorkspace({
                   queueItem={queueItem}
                   onApprove={()       => approveMutation.mutate()}
                   onReject={()        => rejectMutation.mutate()}
-                  onSnooze={()        => snoozeMutation.mutate()}
+                  onSnooze={handleSnooze}
                   onEscalate={()      => escalateSummaryMutation.mutate()}
                   approvePending={approveMutation.isPending}
                   rejectPending={rejectMutation.isPending}

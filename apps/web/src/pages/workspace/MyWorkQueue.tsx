@@ -608,6 +608,7 @@ export function MyWorkQueue() {
           setDrawerItem(null)
           setDrawerEmpId(null)
         }}
+        onSnooze={id => bulkSnooze([id])}
       />
       <ConfirmDialog open={!!cdlg} message={cdlg?.msg ?? ''} title="Confirm" confirmLabel="Confirm" onConfirm={() => { cdlg?.act(); setCdlg(null) }} onCancel={() => setCdlg(null)} />
     </div>

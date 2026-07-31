@@ -9,7 +9,10 @@
  * Routes:
  *   POST /attendance/queue/:id/resolve   — mark anomaly as resolved
  *   POST /attendance/queue/:id/escalate  — mark anomaly as escalated; soft-success for others
- *   POST /attendance/queue/:id/snooze    — lightweight snooze acknowledgement
+ *
+ * Snooze is handled entirely client-side (see useOperationalQueue.ts's
+ * bulkSnooze) — there's no single backing table for "the operations queue"
+ * to persist a snooze against, so no backend endpoint exists for it.
  *
  * Auth pattern: same as anomalies.ts — authenticate via fastify.authenticate,
  * then check req.userRole inline (NOT via a separate preHandler, which can cause
@@ -17,7 +20,6 @@
  */
 
 import type { FastifyInstance } from 'fastify'
-import { z }                    from 'zod'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
@@ -91,25 +93,5 @@ export default async function attendanceQueueActionsRoute(fastify: FastifyInstan
     }
 
     return reply.send({ message: 'Escalated', id, reason: reason ?? null })
-  })
-
-  // ── POST /attendance/queue/:id/snooze ──────────────────────────────────────
-  fastify.post('/attendance/queue/:id/snooze', auth, async (req: any, reply) => {
-    if (!HR_ADMIN_ROLES.includes(req.userRole)) {
-      return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
-    }
-
-    const { id } = req.params as { id: string }
-
-    // Parse hours from body; default 24h — handle null/empty body gracefully
-    const bodySchema = z.object({
-      hours: z.coerce.number().int().min(1).max(168).default(24),
-    })
-    const parsed = bodySchema.safeParse(req.body ?? {})
-    const hours  = parsed.data?.hours ?? 24
-
-    const snoozedUntil = new Date(Date.now() + hours * 3_600_000).toISOString()
-
-    return reply.send({ message: 'Snoozed', id, snoozed_until: snoozedUntil, hours })
   })
 }
