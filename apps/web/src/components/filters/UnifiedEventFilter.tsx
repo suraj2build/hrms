@@ -73,6 +73,16 @@ export function UnifiedEventFilter({
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [localSearch, setLocalSearch] = useState(filters.search ?? '')
 
+  // Always read the latest filters when the debounce timer fires — the
+  // effect below only re-runs on [localSearch], so without this ref its
+  // setTimeout callback would close over whatever `filters` was at the
+  // last keystroke, silently reverting any filter chip clicked within the
+  // 300ms window once the timer fires.
+  const filtersRef = useRef(filters)
+  useEffect(() => {
+    filtersRef.current = filters
+  }, [filters])
+
   // Sync local search when external filters change
   useEffect(() => {
     setLocalSearch(filters.search ?? '')
@@ -82,7 +92,7 @@ export function UnifiedEventFilter({
   useEffect(() => {
     if (searchTimerRef.current) clearTimeout(searchTimerRef.current)
     searchTimerRef.current = setTimeout(() => {
-      onChange({ ...filters, search: localSearch || undefined })
+      onChange({ ...filtersRef.current, search: localSearch || undefined })
     }, 300)
     return () => {
       if (searchTimerRef.current) clearTimeout(searchTimerRef.current)
