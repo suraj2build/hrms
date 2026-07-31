@@ -98,42 +98,28 @@ export class IncidentService {
   /**
    * Link two incidents as related (e.g. same entity, close in time).
    * Non-fatal — errors are swallowed.
+   *
+   * Uses link_related_incidents_atomic() (migration 417, PEND-60) rather than
+   * a read-then-write: two concurrent calls linking different related
+   * incidents onto the same incidentId both used to read the same stale
+   * metadata snapshot, and whichever plain UPDATE landed second silently
+   * overwrote the first caller's addition. The RPC computes the deduplicated
+   * related_incidents array from the row's own current value inside one
+   * UPDATE statement, so there's no window for a concurrent caller to race.
    */
   async linkRelatedIncidents(
     incidentId:        string,
     relatedIncidentId: string,
     tenantId:          string,
   ): Promise<void> {
-    const { data, error: fetchError } = await this.supabase
-      .from('operational_incidents')
-      .select('metadata')
-      .eq('id', incidentId)
-      .eq('tenant_id', tenantId)
-      .single()
+    const { error } = await this.supabase.rpc('link_related_incidents_atomic', {
+      p_tenant_id:           tenantId,
+      p_incident_id:         incidentId,
+      p_related_incident_id: relatedIncidentId,
+    })
 
-    if (fetchError) {
-      console.warn('[IncidentService] failed to fetch incident for linking', { incidentId, error: fetchError.message })
-      return
-    }
-    if (!data) return
-
-    const meta     = (data as any).metadata ?? {}
-    const related: string[] = meta.related_incidents ?? []
-    if (!related.includes(relatedIncidentId)) {
-      related.push(relatedIncidentId)
-    }
-
-    const { error: updateError } = await this.supabase
-      .from('operational_incidents')
-      .update({
-        metadata:   { ...meta, related_incidents: related },
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', incidentId)
-      .eq('tenant_id', tenantId)
-
-    if (updateError) {
-      console.warn('[IncidentService] failed to link related incident', { incidentId, relatedIncidentId, error: updateError.message })
+    if (error) {
+      console.warn('[IncidentService] failed to link related incident', { incidentId, relatedIncidentId, error: error.message })
     }
   }
 
