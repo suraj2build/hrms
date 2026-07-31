@@ -201,7 +201,11 @@ function ruleInvestigateTiming(events: OperationalActivityEvent[]): DecisionInsi
     confidenceLevel:   toConfidenceLevel(confidence),
     title:             `${count} High-Severity Attendance Anomal${count > 1 ? 'ies' : 'y'} Detected`,
     explanation:       `${count} attendance anomal${count > 1 ? 'ies' : 'y'} with high or critical severity require investigation.`,
-    recommendedAction: 'Flag all high-severity anomalies for supervisor review before payroll lock.',
+    // /attendance/anomalies/bulk-resolve only ever fully resolves an anomaly
+    // (attendance_anomalies has no distinct "flagged" sub-state, just a
+    // resolved boolean) — after supervisor review is actually done outside
+    // this flow, use this to mark the batch resolved, not to flag it.
+    recommendedAction: 'Mark all high-severity anomalies resolved once supervisor review is complete.',
     affectedEntities:  entities,
     impactEstimate,
     sourceEventIds:    eventIds,
@@ -209,10 +213,10 @@ function ruleInvestigateTiming(events: OperationalActivityEvent[]): DecisionInsi
     factors,
     explainability,
     status:            'pending',
-    actionLabel:       'Flag for Review',
+    actionLabel:       'Mark Resolved',
     actionType:        'bulk_resolve_anomalies',
     actionEndpoint:    '/attendance/anomalies/bulk-resolve',
-    actionBody:        { ids: eventIds, resolution: 'flagged_for_review' },
+    actionBody:        { ids: eventIds },
   }
 }
 
@@ -478,7 +482,9 @@ function ruleOtThresholdWarning(events: OperationalActivityEvent[]): DecisionIns
     confidenceLevel:   toConfidenceLevel(confidence),
     title:             `${count} Overtime Spike${count > 1 ? 's' : ''} Exceed Threshold`,
     explanation:       `${count} employee${count > 1 ? 's have' : ' has'} open overtime spike flags that may breach statutory or policy OT limits.`,
-    recommendedAction: 'Review all flagged OT spikes and adjust schedules or approvals to stay within permitted limits.',
+    // Same reasoning as ruleInvestigateTiming above — bulk-resolve has no
+    // distinct "under review" sub-state, so this marks resolved after review.
+    recommendedAction: 'Mark all flagged OT spikes resolved once schedules/approvals are adjusted within permitted limits.',
     affectedEntities:  entities,
     impactEstimate,
     sourceEventIds:    eventIds,
@@ -486,10 +492,10 @@ function ruleOtThresholdWarning(events: OperationalActivityEvent[]): DecisionIns
     factors,
     explainability,
     status:            'pending',
-    actionLabel:       'Review OT',
+    actionLabel:       'Mark Resolved',
     actionType:        'bulk_resolve_anomalies',
     actionEndpoint:    '/attendance/anomalies/bulk-resolve',
-    actionBody:        { ids: eventIds, resolution: 'ot_review' },
+    actionBody:        { ids: eventIds },
   }
 }
 
