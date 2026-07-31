@@ -16,6 +16,23 @@ import { brandConfig } from './brand-config.js'
 
 const RESEND_ENDPOINT = 'https://api.resend.com/emails'
 
+// Every template below interpolates fields sourced from an authenticated
+// HR-admin/recruiter-created row (candidate/employee names, reasons,
+// messages) into raw HTML template literals with no escaping — any account
+// able to create that row could inject arbitrary markup (phishing links,
+// tracking pixels, layout-breaking content) into emails sent to other
+// internal recipients (panellists, buddies, the IT/HR roster). Escaped at
+// every interpolation site below; brandConfig values are operator-config,
+// not user input, and are left as-is.
+function escapeHtml(input: string): string {
+  return input
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
+
 export const APP_PUBLIC_URL =
   process.env.APP_PUBLIC_URL ?? 'https://hrms-web-alpha.vercel.app'
 
@@ -104,24 +121,27 @@ export function preJoineeInviteEmail(opts: {
   joiningDate:   string
   inviteUrl:     string
 }): { subject: string; html: string } {
-  const firstName = opts.candidateName.split(' ')[0] || 'there'
+  const firstName    = escapeHtml(opts.candidateName.split(' ')[0] || 'there')
+  const companyName  = escapeHtml(opts.companyName)
+  const joiningDate  = opts.joiningDate ? escapeHtml(opts.joiningDate) : ''
+  const inviteUrl    = escapeHtml(opts.inviteUrl)
   const subject = `Welcome to ${opts.companyName} — complete your onboarding`
   const { primary, teal } = brandConfig.colors
   const html = shell(`
     <h1 style="font-size:22px;color:#0f172a;margin:0 0 12px;">Welcome aboard, ${firstName}! 🎉</h1>
     <p style="color:#475569;font-size:15px;line-height:1.6;margin:0 0 16px;">
-      We're excited to have you join <strong>${opts.companyName}</strong>${opts.joiningDate ? ` on <strong>${opts.joiningDate}</strong>` : ''}.
+      We're excited to have you join <strong>${companyName}</strong>${joiningDate ? ` on <strong>${joiningDate}</strong>` : ''}.
       To get a head start, please complete your pre-onboarding details — it only takes a few minutes.
     </p>
     <div style="text-align:center;margin:28px 0;">
-      <a href="${opts.inviteUrl}"
+      <a href="${inviteUrl}"
          style="display:inline-block;background:linear-gradient(135deg,${primary} 0%,${teal} 100%);color:#ffffff;text-decoration:none;font-weight:600;font-size:15px;padding:13px 32px;border-radius:999px;letter-spacing:0.02em;">
         Complete My Details
       </a>
     </div>
     <p style="color:#94a3b8;font-size:13px;line-height:1.5;margin:16px 0 0;">
       Or paste this link into your browser:<br>
-      <a href="${opts.inviteUrl}" style="color:${teal};word-break:break-all;">${opts.inviteUrl}</a>
+      <a href="${inviteUrl}" style="color:${teal};word-break:break-all;">${inviteUrl}</a>
     </p>
     <p style="color:#cbd5e1;font-size:12px;margin-top:20px;">This link is private to you and expires in 30 days.</p>
   `)
@@ -137,33 +157,36 @@ export function preJoineeReuploadEmail(opts: {
   items:         { document_type: string; reason: string }[]
   message?:      string | null
 }): { subject: string; html: string } {
-  const firstName = opts.candidateName.split(' ')[0] || 'there'
+  const firstName   = escapeHtml(opts.candidateName.split(' ')[0] || 'there')
+  const companyName = escapeHtml(opts.companyName)
+  const inviteUrl   = escapeHtml(opts.inviteUrl)
+  const message     = opts.message ? escapeHtml(opts.message) : ''
   const subject = `Action needed — please update your onboarding documents`
   const { primary, teal } = brandConfig.colors
   const rows = opts.items.map(i => `
     <li style="margin:0 0 8px;color:#475569;font-size:14px;line-height:1.5;">
-      <strong style="color:#0f172a;text-transform:capitalize;">${i.document_type.replace(/_/g, ' ')}</strong> — ${i.reason}
+      <strong style="color:#0f172a;text-transform:capitalize;">${escapeHtml(i.document_type.replace(/_/g, ' '))}</strong> — ${escapeHtml(i.reason)}
     </li>`).join('')
   const html = shell(`
     <h1 style="font-size:22px;color:#0f172a;margin:0 0 12px;">Hi ${firstName}, a quick update is needed</h1>
     <p style="color:#475569;font-size:15px;line-height:1.6;margin:0 0 16px;">
-      Thanks for submitting your details to <strong>${opts.companyName}</strong>. Our team reviewed them and
+      Thanks for submitting your details to <strong>${companyName}</strong>. Our team reviewed them and
       needs you to re-upload the following document${opts.items.length !== 1 ? 's' : ''}:
     </p>
     <ul style="margin:0 0 16px;padding-left:20px;">${rows}</ul>
-    ${opts.message ? `<p style="color:#475569;font-size:14px;line-height:1.6;margin:0 0 16px;"><em>${opts.message}</em></p>` : ''}
+    ${message ? `<p style="color:#475569;font-size:14px;line-height:1.6;margin:0 0 16px;"><em>${message}</em></p>` : ''}
     <p style="color:#475569;font-size:15px;line-height:1.6;margin:0 0 16px;">
       Your details are saved — just open the link, update what's flagged, and resubmit.
     </p>
     <div style="text-align:center;margin:28px 0;">
-      <a href="${opts.inviteUrl}"
+      <a href="${inviteUrl}"
          style="display:inline-block;background:linear-gradient(135deg,${primary} 0%,${teal} 100%);color:#ffffff;text-decoration:none;font-weight:600;font-size:15px;padding:13px 32px;border-radius:999px;letter-spacing:0.02em;">
         Update My Documents
       </a>
     </div>
     <p style="color:#94a3b8;font-size:13px;line-height:1.5;margin:16px 0 0;">
       Or paste this link into your browser:<br>
-      <a href="${opts.inviteUrl}" style="color:${teal};word-break:break-all;">${opts.inviteUrl}</a>
+      <a href="${inviteUrl}" style="color:${teal};word-break:break-all;">${inviteUrl}</a>
     </p>
   `)
   return { subject, html }
@@ -183,29 +206,37 @@ export function joiningWelcomeEmail(opts: {
   loginUrl:         string
 }): { subject: string; html: string } {
   const { primary, teal } = brandConfig.colors
-  const firstName = opts.firstName || 'there'
+  const firstName      = escapeHtml(opts.firstName || 'there')
+  const companyName    = escapeHtml(opts.companyName)
+  const employeeCode   = escapeHtml(opts.employeeCode)
+  const joiningDate    = opts.joiningDate    ? escapeHtml(opts.joiningDate)    : ''
+  const managerName    = opts.managerName    ? escapeHtml(opts.managerName)   : ''
+  const managerEmail   = opts.managerEmail   ? escapeHtml(opts.managerEmail)  : ''
+  const workstation    = opts.workstation    ? escapeHtml(opts.workstation)   : ''
+  const officeLocation = opts.officeLocation ? escapeHtml(opts.officeLocation) : ''
+  const loginUrl       = escapeHtml(opts.loginUrl)
   const subject = `Welcome to ${opts.companyName} — your account is ready`
 
   const infoRows: string[] = []
   infoRows.push(`<tr>
     <td style="padding:9px 12px;background:#f8fafc;border:1px solid #e2e8f0;font-weight:600;font-size:13px;width:40%;color:#374151;">Employee ID</td>
-    <td style="padding:9px 12px;border:1px solid #e2e8f0;font-size:13px;color:#0f172a;font-weight:700;">${opts.employeeCode}</td>
+    <td style="padding:9px 12px;border:1px solid #e2e8f0;font-size:13px;color:#0f172a;font-weight:700;">${employeeCode}</td>
   </tr>`)
-  if (opts.joiningDate) infoRows.push(`<tr>
+  if (joiningDate) infoRows.push(`<tr>
     <td style="padding:9px 12px;background:#f8fafc;border:1px solid #e2e8f0;font-weight:600;font-size:13px;color:#374151;">Joining Date</td>
-    <td style="padding:9px 12px;border:1px solid #e2e8f0;font-size:13px;color:#0f172a;">${opts.joiningDate}</td>
+    <td style="padding:9px 12px;border:1px solid #e2e8f0;font-size:13px;color:#0f172a;">${joiningDate}</td>
   </tr>`)
-  if (opts.managerName) infoRows.push(`<tr>
+  if (managerName) infoRows.push(`<tr>
     <td style="padding:9px 12px;background:#f8fafc;border:1px solid #e2e8f0;font-weight:600;font-size:13px;color:#374151;">Reporting Manager</td>
-    <td style="padding:9px 12px;border:1px solid #e2e8f0;font-size:13px;color:#0f172a;">${opts.managerName}${opts.managerEmail ? ` &mdash; <a href="mailto:${opts.managerEmail}" style="color:${primary};">${opts.managerEmail}</a>` : ''}</td>
+    <td style="padding:9px 12px;border:1px solid #e2e8f0;font-size:13px;color:#0f172a;">${managerName}${managerEmail ? ` &mdash; <a href="mailto:${managerEmail}" style="color:${primary};">${managerEmail}</a>` : ''}</td>
   </tr>`)
-  if (opts.workstation) infoRows.push(`<tr>
+  if (workstation) infoRows.push(`<tr>
     <td style="padding:9px 12px;background:#f8fafc;border:1px solid #e2e8f0;font-weight:600;font-size:13px;color:#374151;">Workstation</td>
-    <td style="padding:9px 12px;border:1px solid #e2e8f0;font-size:13px;color:#0f172a;">${opts.workstation}</td>
+    <td style="padding:9px 12px;border:1px solid #e2e8f0;font-size:13px;color:#0f172a;">${workstation}</td>
   </tr>`)
-  if (opts.officeLocation) infoRows.push(`<tr>
+  if (officeLocation) infoRows.push(`<tr>
     <td style="padding:9px 12px;background:#f8fafc;border:1px solid #e2e8f0;font-weight:600;font-size:13px;color:#374151;">Office Location</td>
-    <td style="padding:9px 12px;border:1px solid #e2e8f0;font-size:13px;color:#0f172a;">${opts.officeLocation}</td>
+    <td style="padding:9px 12px;border:1px solid #e2e8f0;font-size:13px;color:#0f172a;">${officeLocation}</td>
   </tr>`)
 
   const html = shell(`
@@ -214,7 +245,7 @@ export function joiningWelcomeEmail(opts: {
     </div>
     <h1 style="font-size:22px;color:#0f172a;margin:0 0 10px;text-align:center;">Hi ${firstName}, you're all set! 🎉</h1>
     <p style="color:#475569;font-size:15px;line-height:1.6;margin:0 0 24px;text-align:center;">
-      Your joining at <strong>${opts.companyName}</strong> has been confirmed. Here are your Day 1 details:
+      Your joining at <strong>${companyName}</strong> has been confirmed. Here are your Day 1 details:
     </p>
     <table style="width:100%;border-collapse:collapse;margin:0 0 24px;border-radius:8px;overflow:hidden;">
       ${infoRows.join('')}
@@ -224,7 +255,7 @@ export function joiningWelcomeEmail(opts: {
       check your schedule, and complete your onboarding checklist.
     </p>
     <div style="text-align:center;margin:24px 0;">
-      <a href="${opts.loginUrl}"
+      <a href="${loginUrl}"
          style="display:inline-block;background:linear-gradient(135deg,${primary} 0%,${teal} 100%);color:#ffffff;text-decoration:none;font-weight:700;font-size:15px;padding:14px 36px;border-radius:999px;letter-spacing:0.02em;">
         Open My Workspace
       </a>
@@ -246,23 +277,26 @@ export function applicationReceivedEmail(opts: {
   portalUrl?:    string
 }): { subject: string; html: string } {
   const { teal } = brandConfig.colors
-  const firstName = opts.candidateName.split(' ')[0] || 'there'
+  const firstName   = escapeHtml(opts.candidateName.split(' ')[0] || 'there')
+  const jobTitle    = escapeHtml(opts.jobTitle)
+  const companyName = escapeHtml(opts.companyName)
+  const portalUrl   = opts.portalUrl ? escapeHtml(opts.portalUrl) : ''
   const subject = `Application received — ${opts.jobTitle} at ${opts.companyName}`
-  const portalBlock = opts.portalUrl ? `
+  const portalBlock = portalUrl ? `
     <div style="text-align:center;margin:24px 0;">
-      <a href="${opts.portalUrl}"
+      <a href="${portalUrl}"
          style="display:inline-block;background:linear-gradient(135deg,#2E6FE6 0%,${teal} 100%);color:#ffffff;text-decoration:none;font-weight:600;font-size:14px;padding:11px 28px;border-radius:999px;">
         Track Your Application
       </a>
     </div>
     <p style="color:#94a3b8;font-size:12px;text-align:center;margin:0 0 16px;">
-      Or visit: <a href="${opts.portalUrl}" style="color:${teal};word-break:break-all;">${opts.portalUrl}</a>
+      Or visit: <a href="${portalUrl}" style="color:${teal};word-break:break-all;">${portalUrl}</a>
     </p>` : ''
   const html = shell(`
     <h1 style="font-size:22px;color:#0f172a;margin:0 0 12px;">Application Received</h1>
     <p style="color:#475569;font-size:15px;line-height:1.6;margin:0 0 16px;">
-      Hi ${firstName}, thank you for applying for <strong>${opts.jobTitle}</strong> at
-      <strong>${opts.companyName}</strong>. We've received your application and our team
+      Hi ${firstName}, thank you for applying for <strong>${jobTitle}</strong> at
+      <strong>${companyName}</strong>. We've received your application and our team
       will review it shortly.
     </p>
     <p style="color:#475569;font-size:15px;line-height:1.6;margin:0 0 4px;">
@@ -282,7 +316,9 @@ export function applicationShortlistedEmail(opts: {
   companyName:   string
 }): { subject: string; html: string } {
   const { teal } = brandConfig.colors
-  const firstName = opts.candidateName.split(' ')[0] || 'there'
+  const firstName   = escapeHtml(opts.candidateName.split(' ')[0] || 'there')
+  const jobTitle    = escapeHtml(opts.jobTitle)
+  const companyName = escapeHtml(opts.companyName)
   const subject = `You've been shortlisted — ${opts.jobTitle} at ${opts.companyName}`
   const html = shell(`
     <div style="text-align:center;margin-bottom:20px;">
@@ -290,8 +326,8 @@ export function applicationShortlistedEmail(opts: {
     </div>
     <h1 style="font-size:22px;color:#0f172a;margin:0 0 12px;text-align:center;">Great news, ${firstName}!</h1>
     <p style="color:#475569;font-size:15px;line-height:1.6;margin:0 0 16px;text-align:center;">
-      You've been shortlisted for <strong>${opts.jobTitle}</strong> at
-      <strong>${opts.companyName}</strong>.
+      You've been shortlisted for <strong>${jobTitle}</strong> at
+      <strong>${companyName}</strong>.
     </p>
     <p style="color:#475569;font-size:15px;line-height:1.6;margin:0 0 16px;">
       Our team has reviewed your profile and would like to move forward. Someone from our
@@ -317,13 +353,16 @@ export function interviewScheduledEmail(opts: {
   tenantTz?:     string
 }): { subject: string; html: string } {
   const { primary, teal } = brandConfig.colors
-  const firstName = opts.candidateName.split(' ')[0] || 'there'
+  const firstName = escapeHtml(opts.candidateName.split(' ')[0] || 'there')
+  const jobTitle    = escapeHtml(opts.jobTitle)
+  const companyName = escapeHtml(opts.companyName)
+  const meetLink     = opts.meetLink ? escapeHtml(opts.meetLink) : ''
   const typeLabel: Record<string, string> = {
     video: 'Video Call', phone: 'Phone Call',
     in_person: 'In-Person', assignment: 'Assignment',
   }
-  const displayType = typeLabel[opts.interviewType] ?? opts.interviewType
-  const roundLabel  = opts.roundTitle || `Round ${opts.roundNumber}`
+  const displayType = escapeHtml(typeLabel[opts.interviewType] ?? opts.interviewType)
+  const roundLabel  = escapeHtml(opts.roundTitle || `Round ${opts.roundNumber}`)
 
   let dateBlock = ''
   if (opts.scheduledAt) {
@@ -345,7 +384,7 @@ export function interviewScheduledEmail(opts: {
     </div>
     <h1 style="font-size:22px;color:#0f172a;margin:0 0 12px;text-align:center;">Hi ${firstName}, you have an interview!</h1>
     <p style="color:#475569;font-size:15px;line-height:1.6;margin:0 0 20px;text-align:center;">
-      Your interview for <strong>${opts.jobTitle}</strong> at <strong>${opts.companyName}</strong> has been scheduled.
+      Your interview for <strong>${jobTitle}</strong> at <strong>${companyName}</strong> has been scheduled.
     </p>
     <table style="width:100%;border-collapse:collapse;margin:0 0 20px;font-size:14px;">
       <tr>
@@ -361,9 +400,9 @@ export function interviewScheduledEmail(opts: {
         <td style="padding:8px 12px;background:#f8fafc;border:1px solid #e2e8f0;font-weight:600;">Duration</td>
         <td style="padding:8px 12px;border:1px solid #e2e8f0;">${opts.durationMins} minutes</td>
       </tr>
-      ${opts.meetLink ? `<tr>
+      ${meetLink ? `<tr>
         <td style="padding:8px 12px;background:#f8fafc;border:1px solid #e2e8f0;font-weight:600;">Meeting Link</td>
-        <td style="padding:8px 12px;border:1px solid #e2e8f0;"><a href="${opts.meetLink}" style="color:${teal};word-break:break-all;">${opts.meetLink}</a></td>
+        <td style="padding:8px 12px;border:1px solid #e2e8f0;"><a href="${meetLink}" style="color:${teal};word-break:break-all;">${meetLink}</a></td>
       </tr>` : ''}
     </table>
     <p style="color:#475569;font-size:14px;line-height:1.6;margin:0 0 8px;">
@@ -390,12 +429,16 @@ export function panelInterviewNotificationEmail(opts: {
   tenantTz?:     string
 }): { subject: string; html: string } {
   const { primary, teal } = brandConfig.colors
+  const panelName    = escapeHtml(opts.panelName)
+  const candidateName = escapeHtml(opts.candidateName)
+  const jobTitle      = escapeHtml(opts.jobTitle)
+  const meetLink      = opts.meetLink ? escapeHtml(opts.meetLink) : ''
   const typeLabel: Record<string, string> = {
     video: 'Video Call', phone: 'Phone Call',
     in_person: 'In-Person', assignment: 'Assignment',
   }
-  const displayType = typeLabel[opts.interviewType] ?? opts.interviewType
-  const roundLabel  = opts.roundTitle || `Round ${opts.roundNumber}`
+  const displayType = escapeHtml(typeLabel[opts.interviewType] ?? opts.interviewType)
+  const roundLabel  = escapeHtml(opts.roundTitle || `Round ${opts.roundNumber}`)
 
   let dateBlock = ''
   if (opts.scheduledAt) {
@@ -415,10 +458,10 @@ export function panelInterviewNotificationEmail(opts: {
     <div style="text-align:center;margin-bottom:20px;">
       <span style="display:inline-block;background:${primary};color:#fff;font-weight:700;font-size:13px;padding:5px 14px;border-radius:999px;letter-spacing:0.5px;">PANEL NOTIFICATION</span>
     </div>
-    <h1 style="font-size:20px;color:#0f172a;margin:0 0 12px;">Hi ${opts.panelName},</h1>
+    <h1 style="font-size:20px;color:#0f172a;margin:0 0 12px;">Hi ${panelName},</h1>
     <p style="color:#475569;font-size:15px;line-height:1.6;margin:0 0 20px;">
-      You've been assigned to interview <strong>${opts.candidateName}</strong> for the
-      <strong>${opts.jobTitle}</strong> role.
+      You've been assigned to interview <strong>${candidateName}</strong> for the
+      <strong>${jobTitle}</strong> role.
     </p>
     <table style="width:100%;border-collapse:collapse;margin:0 0 20px;font-size:14px;">
       <tr>
@@ -434,9 +477,9 @@ export function panelInterviewNotificationEmail(opts: {
         <td style="padding:8px 12px;background:#f8fafc;border:1px solid #e2e8f0;font-weight:600;">Duration</td>
         <td style="padding:8px 12px;border:1px solid #e2e8f0;">${opts.durationMins} minutes</td>
       </tr>
-      ${opts.meetLink ? `<tr>
+      ${meetLink ? `<tr>
         <td style="padding:8px 12px;background:#f8fafc;border:1px solid #e2e8f0;font-weight:600;">Meeting Link</td>
-        <td style="padding:8px 12px;border:1px solid #e2e8f0;"><a href="${opts.meetLink}" style="color:${teal};word-break:break-all;">${opts.meetLink}</a></td>
+        <td style="padding:8px 12px;border:1px solid #e2e8f0;"><a href="${meetLink}" style="color:${teal};word-break:break-all;">${meetLink}</a></td>
       </tr>` : ''}
     </table>
     <p style="color:#94a3b8;font-size:13px;margin-top:24px;">
@@ -452,7 +495,9 @@ export function offerExtendedEmail(opts: {
   companyName:   string
 }): { subject: string; html: string } {
   const { teal } = brandConfig.colors
-  const firstName = opts.candidateName.split(' ')[0] || 'there'
+  const firstName   = escapeHtml(opts.candidateName.split(' ')[0] || 'there')
+  const jobTitle    = escapeHtml(opts.jobTitle)
+  const companyName = escapeHtml(opts.companyName)
   const subject = `Offer from ${opts.companyName} — ${opts.jobTitle}`
   const html = shell(`
     <div style="text-align:center;margin-bottom:20px;">
@@ -460,8 +505,8 @@ export function offerExtendedEmail(opts: {
     </div>
     <h1 style="font-size:22px;color:#0f172a;margin:0 0 12px;text-align:center;">Congratulations, ${firstName}! 🎉</h1>
     <p style="color:#475569;font-size:15px;line-height:1.6;margin:0 0 16px;text-align:center;">
-      We are delighted to extend an offer for the <strong>${opts.jobTitle}</strong> position
-      at <strong>${opts.companyName}</strong>.
+      We are delighted to extend an offer for the <strong>${jobTitle}</strong> position
+      at <strong>${companyName}</strong>.
     </p>
     <p style="color:#475569;font-size:15px;line-height:1.6;margin:0 0 16px;">
       Our HR team will reach out to you shortly with the full offer letter and details.
@@ -479,13 +524,15 @@ export function applicationRejectedEmail(opts: {
   jobTitle:      string
   companyName:   string
 }): { subject: string; html: string } {
-  const firstName = opts.candidateName.split(' ')[0] || 'there'
+  const firstName   = escapeHtml(opts.candidateName.split(' ')[0] || 'there')
+  const jobTitle    = escapeHtml(opts.jobTitle)
+  const companyName = escapeHtml(opts.companyName)
   const subject = `Update on your application — ${opts.jobTitle} at ${opts.companyName}`
   const html = shell(`
     <h1 style="font-size:22px;color:#0f172a;margin:0 0 12px;">Hi ${firstName},</h1>
     <p style="color:#475569;font-size:15px;line-height:1.6;margin:0 0 16px;">
-      Thank you for taking the time to apply for <strong>${opts.jobTitle}</strong> at
-      <strong>${opts.companyName}</strong> and for the interest you've shown in joining our team.
+      Thank you for taking the time to apply for <strong>${jobTitle}</strong> at
+      <strong>${companyName}</strong> and for the interest you've shown in joining our team.
     </p>
     <p style="color:#475569;font-size:15px;line-height:1.6;margin:0 0 16px;">
       After careful consideration, we've decided to move forward with other candidates whose
@@ -511,25 +558,30 @@ export function itProvisioningEmail(opts: {
   hrSystemUrl:  string
 }): { subject: string; html: string } {
   const { primary } = brandConfig.colors
+  const employeeName = escapeHtml(opts.employeeName)
+  const employeeCode = escapeHtml(opts.employeeCode)
+  const companyName  = escapeHtml(opts.companyName)
+  const joiningDate  = opts.joiningDate ? escapeHtml(opts.joiningDate) : ''
+  const hrSystemUrl  = escapeHtml(opts.hrSystemUrl)
   const subject = `IT Setup Required — ${opts.employeeName} joining${opts.joiningDate ? ` on ${opts.joiningDate}` : ''}`
   const html = shell(`
     <h1 style="font-size:20px;color:#0f172a;margin:0 0 12px;">New Joiner IT Provisioning</h1>
     <p style="color:#475569;font-size:14px;line-height:1.6;margin:0 0 16px;">
-      A new employee has been confirmed in ${opts.companyName}. Please complete IT provisioning before their joining date.
+      A new employee has been confirmed in ${companyName}. Please complete IT provisioning before their joining date.
     </p>
     <table style="width:100%;border-collapse:collapse;margin:0 0 20px;font-size:13px;">
       <tr>
         <td style="padding:8px 12px;background:#f8fafc;border:1px solid #e2e8f0;font-weight:600;width:40%;">Employee</td>
-        <td style="padding:8px 12px;border:1px solid #e2e8f0;">${opts.employeeName}</td>
+        <td style="padding:8px 12px;border:1px solid #e2e8f0;">${employeeName}</td>
       </tr>
       <tr>
         <td style="padding:8px 12px;background:#f8fafc;border:1px solid #e2e8f0;font-weight:600;">Employee Code</td>
-        <td style="padding:8px 12px;border:1px solid #e2e8f0;">${opts.employeeCode}</td>
+        <td style="padding:8px 12px;border:1px solid #e2e8f0;">${employeeCode}</td>
       </tr>
-      ${opts.joiningDate ? `
+      ${joiningDate ? `
       <tr>
         <td style="padding:8px 12px;background:#f8fafc;border:1px solid #e2e8f0;font-weight:600;">Joining Date</td>
-        <td style="padding:8px 12px;border:1px solid #e2e8f0;">${opts.joiningDate}</td>
+        <td style="padding:8px 12px;border:1px solid #e2e8f0;">${joiningDate}</td>
       </tr>` : ''}
     </table>
     <p style="color:#475569;font-size:13px;font-weight:600;margin:0 0 8px;">Standard Provisioning Checklist:</p>
@@ -541,7 +593,7 @@ export function itProvisioningEmail(opts: {
       <li>Configure VPN and security credentials</li>
     </ul>
     <div style="text-align:center;margin:20px 0;">
-      <a href="${opts.hrSystemUrl}"
+      <a href="${hrSystemUrl}"
          style="display:inline-block;background:${primary};color:#ffffff;text-decoration:none;font-weight:600;font-size:14px;padding:11px 28px;border-radius:999px;">
         View in HR System
       </a>
@@ -564,8 +616,13 @@ export function buddyAssignmentEmail(opts: {
   hrSystemUrl:     string
 }): { subject: string; html: string } {
   const { primary, teal } = brandConfig.colors
-  const buddyFirst  = opts.buddyName.split(' ')[0] || opts.buddyName
-  const joinerFirst = opts.newJoinerName.split(' ')[0] || opts.newJoinerName
+  const buddyFirst    = escapeHtml(opts.buddyName.split(' ')[0] || opts.buddyName)
+  const joinerFirst   = escapeHtml(opts.newJoinerName.split(' ')[0] || opts.newJoinerName)
+  const newJoinerName = escapeHtml(opts.newJoinerName)
+  const newJoinerRole = opts.newJoinerRole ? escapeHtml(opts.newJoinerRole) : ''
+  const companyName   = escapeHtml(opts.companyName)
+  const joiningDate   = opts.joiningDate ? escapeHtml(opts.joiningDate) : ''
+  const hrSystemUrl   = escapeHtml(opts.hrSystemUrl)
   const subject = `You've been assigned as buddy — ${opts.newJoinerName} is joining${opts.joiningDate ? ` on ${opts.joiningDate}` : ''}`
   const html = shell(`
     <div style="text-align:center;margin-bottom:20px;">
@@ -573,8 +630,8 @@ export function buddyAssignmentEmail(opts: {
     </div>
     <h1 style="font-size:21px;color:#0f172a;margin:0 0 10px;">Hi ${buddyFirst}, meet your new buddy! 👋</h1>
     <p style="color:#475569;font-size:15px;line-height:1.6;margin:0 0 20px;">
-      You've been selected as the onboarding buddy for <strong>${opts.newJoinerName}</strong>${opts.newJoinerRole ? `, joining as <strong>${opts.newJoinerRole}</strong>` : ''} at
-      <strong>${opts.companyName}</strong>${opts.joiningDate ? ` on <strong>${opts.joiningDate}</strong>` : ''}.
+      You've been selected as the onboarding buddy for <strong>${newJoinerName}</strong>${newJoinerRole ? `, joining as <strong>${newJoinerRole}</strong>` : ''} at
+      <strong>${companyName}</strong>${joiningDate ? ` on <strong>${joiningDate}</strong>` : ''}.
     </p>
     <div style="background:#f0fdf8;border-radius:10px;padding:16px 20px;margin:0 0 20px;border-left:4px solid ${teal};">
       <p style="margin:0 0 8px;font-size:13px;font-weight:700;color:#0f172a;">Your role as buddy:</p>
@@ -586,13 +643,13 @@ export function buddyAssignmentEmail(opts: {
       </ul>
     </div>
     <div style="text-align:center;margin:24px 0;">
-      <a href="${opts.hrSystemUrl}"
+      <a href="${hrSystemUrl}"
          style="display:inline-block;background:linear-gradient(135deg,${primary} 0%,${teal} 100%);color:#ffffff;text-decoration:none;font-weight:700;font-size:14px;padding:12px 28px;border-radius:999px;">
         View in HR System
       </a>
     </div>
     <p style="color:#94a3b8;font-size:12px;margin-top:16px;text-align:center;">
-      Thank you for helping ${joinerFirst} feel welcome at ${opts.companyName}!
+      Thank you for helping ${joinerFirst} feel welcome at ${companyName}!
     </p>
   `)
   return { subject, html }
@@ -612,22 +669,25 @@ export function digestEmail(opts: {
   appUrl?:      string
 }): { subject: string; html: string } {
   const { primary, teal } = brandConfig.colors
-  const freq = FREQ_LABEL[opts.frequency] ?? 'Workforce'
+  const freq        = FREQ_LABEL[opts.frequency] ?? 'Workforce'
+  const periodLabel = escapeHtml(opts.periodLabel)
+  const summaryText = escapeHtml(opts.summaryText)
+  const companyName = opts.companyName ? escapeHtml(opts.companyName) : ''
   const subject = `${freq} workforce digest — ${opts.periodLabel}`
-  const ctaUrl = `${opts.appUrl ?? APP_PUBLIC_URL}/admin/insights`
+  const ctaUrl = escapeHtml(`${opts.appUrl ?? APP_PUBLIC_URL}/admin/insights`)
 
   const metricRows = Object.entries(opts.metrics)
     .map(([k, v]) => `
       <tr>
-        <td style="padding:8px 0;color:#475569;font-size:14px;border-bottom:1px solid #f1f5f9;">${k.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}</td>
+        <td style="padding:8px 0;color:#475569;font-size:14px;border-bottom:1px solid #f1f5f9;">${escapeHtml(k.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()))}</td>
         <td style="padding:8px 0;color:#0f172a;font-size:14px;font-weight:600;text-align:right;border-bottom:1px solid #f1f5f9;">${v}</td>
       </tr>`)
     .join('')
 
   const html = shell(`
     <div style="font-size:11px;letter-spacing:0.08em;text-transform:uppercase;color:${teal};font-weight:600;margin:0 0 6px;">${freq} Digest</div>
-    <h1 style="font-size:21px;color:#0f172a;margin:0 0 12px;">${opts.periodLabel}</h1>
-    <p style="color:#475569;font-size:15px;line-height:1.6;margin:0 0 18px;">${opts.summaryText}</p>
+    <h1 style="font-size:21px;color:#0f172a;margin:0 0 12px;">${periodLabel}</h1>
+    <p style="color:#475569;font-size:15px;line-height:1.6;margin:0 0 18px;">${summaryText}</p>
     <table style="width:100%;border-collapse:collapse;margin:0 0 22px;">${metricRows}</table>
     <div style="text-align:center;margin:26px 0;">
       <a href="${ctaUrl}"
@@ -636,7 +696,7 @@ export function digestEmail(opts: {
       </a>
     </div>
     <p style="color:#94a3b8;font-size:12px;line-height:1.5;margin:18px 0 0;">
-      You're receiving this because digest delivery is enabled for your account${opts.companyName ? ` at ${opts.companyName}` : ''}.
+      You're receiving this because digest delivery is enabled for your account${companyName ? ` at ${companyName}` : ''}.
       Manage your preferences in Settings → Notifications.
     </p>
   `)
