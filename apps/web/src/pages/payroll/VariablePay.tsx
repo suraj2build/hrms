@@ -35,8 +35,9 @@ interface IncentiveTemplate {
   id:                  string
   name:                string
   code:                string
-  calculation_basis:   string
-  payout_frequency:    string
+  template_type:       string
+  is_taxable:          boolean
+  requires_approval:   boolean
   is_active:           boolean
 }
 
@@ -76,8 +77,13 @@ const BATCH_BADGE: Record<string, 'secondary' | 'outline' | 'success' | 'warning
   cancelled:  'secondary',
 }
 
-const CALC_BASIS   = ['fixed', 'performance_linked', 'revenue_pct', 'attendance_linked']
-const PAY_FREQ     = ['monthly', 'quarterly', 'annually', 'on_target']
+// Must match incentive_templates.template_type's CHECK constraint exactly
+// (supabase/migrations/102_variable_pay.sql) — mirrors the same list the
+// backend's zod schema enforces (routes/payroll/variable-pay.ts).
+const TEMPLATE_TYPES = [
+  'performance', 'sales', 'referral', 'spot_award', 'project',
+  'quarterly', 'annual', 'festival', 'retention', 'other',
+]
 
 const fmt = (n: number) =>
   new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(n)
@@ -292,23 +298,27 @@ function PayoutsDialog({
 
 // ── Add Template Dialog ────────────────────────────────────────────────────────
 
+const DEFAULT_TEMPLATE_FORM = {
+  name:               '',
+  code:               '',
+  template_type:      'other',
+  is_taxable:         true,
+  requires_approval:  true,
+}
+
 function AddTemplateDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   const qc = useQueryClient()
-  const [form, setForm] = useState({
-    name:               '',
-    code:               '',
-    calculation_basis:  'fixed',
-    payout_frequency:   'monthly',
-  })
+  const [form, setForm] = useState(DEFAULT_TEMPLATE_FORM)
 
   const set = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }))
+  const setBool = (k: 'is_taxable' | 'requires_approval', v: boolean) => setForm(f => ({ ...f, [k]: v }))
 
   const mutation = useMutation({
     mutationFn: () => api.post('/payroll/variable-pay/templates', form),
     onSuccess:  () => {
       qc.invalidateQueries({ queryKey: ['vp-templates'] })
       onClose()
-      setForm({ name: '', code: '', calculation_basis: 'fixed', payout_frequency: 'monthly' })
+      setForm(DEFAULT_TEMPLATE_FORM)
     },
     onError: (e: Error) => {
       toast.error('Failed to create template', { description: e.message })
@@ -331,24 +341,34 @@ function AddTemplateDialog({ open, onClose }: { open: boolean; onClose: () => vo
             <Input value={form.code} onChange={e => set('code', e.target.value)} placeholder="e.g. SALES_INC" />
           </div>
           <div className="space-y-1">
-            <label className="text-sm font-medium text-foreground">Calculation Basis</label>
+            <label className="text-sm font-medium text-foreground">Template Type</label>
             <select
-              value={form.calculation_basis}
-              onChange={e => set('calculation_basis', e.target.value)}
+              value={form.template_type}
+              onChange={e => set('template_type', e.target.value)}
               className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground"
             >
-              {CALC_BASIS.map(b => <option key={b} value={b}>{labelify(b)}</option>)}
+              {TEMPLATE_TYPES.map(t => <option key={t} value={t}>{labelify(t)}</option>)}
             </select>
           </div>
-          <div className="space-y-1">
-            <label className="text-sm font-medium text-foreground">Payout Frequency</label>
-            <select
-              value={form.payout_frequency}
-              onChange={e => set('payout_frequency', e.target.value)}
-              className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground"
-            >
-              {PAY_FREQ.map(f => <option key={f} value={f}>{labelify(f)}</option>)}
-            </select>
+          <div className="flex items-center gap-2 pt-1">
+            <input
+              id="tpl-taxable"
+              type="checkbox"
+              checked={form.is_taxable}
+              onChange={e => setBool('is_taxable', e.target.checked)}
+              className="h-4 w-4 rounded border-border"
+            />
+            <label htmlFor="tpl-taxable" className="text-sm font-medium text-foreground">Taxable</label>
+          </div>
+          <div className="flex items-center gap-2">
+            <input
+              id="tpl-approval"
+              type="checkbox"
+              checked={form.requires_approval}
+              onChange={e => setBool('requires_approval', e.target.checked)}
+              className="h-4 w-4 rounded border-border"
+            />
+            <label htmlFor="tpl-approval" className="text-sm font-medium text-foreground">Requires Approval</label>
           </div>
           <div className="flex justify-end gap-2 pt-2">
             <Button variant="outline" onClick={onClose}>Cancel</Button>
@@ -498,8 +518,8 @@ export function VariablePay() {
                   <tr className="border-b border-border text-muted-foreground">
                     <th className="text-left py-3 px-4 font-medium">Name</th>
                     <th className="text-left py-3 px-4 font-medium">Code</th>
-                    <th className="text-left py-3 px-4 font-medium">Basis</th>
-                    <th className="text-left py-3 px-4 font-medium">Frequency</th>
+                    <th className="text-left py-3 px-4 font-medium">Type</th>
+                    <th className="text-left py-3 px-4 font-medium">Taxable</th>
                     <th className="text-left py-3 px-4 font-medium">Status</th>
                   </tr>
                 </thead>
@@ -508,8 +528,8 @@ export function VariablePay() {
                     <tr key={t.id} className="border-b border-border hover:bg-muted/40 transition-colors">
                       <td className="py-3 px-4 font-medium text-foreground">{t.name}</td>
                       <td className="py-3 px-4 text-muted-foreground font-mono text-xs">{t.code}</td>
-                      <td className="py-3 px-4 text-foreground">{labelify(t.calculation_basis)}</td>
-                      <td className="py-3 px-4 text-foreground">{labelify(t.payout_frequency)}</td>
+                      <td className="py-3 px-4 text-foreground">{labelify(t.template_type)}</td>
+                      <td className="py-3 px-4 text-foreground">{t.is_taxable ? 'Yes' : 'No'}</td>
                       <td className="py-3 px-4">
                         <Badge variant={t.is_active ? 'success' : 'secondary'}>
                           {t.is_active ? 'Active' : 'Inactive'}
