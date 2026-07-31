@@ -68,10 +68,8 @@ function fmtDatetime(iso: string): string {
   return `${String(d.getDate()).padStart(2,'0')}-${M[d.getMonth()]}-${d.getFullYear()} ${hr}:${mn}`
 }
 
-function currentPeriod(): string {
-  const now = new Date()
-  const q = Math.ceil((now.getMonth() + 1) / 3)
-  return `${now.getFullYear()}-Q${q}`
+function todayStr(): string {
+  return new Date().toISOString().slice(0, 10)
 }
 
 type RiskLevel = 'low' | 'medium' | 'high' | 'critical'
@@ -112,30 +110,36 @@ export function AttendanceRisk() {
   const { profile } = useAuthStore()
   const isAdmin = ['super_admin', 'hr_admin'].includes(profile?.role ?? '')
 
-  const [period, setPeriod]         = useState(currentPeriod)
-  const [loadedPeriod, setLoadedPeriod] = useState(currentPeriod)
-  const [computeError, setComputeError] = useState('')
+  // GET /attendance/risk and /summary filter on a single as-of date
+  // (period_end); POST /compute has no date concept at all — it always
+  // scores a trailing period_days window ending today. These are two
+  // separate backend inputs, not one shared "period" — matching them to
+  // distinct controls instead of a single free-text quarter string.
+  const [asOfDate,       setAsOfDate]       = useState(todayStr)
+  const [loadedAsOfDate, setLoadedAsOfDate] = useState(todayStr)
+  const [lookbackDays,   setLookbackDays]   = useState(90)
+  const [computeError,   setComputeError]   = useState('')
 
   // ── Queries ────────────────────────────────────────────────────────────────
 
   const { data: listData, isLoading: listLoading, refetch: refetchList } = useQuery<{ data: RiskProfile[] }>({
-    queryKey: ['risk-list', loadedPeriod],
-    queryFn:  () => api.get(`/attendance/risk?period_end=${loadedPeriod}&limit=50`),
+    queryKey: ['risk-list', loadedAsOfDate],
+    queryFn:  () => api.get(`/attendance/risk?period_end=${loadedAsOfDate}&limit=50`),
     enabled:  isAdmin,
     staleTime: 60_000,
     placeholderData: keepPreviousData,
   })
 
   const { data: summary, refetch: refetchSummary } = useQuery<RiskSummary>({
-    queryKey: ['risk-summary', loadedPeriod],
-    queryFn:  () => api.get(`/attendance/risk/summary?period_end=${loadedPeriod}`),
+    queryKey: ['risk-summary', loadedAsOfDate],
+    queryFn:  () => api.get(`/attendance/risk/summary?period_end=${loadedAsOfDate}`),
     enabled:  isAdmin,
     staleTime: 60_000,
   })
 
   // ── Mutations ──────────────────────────────────────────────────────────────
 
-  const computeMut = useMutation<{ computed: number }, Error, { employee_ids: string[]; period: string }>({
+  const computeMut = useMutation<{ computed: number }, Error, { employee_ids: string[]; period_days: number }>({
     mutationFn: (body) => api.post('/attendance/risk/compute', body),
     onSuccess: (data) => {
       setComputeError('')
@@ -150,12 +154,12 @@ export function AttendanceRisk() {
   })
 
   function handleLoad() {
-    setLoadedPeriod(period)
+    setLoadedAsOfDate(asOfDate)
   }
 
   function handleCompute() {
     setComputeError('')
-    computeMut.mutate({ employee_ids: [], period: loadedPeriod })
+    computeMut.mutate({ employee_ids: [], period_days: lookbackDays })
   }
 
   // ── Access guard ───────────────────────────────────────────────────────────
@@ -266,17 +270,28 @@ export function AttendanceRisk() {
       <SectionCard>
         <div className="flex flex-wrap items-end gap-3">
           <div className="space-y-1">
-            <label className="text-xs font-medium text-muted-foreground">Period</label>
+            <label className="text-xs font-medium text-muted-foreground">As Of Date</label>
             <Input
-              placeholder="e.g. 2025-Q2"
-              value={period}
-              onChange={e => setPeriod(e.target.value)}
+              type="date"
+              value={asOfDate}
+              onChange={e => setAsOfDate(e.target.value)}
               className="h-8 text-xs w-36"
             />
           </div>
           <Button size="sm" className="h-8 text-xs" onClick={handleLoad}>
             Load
           </Button>
+          <div className="space-y-1">
+            <label className="text-xs font-medium text-muted-foreground">Recompute Lookback (days)</label>
+            <Input
+              type="number"
+              min={7}
+              max={365}
+              value={lookbackDays}
+              onChange={e => setLookbackDays(Math.max(7, Math.min(365, Number(e.target.value))))}
+              className="h-8 text-xs w-28"
+            />
+          </div>
           {computeError && (
             <p className="text-xs text-destructive flex items-center gap-1">
               <AlertTriangle className="h-3.5 w-3.5" />
@@ -293,7 +308,7 @@ export function AttendanceRisk() {
 
       {/* Risk profiles table */}
       <SectionCard
-        title={`Risk Profiles — ${loadedPeriod}${profiles.length ? ` (${profiles.length})` : ''}`}
+        title={`Risk Profiles — as of ${loadedAsOfDate}${profiles.length ? ` (${profiles.length})` : ''}`}
         icon={<ShieldAlert className="h-4 w-4 text-muted-foreground" />}
       >
         {listLoading ? (
@@ -304,7 +319,7 @@ export function AttendanceRisk() {
         ) : profiles.length === 0 ? (
           <div className="flex flex-col items-center gap-2 py-14 text-muted-foreground">
             <ShieldAlert className="h-8 w-8 opacity-30" />
-            <p className="text-sm">No risk profiles found for {loadedPeriod}.</p>
+            <p className="text-sm">No risk profiles found as of {loadedAsOfDate}.</p>
             <p className="text-xs opacity-70">Try running Recompute or loading a different period.</p>
           </div>
         ) : (
