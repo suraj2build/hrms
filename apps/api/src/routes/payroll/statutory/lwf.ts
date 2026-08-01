@@ -90,6 +90,15 @@ export default async function lwfRoutes(fastify: FastifyInstance) {
   fastify.put('/states/:stateCode', { preHandler: [fastify.authenticate, requireHrAdmin] }, async (req: any, reply) => {
     const { stateCode } = req.params as { stateCode: string }
 
+    // A comma-separated list of 1-12 month numbers — same shape parseDeductionMonths()
+    // (lwf-engine.ts) expects to split/parse; validated here so a malformed value
+    // (empty after filtering, non-numeric) can't silently fall through to that
+    // function's own "not configured" fallback later.
+    const deductionMonthsSchema = z.string().refine(s => {
+      const months = s.split(',').map(x => parseInt(x.trim(), 10)).filter(n => n >= 1 && n <= 12)
+      return months.length > 0
+    }, { message: 'deduction_months must be a comma-separated list of month numbers (1-12)' })
+
     const schema = z.object({
       enabled:             z.boolean().optional(),
       state_name:          z.string().optional(),
@@ -97,12 +106,36 @@ export default async function lwfRoutes(fastify: FastifyInstance) {
       employer_amount:     z.number().min(0).optional(),
       wage_ceiling:        z.number().nullable().optional(),
       frequency:           z.enum(['monthly','half_yearly','annual']).optional(),
-      deduction_months:    z.string().nullable().optional(),
+      deduction_months:    deductionMonthsSchema.nullable().optional(),
       registration_number: z.string().nullable().optional(),
     })
 
     const parsed = schema.safeParse(req.body)
     if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+
+    // Fetch the existing row up front — needed both to preserve `enabled` when
+    // omitted, and to determine the EFFECTIVE frequency/deduction_months this
+    // update would result in (a partial PUT that only sends `frequency` must
+    // still be checked against whatever deduction_months already exists).
+    const { data: existing, error: existingErr } = await fastify.supabase
+      .from('lwf_state_settings').select('enabled, frequency, deduction_months')
+      .eq('tenant_id', req.tenantId).eq('state_code', stateCode).maybeSingle()
+    if (existingErr) return serverError(req, reply, existingErr, ErrorCode.QUERY_FAILED, 'Failed to fetch existing LWF state settings')
+
+    const effectiveFrequency = parsed.data.frequency ?? existing?.frequency ?? 'monthly'
+    const effectiveDeductionMonths = parsed.data.deduction_months !== undefined
+      ? parsed.data.deduction_months
+      : existing?.deduction_months ?? null
+    // A non-monthly frequency with no configured deduction_months previously
+    // fell through to parseDeductionMonths()'s hardcoded [6,12]/[12] guess —
+    // real half-yearly LWF cycles aren't all June/December. Require the admin
+    // to configure the actual cycle instead of silently relying on a guess.
+    if (effectiveFrequency !== 'monthly' && !effectiveDeductionMonths) {
+      return reply.code(400).send({
+        error:   'VALIDATION_ERROR',
+        message: `deduction_months is required when frequency is '${effectiveFrequency}' — specify the actual months this state's LWF is deducted in (e.g. "6,12")`,
+      })
+    }
 
     const upsertPayload: Record<string, any> = {
       tenant_id:  req.tenantId,
@@ -119,9 +152,6 @@ export default async function lwfRoutes(fastify: FastifyInstance) {
     if (parsed.data.registration_number !== undefined) upsertPayload.registration_number = parsed.data.registration_number
 
     if (upsertPayload.enabled === undefined) {
-      const { data: existing } = await fastify.supabase
-        .from('lwf_state_settings').select('enabled')
-        .eq('tenant_id', req.tenantId).eq('state_code', stateCode).maybeSingle()
       upsertPayload.enabled = existing?.enabled ?? true
     }
 
