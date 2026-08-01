@@ -123,6 +123,24 @@ export default async function managerTeamLifecycleRoute(fastify: FastifyInstance
     const confirmationDue     = probationItems.filter(i => i.bucket !== 'overdue')
     const overdueIds = new Set(confirmationOverdue.map(i => i.employee_id))
     const dueIds     = new Set(confirmationDue.map(i => i.employee_id))
+
+    // Which of these already have an open (unactioned) confirmation-recommendation
+    // inbox item, so the UI can show "Recommended" instead of a re-clickable
+    // button — mirrors the same dedup check the POST endpoint enforces.
+    const confirmationIds = [...overdueIds, ...dueIds]
+    let recommendedIds = new Set<string>()
+    if (confirmationIds.length) {
+      const { data: openRecs, error: recErr } = await fastify.supabase
+        .from('inbox_items')
+        .select('entity_id')
+        .eq('tenant_id', req.tenantId)
+        .eq('entity_type', 'employees')
+        .in('entity_id', confirmationIds)
+        .in('status', ['unread', 'read', 'snoozed'])
+        .contains('metadata', { kind: 'confirmation_recommendation' })
+      if (recErr) return serverError(req, reply, recErr, ErrorCode.QUERY_FAILED, 'Failed to fetch confirmation recommendations')
+      recommendedIds = new Set((openRecs ?? []).map((r: any) => r.entity_id))
+    }
     const onProbation = [...onProbationIds].map(id => ({
       employee_id: id,
       name:        nameOf.get(id) ?? id.slice(0, 8),
@@ -251,8 +269,8 @@ export default async function managerTeamLifecycleRoute(fastify: FastifyInstance
       team_size: reports.length,
       probation: {
         on_probation:         onProbation,
-        confirmation_due:     confirmationDue.map(toConfirmationRow),
-        confirmation_overdue: confirmationOverdue.map(toConfirmationRow),
+        confirmation_due:     confirmationDue.map(i => toConfirmationRow(i, recommendedIds)),
+        confirmation_overdue: confirmationOverdue.map(i => toConfirmationRow(i, recommendedIds)),
       },
       new_joiners: newJoiners,
       expiry: { items: expiryItems, summary: expirySummary },
@@ -290,6 +308,23 @@ export default async function managerTeamLifecycleRoute(fastify: FastifyInstance
 
     const name = `${(emp as any).first_name ?? ''} ${(emp as any).last_name ?? ''}`.trim() || (emp as any).employee_code
 
+    // Dedup: don't re-notify HR while a prior recommendation for this employee
+    // is still open (unactioned) — repeated clicks previously fired a fresh
+    // notification to every HR admin every time with no server-side guard.
+    const { data: existingRec, error: existingRecErr } = await fastify.supabase
+      .from('inbox_items')
+      .select('id')
+      .eq('tenant_id', req.tenantId)
+      .eq('entity_type', 'employees')
+      .eq('entity_id', parsed.data.employee_id)
+      .in('status', ['unread', 'read', 'snoozed'])
+      .contains('metadata', { kind: 'confirmation_recommendation' })
+      .limit(1)
+    if (existingRecErr) return serverError(req, reply, existingRecErr, ErrorCode.QUERY_FAILED, 'Failed to check existing confirmation recommendations')
+    if (existingRec && existingRec.length > 0) {
+      return reply.send({ ok: true, employee_id: parsed.data.employee_id, already_recommended: true })
+    }
+
     // Reuse the existing inbox/notification system — no new workflow.
     await notifyHrAdmins(fastify.supabase, {
       tenantId:     req.tenantId,
@@ -313,7 +348,7 @@ export default async function managerTeamLifecycleRoute(fastify: FastifyInstance
 
 // ── helpers ────────────────────────────────────────────────────────────────────
 
-function toConfirmationRow(i: LifecycleRiskItem) {
+function toConfirmationRow(i: LifecycleRiskItem, recommendedIds: Set<string>) {
   return {
     employee_id:   i.employee_id,
     name:          i.employee_name,
@@ -322,6 +357,7 @@ function toConfirmationRow(i: LifecycleRiskItem) {
     days_to_due:   i.days_to_due,
     bucket:        i.bucket,
     severity:      i.severity,
+    recommended:   recommendedIds.has(i.employee_id),
   }
 }
 

@@ -31,7 +31,7 @@ import { cn }            from '@/lib/utils'
 interface ProbationRow {
   employee_id: string; name: string; employee_code: string | null
   joining_date?: string | null; due_date?: string; days_to_due?: number
-  bucket?: string; confirmation_state?: string
+  bucket?: string; confirmation_state?: string; recommended?: boolean
 }
 interface NewJoiner {
   employee_id: string; name: string; employee_code: string | null; joining_date: string
@@ -95,12 +95,19 @@ export function ManagerTeamLifecycle() {
 
   const invalidate = () => qc.invalidateQueries({ queryKey: ['manager-team-lifecycle'] })
 
-  // Confirmation recommendation
+  // Confirmation recommendation — the backend dedups against any still-open
+  // (unactioned) recommendation for the same employee, so a repeat click can't
+  // spam HR with duplicate inbox notifications.
   const recommendMut = useMutation({
     mutationFn: (employeeId: string) =>
-      api.post('/manager/team/lifecycle/confirmation-recommend', { employee_id: employeeId }),
-    onSuccess: () => toast.success('Confirmation recommended — sent to HR for review'),
-    onError:   (e: unknown) => toast.error(e instanceof Error ? e.message : 'Failed to send recommendation'),
+      api.post<{ ok: boolean; already_recommended?: boolean }>('/manager/team/lifecycle/confirmation-recommend', { employee_id: employeeId }),
+    onSuccess: (res) => {
+      toast.success(res.already_recommended
+        ? 'Already recommended — HR has not actioned it yet'
+        : 'Confirmation recommended — sent to HR for review')
+      invalidate()
+    },
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : 'Failed to send recommendation'),
   })
 
   // Manager clearance action (reuses existing separation-clearances endpoint)
@@ -184,11 +191,17 @@ export function ManagerTeamLifecycle() {
                   <div className="flex items-center gap-2 shrink-0">
                     {r.confirmation_state === 'overdue' && <Badge variant="destructive" className="text-[9px]">Overdue</Badge>}
                     {r.confirmation_state === 'due'      && <Badge variant="warning" className="text-[9px]">Due</Badge>}
-                    <Button size="sm" variant="outline" className="h-7 text-xs"
-                      disabled={recommendMut.isPending}
-                      onClick={() => recommendMut.mutate(r.employee_id)}>
-                      <Send className="mr-1 h-3 w-3" /> Recommend
-                    </Button>
+                    {r.recommended ? (
+                      <Badge variant="secondary" className="text-[9px] gap-1">
+                        <Check className="h-2.5 w-2.5" /> Recommended
+                      </Badge>
+                    ) : (
+                      <Button size="sm" variant="outline" className="h-7 text-xs"
+                        disabled={recommendMut.isPending && recommendMut.variables === r.employee_id}
+                        onClick={() => recommendMut.mutate(r.employee_id)}>
+                        <Send className="mr-1 h-3 w-3" /> Recommend
+                      </Button>
+                    )}
                   </div>
                 </div>
               ))}
