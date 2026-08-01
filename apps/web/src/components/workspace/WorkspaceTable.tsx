@@ -322,6 +322,15 @@ export function WorkspaceTable<T extends { id: string }>({
   const showFrom = (effectivePage - 1) * pageSize + 1
   const showTo = Math.min(effectivePage * pageSize, effectiveTotal)
 
+  // If the dataset shrinks (external filter, prop update — not just this
+  // component's own search box, which already resets to page 1) below the
+  // current page's start index, clamp back to the last valid page instead of
+  // stranding the user on an empty "No data" view with real rows on page 1.
+  useEffect(() => {
+    if (isServerPaginated) return
+    setLocalPage((p) => Math.min(p, Math.max(1, totalPages)))
+  }, [isServerPaginated, totalPages])
+
   const goToPage = useCallback(
     (p: number) => {
       if (isServerPaginated) onPageChange?.(p)
