@@ -6,7 +6,6 @@
 import { randomUUID }            from 'crypto'
 import type { SupabaseClient }   from '@supabase/supabase-js'
 import type { OrchestrationActivity, OrchestrationWorkflowType, OrchestrationStep } from '../types/fabric-types.js'
-import { slaService }            from '../../operations/sla/sla.service.js'
 import { explainabilityService } from '../../ai/services/explainability.service.js'
 
 export class WorkflowOrchestrationService {
@@ -97,8 +96,19 @@ export class WorkflowOrchestrationService {
 
   /**
    * Coordinate an approval escalation workflow (advisory only).
-   * Tracks SLA, logs orchestration, generates explainability.
-   * Does NOT alter the approval itself.
+   * Logs orchestration, generates explainability. Does NOT alter the approval
+   * itself.
+   *
+   * Deliberately does NOT call slaService.track(): the 'approval-pending' SLA
+   * is only ever resolved by the leave-approval listener
+   * (operational-intelligence-listener.ts), keyed on a leave request's
+   * entity_id — an escalation's entity_id is essentially never that, so a
+   * tracked entry here could never be honestly resolved and would sit
+   * permanently "breached" after 48h, inflating every SLA dashboard
+   * (enterprise queue/health, GET /operations/sla) on every call to this
+   * method. Resolution is instead tracked via this activity's own
+   * steps/status (see GET /fabric/orchestration), which the caller can
+   * actually observe and complete.
    */
   async coordinateEscalation(supabase: SupabaseClient, params: {
     tenant_id:       string
@@ -107,9 +117,6 @@ export class WorkflowOrchestrationService {
     reason:       string
     escalate_to?: string    // optional actor target description
   }): Promise<string> {
-    // Start SLA tracking for the escalation
-    slaService.track('approval-pending', params.entity_id, params.entity_type, params.tenant_id)
-
     return this.startOrchestration(supabase, {
       tenant_id:        params.tenant_id,
       workflow_type: 'escalation_chain',
