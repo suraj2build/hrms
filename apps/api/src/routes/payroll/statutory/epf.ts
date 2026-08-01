@@ -62,6 +62,11 @@ export default async function epfRoutes(fastify: FastifyInstance) {
       include_hra_in_pf_wages:    z.boolean().optional(),
       pf_account_number:          z.string().optional(),
       establishment_code:         z.string().optional(),
+      // When true, EPF only applies to employees whose tenant/site has an
+      // active statutory_registrations row (statutory_type=epf) — see
+      // migration 419. Defaults to false (unset) so existing tenants are
+      // unaffected until they deliberately opt in.
+      enforce_registration:       z.boolean().optional(),
       effective_from:             z.string(),
     })
 

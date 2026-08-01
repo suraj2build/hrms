@@ -43,6 +43,7 @@ interface EPFConfig {
   wage_ceiling: number
   is_wage_ceiling_applicable: boolean
   allow_voluntary_pf: boolean
+  enforce_registration?: boolean
   pf_account_number: string | null
   establishment_code: string | null
   effective_from: string
@@ -198,6 +199,7 @@ function EditConfigDialog({ config, onClose }: { config: EPFConfig; onClose: () 
     wage_ceiling:               config.wage_ceiling,
     is_wage_ceiling_applicable: config.is_wage_ceiling_applicable,
     allow_voluntary_pf:         config.allow_voluntary_pf,
+    enforce_registration:       config.enforce_registration ?? false,
   })
   const [error, setError] = useState('')
 
@@ -249,6 +251,25 @@ function EditConfigDialog({ config, onClose }: { config: EPFConfig; onClose: () 
               <span className={cn(
                 'inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform',
                 form.is_wage_ceiling_applicable ? 'translate-x-4' : 'translate-x-1',
+              )} />
+            </button>
+          </div>
+          <div className="flex items-center justify-between p-3 rounded-md bg-muted/30 border border-border">
+            <div>
+              <span className="text-sm font-medium">Require Registration</span>
+              <p className="text-[11px] text-muted-foreground">EPF only applies to employees whose site has a registration on file (below)</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setForm(f => ({ ...f, enforce_registration: !f.enforce_registration }))}
+              className={cn(
+                'relative inline-flex h-5 w-9 items-center rounded-full transition-colors shrink-0',
+                form.enforce_registration ? 'bg-primary' : 'bg-muted-foreground/30',
+              )}
+            >
+              <span className={cn(
+                'inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform',
+                form.enforce_registration ? 'translate-x-4' : 'translate-x-1',
               )} />
             </button>
           </div>

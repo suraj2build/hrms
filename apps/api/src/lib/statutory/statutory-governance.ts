@@ -419,6 +419,18 @@ export async function resolveEmployeeStatutoryParams(
 
   ptaxApplicability.registration = registrations.ptax
 
+  // Registration-enforcement gate (migration 419 / PEND-23): opt-in per scheme,
+  // defaults to false so existing tenants' payroll is unaffected until they
+  // deliberately turn it on once their statutory_registrations row is on file.
+  // Only ever narrows isApplicable (never overrides an existing exemption to
+  // "applicable") — an employee already exempt stays exempt either way.
+  if (epfRow?.enforce_registration) {
+    epfApplicability.isApplicable = epfApplicability.isApplicable && !!registrations.epf
+  }
+  if (esiRow?.enforce_registration) {
+    esiApplicability.isApplicable = esiApplicability.isApplicable && !!registrations.esi
+  }
+
   // ── LWF resolution ────────────────────────────────────────────────────────────
   // LWF state: LWF override → PT override → site (mirror of the PT resolution).
   const lwfState = lwfManual ?? ptManual ?? stateCode

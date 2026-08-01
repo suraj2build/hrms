@@ -47,6 +47,11 @@ export default async function esiRoutes(fastify: FastifyInstance) {
       employee_contribution_pct: z.number().optional(),
       employer_contribution_pct: z.number().optional(),
       wage_ceiling:              z.number().optional(),
+      // When true, ESI only applies to employees whose tenant/site has an
+      // active statutory_registrations row (statutory_type=esi) — see
+      // migration 419. Defaults to false (unset) so existing tenants are
+      // unaffected until they deliberately opt in.
+      enforce_registration:      z.boolean().optional(),
       effective_from:            z.string(),
     })
 
