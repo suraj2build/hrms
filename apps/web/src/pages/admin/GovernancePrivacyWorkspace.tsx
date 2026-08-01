@@ -160,7 +160,7 @@ export function GovernancePrivacyWorkspace() {
   const [erasureModal, setErasureModal] = useState(false)
   const [erasureForm, setErasureForm] = useState({ subject_email: '', subject_name: '', request_source: 'hr_admin', notes: '' })
   const [updateModal, setUpdateModal] = useState<ErasureRequest | null>(null)
-  const [updateForm, setUpdateForm] = useState({ status: '', notes: '' })
+  const [updateForm, setUpdateForm] = useState({ status: '', notes: '', rejection_reason: '' })
   const [evalCompliant, setEvalCompliant] = useState('all')
   const [evalSeverity,  setEvalSeverity]  = useState('all')
   const [retentionBy,   setRetentionBy]   = useState('all')
@@ -242,8 +242,9 @@ export function GovernancePrivacyWorkspace() {
   const updateErasureMutation = useMutation({
     mutationFn: (id: string) =>
       api.patch(`/governance/privacy/erasure-requests/${id}`, {
-        status: updateForm.status,
-        notes:  updateForm.notes || null,
+        status:           updateForm.status,
+        notes:            updateForm.notes || null,
+        rejection_reason: updateForm.status === 'rejected' ? (updateForm.rejection_reason || null) : undefined,
       }),
     onSuccess: () => {
       toast.success('Request updated')
@@ -562,11 +563,17 @@ export function GovernancePrivacyWorkspace() {
                           )}
                           {r.completed_at && <span>Completed {format(new Date(r.completed_at), 'dd MMM yyyy')}</span>}
                         </div>
+                        {r.status === 'rejected' && r.rejection_reason && (
+                          <p className="mt-1 text-xs text-destructive">Rejection reason: {r.rejection_reason}</p>
+                        )}
+                        {r.notes && (
+                          <p className="mt-0.5 text-xs text-muted-foreground">Notes: {r.notes}</p>
+                        )}
                       </div>
                       {['pending','in_progress','on_hold'].includes(r.status) && (
                         <Button
                           size="sm" variant="outline"
-                          onClick={() => { setUpdateModal(r); setUpdateForm({ status: '', notes: '' }) }}
+                          onClick={() => { setUpdateModal(r); setUpdateForm({ status: '', notes: '', rejection_reason: '' }) }}
                         >
                           Update
                         </Button>
@@ -792,6 +799,17 @@ export function GovernancePrivacyWorkspace() {
                   </SelectContent>
                 </Select>
               </div>
+              {updateForm.status === 'rejected' && (
+                <div>
+                  <Label>Rejection Reason</Label>
+                  <Input
+                    className="mt-1"
+                    placeholder="Structured justification for the audit trail (e.g. legal hold, retention requirement)"
+                    value={updateForm.rejection_reason}
+                    onChange={e => setUpdateForm(f => ({ ...f, rejection_reason: e.target.value }))}
+                  />
+                </div>
+              )}
               <div>
                 <Label>Notes</Label>
                 <Input className="mt-1" value={updateForm.notes} onChange={e => setUpdateForm(f => ({ ...f, notes: e.target.value }))} />
@@ -801,7 +819,7 @@ export function GovernancePrivacyWorkspace() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setUpdateModal(null)}>Cancel</Button>
             <Button
-              disabled={!updateForm.status || updateErasureMutation.isPending}
+              disabled={!updateForm.status || (updateForm.status === 'rejected' && !updateForm.rejection_reason.trim()) || updateErasureMutation.isPending}
               onClick={() => updateModal && updateErasureMutation.mutate(updateModal.id)}
             >
               {updateErasureMutation.isPending ? 'Updating...' : 'Update'}
