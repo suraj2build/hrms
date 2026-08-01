@@ -132,6 +132,22 @@ export default async function compensationRevisionsRoutes(fastify: FastifyInstan
       .single()
 
     if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create compensation revision')
+
+    // PEND-94: governance rule 'compensation.revision-frequency' needs this
+    // count to fire — non-rejected revisions (including the one just
+    // created) for this employee in the trailing 12 months. Fire-and-forget
+    // like the publish below; a count-query failure must never block the
+    // (already-committed) revision creation itself.
+    const twelveMonthsAgo = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString()
+    const { count: revisionsIn12m } = await fastify.supabase
+      .from('compensation_revisions')
+      .select('id', { count: 'exact', head: true })
+      .eq('tenant_id', req.tenantId)
+      .eq('employee_id', parsed.data.employee_id)
+      .neq('status', 'rejected')
+      .gte('created_at', twelveMonthsAgo)
+      .then(res => ({ count: res.error ? null : res.count }))
+
     // Fire-and-forget — never await, never blocks
     fastify.eventPublisher.publish({
       event_type:  EventType.COMPENSATION_REVISION_CREATED,
@@ -141,7 +157,12 @@ export default async function compensationRevisionsRoutes(fastify: FastifyInstan
       tenant_id:      req.tenantId,
       actor_id:    req.userId,
       actor_type:  'user',
-      payload:     { employee_id: parsed.data.employee_id, new_ctc_annual: parsed.data.new_ctc_annual, revision_type: parsed.data.revision_type },
+      payload:     {
+        employee_id:     parsed.data.employee_id,
+        new_ctc_annual:  parsed.data.new_ctc_annual,
+        revision_type:   parsed.data.revision_type,
+        revisions_in_12m: revisionsIn12m ?? undefined,
+      },
       correlation_id: req.correlationId ?? undefined,
     })
     const responseBody = { data }
@@ -379,6 +400,17 @@ export default async function compensationRevisionsRoutes(fastify: FastifyInstan
       newData:     { status: 'approved', new_ctc_annual: rev.new_ctc_annual, effective_date: rev.effective_date },
     })
 
+    // PEND-94: derived here (not read from rev.delta_pct, which is typically
+    // null for revisions created via this file's own POST / — see comment
+    // below) so both the governance-rule payload and the eventBus payload
+    // get a real value. Feeds 'payroll.pf-eligibility-mismatch' and
+    // 'compensation.spike-detection' (both listen for delta_pct on
+    // COMPENSATION_REVISION_APPROVED) plus drift-detection's
+    // policy_inconsistency signal.
+    const deltaPct = previousCtcAnnual > 0
+      ? ((Number(rev.new_ctc_annual) - previousCtcAnnual) / previousCtcAnnual) * 100
+      : null
+
     // Fire-and-forget — never await, never blocks
     fastify.eventPublisher.publish({
       event_type:  EventType.COMPENSATION_REVISION_APPROVED,
@@ -388,7 +420,7 @@ export default async function compensationRevisionsRoutes(fastify: FastifyInstan
       tenant_id:      req.tenantId,
       actor_id:    req.userId,
       actor_type:  'user',
-      payload:     { employee_id: rev.employee_id, new_ctc_annual: rev.new_ctc_annual, effective_date: rev.effective_date },
+      payload:     { employee_id: rev.employee_id, new_ctc_annual: rev.new_ctc_annual, effective_date: rev.effective_date, delta_pct: deltaPct },
       correlation_id: req.correlationId ?? undefined,
     })
 
@@ -398,8 +430,7 @@ export default async function compensationRevisionsRoutes(fastify: FastifyInstan
     // revisions admin page + manager submission flow there), but only the
     // latter emitted on eventBus — meaning approvals made through here never
     // reached event-bus-automation.ts's employee-notification handler or the
-    // webhook allow-list. rev.delta_pct is typically null for revisions
-    // created via this file's own POST / (which doesn't populate it).
+    // webhook allow-list.
     eventBus.emit({
       type:          'compensation.revised',
       tenantId:      req.tenantId,
@@ -412,7 +443,7 @@ export default async function compensationRevisionsRoutes(fastify: FastifyInstan
         effectiveDate:   rev.effective_date,
         beforeCtcAnnual: previousCtcAnnual > 0 ? previousCtcAnnual : null,
         afterCtcAnnual:  Number(rev.new_ctc_annual),
-        deltaPct:        rev.delta_pct != null ? Number(rev.delta_pct) : null,
+        deltaPct,
         approvedBy:      req.userId,
       },
     })

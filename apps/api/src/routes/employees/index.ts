@@ -369,7 +369,12 @@ export default async function employeeRoutes(fastify: FastifyInstance) {
       tenant_id:      request.tenantId,
       actor_id:    (request as any).userId,
       actor_type:  'user',
-      payload:     { employee_code: (data as any).employee_code, employment_type: (parsed.data as any).employment_type ?? null },
+      // phone: TrustGovernanceListener's has_phone check (PEND-94) reads this
+      // field; pan_number/account_number/ifsc_code aren't collected at
+      // creation time (moved to employee_bank_statutory by migration 016,
+      // written later via PUT /:id/bank-statutory), so has_pan/has_bank stay
+      // unset here.
+      payload:     { employee_code: (data as any).employee_code, employment_type: (parsed.data as any).employment_type ?? null, phone: (parsed.data as any).phone ?? null },
       correlation_id: (request as any).correlationId ?? undefined,
     })
     return reply.code(201).send(data)
