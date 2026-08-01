@@ -4,6 +4,7 @@ import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { serverError, notFound, validationError, ErrorCode } from '../../lib/api-errors.js'
 import { fetchTenantTz } from '../../lib/attendance-engine.js'
 import { getLocalDate } from '../../lib/org-context.js'
+import { EventType, MODULE } from '../../platform/events/index.js'
 
 // Resolve "today" in the tenant's own timezone, not the server's (UTC) clock —
 // mirrors the same fix applied to tds.ts / it-statement.ts / org-context.ts.
@@ -223,6 +224,27 @@ export default async function bankStatutoryRoutes(fastify: FastifyInstance) {
       .select()
       .single()
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to save bank and statutory information')
+
+    // Fire-and-forget — never await, never blocks. PAN/bank data doesn't exist
+    // yet at EMPLOYEE_CREATED time (see employees/index.ts's comment) — this is
+    // the actual write point, so TrustGovernanceListener's has_pan/has_bank
+    // checks (PEND-94) need the fields from here instead.
+    fastify.eventPublisher.publish({
+      event_type:  EventType.EMPLOYEE_UPDATED,
+      module:      MODULE.EMPLOYEE,
+      entity_type: 'employee',
+      entity_id:   req.params.id,
+      tenant_id:      req.tenantId,
+      actor_id:    req.userId,
+      actor_type:  'user',
+      payload: {
+        pan_number:     (data as any).pan_number ?? null,
+        account_number: (data as any).account_number ?? null,
+        ifsc_code:      (data as any).ifsc_code ?? null,
+      },
+      correlation_id: req.correlationId ?? undefined,
+    })
+
     return reply.send(data)
   })
 }

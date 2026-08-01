@@ -2845,6 +2845,19 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       newData:     { status: 'finalized', month: run.month, snapshot_id: snapshotId ?? null },
     })
 
+    // PEND-94: payroll.excessive-override's `override_count` — canonical source
+    // is payroll_finalize_overrides (this run's force-finalize audit rows), each
+    // row's missing_employee_count being the number of employees whose pay was
+    // finalized on an attendance override for this run.
+    const { data: overrideRows } = await fastify.supabase
+      .from('payroll_finalize_overrides')
+      .select('missing_employee_count')
+      .eq('tenant_id', tenantId)
+      .eq('run_id', id)
+    const overrideCount = (overrideRows ?? []).reduce(
+      (sum: number, r: any) => sum + (r.missing_employee_count ?? 0), 0,
+    )
+
     // Fire-and-forget — never await, never blocks
     fastify.eventPublisher.publish({
       event_type:  EventType.PAYROLL_RUN_FINALIZED,
@@ -2854,7 +2867,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       tenant_id:      req.tenantId,
       actor_id:    req.userId,
       actor_type:  'user',
-      payload:     { month: run.month, total_employees: (run as any).total_employees ?? 0 },
+      payload:     { month: run.month, total_employees: (run as any).total_employees ?? 0, override_count: overrideCount },
       correlation_id: req.correlationId ?? undefined,
     })
 

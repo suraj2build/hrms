@@ -165,7 +165,7 @@ export interface LeaveApprovalOpts {
 export async function approveLeaveRequest(
   supabase: SupabaseClient,
   opts:     LeaveApprovalOpts,
-): Promise<ApprovalResult<{ id: string; status: string }>> {
+): Promise<ApprovalResult<{ id: string; status: string; backdated?: boolean }>> {
   const { tenantId, requestId, ctx } = opts
 
   // ── 1. Fetch ────────────────────────────────────────────────────────────────
@@ -352,7 +352,11 @@ export async function approveLeaveRequest(
     },
   })
 
-  return { ok: true, value: approved }
+  // PEND-94: leave.abnormal-approval-pattern's `backdated` — the request's
+  // start date already lay in the past at the moment it was submitted.
+  const backdated = req.from_date < req.created_at.slice(0, 10)
+
+  return { ok: true, value: { ...approved, backdated } }
 }
 
 /**
