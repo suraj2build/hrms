@@ -112,6 +112,7 @@ const TriggerLifecycleSchema = z.object({
 })
 
 const Setup360Schema = z.object({
+  employee_ids: z.array(z.string()).min(1, 'employee_ids is required'),
   peer_count: z.number().int().min(1).optional(),
   deadline_days: z.number().int().min(1).optional(),
   self_review: z.boolean().optional(),
@@ -842,43 +843,52 @@ export default async function surveyRoutes(fastify: FastifyInstance) {
       .maybeSingle()
     if (!survey) return reply.status(404).send({ error: 'Survey not found' })
 
-    // Guard against a resubmitted "Create 360° Round" click silently creating a
-    // second concurrent round for the same survey (no DB uniqueness constraint
-    // exists on survey_id for this table).
-    const { data: existingRound, error: existingErr } = await supabase
-      .from('feedback_360_rounds')
-      .select('id')
-      .eq('survey_id', id)
-      .eq('tenant_id', tenantId)
-      .eq('status', 'open')
-      .maybeSingle()
-    if (existingErr) return serverError(req, reply, existingErr, ErrorCode.QUERY_FAILED, 'Failed to check for an existing 360 round')
-    if (existingRound) return reply.status(409).send({ error: 'ROUND_EXISTS', message: 'An open 360° review round already exists for this survey' })
+    const { employee_ids, peer_count = 3, deadline_days, self_review, manager_review } = parsed.data
 
-    const { peer_count = 3, deadline_days, self_review, manager_review } = parsed.data
+    // employee_ids (who this 360 round is FOR — the reviewees) is
+    // caller-supplied — verify every id belongs to this tenant, matching the
+    // same check on /admin/trigger-lifecycle above and
+    // /my/360/:roundId/nominate below.
+    const uniqueEmpIds = [...new Set(employee_ids)]
+    const { data: validEmps } = await supabase
+      .from('employees')
+      .select('id')
+      .eq('tenant_id', tenantId)
+      .in('id', uniqueEmpIds)
+    if ((validEmps?.length ?? 0) !== uniqueEmpIds.length) {
+      return reply.status(400).send({ error: 'INVALID_EMPLOYEES', message: 'One or more employees were not found in your organisation' })
+    }
 
     const deadline_at = deadline_days
       ? new Date(Date.now() + Number(deadline_days) * 86400000).toISOString()
       : null
 
-    const insertRow: Record<string, unknown> = {
-      survey_id:      id,
-      tenant_id:      tenantId,
-      peers_required: Number(peer_count),
-      status:         'open',
-    }
-    if (deadline_at    !== null)      insertRow.deadline_at     = deadline_at
-    if (self_review    !== undefined) insertRow.self_review     = Boolean(self_review)
-    if (manager_review !== undefined) insertRow.manager_review  = Boolean(manager_review)
+    const rows = uniqueEmpIds.map(nomineeId => {
+      const row: Record<string, unknown> = {
+        survey_id:      id,
+        tenant_id:      tenantId,
+        nominee_id:     nomineeId,
+        peers_required: Number(peer_count),
+        status:         'open',
+      }
+      if (deadline_at    !== null)      row.deadline_at    = deadline_at
+      if (self_review    !== undefined) row.self_review    = Boolean(self_review)
+      if (manager_review !== undefined) row.manager_review = Boolean(manager_review)
+      return row
+    })
 
-    const { data: round, error } = await supabase
+    // One round row per reviewee (nominee_id set) — upsert on the table's
+    // existing UNIQUE(survey_id, nominee_id) constraint so re-running setup
+    // for an employee already in an open round is a safe no-op instead of a
+    // duplicate-key error, while still creating fresh rounds for any
+    // newly-added employees in the same call.
+    const { data: rounds, error } = await supabase
       .from('feedback_360_rounds')
-      .insert(insertRow)
-      .select('id')
-      .single()
+      .upsert(rows, { onConflict: 'survey_id,nominee_id', ignoreDuplicates: true })
+      .select('id, nominee_id')
 
     if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to set up 360 feedback round')
-    return reply.status(201).send({ data: round })
+    return reply.status(201).send({ data: { created: rounds?.length ?? 0, employee_ids: uniqueEmpIds } })
   })
 
   fastify.get('/admin/360/:roundId/approve', hrAuth, async (req: any, reply) => {

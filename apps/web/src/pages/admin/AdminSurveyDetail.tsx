@@ -9,6 +9,7 @@ import {
 import { toast } from'sonner'
 import { Button } from'@/components/ui/button'
 import { ConfirmDialog } from'@/components/ui/ConfirmDialog'
+import { EmployeeSelector } from'@/components/filters/EmployeeSelector'
 import { api } from'@/lib/api/client'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -235,6 +236,7 @@ export function AdminSurveyDetail() {
 
  const [tab, setTab] = useState<Tab>('overview')
  const [setup360Form, setSetup360Form] = useState({ peer_count: 3, self_review: true, manager_review: true, deadline_days: 14 })
+ const [setup360EmployeeIds, setSetup360EmployeeIds] = useState<string[]>([])
  const [setup360Loading, setSetup360Loading] = useState(false)
  const [showCloseConfirm, setShowCloseConfirm] = useState(false)
 
@@ -293,11 +295,18 @@ export function AdminSurveyDetail() {
  ]
 
  async function handle360Setup() {
- if (!id) return
+ if (!id || setup360EmployeeIds.length === 0) return
  setSetup360Loading(true)
  try {
- await api.post(`/surveys/admin/${id}/360/setup`, setup360Form)
- toast.success('360° review round created')
+ const res = await api.post<{ data: { created: number; employee_ids: string[] } }>(
+ `/surveys/admin/${id}/360/setup`,
+ { ...setup360Form, employee_ids: setup360EmployeeIds },
+ )
+ const created = res.data.created
+ toast.success(created > 0
+ ? `360° review round created for ${created} employee${created === 1 ?'':'s'}`
+ :'Selected employees already have an open 360° round for this survey')
+ setSetup360EmployeeIds([])
  qc.invalidateQueries({ queryKey: ['admin-survey', id] })
  qc.invalidateQueries({ queryKey: ['my-360-nominations'] })
  } catch (e) {
@@ -549,8 +558,17 @@ export function AdminSurveyDetail() {
  {tab ==='360-setup'&& (
  <div className="rounded-2xl border border-border/60 bg-card p-6 space-y-5 max-w-lg">
  <p className="text-sm text-muted-foreground">
- Create a 360° review round for this survey. Employees nominate peers; HR can view consolidated feedback.
+ Create a 360° review round for this survey. Select who this round is for — each employee will see it under "My 360° Nominations" and choose their peer reviewers; HR can then view consolidated feedback.
  </p>
+ <div>
+ <label className="text-xs font-medium text-muted-foreground mb-1 block">Reviewees (who this round is for)</label>
+ <EmployeeSelector
+ value={setup360EmployeeIds}
+ onChange={v => setSetup360EmployeeIds(Array.isArray(v) ? v : v ? [v] : [])}
+ multiple
+ placeholder="Search by name or employee code…"
+ />
+ </div>
  <div className="grid grid-cols-2 gap-4">
  <div>
  <label className="text-xs font-medium text-muted-foreground mb-1 block">Peer nominations required</label>
@@ -583,9 +601,9 @@ export function AdminSurveyDetail() {
  Include manager review
  </label>
  </div>
- <Button onClick={handle360Setup} disabled={setup360Loading}>
+ <Button onClick={handle360Setup} disabled={setup360Loading || setup360EmployeeIds.length === 0}>
  {setup360Loading ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <RefreshCw className="h-4 w-4 mr-1" />}
- Create 360° Round
+ Create 360° Round{setup360EmployeeIds.length > 0 ? ` (${setup360EmployeeIds.length})` :''}
  </Button>
  </div>
  )}
