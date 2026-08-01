@@ -576,17 +576,35 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
   // Submit a draft requisition into the approval chain (seeds the steps).
   fastify.post('/requisitions/:id/submit-approval', hrAdminAuth, async (req: any, reply) => {
     const { id } = req.params as { id: string }
-    const { data: r } = await fastify.supabase
+    const { data: r, error: rErr } = await fastify.supabase
       .from('job_requisitions').select('status').eq('id', id).eq('tenant_id', req.tenantId).maybeSingle()
+    if (rErr) return serverError(req, reply, rErr, ErrorCode.QUERY_FAILED, 'Failed to fetch requisition')
     if (!r) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Requisition not found' })
     if (r.status !== 'draft') return reply.code(422).send({ error: 'INVALID_STATE', message: 'Only draft requisitions can be submitted for approval' })
+
+    // Idempotency: the requisition's own status stays 'draft' through the
+    // whole approval chain (it only flips on final approval), so a status
+    // precondition alone can't stop two concurrent submit-approval calls
+    // (double-click, network retry) from both passing the check above and
+    // racing each other's delete-then-reseed of requisition_approvals below.
+    const iKey = (req.headers['idempotency-key'] as string | undefined)?.trim()
+    if (iKey) {
+      const cached = await checkIdempotency(fastify.supabase, req.tenantId, iKey, 'requisition-submit-approval')
+      if (cached) {
+        reply.header('Idempotency-Replayed', 'true')
+        return reply.code(cached.status_code).send(cached.response)
+      }
+    }
 
     // Reset any prior steps (e.g. resubmission after a rejection).
     await fastify.supabase.from('requisition_approvals').delete().eq('requisition_id', id).eq('tenant_id', req.tenantId)
     const rows = DEFAULT_REQ_CHAIN.map(s => ({ tenant_id: req.tenantId, requisition_id: id, step_order: s.step_order, label: s.label, status: 'pending' }))
     const { error } = await fastify.supabase.from('requisition_approvals').insert(rows)
     if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to submit requisition for approval')
-    return reply.code(201).send({ message: 'Submitted for approval', steps: rows.length })
+
+    const responseBody = { message: 'Submitted for approval', steps: rows.length }
+    if (iKey) await storeIdempotency(fastify.supabase, req.tenantId, iKey, 'requisition-submit-approval', 201, responseBody)
+    return reply.code(201).send(responseBody)
   })
 
   // List a requisition's approval steps.

@@ -2,6 +2,7 @@
  * Multi-stage requisition approval — submit a draft into the chain, then
  * approve/reject each step in order. Final approval opens the requisition.
  */
+import { useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { CheckCircle2, XCircle, Circle } from 'lucide-react'
@@ -28,9 +29,19 @@ export function RequisitionApprovalDialog({ requisitionId, title, status, open, 
     qc.invalidateQueries({ queryKey: ['req-approvals', requisitionId] })
     qc.invalidateQueries({ queryKey: ['recruitment', 'requisitions'] })
   }
+  // The backend supports an Idempotency-Key on this endpoint (checkIdempotency/
+  // storeIdempotency, keyed 'requisition-submit-approval') to stop a double-click
+  // or network retry from resetting an already-submitted approval chain.
+  const idempotencyKey = useRef(crypto.randomUUID())
   const submitMut = useMutation({
-    mutationFn: () => api.post(`/recruitment/requisitions/${requisitionId}/submit-approval`),
-    onSuccess: () => { invalidate(); toast.success('Submitted for approval') },
+    mutationFn: () => api.post(`/recruitment/requisitions/${requisitionId}/submit-approval`, undefined, {
+      headers: { 'Idempotency-Key': idempotencyKey.current },
+    }),
+    onSuccess: () => {
+      idempotencyKey.current = crypto.randomUUID()
+      invalidate()
+      toast.success('Submitted for approval')
+    },
     onError: (e: Error) => toast.error('Failed', { description: e.message }),
   })
   const decideMut = useMutation({
