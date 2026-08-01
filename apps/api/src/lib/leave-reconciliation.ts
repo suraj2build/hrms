@@ -48,6 +48,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { detectBalanceDrift }  from './leave-replay-engine.js'
 import { fetchAllRows }        from './supabase-paginate.js'
 import { fetchTenantTz, utcToLocalDate } from './attendance-engine.js'
+import { logger }              from './logger.js'
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -123,7 +124,7 @@ async function flushLeaveIssues(
       .from('leave_reconciliation_issues')
       .insert(chunk)
     if (error) {
-      console.error('[leave-reconciliation] issue flush error:', error.message)
+      logger.error({ err: error }, '[leave-reconciliation] issue flush error')
     }
   }
 }

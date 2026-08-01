@@ -28,6 +28,7 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { logger } from './logger.js'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -295,9 +296,9 @@ export async function checkFreezeConstraint(
     // period that may actually be locked/archived (same class of bug as
     // ISSUE-147's checkFreezeGuard — a transient DB error must never read
     // as "no periods are frozen").
-    console.error(
-      'payroll-freeze-service: checkFreezeConstraint query failed — failing closed',
-      { tenantId, fromDate, toDate: effectiveTo, error: error.message },
+    logger.error(
+      { tenantId, fromDate, toDate: effectiveTo, err: error },
+      '[payroll-freeze-service] checkFreezeConstraint query failed — failing closed',
     )
     return {
       allowed: false, queuedOnly: false, requiresAdjustmentWorkflow: false,

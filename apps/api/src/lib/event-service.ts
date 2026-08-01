@@ -25,6 +25,8 @@
  *   eventService.emit('leave.approved', { tenant_id, employee_id, ... })
  */
 
+import { logger } from './logger.js'
+
 // ── Typed event map ────────────────────────────────────────────────────────────
 
 /**
@@ -170,14 +172,13 @@ class EventService {
       Promise.resolve()
         .then(() => handler(payload))
         .catch((err: unknown) => {
-          console.error(JSON.stringify({
-            level:   'error',
+          logger.error({
             service: 'event',
             action:  'handler_error',
             event:   eventName,
             handler: handlerIndex,
-            error:   err instanceof Error ? err.message : String(err),
-          }))
+            err,
+          }, '[event-service] handler_error')
         })
     }
   }

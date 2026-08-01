@@ -24,6 +24,7 @@
 import type { SupabaseClient }        from '@supabase/supabase-js'
 import { generateLineageId }         from './leave-jobs.js'
 import { writeBalanceLedgerEntry }   from './leave-ledger-service.js'
+import { logger }                    from './logger.js'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -284,9 +285,9 @@ export async function processEventGrant(
       .update({ ledger_entry_id: ledgerRow.id })
       .eq('id', grantRow.id)
     if (linkErr) {
-      console.error(
-        'leave-event-engine: failed to link grant to ledger entry',
-        { grantId: grantRow.id, ledgerEntryId: ledgerRow.id, error: linkErr.message },
+      logger.error(
+        { grantId: grantRow.id, ledgerEntryId: ledgerRow.id, err: linkErr },
+        '[leave-event-engine] failed to link grant to ledger entry',
       )
     }
   } catch (err) {
@@ -297,10 +298,9 @@ export async function processEventGrant(
     // but that is a detectable, bounded gap (an 'active' grant row with a
     // null ledger_entry_id), which is a materially safer failure mode than
     // the silent double-credit this ordering replaces.
-    console.error(
-      'leave-event-engine: grant reserved but ledger credit failed — needs manual reconciliation',
-      { tenantId, employeeId, dateTypeId: rule.dateTypeId, eventYear, grantId: grantRow.id,
-        error: err instanceof Error ? err.message : String(err) },
+    logger.error(
+      { tenantId, employeeId, dateTypeId: rule.dateTypeId, eventYear, grantId: grantRow.id, err },
+      '[leave-event-engine] grant reserved but ledger credit failed — needs manual reconciliation',
     )
     return 'error'
   }

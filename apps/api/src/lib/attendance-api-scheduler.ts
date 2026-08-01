@@ -14,6 +14,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { fetchSourceData }     from '../routes/attendance/api-sources.js'
 import { durableQueue }        from './durable-queue.js'
+import { logger }              from './logger.js'
 
 // How often the scheduler wakes up and checks for due sources (5 minutes)
 const TICK_MS = 5 * 60 * 1_000
@@ -72,7 +73,7 @@ export async function runDueSources(supabase: SupabaseClient): Promise<void> {
 
   for (const source of due) {
     await processSingleSource(supabase, source).catch((err: Error) =>
-      console.error(`[att-api-scheduler] source ${source.id} unhandled error:`, err.message),
+      logger.error({ err, sourceId: source.id }, `[att-api-scheduler] source ${source.id} unhandled error`),
     )
   }
 }
@@ -197,7 +198,7 @@ export function registerAttendanceApiScheduler(supabase: SupabaseClient): void {
     const min5 = Math.floor(now.getUTCMinutes() / 5) * 5
     const key = `process-attendance:${now.toISOString().slice(0, 15)}${String(min5).padStart(2, '0')}`
     durableQueue.enqueue('process-attendance', {}, { idempotencyKey: key }).catch((err: Error) =>
-      console.error('[att-api-scheduler] enqueue error:', err.message),
+      logger.error({ err }, '[att-api-scheduler] enqueue error'),
     )
   }
 

@@ -8,6 +8,7 @@
  *  - approveOtRequest / rejectOtRequest: workflow actions
  */
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { logger } from './logger.js'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -332,7 +333,7 @@ export async function createOtRequest(
     .eq('employee_id', employeeId)
     .eq('date', attendanceDate)
   if (syncErr) {
-    console.error(`[ot-engine] failed to sync attendance_daily.ot_eligible for employee=${employeeId} date=${attendanceDate}:`, syncErr)
+    logger.error({ err: syncErr, employeeId, attendanceDate }, `[ot-engine] failed to sync attendance_daily.ot_eligible for employee=${employeeId} date=${attendanceDate}`)
   }
 
   return { ok: true, data: data as { id: string; status: string; approved_minutes: number | null } }
@@ -392,7 +393,7 @@ export async function approveOtRequest(
     .eq('employee_id', req.employee_id)
     .eq('date', req.attendance_date)
   if (syncErr) {
-    console.error(`[ot-engine] failed to sync attendance_daily.ot_approved_minutes for employee=${req.employee_id} date=${req.attendance_date}:`, syncErr)
+    logger.error({ err: syncErr, employeeId: req.employee_id, attendanceDate: req.attendance_date }, `[ot-engine] failed to sync attendance_daily.ot_approved_minutes for employee=${req.employee_id} date=${req.attendance_date}`)
   }
 
   return { ok: true, data: data as { id: string; status: string; approved_minutes: number | null } }

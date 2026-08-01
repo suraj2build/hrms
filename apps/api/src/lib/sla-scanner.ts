@@ -23,6 +23,7 @@ import { eventBus }           from './event-bus.js'
 import { ENTITY_WORKFLOW_MAP, type EntityType } from './workflow-service.js'
 import { durableQueue }       from './durable-queue.js'
 import { fetchAllRows }       from './supabase-paginate.js'
+import { logger }             from './logger.js'
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -402,7 +403,7 @@ export function registerSlaScanner(supabase: SupabaseClient): void {
     const enqueue = () => {
       const key = `sla-scan:${new Date().toISOString().slice(0, 13)}`
       durableQueue.enqueue('sla-scan', {}, { idempotencyKey: key }).catch(
-        e => console.error('[sla-scanner] enqueue error:', (e as Error).message),
+        e => logger.error({ err: e }, '[sla-scanner] enqueue error'),
       )
     }
     enqueue()

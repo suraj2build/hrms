@@ -30,6 +30,7 @@ import { durableQueue }        from './durable-queue.js'
 import { fetchAllRows }        from './supabase-paginate.js'
 import { verificationOrchestrator } from '../platform/trust/orchestrator/verification-orchestrator.service.js'
 import { AUTO_RETRY_TYPES, isDueForRetry } from '../platform/integrations/retry/verification-retry.service.js'
+import { logger }              from './logger.js'
 
 const SCAN_INTERVAL_MS = 5 * 60 * 1_000   // 5 minutes — within the 30s-5min backoff range
 const WARMUP_MS        = 60_000           // 1 minute
@@ -109,7 +110,7 @@ export function registerVerificationRetryScanner(_supabase: SupabaseClient): voi
     const enqueue = () => {
       const key = `verification-retry-scan:${new Date().toISOString().slice(0, 16)}`
       durableQueue.enqueue('verification-retry-scan', {}, { idempotencyKey: key }).catch(
-        e => console.error('[verification-retry-scanner] enqueue error:', (e as Error).message),
+        e => logger.error({ err: e }, '[verification-retry-scanner] enqueue error'),
       )
     }
     enqueue()

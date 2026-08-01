@@ -24,6 +24,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { fetchAllRows } from './supabase-paginate.js'
+import { logger } from './logger.js'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -107,7 +108,7 @@ export async function snapshotPolicy(
     .single()
 
   if (error) {
-    console.error('[policy-governance] snapshotPolicy failed:', error.message)
+    logger.error({ err: error }, '[policy-governance] snapshotPolicy failed')
     return null
   }
   return version as PolicyVersion
@@ -150,7 +151,7 @@ export async function logPolicyChange(
     })
 
   if (error) {
-    console.error('[policy-governance] logPolicyChange failed:', error.message)
+    logger.error({ err: error }, '[policy-governance] logPolicyChange failed')
   }
 }
 

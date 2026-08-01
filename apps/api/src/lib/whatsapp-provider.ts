@@ -9,6 +9,7 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { logger } from './logger.js'
 
 const WA_API_VERSION = 'v18.0'
 
@@ -54,7 +55,7 @@ export class WhatsAppProvider {
       .single()
 
     if (insertError) {
-      console.error('[WhatsApp] outbox insert failed:', insertError.message)
+      logger.error({ err: insertError }, '[WhatsApp] outbox insert failed')
       return false
     }
 
@@ -145,7 +146,7 @@ export class WhatsAppProvider {
       .single()
 
     if (insertError) {
-      console.error('[WhatsApp] outbox insert failed:', insertError.message)
+      logger.error({ err: insertError }, '[WhatsApp] outbox insert failed')
       return false
     }
 

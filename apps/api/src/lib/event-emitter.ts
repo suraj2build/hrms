@@ -6,6 +6,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { durableQueue }        from './durable-queue.js'
+import { logger }              from './logger.js'
 
 // ── Event type registry ────────────────────────────────────────────────────
 
@@ -95,7 +96,7 @@ export async function insertEventAndFanOut(opts: InsertEventAndFanOutOpts): Prom
     .insert(notifRows)
 
   if (notifErr) {
-    console.error('[event-emitter] Failed to insert notifications:', notifErr?.message)
+    logger.error({ err: notifErr }, '[event-emitter] Failed to insert notifications')
   }
 }
 
@@ -127,7 +128,7 @@ export async function emitEvent(opts: EmitEventOptions): Promise<void> {
       target_id:   targetId,
       notifications,
     }, { tenantId }).catch(enqueueErr => {
-      console.error('[event-emitter] Failed to enqueue retry for failed emit:', (enqueueErr as Error)?.message)
+      logger.error({ err: enqueueErr }, '[event-emitter] Failed to enqueue retry for failed emit')
     })
   }
 }

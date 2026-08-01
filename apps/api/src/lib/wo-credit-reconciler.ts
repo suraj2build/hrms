@@ -21,6 +21,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { isMonthLocked } from './period-lock.js'
 import { durableQueue }  from './durable-queue.js'
 import { fetchAllRows }  from './supabase-paginate.js'
+import { logger }        from './logger.js'
 
 const RECON_INTERVAL_MS = 6 * 60 * 60 * 1_000   // every 6h (daily-grain; cheap + idempotent)
 const WARMUP_MS         = 7 * 60 * 1_000
@@ -307,7 +308,7 @@ export async function reconcileTenantMonth(
     try {
       results.push(await reconcileEmployeeMonth(supabase, tenantId, emp, year, month, graceDays))
     } catch (e) {
-      console.error(`[wo-credit] employee=${emp.employeeId} error:`, (e as Error).message)
+      logger.error({ err: e, employeeId: emp.employeeId }, `[wo-credit] employee=${emp.employeeId} error`)
     }
   }
   return results
@@ -383,7 +384,7 @@ export async function finalizeEmployeeMonth(
           p_tenant_id: tenantId, p_employee_id: emp.employeeId,
           p_leave_type_id: emp.structure.wo_leave_type_id, p_days: carriedOut, p_year: year,
         })
-        if (cacheErr) console.error('[wo-credit] credit_leave_balance RPC failed:', cacheErr.message)
+        if (cacheErr) logger.error({ err: cacheErr }, '[wo-credit] credit_leave_balance RPC failed')
       }
     }
   }
@@ -424,14 +425,14 @@ export async function finalizeEmployeeMonth(
           // Don't block the rest of the reconciliation loop for other employees —
           // just make the failure loudly discoverable (silent failure here means
           // this employee is never paid for holiday work, with no audit trail).
-          console.error(
-            `[wo-credit] extra-pay payroll_adjustments insert failed employee=${emp.employeeId} month=${lockedMonth} amount=${extraPayAmount}:`,
-            adjError.message,
+          logger.error(
+            { err: adjError, employeeId: emp.employeeId, lockedMonth, amount: extraPayAmount },
+            `[wo-credit] extra-pay payroll_adjustments insert failed employee=${emp.employeeId} month=${lockedMonth} amount=${extraPayAmount}`,
           )
         }
       }
     } catch (e) {
-      console.error(`[wo-credit] extra-pay adjustment employee=${emp.employeeId} error:`, (e as Error).message)
+      logger.error({ err: e, employeeId: emp.employeeId }, `[wo-credit] extra-pay adjustment employee=${emp.employeeId} error`)
     }
   }
 
@@ -455,7 +456,7 @@ export async function finalizeTenantMonth(
     try {
       out.push(await finalizeEmployeeMonth(supabase, tenantId, emp, year, month, graceDays))
     } catch (e) {
-      console.error(`[wo-credit] finalize employee=${emp.employeeId} error:`, (e as Error).message)
+      logger.error({ err: e, employeeId: emp.employeeId }, `[wo-credit] finalize employee=${emp.employeeId} error`)
     }
   }
   return out
@@ -488,7 +489,7 @@ export async function tick(supabase: SupabaseClient): Promise<void> {
         if (credited > 0) console.log(`[wo-credit] tenant=${t.id} finalised ${priorYear}-${priorMonth}: carried ${fin.reduce((s, f) => s + f.carried_out, 0)} for ${credited} employees`)
       }
     } catch (e) {
-      console.error(`[wo-credit] tenant=${t.id} error:`, (e as Error).message)
+      logger.error({ err: e, tenantId: t.id }, `[wo-credit] tenant=${t.id} error`)
     }
   }
 }
@@ -497,7 +498,7 @@ export function registerWoCreditScheduler(supabase: SupabaseClient): void {
   const enqueue = () => {
     const key = `reconcile-wo-credits:${new Date().toISOString().slice(0, 10)}`
     durableQueue.enqueue('reconcile-wo-credits', {}, { idempotencyKey: key }).catch(
-      e => console.error('[wo-credit] enqueue error:', (e as Error).message),
+      e => logger.error({ err: e }, '[wo-credit] enqueue error'),
     )
   }
   setTimeout(() => {

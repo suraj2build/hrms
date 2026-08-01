@@ -17,6 +17,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { fetchAllRows } from './supabase-paginate.js'
 import { fetchTenantTz, utcToLocalDate } from './attendance-engine.js'
+import { logger } from './logger.js'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -360,7 +361,7 @@ export async function computeIntelligence(
           last_updated: summary.computed_at,
           dismissed:    false,
         }, { onConflict: 'tenant_id,employee_id,flag_type' })
-      if (flagErr) console.error('[intelligence] flag upsert error', flagErr.message)
+      if (flagErr) logger.error({ err: flagErr }, '[intelligence] flag upsert error')
     }
   }
 

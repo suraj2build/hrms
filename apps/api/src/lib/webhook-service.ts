@@ -18,6 +18,7 @@
 import { createHmac }    from 'crypto'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { ssrfCheck } from './ssrf-guard.js'
+import { logger } from './logger.js'
 
 // ── Internal types ─────────────────────────────────────────────────────────────
 
@@ -72,7 +73,7 @@ export class WebhookService {
       .contains('event_types', [eventType])
 
     if (fetchErr) {
-      console.error('[WebhookService] failed to fetch webhooks', { tenantId, eventType, err: fetchErr })
+      logger.error({ tenantId, eventType, err: fetchErr }, '[WebhookService] failed to fetch webhooks')
       return
     }
 
@@ -82,7 +83,7 @@ export class WebhookService {
     for (const webhook of webhooks as WebhookRow[]) {
       // Schedule work as a background microtask — never await at call site
       this._deliverToWebhook(tenantId, eventType, payload, webhook, correlationId).catch((err) => {
-        console.error('[WebhookService] unhandled delivery error', { webhookId: webhook.id, err })
+        logger.error({ webhookId: webhook.id, err }, '[WebhookService] unhandled delivery error')
       })
     }
   }
@@ -270,7 +271,7 @@ export class WebhookService {
       // against a delivery that was never inserted, so skip them (and the
       // aggregate stats bump, which would otherwise report a successful
       // delivery with no corresponding webhook_deliveries audit record).
-      console.error('[WebhookService] failed to create delivery row', { webhookId: webhook.id, err: insertErr })
+      logger.error({ webhookId: webhook.id, err: insertErr }, '[WebhookService] failed to create delivery row')
       await this._attemptHttpDelivery(deliveryId, tenantId, webhook, body)
       return
     }
@@ -328,9 +329,10 @@ export class WebhookService {
     // reach cloud metadata / internal services from this delivery path.
     const blockReason = ssrfCheck(webhook.url)
     if (blockReason) {
-      console.error('[WebhookService] blocked delivery to disallowed URL', {
-        webhookId: webhook.id, deliveryId, tenantId, url: webhook.url, reason: blockReason,
-      })
+      logger.error(
+        { webhookId: webhook.id, deliveryId, tenantId, url: webhook.url, reason: blockReason },
+        '[WebhookService] blocked delivery to disallowed URL',
+      )
       return { success: false, duration_ms: 0, error: `Blocked: ${blockReason}` }
     }
 
@@ -401,13 +403,16 @@ export class WebhookService {
         ? `Request timed out after ${webhook.timeout_seconds}s`
         : (err instanceof Error ? err.message : String(err))
 
-      console.error('[WebhookService] HTTP delivery failed', {
-        webhookId:  webhook.id,
-        deliveryId,
-        tenantId,
-        url:        webhook.url,
-        err:        message,
-      })
+      logger.error(
+        {
+          webhookId:  webhook.id,
+          deliveryId,
+          tenantId,
+          url:        webhook.url,
+          err:        message,
+        },
+        '[WebhookService] HTTP delivery failed',
+      )
 
       return { success: false, duration_ms, error: message }
     }

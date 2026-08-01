@@ -19,6 +19,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { fetchAllRows } from './supabase-paginate.js'
 import { fetchTenantTz } from './attendance-engine.js'
 import { getLocalDate, localDayBoundsUtc } from './org-context.js'
+import { logger } from './logger.js'
 
 interface EmpRow {
   id: string
@@ -109,12 +110,12 @@ export async function ensureTodaysCelebrations(supabase: SupabaseClient, tenantI
       if (!error) created++
       else if (error.code !== '23505') {
         // 23505 = unique_violation (expected under races); anything else is real.
-        console.error('[celebrations] insert failed', error.message)
+        logger.error({ err: error }, '[celebrations] insert failed')
       }
     }
     return created
   } catch (err) {
-    console.error('[celebrations] generation failed', err)
+    logger.error({ err }, '[celebrations] generation failed')
     return 0
   }
 }

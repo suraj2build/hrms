@@ -16,6 +16,7 @@ import { durableQueue }        from './durable-queue.js'
 import { fetchAllRows }        from './supabase-paginate.js'
 import { fetchTenantTz }       from './attendance-engine.js'
 import { getLocalDate, getLocalDayOfWeek, getLocalTimeMinutes } from './org-context.js'
+import { logger }              from './logger.js'
 
 const POLL_INTERVAL_MS = 60 * 60 * 1_000  // 1 hour
 
@@ -34,7 +35,7 @@ export async function runPollTick(supabase: SupabaseClient): Promise<void> {
       supabase.from('tenants').select('id').in('status', ['active', 'trial']).range(from, to),
     )
   } catch (err) {
-    console.error('[poll-scheduler] failed to fetch tenants:', err)
+    logger.error({ err }, '[poll-scheduler] failed to fetch tenants')
     return
   }
 
@@ -48,7 +49,7 @@ export async function runPollTick(supabase: SupabaseClient): Promise<void> {
       if (!isMonday9am) continue
       await dispatchWeeklyPoll(supabase, tenant.id, localDate)
     } catch (err) {
-      console.error(`[poll-scheduler] tenant=${tenant.id} error:`, err)
+      logger.error({ err, tenantId: tenant.id }, `[poll-scheduler] tenant=${tenant.id} error`)
     }
   }
 }
@@ -57,7 +58,7 @@ export function registerPollScheduler(supabase: SupabaseClient): void {
   const enqueue = () => {
     const key = `send-pulse-poll:${new Date().toISOString().slice(0, 13)}`
     durableQueue.enqueue('send-pulse-poll', {}, { idempotencyKey: key }).catch(
-      e => console.error('[poll-scheduler] enqueue error:', (e as Error).message),
+      e => logger.error({ err: e }, '[poll-scheduler] enqueue error'),
     )
   }
 
@@ -95,7 +96,7 @@ async function dispatchWeeklyPoll(supabase: SupabaseClient, tenantId: string, to
     .single()
 
   if (pqErr || !pq) {
-    console.error('[poll-scheduler] failed to create pulse question:', pqErr?.message)
+    logger.error({ err: pqErr }, '[poll-scheduler] failed to create pulse question')
     return
   }
 

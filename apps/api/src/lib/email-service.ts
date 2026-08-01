@@ -13,6 +13,7 @@
  */
 
 import { brandConfig } from './brand-config.js'
+import { logger } from './logger.js'
 
 const RESEND_ENDPOINT = 'https://api.resend.com/emails'
 
@@ -77,14 +78,14 @@ export async function sendEmail(input: SendEmailInput): Promise<SendEmailResult>
 
     if (!res.ok) {
       const body = await res.text().catch(() => '')
-      console.error('[email] Resend send failed', res.status, body)
+      logger.error({ status: res.status, body }, '[email] Resend send failed')
       return { sent: false, error: `Resend ${res.status}: ${body}` }
     }
 
     const data = await res.json().catch(() => ({})) as { id?: string }
     return { sent: true, id: data.id }
   } catch (err) {
-    console.error('[email] send threw', err)
+    logger.error({ err }, '[email] send threw')
     return { sent: false, error: err instanceof Error ? err.message : 'unknown' }
   }
 }

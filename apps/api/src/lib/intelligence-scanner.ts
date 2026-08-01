@@ -47,6 +47,7 @@ import { notifyHrAdmins }     from './notify.js'
 import { durableQueue }       from './durable-queue.js'
 import { fetchTenantTz }      from './attendance-engine.js'
 import { getLocalDate }       from './org-context.js'
+import { logger }             from './logger.js'
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -1283,7 +1284,7 @@ export function registerIntelligenceScanner(supabase: SupabaseClient): void {
       const now = new Date()
       const bucket = `${now.toISOString().slice(0, 10)}-${Math.floor(now.getUTCHours() / 6) * 6}`
       durableQueue.enqueue('intelligence-scan', {}, { idempotencyKey: `intelligence-scan:${bucket}` }).catch(
-        e => console.error('[intelligence-scanner] enqueue error:', (e as Error).message),
+        e => logger.error({ err: e }, '[intelligence-scanner] enqueue error'),
       )
     }
     enqueue()

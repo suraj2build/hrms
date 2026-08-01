@@ -29,6 +29,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { eventService }        from './event-service.js'
 import type { AttendanceUpdatedPayload } from './event-service.js'
 import { notify }              from './notify.js'
+import { logger }              from './logger.js'
 
 // ── Notification types ─────────────────────────────────────────────────────────
 
@@ -276,15 +277,14 @@ export function registerAnomalyHandlers(supabase: SupabaseClient): void {
       await handleAttendanceUpdated(supabase, payload)
     } catch (err) {
       // Swallow — notification failures must never surface to callers
-      console.error(JSON.stringify({
-        level:       'error',
+      logger.error({
         service:     'anomaly-handler',
         action:      'handler_error',
         tenant_id:   payload.tenant_id,
         employee_id: payload.employee_id,
         date:        payload.date,
-        error:       err instanceof Error ? err.message : String(err),
-      }))
+        err,
+      }, '[anomaly-handler] handler_error')
     }
   })
 

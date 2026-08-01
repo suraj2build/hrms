@@ -8,6 +8,7 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { logger } from './logger.js'
 
 export interface Claim {
   claim_id:    string
@@ -37,7 +38,7 @@ export class InsuranceProvider {
       })
       .select('id')
       .single()
-    if (insertErr) console.error('[insurance-provider] outbox insert failed:', insertErr)
+    if (insertErr) logger.error({ err: insertErr }, '[insurance-provider] outbox insert failed')
 
     const apiKey = process.env.INSURANCE_API_KEY
     const apiUrl = process.env.INSURANCE_API_URL
@@ -66,7 +67,7 @@ export class InsuranceProvider {
           .eq('id', outboxRow.id)
       }
     } catch (err: unknown) {
-      console.error('[insurance-provider] sync failed:', err)
+      logger.error({ err }, '[insurance-provider] sync failed')
     }
   }
 
@@ -91,7 +92,7 @@ export class InsuranceProvider {
       })
       .select('id')
       .single()
-    if (insertErr) console.error('[insurance-provider] outbox insert failed:', insertErr)
+    if (insertErr) logger.error({ err: insertErr }, '[insurance-provider] outbox insert failed')
 
     const apiKey = process.env.INSURANCE_API_KEY
     const apiUrl = process.env.INSURANCE_API_URL
@@ -116,7 +117,7 @@ export class InsuranceProvider {
           .eq('id', outboxRow.id)
       }
     } catch (err: unknown) {
-      console.error('[insurance-provider] unenrolment sync failed:', err)
+      logger.error({ err }, '[insurance-provider] unenrolment sync failed')
     }
   }
 

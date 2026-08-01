@@ -26,6 +26,7 @@ import { buildDigest, periodKey, tenantTodayStr, type DigestFrequency } from './
 import { sendEmail, digestEmail, APP_PUBLIC_URL } from './email-service.js'
 import { durableQueue }       from './durable-queue.js'
 import { fetchAllRows }       from './supabase-paginate.js'
+import { logger }             from './logger.js'
 
 const TICK_MS    = 60 * 60 * 1_000   // hourly
 const WARMUP_MS  = 5 * 60 * 1_000    // 5-minute startup delay
@@ -239,7 +240,7 @@ export async function tick(supabase: SupabaseClient): Promise<void> {
           console.log(`[digest] ${f} tenant=${t.id} → ${r.in_app} in-app, ${r.email} email, ${r.failed} failed`)
         }
       } catch (e) {
-        console.error(`[digest] ${f} tenant=${t.id} error:`, (e as Error).message)
+        logger.error({ err: e, frequency: f, tenantId: t.id }, `[digest] ${f} tenant=${t.id} error`)
       }
     }
   }
@@ -253,7 +254,7 @@ export function registerDigestScheduler(supabase: SupabaseClient): void {
   const enqueue = () => {
     const key = `send-digest:${new Date().toISOString().slice(0, 13)}`
     durableQueue.enqueue('send-digest', {}, { idempotencyKey: key }).catch(
-      e => console.error('[digest] enqueue error:', (e as Error).message),
+      e => logger.error({ err: e }, '[digest] enqueue error'),
     )
   }
   setTimeout(() => {

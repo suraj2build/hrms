@@ -28,6 +28,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { fetchAllRows } from './supabase-paginate.js'
 import { fetchTenantTz, utcToLocalDate } from './attendance-engine.js'
+import { logger } from './logger.js'
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -108,7 +109,7 @@ async function flushIssues(
       .from('attendance_reconciliation_issues')
       .insert(chunk)
     if (error) {
-      console.error('[attendance-reconciliation] issue flush error:', error.message)
+      logger.error({ err: error }, '[attendance-reconciliation] issue flush error')
     }
   }
 }
