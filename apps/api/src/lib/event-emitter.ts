@@ -5,6 +5,7 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { durableQueue }        from './durable-queue.js'
 
 // ── Event type registry ────────────────────────────────────────────────────
 
@@ -41,17 +42,26 @@ export interface NotificationSpec {
   link?:       string
 }
 
-// ── Main function ──────────────────────────────────────────────────────────
+// ── Shared insert-and-fan-out logic ─────────────────────────────────────────
+// Extracted so the durable-queue retry handler (registered in index.ts as
+// 'emit-hr-event') can re-run exactly the same insert+fan-out, not just the
+// hr_events insert — notifications.event_id is a NOT NULL FK to hr_events
+// (migration 066_hr_events.sql), so the two can never be split into
+// independently-retriable halves.
+export interface InsertEventAndFanOutOpts {
+  supabase:      SupabaseClient
+  tenantId:      string
+  eventType:     HrEventType
+  payload:       Record<string, unknown>
+  actorId:       string | null
+  targetType:    'employee' | 'team' | 'all' | null
+  targetId:      string | null
+  notifications: NotificationSpec[]
+}
 
-export async function emitEvent(opts: EmitEventOptions): Promise<void> {
-  const {
-    supabase, tenantId, eventType,
-    payload = {}, actorId = null,
-    targetType = null, targetId = null,
-    notifications = [],
-  } = opts
+export async function insertEventAndFanOut(opts: InsertEventAndFanOutOpts): Promise<void> {
+  const { supabase, tenantId, eventType, payload, actorId, targetType, targetId, notifications } = opts
 
-  // 1. Insert hr_event row
   const { data: event, error: eventErr } = await supabase
     .from('hr_events')
     .insert({
@@ -66,12 +76,9 @@ export async function emitEvent(opts: EmitEventOptions): Promise<void> {
     .single()
 
   if (eventErr || !event) {
-    // Non-fatal — log but don't throw (event bus failure shouldn't break core operations)
-    console.error('[event-emitter] Failed to insert hr_event:', eventErr?.message)
-    return
+    throw new Error(`Failed to insert hr_event: ${eventErr?.message ?? 'no row returned'}`)
   }
 
-  // 2. Fan out notifications (if any)
   if (notifications.length === 0) return
 
   const notifRows = notifications.map(n => ({
@@ -89,5 +96,38 @@ export async function emitEvent(opts: EmitEventOptions): Promise<void> {
 
   if (notifErr) {
     console.error('[event-emitter] Failed to insert notifications:', notifErr?.message)
+  }
+}
+
+// ── Main function ──────────────────────────────────────────────────────────
+
+export async function emitEvent(opts: EmitEventOptions): Promise<void> {
+  const {
+    supabase, tenantId, eventType,
+    payload = {}, actorId = null,
+    targetType = null, targetId = null,
+    notifications = [],
+  } = opts
+
+  try {
+    await insertEventAndFanOut({ supabase, tenantId, eventType, payload, actorId, targetType, targetId, notifications })
+  } catch {
+    // hr_events insert failed. A bare log-and-drop here would silently lose
+    // the caller-supplied notification fan-out too (see InsertEventAndFanOutOpts
+    // comment above) — instead, defer the whole emit to the durable queue's
+    // own retry/backoff/dead-letter path (durable-queue.ts) via the
+    // 'emit-hr-event' handler registered in index.ts, so a transient DB
+    // hiccup gets a real second chance instead of a bare console line.
+    await durableQueue.enqueue('emit-hr-event', {
+      tenant_id:   tenantId,
+      event_type:  eventType,
+      payload,
+      actor_id:    actorId,
+      target_type: targetType,
+      target_id:   targetId,
+      notifications,
+    }, { tenantId }).catch(enqueueErr => {
+      console.error('[event-emitter] Failed to enqueue retry for failed emit:', (enqueueErr as Error)?.message)
+    })
   }
 }

@@ -43,6 +43,8 @@ import { monthlyAccrualJob }             from './lib/leave-jobs.js'
 import { eventBus }                      from './lib/event-bus.js'
 import type { HrmsEventType }            from './lib/event-bus.js'
 import { durableQueue }                  from './lib/durable-queue.js'
+import { insertEventAndFanOut }          from './lib/event-emitter.js'
+import type { HrEventType, NotificationSpec } from './lib/event-emitter.js'
 import { fetchAllRows }                  from './lib/supabase-paginate.js'
 import { WebhookService }                from './lib/webhook-service.js'
 // Note: registerNotificationHandlers(supabase) and registerAnomalyHandlers(supabase)
@@ -598,6 +600,22 @@ async function start() {
   // no standalone scan function exists — complete without action on manual trigger.
   durableQueue.register('event-automation', async (_payload, _job) => {
     fastify.log.info('[durable-queue] event-automation: event-driven handler — no standalone scan to run')
+  })
+  // Retry path for emitEvent() (event-emitter.ts) when the initial hr_events
+  // insert fails — re-runs the same insert+notification fan-out. Throwing on
+  // failure (rather than swallowing) lets the queue's own retry/backoff/
+  // dead-letter handle repeated failures instead of losing the event silently.
+  durableQueue.register('emit-hr-event', async (payload, _job) => {
+    await insertEventAndFanOut({
+      supabase:      fastify.supabase,
+      tenantId:      payload.tenant_id as string,
+      eventType:     payload.event_type as HrEventType,
+      payload:       (payload.payload as Record<string, unknown>) ?? {},
+      actorId:       (payload.actor_id as string | null) ?? null,
+      targetType:    (payload.target_type as 'employee' | 'team' | 'all' | null) ?? null,
+      targetId:      (payload.target_id as string | null) ?? null,
+      notifications: (payload.notifications as NotificationSpec[]) ?? [],
+    })
   })
 
   // Enterprise import pipeline — dispatches to per-module handlers registered via
