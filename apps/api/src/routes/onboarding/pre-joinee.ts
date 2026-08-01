@@ -326,6 +326,8 @@ async function signSubmissionEducation(fastify: FastifyInstance, submission: any
 //   5. link the invitation to its session_id
 // Returns the new sessionId, or null on any error (logs a warning; never throws).
 type MergeSubmission = {
+  confirmed_first_name?: any
+  confirmed_last_name?:  any
   dob:                 any
   gender:              any
   address_line1:       any
@@ -362,8 +364,12 @@ async function mergeInvitationToSession(
     // time and abandoning whatever HR review work existed on the prior one.
     if (inv?.session_id) return inv.session_id as string
 
-    const firstName = inv?.first_name ?? null
-    const lastName  = inv?.last_name ?? null
+    // Prefer the candidate's own confirmed name (portal correction of an
+    // HR-entered typo/name-change) over the invitation's original first/last
+    // name — the portal exists specifically so a candidate can fix this before
+    // it becomes their employee record.
+    const firstName = (sub.confirmed_first_name?.trim?.() || null) ?? inv?.first_name ?? null
+    const lastName  = (sub.confirmed_last_name?.trim?.()  || null) ?? inv?.last_name  ?? null
     const candidateName = `${firstName ?? ''} ${lastName ?? ''}`.trim() || (inv?.email ?? 'Candidate')
 
     // 2. Create the onboarding session (created_by null — public/candidate action).
@@ -861,6 +867,8 @@ export default async function preJoineeRoutes(fastify: FastifyInstance) {
 
     // 4. Build the sub object (columns already match) and merge.
     const sub = {
+      confirmed_first_name: subRow.confirmed_first_name,
+      confirmed_last_name:  subRow.confirmed_last_name,
       dob:                 subRow.dob,
       gender:              subRow.gender,
       address_line1:       subRow.address_line1,
