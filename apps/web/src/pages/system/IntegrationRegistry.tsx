@@ -19,6 +19,7 @@ import { PageHeader }    from '@/components/layout/PageHeader'
 import { SectionCard }   from '@/components/layout/SectionCard'
 import { Badge }         from '@/components/ui/badge'
 import { Button }        from '@/components/ui/button'
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { api }           from '@/lib/api/client'
 import { useAuthStore }  from '@/stores/authStore'
 import { cn }            from '@/lib/utils'
@@ -501,6 +502,7 @@ export function IntegrationRegistry() {
   const [selectedId,      setSelectedId]      = useState<string | null>(null)
   const [showCreate,      setShowCreate]      = useState(false)
   const [showEdit,        setShowEdit]        = useState(false)
+  const [showDeactivate,  setShowDeactivate]  = useState(false)
   const [filterStatus,    setFilterStatus]    = useState('')
   const [filterType,      setFilterType]      = useState('')
   const [healthResult,    setHealthResult]    = useState<HealthCheckResult | null>(null)
@@ -832,11 +834,7 @@ export function IntegrationRegistry() {
                         variant="outline"
                         className="gap-1.5 text-destructive hover:text-destructive"
                         disabled={deactivateMutation.isPending}
-                        onClick={() => {
-                          if (confirm(`Deactivate "${selected.name}"?`)) {
-                            deactivateMutation.mutate(selected.id)
-                          }
-                        }}
+                        onClick={() => setShowDeactivate(true)}
                       >
                         <XCircle className="h-3.5 w-3.5" />
                         Deactivate
@@ -943,6 +941,22 @@ export function IntegrationRegistry() {
           onClose={() => setShowEdit(false)}
           onEdit={body => editMutation.mutate({ id: selected.id, body })}
           isPending={editMutation.isPending}
+        />
+      )}
+
+      {/* ── Deactivate confirm ── */}
+      {selected && (
+        <ConfirmDialog
+          open={showDeactivate}
+          title="Deactivate Integration"
+          message={`Deactivate "${selected.name}"?`}
+          confirmLabel="Deactivate"
+          destructive
+          onConfirm={() => {
+            setShowDeactivate(false)
+            deactivateMutation.mutate(selected.id)
+          }}
+          onCancel={() => setShowDeactivate(false)}
         />
       )}
     </PageContainer>
