@@ -8,7 +8,7 @@
 import type { SupabaseClient }         from '@supabase/supabase-js'
 import type { ResolvedPlatformEvent }  from '../../../events/types/platform-event.js'
 import type { EventSeverity }          from '../../../events/types/platform-event.js'
-import type { ComplianceValidationResult } from '../benchmarks/compliance-benchmark.service.js'
+import type { ExplainabilityResult }   from '../../../ai/types/explainability.js'
 import { governanceRuleRegistry }      from '../../rules/registry/governance-rule-registry.js'
 import { explainabilityService }       from '../../../ai/services/explainability.service.js'
 // Side-effect import — registers all 4 statutory compliance rules
@@ -19,6 +19,14 @@ import { explainabilityService }       from '../../../ai/services/explainability
 // rules/compliance/index.ts, so the registry was permanently empty and
 // evaluate() always returned { compliant: true, violations: [] }.
 import '../../rules/compliance/index.js'
+
+export interface ComplianceValidationResult {
+  compliant:           boolean
+  severity:            EventSeverity
+  violations:          string[]
+  affected_entities?:  string[]
+  explainability?:     ExplainabilityResult
+}
 
 /** Severity ordering for computing max severity. */
 const SEVERITY_ORDER: Record<EventSeverity, number> = {
