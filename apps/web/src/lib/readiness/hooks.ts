@@ -46,6 +46,28 @@ interface ShiftItem     { id: string; is_active?: boolean }
 interface RosterItem    { id: string; is_active?: boolean }
 interface RunItem       { id: string; status: string; created_at: string }
 
+// ── fetchAllEmployees ─────────────────────────────────────────────────────────
+// GET /employees defaults to 50 rows/page (capped at 500) — readiness checks
+// need the FULL workforce, not a 50-row sample, or a tenant with >50 employees
+// silently gets its org/workforce/attendance readiness computed against an
+// arbitrary subset. Paginate through every page (mirroring the backend's own
+// fetchAllRows() convention, client-side) and accumulate into one array.
+const EMPLOYEES_PAGE_SIZE = 500
+
+async function fetchAllEmployees(): Promise<{ data: EmpItem[] }> {
+  const all: EmpItem[] = []
+  let page = 1
+  for (;;) {
+    const res: { data: EmpItem[]; total: number } = await api.get(
+      `/employees?page=${page}&limit=${EMPLOYEES_PAGE_SIZE}`,
+    )
+    all.push(...(res.data ?? []))
+    if (all.length >= res.total || (res.data ?? []).length === 0) break
+    page++
+  }
+  return { data: all }
+}
+
 // ── useOrgReadiness ───────────────────────────────────────────────────────────
 
 export function useOrgReadiness(): DomainReadiness {
@@ -71,7 +93,7 @@ export function useOrgReadiness(): DomainReadiness {
   })
   const { data: empData, isLoading: el } = useQuery<{ data: EmpItem[] }>({
     queryKey: ['employees'],
-    queryFn:  () => api.get('/employees'),
+    queryFn:  fetchAllEmployees,
     staleTime: STALE.workforce,
   })
 
@@ -95,7 +117,7 @@ export function useOrgReadiness(): DomainReadiness {
 export function useWorkforceReadiness(): DomainReadiness {
   const { data: empData, isLoading: el } = useQuery<{ data: EmpItem[] }>({
     queryKey: ['employees'],
-    queryFn:  () => api.get('/employees'),
+    queryFn:  fetchAllEmployees,
     staleTime: STALE.workforce,
   })
   const { data: structData, isLoading: sl } = useQuery<{ data: StructureItem[] }>({
@@ -175,7 +197,7 @@ export function useAttendanceReadiness(): DomainReadiness {
   })
   const { data: empData } = useQuery<{ data: EmpItem[] }>({
     queryKey: ['employees'],
-    queryFn:  () => api.get('/employees'),
+    queryFn:  fetchAllEmployees,
     staleTime: STALE.workforce,
   })
   const { data: periodsData, isLoading: pl } = useQuery<{ data: { id: string; status: string }[] }>({
