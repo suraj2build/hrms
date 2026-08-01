@@ -1,6 +1,12 @@
 /**
  * EventService — lightweight in-process event bus.
  *
+ * LEGACY (PEND-75 architecture decision): one of four independent event
+ * systems live in this codebase. event-bus.ts (typed HrmsEventMap +
+ * webhook fan-out + automation handlers) is canonical for new work.
+ * Existing call sites are not being ripped out, but new call sites should
+ * prefer eventBus.emit() over eventService.emit().
+ *
  * Design principles:
  *  - Singleton: one shared instance across the entire API process.
  *  - Multiple handlers per event: stored as ordered arrays, all fire on emit.

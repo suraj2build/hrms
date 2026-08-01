@@ -1,6 +1,14 @@
 /**
  * EventPublisher — centralized non-blocking event publisher.
  *
+ * SCOPE (PEND-75 architecture decision): stays separate from event-bus.ts
+ * (the canonical system for webhook fan-out / background automation).
+ * platform_events is the event source the governance/compliance-rule
+ * engine (GovernanceRuleRegistry, compliance-evaluator.ts) is built
+ * around, so this remains the mechanism for events that need to be
+ * evaluated against compliance rules. Don't add new call sites here for
+ * things eventBus already covers (webhooks, standard automation).
+ *
  * CRITICAL RULE: publish() is ALWAYS fire-and-forget.
  * It NEVER blocks or throws. Core operations MUST succeed first.
  *

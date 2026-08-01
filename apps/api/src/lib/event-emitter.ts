@@ -2,6 +2,13 @@
  * HR Event Emitter
  * Writes events to hr_events table and fans out notifications to relevant recipients.
  * Import and call emitEvent() from route handlers after successful mutations.
+ *
+ * LEGACY (PEND-75 architecture decision): one of four independent event
+ * systems live in this codebase. event-bus.ts (typed HrmsEventMap +
+ * webhook fan-out + automation handlers) is canonical for new work — its
+ * audit_logs-insert-plus-notify pattern covers what this file does, with
+ * more infrastructure around it. Existing call sites are not being ripped
+ * out, but new call sites should prefer eventBus.emit() over emitEvent().
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'

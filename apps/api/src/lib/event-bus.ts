@@ -1,6 +1,16 @@
 /**
  * HRMS Event Bus — central typed event infrastructure.
  *
+ * CANONICAL for cross-cutting side-effects (PEND-75 architecture decision):
+ * this is the mechanism new code should emit through for webhook fan-out
+ * and background automation (event-bus-automation.ts). It is the most
+ * feature-complete of the four event systems live in this codebase
+ * (typed HrmsEventMap, webhook allow-list, automation handlers) and the
+ * one most other systems are converging toward. See event-emitter.ts and
+ * event-service.ts for the two systems being phased out in favor of this
+ * one, and platform/events/publishers/event-publisher.ts for the one
+ * exception (governance/compliance-rule evaluation) that stays separate.
+ *
  * All platform subsystems emit and subscribe through this bus.
  * Designed to be:
  *   - Failure-safe: emit() never throws, handler errors are caught + logged
