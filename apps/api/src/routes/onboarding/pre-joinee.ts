@@ -707,7 +707,12 @@ export default async function preJoineeRoutes(fastify: FastifyInstance) {
         joiningDate:   body.joining_date,
         inviteUrl:     fullInviteUrl,
       })
-      emailResult = await sendEmail({ to: body.email, subject: tmpl.subject, html: tmpl.html })
+      emailResult = await sendEmail({
+        to: body.email,
+        subject: tmpl.subject,
+        html: tmpl.html,
+        idempotencyKey: `preboard-invite:${data.id}`,
+      })
     } catch (e) {
       fastify.log.warn({ event: 'pre_joinee.invite_email', err: e })
     }
@@ -772,7 +777,12 @@ export default async function preJoineeRoutes(fastify: FastifyInstance) {
         joiningDate:   inv.joining_date,
         inviteUrl:     fullInviteUrl,
       })
-      emailResult = await sendEmail({ to: inv.email, subject: tmpl.subject, html: tmpl.html })
+      emailResult = await sendEmail({
+        to: inv.email,
+        subject: tmpl.subject,
+        html: tmpl.html,
+        idempotencyKey: `preboard-invite-resend:${id}:${expiresAt}`,
+      })
     } catch (e) {
       fastify.log.warn({ event: 'pre_joinee.resend_email', invitation_id: id, err: e })
     }
@@ -1609,7 +1619,12 @@ export default async function preJoineeRoutes(fastify: FastifyInstance) {
         joiningDate:   inv.joining_date,
         inviteUrl:     `${APP_PUBLIC_URL}/pre-join/${inv.token}`,
       })
-      await sendEmail({ to: inv.email, subject: tmpl.subject, html: tmpl.html })
+      await sendEmail({
+        to: inv.email,
+        subject: tmpl.subject,
+        html: tmpl.html,
+        idempotencyKey: `preboard-invite-renew:${inv.id}:${expiresAt}`,
+      })
     } catch (e) {
       fastify.log.warn({ event: 'pre_joinee.self_request_link', token, err: e })
     }
@@ -1919,7 +1934,12 @@ export default async function preJoineeRoutes(fastify: FastifyInstance) {
             joiningDate:    inv.joining_date ?? undefined,
             hrSystemUrl:    APP_PUBLIC_URL,
           })
-          await sendEmail({ to: buddy.email, subject, html })
+          await sendEmail({
+            to: buddy.email,
+            subject,
+            html,
+            idempotencyKey: `buddy-assignment:${id}:${buddy_employee_id}`,
+          })
         }
       } catch (_) { /* email is best-effort */ }
     }

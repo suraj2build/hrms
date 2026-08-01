@@ -549,7 +549,12 @@ export function registerOnboardingHandlers(supabase: SupabaseClient): void {
           managerEmail,
           loginUrl:     APP_PUBLIC_URL,
         })
-        await sendEmail({ to: (emp as any).email, subject, html })
+        await sendEmail({
+          to: (emp as any).email,
+          subject,
+          html,
+          idempotencyKey: `welcome:${employeeId}`,
+        })
       } catch (err) {
         logWarn('welcome_email_failed', employeeId, err)
       }
@@ -596,7 +601,12 @@ export function registerOnboardingHandlers(supabase: SupabaseClient): void {
             joiningDate: joiningDate ?? undefined,
             hrSystemUrl: APP_PUBLIC_URL,
           })
-          await sendEmail({ to: recipientEmails, subject, html })
+          await sendEmail({
+            to: recipientEmails,
+            subject,
+            html,
+            idempotencyKey: `it-provisioning:${employeeId}`,
+          })
         }
       }
     } catch (err) {

@@ -70,6 +70,7 @@ export async function reopenInvitationForReupload(
     const inviteUrl = `${APP_PUBLIC_URL}/pre-join/${inv.token}`
     await sendEmail({
       to: inv.email,
+      idempotencyKey: `preboard-reupload:${invitationId}:${expiresAt}`,
       ...preJoineeReuploadEmail({ candidateName, companyName, inviteUrl, items, message }),
     })
   } catch (e) {

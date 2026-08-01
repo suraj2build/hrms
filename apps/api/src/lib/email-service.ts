@@ -44,6 +44,17 @@ export interface SendEmailInput {
   subject: string
   html:    string
   from?:   string
+  /**
+   * Forwarded to Resend as Idempotency-Key. If a caller retries sendEmail()
+   * after a timeout/dropped response (Resend accepted and sent, but our
+   * process never saw the 2xx), Resend recognizes the repeat key and
+   * returns the original result instead of sending a second, duplicate
+   * email. Pass a natural key derived from the triggering entity (e.g.
+   * `interview-scheduled:${roundId}:candidate`) — omit only for sends
+   * that are already deduplicated upstream (e.g. the digest scheduler's
+   * own digest_send_log reservation).
+   */
+  idempotencyKey?: string
 }
 
 export interface SendEmailResult {
@@ -67,6 +78,7 @@ export async function sendEmail(input: SendEmailInput): Promise<SendEmailResult>
       headers: {
         'Authorization': `Bearer ${apiKey}`,
         'Content-Type':  'application/json',
+        ...(input.idempotencyKey ? { 'Idempotency-Key': input.idempotencyKey } : {}),
       },
       body: JSON.stringify({
         from:    input.from ?? DEFAULT_FROM,

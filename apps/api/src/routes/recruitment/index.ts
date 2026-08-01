@@ -155,6 +155,7 @@ async function createPreJoineeFromApp(
       if (cand?.email) {
         await sendEmail({
           to: cand.email,
+          idempotencyKey: `preboard-invite:${invitation.id}`,
           ...preJoineeInviteEmail({
             candidateName: `${cand.first_name ?? ''} ${cand.last_name ?? ''}`.trim(),
             joiningDate:   opts.joining_date,
@@ -975,7 +976,11 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
       if (ctx?.candidateEmail) {
         const { APP_PUBLIC_URL } = await import('../../lib/email-service.js')
         const portalUrl = `${APP_PUBLIC_URL}/portal/candidate/${appId}`
-        await sendEmail({ to: ctx.candidateEmail, ...applicationReceivedEmail({ ...ctx, portalUrl }) })
+        await sendEmail({
+          to: ctx.candidateEmail,
+          idempotencyKey: `application-received:${appId}`,
+          ...applicationReceivedEmail({ ...ctx, portalUrl }),
+        })
       }
     })()
 
@@ -1046,7 +1051,11 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
         const emailPayload = stageType === 'offer'
           ? offerExtendedEmail(ctx)
           : applicationShortlistedEmail(ctx)
-        await sendEmail({ to: ctx.candidateEmail, ...emailPayload })
+        await sendEmail({
+          to: ctx.candidateEmail,
+          idempotencyKey: `application-stage:${id}:${parsed.data.stage_id}`,
+          ...emailPayload,
+        })
       } catch { /* non-throwing */ }
     })()
 
@@ -1077,7 +1086,11 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
     // Rejection email to candidate (non-blocking)
     void (async () => {
       const ctx = await getAppEmailCtx(fastify.supabase, req.tenantId, id)
-      if (ctx?.candidateEmail) await sendEmail({ to: ctx.candidateEmail, ...applicationRejectedEmail(ctx) })
+      if (ctx?.candidateEmail) await sendEmail({
+        to: ctx.candidateEmail,
+        idempotencyKey: `application-rejected:${id}`,
+        ...applicationRejectedEmail(ctx),
+      })
     })()
 
     return reply.send({ message: 'Application rejected' })
@@ -1650,19 +1663,24 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
 
         // Email candidate
         if (ctx.candidateEmail) {
-          await sendEmail({ to: ctx.candidateEmail, ...interviewScheduledEmail(emailOpts) })
+          await sendEmail({
+            to: ctx.candidateEmail,
+            idempotencyKey: `interview-scheduled:${roundId}:candidate`,
+            ...interviewScheduledEmail(emailOpts),
+          })
         }
 
         // Email each panel member
         if (scopedInterviewerIds.length > 0) {
           const { data: panelProfiles } = await fastify.supabase
             .from('profiles')
-            .select('full_name, email')
+            .select('id, full_name, email')
             .in('id', scopedInterviewerIds)
           for (const p of (panelProfiles ?? []) as any[]) {
             if (!p.email) continue
             await sendEmail({
               to: p.email,
+              idempotencyKey: `interview-scheduled:${roundId}:panel:${p.id}`,
               ...panelInterviewNotificationEmail({ ...emailOpts, panelName: p.full_name ?? 'Interviewer' }),
             })
           }
@@ -2182,6 +2200,11 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
     let effAmount: any   = offered_amount
     let effJoining: any  = joining_date
     let effRecipient: string = recipient_email
+    // Idempotency key source: the approved maker-checker log row uniquely
+    // identifies this dispatched offer instance when sign-off is enabled.
+    // Sign-off is opt-in (OFFER_SIGNOFF_DUAL_CONTROL) — with it off there's no
+    // such row, so we fall back to appId below (see sendEmail call).
+    let offerLogId: string | undefined
 
     if (isOfferSignoffEnabled()) {
       const { data: pending } = await fastify.supabase
@@ -2231,12 +2254,14 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
       if (!approvedLog) {
         return reply.code(409).send({ error: 'ALREADY_ACTIONED', message: 'This offer sign-off has already been approved by another reviewer.' })
       }
+      offerLogId = (approvedLog as any).id
     }
 
     const result = await sendEmail({
       to:      effRecipient,
       subject: `Offer Letter — ${job_title} at ${company_name}`,
       html:    letter_html,
+      idempotencyKey: `offer-letter:${offerLogId ?? appId}`,
     })
 
     if (!result.sent && !result.skipped) {
