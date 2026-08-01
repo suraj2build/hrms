@@ -2,11 +2,8 @@
  * navigation.config.ts — Single source of truth for all platform navigation.
  *
  * Consumed by:
- *   · AdminSidebar.tsx        — grouped collapsible nav
- *   · EmployeeSidebar.tsx     — ESS nav  (ESS_NAV_ITEMS only)
- *   · CommandPalette.tsx      — ⌘K search targets
- *   · Breadcrumbs             — auto-generated trail
- *   · OperationalBanner.tsx   — deep-link hrefs
+ *   · UniversalSearch.tsx               — ⌘K search targets (ADMIN_NAV_ITEMS)
+ *   · layout/v2/SidebarAdvancedSection.tsx — advanced-group nav (currently unwired, no importers)
  *
  * ── Admin group structure ─────────────────────────────────────────────────────
  *
@@ -1601,6 +1598,9 @@ export const ADMIN_NAV_ITEMS: NavItem[] = [
 ]
 
 // ── ESS Nav Items ──────────────────────────────────────────────────────────────
+// Not currently read by any component (EmployeeSidebar.tsx has its own nav list).
+// Kept as the reference catalog of ESS routes for when ESS nav is wired to this
+// config; verify against live routes before consuming.
 
 export const ESS_NAV_ITEMS: NavItem[] = [
   {
@@ -1761,29 +1761,3 @@ export const ESS_NAV_ITEMS: NavItem[] = [
   },
 ]
 
-// ── Utility: find item by route ────────────────────────────────────────────────
-
-export function findNavItem(route: string): NavItem | undefined {
-  return [...ADMIN_NAV_ITEMS, ...ESS_NAV_ITEMS].find(
-    item => item.route === route
-  )
-}
-
-/** Build breadcrumb trail from a route path */
-export function buildBreadcrumbs(pathname: string): Array<{ label: string; route: string }> {
-  const crumbs: Array<{ label: string; route: string }> = []
-  const item = [...ADMIN_NAV_ITEMS, ...ESS_NAV_ITEMS].find(
-    i => pathname === i.route || pathname.startsWith(i.route + '/')
-  )
-  if (item) {
-    crumbs.push({ label: item.breadcrumbLabel ?? item.label, route: item.route })
-  }
-  return crumbs
-}
-
-/** Returns all nav items for the command palette */
-export function getCommandItems(section: 'admin' | 'ess' | 'both'): NavItem[] {
-  return [...ADMIN_NAV_ITEMS, ...ESS_NAV_ITEMS].filter(
-    item => item.section === section || item.section === 'both'
-  )
-}
