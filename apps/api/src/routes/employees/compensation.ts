@@ -658,8 +658,25 @@ export default async function compensationRoutes(fastify: FastifyInstance) {
       .maybeSingle()
     if (!target) return notFound(reply, 'NOT_FOUND', 'Compensation record not found')
 
-    // Block deletion if any finalized payroll slip referenced this compensation
-    // period — keep historical pay auditable. (Best-effort: skip if column absent.)
+    // Block deletion if any finalized payroll run snapshotted this compensation
+    // record — keep historical pay auditable. payroll_employee_snapshots is only
+    // ever written for finalized runs (auto on finalize, or via the manual
+    // POST /payroll/runs/:id/snapshot route, which itself requires
+    // status === 'finalized') and its compensation_snapshot blob carries the
+    // source compensation_id, so a match here is a reliable finalized-usage signal.
+    const { data: usedInPayroll, error: usageCheckErr } = await fastify.supabase
+      .from('payroll_employee_snapshots')
+      .select('id')
+      .eq('tenant_id', req.tenantId)
+      .eq('compensation_snapshot->>compensation_id', compId)
+      .limit(1)
+    if (usageCheckErr) {
+      return serverError(req, reply, usageCheckErr, ErrorCode.QUERY_FAILED, 'Failed to verify payroll usage before deletion')
+    }
+    if (usedInPayroll && usedInPayroll.length > 0) {
+      return conflictError(reply, 'COMPENSATION_USED_IN_PAYROLL', 'This compensation record was used in a finalized payroll run and cannot be deleted')
+    }
+
     // Delete components first (explicit; FK cascade may or may not be present).
     const { error: compDelErr } = await fastify.supabase.from('employee_compensation_components').delete().eq('compensation_id', compId)
     if (compDelErr) {
