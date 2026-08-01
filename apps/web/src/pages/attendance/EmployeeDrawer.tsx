@@ -35,6 +35,8 @@ import { Badge, type BadgeProps }   from '@/components/ui/badge'
 import { Button }  from '@/components/ui/button'
 import { api }     from '@/lib/api/client'
 import { cn }      from '@/lib/utils'
+import { useTenantTz }                          from '@/hooks/useTenantTz'
+import { getTenantLocalDate, addTenantLocalDays } from '@/lib/tenant-date'
 
 // ── Types (mirrors ManagerDashboard.tsx) ──────────────────────────────────────
 
@@ -208,11 +210,9 @@ export function EmployeeDrawer({
   }, [open, pendingLeave.length, pendingReg.length])
 
   // ── Data fetching ─────────────────────────────────────────────────────────
-  const today    = new Date().toISOString().slice(0, 10)
-  const sevenAgo = (() => {
-    const d = new Date(); d.setDate(d.getDate() - 6)
-    return d.toISOString().slice(0, 10)
-  })()
+  const tenantTz = useTenantTz()
+  const today    = getTenantLocalDate(new Date(), tenantTz)
+  const sevenAgo = addTenantLocalDays(today, -6)
 
   const {
     data: attData,

@@ -16,6 +16,8 @@ import { UpcomingHolidays } from './parts'
 import { MobileWishButton, type WishKind } from './MobileWish'
 import { timeAgo, initials } from '../format'
 import { invalidateCommunityFeeds } from '@/lib/community-feed-cache'
+import { useTenantTz } from '@/hooks/useTenantTz'
+import { getTenantLocalDate } from '@/lib/tenant-date'
 
 type Reaction = 'like' | 'celebrate' | 'appreciate' | 'support'
 interface CommunityPost {
@@ -37,7 +39,6 @@ interface Reflection { insight: string | null; action?: { label: string; href: s
 
 const lowerFirst = (s: string) => s.charAt(0).toLowerCase() + s.slice(1)
 
-const todayStr = () => new Date().toLocaleDateString('en-CA')
 const fmtTime = (iso: string | null) =>
   iso ? new Date(iso).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false }) : null
 
@@ -60,7 +61,8 @@ export function MobileHome({ base }: { base: string }) {
   const qc = useQueryClient()
   const { profile } = useAuthStore()
   const employeeId = profile?.employee_id ?? ''
-  const today = todayStr()
+  const tenantTz = useTenantTz()
+  const today = getTenantLocalDate(new Date(), tenantTz)
 
   const chips = [
     { label: 'Punch', icon: Fingerprint, from: '#2E6FE6', to: '#5C9AFF', to_path: `${base}/attendance` },

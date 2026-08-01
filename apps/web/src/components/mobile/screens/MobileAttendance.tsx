@@ -5,30 +5,34 @@ import { toast } from 'sonner'
 import { api } from '@/lib/api/client'
 import { useAuthStore } from '@/stores/authStore'
 import { glossy } from '../glossy'
+import { useTenantTz } from '@/hooks/useTenantTz'
+import { getTenantLocalDate, addTenantLocalDays } from '@/lib/tenant-date'
 
 interface LogEntry { check_in: string | null; check_out: string | null; date: string }
 interface DailyRecord { date: string; status: string }
 interface AttendanceResponse { daily: DailyRecord[]; logs: LogEntry[] }
 
-const todayStr = () => new Date().toLocaleDateString('en-CA') // YYYY-MM-DD, local tz
 const fmtTime = (iso: string | null) =>
   iso ? new Date(iso).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false }) : '—'
 
-function weekRange() {
-  const now = new Date()
-  const day = (now.getDay() + 6) % 7 // Mon=0
-  const mon = new Date(now); mon.setDate(now.getDate() - day)
-  const sun = new Date(mon); sun.setDate(mon.getDate() + 6)
-  const f = (d: Date) => d.toLocaleDateString('en-CA')
-  return { from: f(mon), to: f(sun) }
+// Mon–Sun range containing `todayStr`, computed from the date string itself
+// (not a device-local Date) so it agrees with the tenant-local `today` this
+// component already resolved, rather than re-deriving "now" independently.
+function weekRangeFrom(todayStr: string) {
+  const anchor = new Date(`${todayStr}T00:00:00Z`)
+  const day = (anchor.getUTCDay() + 6) % 7 // Mon=0
+  const mon = addTenantLocalDays(todayStr, -day)
+  const sun = addTenantLocalDays(mon, 6)
+  return { from: mon, to: sun }
 }
 
 export function MobileAttendance({ base: _base }: { base: string }) {
   const { profile } = useAuthStore()
   const employeeId = profile?.employee_id ?? ''
   const qc = useQueryClient()
-  const today = todayStr()
-  const wk = weekRange()
+  const tenantTz = useTenantTz()
+  const today = getTenantLocalDate(new Date(), tenantTz)
+  const wk = weekRangeFrom(today)
 
   const { data } = useQuery<AttendanceResponse>({
     queryKey: ['mobile-attendance', employeeId, today],
