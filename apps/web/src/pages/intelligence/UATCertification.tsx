@@ -1,16 +1,20 @@
 /**
  * UAT Certification Workspace — /admin/intelligence/uat-certification
  *
- * Read-only enterprise-readiness certification tool. Drives the per-module
- * UAT checklist from the readiness audit. Sign-off state (pass/fail/na + notes
- * + owner) is persisted in localStorage — NO new API, NO new table, NO business
- * logic. Purely a certification surface for UAT sign-off.
+ * Enterprise-readiness certification tool. Drives the per-module UAT
+ * checklist from the readiness audit. Sign-off state (pass/fail/na + note)
+ * is persisted server-side in uat_certification_marks (migration 420) —
+ * the reviewer identity is the authenticated caller who wrote the mark
+ * (updated_by), not a free-text field. Survives a cleared browser or a
+ * different device, and gives HR an audit trail of who certified what.
  */
-import { useState, useMemo, useCallback } from 'react'
+import { useState, useMemo, useCallback, useEffect } from 'react'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useAuthStore } from '@/stores/authStore'
+import { api } from '@/lib/api/client'
 import { Button } from '@/components/ui/button'
 import {
-  CheckCircle2, XCircle, MinusCircle, Circle, ShieldCheck, Download, RotateCcw,
+  CheckCircle2, XCircle, MinusCircle, Circle, ShieldCheck, Download, RotateCcw, AlertTriangle,
 } from 'lucide-react'
 import { PageContainer } from '@/components/layout/PageContainer'
 
@@ -82,19 +86,13 @@ const MODULES: ModuleSpec[] = [
   ]},
 ]
 
-interface ItemState { status: Status; owner?: string; note?: string }
-type CertState = Record<string, ItemState>
-
-const STORAGE_KEY = 'emvora-uat-certification'
-
-function loadState(tenantId: string): CertState {
-  try {
-    const raw = localStorage.getItem(`${STORAGE_KEY}:${tenantId}`)
-    return raw ? (JSON.parse(raw) as CertState) : {}
-  } catch { return {} }
-}
-function saveState(tenantId: string, s: CertState) {
-  try { localStorage.setItem(`${STORAGE_KEY}:${tenantId}`, JSON.stringify(s)) } catch { /* ignore */ }
+interface MarkRow {
+  item_id: string
+  status: Status
+  note: string | null
+  updated_by: string | null
+  updated_by_name: string | null
+  updated_at: string
 }
 
 const STATUS_META: Record<Status, { icon: React.ComponentType<{ className?: string }>; cls: string; label: string }> = {
@@ -105,53 +103,79 @@ const STATUS_META: Record<Status, { icon: React.ComponentType<{ className?: stri
 }
 
 export function UATCertification() {
+  const qc = useQueryClient()
   const tenant = useAuthStore(s => s.tenant)
-  const profile = useAuthStore(s => s.profile)
   const tenantId = tenant?.id ?? 'default'
-  const [state, setState] = useState<CertState>(() => loadState(tenantId))
 
-  const update = useCallback((id: string, patch: Partial<ItemState>) => {
-    setState(prev => {
-      const prevItem: ItemState = prev[id] ?? { status: 'pending' }
-      const merged: ItemState = { ...prevItem, ...patch }
-      const next = { ...prev, [id]: merged }
-      saveState(tenantId, next)
-      return next
-    })
-  }, [tenantId])
+  const marksQuery = useQuery<{ data: MarkRow[] }>({
+    queryKey: ['uat-certification', tenantId],
+    queryFn:  () => api.get('/intelligence/uat-certification'),
+  })
+
+  const marks = useMemo(() => {
+    const m: Record<string, MarkRow> = {}
+    for (const row of marksQuery.data?.data ?? []) m[row.item_id] = row
+    return m
+  }, [marksQuery.data])
+
+  // Local draft buffer for the note field so typing doesn't fire a request
+  // per keystroke — committed on blur.
+  const [noteDrafts, setNoteDrafts] = useState<Record<string, string>>({})
+  useEffect(() => {
+    const next: Record<string, string> = {}
+    for (const row of marksQuery.data?.data ?? []) next[row.item_id] = row.note ?? ''
+    setNoteDrafts(next)
+  }, [marksQuery.data])
+
+  const updateMutation = useMutation({
+    mutationFn: ({ itemId, status, note }: { itemId: string; status: Status; note?: string | null }) =>
+      api.put<MarkRow>(`/intelligence/uat-certification/${itemId}`, { status, note }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['uat-certification', tenantId] }),
+  })
+
+  const resetMutation = useMutation({
+    mutationFn: () => api.delete('/intelligence/uat-certification'),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['uat-certification', tenantId] }),
+  })
 
   const cycleStatus = useCallback((id: string) => {
     const order: Status[] = ['pending', 'pass', 'fail', 'na']
-    const cur = state[id]?.status ?? 'pending'
+    const cur = marks[id]?.status ?? 'pending'
     const nextStatus = order[(order.indexOf(cur) + 1) % order.length]
-    update(id, { status: nextStatus, owner: nextStatus === 'pass' || nextStatus === 'fail' ? (state[id]?.owner ?? profile?.full_name ?? '') : state[id]?.owner })
-  }, [state, update, profile])
+    updateMutation.mutate({ itemId: id, status: nextStatus, note: marks[id]?.note ?? null })
+  }, [marks, updateMutation])
+
+  const commitNote = useCallback((id: string) => {
+    const note = noteDrafts[id] ?? ''
+    if ((marks[id]?.note ?? '') === note) return // unchanged — skip the request
+    updateMutation.mutate({ itemId: id, status: marks[id]?.status ?? 'pending', note: note || null })
+  }, [noteDrafts, marks, updateMutation])
 
   const totals = useMemo(() => {
     const all = MODULES.flatMap(m => m.items)
     const counts = { total: all.length, pass: 0, fail: 0, na: 0, pending: 0 }
     for (const it of all) {
-      const st = state[it.id]?.status ?? 'pending'
+      const st = marks[it.id]?.status ?? 'pending'
       counts[st]++
     }
     const decided = counts.pass + counts.fail + counts.na
     const pct = Math.round((decided / counts.total) * 100)
     const certified = counts.fail === 0 && counts.pending === 0
     return { ...counts, decided, pct, certified }
-  }, [state])
+  }, [marks])
 
   function moduleStats(m: ModuleSpec) {
     let pass = 0, fail = 0, pending = 0, na = 0
     for (const it of m.items) {
-      const st = state[it.id]?.status ?? 'pending'
+      const st = marks[it.id]?.status ?? 'pending'
       if (st === 'pass') pass++; else if (st === 'fail') fail++; else if (st === 'na') na++; else pending++
     }
     return { pass, fail, pending, na, total: m.items.length }
   }
 
   function reset() {
-    if (!confirm('Reset all UAT certification marks for this tenant?')) return
-    setState({}); saveState(tenantId, {})
+    if (!confirm('Reset all UAT certification marks for this tenant? This clears every reviewer\'s sign-off.')) return
+    resetMutation.mutate()
   }
 
   function exportReport() {
@@ -159,8 +183,8 @@ export function UATCertification() {
     for (const m of MODULES) {
       lines.push(`## ${m.label}`)
       for (const it of m.items) {
-        const s = state[it.id]
-        lines.push(`- [${(s?.status ?? 'pending').toUpperCase()}] ${it.text}${s?.owner ? ` — ${s.owner}` : ''}${s?.note ? ` (${s.note})` : ''}`)
+        const s = marks[it.id]
+        lines.push(`- [${(s?.status ?? 'pending').toUpperCase()}] ${it.text}${s?.updated_by_name ? ` — ${s.updated_by_name}` : ''}${s?.note ? ` (${s.note})` : ''}`)
       }
       lines.push('')
     }
@@ -173,7 +197,7 @@ export function UATCertification() {
       <div className="rounded-xl bg-gradient-to-r from-[#1A4D8F] via-[#1E5BA8] to-[#2260A8] text-white p-5 flex items-start justify-between gap-4">
         <div className="space-y-1">
           <h1 className="text-lg font-semibold flex items-center gap-2"><ShieldCheck className="h-5 w-5" /> UAT Certification Workspace</h1>
-          <p className="text-sm text-white/80">Per-module enterprise-readiness sign-off. Marks are saved locally for {tenant?.name ?? 'this tenant'}.</p>
+          <p className="text-sm text-white/80">Per-module enterprise-readiness sign-off for {tenant?.name ?? 'this tenant'}. Marks are recorded against your account.</p>
           <div className="flex items-center gap-2 mt-2 flex-wrap text-xs">
             <span className="px-2 py-0.5 rounded-full bg-white/20">{totals.pass} pass</span>
             <span className="px-2 py-0.5 rounded-full bg-white/20">{totals.fail} fail</span>
@@ -186,78 +210,90 @@ export function UATCertification() {
           <Button size="sm" variant="outline" className="bg-white/10 border-white/20 text-white hover:bg-white/20" onClick={exportReport}>
             <Download className="h-3.5 w-3.5 mr-1.5" /> Copy report
           </Button>
-          <Button size="sm" variant="outline" className="bg-white/10 border-white/20 text-white hover:bg-white/20" onClick={reset}>
+          <Button size="sm" variant="outline" className="bg-white/10 border-white/20 text-white hover:bg-white/20" onClick={reset} disabled={resetMutation.isPending}>
             <RotateCcw className="h-3.5 w-3.5 mr-1.5" /> Reset
           </Button>
         </div>
       </div>
 
-      {/* Overall progress bar */}
-      <div className="h-2 w-full rounded-full bg-muted overflow-hidden">
-        <div className="h-full rounded-full bg-gradient-to-r from-[#1A4D8F] via-[#1E5BA8] to-[#2260A8] transition-all" style={{ width: `${totals.pct}%` }} />
-      </div>
-
-      {/* Modules */}
-      {MODULES.map(m => {
-        const st = moduleStats(m)
-        const moduleCertified = st.fail === 0 && st.pending === 0
-        return (
-          <div key={m.key} className="rounded-lg border border-border bg-card">
-            <div className="px-4 py-3 border-b border-border flex items-center justify-between gap-2">
-              <p className="text-sm font-semibold text-foreground">{m.label}</p>
-              <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                <span className="text-success">{st.pass}✓</span>
-                {st.fail > 0 && <span className="text-destructive">{st.fail}✗</span>}
-                {st.pending > 0 && <span>{st.pending} pending</span>}
-                {moduleCertified && <span className="px-1.5 py-0.5 rounded-full bg-success/10 text-success font-medium">certified</span>}
-              </div>
-            </div>
-            <div className="divide-y divide-border/50">
-              {m.items.map(it => {
-                const s = state[it.id]
-                const status = s?.status ?? 'pending'
-                const Meta = STATUS_META[status]
-                const Icon = Meta.icon
-                return (
-                  <div key={it.id} className="px-4 py-2.5 flex items-start gap-3">
-                    <button
-                      type="button"
-                      onClick={() => cycleStatus(it.id)}
-                      title="Click to cycle: pending → pass → fail → N/A"
-                      className={`mt-0.5 flex-shrink-0 ${Meta.cls}`}
-                    >
-                      <Icon className="h-4 w-4" />
-                    </button>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm text-foreground">{it.text}</p>
-                      {(status === 'pass' || status === 'fail') && (
-                        <div className="flex flex-wrap items-center gap-2 mt-1.5">
-                          <input
-                            value={s?.owner ?? ''}
-                            onChange={e => update(it.id, { owner: e.target.value })}
-                            placeholder="Sign-off owner"
-                            className="text-xs rounded border border-border bg-background px-2 py-1 w-40"
-                          />
-                          <input
-                            value={s?.note ?? ''}
-                            onChange={e => update(it.id, { note: e.target.value })}
-                            placeholder="Note (optional)"
-                            className="text-xs rounded border border-border bg-background px-2 py-1 flex-1 min-w-[160px]"
-                          />
-                        </div>
-                      )}
-                    </div>
-                    <span className={`text-[11px] font-medium flex-shrink-0 ${Meta.cls}`}>{Meta.label}</span>
-                  </div>
-                )
-              })}
-            </div>
+      {marksQuery.isError ? (
+        <div className="flex items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+          <AlertTriangle className="h-4 w-4 flex-shrink-0" />
+          Failed to load certification marks. <Button size="sm" variant="outline" className="ml-auto" onClick={() => marksQuery.refetch()}>Retry</Button>
+        </div>
+      ) : marksQuery.isLoading ? (
+        <div className="py-12 text-center text-sm text-muted-foreground">Loading certification state…</div>
+      ) : (
+        <>
+          {/* Overall progress bar */}
+          <div className="h-2 w-full rounded-full bg-muted overflow-hidden">
+            <div className="h-full rounded-full bg-gradient-to-r from-[#1A4D8F] via-[#1E5BA8] to-[#2260A8] transition-all" style={{ width: `${totals.pct}%` }} />
           </div>
-        )
-      })}
+
+          {/* Modules */}
+          {MODULES.map(m => {
+            const st = moduleStats(m)
+            const moduleCertified = st.fail === 0 && st.pending === 0
+            return (
+              <div key={m.key} className="rounded-lg border border-border bg-card">
+                <div className="px-4 py-3 border-b border-border flex items-center justify-between gap-2">
+                  <p className="text-sm font-semibold text-foreground">{m.label}</p>
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <span className="text-success">{st.pass}✓</span>
+                    {st.fail > 0 && <span className="text-destructive">{st.fail}✗</span>}
+                    {st.pending > 0 && <span>{st.pending} pending</span>}
+                    {moduleCertified && <span className="px-1.5 py-0.5 rounded-full bg-success/10 text-success font-medium">certified</span>}
+                  </div>
+                </div>
+                <div className="divide-y divide-border/50">
+                  {m.items.map(it => {
+                    const s = marks[it.id]
+                    const status = s?.status ?? 'pending'
+                    const Meta = STATUS_META[status]
+                    const Icon = Meta.icon
+                    return (
+                      <div key={it.id} className="px-4 py-2.5 flex items-start gap-3">
+                        <button
+                          type="button"
+                          onClick={() => cycleStatus(it.id)}
+                          disabled={updateMutation.isPending}
+                          title="Click to cycle: pending → pass → fail → N/A"
+                          className={`mt-0.5 flex-shrink-0 ${Meta.cls} disabled:opacity-50`}
+                        >
+                          <Icon className="h-4 w-4" />
+                        </button>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm text-foreground">{it.text}</p>
+                          {(status === 'pass' || status === 'fail') && (
+                            <div className="flex flex-wrap items-center gap-2 mt-1.5">
+                              {s?.updated_by_name && (
+                                <span className="text-[11px] text-muted-foreground">
+                                  Signed off by <span className="font-medium text-foreground">{s.updated_by_name}</span>
+                                </span>
+                              )}
+                              <input
+                                value={noteDrafts[it.id] ?? ''}
+                                onChange={e => setNoteDrafts(d => ({ ...d, [it.id]: e.target.value }))}
+                                onBlur={() => commitNote(it.id)}
+                                placeholder="Note (optional)"
+                                className="text-xs rounded border border-border bg-background px-2 py-1 flex-1 min-w-[160px]"
+                              />
+                            </div>
+                          )}
+                        </div>
+                        <span className={`text-[11px] font-medium flex-shrink-0 ${Meta.cls}`}>{Meta.label}</span>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            )
+          })}
+        </>
+      )}
 
       <p className="text-[11px] text-muted-foreground">
-        Certification marks are stored locally in this browser for audit convenience — they are not a system of record and never modify employee, payroll, or any operational data.
+        Certification marks are recorded server-side against the signing-in reviewer's account — they are not a system of record for employee, payroll, or any operational data.
       </p>
     </PageContainer>
   )
