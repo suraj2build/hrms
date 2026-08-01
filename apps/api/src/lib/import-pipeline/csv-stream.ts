@@ -237,7 +237,7 @@ async function openStorageStream(
 }
 
 function isBlankRecord(rec: { fields: string[] }): boolean {
-  return rec.fields.length === 1 && rec.fields[0] === ''
+  return rec.fields.length === 1 && rec.fields[0].trim() === ''
 }
 
 // ── Main entry point ───────────────────────────────────────────────────────────

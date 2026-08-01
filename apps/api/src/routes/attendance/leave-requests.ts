@@ -369,11 +369,10 @@ export default async function leaveRequestsRoutes(fastify: FastifyInstance) {
       // chain an intermediate approval leaves the request PENDING (advanced a level).
       if (result.value.status === 'APPROVED') {
         // Fire-and-forget — never await, never blocks.
-        // self_approved is always false here by construction (PEND-94):
-        // isSelfApproval() in approval-service.ts already rejects a self-approval
-        // attempt before this point is reached — the condition is carried in the
-        // payload as defense-in-depth for governance-rule coverage, not because
-        // it can currently fire.
+        // self_approved is computed in approval-service.ts, not hardcoded —
+        // isSelfApproval() already blocks this case upstream today (PEND-94),
+        // so it's expected to stay false, but a real computed value means the
+        // governance rule still catches a regression in that guard.
         fastify.eventPublisher.publish({
           event_type:  EventType.LEAVE_APPROVED,
           module:      MODULE.LEAVE,
@@ -384,7 +383,7 @@ export default async function leaveRequestsRoutes(fastify: FastifyInstance) {
           actor_type:  'user',
           payload: {
             approved_by:   req.userId,
-            self_approved: false,
+            self_approved: result.value.selfApproved ?? false,
             backdated:     result.value.backdated ?? false,
           },
           correlation_id: req.correlationId ?? undefined,

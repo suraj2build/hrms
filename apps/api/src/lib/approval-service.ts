@@ -32,7 +32,8 @@ import { logAction }                            from './audit-service.js'
 import { eventService }                         from './event-service.js'
 import { eventBus }                             from './event-bus.js'
 import { getLeaveRequest }                      from './leave-request-service.js'
-import { recomputeRange }                       from './attendance-engine.js'
+import { recomputeRange, fetchTenantTz }        from './attendance-engine.js'
+import { getLocalDate }                         from './org-context.js'
 import { isSelfApproval }                       from './approval-guards.js'
 import { gateApprove, gateReject }              from './approval-orchestrator.js'
 
@@ -165,7 +166,7 @@ export interface LeaveApprovalOpts {
 export async function approveLeaveRequest(
   supabase: SupabaseClient,
   opts:     LeaveApprovalOpts,
-): Promise<ApprovalResult<{ id: string; status: string; backdated?: boolean }>> {
+): Promise<ApprovalResult<{ id: string; status: string; backdated?: boolean; selfApproved?: boolean }>> {
   const { tenantId, requestId, ctx } = opts
 
   // ── 1. Fetch ────────────────────────────────────────────────────────────────
@@ -354,9 +355,19 @@ export async function approveLeaveRequest(
 
   // PEND-94: leave.abnormal-approval-pattern's `backdated` — the request's
   // start date already lay in the past at the moment it was submitted.
-  const backdated = req.from_date < req.created_at.slice(0, 10)
+  // Compared in the tenant's local calendar, not UTC — a request filed near
+  // local midnight would otherwise be misclassified (mirrors the same
+  // UTC-vs-tenant-local fix applied elsewhere, e.g. tds.ts / org-context.ts).
+  const tz = await fetchTenantTz(supabase, tenantId)
+  const backdated = req.from_date < getLocalDate(req.created_at, tz)
 
-  return { ok: true, value: { ...approved, backdated } }
+  // `self_approved` — computed directly, not hardcoded false, so it's real
+  // defense-in-depth: isSelfApproval() already blocks this above on the
+  // legacy/no-chain path, but a regression in that guard (or in the chain
+  // path's own self-approval check) would still surface here.
+  const selfApproved = req.employee_id === ctx.approverId
+
+  return { ok: true, value: { ...approved, backdated, selfApproved } }
 }
 
 /**

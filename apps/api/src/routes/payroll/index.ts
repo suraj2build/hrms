@@ -2846,17 +2846,20 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
     })
 
     // PEND-94: payroll.excessive-override's `override_count` — canonical source
-    // is payroll_finalize_overrides (this run's force-finalize audit rows), each
-    // row's missing_employee_count being the number of employees whose pay was
-    // finalized on an attendance override for this run.
+    // is payroll_finalize_overrides (this run's force-finalize audit rows).
+    // A finalize attempt that fails after this insert (e.g. slipFinalizeErr
+    // below) leaves the run in draft and gets retried, re-inserting an audit
+    // row for the same employees — so count DISTINCT employee ids across all
+    // of this run's rows, not sum missing_employee_count (which would double-
+    // count the same override on every retry).
     const { data: overrideRows } = await fastify.supabase
       .from('payroll_finalize_overrides')
-      .select('missing_employee_count')
+      .select('missing_employee_ids')
       .eq('tenant_id', tenantId)
       .eq('run_id', id)
-    const overrideCount = (overrideRows ?? []).reduce(
-      (sum: number, r: any) => sum + (r.missing_employee_count ?? 0), 0,
-    )
+    const overrideCount = new Set(
+      (overrideRows ?? []).flatMap((r: any) => r.missing_employee_ids ?? []),
+    ).size
 
     // Fire-and-forget — never await, never blocks
     fastify.eventPublisher.publish({
