@@ -22,6 +22,11 @@ import { SectionCard }   from '@/components/layout/SectionCard'
 import { MetricCard, MetricRow } from '@/components/dashboard/MetricCard'
 import { Badge }         from '@/components/ui/badge'
 import { Button }        from '@/components/ui/button'
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+} from '@/components/ui/dialog'
+import { Label }         from '@/components/ui/label'
+import { Textarea }      from '@/components/ui/textarea'
 import { api }           from '@/lib/api/client'
 import { useAuthStore }  from '@/stores/authStore'
 import { cn }            from '@/lib/utils'
@@ -109,6 +114,14 @@ const STATUS_VARIANT: Record<ExceptionStatus, BadgeVariant> = {
   dismissed:    'secondary',
 }
 
+const ACTION_LABEL: Record<ExceptionStatus, string> = {
+  open:         'Reopen',
+  acknowledged: 'Acknowledge',
+  resolved:     'Resolve',
+  escalated:    'Escalate',
+  dismissed:    'Dismiss',
+}
+
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
 function fmtDate(iso: string) {
@@ -143,7 +156,7 @@ function slaLabel(sla_due_at: string | null, sla_breached: boolean): string {
 
 interface ActionDropdownProps {
   exception:    AttendanceException
-  onAction:     (id: string, status: ExceptionStatus) => void
+  onAction:     (exception: AttendanceException, status: ExceptionStatus) => void
   isPending:    boolean
 }
 
@@ -188,7 +201,7 @@ function ActionDropdown({ exception, onAction, isPending }: ActionDropdownProps)
                 )}
                 onClick={() => {
                   if (!action.disabled) {
-                    onAction(exception.id, action.status)
+                    onAction(exception, action.status)
                     setOpen(false)
                   }
                 }}
@@ -215,6 +228,8 @@ export function ExceptionGovernance() {
   const [applied,  setApplied]  = useState<Filters>(INITIAL_FILTERS)
   const [page,     setPage]     = useState(0)
   const [pendingId, setPendingId] = useState<string | null>(null)
+  const [actionModal, setActionModal] = useState<{ exception: AttendanceException; status: ExceptionStatus } | null>(null)
+  const [actionNote,  setActionNote]  = useState('')
 
   const PAGE_SIZE = 50
 
@@ -267,10 +282,26 @@ export function ExceptionGovernance() {
     },
   })
 
-  function handleAction(id: string, status: ExceptionStatus) {
-    setPendingId(id)
-    updateMutation.mutate({ id, body: { status } })
+  // Every status transition goes through this confirmation dialog — mirrors
+  // SecurityOpsWorkspace.tsx's equivalent flow, which also requires an
+  // explicit note before an alert's status changes. A resolution note is
+  // mandatory for the terminal transitions (Resolve/Dismiss), since those end
+  // the audit trail for what may be a payroll-impacting or SLA-breached
+  // exception; optional for the intermediate ones (Acknowledge/Escalate).
+  function handleAction(exception: AttendanceException, status: ExceptionStatus) {
+    setActionModal({ exception, status })
+    setActionNote('')
   }
+
+  function confirmAction() {
+    if (!actionModal) return
+    const { exception, status } = actionModal
+    setPendingId(exception.id)
+    updateMutation.mutate({ id: exception.id, body: { status, resolution_note: actionNote.trim() || undefined } })
+    setActionModal(null)
+  }
+
+  const actionRequiresNote = actionModal?.status === 'resolved' || actionModal?.status === 'dismissed'
 
   // ── Derived summary values ────────────────────────────────────────────────────
 
@@ -654,6 +685,58 @@ export function ExceptionGovernance() {
           </div>
         </SectionCard>
       )}
+
+      {/* Status-change confirmation — every action captures a note before the
+          transition fires, matching SecurityOpsWorkspace.tsx's equivalent flow. */}
+      <Dialog open={!!actionModal} onOpenChange={(o) => { if (!o) setActionModal(null) }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>
+              {actionModal ? `${ACTION_LABEL[actionModal.status]} Exception` : ''}
+            </DialogTitle>
+          </DialogHeader>
+          {actionModal && (
+            <div className="space-y-3 py-2">
+              <p className="text-sm text-muted-foreground">
+                {actionModal.exception.employees
+                  ? `${actionModal.exception.employees.first_name} ${actionModal.exception.employees.last_name} · ${actionModal.exception.employees.employee_code}`
+                  : actionModal.exception.employee_id}
+                {' — '}{actionModal.exception.exception_type} on {actionModal.exception.date}
+              </p>
+              {(actionModal.exception.payroll_impacting || actionModal.exception.sla_breached) && (
+                <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+                  {actionModal.exception.payroll_impacting && actionModal.exception.sla_breached
+                    ? 'This exception is payroll-impacting and SLA-breached.'
+                    : actionModal.exception.payroll_impacting
+                    ? 'This exception is payroll-impacting.'
+                    : 'This exception is SLA-breached.'}
+                </div>
+              )}
+              <div>
+                <Label>
+                  Resolution Note{actionRequiresNote ? '' : ' (optional)'}
+                </Label>
+                <Textarea
+                  className="mt-1"
+                  rows={3}
+                  placeholder="Why is this exception being updated?"
+                  value={actionNote}
+                  onChange={e => setActionNote(e.target.value)}
+                />
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setActionModal(null)}>Cancel</Button>
+            <Button
+              disabled={(actionRequiresNote && !actionNote.trim()) || updateMutation.isPending}
+              onClick={confirmAction}
+            >
+              {updateMutation.isPending ? 'Updating...' : `Confirm ${actionModal ? ACTION_LABEL[actionModal.status] : ''}`}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </PageContainer>
   )
 }
