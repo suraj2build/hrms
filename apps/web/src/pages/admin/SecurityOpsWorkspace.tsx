@@ -35,6 +35,7 @@ import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
 import { api } from '@/lib/api/client'
 import { cn } from '@/lib/utils'
+import { useAuthStore } from '@/stores/authStore'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -160,6 +161,10 @@ function fmtSeconds(s: number | null) {
 
 export function SecurityOpsWorkspace() {
   const qc = useQueryClient()
+  const { profile } = useAuthStore()
+  // Detection Rules is super_admin-only on the backend (GET /security/detection-rules) —
+  // hide the tab for hr_admin rather than let it 403 into an empty-looking list.
+  const isSuperAdmin = profile?.role === 'super_admin'
   const [tab, setTab] = useState('health')
   const [alertStatus,   setAlertStatus]   = useState('all')
   const [alertSeverity, setAlertSeverity] = useState('all')
@@ -199,7 +204,7 @@ export function SecurityOpsWorkspace() {
   const rulesQ = useQuery<{ data: DetectionRule[] }>({
     queryKey: ['security-rules'],
     queryFn:  () => api.get('/security/detection-rules'),
-    enabled:  tab === 'rules',
+    enabled:  tab === 'rules' && isSuperAdmin,
   })
 
   const intelParams = new URLSearchParams({ limit: '100' })
@@ -284,7 +289,7 @@ export function SecurityOpsWorkspace() {
             ) : null}
           </TabsTrigger>
           <TabsTrigger value="events">Event Stream</TabsTrigger>
-          <TabsTrigger value="rules">Detection Rules</TabsTrigger>
+          {isSuperAdmin && <TabsTrigger value="rules">Detection Rules</TabsTrigger>}
           <TabsTrigger value="intelligence">Intelligence</TabsTrigger>
           <TabsTrigger value="verification">Verification</TabsTrigger>
         </TabsList>
