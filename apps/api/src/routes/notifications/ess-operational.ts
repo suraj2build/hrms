@@ -9,7 +9,10 @@
  *
  * All routes require authentication.
  * Resolves employee_id from profiles table via req.userId.
- * All calculations use safe defaults (0 / null) when data is missing — never crashes.
+ * All calculations use safe defaults (0 / null) when a query returns no rows
+ * — never crashes on missing data. A query that actually *errors* (DB/RLS
+ * failure) is a distinct case and surfaces as a 500 via serverError(), so a
+ * transient failure isn't misreported as a legitimate empty/zero result.
  */
 
 import type { FastifyInstance } from 'fastify'
@@ -96,13 +99,15 @@ export default async function essOperationalRoutes(fastify: FastifyInstance) {
     const { from, to, year, month } = currentMonthRange(todayStr)
 
     // Attendance for current month
-    const { data: attendance } = await fastify.supabase
+    const { data: attendance, error: attErr } = await fastify.supabase
       .from('attendance_daily')
       .select('status, is_late:late_minutes, total_ot_hours:overtime_minutes, is_payable, work_duration:work_hours')
       .eq('employee_id', employeeId)
       .eq('tenant_id', req.tenantId)
       .gte('date', from)
       .lte('date', to)
+
+    if (attErr) return serverError(req, reply, attErr, ErrorCode.QUERY_FAILED, 'Failed to fetch attendance for operational summary')
 
     const rows = (attendance ?? []) as any[]
 
@@ -122,11 +127,13 @@ export default async function essOperationalRoutes(fastify: FastifyInstance) {
     const lop_days = absent_days
 
     // Leave balances
-    const { data: leaveBalances } = await fastify.supabase
+    const { data: leaveBalances, error: leaveBalErr } = await fastify.supabase
       .from('employee_leave_balance')
       .select('leave_type_id, balance_days:balance, leave_types(name)')
       .eq('employee_id', employeeId)
       .eq('tenant_id', req.tenantId)
+
+    if (leaveBalErr) return serverError(req, reply, leaveBalErr, ErrorCode.QUERY_FAILED, 'Failed to fetch leave balances for operational summary')
 
     const leave_balance_by_type = ((leaveBalances ?? []) as any[]).map((lb) => ({
       leave_type_id:   lb.leave_type_id,
@@ -136,7 +143,7 @@ export default async function essOperationalRoutes(fastify: FastifyInstance) {
 
     // Compensation data for payroll preview — table is employee_compensations (plural)
     // ctc_monthly is the stored column; daily_rate and hourly_rate are derived
-    const { data: compData } = await fastify.supabase
+    const { data: compData, error: compErr } = await fastify.supabase
       .from('employee_compensations')
       .select('ctc_monthly')
       .eq('employee_id', employeeId)
@@ -145,6 +152,8 @@ export default async function essOperationalRoutes(fastify: FastifyInstance) {
       .order('effective_from', { ascending: false })
       .limit(1)
       .maybeSingle()
+
+    if (compErr) return serverError(req, reply, compErr, ErrorCode.QUERY_FAILED, 'Failed to fetch compensation for operational summary')
 
     const grossSalary = Number(compData?.ctc_monthly ?? 0)
     const dailyRate   = grossSalary > 0 ? grossSalary / 26 : 0
@@ -206,7 +215,7 @@ export default async function essOperationalRoutes(fastify: FastifyInstance) {
     }> = []
 
     // a. Workforce optimization hints: shift_overload / ot_concentration
-    const { data: hints } = await fastify.supabase
+    const { data: hints, error: hintsErr } = await fastify.supabase
       .from('workforce_optimization_hints')
       // 'details' does not exist on this table (migration 086) — it has
       // explanation/affected_dates/metric_value/threshold_value/payroll_impact
@@ -218,6 +227,8 @@ export default async function essOperationalRoutes(fastify: FastifyInstance) {
       .in('hint_type', ['consecutive_shift_overload', 'ot_concentration'])
       .order('created_at', { ascending: false })
       .limit(5)
+
+    if (hintsErr) return serverError(req, reply, hintsErr, ErrorCode.QUERY_FAILED, 'Failed to fetch workforce hints')
 
     for (const hint of (hints ?? []) as any[]) {
       const metadata = {
@@ -251,11 +262,13 @@ export default async function essOperationalRoutes(fastify: FastifyInstance) {
     }
 
     // b. Low leave balance (< 2 days)
-    const { data: leaveBalances } = await fastify.supabase
+    const { data: leaveBalances, error: leaveBalErr } = await fastify.supabase
       .from('employee_leave_balance')
       .select('balance_days:balance, leave_types(name)')
       .eq('employee_id', employeeId)
       .eq('tenant_id', req.tenantId)
+
+    if (leaveBalErr) return serverError(req, reply, leaveBalErr, ErrorCode.QUERY_FAILED, 'Failed to fetch leave balances for workforce notifications')
 
     for (const lb of (leaveBalances ?? []) as any[]) {
       const balance = Number(lb.balance_days ?? 0)
@@ -274,12 +287,14 @@ export default async function essOperationalRoutes(fastify: FastifyInstance) {
 
     // c. Attendance risk: absent_rate > 20% in last 30 days
     const thirtyDaysAgo = daysAgo(30, todayStr)
-    const { data: recentAttendance } = await fastify.supabase
+    const { data: recentAttendance, error: recentAttErr } = await fastify.supabase
       .from('attendance_daily')
       .select('status')
       .eq('employee_id', employeeId)
       .eq('tenant_id', req.tenantId)
       .gte('date', thirtyDaysAgo)
+
+    if (recentAttErr) return serverError(req, reply, recentAttErr, ErrorCode.QUERY_FAILED, 'Failed to fetch recent attendance for workforce notifications')
 
     const recentRows    = (recentAttendance ?? []) as any[]
     const totalDays     = recentRows.length
@@ -299,7 +314,7 @@ export default async function essOperationalRoutes(fastify: FastifyInstance) {
 
     // d. Incomplete punches: no check_out in last 7 days
     const sevenDaysAgo = daysAgo(7, todayStr)
-    const { data: incompleteSessions } = await fastify.supabase
+    const { data: incompleteSessions, error: incompleteErr } = await fastify.supabase
       .from('attendance_logs')
       .select('check_in, check_out, created_at')
       .eq('employee_id', employeeId)
@@ -307,6 +322,8 @@ export default async function essOperationalRoutes(fastify: FastifyInstance) {
       .gte('created_at', sevenDaysAgo)
       .not('check_in', 'is', null)
       .is('check_out', null)
+
+    if (incompleteErr) return serverError(req, reply, incompleteErr, ErrorCode.QUERY_FAILED, 'Failed to fetch incomplete attendance sessions')
 
     for (const session of (incompleteSessions ?? []) as any[]) {
       notifications.push({
@@ -340,7 +357,7 @@ export default async function essOperationalRoutes(fastify: FastifyInstance) {
     const thirtyDaysAgo = daysAgo(30, todayStr)
 
     // Fetch latest shift balance record for this employee
-    const { data: shiftBalance } = await fastify.supabase
+    const { data: shiftBalance, error: shiftBalErr } = await fastify.supabase
       .from('workforce_shift_balance')
       .select('weekend_shifts:weekend_shifts_count, night_shifts:night_shifts_count, total_ot_hours, fairness_score:overall_balance_score, period_from:period_start, period_to:period_end')
       .eq('employee_id', employeeId)
@@ -348,6 +365,8 @@ export default async function essOperationalRoutes(fastify: FastifyInstance) {
       .order('period_end', { ascending: false })
       .limit(1)
       .maybeSingle()
+
+    if (shiftBalErr) return serverError(req, reply, shiftBalErr, ErrorCode.QUERY_FAILED, 'Failed to fetch shift balance for schedule fairness')
 
     const weekend_shifts   = Number(shiftBalance?.weekend_shifts   ?? 0)
     const night_shifts     = Number(shiftBalance?.night_shifts     ?? 0)
@@ -461,13 +480,15 @@ export default async function essOperationalRoutes(fastify: FastifyInstance) {
     const todayStr = await tenantTodayStr(fastify.supabase, req.tenantId)
     const thirtyDaysAgo = daysAgo(30, todayStr)
 
-    const { data: attendance } = await fastify.supabase
+    const { data: attendance, error: attErr } = await fastify.supabase
       .from('attendance_daily')
       .select('work_duration:work_hours, status, date')
       .eq('employee_id', employeeId)
       .eq('tenant_id', req.tenantId)
       .gte('date', thirtyDaysAgo)
       .in('status', ['present', 'half_day'])
+
+    if (attErr) return serverError(req, reply, attErr, ErrorCode.QUERY_FAILED, 'Failed to fetch attendance for workload balance')
 
     const rows = (attendance ?? []) as any[]
 
