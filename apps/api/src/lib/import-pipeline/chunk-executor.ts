@@ -84,7 +84,29 @@ export async function executeChunks(opts: ExecuteChunksOpts): Promise<{
     }
 
     if (!existingChunk) {
-      log.warn({ jobId: job.id, chunkNo: cn }, '[import] chunk not found in chunkMap — skipping')
+      // The pre-planned chunkMap (from computeChunkBoundaries at job creation)
+      // has no entry for this chunk number — the file's actual row count at
+      // stream time no longer matches the row count planning saw (e.g. the
+      // source file changed between planning and streaming). Silently
+      // returning here used to drop every row in this chunk from the job's
+      // final counts with no error and no audit trail. Record it as a
+      // failure instead so the job's totals stay honest and the gap is
+      // discoverable.
+      log.error({ jobId: job.id, chunkNo: cn, rowCount: buf.length }, '[import] chunk not found in chunkMap — rows dropped')
+      const errors: RowError[] = buf.map(row => ({
+        row_number:    row.rowNumber,
+        error_stage:   'write',
+        error_message: `Chunk ${cn} was not in the pre-planned chunk map — this row was never written`,
+      }))
+      await addRowErrors(supabase, job.id, job.tenant_id, errors)
+      failedRows    += buf.length
+      processedRows += buf.length
+      await updateJobProgress(supabase, job.id, {
+        processed_rows: processedRows,
+        success_rows:   successRows,
+        failed_rows:    failedRows,
+        current_chunk:  cn,
+      })
       return
     }
 
