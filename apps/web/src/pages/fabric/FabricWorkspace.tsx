@@ -413,7 +413,15 @@ export default function FabricWorkspace() {
             <div className="grid grid-cols-2 gap-4 mb-4">
               <div className="space-y-1.5">
                 <Label htmlFor="comp-entity-id">Entity ID</Label>
-                <Input id="comp-entity-id" placeholder="UUID" value={composeEntityId} onChange={e => setComposeEntityId(e.target.value)} />
+                {composeEntityType === 'employee' ? (
+                  <EmployeeSelector
+                    value={composeEntityId}
+                    onChange={(v) => setComposeEntityId(typeof v === 'string' ? v : '')}
+                    placeholder="Search by name or employee code…"
+                  />
+                ) : (
+                  <Input id="comp-entity-id" placeholder="UUID" value={composeEntityId} onChange={e => setComposeEntityId(e.target.value)} />
+                )}
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="comp-entity-type">Entity Type</Label>
@@ -528,7 +536,15 @@ export default function FabricWorkspace() {
             <div className="grid grid-cols-2 gap-4 mb-4">
               <div className="space-y-1.5">
                 <Label>Entity ID</Label>
-                <Input placeholder="UUID" value={escalateEntityId} onChange={e => setEscalateEntityId(e.target.value)} />
+                {escalateEntityType === 'employee' ? (
+                  <EmployeeSelector
+                    value={escalateEntityId}
+                    onChange={(v) => setEscalateEntityId(typeof v === 'string' ? v : '')}
+                    placeholder="Search by name or employee code…"
+                  />
+                ) : (
+                  <Input placeholder="UUID" value={escalateEntityId} onChange={e => setEscalateEntityId(e.target.value)} />
+                )}
               </div>
               <div className="space-y-1.5">
                 <Label>Entity Type</Label>
@@ -566,7 +582,15 @@ export default function FabricWorkspace() {
             <div className="grid grid-cols-2 gap-4 mb-4">
               <div className="space-y-1.5">
                 <Label>Entity ID</Label>
-                <Input placeholder="UUID" value={replayEntityId} onChange={e => setReplayEntityId(e.target.value)} />
+                {replayEntityType === 'employee' ? (
+                  <EmployeeSelector
+                    value={replayEntityId}
+                    onChange={(v) => setReplayEntityId(typeof v === 'string' ? v : '')}
+                    placeholder="Search by name or employee code…"
+                  />
+                ) : (
+                  <Input placeholder="UUID" value={replayEntityId} onChange={e => setReplayEntityId(e.target.value)} />
+                )}
               </div>
               <div className="space-y-1.5">
                 <Label>Entity Type</Label>
