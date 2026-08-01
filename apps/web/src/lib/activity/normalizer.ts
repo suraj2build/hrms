@@ -136,6 +136,7 @@ function normalizeCorrection(c: CorrectionItem): OperationalActivityEvent {
     title:        `Correction ${c.status ?? 'unknown'}: ${c.employee_name ?? 'Unknown'}`,
     description:  c.reason,
     status,
+    sourceTable:  'corrections',
     actionLinks:  [{ label: 'Review Correction', route: '/admin/attendance/corrections' }],
     metadata: {
       corrected_in:  c.corrected_in,
@@ -157,6 +158,7 @@ function normalizeRegularisation(r: RegItem): OperationalActivityEvent {
     title:        `Regularisation pending: ${r.employee_name ?? 'Unknown'}`,
     description:  r.reason,
     status:       'pending',
+    sourceTable:  'regularisation',
     actionLinks:  [{ label: 'Approve', route: '/admin/attendance/regularisation' }],
   }
 }

@@ -108,8 +108,16 @@ function ruleApproveSessions(events: OperationalActivityEvent[]): DecisionInsigh
   const pending = events.filter(
     e => e.type === 'approval_pending' && e.workspace === 'attendance' && e.status === 'pending',
   )
+  // Restricted to corrections-sourced events: normalizeCorrection and
+  // normalizeRegularisation both emit this same approval_pending/attendance
+  // shape from two different tables, and the action below bulk-approves via
+  // the corrections-table endpoint only — mixing in regularisation ids would
+  // silently approve the wrong table's rows. Regularisation items have their
+  // own dedicated bulk-approve flow (Manager Team Regularisation), so this
+  // insight simply not covering them is not a capability loss.
   const lowRisk = pending.filter(
-    e => !(e.description?.toLowerCase().includes('suspicious') || e.description?.toLowerCase().includes('mismatch')),
+    e => e.sourceTable === 'corrections'
+      && !(e.description?.toLowerCase().includes('suspicious') || e.description?.toLowerCase().includes('mismatch')),
   )
   const count = lowRisk.length
   if (count === 0) return null

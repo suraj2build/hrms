@@ -60,6 +60,15 @@ export interface OperationalActivityEvent {
   status:        EventStatus
   metadata?:     Record<string, unknown>
   change?:       EventChange
+  /**
+   * Which source table `id` is a primary key from. Several normalizers emit
+   * the same `type`/`workspace`/`status` shape from different tables (e.g.
+   * attendance_corrections vs attendance_regularisation both normalize to
+   * `approval_pending`/`workspace:'attendance'`) — without this, a rule that
+   * pools ids across normalizers can't tell which bulk-action endpoint an id
+   * actually belongs to.
+   */
+  sourceTable?:  'corrections' | 'regularisation'
 }
 
 // ── Filter / query shapes ─────────────────────────────────────────────────────

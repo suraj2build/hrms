@@ -499,16 +499,17 @@ export default async function attendanceCorrectionsRoute(fastify: FastifyInstanc
     return reply.send({ data: rows, total: count ?? 0 })
   })
 
-  // ──────────────────────────────────────────────────────────────────────────
-  // POST /attendance/corrections/:id/approve
-  // ──────────────────────────────────────────────────────────────────────────
-  fastify.post('/attendance/corrections/:id/approve', auth, async (req: any, reply) => {
-    if (!ALLOW_ROLES.includes(req.userRole)) {
-      return reply.code(403).send({ error: 'FORBIDDEN', message: 'Manager or HR access required' })
-    }
-
-    const { id } = req.params as { id: string }
-
+  // ── Helper: approve a single correction (pending → processing) ─────────────
+  // Shared by the single-approve route and the bulk-approve route below so both
+  // go through the exact same atomic compare-and-swap, period-lock guard, and
+  // event/orchestration wiring — no duplicated approval logic between them.
+  async function approveOneCorrection(
+    req: any,
+    id:  string,
+  ): Promise<
+    | { ok: true; status: 'processing'; approved_at: string }
+    | { ok: false; code: number; error: string; message: string }
+  > {
     const { data: correction, error: fetchErr } = await fastify.supabase
       .from('attendance_corrections')
       .select('id, status, employee_id, date, corrected_in, corrected_out')
@@ -517,7 +518,7 @@ export default async function attendanceCorrectionsRoute(fastify: FastifyInstanc
       .maybeSingle()
 
     if (fetchErr || !correction) {
-      return reply.code(404).send({ error: 'NOT_FOUND', message: 'Correction request not found' })
+      return { ok: false, code: 404, error: 'NOT_FOUND', message: 'Correction request not found' }
     }
 
     const c = correction as {
@@ -526,13 +527,13 @@ export default async function attendanceCorrectionsRoute(fastify: FastifyInstanc
     }
 
     if (c.status === 'processing') {
-      return reply.code(409).send({
-        error:   'CONFLICT',
+      return {
+        ok: false, code: 409, error: 'CONFLICT',
         message: 'This correction is already being processed. Please wait for it to complete.',
-      })
+      }
     }
     if (c.status !== 'pending') {
-      return reply.code(409).send({ error: 'CONFLICT', message: `Correction is already ${c.status}` })
+      return { ok: false, code: 409, error: 'CONFLICT', message: `Correction is already ${c.status}` }
     }
 
     // Period protection — approving a correction inserts punches and recomputes
@@ -540,15 +541,15 @@ export default async function attendanceCorrectionsRoute(fastify: FastifyInstanc
     // month is locked/finalized for payroll, that would silently rewrite sealed
     // attendance. Block it here (and again in the async worker as defence-in-depth).
     if (await isMonthLocked(fastify.supabase, req.tenantId, monthOf(c.date))) {
-      return reply.code(409).send({
-        error:   'PERIOD_LOCKED',
+      return {
+        ok: false, code: 409, error: 'PERIOD_LOCKED',
         message: `Attendance period ${monthOf(c.date)} is locked for payroll — corrections cannot be applied to it.`,
-      })
+      }
     }
 
     const authResult = await authoriseApprover(req.userId, req.userRole, req.tenantId, c.employee_id)
     if (!authResult.ok) {
-      return reply.code(authResult.code).send({ error: authResult.error, message: authResult.message })
+      return { ok: false, code: authResult.code, error: authResult.error, message: authResult.message }
     }
 
     // ── Atomically advance to 'processing' ───────────────────────────────
@@ -573,13 +574,13 @@ export default async function attendanceCorrectionsRoute(fastify: FastifyInstanc
       .maybeSingle()
 
     if (updateErr) {
-      return reply.code(500).send({ error: 'UPDATE_FAILED', message: 'Failed to approve correction' })
+      return { ok: false, code: 500, error: 'UPDATE_FAILED', message: 'Failed to approve correction' }
     }
     if (!claimed) {
-      return reply.code(409).send({
-        error:   'CONFLICT',
+      return {
+        ok: false, code: 409, error: 'CONFLICT',
         message: 'This correction was already picked up by another approval.',
-      })
+      }
     }
 
     auditLog(req.tenantId, id, 'UPDATE', req.userId, {
@@ -629,7 +630,56 @@ export default async function attendanceCorrectionsRoute(fastify: FastifyInstanc
       req.log.warn({ err, correctionId: id }, 'workforce orchestration failed for correction approval')
     })
 
-    return reply.send({ data: { id, status: 'processing', approved_at: now } })
+    return { ok: true, status: 'processing', approved_at: now }
+  }
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // POST /attendance/corrections/:id/approve
+  // ──────────────────────────────────────────────────────────────────────────
+  fastify.post('/attendance/corrections/:id/approve', auth, async (req: any, reply) => {
+    if (!ALLOW_ROLES.includes(req.userRole)) {
+      return reply.code(403).send({ error: 'FORBIDDEN', message: 'Manager or HR access required' })
+    }
+
+    const { id } = req.params as { id: string }
+    const result = await approveOneCorrection(req, id)
+    if (!result.ok) {
+      return reply.code(result.code).send({ error: result.error, message: result.message })
+    }
+    return reply.send({ data: { id, status: result.status, approved_at: result.approved_at } })
+  })
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // POST /attendance/corrections/bulk-approve
+  //
+  // Bulk variant of the single-approve route above — same per-row guards
+  // (period lock, direct-manager/HR authorisation, atomic compare-and-swap)
+  // via approveOneCorrection(), applied to a batch of ids.
+  // ──────────────────────────────────────────────────────────────────────────
+  fastify.post('/attendance/corrections/bulk-approve', auth, async (req: any, reply) => {
+    if (!ALLOW_ROLES.includes(req.userRole)) {
+      return reply.code(403).send({ error: 'FORBIDDEN', message: 'Manager or HR access required' })
+    }
+
+    const schema = z.object({ ids: z.array(z.string().uuid()).min(1).max(50) })
+    const parsed = schema.safeParse(req.body)
+    if (!parsed.success) {
+      return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+    }
+
+    const results: Array<{ id: string; ok: boolean; error?: string }> = []
+    for (const id of parsed.data.ids) {
+      try {
+        const result = await approveOneCorrection(req, id)
+        results.push({ id, ok: result.ok, error: result.ok ? undefined : result.message })
+      } catch (err: any) {
+        results.push({ id, ok: false, error: err?.message ?? 'Unknown error' })
+      }
+    }
+
+    const approved = results.filter(r => r.ok).length
+    const failed   = results.filter(r => !r.ok).length
+    return reply.send({ results, summary: { approved, failed, total: parsed.data.ids.length } })
   })
 
   // ──────────────────────────────────────────────────────────────────────────
