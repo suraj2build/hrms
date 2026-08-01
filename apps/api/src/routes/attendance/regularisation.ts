@@ -343,6 +343,23 @@ export default async function regularisationRoute(fastify: FastifyInstance) {
               tenant_id: req.tenantId, employee_id: approved.employee_id,
               from_date: approved.date, to_date: approved.date, changed_by: req.userId,
             }).catch(() => {})
+
+            // In-process event bus (PEND-75 follow-up) — mirrors the single
+            // approve route's emission below; bulk-approve previously fired
+            // on neither event system, so webhook fan-out and SLA-compliance
+            // automation missed every bulk-approved correction.
+            eventBus.emit({
+              type:          'correction.approved',
+              tenantId:      req.tenantId,
+              correlationId: req.correlationId,
+              payload: {
+                tenantId:     req.tenantId,
+                employeeId:   approved.employee_id,
+                correctionId: approved.id,
+                approverId:   req.userId,
+                date:         approved.date,
+              },
+            })
           }
           results.push({ id, ok: true })
         } else {
@@ -392,6 +409,16 @@ export default async function regularisationRoute(fastify: FastifyInstance) {
       }
     }
 
+    // Pre-fetch employee_id/date for event emission — rejectRegularisation()'s
+    // own return value only carries { id, status }, mirroring why the single
+    // reject route pre-fetches this same shape before calling the service.
+    const { data: regsForEvent } = await fastify.supabase
+      .from('attendance_regularisation')
+      .select('id, employee_id, date')
+      .in('id', parsed.data.ids)
+      .eq('tenant_id', req.tenantId)
+    const regEventMap = new Map((regsForEvent ?? []).map((r: any) => [r.id, r]))
+
     const results: Array<{ id: string; ok: boolean; error?: string }> = []
 
     for (const id of parsed.data.ids) {
@@ -402,6 +429,27 @@ export default async function regularisationRoute(fastify: FastifyInstance) {
           rejectionReason: parsed.data.rejection_reason,
         })
         results.push({ id, ok: result.ok, error: result.ok ? undefined : (result as any).error?.message })
+
+        if (result.ok) {
+          const regForEvent = regEventMap.get(id)
+          if (regForEvent) {
+            // In-process event bus (PEND-75 follow-up) — mirrors the single
+            // reject route's emission; bulk-reject previously fired on
+            // neither event system at all.
+            eventBus.emit({
+              type:          'correction.rejected',
+              tenantId:      req.tenantId,
+              correlationId: req.correlationId,
+              payload: {
+                tenantId:     req.tenantId,
+                employeeId:   regForEvent.employee_id,
+                correctionId: regForEvent.id,
+                approverId:   req.userId,
+                reason:       parsed.data.rejection_reason,
+              },
+            })
+          }
+        }
       } catch (err: any) {
         results.push({ id, ok: false, error: err?.message ?? 'Unknown error' })
       }

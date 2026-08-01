@@ -486,6 +486,22 @@ export default async function compensationRevisionsRoutes(fastify: FastifyInstan
       payload:     { employee_id: (revision as any).employee_id, rejection_reason: parsed.data.rejection_reason },
       correlation_id: req.correlationId ?? undefined,
     })
+
+    // In-process event bus (PEND-75 follow-up) — mirrors this route's own
+    // approve handler emitting 'compensation.revised'; drives the employee
+    // notification + webhook fan-out that only fired on approve until now.
+    eventBus.emit({
+      type:          'compensation.rejected',
+      tenantId:      req.tenantId,
+      correlationId: req.correlationId,
+      payload: {
+        tenantId:   req.tenantId,
+        employeeId: (revision as any).employee_id,
+        revisionId: id,
+        rejectedBy: req.userId,
+        reason:     parsed.data.rejection_reason,
+      },
+    })
     return reply.send({ message: 'Revision rejected' })
   })
 

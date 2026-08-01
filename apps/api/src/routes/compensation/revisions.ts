@@ -536,7 +536,7 @@ export default async function compensationRevisionsRoute(fastify: FastifyInstanc
 
     const { data: rev } = await fastify.supabase
       .from('compensation_revisions')
-      .select('status')
+      .select('status, employee_id')
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
       .maybeSingle()
@@ -560,6 +560,24 @@ export default async function compensationRevisionsRoute(fastify: FastifyInstanc
       .maybeSingle()
 
     if (!rejected) return reply.code(409).send({ error: 'INVALID_STATE', message: 'Revision is already actioned' })
+
+    // In-process event bus (PEND-75 follow-up) — this handler previously
+    // emitted nothing at all on reject (unlike its own approve handler,
+    // which emits 'compensation.revised'), so webhook fan-out and the
+    // employee-rejection notification never fired for revisions actioned
+    // through this admin page.
+    eventBus.emit({
+      type:          'compensation.rejected',
+      correlationId: req.correlationId,
+      payload: {
+        tenantId:   req.tenantId,
+        employeeId: rev.employee_id,
+        revisionId: id,
+        rejectedBy: req.userId,
+        reason:     parsed.data.rejection_reason,
+      },
+      tenantId: req.tenantId,
+    })
 
     return reply.send({ message: 'Revision rejected', revision_id: id })
   })

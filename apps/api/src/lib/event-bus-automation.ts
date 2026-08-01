@@ -593,6 +593,50 @@ export function registerEventBusAutomation(supabase: SupabaseClient): void {
     }
   })
 
+  // ── compensation.rejected ───────────────────────────────────────────────────
+  // Write audit record + notify affected employee
+  eventBus.on('compensation.rejected', async (event) => {
+    const { tenantId, employeeId, revisionId, rejectedBy, reason } = event.payload
+
+    // Audit trail
+    try {
+      await supabase.from('audit_logs').insert({
+        tenant_id:  tenantId,
+        action:     'compensation_rejected',
+        table_name: 'compensation_revisions',
+        record_id:  revisionId,
+        new_data:   { rejected_by: rejectedBy, reason: reason ?? null },
+      })
+    } catch {
+      // Non-fatal
+    }
+
+    // Notify employee about their own revision being rejected
+    try {
+      const { data: emp } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('employee_id', employeeId)
+        .eq('tenant_id', tenantId)
+        .maybeSingle()
+
+      if (emp) {
+        await supabase.from('notifications').insert({
+          tenant_id:    tenantId,
+          recipient_id: emp.id,
+          title:        'Compensation Revision Rejected',
+          body:         reason
+            ? `Your compensation revision was not approved: ${reason}`
+            : 'Your compensation revision was not approved.',
+          link:         '/ess/compensation',
+          is_read:      false,
+        })
+      }
+    } catch {
+      // Non-fatal
+    }
+  })
+
   // ── payroll.volatility.detected ─────────────────────────────────────────────
   // High volatility (>10% MoM change) — audit + HR notification
   eventBus.on('payroll.volatility.detected', async (event) => {

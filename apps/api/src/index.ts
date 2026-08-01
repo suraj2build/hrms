@@ -642,7 +642,7 @@ async function start() {
       'attendance.processing.completed', 'attendance.processing.failed', 'attendance.recomputed',
       'attendance.anomaly.detected',
       'correction.submitted', 'correction.approved', 'correction.rejected',
-      'compensation.revised',
+      'compensation.revised', 'compensation.rejected',
       'sla.breached',
       'roster.updated',
       'attendance.risk.detected',

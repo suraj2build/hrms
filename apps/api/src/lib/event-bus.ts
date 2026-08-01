@@ -304,6 +304,17 @@ export interface HrmsEventMap {
   }
 
   /**
+   * Compensation revision rejected — no change applied to the employee record.
+   */
+  'compensation.rejected': {
+    tenantId:    string
+    employeeId:  string
+    revisionId:  string
+    rejectedBy:  string
+    reason?:     string
+  }
+
+  /**
    * Month-over-month payroll volatility exceeds threshold for an employee.
    * Threshold: |net_pay_change| / prior_net_pay > 0.10 (10%).
    */
