@@ -16,9 +16,12 @@ export interface QueueAnalyticsDashboardProps {
 
 // ── helpers ────────────────────────────────────────────────────────────────
 
-const todayIso = new Date().toISOString().slice(0, 10)
-
-function isResolvedToday(item: OperationalQueueItem): boolean {
+// OperationalQueueItem has no resolved_at/timestamp field, so there is no
+// way to determine "today" from the data this component receives — this
+// counts every resolved item, not just today's. Named/labelled to match
+// what it actually computes rather than claiming a "today" filter that
+// can't be implemented without a timestamp field being added upstream.
+function isResolved(item: OperationalQueueItem): boolean {
   return item.status === 'resolved'
 }
 
@@ -53,8 +56,8 @@ function MetricCard({ label, value, sublabel, accent = 'neutral' }: MetricCardPr
 export function QueueAnalyticsDashboard({ items, sla }: QueueAnalyticsDashboardProps) {
   const total = items.length
 
-  // 1. Issues resolved today
-  const resolvedToday = items.filter(isResolvedToday).length
+  // 1. Issues resolved
+  const resolvedCount = items.filter(isResolved).length
 
   // 2. Payroll blockers cleared
   const blockersCleared = items.filter(i => i.status === 'resolved' && i.payroll_blocking).length
@@ -137,17 +140,14 @@ export function QueueAnalyticsDashboard({ items, sla }: QueueAnalyticsDashboardP
     duplicate_entry:       'Duplicate Entry',
   }
 
-  // suppress unused-variable warning for todayIso used in component scope
-  void todayIso
-
   return (
     <div className="flex flex-col gap-6">
       {/* Metric cards — 2-column grid */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
         <MetricCard
-          label="Issues Resolved Today"
-          value={resolvedToday}
-          accent={resolvedToday > 0 ? 'green' : 'neutral'}
+          label="Issues Resolved"
+          value={resolvedCount}
+          accent={resolvedCount > 0 ? 'green' : 'neutral'}
         />
         <MetricCard
           label="Payroll Blockers Cleared"
