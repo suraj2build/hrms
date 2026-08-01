@@ -22,6 +22,13 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { fetchTenantTz } from './attendance-engine.js'
+import { getLocalDate } from './org-context.js'
+
+async function tenantTodayStr(supabase: SupabaseClient, tenantId: string): Promise<string> {
+  const tz = await fetchTenantTz(supabase, tenantId)
+  return getLocalDate(new Date().toISOString(), tz)
+}
 
 // ── Canonical read shape ───────────────────────────────────────────────────────
 
@@ -130,16 +137,17 @@ function normaliseBalanceRow(row: Record<string, unknown>): LedgerEntry {
  * Get aggregated balance summary for an employee + leave type.
  *
  * Reads both ledger tables and combines them into a single coherent view.
- * `asOf` is today by default — held credits beyond this date are excluded
- * from net_consumable.
+ * `asOf` is tenant-local today by default — held credits beyond this date
+ * are excluded from net_consumable.
  */
 export async function getBalanceSummary(
   supabase:      SupabaseClient,
   tenantId:      string,
   employeeId:    string,
   leaveTypeId:   string,
-  asOf:          string = new Date().toISOString().slice(0, 10),
+  asOf?:         string,
 ): Promise<BalanceSummary> {
+  const effectiveAsOf = asOf ?? await tenantTodayStr(supabase, tenantId)
   // Query both ledgers in parallel
   const [accrualRes, balanceRes] = await Promise.all([
     supabase
@@ -176,7 +184,7 @@ export async function getBalanceSummary(
     const days = Number(row.days ?? 0)
     if (row.is_expired) { lapsedCredits += Math.abs(days); continue }
     const eligibleFrom = row.consumption_eligible_from as string | null
-    if (eligibleFrom && eligibleFrom > asOf) {
+    if (eligibleFrom && eligibleFrom > effectiveAsOf) {
       heldCredits += days
     } else if (days >= 0) {
       totalAccrued += days
@@ -260,8 +268,13 @@ export async function getAllBalancesForEmployee(
   supabase:    SupabaseClient,
   tenantId:    string,
   employeeId:  string,
-  asOf:        string = new Date().toISOString().slice(0, 10),
+  asOf?:       string,
 ): Promise<Map<string, BalanceSummary>> {
+  // Resolved once here (not per leave type) and passed through explicitly,
+  // so every summary in the returned map is computed as-of the same
+  // tenant-local date.
+  const effectiveAsOf = asOf ?? await tenantTodayStr(supabase, tenantId)
+
   // Fetch distinct leave_type_ids across both ledgers
   const [accrualRes, balanceRes] = await Promise.all([
     supabase
@@ -291,7 +304,7 @@ export async function getAllBalancesForEmployee(
   // Build summaries concurrently
   await Promise.all(
     leaveTypeIds.map(async ltId => {
-      const summary = await getBalanceSummary(supabase, tenantId, employeeId, ltId, asOf)
+      const summary = await getBalanceSummary(supabase, tenantId, employeeId, ltId, effectiveAsOf)
       summaries.set(ltId, summary)
     }),
   )
