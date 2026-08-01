@@ -92,7 +92,18 @@ function compareNames(anchor: string, candidate: string): MatchVerdict {
   }
 
   if (aligned === 0) return 'mismatch'
-  if (aligned === small.length) return 'match'      // every token of the shorter name is present
+  if (aligned === small.length) {
+    // Every token of the shorter (extracted) name aligns — normally a full
+    // 'match'. But when that shorter side is just a single token (e.g. a
+    // degraded/garbled OCR extraction that only yielded one word), a single
+    // aligned token is weak evidence — it can align via tokensMatch()'s
+    // initial-vs-full-word rule against almost any name sharing that first
+    // letter. Cap at 'partial' so a manual-review warning still fires, unless
+    // the anchor name itself only has one token to compare against (nothing
+    // more to check either way).
+    if (small.length === 1 && large.length > 1) return 'partial'
+    return 'match'
+  }
   // At least one shared token but not full coverage
   return aligned / small.length >= 0.5 ? 'partial' : 'mismatch'
 }
