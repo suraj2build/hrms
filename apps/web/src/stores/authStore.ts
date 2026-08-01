@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import type { Profile, Tenant, UserRole } from '@/types'
+import { clearSessionUIState } from '@/lib/clearSessionUIState'
 
 interface AuthState {
   profile: Profile | null
@@ -63,7 +64,10 @@ export const useAuthStore = create<AuthState>()(
       setAccessToken: (accessToken) => set({ accessToken }),
       setLoading: (isLoading) => set({ isLoading }),
       setBootstrapping: (isBootstrapping) => set({ isBootstrapping }),
-      clear: () => set({ profile: null, tenant: null, accessToken: null }),
+      clear: () => {
+        clearSessionUIState()
+        set({ profile: null, tenant: null, accessToken: null })
+      },
       hasRole: (role: UserRole) => {
         const { profile } = get()
         if (!profile) return false
