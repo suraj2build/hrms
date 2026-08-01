@@ -230,19 +230,24 @@ export function computeCompensation({
       const a = r2((c.value / 100) * nbGross); amt.set(c.salary_component_id, a); nbGross = r2(nbGross + a)
     }
 
-    // Employer contributions (structure-defined: gratuity, etc.)
-    let employerAnnual = 0
+    // Non-balance earnings total — fixed, independent of employer contributions/balance
+    const nonBalanceEarnings = r2(earnings.filter(c => c.calc_type !== 'balance')
+      .reduce((s, c) => s + (amt.get(c.salary_component_id) ?? 0), 0))
+
+    // Employer contributions that don't depend on gross (structure-defined: gratuity, etc.)
+    const pctGrossEmployerComps = employerContrib.filter(c => c.calc_type === 'pct_of_gross')
+    let employerFixedAnnual = 0
     for (const c of employerContrib) {
+      if (c.calc_type === 'pct_of_gross') continue
       let a = 0
       switch (c.calc_type) {
         case 'fixed':        a = r2(c.value * 12);                  break
         case 'pct_of_ctc':   a = r2((c.value / 100) * ctcAnnual);   break
         case 'pct_of_basic': a = r2((c.value / 100) * basicAnnual); break
-        case 'pct_of_gross': a = r2((c.value / 100) * nbGross);     break
         case 'balance':      a = 0;                                 break  // not valid for employer lines
       }
       amt.set(c.salary_component_id, a)
-      employerAnnual = r2(employerAnnual + a)
+      employerFixedAnnual = r2(employerFixedAnnual + a)
     }
 
     // Engine-injected PF (employer side counts toward CTC; employee side is a deduction within gross)
@@ -260,17 +265,38 @@ export function computeCompensation({
       const pfBase = employee.pf_capped ? r2(Math.min(pfBaseMonthly, policy.pf_cap_amount)) : pfBaseMonthly
       pfEmployeeAnnual = r2(r2(pfBase * (policy.pf_employee_rate / 100)) * 12)
       pfEmployerAnnual = r2(r2(pfBase * (policy.pf_employer_rate / 100)) * 12)
-      employerAnnual   = r2(employerAnnual + pfEmployerAnnual)
+      employerFixedAnnual = r2(employerFixedAnnual + pfEmployerAnnual)
     }
 
-    // Non-balance earnings total, then the balance (Special Allowance)
-    const nonBalanceEarnings = r2(earnings.filter(c => c.calc_type !== 'balance')
-      .reduce((s, c) => s + (amt.get(c.salary_component_id) ?? 0), 0))
-    const rawBalance   = r2(ctcAnnual - employerAnnual - nonBalanceEarnings)
-    const balanceAnnual = balanceComp ? Math.max(0, rawBalance) : 0
-    if (balanceComp) amt.set(balanceComp.salary_component_id, balanceAnnual)
+    // Employer pct_of_gross contributions (e.g. employer-side ESI) must share the
+    // SAME wage base as the employee-side pct_of_gross deductions below — the
+    // FINAL gross, including the balance (Special Allowance) component. But final
+    // gross depends on the balance, which depends on employerAnnual (CTC model:
+    // balance absorbs CTC − employerAnnual − nonBalanceEarnings), which in turn
+    // depends on these very contributions — a genuine circular dependency.
+    // Resolved the same way the NLC solve resolves Basic-vs-Gross below:
+    // fixed-point iteration (statutory employer rates are small percentages, so
+    // this contracts and converges in a handful of passes).
+    let employerAnnual = employerFixedAnnual
+    let balanceAnnual   = 0
+    let grossAnnual      = nonBalanceEarnings
+    for (let i = 0; i < 50; i++) {
+      let pctGrossSum = 0
+      for (const c of pctGrossEmployerComps) pctGrossSum = r2(pctGrossSum + r2((c.value / 100) * grossAnnual))
+      const nextEmployerAnnual = r2(employerFixedAnnual + pctGrossSum)
+      const nextRawBalance     = r2(ctcAnnual - nextEmployerAnnual - nonBalanceEarnings)
+      const nextBalanceAnnual  = balanceComp ? Math.max(0, nextRawBalance) : 0
+      const nextGrossAnnual    = r2(nonBalanceEarnings + nextBalanceAnnual)
+      const converged = Math.abs(nextGrossAnnual - grossAnnual) < 0.01 && Math.abs(nextEmployerAnnual - employerAnnual) < 0.01
+      employerAnnual = nextEmployerAnnual
+      balanceAnnual  = nextBalanceAnnual
+      grossAnnual    = nextGrossAnnual
+      if (converged) break
+    }
+    for (const c of pctGrossEmployerComps) amt.set(c.salary_component_id, r2((c.value / 100) * grossAnnual))
 
-    const grossAnnual = r2(nonBalanceEarnings + balanceAnnual)
+    const rawBalance = r2(ctcAnnual - employerAnnual - nonBalanceEarnings)
+    if (balanceComp) amt.set(balanceComp.salary_component_id, balanceAnnual)
     const nlcWage = r2((basicComp ? basicAnnual : 0) + earnings
       .filter(c => !c.is_basic && c.affects_nlc && c.calc_type !== 'balance')
       .reduce((s, c) => s + (amt.get(c.salary_component_id) ?? 0), 0))

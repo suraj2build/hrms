@@ -97,6 +97,32 @@ describe('compensation-engine — CTC reconciliation (balance model)', () => {
     expect(r.total_cost_annual).toBeCloseTo(ctc, 0)   // reconciliation preserved
   })
 
+  it('employer pct_of_gross contribution (e.g. employer ESI) uses the SAME final gross as the employee-side pct_of_gross deduction', () => {
+    const ctc = 900_000
+    const components = [
+      comp({ code: 'BASIC',    calc_type: 'pct_of_ctc',   value: 40, is_basic: true }),
+      comp({ code: 'HRA',      calc_type: 'pct_of_basic', value: 40 }),
+      comp({ code: 'SPECIAL',  calc_type: 'balance' }),
+      comp({ code: 'ER_ESI',   calc_type: 'pct_of_gross', value: 3.25, component_type: 'employer_contribution' }),
+      comp({ code: 'EE_ESI',   calc_type: 'pct_of_gross', value: 0.75, component_type: 'deduction' }),
+    ]
+    const r = computeCompensation({ ctcAnnual: ctc, components, employee: { pf_enabled: false, pf_capped: true }, policy: noPf })
+    // CTC = gross + employer contributions must still reconcile despite the
+    // employer pct_of_gross contribution depending on (and shrinking) the
+    // balance that funds it — a circular dependency resolved by fixed-point
+    // iteration inside derive().
+    expect(r.ctc_reconciled).toBe(true)
+    expect(r.total_cost_annual).toBeCloseTo(ctc, 0)
+
+    const gross  = r.totals.gross_annual
+    const erEsi  = r.components.find(c => c.code === 'ER_ESI')!
+    const eeEsi  = r.components.find(c => c.code === 'EE_ESI')!
+    // Both employer and employee ESI must be computed against the SAME final
+    // gross wage base — the entire point of PEND-28's fix.
+    expect(erEsi.annual_amount).toBeCloseTo(gross * 0.0325, 0)
+    expect(eeEsi.annual_amount).toBeCloseTo(gross * 0.0075, 0)
+  })
+
   it('throws on invalid CTC / empty components / missing basic', () => {
     expect(() => computeCompensation({ ctcAnnual: 0, components: [comp({ code: 'X', calc_type: 'fixed', value: 1 })], employee: { pf_enabled: false, pf_capped: true }, policy: noPf })).toThrow()
     expect(() => computeCompensation({ ctcAnnual: 100, components: [], employee: { pf_enabled: false, pf_capped: true }, policy: noPf })).toThrow()
