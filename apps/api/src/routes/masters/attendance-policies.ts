@@ -204,7 +204,7 @@ export default async function attendancePoliciesRoutes(fastify: FastifyInstance)
       if (error.code === '23505') {
         return reply.code(409).send({ error: 'CONFLICT', message: 'Another request just changed the default policy — please retry' })
       }
-      return reply.code(500).send({ error: 'UPDATE_FAILED', message: 'Failed to set default policy' })
+      return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to set default policy')
     }
 
     policyService.clearTenantCache(req.tenantId)
