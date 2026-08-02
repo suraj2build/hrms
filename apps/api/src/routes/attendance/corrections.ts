@@ -285,7 +285,7 @@ export default async function attendanceCorrectionsRoute(fastify: FastifyInstanc
           message: 'A pending correction already exists for this date. Please wait for it to be processed.',
         })
       }
-      return reply.code(500).send({ error: 'INSERT_FAILED', message: 'Failed to submit correction request' })
+      return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to submit correction request')
     }
 
     auditLog(req.tenantId, (data as { id: string }).id, 'INSERT', req.userId, {
@@ -335,7 +335,7 @@ export default async function attendanceCorrectionsRoute(fastify: FastifyInstanc
     if (parsed.data.status) q = q.eq('status', parsed.data.status)
 
     const { data, error, count } = await q
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch corrections' })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch corrections')
     return reply.send({ data: data ?? [], total: count ?? 0 })
   })
 
@@ -366,9 +366,7 @@ export default async function attendanceCorrectionsRoute(fastify: FastifyInstanc
       .lt('processing_started_at', cutoff)
       .order('processing_started_at', { ascending: true })
 
-    if (fetchErr) {
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to query stale corrections' })
-    }
+    if (fetchErr) return serverError(req, reply, fetchErr, ErrorCode.QUERY_FAILED, 'Failed to query stale corrections')
 
     const now = Date.now()
 
@@ -471,7 +469,7 @@ export default async function attendanceCorrectionsRoute(fastify: FastifyInstanc
     if (employeeFilter)          q = q.in('employee_id', employeeFilter)
 
     const { data, error, count } = await q
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch corrections' })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch corrections')
 
     // Flatten nested employee join so consumers get flat employee_name / employee_code
     const rows = (data ?? []).map((r: any) => {
@@ -791,7 +789,7 @@ export default async function attendanceCorrectionsRoute(fastify: FastifyInstanc
       .select('id')
 
     if (updateErr) {
-      return reply.code(500).send({ error: 'UPDATE_FAILED', message: 'Failed to initiate retry' })
+      return serverError(req, reply, updateErr, ErrorCode.UPDATE_FAILED, 'Failed to initiate retry')
     }
     if (!retryRows || retryRows.length === 0) {
       return reply.code(409).send({
@@ -894,7 +892,7 @@ export default async function attendanceCorrectionsRoute(fastify: FastifyInstanc
       .select('id')
 
     if (updateErr) {
-      return reply.code(500).send({ error: 'UPDATE_FAILED', message: 'Failed to reject correction' })
+      return serverError(req, reply, updateErr, ErrorCode.UPDATE_FAILED, 'Failed to reject correction')
     }
     if (!rejectRows || rejectRows.length === 0) {
       return reply.code(409).send({ error: 'CONFLICT', message: 'Correction was already actioned by another request' })
