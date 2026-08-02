@@ -283,6 +283,23 @@ export function MusterRoll() {
     empWithMissingPunch: monthTotals.empWithMissingPunch,
   }), [monthTotals])
 
+  // Data Verification Panel's raw-count breakdown — depends only on the raw
+  // query result, not on search/filter/UI state, so unrelated re-renders
+  // (e.g. every keystroke in the search box) don't re-scan the full
+  // employees×days grid.
+  const debugStats = useMemo(() => {
+    const allDays = (data?.employees ?? []).flatMap(e => e.days)
+    const statusDist = allDays.reduce<Record<string, number>>((acc, d) => {
+      if (d.status) acc[d.status] = (acc[d.status] ?? 0) + 1
+      return acc
+    }, {})
+    return {
+      statusDist,
+      statusRowCount: allDays.filter(d => d.status !== null).length,
+      nullCount:      allDays.filter(d => d.status === null).length,
+    }
+  }, [data])
+
   // Phase 7 — Missing records: past working weekdays (Mon–Fri) with no status.
   // These are unprocessed days — a payroll-critical signal.
   // After implied-absence resolution, null-status past employed days become 'absent'
@@ -560,24 +577,18 @@ export function MusterRoll() {
           {data && !isLoading && (
             <details className="rounded-md border border-border/60 bg-muted/30 text-[10px] font-mono">
               <summary className="px-3 py-1.5 cursor-pointer text-muted-foreground hover:text-foreground select-none">
-                ▶ Data Verification Panel — {ms} ({allEmployees.length} employees, {(data.employees).flatMap(e => e.days).filter(d => d.status !== null).length} status rows)
+                ▶ Data Verification Panel — {ms} ({allEmployees.length} employees, {debugStats.statusRowCount} status rows)
               </summary>
               <div className="px-3 pb-3 pt-1 grid grid-cols-2 sm:grid-cols-4 gap-x-6 gap-y-1 text-muted-foreground">
                 {/* Column 1 — Raw API status distribution */}
                 <div>
                   <div className="font-semibold text-foreground mb-1">1. Raw API (attendance_daily)</div>
-                  {Object.entries(
-                    data.employees.flatMap(e => e.days)
-                      .reduce<Record<string, number>>((acc, d) => {
-                        if (d.status) acc[d.status] = (acc[d.status] ?? 0) + 1
-                        return acc
-                      }, {})
-                  ).sort().map(([s, n]) => (
+                  {Object.entries(debugStats.statusDist).sort().map(([s, n]) => (
                     <div key={s}><span className="text-foreground">{s}:</span> {n}</div>
                   ))}
                   <div className="mt-1 border-t border-border/40 pt-1">
                     <span className="text-foreground">null (no row):</span>{' '}
-                    {data.employees.flatMap(e => e.days).filter(d => d.status === null).length}
+                    {debugStats.nullCount}
                   </div>
                 </div>
 
