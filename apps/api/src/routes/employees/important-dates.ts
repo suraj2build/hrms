@@ -17,6 +17,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 const upsertSchema = z.object({
   date_type_id: z.string().uuid('date_type_id must be a UUID'),
@@ -83,8 +84,7 @@ export default async function employeeImportantDatesRoutes(fastify: FastifyInsta
       .order('event_date')
 
     if (error) {
-      req.log.error({ err: error }, 'employee important-dates list failed')
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch important dates' })
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch important dates')
     }
 
     return reply.send({ data: data ?? [] })
@@ -162,8 +162,7 @@ export default async function employeeImportantDatesRoutes(fastify: FastifyInsta
       .single()
 
     if (error) {
-      req.log.error({ err: error }, 'employee important-dates upsert failed')
-      return reply.code(500).send({ error: 'UPSERT_FAILED', message: 'Failed to save important date' })
+      return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to save important date')
     }
 
     return reply.code(201).send({ data })
@@ -188,8 +187,7 @@ export default async function employeeImportantDatesRoutes(fastify: FastifyInsta
       .select('id')
 
     if (error) {
-      req.log.error({ err: error }, 'employee important-dates delete failed')
-      return reply.code(500).send({ error: 'DELETE_FAILED', message: 'Failed to delete important date' })
+      return serverError(req, reply, error, ErrorCode.DELETE_FAILED, 'Failed to delete important date')
     }
     if (!data?.length) {
       return reply.code(404).send({ error: 'NOT_FOUND', message: 'Important date not found' })
