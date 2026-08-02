@@ -211,8 +211,8 @@ export default async function workforceDrillRoutes(fastify: FastifyInstance) {
             .in('status', ['present', 'absent', 'late', 'half_day', 'leave'])
             .range(from, to),
         )
-      } catch {
-        return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch attendance data' })
+      } catch (err) {
+        return serverError(req, reply, err, ErrorCode.QUERY_FAILED, 'Failed to fetch attendance data')
       }
 
       // Aggregate per employee
@@ -280,8 +280,8 @@ export default async function workforceDrillRoutes(fastify: FastifyInstance) {
             .gt('overtime_minutes', 0)
             .range(from, to),
         )
-      } catch {
-        return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch OT data' })
+      } catch (err) {
+        return serverError(req, reply, err, ErrorCode.QUERY_FAILED, 'Failed to fetch OT data')
       }
 
       type OtStats = { total_ot_minutes: number; ot_days: number }
@@ -414,8 +414,8 @@ export default async function workforceDrillRoutes(fastify: FastifyInstance) {
             .in('status', ['present', 'absent', 'late', 'half_day', 'leave'])
             .range(from, to),
         )
-      } catch {
-        return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch reliability data' })
+      } catch (err) {
+        return serverError(req, reply, err, ErrorCode.QUERY_FAILED, 'Failed to fetch reliability data')
       }
 
       type RelStats = { present: number; absent: number; late: number; total: number }
