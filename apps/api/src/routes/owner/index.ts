@@ -634,7 +634,7 @@ export default async function ownerRoutes(fastify: FastifyInstance) {
       }
     }
 
-    if (!userId) return reply.code(500).send({ error: 'AUTH_ERROR', message: 'Auth user creation returned no ID' })
+    if (!userId) return serverError(req, reply, null, ErrorCode.INSERT_FAILED, 'Auth user creation returned no ID')
 
     // Create profiles row — profiles.id IS the auth user id.
     // email IS stored here (profiles.email is NOT NULL in this DB) and used by
@@ -1194,7 +1194,7 @@ export default async function ownerRoutes(fastify: FastifyInstance) {
 
     const userId = inviteData?.user?.id
     if (!userId) {
-      return reply.code(500).send({ error: 'INVITE_ERROR', message: 'Failed to create auth user' })
+      return serverError(req, reply, null, ErrorCode.INSERT_FAILED, 'Failed to create auth user')
     }
 
     // Create platform_admins row
