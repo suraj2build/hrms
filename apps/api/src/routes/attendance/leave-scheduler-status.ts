@@ -293,7 +293,7 @@ export default async function leaveSchedulerStatusRoutes(fastify: FastifyInstanc
 
     const { data, error, count } = await q
 
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch leave job runs')
     return reply.send({ data: data ?? [], total: count ?? 0 })
   })
 
