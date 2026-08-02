@@ -52,6 +52,14 @@ export interface PayrollComponentSnapshot {
   is_pt_applicable?:   boolean
 }
 
+/** A single pending advance-recovery or loan-EMI installment due this month. */
+export interface AdvanceLoanDeduction {
+  type:        'advance_recovery' | 'loan_emi'
+  schedule_id: string   // advance_recovery_schedules.id or loan_schedules.id
+  amount:      number
+  label:       string   // "Salary Advance Recovery" or "Personal Loan EMI #3"
+}
+
 export interface PayrollSlipInput {
   tenantId:    string
   employeeId:  string
@@ -77,13 +85,17 @@ export interface PayrollSlipInput {
   }
   /** Total scheduled working days in the month for this employee */
   total_working_days: number
-  /** Pending advance recovery and loan EMI deductions fetched from schedules */
-  advance_loan_deductions?: Array<{
-    type:        'advance_recovery' | 'loan_emi'
-    schedule_id: string   // advance_recovery_schedules.id or loan_schedules.id
-    amount:      number
-    label:       string   // "Salary Advance Recovery" or "Personal Loan EMI #3"
-  }>
+  /**
+   * Pending advance recovery and loan EMI deductions fetched from schedules.
+   *
+   * NOT processed here — see applyAdvanceLoanRecovery() below. computePayrollSlip()
+   * only computes earnings/LOP/baked-in compensation deductions; the recovery
+   * accept-or-defer decision must run AFTER applyStatutoryToSlip() has injected
+   * the real PF/ESI/PT/LWF lines, or it's evaluated against the wrong available
+   * headroom (SYSCERT_AUDIT_2026-08-02.md C2). Kept on this input type only so
+   * callers can build the full args object once; computePayrollSlip ignores it.
+   */
+  advance_loan_deductions?: AdvanceLoanDeduction[]
 }
 
 export interface PayrollSlipResult {
@@ -120,7 +132,6 @@ export interface PayrollSlipResult {
 export function computePayrollSlip(input: PayrollSlipInput): PayrollSlipResult {
   const {
     employeeId, month, compensation, attendance, total_working_days,
-    advance_loan_deductions,
   } = input
 
   // ── Warning: no attendance data (employee will receive full pay — may be wrong) ─
@@ -189,46 +200,13 @@ export function computePayrollSlip(input: PayrollSlipInput): PayrollSlipResult {
       'LOP deduction skipped to avoid wiping salary; verify holiday/roster/working-day setup.'
   }
 
-  // Advance recovery and loan EMI deductions.
-  //
-  // Cap recovery at the pay available after statutory deductions + LOP, so a
-  // scheduled installment can NEVER exceed what the employee actually earns this
-  // month (which would otherwise make total_deductions exceed gross and force net
-  // to 0). Installments are taken in order, fully or not at all; any that don't
-  // fit are DEFERRED — left off this slip and rolled forward to the next cycle by
-  // the payroll finalize step, so nothing is lost and the loan ledger stays honest.
-  const alDeductions = advance_loan_deductions ?? []
-  let availableForRecovery = round2(Math.max(0, gross_pay - deduction_total_base - lop_amount))
-  const recoveredAL: typeof alDeductions = []
-  const deferredAL:  typeof alDeductions = []
-  for (const d of alDeductions) {
-    if (d.amount <= availableForRecovery + 0.005) {
-      recoveredAL.push(d)
-      availableForRecovery = round2(availableForRecovery - d.amount)
-    } else {
-      deferredAL.push(d)
-    }
-  }
-  const al_total = round2(recoveredAL.reduce((s, d) => s + d.amount, 0))
-  const al_components: PayrollComponentSnapshot[] = recoveredAL.map((d, idx) => ({
-    salary_component_id: d.schedule_id,
-    name:                d.label,
-    code:                d.type === 'advance_recovery' ? 'ADVANCE_RECOVERY' : 'LOAN_EMI',
-    component_type:      'deduction' as const,
-    calc_type:           'fixed',
-    value:               d.amount,
-    monthly_amount:      d.amount,
-    annual_amount:       0,
-    sequence:            900 + idx,
-  }))
-
-  const deferralWarning = deferredAL.length > 0
-    ? `${deferredAL.length} advance/loan recovery installment(s) totalling ` +
-      `${round2(deferredAL.reduce((s, d) => s + d.amount, 0))} deferred to next cycle ` +
-      '(exceeded available net pay for the month).'
-    : undefined
-
-  const uncappedDeductions = round2(deduction_total_base + lop_amount + al_total)
+  // Advance recovery / loan EMI deductions are NOT decided here — see
+  // applyAdvanceLoanRecovery() below. This function has no visibility into the
+  // real PF/ESI/PT/LWF lines (those are injected afterward by
+  // applyStatutoryToSlip()), so deciding "does this installment fit?" at this
+  // point would evaluate affordability against the wrong available headroom
+  // (SYSCERT_AUDIT_2026-08-02.md C2).
+  const uncappedDeductions = round2(deduction_total_base + lop_amount)
   const { total_deductions, net_pay, deduction_shortfall } = finalizeDeductionsAndNet(gross_pay, uncappedDeductions)
   const shortfallWarning = deduction_shortfall > 0
     ? `Deductions (${uncappedDeductions}) exceed gross pay (${gross_pay}) by ${deduction_shortfall} — ` +
@@ -249,11 +227,101 @@ export function computePayrollSlip(input: PayrollSlipInput): PayrollSlipResult {
     net_pay,
     deduction_shortfall,
     employer_contributions,
-    component_breakdown: [...components, ...al_components],
+    component_breakdown: [...components],
+    recovered_recovery_ids: [],
+    deferred_recovery_ids:  [],
+    // Propagate no-attendance + zero-working-days + shortfall warnings.
+    warning: [noAttendanceWarning, zeroDenomWarning, shortfallWarning].filter(Boolean).join(' ') || undefined,
+  }
+}
+
+/**
+ * Decide which pending advance-recovery/loan-EMI installments fit this month's
+ * pay and apply them to an already-statutory-applied slip (SYSCERT_AUDIT_2026-08-02.md
+ * C2 fix).
+ *
+ * MUST be called after applyStatutoryToSlip() — `slip.component_breakdown` and
+ * `slip.total_deductions`/`lop_amount` need to already reflect the real PF/ESI/PT/
+ * LWF lines, or "does this installment fit?" is evaluated against the wrong
+ * available headroom (previously: only whatever legacy deduction components
+ * happened to be baked into employee_compensation_components at authoring
+ * time — typically nothing for ESI/PT — so an installment could be accepted
+ * here, then the later statutory injection pushed total_deductions past
+ * gross_pay, silently forcing net_pay to 0 instead of deferring the EMI).
+ *
+ * Installments are taken in order, fully or not at all; any that don't fit are
+ * DEFERRED — left off this slip and rolled forward to the next cycle by the
+ * payroll finalize step, so nothing is lost and the loan ledger stays honest.
+ */
+export function applyAdvanceLoanRecovery(
+  slip: PayrollSlipResult,
+  advanceLoanDeductions: AdvanceLoanDeduction[],
+): PayrollSlipResult {
+  const alDeductions = advanceLoanDeductions ?? []
+  if (!alDeductions.length) return slip
+
+  const deductionBase = round2(
+    slip.component_breakdown
+      .filter(c => c.component_type === 'deduction')
+      .reduce((s, c) => s + c.monthly_amount, 0),
+  )
+  let availableForRecovery = round2(Math.max(0, slip.gross_pay - deductionBase - slip.lop_amount))
+  const recoveredAL: typeof alDeductions = []
+  const deferredAL:  typeof alDeductions = []
+  for (const d of alDeductions) {
+    if (d.amount <= availableForRecovery + 0.005) {
+      recoveredAL.push(d)
+      availableForRecovery = round2(availableForRecovery - d.amount)
+    } else {
+      deferredAL.push(d)
+    }
+  }
+  if (!recoveredAL.length) {
+    const deferralWarning = deferredAL.length > 0
+      ? `${deferredAL.length} advance/loan recovery installment(s) totalling ` +
+        `${round2(deferredAL.reduce((s, d) => s + d.amount, 0))} deferred to next cycle ` +
+        '(exceeded available net pay for the month).'
+      : undefined
+    return deferralWarning
+      ? { ...slip, deferred_recovery_ids: deferredAL.map(d => d.schedule_id), warning: [slip.warning, deferralWarning].filter(Boolean).join(' ') }
+      : slip
+  }
+
+  const al_total = round2(recoveredAL.reduce((s, d) => s + d.amount, 0))
+  const al_components: PayrollComponentSnapshot[] = recoveredAL.map((d, idx) => ({
+    salary_component_id: d.schedule_id,
+    name:                d.label,
+    code:                d.type === 'advance_recovery' ? 'ADVANCE_RECOVERY' : 'LOAN_EMI',
+    component_type:      'deduction' as const,
+    calc_type:           'fixed',
+    value:               d.amount,
+    monthly_amount:      d.amount,
+    annual_amount:       0,
+    sequence:            900 + idx,
+  }))
+
+  const deferralWarning = deferredAL.length > 0
+    ? `${deferredAL.length} advance/loan recovery installment(s) totalling ` +
+      `${round2(deferredAL.reduce((s, d) => s + d.amount, 0))} deferred to next cycle ` +
+      '(exceeded available net pay for the month).'
+    : undefined
+
+  const uncappedDeductions = round2(deductionBase + slip.lop_amount + al_total)
+  const { total_deductions, net_pay, deduction_shortfall } = finalizeDeductionsAndNet(slip.gross_pay, uncappedDeductions)
+  const shortfallWarning = deduction_shortfall > 0
+    ? `Deductions (${uncappedDeductions}) exceed gross pay (${slip.gross_pay}) by ${deduction_shortfall} — ` +
+      'total_deductions and net_pay have been capped; the shortfall is not recovered automatically. Review this slip.'
+    : undefined
+
+  return {
+    ...slip,
+    total_deductions,
+    net_pay,
+    deduction_shortfall,
+    component_breakdown: [...slip.component_breakdown, ...al_components],
     recovered_recovery_ids: recoveredAL.map(d => d.schedule_id),
     deferred_recovery_ids:  deferredAL.map(d => d.schedule_id),
-    // Propagate no-attendance + zero-working-days + recovery-deferral + shortfall warnings.
-    warning: [noAttendanceWarning, zeroDenomWarning, deferralWarning, shortfallWarning].filter(Boolean).join(' ') || undefined,
+    warning: [slip.warning, deferralWarning, shortfallWarning].filter(Boolean).join(' ') || undefined,
   }
 }
 

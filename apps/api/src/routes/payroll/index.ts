@@ -29,6 +29,7 @@ import {
   countWorkingDaysForEmployee,
   fetchAttendanceSummary,
   fetchActiveCompensation,
+  applyAdvanceLoanRecovery,
   round2,
   type PayrollSlipResult,
 } from '../../lib/payroll-engine.js'
@@ -211,7 +212,7 @@ async function applyTdsForRun(
 }
 
 /**
- * Compute a payroll slip with two corrections layered on the base engine:
+ * Compute a payroll slip with three corrections layered on the base engine:
  *   1. Roster-aware LOP denominator — recompute total_working_days PER EMPLOYEE
  *      so it matches the per-employee weekly-off used for day_fraction (fixes the
  *      Sat/Sun-hardcoded denominator vs roster-numerator mismatch). Falls back to
@@ -219,6 +220,11 @@ async function applyTdsForRun(
  *   2. Config-driven statutory — recompute PF/ESI/PT via the engines (TDS stays
  *      on the tax-governance flow). Returns the base slip unchanged when the
  *      employee has no compensation/components to act on.
+ *   3. Advance/loan recovery — decided AFTER (2), not before (SYSCERT_AUDIT_2026-08-02.md
+ *      C2): whether a scheduled EMI/recovery installment fits this month's pay
+ *      must be evaluated against the real post-statutory deduction total, or a
+ *      legitimate installment can be wrongly accepted and later force net_pay to
+ *      0 once the real PF/ESI/PT lines land, instead of deferring the EMI.
  */
 async function computeSlipWithStatutory(
   supabase: any,
@@ -255,8 +261,12 @@ async function computeSlipWithStatutory(
   const params   = await resolveEmployeeStatutoryParams(supabase, tenantId, args.employeeId, month, ctx?.statutoryCache)
   const calMonth = Number(month.slice(5, 7))
   const withStat = applyStatutoryToSlip(base, params, calMonth).slip   // spread preserves base.warning
+  // Advance/loan recovery is decided here — after real PF/ESI/PT/LWF are on the
+  // slip — not inside computePayrollSlip(). See computeSlipWithStatutory's own
+  // doc comment (point 3) and applyAdvanceLoanRecovery()'s doc comment.
+  const withRecovery = applyAdvanceLoanRecovery(withStat, slipArgs.advance_loan_deductions ?? [])
   // Inject TDS (income tax) if enabled — PF/ESI/PT engines don't cover it.
-  return applyTdsForRun(supabase, tenantId, args.employeeId, month, withStat, ctx)
+  return applyTdsForRun(supabase, tenantId, args.employeeId, month, withRecovery, ctx)
 }
 import {
   validatePayrollSlipPayload,
