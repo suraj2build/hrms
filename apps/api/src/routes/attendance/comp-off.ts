@@ -159,8 +159,7 @@ export default async function compOffRoute(fastify: FastifyInstance) {
     try {
       woEmpIds = new Set((await resolveWoEmployees(fastify.supabase, req.tenantId)).map(e => e.employeeId))
     } catch (err: unknown) {
-      req.log.error({ err, tenantId: req.tenantId }, '[comp-off] failed to resolve WO employees')
-      return reply.code(500).send({ error: 'WO_RESOLVE_ERROR', message: 'Failed to resolve weekly-off employees' })
+      return serverError(req, reply, err, ErrorCode.COMPUTE_FAILED, 'Failed to resolve weekly-off employees')
     }
     const qualifying = (qualifyingRaw ?? []).filter((r: any) => !woEmpIds.has(r.employee_id))
 
@@ -305,8 +304,7 @@ export default async function compOffRoute(fastify: FastifyInstance) {
       }
       // gate.kind === 'finalize' → fall through to the credit logic below.
     } catch (err: unknown) {
-      req.log.error({ err, tenantId: req.tenantId, id }, '[comp-off] unexpected error in approval gate')
-      return reply.code(500).send({ error: 'APPROVE_GATE_ERROR', message: 'Failed to process comp-off approval' })
+      return serverError(req, reply, err, ErrorCode.COMPUTE_FAILED, 'Failed to process comp-off approval')
     }
 
     // Segregation of duties — a user may not approve their own comp-off (F3).
@@ -441,8 +439,7 @@ export default async function compOffRoute(fastify: FastifyInstance) {
           .eq('id', id)
           .eq('tenant_id', req.tenantId)
           .eq('status', 'approved')
-        req.log.error({ err: ledgerErr }, 'comp-off ledger insert failed')
-        return reply.code(500).send({ error: 'LEDGER_FAILED', message: 'Failed to credit leave balance' })
+        return serverError(req, reply, ledgerErr, ErrorCode.INSERT_FAILED, 'Failed to credit leave balance')
       }
 
       // Mirror into the cached balance only when a new ledger row was written.
@@ -521,8 +518,7 @@ export default async function compOffRoute(fastify: FastifyInstance) {
         return reply.code(code).send({ error: gate.error.type, message: gate.error.message })
       }
     } catch (err: unknown) {
-      req.log.error({ err, tenantId: req.tenantId, id }, '[comp-off] unexpected error in rejection gate')
-      return reply.code(500).send({ error: 'REJECT_GATE_ERROR', message: 'Failed to process comp-off rejection' })
+      return serverError(req, reply, err, ErrorCode.COMPUTE_FAILED, 'Failed to process comp-off rejection')
     }
 
     const now = new Date().toISOString()
