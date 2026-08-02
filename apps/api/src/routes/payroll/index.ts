@@ -2951,7 +2951,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
     if (!parsed.success) {
       return validationError(reply, 'VALIDATION_ERROR', parsed.error.issues[0]?.message ?? 'Validation failed')
     }
-    const { limit, offset } = parsed.data
+    const { limit, offset, search } = parsed.data
 
     // Verify run belongs to tenant — fetch full run status for visibility computation
     const { data: run } = await fastify.supabase
@@ -2961,6 +2961,28 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', req.tenantId)
       .single()
     if (!run) return notFound(reply, 'NOT_FOUND', 'Run not found')
+
+    // SYSCERT_AUDIT_2026-08-02.md H1: `search` was validated by the query
+    // schema but never applied to the query — the slip search box was a
+    // complete no-op. payroll_slips has no name/code columns of its own (the
+    // employee's name/code live on the joined `employees` table), so resolve
+    // matching employee_ids first, then filter slips by that set — same
+    // two-step shape as /employees/search's ilike-OR pattern.
+    let matchedEmployeeIds: string[] | null = null
+    if (search && search.trim()) {
+      const term = `%${sanitizeOrFilterTerm(search.trim())}%`
+      const { data: matches, error: matchErr } = await fastify.supabase
+        .from('employees')
+        .select('id')
+        .eq('tenant_id', req.tenantId)
+        .or(`first_name.ilike.${term},last_name.ilike.${term},employee_code.ilike.${term}`)
+        .limit(1000)
+      if (matchErr) return serverError(req, reply, matchErr, ErrorCode.QUERY_FAILED, 'Failed to search employees')
+      matchedEmployeeIds = (matches ?? []).map((m: { id: string }) => m.id)
+      if (!matchedEmployeeIds.length) {
+        return reply.send({ data: [], total: 0, limit, offset })
+      }
+    }
 
     // Use LEFT JOIN (no !inner) so orphaned slips remain visible when employee row
     // has been archived or soft-deleted — !inner would silently drop those slips.
@@ -2976,6 +2998,10 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       .eq('run_id', id)
       .eq('tenant_id', req.tenantId)
       .range(offset, offset + limit - 1)
+
+    if (matchedEmployeeIds) {
+      q = q.in('employee_id', matchedEmployeeIds)
+    }
 
     const { data, error, count } = await q
     if (error) {
