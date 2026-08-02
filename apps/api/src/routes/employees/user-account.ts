@@ -276,7 +276,7 @@ export default async function userAccountRoutes(fastify: FastifyInstance) {
 
     // (invite path already returned above — this is unreachable but satisfies TS)
     /* istanbul ignore next */
-    return reply.code(500).send({ error: 'UNEXPECTED', message: 'Unexpected code path' })
+    return serverError(req, reply, null, ErrorCode.COMPUTE_FAILED, 'Unexpected code path')
   })
 
   // ── PATCH /employees/:id/user-account ──────────────────────────────────────
