@@ -15,7 +15,7 @@ import { getDirectReportIds, isHrAdmin } from '../manager-scope.js'
 import { fetchAllRows } from '../supabase-paginate.js'
 import { fetchTenantTz } from '../attendance-engine.js'
 import { getLocalDate } from '../org-context.js'
-import { createLeaveRequest } from '../leave-request-service.js'
+import { createLeaveRequest, cancelLeaveRequest as cancelLeaveRequestService } from '../leave-request-service.js'
 import { submitRegularisation } from '../regularisation-service.js'
 import { resolveTicketSla } from '../helpdesk-sla.js'
 import type { ToolDef } from './llm.js'
@@ -877,34 +877,15 @@ async function applyLeave(ctx: ToolCtx, args: { leave_type: string; start_date: 
 async function cancelLeaveRequest(ctx: ToolCtx, args: { request_id: string }): Promise<string> {
   if (!ctx.employeeId) return 'No employee profile linked to your account.'
 
-  const { data: req, error: fetchErr } = await ctx.supabase
-    .from('leave_requests')
-    .select('id, status, from_date, to_date, leave_types(name)')
-    .eq('tenant_id', ctx.caller.tenantId)
-    .eq('id', args.request_id)
-    .eq('employee_id', ctx.employeeId)
-    .single()
+  // Delegate to the canonical service (same one used elsewhere) rather than
+  // hand-rolling the update — it enforces the requester-match check under the
+  // same TOCTOU-safe WHERE-clause precondition, and emits the 'leave.cancelled'
+  // event the hand-rolled version here previously skipped entirely.
+  const result = await cancelLeaveRequestService(ctx.supabase, ctx.caller.tenantId, args.request_id, ctx.caller.userId)
 
-  if (fetchErr || !req) return 'Leave request not found or you do not have permission to cancel it.'
-  if (req.status !== 'PENDING') return `Cannot cancel a request with status ${req.status}. Only PENDING requests can be cancelled.`
-
-  // TOCTOU-safe: fold the PENDING precondition into the UPDATE's own WHERE clause,
-  // so a concurrent approval/rejection between the read above and this write can't
-  // be silently clobbered back to CANCELLED.
-  const { data: updated, error } = await ctx.supabase
-    .from('leave_requests')
-    .update({ status: 'CANCELLED', updated_at: new Date().toISOString() })
-    .eq('id', args.request_id)
-    .eq('tenant_id', ctx.caller.tenantId)
-    .eq('employee_id', ctx.employeeId)
-    .eq('status', 'PENDING')
-    .select('id')
-    .maybeSingle()
-
-  if (error) return 'Failed to cancel your leave request. Please try again.'
-  if (!updated) return 'This request can no longer be cancelled — its status changed (e.g. it was just approved or rejected) before the cancellation went through.'
-  const typeName = (req.leave_types as any)?.name ?? 'leave'
-  return `✅ ${typeName} request (${req.from_date} → ${req.to_date}) has been cancelled.`
+  if (!result.ok) return `Could not cancel your leave request: ${result.error.message}`
+  const typeName = (result.value.leave_types as any)?.name ?? 'leave'
+  return `✅ ${typeName} request (${result.value.from_date} → ${result.value.to_date}) has been cancelled.`
 }
 
 async function createHelpdeskTicket(ctx: ToolCtx, args: { subject: string; description: string; category?: string; priority?: string }): Promise<string> {
