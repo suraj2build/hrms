@@ -26,6 +26,7 @@ import type { FastifyInstance } from 'fastify'
 import { createHash }                        from 'crypto'
 import { requireRole, HR_ADMIN_ROLES }       from '../../lib/rbac.js'
 import { recomputeRange, localToUtc }        from '../../lib/attendance-engine.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -458,8 +459,7 @@ export default async function attendanceUploadRoute(fastify: FastifyInstance) {
         .single()
 
       if (jobErr || !jobRow) {
-        req.log.error({ err: jobErr }, 'attendance upload: failed to create job record')
-        return reply.code(500).send({ error: 'JOB_CREATE_FAILED', message: 'Failed to create upload job' })
+        return serverError(req, reply, jobErr, ErrorCode.INSERT_FAILED, 'Failed to create upload job')
       }
 
       const jobId = (jobRow as { id: string }).id
@@ -480,8 +480,7 @@ export default async function attendanceUploadRoute(fastify: FastifyInstance) {
         })
       })
     } catch (err: any) {
-      req.log.error({ err }, 'attendance upload: unhandled exception')
-      return reply.code(500).send({ error: 'UPLOAD_ERROR', message: 'Upload failed due to an unexpected error. Please try again.' })
+      return serverError(req, reply, err, ErrorCode.ATTENDANCE_SYNC_FAILED, 'Upload failed due to an unexpected error. Please try again.')
     }
   })
 
@@ -495,7 +494,7 @@ export default async function attendanceUploadRoute(fastify: FastifyInstance) {
       .eq('tenant_id', req.tenantId)
       .maybeSingle()
 
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch upload job')
     if (!data)  return reply.code(404).send({ error: 'NOT_FOUND', message: 'Upload job not found' })
     return reply.send(data)
   })
@@ -534,7 +533,7 @@ export default async function attendanceUploadRoute(fastify: FastifyInstance) {
       .limit(1)
       .maybeSingle()
 
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch active upload job')
     return reply.send(data ?? null)
   })
 
@@ -551,7 +550,7 @@ export default async function attendanceUploadRoute(fastify: FastifyInstance) {
       .order('created_at', { ascending: false })
       .limit(pageLimit)
 
-    if (error) return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch upload sessions')
     return reply.send({ data: data ?? [] })
   })
 }
