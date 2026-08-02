@@ -3,7 +3,9 @@
  *
  * Mounted once globally (App.tsx). Self-guards: renders nothing on auth/owner
  * pages or when logged out. Calls POST /assistant/chat (role-scoped server-side).
- * Read-only assistant — no actions. Shows a friendly "not configured" state with a
+ * Can both answer questions and take some actions (apply leave, raise a
+ * helpdesk ticket, update contact info, etc — see assistant-tools.ts for the
+ * full write-tool list). Shows a friendly "not configured" state with a
  * link to the admin AI settings when no provider key is set.
  */
 import { useState, useRef, useEffect } from 'react'
@@ -113,7 +115,7 @@ export function AssistantWidget() {
             <div className="min-w-0 flex-1">
               <p className="text-sm font-semibold leading-tight">CognixHR Assistant</p>
               <p className="text-[10px] text-white/70 leading-tight">
-                {DEMO_MODE ? 'Demo · sample answers' : status?.data.enabled ? 'Read-only · answers from your data' : 'Not configured'}
+                {DEMO_MODE ? 'Demo · sample answers' : status?.data.enabled ? 'Answers questions & can take actions for you' : 'Not configured'}
               </p>
             </div>
             {msgs.length > 0 && (
