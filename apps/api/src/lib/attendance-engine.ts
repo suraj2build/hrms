@@ -682,15 +682,16 @@ async function fetchApprovedLeave(
   employeeId: string,
   date:       string,
 ): Promise<{
-  leave_type_id:   string
-  is_paid:         boolean
-  half_day:        boolean
-  session:         LeaveSession | null
-  hours_requested: number | null
+  leave_type_id:      string
+  is_paid:            boolean
+  half_day:           boolean
+  session:            LeaveSession | null
+  hours_requested:    number | null
+  duration_breakdown: { per_day?: Array<{ date: string; session: 'full_day' | 'first_half' | 'second_half' | 'none' }> } | null
 } | null> {
   const { data, error } = await supabase
     .from('leave_requests')
-    .select('leave_type_id, half_day, session, hours_requested, leave_types(is_paid)')
+    .select('leave_type_id, half_day, session, hours_requested, duration_breakdown, leave_types(is_paid)')
     .eq('tenant_id', tenantId)
     .eq('employee_id', employeeId)
     .eq('status', 'APPROVED')
@@ -711,22 +712,64 @@ async function fetchApprovedLeave(
   if (!data) return null
 
   const row = data as unknown as {
-    leave_type_id:   string
-    half_day:        boolean | null
-    session:         LeaveSession | null
-    hours_requested: number | null
-    leave_types:     { is_paid: boolean } | { is_paid: boolean }[] | null
+    leave_type_id:      string
+    half_day:           boolean | null
+    session:            LeaveSession | null
+    hours_requested:    number | null
+    duration_breakdown: { per_day?: Array<{ date: string; session: 'full_day' | 'first_half' | 'second_half' | 'none' }> } | null
+    leave_types:        { is_paid: boolean } | { is_paid: boolean }[] | null
   }
 
   const lt = Array.isArray(row.leave_types) ? row.leave_types[0] : row.leave_types
 
   return {
-    leave_type_id:   row.leave_type_id,
-    is_paid:         lt?.is_paid ?? false,
-    half_day:        row.half_day ?? false,
-    session:         row.session,
-    hours_requested: row.hours_requested,
+    leave_type_id:      row.leave_type_id,
+    is_paid:            lt?.is_paid ?? false,
+    half_day:           row.half_day ?? false,
+    session:            row.session,
+    hours_requested:    row.hours_requested,
+    duration_breakdown: row.duration_breakdown,
   }
+}
+
+/**
+ * Resolve which session applies to ONE specific calendar day of a (possibly
+ * multi-day) approved leave request (SYSCERT_AUDIT_2026-08-02.md C3).
+ *
+ * The legacy `session` column holds a single value for the whole request —
+ * applying it to every date in a multi-day span is wrong whenever the
+ * request has a half-day boundary (e.g. start_session='second_half' on day 1,
+ * full days between, end_session='first_half' on the last day): every day
+ * after the first got the wrong day_fraction.
+ *
+ * `duration_breakdown.per_day` (written by the duration engine — see
+ * leave-duration-engine.ts) has the authoritative per-date session, so it
+ * takes priority. Falls back to the legacy single `session` column when no
+ * per-day entry exists for this date — covers hourly leave (single-day only,
+ * per_day is empty by design) and any pre-duration-engine-rollout row.
+ *
+ * Returns null when the duration engine explicitly resolved this date to
+ * no charge (holiday/weekoff skip, sandwich-exclude, or attendance-overlap)
+ * — the caller should treat the day as if no approved leave applies, and let
+ * the existing holiday/weekly-off/punch-based logic resolve it instead.
+ */
+export function resolveLeaveSessionForDate(
+  approvedLeave: {
+    half_day:           boolean
+    session:            LeaveSession | null
+    duration_breakdown: { per_day?: Array<{ date: string; session: 'full_day' | 'first_half' | 'second_half' | 'none' }> } | null
+  },
+  date: string,
+): LeaveSession | null {
+  const perDayEntry = approvedLeave.duration_breakdown?.per_day?.find((d) => d.date === date)
+  if (perDayEntry) {
+    return perDayEntry.session === 'none' ? null : perDayEntry.session
+  }
+  // Legacy fallback — session is the authoritative field (set on every row
+  // written since the duration-engine rollout); half_day is the legacy
+  // boolean, kept as a fallback for any older row where session was never
+  // backfilled.
+  return approvedLeave.session ?? (approvedLeave.half_day ? 'first_half' : 'full_day')
 }
 
 async function fetchHoliday(
@@ -923,12 +966,18 @@ export async function computeDay(
 
   // 3. Approved leave → LEAVE (session-aware). Only reached on actual working
   //    days now — rest days above already returned.
-  if (approvedLeave) {
-    const { is_paid, half_day, session: leaveSession, hours_requested } = approvedLeave
-    // session is the authoritative field (set on every row written since the
-    // duration-engine rollout); half_day is the legacy boolean, kept as a
-    // fallback for any older row where session was never backfilled.
-    const resolvedSession: LeaveSession = leaveSession ?? (half_day ? 'first_half' : 'full_day')
+  //
+  // resolveLeaveSessionForDate resolves THIS specific date's session from the
+  // duration engine's per-day breakdown (SYSCERT_AUDIT_2026-08-02.md C3) —
+  // required for multi-day requests with a half-day start/end (the legacy
+  // `session` column holds one value for the whole request, which is wrong
+  // for every day but the boundary it actually applies to). Returns null when
+  // the duration engine resolved this date to no charge (holiday/weekoff skip,
+  // sandwich-exclude, attendance-overlap) — treat as if there's no approved
+  // leave and fall through to the punch-based path below.
+  const resolvedSession = approvedLeave ? resolveLeaveSessionForDate(approvedLeave, date) : null
+  if (approvedLeave && resolvedSession) {
+    const { is_paid, hours_requested } = approvedLeave
     const isFractional = resolvedSession !== 'full_day'
     // For a fractional (half-day or hourly) leave, the rest of the day may
     // have been worked. Treat the presence of punches as the worked remainder
@@ -948,7 +997,7 @@ export async function computeDay(
     })
     const reason = resolvedSession === 'hourly'
       ? `Approved ${hours_requested ?? '?'}h leave on ${date}`
-      : (half_day ? `Approved half-day leave on ${date}` : `Approved leave on ${date}`)
+      : (isFractional ? `Approved half-day (${resolvedSession}) leave on ${date}` : `Approved leave on ${date}`)
     return {
       tenant_id, employee_id, date,
       status:               resolved.status,
