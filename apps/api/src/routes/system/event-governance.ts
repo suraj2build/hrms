@@ -20,6 +20,7 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 // ── Query / body schemas ──────────────────────────────────────────────────────
 
@@ -170,8 +171,7 @@ export default async function eventGovernanceRoutes(fastify: FastifyInstance) {
       .maybeSingle()
 
     if (error) {
-      req.log.error({ err: error, eventId }, 'event_log single fetch failed')
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch event' })
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch event')
     }
 
     if (!data) {
@@ -232,8 +232,7 @@ export default async function eventGovernanceRoutes(fastify: FastifyInstance) {
       .order('created_at', { ascending: true })
 
     if (error) {
-      req.log.error({ err: error, correlation_id }, 'event timeline query failed')
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch event timeline' })
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch event timeline')
     }
 
     const events = (data ?? []).map((r: any) => ({
@@ -278,8 +277,7 @@ export default async function eventGovernanceRoutes(fastify: FastifyInstance) {
       .maybeSingle()
 
     if (eventErr) {
-      req.log.error({ err: eventErr, event_log_id }, 'event lookup for replay failed')
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to verify event' })
+      return serverError(req, reply, eventErr, ErrorCode.QUERY_FAILED, 'Failed to verify event')
     }
 
     if (!eventRow) {
@@ -299,8 +297,7 @@ export default async function eventGovernanceRoutes(fastify: FastifyInstance) {
       .single()
 
     if (insertErr) {
-      req.log.error({ err: insertErr, event_log_id }, 'event replay queue insert failed')
-      return reply.code(500).send({ error: 'INSERT_FAILED', message: 'Failed to enqueue replay request' })
+      return serverError(req, reply, insertErr, ErrorCode.INSERT_FAILED, 'Failed to enqueue replay request')
     }
 
     req.log.info(
@@ -355,8 +352,7 @@ export default async function eventGovernanceRoutes(fastify: FastifyInstance) {
     const { data, error, count } = await q
 
     if (error) {
-      req.log.error({ err: error }, 'replay queue query failed')
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch replay queue' })
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch replay queue')
     }
 
     const rows = (data ?? []).map((r: any) => ({
@@ -399,8 +395,7 @@ export default async function eventGovernanceRoutes(fastify: FastifyInstance) {
       .maybeSingle()
 
     if (fetchErr) {
-      req.log.error({ err: fetchErr, id }, 'replay queue fetch for cancel failed')
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch replay request' })
+      return serverError(req, reply, fetchErr, ErrorCode.QUERY_FAILED, 'Failed to fetch replay request')
     }
 
     if (!existing) {
@@ -428,8 +423,7 @@ export default async function eventGovernanceRoutes(fastify: FastifyInstance) {
       .maybeSingle()
 
     if (updateErr) {
-      req.log.error({ err: updateErr, id }, 'replay queue cancel update failed')
-      return reply.code(500).send({ error: 'UPDATE_FAILED', message: 'Failed to cancel replay request' })
+      return serverError(req, reply, updateErr, ErrorCode.UPDATE_FAILED, 'Failed to cancel replay request')
     }
 
     if (!updated) {
@@ -459,8 +453,7 @@ export default async function eventGovernanceRoutes(fastify: FastifyInstance) {
       .order('event_type', { ascending: true })
 
     if (error) {
-      req.log.error({ err: error }, 'retention rules query failed')
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch retention rules' })
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch retention rules')
     }
 
     return reply.send({ data: data ?? [] })
@@ -501,8 +494,7 @@ export default async function eventGovernanceRoutes(fastify: FastifyInstance) {
       .single()
 
     if (error) {
-      req.log.error({ err: error }, 'retention rule upsert failed')
-      return reply.code(500).send({ error: 'UPSERT_FAILED', message: 'Failed to save retention rule' })
+      return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to save retention rule')
     }
 
     req.log.info(
@@ -531,8 +523,7 @@ export default async function eventGovernanceRoutes(fastify: FastifyInstance) {
       .maybeSingle()
 
     if (fetchErr) {
-      req.log.error({ err: fetchErr, id }, 'retention rule fetch for delete failed')
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch retention rule' })
+      return serverError(req, reply, fetchErr, ErrorCode.QUERY_FAILED, 'Failed to fetch retention rule')
     }
 
     if (!existing) {
@@ -546,8 +537,7 @@ export default async function eventGovernanceRoutes(fastify: FastifyInstance) {
       .eq('id', id)
 
     if (updateErr) {
-      req.log.error({ err: updateErr, id }, 'retention rule soft-delete failed')
-      return reply.code(500).send({ error: 'UPDATE_FAILED', message: 'Failed to deactivate retention rule' })
+      return serverError(req, reply, updateErr, ErrorCode.UPDATE_FAILED, 'Failed to deactivate retention rule')
     }
 
     req.log.info({ ruleId: id, deletedBy: req.userId }, 'event retention rule soft-deleted')
@@ -594,8 +584,7 @@ export default async function eventGovernanceRoutes(fastify: FastifyInstance) {
           fastify.supabase.from('event_log').select('created_at').eq('tenant_id', tenantId).gte('created_at', since7d).range(from, to)),
       ]) as [any[], any[], any[]]
     } catch (err) {
-      req.log.error({ err }, 'event governance stats query failed')
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to compute event stats' })
+      return serverError(req, reply, err, ErrorCode.QUERY_FAILED, 'Failed to compute event stats')
     }
 
     // by_status

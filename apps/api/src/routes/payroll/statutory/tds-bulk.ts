@@ -389,7 +389,7 @@ export default async function tdsBulkRoutes(fastify: FastifyInstance) {
     if (employee_id)           q = q.eq('employee_id', employee_id)
 
     const { data, error, count } = await q
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch TDS reconciliation records')
 
     return reply.send({ data: data ?? [], total: count ?? 0, limit, offset })
   })
@@ -440,7 +440,7 @@ export default async function tdsBulkRoutes(fastify: FastifyInstance) {
       employees = []
       empErr = err
     }
-    if (empErr) return reply.code(500).send({ error: 'QUERY_FAILED', message: (empErr as Error).message })
+    if (empErr) return serverError(req, reply, empErr, ErrorCode.QUERY_FAILED, 'Failed to fetch employees for reconciliation')
     if (!employees || employees.length === 0) {
       return reply.send({ computed: 0, high_variance: 0 })
     }
@@ -544,7 +544,7 @@ export default async function tdsBulkRoutes(fastify: FastifyInstance) {
           onConflict: 'tenant_id,employee_id,financial_year,period_month,payroll_run_id',
         })
 
-      if (upsertErr) return reply.code(500).send({ error: 'UPSERT_FAILED', message: upsertErr.message })
+      if (upsertErr) return serverError(req, reply, upsertErr, ErrorCode.UPDATE_FAILED, 'Failed to save tax projection reconciliation')
       computed = upsertRows.length
     }
 
@@ -580,7 +580,7 @@ export default async function tdsBulkRoutes(fastify: FastifyInstance) {
       .select()
       .single()
 
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update reconciliation record')
     if (!data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Reconciliation record not found' })
 
     return reply.send({ data })

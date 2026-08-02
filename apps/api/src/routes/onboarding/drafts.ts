@@ -144,7 +144,7 @@ export default async function draftRoutes(fastify: FastifyInstance) {
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
 
-    if (updateError) return reply.code(500).send({ error: 'DB_ERROR', message: updateError.message })
+    if (updateError) return serverError(req, reply, updateError, ErrorCode.UPDATE_FAILED, 'Failed to update draft fields')
 
     // Delete existing HR-override field rows for this draft + field names, then re-insert
     const overrideFieldNames = overrides.map((o) => o.field_name)
@@ -191,7 +191,7 @@ export default async function draftRoutes(fastify: FastifyInstance) {
       .eq('id', id)
       .single()
 
-    if (fetchError) return reply.code(500).send({ error: 'DB_ERROR', message: fetchError.message })
+    if (fetchError) return serverError(req, reply, fetchError, ErrorCode.QUERY_FAILED, 'Failed to fetch updated draft')
 
     return reply.send({ data: updatedDraft })
   })
@@ -495,7 +495,7 @@ export default async function draftRoutes(fastify: FastifyInstance) {
       await fastify.supabase.from('draft_employee_profiles')
         .update({ status: originalStatus, updated_at: new Date().toISOString() })
         .eq('id', id).eq('tenant_id', req.tenantId).eq('status', 'approved')
-      return reply.code(500).send({ error: 'CODE_GEN_ERROR', message: `Failed to generate employee code: ${codeErr?.message ?? 'unknown'}` })
+      return serverError(req, reply, codeErr, ErrorCode.INSERT_FAILED, 'Failed to generate employee code')
     }
     const employeeCode = generatedCode as string
 
@@ -531,7 +531,7 @@ export default async function draftRoutes(fastify: FastifyInstance) {
       await fastify.supabase.from('draft_employee_profiles')
         .update({ status: originalStatus, updated_at: new Date().toISOString() })
         .eq('id', id).eq('tenant_id', req.tenantId).eq('status', 'approved')
-      return reply.code(500).send({ error: 'DB_ERROR', message: empError?.message ?? 'Failed to create employee' })
+      return serverError(req, reply, empError, ErrorCode.INSERT_FAILED, 'Failed to create employee record')
     }
 
     const employeeId = employee.id
@@ -741,7 +741,7 @@ export default async function draftRoutes(fastify: FastifyInstance) {
       .select('id')
       .maybeSingle()
 
-    if (updateError) return reply.code(500).send({ error: 'DB_ERROR', message: updateError.message })
+    if (updateError) return serverError(req, reply, updateError, ErrorCode.UPDATE_FAILED, 'Failed to reject draft')
     if (!claimed) {
       return reply.code(409).send({
         error:   'INVALID_STATUS',

@@ -19,6 +19,7 @@ import {
 } from '../../lib/enterprise-import/index.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { fetchAllRows }   from '../../lib/supabase-paginate.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 // ── Shared constants ──────────────────────────────────────────────────────────
 
@@ -200,7 +201,7 @@ export default async function importRoutes(fastify: FastifyInstance) {
         if (err instanceof Error) {
           return reply.code(400).send({ error: 'VALIDATION_ERROR', message: msg })
         }
-        return reply.code(500).send({ error: 'VALIDATION_ERROR', message: msg })
+        return serverError(req, reply, err, ErrorCode.COMPUTE_FAILED, 'Unexpected error during validation')
       }
     }
 
@@ -213,11 +214,7 @@ export default async function importRoutes(fastify: FastifyInstance) {
       )
       return reply.send({ data: result })
     } catch (err) {
-      fastify.log.error(err)
-      return reply.code(500).send({
-        error:   'VALIDATION_ERROR',
-        message: err instanceof Error ? err.message : 'Unexpected error during validation',
-      })
+      return serverError(req, reply, err, ErrorCode.COMPUTE_FAILED, 'Unexpected error during validation')
     }
   })
 
@@ -297,11 +294,7 @@ export default async function importRoutes(fastify: FastifyInstance) {
             message: `A ${masterType} import is already in progress. Wait for it to complete or cancel it before starting a new one.`,
           })
         }
-        fastify.log.error(err)
-        return reply.code(500).send({
-          error:   'IMPORT_ERROR',
-          message: err instanceof Error ? err.message : 'Failed to create import job',
-        })
+        return serverError(req, reply, err, ErrorCode.INSERT_FAILED, 'Failed to create import job')
       }
       reply.code(202).send({ data: { importJobId: jobId, status: 'processing' } })
       runSalaryUploadJob(
@@ -332,11 +325,7 @@ export default async function importRoutes(fastify: FastifyInstance) {
           message: `A ${masterType} import is already in progress. Wait for it to complete or cancel it before starting a new one.`,
         })
       }
-      fastify.log.error(err)
-      return reply.code(500).send({
-        error:   'IMPORT_ERROR',
-        message: err instanceof Error ? err.message : 'Failed to create import job',
-      })
+      return serverError(req, reply, err, ErrorCode.INSERT_FAILED, 'Failed to create import job')
     }
 
     // Return 202 immediately — client can poll Import History for progress.
@@ -387,8 +376,7 @@ export default async function importRoutes(fastify: FastifyInstance) {
     const { data, error, count } = await query
 
     if (error) {
-      fastify.log.error(error)
-      return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch import jobs')
     }
 
     return reply.send({
@@ -431,8 +419,7 @@ export default async function importRoutes(fastify: FastifyInstance) {
           .range(from, to),
       )
     } catch (err) {
-      fastify.log.error(err)
-      return reply.code(500).send({ error: 'DB_ERROR', message: 'Failed to load row status summary' })
+      return serverError(req, reply, err, ErrorCode.QUERY_FAILED, 'Failed to load row status summary')
     }
 
     const statusCounts: Record<string, number> = {}
@@ -492,8 +479,7 @@ export default async function importRoutes(fastify: FastifyInstance) {
     const { data, error, count } = await query
 
     if (error) {
-      fastify.log.error(error)
-      return reply.code(500).send({ error: 'DB_ERROR', message: error.message })
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch import job rows')
     }
 
     return reply.send({
@@ -629,8 +615,7 @@ export default async function importRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', req.tenantId)
 
     if (updateErr) {
-      fastify.log.error(updateErr)
-      return reply.code(500).send({ error: 'DB_ERROR', message: updateErr.message })
+      return serverError(req, reply, updateErr, ErrorCode.UPDATE_FAILED, 'Failed to cancel import job')
     }
 
     return reply.send({ success: true, message: 'Import job cancelled' })

@@ -15,6 +15,7 @@ import { computeTaxWithDB } from '../../../lib/statutory/tax-computation-engine.
 import { HR_ADMIN_ROLES } from '../../../lib/rbac.js'
 import { fetchTenantTz } from '../../../lib/attendance-engine.js'
 import { getLocalDate } from '../../../lib/org-context.js'
+import { serverError, ErrorCode } from '../../../lib/api-errors.js'
 
 // ── Admin guard ───────────────────────────────────────────────────────────────
 
@@ -375,8 +376,7 @@ export default async function itStatementRoute(fastify: FastifyInstance) {
       if (err.message === 'Employee not found') {
         return reply.code(404).send({ error: 'NOT_FOUND', message: 'Employee record not found' })
       }
-      fastify.log.error(err, 'IT statement build failed')
-      return reply.code(500).send({ error: 'COMPUTATION_FAILED', message: err.message })
+      return serverError(req, reply, err, ErrorCode.COMPUTE_FAILED, 'Failed to build IT statement')
     }
   })
 
@@ -403,8 +403,7 @@ export default async function itStatementRoute(fastify: FastifyInstance) {
       if (err.message === 'Employee not found') {
         return reply.code(404).send({ error: 'NOT_FOUND', message: 'Employee not found' })
       }
-      fastify.log.error(err, 'IT statement build failed (admin)')
-      return reply.code(500).send({ error: 'COMPUTATION_FAILED', message: err.message })
+      return serverError(req, reply, err, ErrorCode.COMPUTE_FAILED, 'Failed to build IT statement')
     }
   })
 }

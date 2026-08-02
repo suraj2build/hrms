@@ -163,7 +163,7 @@ export default async function validationRoutes(fastify: FastifyInstance) {
       .single()
 
     if (runErr || !runRow) {
-      return reply.code(500).send({ error: 'INSERT_FAILED', message: 'Failed to create validation run' })
+      return serverError(req, reply, runErr, ErrorCode.INSERT_FAILED, 'Failed to create validation run')
     }
 
     const validationRunId = (runRow as any).id as string
@@ -427,7 +427,7 @@ export default async function validationRoutes(fastify: FastifyInstance) {
       .single()
 
     if (reconErr || !reconRun) {
-      return reply.code(500).send({ error: 'INSERT_FAILED', message: 'Failed to create reconciliation run' })
+      return serverError(req, reply, reconErr, ErrorCode.INSERT_FAILED, 'Failed to create reconciliation run')
     }
 
     const reconciliationRunId = (reconRun as any).id as string

@@ -51,6 +51,7 @@ const deliveriesQuerySchema = z.object({
 // ── Helper ────────────────────────────────────────────────────────────────────
 
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 function isAdmin(role: string): boolean {
   return (HR_ADMIN_ROLES as readonly string[]).includes(role)
@@ -110,8 +111,7 @@ export default async function webhooksRoutes(fastify: FastifyInstance) {
     const { data, error, count } = await q
 
     if (error) {
-      req.log.error({ err: error }, 'webhooks list query failed')
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch webhooks' })
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch webhooks')
     }
 
     // Never re-serialize the HMAC signing secret, even to an admin — it's
@@ -205,8 +205,7 @@ export default async function webhooksRoutes(fastify: FastifyInstance) {
       .single()
 
     if (error) {
-      req.log.error({ err: error }, 'webhook insert failed')
-      return reply.code(500).send({ error: 'INSERT_FAILED', message: 'Failed to create webhook' })
+      return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create webhook')
     }
 
     // Never re-serialize the HMAC signing secret — see GET / above. The
@@ -253,8 +252,7 @@ export default async function webhooksRoutes(fastify: FastifyInstance) {
       .single()
 
     if (error) {
-      req.log.error({ err: error }, 'webhook update failed')
-      return reply.code(500).send({ error: 'UPDATE_FAILED', message: 'Failed to update webhook' })
+      return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update webhook')
     }
 
     if (!data) {
@@ -362,8 +360,7 @@ export default async function webhooksRoutes(fastify: FastifyInstance) {
       .single()
 
     if (insertError || !delivery) {
-      req.log.error({ err: insertError }, 'failed to create test delivery row')
-      return reply.code(500).send({ error: 'INSERT_FAILED', message: 'Failed to record test delivery' })
+      return serverError(req, reply, insertError, ErrorCode.INSERT_FAILED, 'Failed to record test delivery')
     }
 
     // Attempt HTTP POST
@@ -468,8 +465,7 @@ export default async function webhooksRoutes(fastify: FastifyInstance) {
     const { data, error, count } = await q
 
     if (error) {
-      req.log.error({ err: error }, 'webhook deliveries query failed')
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch deliveries' })
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch deliveries')
     }
 
     return reply.send({ data: data ?? [], total: count ?? 0, limit, offset })

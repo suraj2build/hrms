@@ -332,8 +332,7 @@ export default async function tdsRecoveryRoutes(fastify: FastifyInstance) {
         .maybeSingle()
 
       if (declErr) {
-        req.log.error({ err: declErr }, 'tds-recovery: failed to fetch tax_declaration_plans')
-        return reply.code(500).send({ error: 'QUERY_FAILED', message: declErr.message })
+        return serverError(req, reply, declErr, ErrorCode.QUERY_FAILED, 'Failed to fetch tax declaration')
       }
 
       const declaration   = declarationRow as any
@@ -362,8 +361,7 @@ export default async function tdsRecoveryRoutes(fastify: FastifyInstance) {
         .eq('status', 'finalized')
 
       if (slipErr) {
-        req.log.error({ err: slipErr }, 'tds-recovery: failed to fetch payroll_slips')
-        return reply.code(500).send({ error: 'QUERY_FAILED', message: slipErr.message })
+        return serverError(req, reply, slipErr, ErrorCode.QUERY_FAILED, 'Failed to fetch payroll slips')
       }
 
       const taxAlreadyDeducted: number = (slipRows ?? []).reduce(
@@ -381,8 +379,7 @@ export default async function tdsRecoveryRoutes(fastify: FastifyInstance) {
         .eq('verification_status', 'verified')
 
       if (prevErr) {
-        req.log.error({ err: prevErr }, 'tds-recovery: failed to fetch previous_employment_tax_details')
-        return reply.code(500).send({ error: 'QUERY_FAILED', message: prevErr.message })
+        return serverError(req, reply, prevErr, ErrorCode.QUERY_FAILED, 'Failed to fetch previous employment tax details')
       }
 
       const externalTds: number = (prevEmpRows ?? []).reduce(
@@ -431,8 +428,7 @@ export default async function tdsRecoveryRoutes(fastify: FastifyInstance) {
         .single()
 
       if (upsertErr) {
-        req.log.error({ err: upsertErr }, 'tds-recovery: upsert failed')
-        return reply.code(500).send({ error: 'UPSERT_FAILED', message: upsertErr.message })
+        return serverError(req, reply, upsertErr, ErrorCode.UPDATE_FAILED, 'Failed to save TDS recovery record')
       }
 
       return reply.code(201).send({ data: upsertedRow })

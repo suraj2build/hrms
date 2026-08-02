@@ -62,8 +62,7 @@ export default async function orchestrationRoutes(fastify: FastifyInstance) {
     const { data, error } = await q
 
     if (error) {
-      req.log.error({ err: error }, 'worker registry query failed')
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch workers' })
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch workers')
     }
 
     const workers = data ?? []
@@ -116,8 +115,7 @@ export default async function orchestrationRoutes(fastify: FastifyInstance) {
       .single()
 
     if (error) {
-      req.log.error({ err: error }, 'worker heartbeat upsert failed')
-      return reply.code(500).send({ error: 'UPSERT_FAILED', message: 'Failed to record heartbeat' })
+      return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to record heartbeat')
     }
 
     return reply.send({ data })
@@ -147,8 +145,7 @@ export default async function orchestrationRoutes(fastify: FastifyInstance) {
       .single()
 
     if (error) {
-      req.log.error({ err: error }, 'worker status update failed')
-      return reply.code(500).send({ error: 'UPDATE_FAILED', message: 'Failed to update worker status' })
+      return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update worker status')
     }
     if (!data) {
       return reply.code(404).send({ error: 'NOT_FOUND', message: `Worker '${worker_id}' not found` })
@@ -188,8 +185,7 @@ export default async function orchestrationRoutes(fastify: FastifyInstance) {
     const { data, error } = await q
 
     if (error) {
-      req.log.error({ err: error }, 'queue partitions query failed')
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch queue partitions' })
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch queue partitions')
     }
 
     const partitions = data ?? []
@@ -236,8 +232,7 @@ export default async function orchestrationRoutes(fastify: FastifyInstance) {
       .single()
 
     if (error) {
-      req.log.error({ err: error }, 'queue pressure update failed')
-      return reply.code(500).send({ error: 'UPDATE_FAILED', message: 'Failed to update queue pressure' })
+      return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update queue pressure')
     }
     if (!data) {
       return reply.code(404).send({ error: 'NOT_FOUND', message: 'Queue partition not found' })
@@ -278,8 +273,7 @@ export default async function orchestrationRoutes(fastify: FastifyInstance) {
     const { data, error, count } = await q
 
     if (error) {
-      req.log.error({ err: error }, 'long running jobs query failed')
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch jobs' })
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch jobs')
     }
 
     return reply.send({ data: data ?? [], total: count ?? 0, limit, offset })
@@ -301,8 +295,7 @@ export default async function orchestrationRoutes(fastify: FastifyInstance) {
       .maybeSingle()
 
     if (error) {
-      req.log.error({ err: error }, 'long running job fetch failed')
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch job' })
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch job')
     }
     if (!data) {
       return reply.code(404).send({ error: 'NOT_FOUND', message: 'Job not found' })
@@ -332,8 +325,7 @@ export default async function orchestrationRoutes(fastify: FastifyInstance) {
       .single()
 
     if (error) {
-      req.log.error({ err: error }, 'job cancel update failed')
-      return reply.code(500).send({ error: 'UPDATE_FAILED', message: 'Failed to cancel job' })
+      return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to cancel job')
     }
     if (!data) {
       return reply.code(404).send({
