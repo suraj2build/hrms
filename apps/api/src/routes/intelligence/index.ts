@@ -50,9 +50,11 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
     }
     const tenantId: string = req.tenantId
     const observations: Observation[] = []
-    const now           = new Date()
-    const sevenDaysAgo  = new Date(now.getTime() - 7  * 24 * 60 * 60 * 1000).toISOString()
-    const threeDaysAgo  = new Date(now.getTime() - 3  * 24 * 60 * 60 * 1000).toISOString()
+    const now            = new Date()
+    const sevenDaysAgo    = new Date(now.getTime() - 7  * 24 * 60 * 60 * 1000).toISOString()
+    const threeDaysAgo    = new Date(now.getTime() - 3  * 24 * 60 * 60 * 1000).toISOString()
+    const oneDayAgo       = new Date(now.getTime() - 1  * 24 * 60 * 60 * 1000).toISOString()
+    const fourteenDaysAgo = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000).toISOString()
     // Tenant-local "today" — a raw server-UTC month boundary shifts "this
     // month" comparisons by a day right at every month start for a non-UTC
     // tenant (e.g. IST), same class as ISSUE-154/digest-builder.ts.
@@ -60,10 +62,205 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
     const monthStart    = todayStr.slice(0, 7) + '-01'
 
     try {
-      // 1. Employees missing joining_date
-      const { data: noJoin } = await fastify.supabase
-        .from('employees').select('id, first_name, last_name')
-        .eq('tenant_id', tenantId).eq('status', 'active').is('joining_date', null).limit(50)
+      // All 16 top-level reads below are independent of one another (none
+      // consumes another's result), so they're batched into one Promise.all
+      // instead of running sequentially — previously ~16 round-trips end to
+      // end, now one. The two lifecycle/compliance blocks are likewise
+      // independent of these and of each other, so they run concurrently too
+      // (as async closures — each already has its own try/catch and pushes
+      // straight to the shared `observations` array; concurrent pushes are
+      // safe since JS execution itself never interleaves).
+      let probationDueCount = 0
+      const [
+        [
+          { data: noJoin },
+          { data: stalledSessions }, { count: stalledCount },
+          { data: pendingSep }, { count: pendingSepCount },
+          { data: emptyDocSessions },
+          { data: slaBreached }, { count: slaBreachedCount },
+          { data: overdueChecklists }, { count: overdueChecklistsCount },
+          { count: activeCount }, { count: joinersThisMonth }, { count: onNotice },
+          { count: readyCount }, { count: rejCount }, { count: activeOnb },
+        ],
+      ] = await Promise.all([
+        Promise.all([
+          // 1. Employees missing joining_date
+          fastify.supabase.from('employees').select('id, first_name, last_name')
+            .eq('tenant_id', tenantId).eq('status', 'active').is('joining_date', null).limit(50),
+          // 2. Stalled onboarding sessions.
+          // .limit(50) only bounds the SAMPLE fetched for the observation body —
+          // the true count (used for severity + the KPI tile below) comes from a
+          // separate exact `count` query so a tenant with >50 stalled sessions
+          // doesn't have its KPI silently clipped to 50 with no error.
+          fastify.supabase.from('onboarding_sessions').select('id, candidate_name, status, created_at')
+            .eq('tenant_id', tenantId).neq('status', 'employee_created').neq('status', 'rejected')
+            .lt('created_at', sevenDaysAgo).limit(50),
+          fastify.supabase.from('onboarding_sessions').select('id', { count: 'exact', head: true })
+            .eq('tenant_id', tenantId).neq('status', 'employee_created').neq('status', 'rejected')
+            .lt('created_at', sevenDaysAgo),
+          // 3. Separations stalled in intermediate stage > 3 days.
+          // Same fix as above: .limit(20) only bounds the sample; the exact
+          // count backs severity/KPI so a tenant with >20 stalled separations
+          // isn't silently reported as capped at 20.
+          fastify.supabase.from('employee_separation').select('id, employee_id, lifecycle_stage, updated_at')
+            .eq('tenant_id', tenantId).not('lifecycle_stage', 'in', '("relieved","archived")')
+            .lt('updated_at', threeDaysAgo).limit(20),
+          fastify.supabase.from('employee_separation').select('id', { count: 'exact', head: true })
+            .eq('tenant_id', tenantId).not('lifecycle_stage', 'in', '("relieved","archived")')
+            .lt('updated_at', threeDaysAgo),
+          // 6. O3 — Sessions with no documents uploaded > 24h (missing mandatory docs)
+          fastify.supabase.from('onboarding_sessions')
+            .select('id, candidate_name, created_at')
+            .eq('tenant_id', tenantId)
+            .in('status', ['active', 'extracting'])
+            .lt('created_at', oneDayAgo)
+            .limit(50),
+          // 7. O3 — Sessions in hr_review > 3 days (approvals over SLA).
+          // Same fix as findings #2/#3: .limit(50) bounds the sample only.
+          fastify.supabase.from('onboarding_sessions')
+            .select('id, candidate_name')
+            .eq('tenant_id', tenantId)
+            .in('status', ['hr_review', 'validation_pending'])
+            .lt('updated_at', threeDaysAgo)
+            .limit(50),
+          fastify.supabase.from('onboarding_sessions')
+            .select('id', { count: 'exact', head: true })
+            .eq('tenant_id', tenantId)
+            .in('status', ['hr_review', 'validation_pending'])
+            .lt('updated_at', threeDaysAgo),
+          // 8. O3 — Employees with incomplete checklists > 14 days post-approval
+          fastify.supabase.from('employee_onboarding_checklists')
+            .select('id, employee_id')
+            .eq('tenant_id', tenantId)
+            .neq('status', 'completed')
+            .lt('start_date', fourteenDaysAgo.slice(0, 10))
+            .limit(50),
+          fastify.supabase.from('employee_onboarding_checklists')
+            .select('id', { count: 'exact', head: true })
+            .eq('tenant_id', tenantId)
+            .neq('status', 'completed')
+            .lt('start_date', fourteenDaysAgo.slice(0, 10)),
+          // KPIs (existing + O3 readiness KPIs derived from session status)
+          fastify.supabase.from('employees').select('id', { count: 'exact', head: true }).eq('tenant_id', tenantId).eq('status', 'active'),
+          fastify.supabase.from('employees').select('id', { count: 'exact', head: true }).eq('tenant_id', tenantId).gte('joining_date', monthStart),
+          fastify.supabase.from('employees').select('id', { count: 'exact', head: true }).eq('tenant_id', tenantId).eq('status', 'on_notice'),
+          // O3 readiness distribution — derived from session status (no per-employee score computation)
+          fastify.supabase.from('onboarding_sessions').select('id', { count: 'exact', head: true }).eq('tenant_id', tenantId).eq('status', 'employee_created'),
+          fastify.supabase.from('onboarding_sessions').select('id', { count: 'exact', head: true }).eq('tenant_id', tenantId).eq('status', 'rejected'),
+          fastify.supabase.from('onboarding_sessions').select('id', { count: 'exact', head: true }).eq('tenant_id', tenantId).not('status', 'in', '("employee_created","rejected","archived")'),
+        ]),
+
+        // 5. Workforce lifecycle expiry — single source: lifecycle-expiry service.
+        //    Accurate probation (category window + confirmation gate) + document /
+        //    identity / passport / visa / contract expiry. No joining_date proxy.
+        (async () => {
+          try {
+            const risks = await computeLifecycleRisks(fastify.supabase, tenantId, { withinDays: 90 })
+            const actionable = (cats: LifecycleCategory[], maxDays: number) =>
+              risks.filter(r => cats.includes(r.category) && (r.bucket === 'overdue' || r.days_to_due <= maxDays))
+            const sampleOf = (arr: typeof risks) =>
+              arr.slice(0, 3).map(r => `${r.employee_name} — ${r.label} (${r.bucket === 'overdue' ? `${Math.abs(r.days_to_due)}d ago` : `${r.days_to_due}d`})`).join('; ')
+
+            // Probation confirmations (overdue + due within 90) — accurate count.
+            const probation = actionable(['probation'], 90)
+            probationDueCount = probation.length
+            if (probation.length) {
+              const overdueP = probation.filter(r => r.bucket === 'overdue').length
+              observations.push({
+                id: 'probation-confirmation-due', category: 'compliance',
+                severity: overdueP > 0 || probation.length > 5 ? 'high' : 'medium',
+                title: `${probation.length} probation confirmation${probation.length > 1 ? 's' : ''} ${overdueP > 0 ? `due (${overdueP} overdue)` : 'due'}`,
+                body: `These employees are on probation and reaching (or past) their confirmation date based on their employment category's probation period. Confirm or extend probation. ${sampleOf(probation)}.`,
+                source_records: [{ table: 'job_history', count: probation.length, sample: sampleOf(probation) }],
+                generated_at: now.toISOString(),
+              })
+            }
+
+            // Visas — passports/visas are time-critical for right-to-work.
+            const visas = actionable(['visa'], 30)
+            if (visas.length) {
+              const overdueV = visas.filter(r => r.bucket === 'overdue').length
+              observations.push({
+                id: 'lifecycle-visa-expiry', category: 'compliance',
+                severity: overdueV > 0 ? 'critical' : 'high',
+                title: `${visas.length} visa${visas.length > 1 ? 's' : ''} ${overdueV > 0 ? `expired or expiring` : 'expiring within 30 days'}`,
+                body: `Work-authorisation risk. ${overdueV > 0 ? `${overdueV} already expired. ` : ''}Renew before expiry to maintain right-to-work compliance. ${sampleOf(visas)}.`,
+                source_records: [{ table: 'employee_passport_visa', count: visas.length, sample: sampleOf(visas) }],
+                generated_at: now.toISOString(),
+              })
+            }
+
+            // Contracts — employment continuity.
+            const contracts = actionable(['contract'], 30)
+            if (contracts.length) {
+              const overdueC = contracts.filter(r => r.bucket === 'overdue').length
+              observations.push({
+                id: 'lifecycle-contract-expiry', category: 'compliance',
+                severity: overdueC > 0 ? 'high' : 'medium',
+                title: `${contracts.length} contract${contracts.length > 1 ? 's' : ''} ${overdueC > 0 ? 'expired or expiring' : 'expiring within 30 days'}`,
+                body: `Employment-continuity risk. Initiate renewals before the end date to avoid lapses. ${sampleOf(contracts)}.`,
+                source_records: [{ table: 'employee_contracts', count: contracts.length, sample: sampleOf(contracts) }],
+                generated_at: now.toISOString(),
+              })
+            }
+
+            // Documents, identity & passports — KYC / statutory document health.
+            const docs = actionable(['document', 'identity', 'passport'], 30)
+            if (docs.length) {
+              const overdueD = docs.filter(r => r.bucket === 'overdue').length
+              observations.push({
+                id: 'lifecycle-document-expiry', category: 'compliance',
+                severity: overdueD > 3 ? 'high' : 'medium',
+                title: `${docs.length} employee document${docs.length > 1 ? 's' : ''} ${overdueD > 0 ? `expired or expiring` : 'expiring within 30 days'}`,
+                body: `Documentation-health risk (identity / passport / general documents). ${overdueD > 0 ? `${overdueD} already expired. ` : ''}Request updated copies before expiry. ${sampleOf(docs)}.`,
+                source_records: [{ table: 'documents', count: docs.length, sample: sampleOf(docs) }],
+                generated_at: now.toISOString(),
+              })
+            }
+          } catch { /* lifecycle scan is best-effort; never break the command view */ }
+        })(),
+
+        // ── Compliance filing deadlines (single source: ComplianceCalendarService)
+        (async () => {
+          try {
+            const upcoming = await computeUpcoming(fastify.supabase, tenantId, 7)
+            const overdue = upcoming.filter(d => d.status === 'overdue')
+            const due3    = upcoming.filter(d => d.status !== 'overdue' && d.days_to_due <= 3)
+            const due7    = upcoming.filter(d => d.status !== 'overdue' && d.days_to_due > 3 && d.days_to_due <= 7)
+            const sample  = (arr: typeof upcoming) => arr.slice(0, 3).map(d => `${d.label} — due ${d.due_date}${d.status === 'overdue' ? ` (${Math.abs(d.days_to_due)}d late)` : ` (${d.days_to_due}d)`}`).join('; ')
+            if (overdue.length) {
+              observations.push({
+                id: 'compliance-overdue', category: 'compliance', severity: 'critical',
+                title: `${overdue.length} statutory filing${overdue.length > 1 ? 's' : ''} overdue`,
+                body: `Overdue filings risk penalties and interest. Most overdue: ${overdue[0].label} (${Math.abs(overdue[0].days_to_due)} days late, due ${overdue[0].due_date}). Recommended action: file immediately and record the challan reference.`,
+                source_records: [{ table: 'compliance_calendar', count: overdue.length, sample: sample(overdue) }],
+                generated_at: now.toISOString(),
+              })
+            }
+            if (due3.length) {
+              observations.push({
+                id: 'compliance-due-3', category: 'compliance', severity: 'high',
+                title: `${due3.length} statutory filing${due3.length > 1 ? 's' : ''} due within 3 days`,
+                body: `Filings due imminently. Next: ${due3[0].label} due ${due3[0].due_date} (${due3[0].days_to_due} day${due3[0].days_to_due === 1 ? '' : 's'} remaining). Recommended action: finalise figures and file before the due date.`,
+                source_records: [{ table: 'compliance_calendar', count: due3.length, sample: sample(due3) }],
+                generated_at: now.toISOString(),
+              })
+            }
+            if (due7.length) {
+              observations.push({
+                id: 'compliance-due-7', category: 'compliance', severity: 'medium',
+                title: `${due7.length} statutory filing${due7.length > 1 ? 's' : ''} due within 7 days`,
+                body: `Upcoming statutory deadlines. Recommended action: prepare the returns and challans this week. ${sample(due7)}.`,
+                source_records: [{ table: 'compliance_calendar', count: due7.length, sample: sample(due7) }],
+                generated_at: now.toISOString(),
+              })
+            }
+          } catch { /* compliance scan is best-effort; never break the command view */ }
+        })(),
+      ])
+
+      // ── Push observations for the batched reads above, same order/logic as before ──
+
       if (noJoin && noJoin.length > 0) {
         observations.push({
           id: 'missing-joining-date', category: 'onboarding',
@@ -75,19 +272,6 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
         })
       }
 
-      // 2. Stalled onboarding sessions
-      // .limit(50) only bounds the SAMPLE fetched for the observation body —
-      // the true count (used for severity + the KPI tile below) comes from a
-      // separate exact `count` query so a tenant with >50 stalled sessions
-      // doesn't have its KPI silently clipped to 50 with no error.
-      const { data: stalledSessions } = await fastify.supabase
-        .from('onboarding_sessions').select('id, candidate_name, status, created_at')
-        .eq('tenant_id', tenantId).neq('status', 'employee_created').neq('status', 'rejected')
-        .lt('created_at', sevenDaysAgo).limit(50)
-      const { count: stalledCount } = await fastify.supabase
-        .from('onboarding_sessions').select('id', { count: 'exact', head: true })
-        .eq('tenant_id', tenantId).neq('status', 'employee_created').neq('status', 'rejected')
-        .lt('created_at', sevenDaysAgo)
       const stalledTotal = stalledCount ?? stalledSessions?.length ?? 0
       if (stalledSessions && stalledSessions.length > 0) {
         observations.push({
@@ -100,18 +284,6 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
         })
       }
 
-      // 3. Separations stalled in intermediate stage > 3 days
-      // Same fix as above: .limit(20) only bounds the sample; the exact
-      // count backs severity/KPI so a tenant with >20 stalled separations
-      // isn't silently reported as capped at 20.
-      const { data: pendingSep } = await fastify.supabase
-        .from('employee_separation').select('id, employee_id, lifecycle_stage, updated_at')
-        .eq('tenant_id', tenantId).not('lifecycle_stage', 'in', '("relieved","archived")')
-        .lt('updated_at', threeDaysAgo).limit(20)
-      const { count: pendingSepCount } = await fastify.supabase
-        .from('employee_separation').select('id', { count: 'exact', head: true })
-        .eq('tenant_id', tenantId).not('lifecycle_stage', 'in', '("relieved","archived")')
-        .lt('updated_at', threeDaysAgo)
       const pendingSepTotal = pendingSepCount ?? pendingSep?.length ?? 0
       if (pendingSep && pendingSep.length > 0) {
         observations.push({
@@ -124,19 +296,21 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
         })
       }
 
-      // 4. Assets assigned to employees under separation
+      // 4. Assets assigned to employees under separation — needs pendingSep's
+      // employee IDs from the batch above, so this pair runs after it (its own
+      // Promise.all since the two queries here are mutually independent).
       const sepEmpIds = (pendingSep ?? []).map((s: any) => s.employee_id as string)
       let assetsAtRiskCount = 0
       if (sepEmpIds.length > 0) {
         // Same fix as pendingSepCount above: .limit(50) only bounds a sample —
         // the exact count backs the severity/KPI so a tenant with >50 at-risk
         // assets isn't silently reported as capped at 50.
-        const { data: assetRisk } = await fastify.supabase
-          .from('assets').select('id, assigned_to')
-          .eq('tenant_id', tenantId).eq('status', 'assigned').in('assigned_to', sepEmpIds).limit(50)
-        const { count: assetRiskCount } = await fastify.supabase
-          .from('assets').select('id', { count: 'exact', head: true })
-          .eq('tenant_id', tenantId).eq('status', 'assigned').in('assigned_to', sepEmpIds)
+        const [{ data: assetRisk }, { count: assetRiskCount }] = await Promise.all([
+          fastify.supabase.from('assets').select('id, assigned_to')
+            .eq('tenant_id', tenantId).eq('status', 'assigned').in('assigned_to', sepEmpIds).limit(50),
+          fastify.supabase.from('assets').select('id', { count: 'exact', head: true })
+            .eq('tenant_id', tenantId).eq('status', 'assigned').in('assigned_to', sepEmpIds),
+        ])
         if (assetRisk && assetRisk.length > 0) {
           assetsAtRiskCount = assetRiskCount ?? assetRisk.length
           observations.push({
@@ -149,97 +323,25 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
         }
       }
 
-      // 5. Workforce lifecycle expiry — single source: lifecycle-expiry service.
-      //    Accurate probation (category window + confirmation gate) + document /
-      //    identity / passport / visa / contract expiry. No joining_date proxy.
-      let probationDueCount = 0
-      try {
-        const risks = await computeLifecycleRisks(fastify.supabase, tenantId, { withinDays: 90 })
-        const actionable = (cats: LifecycleCategory[], maxDays: number) =>
-          risks.filter(r => cats.includes(r.category) && (r.bucket === 'overdue' || r.days_to_due <= maxDays))
-        const sampleOf = (arr: typeof risks) =>
-          arr.slice(0, 3).map(r => `${r.employee_name} — ${r.label} (${r.bucket === 'overdue' ? `${Math.abs(r.days_to_due)}d ago` : `${r.days_to_due}d`})`).join('; ')
-
-        // Probation confirmations (overdue + due within 90) — accurate count.
-        const probation = actionable(['probation'], 90)
-        probationDueCount = probation.length
-        if (probation.length) {
-          const overdueP = probation.filter(r => r.bucket === 'overdue').length
-          observations.push({
-            id: 'probation-confirmation-due', category: 'compliance',
-            severity: overdueP > 0 || probation.length > 5 ? 'high' : 'medium',
-            title: `${probation.length} probation confirmation${probation.length > 1 ? 's' : ''} ${overdueP > 0 ? `due (${overdueP} overdue)` : 'due'}`,
-            body: `These employees are on probation and reaching (or past) their confirmation date based on their employment category's probation period. Confirm or extend probation. ${sampleOf(probation)}.`,
-            source_records: [{ table: 'job_history', count: probation.length, sample: sampleOf(probation) }],
-            generated_at: now.toISOString(),
-          })
-        }
-
-        // Visas — passports/visas are time-critical for right-to-work.
-        const visas = actionable(['visa'], 30)
-        if (visas.length) {
-          const overdueV = visas.filter(r => r.bucket === 'overdue').length
-          observations.push({
-            id: 'lifecycle-visa-expiry', category: 'compliance',
-            severity: overdueV > 0 ? 'critical' : 'high',
-            title: `${visas.length} visa${visas.length > 1 ? 's' : ''} ${overdueV > 0 ? `expired or expiring` : 'expiring within 30 days'}`,
-            body: `Work-authorisation risk. ${overdueV > 0 ? `${overdueV} already expired. ` : ''}Renew before expiry to maintain right-to-work compliance. ${sampleOf(visas)}.`,
-            source_records: [{ table: 'employee_passport_visa', count: visas.length, sample: sampleOf(visas) }],
-            generated_at: now.toISOString(),
-          })
-        }
-
-        // Contracts — employment continuity.
-        const contracts = actionable(['contract'], 30)
-        if (contracts.length) {
-          const overdueC = contracts.filter(r => r.bucket === 'overdue').length
-          observations.push({
-            id: 'lifecycle-contract-expiry', category: 'compliance',
-            severity: overdueC > 0 ? 'high' : 'medium',
-            title: `${contracts.length} contract${contracts.length > 1 ? 's' : ''} ${overdueC > 0 ? 'expired or expiring' : 'expiring within 30 days'}`,
-            body: `Employment-continuity risk. Initiate renewals before the end date to avoid lapses. ${sampleOf(contracts)}.`,
-            source_records: [{ table: 'employee_contracts', count: contracts.length, sample: sampleOf(contracts) }],
-            generated_at: now.toISOString(),
-          })
-        }
-
-        // Documents, identity & passports — KYC / statutory document health.
-        const docs = actionable(['document', 'identity', 'passport'], 30)
-        if (docs.length) {
-          const overdueD = docs.filter(r => r.bucket === 'overdue').length
-          observations.push({
-            id: 'lifecycle-document-expiry', category: 'compliance',
-            severity: overdueD > 3 ? 'high' : 'medium',
-            title: `${docs.length} employee document${docs.length > 1 ? 's' : ''} ${overdueD > 0 ? `expired or expiring` : 'expiring within 30 days'}`,
-            body: `Documentation-health risk (identity / passport / general documents). ${overdueD > 0 ? `${overdueD} already expired. ` : ''}Request updated copies before expiry. ${sampleOf(docs)}.`,
-            source_records: [{ table: 'documents', count: docs.length, sample: sampleOf(docs) }],
-            generated_at: now.toISOString(),
-          })
-        }
-      } catch { /* lifecycle scan is best-effort; never break the command view */ }
-
-      // 6. O3 — Sessions with no documents uploaded > 24h (missing mandatory docs)
-      const oneDayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString()
-      const { data: emptyDocSessions } = await fastify.supabase
-        .from('onboarding_sessions')
-        .select('id, candidate_name, created_at')
-        .eq('tenant_id', tenantId)
-        .in('status', ['active', 'extracting'])
-        .lt('created_at', oneDayAgo)
-        .limit(50)
-      // Filter: sessions with zero documents
+      // Filter: sessions with zero documents — needs emptyDocSessions from the
+      // batch above; the per-session doc-count queries are independent of each
+      // other so they run as one Promise.all instead of a sequential loop.
       let noDocCount = 0
       const noDocSamples: string[] = []
       if (emptyDocSessions && emptyDocSessions.length > 0) {
-        for (const s of emptyDocSessions as any[]) {
-          const { count: docCount } = await fastify.supabase
-            .from('onboarding_documents').select('id', { count: 'exact', head: true })
-            .eq('session_id', s.id).eq('tenant_id', tenantId)
+        const docCounts = await Promise.all(
+          (emptyDocSessions as any[]).map(s =>
+            fastify.supabase.from('onboarding_documents').select('id', { count: 'exact', head: true })
+              .eq('session_id', s.id).eq('tenant_id', tenantId),
+          ),
+        )
+        docCounts.forEach(({ count: docCount }, i) => {
           if ((docCount ?? 0) === 0) {
             noDocCount++
+            const s = (emptyDocSessions as any[])[i]
             if (noDocSamples.length < 3) noDocSamples.push(s.candidate_name || s.id.slice(0, 8))
           }
-        }
+        })
       }
       if (noDocCount > 0) {
         observations.push({
@@ -252,21 +354,6 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
         })
       }
 
-      // 7. O3 — Sessions in hr_review > 3 days (approvals over SLA)
-      // Same fix as findings #2/#3: .limit(50) bounds the sample only.
-      const { data: slaBreached } = await fastify.supabase
-        .from('onboarding_sessions')
-        .select('id, candidate_name')
-        .eq('tenant_id', tenantId)
-        .in('status', ['hr_review', 'validation_pending'])
-        .lt('updated_at', threeDaysAgo)
-        .limit(50)
-      const { count: slaBreachedCount } = await fastify.supabase
-        .from('onboarding_sessions')
-        .select('id', { count: 'exact', head: true })
-        .eq('tenant_id', tenantId)
-        .in('status', ['hr_review', 'validation_pending'])
-        .lt('updated_at', threeDaysAgo)
       const slaBreachedTotal = slaBreachedCount ?? slaBreached?.length ?? 0
       if (slaBreached && slaBreached.length > 0) {
         observations.push({
@@ -279,21 +366,6 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
         })
       }
 
-      // 8. O3 — Employees with incomplete checklists > 14 days post-approval
-      const fourteenDaysAgo = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000).toISOString()
-      const { data: overdueChecklists } = await fastify.supabase
-        .from('employee_onboarding_checklists')
-        .select('id, employee_id')
-        .eq('tenant_id', tenantId)
-        .neq('status', 'completed')
-        .lt('start_date', fourteenDaysAgo.slice(0, 10))
-        .limit(50)
-      const { count: overdueChecklistsCount } = await fastify.supabase
-        .from('employee_onboarding_checklists')
-        .select('id', { count: 'exact', head: true })
-        .eq('tenant_id', tenantId)
-        .neq('status', 'completed')
-        .lt('start_date', fourteenDaysAgo.slice(0, 10))
       const overdueChecklistsTotal = overdueChecklistsCount ?? overdueChecklists?.length ?? 0
       if (overdueChecklists && overdueChecklists.length > 0) {
         observations.push({
@@ -306,54 +378,9 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
         })
       }
 
-      // KPIs (existing + O3 readiness KPIs derived from session status)
-      const { count: activeCount }      = await fastify.supabase.from('employees').select('id', { count: 'exact', head: true }).eq('tenant_id', tenantId).eq('status', 'active')
-      const { count: joinersThisMonth } = await fastify.supabase.from('employees').select('id', { count: 'exact', head: true }).eq('tenant_id', tenantId).gte('joining_date', monthStart)
-      const { count: onNotice }         = await fastify.supabase.from('employees').select('id', { count: 'exact', head: true }).eq('tenant_id', tenantId).eq('status', 'on_notice')
-
-      // O3 readiness distribution — derived from session status (no per-employee score computation)
-      const { count: readyCount }   = await fastify.supabase.from('onboarding_sessions').select('id', { count: 'exact', head: true }).eq('tenant_id', tenantId).eq('status', 'employee_created')
-      const { count: rejCount }     = await fastify.supabase.from('onboarding_sessions').select('id', { count: 'exact', head: true }).eq('tenant_id', tenantId).eq('status', 'rejected')
-      const { count: activeOnb }    = await fastify.supabase.from('onboarding_sessions').select('id', { count: 'exact', head: true }).eq('tenant_id', tenantId).not('status', 'in', '("employee_created","rejected","archived")')
       const readyPct   = (readyCount ?? 0) + (rejCount ?? 0) + (activeOnb ?? 0) > 0
         ? Math.round(((readyCount ?? 0) / ((readyCount ?? 0) + (rejCount ?? 0) + (activeOnb ?? 0))) * 100)
         : null
-
-      // ── Compliance filing deadlines (single source: ComplianceCalendarService)
-      try {
-        const upcoming = await computeUpcoming(fastify.supabase, tenantId, 7)
-        const overdue = upcoming.filter(d => d.status === 'overdue')
-        const due3    = upcoming.filter(d => d.status !== 'overdue' && d.days_to_due <= 3)
-        const due7    = upcoming.filter(d => d.status !== 'overdue' && d.days_to_due > 3 && d.days_to_due <= 7)
-        const sample  = (arr: typeof upcoming) => arr.slice(0, 3).map(d => `${d.label} — due ${d.due_date}${d.status === 'overdue' ? ` (${Math.abs(d.days_to_due)}d late)` : ` (${d.days_to_due}d)`}`).join('; ')
-        if (overdue.length) {
-          observations.push({
-            id: 'compliance-overdue', category: 'compliance', severity: 'critical',
-            title: `${overdue.length} statutory filing${overdue.length > 1 ? 's' : ''} overdue`,
-            body: `Overdue filings risk penalties and interest. Most overdue: ${overdue[0].label} (${Math.abs(overdue[0].days_to_due)} days late, due ${overdue[0].due_date}). Recommended action: file immediately and record the challan reference.`,
-            source_records: [{ table: 'compliance_calendar', count: overdue.length, sample: sample(overdue) }],
-            generated_at: now.toISOString(),
-          })
-        }
-        if (due3.length) {
-          observations.push({
-            id: 'compliance-due-3', category: 'compliance', severity: 'high',
-            title: `${due3.length} statutory filing${due3.length > 1 ? 's' : ''} due within 3 days`,
-            body: `Filings due imminently. Next: ${due3[0].label} due ${due3[0].due_date} (${due3[0].days_to_due} day${due3[0].days_to_due === 1 ? '' : 's'} remaining). Recommended action: finalise figures and file before the due date.`,
-            source_records: [{ table: 'compliance_calendar', count: due3.length, sample: sample(due3) }],
-            generated_at: now.toISOString(),
-          })
-        }
-        if (due7.length) {
-          observations.push({
-            id: 'compliance-due-7', category: 'compliance', severity: 'medium',
-            title: `${due7.length} statutory filing${due7.length > 1 ? 's' : ''} due within 7 days`,
-            body: `Upcoming statutory deadlines. Recommended action: prepare the returns and challans this week. ${sample(due7)}.`,
-            source_records: [{ table: 'compliance_calendar', count: due7.length, sample: sample(due7) }],
-            generated_at: now.toISOString(),
-          })
-        }
-      } catch { /* compliance scan is best-effort; never break the command view */ }
 
       observations.sort((a, b) => (SEV_ORDER[a.severity] ?? 3) - (SEV_ORDER[b.severity] ?? 3))
 
