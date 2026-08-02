@@ -407,11 +407,36 @@ export async function runLeaveReconciliation(
       ...([...balanceEmpTypes].map(k => k.split('|')[0])),
     ])
 
+    // Process employees in bounded-concurrency chunks rather than one at a
+    // time — the previous fully-sequential loop (one async replay chain
+    // awaited per employee before starting the next) issued ~5-11 DB round
+    // trips × every employee in the tenant, serially, inside a single
+    // synchronous HTTP request. At enterprise scale (2,877+ employees) this
+    // ran for many minutes with no cap, risking a request timeout before the
+    // run could ever complete (SYSCERT_AUDIT_2026-08-02.md High #18). Each
+    // employee's replay is read-only and independent of the others, so
+    // chunked parallelism (same convention as poll-scheduler.ts's
+    // SEND_CHUNK_SIZE) is safe.
+    const REPLAY_CHUNK_SIZE = 25
     const asOfToday = today  // already computed above
-    for (const empId of replayEmployeeIds) {
+    const replayIds = [...replayEmployeeIds]
+
+    for (let i = 0; i < replayIds.length; i += REPLAY_CHUNK_SIZE) {
       if (issues.length >= MAX_ISSUES) break
-      try {
-        const drifted = await detectBalanceDrift(supabase, tenantId, empId, year, asOfToday)
+      const chunk = replayIds.slice(i, i + REPLAY_CHUNK_SIZE)
+
+      const chunkResults = await Promise.all(
+        chunk.map(async empId => {
+          try {
+            return await detectBalanceDrift(supabase, tenantId, empId, year, asOfToday)
+          } catch {
+            // Replay errors are non-fatal — the primary reconciliation still runs
+            return []
+          }
+        }),
+      )
+
+      for (const drifted of chunkResults) {
         for (const d of drifted) {
           issues.push({
             issue_type:    'replay_drift',
@@ -431,10 +456,8 @@ export async function runLeaveReconciliation(
             },
             suggestion: `Replay engine reconstructed balance (${d.reconstructed_balance}) differs from stored balance (${d.stored_balance}) by ${d.drift > 0 ? '+' : ''}${d.drift} days. ${d.drift_detail}. Cross-check ledger entries for this employee using the audit trail and run retroactive rebuild if needed.`,
           })
-          driftedKeys.add(empId)
+          driftedKeys.add(d.employee_id)
         }
-      } catch {
-        // Replay errors are non-fatal — the primary reconciliation still runs
       }
     }
 
