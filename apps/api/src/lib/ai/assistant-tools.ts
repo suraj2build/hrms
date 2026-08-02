@@ -320,17 +320,11 @@ export const ASSISTANT_TOOLS: ToolDef[] = [
   {
     type: 'function',
     function: {
-      name: 'update_bank_details',
-      description: "Update the current employee's bank account details (account number, IFSC, bank name). Always confirm the details before calling. Use for 'update my bank account' requests.",
+      name: 'get_bank_details',
+      description: "Show the current employee's bank account details on file (masked account number, IFSC, bank name). Bank details are HR-verified-only and cannot be changed via chat — if the employee wants to change them, direct them to raise a request with HR. Use for 'what bank account do I have on file' / 'update my bank account' requests.",
       parameters: {
         type: 'object',
-        properties: {
-          account_number: { type: 'string', description: 'Bank account number' },
-          ifsc_code:      { type: 'string', description: 'IFSC code (11 characters)' },
-          bank_name:      { type: 'string', description: 'Bank name, e.g. HDFC Bank, SBI' },
-          account_holder: { type: 'string', description: 'Account holder name as per bank records' },
-        },
-        required: ['account_number', 'ifsc_code'],
+        properties: {},
       },
     },
   },
@@ -1143,28 +1137,31 @@ async function getAttendanceCalendar(ctx: ToolCtx, args: { month?: string }): Pr
   return `**Attendance for ${month}**\n\n${lines.join('\n')}`
 }
 
-async function updateBankDetails(ctx: ToolCtx, args: { account_number?: string; ifsc_code?: string; bank_name?: string; account_holder?: string }): Promise<string> {
+// Bank details are highly sensitive PII/financial data — per employees/bank-statutory.ts
+// and ess/self-service.ts, employees may VIEW their own bank details (to verify
+// salary-credit info) but never WRITE them directly; changes stay an HR-verified
+// action. This tool mirrors that read-only contract rather than upserting.
+function maskAccountTail(value: string | null | undefined, visible = 4): string | null {
+  if (!value) return null
+  const s = String(value)
+  if (s.length <= visible) return s
+  return `••••${s.slice(-visible)}`
+}
+
+async function getBankDetails(ctx: ToolCtx): Promise<string> {
   if (!ctx.employeeId) return 'No employee profile linked to your account.'
 
-  const accountNum = args.account_number?.trim()
-  const ifsc       = args.ifsc_code?.trim()
-  if (!accountNum || !ifsc) return 'Account number and IFSC code are required.'
-  if (!/^[A-Z]{4}0[A-Z0-9]{6}$/.test(ifsc.toUpperCase())) {
-    return 'Invalid IFSC code format. Should be 11 characters like HDFC0001234.'
-  }
-
-  const { error } = await ctx.supabase
+  const { data, error } = await ctx.supabase
     .from('employee_bank_statutory')
-    .upsert({
-      employee_id:    ctx.employeeId,
-      tenant_id:      ctx.caller.tenantId,
-      account_number: accountNum,
-      ifsc_code:      ifsc.toUpperCase(),
-      bank_name:      args.bank_name ?? null,
-    }, { onConflict: 'tenant_id,employee_id' })
+    .select('bank_name, account_number, ifsc_code')
+    .eq('employee_id', ctx.employeeId)
+    .eq('tenant_id', ctx.caller.tenantId)
+    .maybeSingle()
 
-  if (error) return 'Failed to update your bank details. Please try again.'
-  return `Bank account updated: ${accountNum} (${ifsc.toUpperCase()}). Changes will be reflected in your next payroll.`
+  if (error) return 'Failed to fetch your bank details. Please try again.'
+  if (!data) return "No bank account is on file yet. Bank details are HR-verified only — please raise a request with HR to add or change your bank account."
+
+  return `Bank account on file: ${maskAccountTail(data.account_number)} (${data.ifsc_code ?? 'IFSC not set'}), ${data.bank_name ?? 'bank name not set'}. Bank details are HR-verified only — I can't change them here; please raise a request with HR to update your bank account.`
 }
 
 async function updateEmergencyContact(ctx: ToolCtx, args: { name?: string; relationship?: string; phone?: string }): Promise<string> {
@@ -1305,7 +1302,7 @@ export async function executeTool(ctx: ToolCtx, name: string, args: any): Promis
       case 'search_policy':          return await searchPolicy(ctx, args)
       case 'get_pay_breakdown':      return await getPayBreakdown(ctx)
       case 'get_attendance_calendar': return await getAttendanceCalendar(ctx, args)
-      case 'update_bank_details':    return await updateBankDetails(ctx, args)
+      case 'get_bank_details':       return await getBankDetails(ctx)
       case 'update_emergency_contact': return await updateEmergencyContact(ctx, args)
       case 'get_ticket_status':      return await getTicketStatus(ctx, args)
       case 'escalate_ticket':        return await escalateTicket(ctx, args)
