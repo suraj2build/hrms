@@ -122,10 +122,7 @@ export default async function attendanceRiskRoute(fastify: FastifyInstance) {
 
     const { data, error, count } = await q
 
-    if (error) {
-      req.log.error({ err: error }, 'attendance_risk_profiles list failed')
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch risk profiles' })
-    }
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch risk profiles')
 
     const rows = ((data ?? []) as any[]).map((r) => {
       const emp = Array.isArray(r.employees) ? r.employees[0] : r.employees
@@ -184,10 +181,7 @@ export default async function attendanceRiskRoute(fastify: FastifyInstance) {
       .lte('period_end', effectivePeriodEnd)
       .order('computed_at', { ascending: false })
 
-    if (error) {
-      req.log.error({ err: error }, 'attendance_risk_profiles summary failed')
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch risk summary' })
-    }
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch risk summary')
 
     // Deduplicate — keep only the most recent profile per employee
     const seen = new Set<string>()
@@ -273,10 +267,7 @@ export default async function attendanceRiskRoute(fastify: FastifyInstance) {
         .order('computed_at', { ascending: false })
         .limit(2)
 
-      if (error) {
-        req.log.error({ err: error }, 'employee risk profile fetch failed')
-        return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch risk profile' })
-      }
+      if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch risk profile')
 
       const rows = (profiles ?? []) as any[]
       const e    = emp as any
@@ -333,8 +324,7 @@ export default async function attendanceRiskRoute(fastify: FastifyInstance) {
             .range(from, to),
         )
       } catch (empErr) {
-        req.log.error({ err: empErr }, 'employee fetch for risk compute failed')
-        return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch active employees' })
+        return serverError(req, reply, empErr, ErrorCode.QUERY_FAILED, 'Failed to fetch active employees')
       }
       targetIds = activeEmps.map((e) => e.id)
     }
@@ -476,10 +466,7 @@ export default async function attendanceRiskRoute(fastify: FastifyInstance) {
           onConflict: 'tenant_id,employee_id,period_start,period_end',
         })
 
-      if (upsertErr) {
-        req.log.error({ err: upsertErr, batch_start: i }, 'risk profile upsert failed')
-        return reply.code(500).send({ error: 'UPSERT_FAILED', message: 'Failed to persist risk profiles' })
-      }
+      if (upsertErr) return serverError(req, reply, upsertErr, ErrorCode.UPDATE_FAILED, 'Failed to persist risk profiles')
     }
 
     return reply.send({ computed: computedCount, elevated: elevatedCount })
