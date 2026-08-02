@@ -31,6 +31,7 @@ import {
 }                               from '../../lib/approval-service.js'
 import { getDirectReportIds }   from '../../lib/manager-scope.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 const dateRe = /^\d{4}-\d{2}-\d{2}$/
 
@@ -147,8 +148,7 @@ export default async function leaveRequestsRoutes(fastify: FastifyInstance) {
       }
       return reply.code(201).send(responseBody)
     } catch (err: unknown) {
-      req.log.error({ err, tenantId: req.tenantId }, '[leave-requests] unexpected error creating leave request')
-      return reply.code(500).send({ error: 'LEAVE_SERVICE_ERROR', message: 'Failed to create leave request' })
+      return serverError(req, reply, err, ErrorCode.LEAVE_APPLY_FAILED, 'Failed to create leave request')
     }
   })
 
@@ -266,7 +266,7 @@ export default async function leaveRequestsRoutes(fastify: FastifyInstance) {
     ])
 
     if (!result.ok) {
-      return reply.code(500).send({ error: result.error.type, message: result.error.message })
+      return serverError(req, reply, result.error, ErrorCode.QUERY_FAILED, result.error.message)
     }
 
     return reply.send({ data: result.value, total: count ?? 0, limit: parsed.data.limit, offset: parsed.data.offset })
@@ -334,8 +334,7 @@ export default async function leaveRequestsRoutes(fastify: FastifyInstance) {
 
       return reply.send({ data: result.value })
     } catch (err: unknown) {
-      req.log.error({ err, tenantId: req.tenantId, id }, '[leave-requests] unexpected error cancelling leave request')
-      return reply.code(500).send({ error: 'LEAVE_SERVICE_ERROR', message: 'Failed to cancel leave request' })
+      return serverError(req, reply, err, ErrorCode.LEAVE_APPLY_FAILED, 'Failed to cancel leave request')
     }
   })
 
@@ -391,8 +390,7 @@ export default async function leaveRequestsRoutes(fastify: FastifyInstance) {
       }
       return reply.send({ data: result.value })
     } catch (err: unknown) {
-      req.log.error({ err, tenantId: req.tenantId, id }, '[leave-requests] unexpected error approving leave request')
-      return reply.code(500).send({ error: 'LEAVE_SERVICE_ERROR', message: 'Failed to approve leave request' })
+      return serverError(req, reply, err, ErrorCode.LEAVE_APPLY_FAILED, 'Failed to approve leave request')
     }
   })
 
@@ -434,8 +432,7 @@ export default async function leaveRequestsRoutes(fastify: FastifyInstance) {
       })
       return reply.send({ data: result.value })
     } catch (err: unknown) {
-      req.log.error({ err, tenantId: req.tenantId, id }, '[leave-requests] unexpected error reversing leave approval')
-      return reply.code(500).send({ error: 'LEAVE_SERVICE_ERROR', message: 'Failed to reverse leave approval' })
+      return serverError(req, reply, err, ErrorCode.LEAVE_APPLY_FAILED, 'Failed to reverse leave approval')
     }
   })
 
@@ -475,8 +472,7 @@ export default async function leaveRequestsRoutes(fastify: FastifyInstance) {
 
       return reply.send({ data: result.value })
     } catch (err: unknown) {
-      req.log.error({ err, tenantId: req.tenantId, id }, '[leave-requests] unexpected error rejecting leave request')
-      return reply.code(500).send({ error: 'LEAVE_SERVICE_ERROR', message: 'Failed to reject leave request' })
+      return serverError(req, reply, err, ErrorCode.LEAVE_APPLY_FAILED, 'Failed to reject leave request')
     }
   })
 
