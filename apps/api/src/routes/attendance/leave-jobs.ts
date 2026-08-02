@@ -25,6 +25,7 @@ import {
 } from '../../lib/leave-jobs.js'
 import { fetchTenantTz, utcToLocalDate } from '../../lib/attendance-engine.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 const dateRe = /^\d{4}-\d{2}-\d{2}$/
 
@@ -50,7 +51,7 @@ export default async function leaveJobsRoute(fastify: FastifyInstance) {
       .order('started_at', { ascending: false })
       .limit(20)
 
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch leave job runs')
     return reply.send({ data: data ?? [] })
   })
 
@@ -66,7 +67,7 @@ export default async function leaveJobsRoute(fastify: FastifyInstance) {
       .eq('tenant_id', req.tenantId)
       .maybeSingle()
 
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch leave job run')
     if (!data)  return reply.code(404).send({ error: 'NOT_FOUND', message: 'Job run not found' })
     return reply.send({ data })
   })
