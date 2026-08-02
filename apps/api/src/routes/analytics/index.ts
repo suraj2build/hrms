@@ -87,7 +87,7 @@ export default async function analyticsRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', req.tenantId)
       .order('created_at', { ascending: true })
 
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch users' })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch users')
     return reply.send({ data: data ?? [] })
   })
 
@@ -139,7 +139,7 @@ export default async function analyticsRoutes(fastify: FastifyInstance) {
       .select('id, full_name, role')
       .single()
 
-    if (updateErr) return reply.code(500).send({ error: 'UPDATE_FAILED', message: 'Failed to update role.' })
+    if (updateErr) return serverError(req, reply, updateErr, ErrorCode.UPDATE_FAILED, 'Failed to update role.')
     return reply.send({ data: updated })
   })
 
@@ -187,7 +187,7 @@ export default async function analyticsRoutes(fastify: FastifyInstance) {
       .select('id, full_name, is_active')
       .single()
 
-    if (error || !data) return reply.code(500).send({ error: 'UPDATE_FAILED', message: 'Failed to update status.' })
+    if (error || !data) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update status.')
 
     // Mirror the ban/unban behaviour from user-account.ts — set Supabase Auth
     // ban_duration so existing JWTs are rejected immediately, not just at TTL.
