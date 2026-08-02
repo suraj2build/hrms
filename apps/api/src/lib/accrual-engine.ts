@@ -341,6 +341,27 @@ export async function processCarryForward(
         notes:         `Carry-forward from ${fromYear}${notesSuffix}`,
       })
 
+      // SYSCERT_AUDIT_2026-08-02.md C4 (ISSUE-156 parity): the carry_forward_max
+      // cap can forfeit balance with no record of it anywhere — write a
+      // forfeiture ledger entry against fromYear so the gap between the
+      // employee's actual balance and what carried over is auditable instead
+      // of silently vanishing. Mirrors leave-jobs.ts's carryForwardJob().
+      const forfeitedDays = parseFloat((Number(bal.balance) - carryDays).toFixed(2))
+      if (forfeitedDays > 0) {
+        cfAlUpserts.push({
+          tenant_id:     tenantId,
+          employee_id:   bal.employee_id,
+          leave_type_id: rule.leave_type_id,
+          year:          fromYear,
+          accrual_type:  'forfeiture',
+          days:          -forfeitedDays,
+          accrued_on:    carryAccruedOn,
+          is_expired:    false,
+          notes:         `Forfeited at year-end carry-forward cap (max ${rule.carry_forward_max} day(s)): ` +
+            `${forfeitedDays} of ${bal.balance} day(s) from ${fromYear} balance did not carry over`,
+        })
+      }
+
       employeesProcessed++
       totalCarried = parseFloat((totalCarried + carryDays).toFixed(2))
     }
