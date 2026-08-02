@@ -13,6 +13,7 @@ import { z } from 'zod'
 import { isHrAdmin, resolveCallerEmployeeId, isDirectReport } from '../../lib/manager-scope.js'
 import { fetchTenantTz, utcToLocalDate } from '../../lib/attendance-engine.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 const dateRe = /^\d{4}-\d{2}-\d{2}$/
 
@@ -90,8 +91,7 @@ export default async function fetchRoute(fastify: FastifyInstance) {
             .range(rangeFrom, rangeTo),
         )
       } catch (err: unknown) {
-        req.log.error({ err, module: 'attendance', route: 'fetch' }, 'daily query failed')
-        return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch daily records' })
+        return serverError(req, reply, err, ErrorCode.QUERY_FAILED, 'Failed to fetch daily records')
       }
 
       // Fetch check-in/out log entries
@@ -108,8 +108,7 @@ export default async function fetchRoute(fastify: FastifyInstance) {
             .range(rangeFrom, rangeTo),
         )
       } catch (err: unknown) {
-        req.log.error({ err, module: 'attendance', route: 'fetch' }, 'logs query failed')
-        return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch log entries' })
+        return serverError(req, reply, err, ErrorCode.QUERY_FAILED, 'Failed to fetch log entries')
       }
 
       // Aggregate summary stats for the range
