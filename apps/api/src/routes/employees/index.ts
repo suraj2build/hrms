@@ -7,6 +7,7 @@ import { fetchAllRows } from '../../lib/supabase-paginate.js'
 import { serverError, notFound, forbidden, validationError, conflictError, ErrorCode } from '../../lib/api-errors.js'
 import { revokeEmployeeAuth } from '../../lib/user-account-service.js'
 import { sanitizeOrFilterTerm } from '../../lib/postgrest-filter.js'
+import { isHrAdmin, resolveCallerEmployeeId } from '../../lib/manager-scope.js'
 
 // NOTE: After migration 016 (lean employees), the following columns were removed
 // from the employees table and relocated to dedicated sub-tables:
@@ -319,8 +320,20 @@ export default async function employeeRoutes(fastify: FastifyInstance) {
   })
 
   // GET /employees/:id
+  // HR admins may read any employee; a regular employee may only read their
+  // own (SYSCERT_AUDIT_2026-08-02.md H10) — matches the same scoping already
+  // enforced by /employees/:id/personal-info and /employees/:id/full-profile;
+  // this route previously had no such check, letting any authenticated
+  // employee read any colleague's email/phone/joining_date by guessing IDs.
   fastify.get('/employees/:id', auth, async (request, reply) => {
     const { id } = request.params as { id: string }
+
+    if (!isHrAdmin(request.userRole)) {
+      const callerEmpId = await resolveCallerEmployeeId(fastify.supabase, request.userId, request.tenantId)
+      if (!callerEmpId || callerEmpId !== id) {
+        return forbidden(reply, 'FORBIDDEN', 'You can only view your own employee record')
+      }
+    }
 
     // Lean select — FK columns department_id, designation_id, grade_id, manager_id
     // were moved to job_history by migration 016. Use /employees/:id/full-profile
