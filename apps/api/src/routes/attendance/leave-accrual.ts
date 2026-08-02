@@ -27,7 +27,7 @@ import {
   processEncashment,
 } from '../../lib/accrual-engine.js'
 import { checkIdempotency, storeIdempotency } from '../../lib/idempotency.js'
-import { notFound } from '../../lib/api-errors.js'
+import { notFound, serverError, ErrorCode } from '../../lib/api-errors.js'
 
 const dateRe = /^\d{4}-\d{2}-\d{2}$/
 
@@ -57,7 +57,7 @@ export default async function leaveAccrualRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', req.tenantId)
       .order('effective_from', { ascending: false })
 
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch accrual rules' })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch accrual rules')
     return reply.send({ data: data ?? [] })
   })
 
@@ -87,7 +87,7 @@ export default async function leaveAccrualRoutes(fastify: FastifyInstance) {
 
     if (error) {
       if (error.code === '23505') return reply.code(409).send({ error: 'DUPLICATE', message: 'An accrual rule already exists for this leave type on that effective date' })
-      return reply.code(500).send({ error: 'INSERT_FAILED', message: 'Failed to create accrual rule' })
+      return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create accrual rule')
     }
 
     return reply.code(201).send({ data })
@@ -120,7 +120,7 @@ export default async function leaveAccrualRoutes(fastify: FastifyInstance) {
       .select('*')
       .single()
 
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: 'Failed to update rule' })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update rule')
     if (!data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Accrual rule not found' })
     return reply.send({ data })
   })
@@ -136,7 +136,7 @@ export default async function leaveAccrualRoutes(fastify: FastifyInstance) {
       .select('id')
       .maybeSingle()
 
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: 'Failed to deactivate rule' })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to deactivate rule')
     if (!data) return notFound(reply, 'NOT_FOUND', 'Accrual rule not found')
     return reply.code(204).send()
   })
@@ -166,8 +166,7 @@ export default async function leaveAccrualRoutes(fastify: FastifyInstance) {
       if (iKey) await storeIdempotency(fastify.supabase, req.tenantId, iKey, 'leave-accrual-run', 200, responseBody)
       return reply.send(responseBody)
     } catch (err: unknown) {
-      req.log.error({ err, tenantId: req.tenantId, period: parsed.data.period }, '[leave-accrual] unexpected error running monthly accrual')
-      return reply.code(500).send({ error: 'ACCRUAL_ERROR', message: 'Failed to run monthly accrual' })
+      return serverError(req, reply, err, ErrorCode.COMPUTE_FAILED, 'Failed to run monthly accrual')
     }
   })
 
@@ -181,8 +180,7 @@ export default async function leaveAccrualRoutes(fastify: FastifyInstance) {
       const result = await processCarryForward(fastify.supabase, req.tenantId, parsed.data.from_year)
       return reply.send({ data: result })
     } catch (err: unknown) {
-      req.log.error({ err, tenantId: req.tenantId, from_year: parsed.data.from_year }, '[leave-accrual] unexpected error processing carry-forward')
-      return reply.code(500).send({ error: 'CARRY_FORWARD_ERROR', message: 'Failed to process carry-forward' })
+      return serverError(req, reply, err, ErrorCode.COMPUTE_FAILED, 'Failed to process carry-forward')
     }
   })
 
@@ -196,7 +194,7 @@ export default async function leaveAccrualRoutes(fastify: FastifyInstance) {
       .order('ran_at', { ascending: false })
       .range(Number(offset), Number(offset) + Number(limit) - 1)
 
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch runs' })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch runs')
     return reply.send({ data: data ?? [], total: count ?? 0 })
   })
 
@@ -231,7 +229,7 @@ export default async function leaveAccrualRoutes(fastify: FastifyInstance) {
     if (leave_type_id) q = q.eq('leave_type_id', leave_type_id)
 
     const { data, error, count } = await q
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch ledger' })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch ledger')
     return reply.send({ data: data ?? [], total: count ?? 0 })
   })
 
@@ -309,7 +307,7 @@ export default async function leaveAccrualRoutes(fastify: FastifyInstance) {
       .select('id, days, status, created_at')
       .single()
 
-    if (error) return reply.code(500).send({ error: 'INSERT_FAILED', message: 'Failed to submit encashment request' })
+    if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to submit encashment request')
     return reply.code(201).send({ data })
   })
 
@@ -326,7 +324,7 @@ export default async function leaveAccrualRoutes(fastify: FastifyInstance) {
       .eq('employee_id', prof.employee_id)
       .order('created_at', { ascending: false })
 
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch encashment requests' })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch encashment requests')
     return reply.send({ data: data ?? [] })
   })
 
@@ -342,7 +340,7 @@ export default async function leaveAccrualRoutes(fastify: FastifyInstance) {
       .eq('status', 'pending')
       .order('created_at', { ascending: false })
 
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch encashment requests' })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch encashment requests')
 
     const rows = (data ?? []).map((r: any) => ({
       ...r,
@@ -361,8 +359,7 @@ export default async function leaveAccrualRoutes(fastify: FastifyInstance) {
       if (!result.ok) return reply.code(422).send({ error: 'ENCASHMENT_FAILED', message: result.message })
       return reply.send({ message: result.message })
     } catch (err: unknown) {
-      req.log.error({ err, tenantId: req.tenantId, encashmentId: req.params.id }, '[leave-accrual] unexpected error processing encashment')
-      return reply.code(500).send({ error: 'ENCASHMENT_ERROR', message: 'Failed to process encashment' })
+      return serverError(req, reply, err, ErrorCode.COMPUTE_FAILED, 'Failed to process encashment')
     }
   })
 
@@ -381,7 +378,7 @@ export default async function leaveAccrualRoutes(fastify: FastifyInstance) {
       .select('id')
       .maybeSingle()
 
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: 'Failed to reject encashment' })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to reject encashment')
     if (!data) return notFound(reply, 'NOT_FOUND', 'Pending encashment request not found')
     return reply.send({ message: 'Encashment request rejected' })
   })
@@ -397,7 +394,7 @@ export default async function leaveAccrualRoutes(fastify: FastifyInstance) {
       .select('id')
       .maybeSingle()
 
-    if (error) return reply.code(500).send({ error: 'UPDATE_FAILED', message: 'Failed to mark as paid' })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to mark as paid')
     if (!data) return notFound(reply, 'NOT_FOUND', 'Approved encashment request not found')
     return reply.send({ message: 'Marked as paid' })
   })
