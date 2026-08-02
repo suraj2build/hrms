@@ -29,6 +29,7 @@ import { recomputeRange, utcToLocalDate } from '../../lib/attendance-engine.js'
 import { isMonthLocked, monthOf } from '../../lib/period-lock.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { checkIdempotency, storeIdempotency } from '../../lib/idempotency.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 const bodySchema = z.object({
   employee_id: z.string().uuid().optional(),
@@ -150,14 +151,13 @@ export default async function attendancePunchRoute(fastify: FastifyInstance) {
       .maybeSingle()
 
     if (insertErr) {
-      req.log.error({ err: insertErr, employee_id: employeeId }, 'punch_logs upsert failed')
-      return reply.code(500).send({ error: 'INSERT_FAILED', message: 'Failed to record punch' })
+      return serverError(req, reply, insertErr, ErrorCode.INSERT_FAILED, 'Failed to record punch')
     }
 
     // If upsertResult is null the row already existed (duplicate punch) — fetch the existing record.
     let punchRow = upsertResult
     if (!punchRow) {
-      const { data: existing } = await fastify.supabase
+      const { data: existing, error: fetchErr } = await fastify.supabase
         .from('attendance_punch_logs')
         .select('id, employee_id, punched_at, direction, source')
         .eq('tenant_id', req.tenantId)
@@ -167,8 +167,7 @@ export default async function attendancePunchRoute(fastify: FastifyInstance) {
         .maybeSingle()
 
       if (!existing) {
-        req.log.error({ employee_id: employeeId, punched_at: punchedAt, direction }, 'punch_logs duplicate but fetch also failed')
-        return reply.code(500).send({ error: 'INSERT_FAILED', message: 'Failed to record punch' })
+        return serverError(req, reply, fetchErr, ErrorCode.INSERT_FAILED, 'Failed to record punch')
       }
       punchRow = existing
     }
