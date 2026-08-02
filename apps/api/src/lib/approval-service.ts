@@ -36,6 +36,7 @@ import { recomputeRange, fetchTenantTz }        from './attendance-engine.js'
 import { getLocalDate }                         from './org-context.js'
 import { isSelfApproval }                       from './approval-guards.js'
 import { gateApprove, gateReject }              from './approval-orchestrator.js'
+import { getLockedMonths, monthsInRange }       from './period-lock.js'
 
 // ── Shared types ───────────────────────────────────────────────────────────────
 
@@ -181,6 +182,26 @@ export async function approveLeaveRequest(
     return {
       ok:    false,
       error: { type: 'CONFLICT', message: `Request is already ${req.status}` },
+    }
+  }
+
+  // ── 2.5 Period-lock recheck (SYSCERT_AUDIT_2026-08-02.md C1) ──────────────────
+  // Every sibling approval type (regularisation, corrections, overtime, comp-off)
+  // blocks approval once the affected period is locked; leave never did. A
+  // request can sit pending for days — if HR locks the period (or payroll
+  // advances it to PAYROLL_PROCESSING/PAYROLL_FINALIZED) before this request is
+  // approved, approving it here would still silently rewrite attendance_daily
+  // and the leave ledger for a period that's supposed to be closed. Mirrors
+  // approveRegularisation()'s ISSUE-144 fix below, extended to a date range.
+  const lockedMonths = await getLockedMonths(supabase, tenantId, monthsInRange(req.from_date, req.to_date))
+  if (lockedMonths.size) {
+    return {
+      ok:    false,
+      error: {
+        type:    'CONFLICT',
+        message: `Cannot approve — the pay period ${[...lockedMonths].sort()[0]} is locked. ` +
+          'Reopen the period before approving this request.',
+      },
     }
   }
 
@@ -397,6 +418,23 @@ export async function reverseApprovedLeaveRequest(
     return {
       ok:    false,
       error: { type: 'CONFLICT', message: `Only an APPROVED request can be reversed (current: ${req.status})` },
+    }
+  }
+
+  // ── 2.5 Period-lock recheck (SYSCERT_AUDIT_2026-08-02.md C1) ──────────────────
+  // Reversal rewrites attendance_daily and restores ledger balance the same way
+  // approval does — must not silently touch a period HR has since locked (or
+  // payroll has since advanced) for the same reason approveLeaveRequest() checks
+  // this above.
+  const lockedMonths = await getLockedMonths(supabase, tenantId, monthsInRange(req.from_date, req.to_date))
+  if (lockedMonths.size) {
+    return {
+      ok:    false,
+      error: {
+        type:    'CONFLICT',
+        message: `Cannot reverse — the pay period ${[...lockedMonths].sort()[0]} is locked. ` +
+          'Reopen the period before reversing this approval.',
+      },
     }
   }
 
