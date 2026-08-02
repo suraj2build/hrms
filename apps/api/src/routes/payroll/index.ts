@@ -2444,65 +2444,87 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
           total_working_days = 0
         }
 
-        for (const employeeId of staleEmployeeIds) {
-          try {
-            // 1. Recompute attendance_daily for the period
-            await recomputeRange(fastify.supabase, {
-              tenant_id:   tenantId,
-              employee_id: employeeId,
-              from_date:   periodStart,
-              to_date:     periodEnd,
-              changed_by:  req.userId,
-            })
-
-            // 2. Re-fetch attendance + compensation and recompute slip
-            const [compensation, attendance] = await Promise.all([
-              fetchActiveCompensation(fastify.supabase, tenantId, employeeId, periodEnd),
-              fetchAttendanceSummary(fastify.supabase, tenantId, employeeId, run.month as string),
-            ])
-
-            const freshAdvLoanDeductions = await fetchAdvanceLoanDeductions(
-              fastify.supabase, tenantId, employeeId, run.month as string,
-            )
-
-            const freshSlip = await computeSlipWithStatutory(fastify.supabase, tenantId, {
-              tenantId,
-              employeeId,
-              month:              run.month as string,
-              compensation,
-              attendance,
-              total_working_days,
-              advance_loan_deductions: freshAdvLoanDeductions,
-            }, run.month as string)
-
-            // 3. Update the existing draft slip in place
-            await fastify.supabase
-              .from('payroll_slips')
-              .update({
-                payable_days:          freshSlip.payable_days,
-                lop_days:              freshSlip.lop_days,
-                overtime_hours:        freshSlip.overtime_hours,
-                gross_pay:             freshSlip.gross_pay,
-                lop_amount:            freshSlip.lop_amount,
-                total_deductions:      freshSlip.total_deductions,
-                net_pay:               freshSlip.net_pay,
-                employer_contributions:freshSlip.employer_contributions,
-                component_breakdown:   freshSlip.component_breakdown,
-                tds_deducted:          round2fn((freshSlip.component_breakdown ?? [])
-                  .filter((c: any) => /^TDS$/i.test(c.code))
-                  .reduce((s: number, c: any) => s + (Number(c.monthly_amount) || 0), 0)),
+        // Each employee's recompute only touches its own attendance_daily rows
+        // and its own payroll_slips row (both scoped by employee_id in the
+        // WHERE/upsert-conflict clause) — no shared/run-level state is written
+        // inside this loop, so chunked parallelism is safe. Same convention as
+        // poll-scheduler.ts's SEND_CHUNK_SIZE / leave-reconciliation.ts's
+        // REPLAY_CHUNK_SIZE: bounded rather than unbounded Promise.all, since a
+        // bulk leave-approval event right before finalize could push the stale
+        // set into the hundreds.
+        const STALE_RECOMPUTE_CHUNK_SIZE = 25
+        for (let i = 0; i < staleEmployeeIds.length; i += STALE_RECOMPUTE_CHUNK_SIZE) {
+          const chunk = staleEmployeeIds.slice(i, i + STALE_RECOMPUTE_CHUNK_SIZE)
+          const chunkResults = await Promise.all(chunk.map(async (employeeId) => {
+            try {
+              // 1. Recompute attendance_daily for the period
+              await recomputeRange(fastify.supabase, {
+                tenant_id:   tenantId,
+                employee_id: employeeId,
+                from_date:   periodStart,
+                to_date:     periodEnd,
+                changed_by:  req.userId,
               })
-              .eq('run_id', id)
-              .eq('employee_id', employeeId)
-              .eq('status', 'draft')
 
-            recomputedCount++
-          } catch (empErr: any) {
-            // Per-employee failure: log, record warning, continue with remaining employees
-            const errMsg = empErr?.message ?? 'Unknown recompute error'
-            req.log.warn({ err: empErr, employee_id: employeeId, run_id: id },
-              'payroll finalize: per-employee recompute failed (non-fatal)')
-            recomputeWarnings.push({ employee_id: employeeId, error: errMsg })
+              // 2. Re-fetch attendance + compensation and recompute slip
+              const [compensation, attendance] = await Promise.all([
+                fetchActiveCompensation(fastify.supabase, tenantId, employeeId, periodEnd),
+                fetchAttendanceSummary(fastify.supabase, tenantId, employeeId, run.month as string),
+              ])
+
+              const freshAdvLoanDeductions = await fetchAdvanceLoanDeductions(
+                fastify.supabase, tenantId, employeeId, run.month as string,
+              )
+
+              const freshSlip = await computeSlipWithStatutory(fastify.supabase, tenantId, {
+                tenantId,
+                employeeId,
+                month:              run.month as string,
+                compensation,
+                attendance,
+                total_working_days,
+                advance_loan_deductions: freshAdvLoanDeductions,
+              }, run.month as string)
+
+              // 3. Update the existing draft slip in place
+              await fastify.supabase
+                .from('payroll_slips')
+                .update({
+                  payable_days:          freshSlip.payable_days,
+                  lop_days:              freshSlip.lop_days,
+                  overtime_hours:        freshSlip.overtime_hours,
+                  gross_pay:             freshSlip.gross_pay,
+                  lop_amount:            freshSlip.lop_amount,
+                  total_deductions:      freshSlip.total_deductions,
+                  net_pay:               freshSlip.net_pay,
+                  employer_contributions:freshSlip.employer_contributions,
+                  component_breakdown:   freshSlip.component_breakdown,
+                  tds_deducted:          round2fn((freshSlip.component_breakdown ?? [])
+                    .filter((c: any) => /^TDS$/i.test(c.code))
+                    .reduce((s: number, c: any) => s + (Number(c.monthly_amount) || 0), 0)),
+                })
+                .eq('run_id', id)
+                .eq('employee_id', employeeId)
+                .eq('status', 'draft')
+
+              return { employeeId, ok: true as const }
+            } catch (empErr: any) {
+              const errMsg = empErr?.message ?? 'Unknown recompute error'
+              req.log.warn({ err: empErr, employee_id: employeeId, run_id: id },
+                'payroll finalize: per-employee recompute failed (non-fatal)')
+              return { employeeId, ok: false as const, error: errMsg }
+            }
+          }))
+
+          // Fold this chunk's outcomes into the run-level counters sequentially —
+          // per-employee failure: recorded as a warning, remaining employees
+          // (in this chunk and subsequent ones) still proceed.
+          for (const result of chunkResults) {
+            if (result.ok) {
+              recomputedCount++
+            } else {
+              recomputeWarnings.push({ employee_id: result.employeeId, error: result.error })
+            }
           }
         }
 
