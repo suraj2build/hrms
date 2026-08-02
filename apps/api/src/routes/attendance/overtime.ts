@@ -18,6 +18,7 @@
  * DELETE /overtime/assignments/:id         — remove assignment (admin)
  */
 import type { FastifyInstance } from 'fastify'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 import { z }                    from 'zod'
 import {
   resolveOtPolicy,
@@ -148,7 +149,7 @@ export default async function overtimeRoutes(fastify: FastifyInstance) {
       .select('*')
       .eq('tenant_id', req.tenantId)
       .order('name')
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch OT policies' })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch OT policies')
     return reply.send({ data: data ?? [] })
   })
 
@@ -166,7 +167,7 @@ export default async function overtimeRoutes(fastify: FastifyInstance) {
       .single()
     if (error) {
       if (error.code === '23505') return reply.code(409).send({ error: 'DUPLICATE', message: `Policy "${parsed.data.name}" already exists` })
-      return reply.code(500).send({ error: 'INSERT_FAILED', message: 'Failed to create OT policy' })
+      return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create OT policy')
     }
     return reply.code(201).send({ data })
   })
@@ -208,7 +209,7 @@ export default async function overtimeRoutes(fastify: FastifyInstance) {
       .delete()
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
-    if (error) return reply.code(500).send({ error: 'DELETE_FAILED', message: 'Failed to delete OT policy' })
+    if (error) return serverError(req, reply, error, ErrorCode.DELETE_FAILED, 'Failed to delete OT policy')
     return reply.code(204).send()
   })
 
@@ -255,7 +256,7 @@ export default async function overtimeRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', req.tenantId)
     if (parsed.data.employee_id) query = query.eq('employee_id', parsed.data.employee_id)
     const { data, error } = await query.order('created_at', { ascending: false })
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch assignments' })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch assignments')
     return reply.send({ data: data ?? [] })
   })
 
@@ -288,7 +289,7 @@ export default async function overtimeRoutes(fastify: FastifyInstance) {
       )
       .select('id, employee_id, ot_policy_id, effective_from')
       .single()
-    if (error) return reply.code(500).send({ error: 'UPSERT_FAILED', message: 'Failed to assign policy' })
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to assign policy')
     return reply.code(201).send({ data })
   })
 
@@ -301,7 +302,7 @@ export default async function overtimeRoutes(fastify: FastifyInstance) {
       .delete()
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
-    if (error) return reply.code(500).send({ error: 'DELETE_FAILED', message: 'Failed to remove assignment' })
+    if (error) return serverError(req, reply, error, ErrorCode.DELETE_FAILED, 'Failed to remove assignment')
     return reply.code(204).send()
   })
 
@@ -327,7 +328,7 @@ export default async function overtimeRoutes(fastify: FastifyInstance) {
           .range(from, to),
       )
     } catch (err) {
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: err instanceof Error ? err.message : 'Failed to fetch attendance' })
+      return serverError(req, reply, err, ErrorCode.QUERY_FAILED, 'Failed to fetch attendance')
     }
 
     const agg = new Map<string, { ot: number; approved: number }>()
@@ -422,7 +423,7 @@ export default async function overtimeRoutes(fastify: FastifyInstance) {
     q = q.range(parsed.data.offset, parsed.data.offset + parsed.data.limit - 1)
 
     const { data, error } = await q
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch OT requests' })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch OT requests')
     return reply.send({ data: data ?? [] })
   })
 
