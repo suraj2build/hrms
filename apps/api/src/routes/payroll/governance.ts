@@ -156,14 +156,7 @@ export default async function governanceRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', req.tenantId)
 
     if (updateErr) {
-      req.log.error(
-        { err: updateErr, freeze_id: (latestFreeze as any).id, freeze_month: parsed.data.freeze_month },
-        'governance: unfreeze — freeze record update failed; month remains frozen',
-      )
-      return reply.code(500).send({
-        error:   'UNFREEZE_FAILED',
-        message: 'Failed to lift freeze — the month remains frozen. Retry the unfreeze operation.',
-      })
+      return serverError(req, reply, updateErr, ErrorCode.UPDATE_FAILED, 'Failed to lift freeze — the month remains frozen. Retry the unfreeze operation.')
     }
 
     // Step 3: Insert unfreeze audit record (non-critical — freeze is already lifted by step 2)
