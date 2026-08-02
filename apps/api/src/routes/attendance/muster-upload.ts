@@ -18,6 +18,7 @@ import { z }                    from 'zod'
 import * as XLSX                from 'xlsx'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -95,8 +96,8 @@ export default async function musterUploadRoutes(fastify: FastifyInstance) {
           .order('employee_code')
           .range(from, to),
       )
-    } catch {
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch employees' })
+    } catch (err) {
+      return serverError(req, reply, err, ErrorCode.QUERY_FAILED, 'Failed to fetch employees')
     }
 
     // Build date list
@@ -227,8 +228,7 @@ export default async function musterUploadRoutes(fastify: FastifyInstance) {
       .single()
 
     if (uploadErr || !uploadRecord) {
-      fastify.log.error({ uploadErr }, 'muster-upload: failed to create upload record')
-      return reply.code(500).send({ error: 'UPLOAD_CREATE_FAILED', message: 'Failed to initialise upload' })
+      return serverError(req, reply, uploadErr, ErrorCode.INSERT_FAILED, 'Failed to initialise upload')
     }
 
     const uploadId = uploadRecord.id
@@ -358,7 +358,7 @@ export default async function musterUploadRoutes(fastify: FastifyInstance) {
 
     if (error) {
       if ((error as any).code === '42P01') return reply.send({ data: [] })
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch uploads')
     }
 
     // Resolve uploader names
@@ -402,7 +402,7 @@ export default async function musterUploadRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', req.tenantId)
       .maybeSingle()
 
-    if (error)  return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error)  return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch upload')
     if (!data)  return reply.code(404).send({ error: 'NOT_FOUND', message: 'Upload not found' })
 
     return reply.send({ data })
