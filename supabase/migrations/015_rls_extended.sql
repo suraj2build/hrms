@@ -37,7 +37,8 @@ ALTER TABLE employee_compensation_components ENABLE ROW LEVEL SECURITY;
 -- ============================================================
 
 -- Managers can read personal info of their direct reports
-CREATE POLICY IF NOT EXISTS "epi_mgr_read" ON employee_personal_info FOR SELECT
+DROP POLICY IF EXISTS "epi_mgr_read" ON employee_personal_info;
+CREATE POLICY "epi_mgr_read" ON employee_personal_info FOR SELECT
   USING (
     get_user_role() = 'manager'
     AND tenant_id = get_user_tenant_id()
@@ -64,7 +65,8 @@ CREATE POLICY IF NOT EXISTS "epi_mgr_read" ON employee_personal_info FOR SELECT
 -- (no additional policy needed — only hr_all policy exists from 012)
 
 -- Nominations: employees can read own
-CREATE POLICY IF NOT EXISTS "enom_self_read" ON employee_nominations FOR SELECT
+DROP POLICY IF EXISTS "enom_self_read" ON employee_nominations;
+CREATE POLICY "enom_self_read" ON employee_nominations FOR SELECT
   USING (
     get_user_role() = 'employee'
     AND tenant_id = get_user_tenant_id()
@@ -74,7 +76,8 @@ CREATE POLICY IF NOT EXISTS "enom_self_read" ON employee_nominations FOR SELECT
   );
 
 -- Family: employees can read own
-CREATE POLICY IF NOT EXISTS "ef_self_read" ON employee_family FOR SELECT
+DROP POLICY IF EXISTS "ef_self_read" ON employee_family;
+CREATE POLICY "ef_self_read" ON employee_family FOR SELECT
   USING (
     get_user_role() = 'employee'
     AND tenant_id = get_user_tenant_id()

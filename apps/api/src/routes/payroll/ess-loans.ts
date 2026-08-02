@@ -128,11 +128,24 @@ export default async function essLoansRoutes(fastify: FastifyInstance) {
     const empId = await getMyEmployeeId(fastify, req.userId, req.tenantId)
     if (!empId) return reply.send({ data: [] })
 
+    // loan_schedules has no employee_id column of its own (it links via
+    // loan_id -> employee_loans) — filtering by employee_id here always
+    // errored (invalid column), so the caller-ownership check must go
+    // through the parent employee_loans row instead
+    // (SYSCERT_AUDIT_2026-08-02.md High #23 schema-drift audit).
+    const { data: loan } = await fastify.supabase
+      .from('employee_loans')
+      .select('id')
+      .eq('id', id)
+      .eq('employee_id', empId)
+      .eq('tenant_id', req.tenantId)
+      .maybeSingle()
+    if (!loan) return reply.send({ data: [] })
+
     const { data, error } = await fastify.supabase
       .from('loan_schedules')
       .select('*')
       .eq('loan_id', id)
-      .eq('employee_id', empId)
       .eq('tenant_id', req.tenantId)
       .order('installment_number', { ascending: true })
 
@@ -146,11 +159,21 @@ export default async function essLoansRoutes(fastify: FastifyInstance) {
     const empId = await getMyEmployeeId(fastify, req.userId, req.tenantId)
     if (!empId) return reply.send({ data: [] })
 
+    // advance_recovery_schedules has no employee_id column of its own — see
+    // /my-loans/:id/schedule above for the same pattern/reason.
+    const { data: advance } = await fastify.supabase
+      .from('advance_salary_requests')
+      .select('id')
+      .eq('id', id)
+      .eq('employee_id', empId)
+      .eq('tenant_id', req.tenantId)
+      .maybeSingle()
+    if (!advance) return reply.send({ data: [] })
+
     const { data, error } = await fastify.supabase
       .from('advance_recovery_schedules')
       .select('*')
       .eq('advance_id', id)
-      .eq('employee_id', empId)
       .eq('tenant_id', req.tenantId)
       .order('recovery_month', { ascending: true })
 

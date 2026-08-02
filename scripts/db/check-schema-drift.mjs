@@ -38,12 +38,24 @@ const SKIP_APPLY = process.argv.includes('--skip-apply')
 // actual (partial) shape. A migration failing here is EXPECTED; anything else is
 // new breakage and fails the build. Keep this list short and documented.
 const KNOWN_FAILING = new Set([
-  '015_rls_extended.sql',          // invalid `CREATE POLICY IF NOT EXISTS`
-  '016_lean_employees.sql',        // manager_id drop blocked by dependency (drift source)
-  '017_create_employee_with_job.sql', // superseded by 063
-  '038_storage_buckets.sql',       // Supabase `storage` schema, not present in plain PG
-  '068_leave_session_granularity.sql',
-  '114_demo_data_cleanup.sql',
+  // 016_lean_employees.sql: DROP COLUMN ... manager_id aborts here because
+  // migration 007's "employees_manager_team" RLS policy reads that column
+  // directly ("policy ... depends on column manager_id"). This is NOT a
+  // simple syntax bug to patch with CASCADE — completing this migration
+  // (SYSCERT_AUDIT_2026-08-02.md High #23 investigation) revealed that live
+  // API routes (apps/api/src/routes/analytics/index.ts,
+  // apps/api/src/routes/executive/index.ts,
+  // apps/api/src/routes/letters/index.ts,
+  // apps/api/src/routes/intelligence/index.ts) still read
+  // employees.employment_type/gender/pan_number/uan_number/esi_number/address
+  // — the exact columns this migration's later statements would drop.
+  // Production has almost certainly hit the same abort and never actually
+  // dropped these columns either, which is why that code still works.
+  // A real fix requires migrating those routes to the normalized tables
+  // (job_history, employee_personal_info, employee_bank_statutory,
+  // employee_addresses) FIRST, then completing this migration — a separate,
+  // larger, cross-cutting piece of work, not part of this fix.
+  '016_lean_employees.sql',
 ])
 
 function psql(sql) {
@@ -210,9 +222,16 @@ function walkSelect(file, off, table, body, src, schema) {
           issues.push({ ...here, col: `→ ${embed} (no table/relationship)`, kind: 'embed-rel' })
         continue
       }
-      // A hint is either a column on the base (disambiguation) or an FK constraint name.
-      if (hint && hint !== 'inner' && hint !== 'left' &&
-          !(baseCols && baseCols.has(hint)) && FK?.names && !FK.names.has(hint)) {
+      // A hint is either a column on the base (disambiguation) or an FK constraint
+      // name, optionally combined with a join-type modifier via a second `!`
+      // (e.g. `employees!employee_id!inner(...)`) — split on `!` and validate
+      // only the non-modifier part(s); the combined string never matches a
+      // real column/constraint name (was a false-positive source).
+      const hintParts = hint ? hint.split('!').filter(p => p !== 'inner' && p !== 'left') : []
+      const badHintPart = hintParts.find(
+        part => !(baseCols && baseCols.has(part)) && FK?.names && !FK.names.has(part),
+      )
+      if (badHintPart) {
         issues.push({ ...here, col: `→ ${embed}!${hint} (no such column/FK)`, kind: 'embed-rel' }); continue
       }
       if (FK && !FK.has(table + '|' + embed)) {

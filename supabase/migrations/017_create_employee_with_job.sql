@@ -15,10 +15,14 @@ CREATE OR REPLACE FUNCTION create_employee_with_job(
   p_first_name        TEXT,
   p_last_name         TEXT,
   p_email             TEXT,
-  p_phone             TEXT    DEFAULT NULL,
   p_joining_date      DATE,
   -- ── job_history table ───────────────────────────────────
   p_employment_type   TEXT,                  -- NOT NULL
+  -- optional params (must all follow required ones) — Postgres rejects a
+  -- required parameter after a defaulted one, which is why p_phone moved
+  -- here from before p_joining_date (SYSCERT_AUDIT_2026-08-02.md High #23;
+  -- 063_create_employee_with_job_v2.sql already applies this same fix)
+  p_phone             TEXT    DEFAULT NULL,
   p_effective_from    DATE    DEFAULT NULL,  -- falls back to p_joining_date
   p_department_id     UUID    DEFAULT NULL,
   p_designation_id    UUID    DEFAULT NULL,
