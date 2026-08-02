@@ -208,18 +208,25 @@ export default async function epfRoutes(fastify: FastifyInstance) {
       return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
     }
 
-    let q = fastify.supabase
-      .from('epf_contributions')
-      .select('*, employees(id, first_name, last_name, employee_code)')
-      .eq('tenant_id', req.tenantId)
-      .order('contribution_month', { ascending: false })
-
-    if (parsed.data.month) q = q.eq('contribution_month', parsed.data.month)
-    if (parsed.data.employee_id) q = q.eq('employee_id', parsed.data.employee_id)
-
-    const { data, error } = await q
-    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch EPF contributions')
-    return reply.send({ data: data ?? [] })
+    // fetchAllRows(): a plain .select() with no .range() silently truncates at
+    // PostgREST's 1,000-row ceiling for tenants with more than 1,000 EPF
+    // contribution rows (SYSCERT_AUDIT_2026-08-02.md C6).
+    let data: any[]
+    try {
+      data = await fetchAllRows((from, to) => {
+        let q = fastify.supabase
+          .from('epf_contributions')
+          .select('*, employees(id, first_name, last_name, employee_code)')
+          .eq('tenant_id', req.tenantId)
+          .order('contribution_month', { ascending: false })
+        if (parsed.data.month) q = q.eq('contribution_month', parsed.data.month)
+        if (parsed.data.employee_id) q = q.eq('employee_id', parsed.data.employee_id)
+        return q.range(from, to)
+      })
+    } catch (error) {
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch EPF contributions')
+    }
+    return reply.send({ data })
   })
 
   // ── POST /payroll/statutory/epf/contributions/compute ────────────────────────
@@ -704,15 +711,24 @@ export default async function epfRoutes(fastify: FastifyInstance) {
   fastify.get('/export/:month', { preHandler: [fastify.authenticate, requireHrAdmin] }, async (req: any, reply) => {
     const { month } = req.params as { month: string }
 
-    const { data, error } = await fastify.supabase
-      .from('epf_contributions')
-      .select('*, employees(employee_code, first_name, last_name)')
-      .eq('tenant_id', req.tenantId)
-      .eq('contribution_month', month)
+    // fetchAllRows(): the EPFO ECR export must include every employee's row —
+    // a plain .select() with no .range() silently truncates at PostgREST's
+    // 1,000-row ceiling for tenants above 1,000 employees (SYSCERT_AUDIT_2026-08-02.md C6).
+    let data: any[]
+    try {
+      data = await fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('epf_contributions')
+          .select('*, employees(employee_code, first_name, last_name)')
+          .eq('tenant_id', req.tenantId)
+          .eq('contribution_month', month)
+          .range(from, to),
+      )
+    } catch (error) {
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch EPF export data')
+    }
 
-    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch EPF export data')
-
-    const ecr = (data ?? []).map((row: any) => ({
+    const ecr = data.map((row: any) => ({
       uan: null,
       employee_code: row.employees?.employee_code ?? null,
       name: row.employees ? `${row.employees.first_name} ${row.employees.last_name}` : null,

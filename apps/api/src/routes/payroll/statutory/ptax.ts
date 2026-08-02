@@ -357,17 +357,24 @@ export default async function ptaxRoutes(fastify: FastifyInstance) {
       return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
     }
 
-    let q = fastify.supabase
-      .from('ptax_contributions')
-      .select('*')
-      .eq('tenant_id', req.tenantId)
-
-    if (parsed.data.month) q = q.eq('contribution_month', parsed.data.month)
-    if (parsed.data.employee_id) q = q.eq('employee_id', parsed.data.employee_id)
-
-    const { data, error } = await q
-    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch P-Tax contributions')
-    return reply.send({ data: data ?? [] })
+    // fetchAllRows(): a plain .select() with no .range() silently truncates at
+    // PostgREST's 1,000-row ceiling for tenants with more than 1,000 P-Tax
+    // contribution rows (SYSCERT_AUDIT_2026-08-02.md C6).
+    let data: any[]
+    try {
+      data = await fetchAllRows((from, to) => {
+        let q = fastify.supabase
+          .from('ptax_contributions')
+          .select('*')
+          .eq('tenant_id', req.tenantId)
+        if (parsed.data.month) q = q.eq('contribution_month', parsed.data.month)
+        if (parsed.data.employee_id) q = q.eq('employee_id', parsed.data.employee_id)
+        return q.range(from, to)
+      })
+    } catch (error) {
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch P-Tax contributions')
+    }
+    return reply.send({ data })
   })
 
   // ── POST /payroll/statutory/ptax/contributions/compute ───────────────────────

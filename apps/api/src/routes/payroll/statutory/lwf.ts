@@ -239,16 +239,25 @@ export default async function lwfRoutes(fastify: FastifyInstance) {
   // ── GET /payroll/statutory/lwf/contributions ──────────────────────────────────
   fastify.get('/contributions', { preHandler: [fastify.authenticate, requireHrAdmin] }, async (req: any, reply) => {
     const { month, employee_id } = (req.query ?? {}) as { month?: string; employee_id?: string }
-    let q = fastify.supabase
-      .from('lwf_contributions')
-      .select('*')
-      .eq('tenant_id', req.tenantId)
-      .order('contribution_month', { ascending: false })
-    if (month)       q = q.eq('contribution_month', month)
-    if (employee_id) q = q.eq('employee_id', employee_id)
-    const { data, error } = await q
-    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch LWF contributions')
-    return reply.send({ data: data ?? [] })
+    // fetchAllRows(): a plain .select() with no .range() silently truncates at
+    // PostgREST's 1,000-row ceiling for tenants with more than 1,000 LWF
+    // contribution rows (SYSCERT_AUDIT_2026-08-02.md C6).
+    let data: any[]
+    try {
+      data = await fetchAllRows((from, to) => {
+        let q = fastify.supabase
+          .from('lwf_contributions')
+          .select('*')
+          .eq('tenant_id', req.tenantId)
+          .order('contribution_month', { ascending: false })
+        if (month)       q = q.eq('contribution_month', month)
+        if (employee_id) q = q.eq('employee_id', employee_id)
+        return q.range(from, to)
+      })
+    } catch (error) {
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch LWF contributions')
+    }
+    return reply.send({ data })
   })
 
   // ── POST /payroll/statutory/lwf/contributions/compute ────────────────────────

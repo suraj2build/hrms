@@ -16,6 +16,7 @@ import { HR_ADMIN_ROLES } from '../../../lib/rbac.js'
 import { fetchTenantTz } from '../../../lib/attendance-engine.js'
 import { getLocalDate } from '../../../lib/org-context.js'
 import { serverError, ErrorCode } from '../../../lib/api-errors.js'
+import { fetchAllRows } from '../../../lib/supabase-paginate.js'
 
 // DB enum values — must match migration 098_tds_foundation.sql CHECK constraint
 const DECLARATION_CATEGORIES = [
@@ -629,26 +630,33 @@ ${section('Part D — Loss from House Property (Home Loan Interest)', hlDecls,
       status:         z.string().optional(),
     }).safeParse(req.query)
 
-    let q = fastify.supabase
-      .from('tax_declarations')
-      .select(`
-        *,
-        employees!inner (
-          id,
-          employee_code,
-          profiles!profile_id (id, full_name)
-        ),
-        declaration_proofs (id, file_name, document_state, uploaded_at)
-      `)
-      .eq('tenant_id', req.tenantId)
-      .order('created_at', { ascending: false })
-
-    if (qs.data?.financial_year) q = q.eq('financial_year', qs.data.financial_year)
-    if (qs.data?.status)         q = q.eq('status', qs.data.status)
-
-    const { data, error } = await q
-    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch declarations')
-    return reply.send({ data: data ?? [] })
+    // fetchAllRows(): a plain .select() with no .range() silently truncates at
+    // PostgREST's 1,000-row ceiling for tenants with more than 1,000 tax
+    // declaration rows (SYSCERT_AUDIT_2026-08-02.md C6).
+    let data: any[]
+    try {
+      data = await fetchAllRows((from, to) => {
+        let q = fastify.supabase
+          .from('tax_declarations')
+          .select(`
+            *,
+            employees!inner (
+              id,
+              employee_code,
+              profiles!profile_id (id, full_name)
+            ),
+            declaration_proofs (id, file_name, document_state, uploaded_at)
+          `)
+          .eq('tenant_id', req.tenantId)
+          .order('created_at', { ascending: false })
+        if (qs.data?.financial_year) q = q.eq('financial_year', qs.data.financial_year)
+        if (qs.data?.status)         q = q.eq('status', qs.data.status)
+        return q.range(from, to)
+      })
+    } catch (error) {
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch declarations')
+    }
+    return reply.send({ data })
   })
 
   // GET /payroll/statutory/tds/declarations/:employeeId — by specific employee
