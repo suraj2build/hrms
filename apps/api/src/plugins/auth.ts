@@ -48,6 +48,21 @@ function isTenantBlocked(tenant: { status: string; trial_ends_at: string | null 
   return { blocked, trialExpired }
 }
 
+/**
+ * SYSCERT_AUDIT_2026-08-02.md Medium finding: the write-gate's `/billing`
+ * and `/support` exemptions used a raw `url.startsWith('/billing')`, which
+ * also matches any *unrelated* route that merely shares the prefix (e.g. a
+ * future `/billingHistory` or `/billing-something` route would silently
+ * bypass the subscription gate too). Match on the path segment instead —
+ * exactly `/billing`/`/support`, or a sub-path of it — not any string with
+ * that prefix.
+ */
+function isExemptFromWriteGate(url: string): boolean {
+  const path = url.split('?')[0]
+  return path === '/billing' || path.startsWith('/billing/') ||
+    path === '/support' || path.startsWith('/support/')
+}
+
 function verifySupabaseJwt(token: string, secret: string): { sub: string } | null {
   try {
     const parts = token.split('.')
@@ -141,7 +156,7 @@ const authPlugin: FastifyPluginAsync = async (fastify) => {
         // can still reach the billing page.
         const hitMethod = request.method
         const hitIsWrite = hitMethod === 'POST' || hitMethod === 'PUT' || hitMethod === 'PATCH' || hitMethod === 'DELETE'
-        if (hitIsWrite && !request.url.startsWith('/billing') && !request.url.startsWith('/support')) {
+        if (hitIsWrite && !isExemptFromWriteGate(request.url)) {
           const { data: freshTenant, error: tenantErr } = await fastify.supabase
             .from('tenants')
             .select('status, trial_ends_at')
@@ -234,7 +249,7 @@ const authPlugin: FastifyPluginAsync = async (fastify) => {
       // unaffected.
       const method = request.method
       const isWrite = method === 'POST' || method === 'PUT' || method === 'PATCH' || method === 'DELETE'
-      if (isWrite && !request.url.startsWith('/billing') && !request.url.startsWith('/support')) {
+      if (isWrite && !isExemptFromWriteGate(request.url)) {
         // Reuse the tenant row already fetched above — saves a second round-trip
         // on write requests that hit this (cache-miss) path.
         if (tenant) {
