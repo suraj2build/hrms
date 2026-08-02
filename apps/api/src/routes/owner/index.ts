@@ -929,8 +929,12 @@ export default async function ownerRoutes(fastify: FastifyInstance) {
     return reply.send({ data })
   })
 
-  // POST /owner/api-keys
-  fastify.post('/owner/api-keys', ownerAuth, async (req: any, reply) => {
+  // POST /owner/api-keys — mints a live tenant credential; same tier as the
+  // other tenant-lifecycle mutations below (SYSCERT_AUDIT_2026-08-02.md Medium
+  // finding: this previously ran under the looser `ownerAuth`, letting any
+  // active admin-role platform user — not just `owner` — mint working API
+  // keys into any tenant).
+  fastify.post('/owner/api-keys', ownerOnlyAuth, async (req: any, reply) => {
     const body     = req.body as any
     const tenantId = body.tenant_id
     const name     = String(body.name ?? 'Default').trim()
@@ -971,8 +975,8 @@ export default async function ownerRoutes(fastify: FastifyInstance) {
     })
   })
 
-  // DELETE /owner/api-keys/:id — revoke (soft delete)
-  fastify.delete('/owner/api-keys/:id', ownerAuth, async (req: any, reply) => {
+  // DELETE /owner/api-keys/:id — revoke (soft delete); same tier as POST above
+  fastify.delete('/owner/api-keys/:id', ownerOnlyAuth, async (req: any, reply) => {
     const { id } = req.params
     const { data, error } = await fastify.supabase
       .from('tenant_api_keys')
