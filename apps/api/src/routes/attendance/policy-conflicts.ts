@@ -11,6 +11,7 @@ import { fetchAllRows } from '../../lib/supabase-paginate.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { fetchTenantTz } from '../../lib/attendance-engine.js'
 import { getLocalDate } from '../../lib/org-context.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 const dateRe  = /^\d{4}-\d{2}-\d{2}$/
 const monthRe = /^\d{4}-\d{2}$/
@@ -90,8 +91,7 @@ export default async function attendancePolicyConflictsRoute(fastify: FastifyIns
     const { data, error, count } = await q
 
     if (error) {
-      req.log.error({ err: error }, 'attendance_policy_conflict_log query failed')
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch policy conflicts' })
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch policy conflicts')
     }
 
     const rows = ((data ?? []) as Array<Record<string, any>>).map((r) => {
@@ -141,8 +141,7 @@ export default async function attendancePolicyConflictsRoute(fastify: FastifyIns
           .range(rangeFrom, rangeTo),
       ) as Array<{ conflict_type: string; severity: string; payroll_impacting: boolean }>
     } catch (error) {
-      req.log.error({ err: error }, 'policy_conflict summary query failed')
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch policy conflict summary' })
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch policy conflict summary')
     }
 
     const by_type: Record<string, number>     = {}
@@ -207,8 +206,7 @@ export default async function attendancePolicyConflictsRoute(fastify: FastifyIns
       .order('created_at', { ascending: false })
 
     if (error) {
-      req.log.error({ err: error }, 'policy conflicts employee query failed')
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch policy conflicts' })
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch policy conflicts')
     }
 
     const rows = (data ?? []) as Array<{
