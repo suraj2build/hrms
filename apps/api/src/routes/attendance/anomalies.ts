@@ -94,9 +94,7 @@ export default async function attendanceAnomaliesRoute(fastify: FastifyInstance)
 
     const { data, error, count } = await q
 
-    if (error) {
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch anomalies' })
-    }
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch anomalies')
 
     return reply.send({ data: data ?? [], total: count ?? 0, limit, offset })
   })
@@ -135,8 +133,7 @@ export default async function attendanceAnomaliesRoute(fastify: FastifyInstance)
           .range(from, to),
       )
     } catch (error) {
-      req.log.error({ err: error }, 'anomaly summary query failed')
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch anomaly summary' })
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch anomaly summary')
     }
 
     // ── Fetch department info for all affected employees in one query ─────────────
@@ -329,10 +326,7 @@ export default async function attendanceAnomaliesRoute(fastify: FastifyInstance)
 
     const { data, error, count } = await q
 
-    if (error) {
-      req.log.error({ err: error }, 'attendance_anomalies query failed')
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch anomalies' })
-    }
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch anomalies')
 
     // Step 2 — fetch employee names for the page of results (at most `limit` unique IDs).
     type AnomalyRow = { id: string; date: string; type: string; message: string; severity: string; resolved: boolean; created_at: string; updated_at: string; resolved_at: string | null; employee_id: string | null }
@@ -394,10 +388,7 @@ export default async function attendanceAnomaliesRoute(fastify: FastifyInstance)
       .select('id, resolved, resolved_at, employee_id, date, tenant_id, type')
       .maybeSingle()
 
-    if (error) {
-      req.log.error({ err: error, anomaly_id: id }, 'anomaly resolve failed')
-      return reply.code(500).send({ error: 'UPDATE_FAILED', message: 'Failed to resolve anomaly' })
-    }
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to resolve anomaly')
 
     if (!data) {
       return reply.code(404).send({
@@ -511,10 +502,7 @@ export default async function attendanceAnomaliesRoute(fastify: FastifyInstance)
       // Select fields needed for recompute — employee_id and date are required
       .select('id, employee_id, date, tenant_id, type')
 
-    if (error) {
-      req.log.error({ err: error }, 'bulk anomaly resolve failed')
-      return reply.code(500).send({ error: 'UPDATE_FAILED', message: 'Failed to bulk-resolve anomalies' })
-    }
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to bulk-resolve anomalies')
 
     const resolvedRows = (data ?? []) as Array<{
       id: string
