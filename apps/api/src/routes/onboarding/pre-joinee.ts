@@ -897,7 +897,7 @@ export default async function preJoineeRoutes(fastify: FastifyInstance) {
 
     // 5. Failure → 500.
     if (!sessionId) {
-      return reply.code(500).send({ error: 'MERGE_FAILED' })
+      return serverError(req, reply, null, ErrorCode.INSERT_FAILED, 'Failed to merge invitation into onboarding session')
     }
 
     return reply.send({ data: { session_id: sessionId } })
