@@ -94,8 +94,7 @@ export default async function rosterCalendarRoutes(fastify: FastifyInstance) {
         },
       })
     } catch (err: unknown) {
-      req.log.error({ err, employeeId, month }, '[roster-calendar] engine error')
-      return reply.code(500).send({ error: 'ROSTER_CALENDAR_ERROR', message: 'Failed to build roster calendar' })
+      return serverError(req, reply, err, ErrorCode.COMPUTE_FAILED, 'Failed to build roster calendar')
     }
   })
 
@@ -133,8 +132,7 @@ export default async function rosterCalendarRoutes(fastify: FastifyInstance) {
 
       return reply.send({ data: results, month })
     } catch (err: unknown) {
-      req.log.error({ err, month, count: employee_ids.length }, '[roster-calendar] bulk engine error')
-      return reply.code(500).send({ error: 'ROSTER_CALENDAR_ERROR', message: 'Failed to build roster calendar' })
+      return serverError(req, reply, err, ErrorCode.COMPUTE_FAILED, 'Failed to build roster calendar')
     }
   })
 
@@ -157,8 +155,7 @@ export default async function rosterCalendarRoutes(fastify: FastifyInstance) {
 
       return reply.send({ data: { ...day, shift_expectation: expectation, fatigue_detail: fatigue } })
     } catch (err: unknown) {
-      req.log.error({ err, employeeId, date }, '[roster-calendar] engine error')
-      return reply.code(500).send({ error: 'ROSTER_CALENDAR_ERROR', message: 'Failed to resolve roster day' })
+      return serverError(req, reply, err, ErrorCode.COMPUTE_FAILED, 'Failed to resolve roster day')
     }
   })
 
@@ -174,8 +171,7 @@ export default async function rosterCalendarRoutes(fastify: FastifyInstance) {
       const count = await countRosterWorkingDays(supabase, tenantId, employeeId, month)
       return reply.send({ data: { employee_id: employeeId, month, working_days: count } })
     } catch (err: unknown) {
-      req.log.error({ err, employeeId, month }, '[roster-calendar] engine error')
-      return reply.code(500).send({ error: 'ROSTER_CALENDAR_ERROR', message: 'Failed to count working days' })
+      return serverError(req, reply, err, ErrorCode.COMPUTE_FAILED, 'Failed to count working days')
     }
   })
 
@@ -516,8 +512,7 @@ export default async function rosterCalendarRoutes(fastify: FastifyInstance) {
       const explanation = await explainRosterDay(supabase, tenantId, employeeId, date)
       return reply.send({ data: explanation })
     } catch (err: unknown) {
-      req.log.error({ err, employeeId, date }, '[roster-calendar] engine error')
-      return reply.code(500).send({ error: 'ROSTER_CALENDAR_ERROR', message: 'Failed to explain roster simulation' })
+      return serverError(req, reply, err, ErrorCode.COMPUTE_FAILED, 'Failed to explain roster simulation')
     }
   })
 
@@ -549,8 +544,7 @@ export default async function rosterCalendarRoutes(fastify: FastifyInstance) {
         },
       })
     } catch (err: unknown) {
-      req.log.error({ err, employeeId, month }, '[roster-calendar] engine error')
-      return reply.code(500).send({ error: 'ROSTER_CALENDAR_ERROR', message: 'Failed to validate roster simulation' })
+      return serverError(req, reply, err, ErrorCode.COMPUTE_FAILED, 'Failed to validate roster simulation')
     }
   })
 
@@ -560,8 +554,7 @@ export default async function rosterCalendarRoutes(fastify: FastifyInstance) {
     try {
       return reply.send({ data: generateTestDataset() })
     } catch (err: unknown) {
-      req.log.error({ err }, '[roster-calendar] engine error')
-      return reply.code(500).send({ error: 'ROSTER_CALENDAR_ERROR', message: 'Failed to generate roster test dataset' })
+      return serverError(req, reply, err, ErrorCode.COMPUTE_FAILED, 'Failed to generate roster test dataset')
     }
   })
 
@@ -611,8 +604,7 @@ export default async function rosterCalendarRoutes(fastify: FastifyInstance) {
         allCalendars.push(...results)
       }
     } catch (err: unknown) {
-      req.log.error({ err, month }, '[roster-calendar] coverage engine error')
-      return reply.code(500).send({ error: 'ROSTER_CALENDAR_ERROR', message: 'Failed to calculate roster coverage' })
+      return serverError(req, reply, err, ErrorCode.COMPUTE_FAILED, 'Failed to calculate roster coverage')
     }
 
     const totalWorking = allCalendars.reduce((s, c) => s + c.working_days, 0)
