@@ -13,6 +13,7 @@ import { z } from 'zod'
 import { normalizeAttendanceStatus } from '../../lib/attendance-utils.js'
 import { HR_ADMIN_ROLES, MANAGER_ROLES } from '../../lib/rbac.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 const MUSTER_ROW_LIMIT = 200_000
 
@@ -104,8 +105,7 @@ export default async function musterRoute(fastify: FastifyInstance) {
           return q as any
         })
       } catch (empError: any) {
-        req.log.error({ err: empError }, 'muster employees query failed')
-        return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch employees' })
+        return serverError(req, reply, empError, ErrorCode.QUERY_FAILED, 'Failed to fetch employees')
       }
 
       // Department filter — post-fetch, not .eq('job_history.department_id', …).
@@ -142,8 +142,7 @@ export default async function musterRoute(fastify: FastifyInstance) {
             .range(from, to) as any,
         )
       } catch (dailyError: any) {
-        req.log.error({ err: dailyError }, 'muster daily query failed')
-        return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch attendance records' })
+        return serverError(req, reply, dailyError, ErrorCode.QUERY_FAILED, 'Failed to fetch attendance records')
       }
 
       // Build a lookup: employeeId → date → daily row
@@ -262,8 +261,7 @@ export default async function musterRoute(fastify: FastifyInstance) {
         .maybeSingle()
 
       if (error) {
-        req.log.error({ err: error }, 'muster/latest-month query failed')
-        return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch latest month' })
+        return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch latest month')
       }
 
       const currentMonth = new Date().toISOString().slice(0, 7)  // YYYY-MM
