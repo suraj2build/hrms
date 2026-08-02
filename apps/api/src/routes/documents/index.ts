@@ -97,8 +97,7 @@ export default async function documentRoutes(fastify: FastifyInstance) {
         return query.range(from, to)
       })
     } catch (err) {
-      req.log.error({ err }, 'documents list query failed')
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch documents' })
+      return serverError(req, reply, err, ErrorCode.QUERY_FAILED, 'Failed to fetch documents')
     }
 
     // Attach signed URLs in parallel (best-effort — null if storage path invalid)
