@@ -126,13 +126,18 @@ export function computeEPF(input: EPFInput, config: EPFConfig): EPFResult {
     `EDLI (${config.edliRatePct}%, cap=${config.edliCap}): raw=${edliRaw} → applied=${edliContribution}`,
   )
 
-  // ── Admin charges (floored so a small wage base doesn't zero out the admin charge) ──
-  const adminChargesRaw = round2(cappedPfWages * config.adminChargesPct / 100)
-  const adminCharges = Math.max(adminChargesRaw, config.edliFloor > 0 ? config.edliFloor : 0)
-  traceSteps.push(
-    `Admin charges (${config.adminChargesPct}%, floor=${config.edliFloor}): ` +
-    `raw=${adminChargesRaw} → applied=${adminCharges}`,
-  )
+  // ── Admin charges (proportional only — no per-employee floor) ────────────────
+  // The statutory admin-charge floor (config.edliFloor) applies once to an
+  // establishment's *total* monthly admin charges, not to each employee's
+  // individual share. Flooring here, per employee, overstated the aggregate
+  // by floor×employeeCount whenever most employees' raw share fell under the
+  // floor (e.g. 200 employees × ₹15 raw → floored to ₹25 each = ₹5,000
+  // instead of the correct establishment-level ₹3,000). The floor is applied
+  // once, to the summed total, at the call sites that aggregate this across
+  // an establishment (payroll/exports.ts, payroll/filing-pack.ts,
+  // datasets/statutory.ts).
+  const adminCharges = round2(cappedPfWages * config.adminChargesPct / 100)
+  traceSteps.push(`Admin charges (${config.adminChargesPct}%): ${cappedPfWages} × ${config.adminChargesPct}% = ${adminCharges}`)
 
   // ── Total employer contribution ───────────────────────────────────────────────
   const totalEmployerContribution = round2(employerPf + employerEps + edliContribution)

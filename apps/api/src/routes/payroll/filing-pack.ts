@@ -803,8 +803,10 @@ export default async function filingPackRoutes(fastify: FastifyInstance) {
       ptaxByState[r.state_code] = r2((ptaxByState[r.state_code] ?? 0) + (r.ptax_amount ?? 0))
     }
 
-    // Admin charges = 0.50% of aggregate PF wages (EPFO standard rate)
-    const epfAdminCharges = r2(sum(epfRows, 'pf_wages') * 0.005)
+    // Admin charges = 0.50% of aggregate PF wages (EPFO standard rate),
+    // floored at the establishment level (statutory default ₹25 — matches
+    // DEFAULT_EPF_CONFIG.edliFloor) — not per employee.
+    const epfAdminCharges = Math.max(r2(sum(epfRows, 'pf_wages') * 0.005), epfRows.length > 0 ? 25 : 0)
 
     const challan = {
       month,

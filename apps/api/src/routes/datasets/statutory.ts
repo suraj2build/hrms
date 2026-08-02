@@ -355,7 +355,9 @@ export default async function statutoryDataset(fastify: FastifyInstance) {
     const sumEmployerEps    = r2(epfRows.reduce((s: number, r: any) => s + (r.employer_eps ?? 0), 0))
     const sumEdli           = r2(epfRows.reduce((s: number, r: any) => s + (r.edli_contribution ?? 0), 0))
     const sumPfWages        = r2(epfRows.reduce((s: number, r: any) => s + (r.pf_wages ?? 0), 0))
-    const adminCharges      = r2(sumPfWages * 0.005)
+    // Floored at the establishment level (statutory default ₹25 — matches
+    // DEFAULT_EPF_CONFIG.edliFloor) — not per employee.
+    const adminCharges      = Math.max(r2(sumPfWages * 0.005), epfRows.length > 0 ? 25 : 0)
     const epfTotalRemittance = r2(sumEpfEmpContrib + sumEmployerPf + sumEmployerEps + sumEdli + adminCharges)
 
     const sumEsiEmpContrib   = r2(esiRows.reduce((s: number, r: any) => s + (r.employee_contribution ?? 0), 0))

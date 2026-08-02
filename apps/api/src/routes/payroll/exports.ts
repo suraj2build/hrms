@@ -502,12 +502,14 @@ export default async function payrollExportsRoutes(fastify: FastifyInstance) {
       ptaxByState[r.state_code] = r2((ptaxByState[r.state_code] ?? 0) + (r.ptax_amount ?? 0))
     }
 
-    // Admin charges = 0.50% of aggregate PF wages (EPFO standard rate) —
-    // epf_contributions has no admin_charges column at all, so
-    // sum(epfRows, 'admin_charges') always evaluated to 0, understating
-    // every EPF/grand total in this challan by the real admin-charge amount.
-    // Matches the correct pattern already used in filing-pack.ts.
-    const epfAdminCharges = r2(sum(epfRows, 'pf_wages') * 0.005)
+    // Admin charges = 0.50% of aggregate PF wages (EPFO standard rate),
+    // floored at the establishment level (statutory default ₹25 — matches
+    // DEFAULT_EPF_CONFIG.edliFloor) — not per employee. epf_contributions
+    // has no admin_charges column at all, so sum(epfRows, 'admin_charges')
+    // always evaluated to 0, understating every EPF/grand total in this
+    // challan by the real admin-charge amount. Matches the correct pattern
+    // already used in filing-pack.ts.
+    const epfAdminCharges = Math.max(r2(sum(epfRows, 'pf_wages') * 0.005), epfRows.length > 0 ? 25 : 0)
 
     const challan = {
       month,
