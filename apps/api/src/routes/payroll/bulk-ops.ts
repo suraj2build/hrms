@@ -271,67 +271,91 @@ export default async function bulkOpsRoutes(fastify: FastifyInstance) {
       .eq('status', 'PENDING')
     if (appsErr) return serverError(req, reply, appsErr, ErrorCode.QUERY_FAILED, 'Failed to fetch leave requests')
 
-    const approvedIds: string[] = []
-    const advancedIds: string[] = []
-    const failedIds:   Array<{ id: string; reason: string }> = []
     const skipped = application_ids.filter(id => !(apps ?? []).find((a: any) => a.id === id))
 
+    // Phase 1: compute every application's affected months, then batch-check
+    // freeze status ONCE for the whole batch's distinct months (the freeze-log
+    // filter is tenant+month scoped, not per-employee, so this is a single
+    // query regardless of batch size) — was previously a SELECT per
+    // application×month (up to 50×12 round trips for a full year-spanning
+    // batch), an N+1 nested inside the already-sequential per-application loop.
+    // Pure UTC millisecond arithmetic — mixing a UTC-parsed Date with local
+    // getDate()/setDate() mutators would drift by a day across a server-TZ
+    // DST transition falling inside a leave range.
+    const monthsByApp = new Map<string, string[]>()
+    const allMonths = new Set<string>()
     for (const app of (apps ?? []) as any[]) {
-      // Route through the full approval service — inherits validateApprover,
-      // self-approval guard, atomic balance deduction, and attendance_daily upsert.
-      const result = await approveLeaveRequest(fastify.supabase, {
-        tenantId:  req.tenantId,
-        requestId: app.id,
-        ctx: { approverId: req.userId, approverRole: req.userRole, tenantId: req.tenantId },
-      })
-
-      if (!result.ok) {
-        failedIds.push({ id: app.id, reason: result.error.message })
-        continue
-      }
-
-      // Multi-level chain: an intermediate approval advances a level but the leave is
-      // still PENDING — do NOT count it as approved and do NOT create payroll
-      // adjustments for a not-yet-approved leave.
-      if (result.value.status !== 'APPROVED') {
-        advancedIds.push(app.id)
-        continue
-      }
-
-      // Frozen-period payroll adjustment (extra logic beyond the approval service).
-      // Pure UTC millisecond arithmetic — mixing a UTC-parsed Date with local
-      // getDate()/setDate() mutators would drift by a day across a server-TZ
-      // DST transition falling inside the leave range.
       const fromMs = new Date(app.from_date + 'T00:00:00.000Z').getTime()
       const toMs   = new Date(app.to_date   + 'T00:00:00.000Z').getTime()
       const dates: string[] = []
       for (let t = fromMs; t <= toMs; t += 24 * 60 * 60 * 1000) {
         dates.push(new Date(t).toISOString().slice(0, 10))
       }
-
       const affectedMonths = [...new Set(dates.map(d => d.slice(0, 7)))]
-      for (const month of affectedMonths) {
-        const { data: freeze, error: freezeErr } = await fastify.supabase
-          .from('payroll_freeze_log')
-          .select('id')
-          .eq('tenant_id', req.tenantId)
-          .eq('freeze_month', month)
-          .eq('action', 'freeze')
-          .is('unfrozen_at', null)
-          .limit(1)
-          .maybeSingle()
+      monthsByApp.set(app.id, affectedMonths)
+      affectedMonths.forEach(m => allMonths.add(m))
+    }
 
-        if (freezeErr) {
-          // Leave approval already committed — do not block/revert it, but a
-          // failed freeze check must not silently look like "not frozen" and
-          // skip a required LOP adjustment for a locked period.
-          req.log.warn(
-            { err: freezeErr, employeeId: app.employee_id, month, leaveRequestId: app.id, tenantId: req.tenantId },
-            '[payroll] failed to check freeze status for bulk-approved leave — LOP adjustment may be missing',
-          )
+    let frozenMonths = new Set<string>()
+    if (allMonths.size > 0) {
+      const { data: freezes, error: freezeErr } = await fastify.supabase
+        .from('payroll_freeze_log')
+        .select('freeze_month')
+        .eq('tenant_id', req.tenantId)
+        .in('freeze_month', [...allMonths])
+        .eq('action', 'freeze')
+        .is('unfrozen_at', null)
+
+      if (freezeErr) {
+        // Leave approvals below already commit independently of this check — do
+        // not block/revert them, but a failed freeze check must not silently
+        // look like "nothing is frozen" and skip required LOP adjustments.
+        req.log.warn(
+          { err: freezeErr, months: [...allMonths], tenantId: req.tenantId },
+          '[payroll] failed to batch-check freeze status for bulk leave approval — LOP adjustments may be missing',
+        )
+      } else {
+        frozenMonths = new Set((freezes ?? []).map((f: any) => f.freeze_month))
+      }
+    }
+
+    // Phase 2: each application is fully row-scoped (its own approveLeaveRequest()
+    // call, its own payroll_adjustments inserts) — no shared/aggregate state
+    // touched per iteration now that the freeze lookup is batched above, so
+    // chunked parallelism is safe. Same convention as poll-scheduler.ts's
+    // SEND_CHUNK_SIZE / leave-reconciliation.ts's REPLAY_CHUNK_SIZE.
+    const BULK_APPROVE_CHUNK_SIZE = 25
+    const approvedIds: string[] = []
+    const advancedIds: string[] = []
+    const failedIds:   Array<{ id: string; reason: string }> = []
+
+    const appList = (apps ?? []) as any[]
+    for (let i = 0; i < appList.length; i += BULK_APPROVE_CHUNK_SIZE) {
+      const chunk = appList.slice(i, i + BULK_APPROVE_CHUNK_SIZE)
+      const chunkResults = await Promise.all(chunk.map(async (app) => {
+        // Route through the full approval service — inherits validateApprover,
+        // self-approval guard, atomic balance deduction, and attendance_daily upsert.
+        const result = await approveLeaveRequest(fastify.supabase, {
+          tenantId:  req.tenantId,
+          requestId: app.id,
+          ctx: { approverId: req.userId, approverRole: req.userRole, tenantId: req.tenantId },
+        })
+
+        if (!result.ok) {
+          return { kind: 'failed' as const, id: app.id, reason: result.error.message }
         }
 
-        if (freeze) {
+        // Multi-level chain: an intermediate approval advances a level but the leave is
+        // still PENDING — do NOT count it as approved and do NOT create payroll
+        // adjustments for a not-yet-approved leave.
+        if (result.value.status !== 'APPROVED') {
+          return { kind: 'advanced' as const, id: app.id }
+        }
+
+        // Frozen-period payroll adjustment (extra logic beyond the approval service).
+        const affectedMonths = monthsByApp.get(app.id) ?? []
+        for (const month of affectedMonths) {
+          if (!frozenMonths.has(month)) continue
           const { error: adjError } = await fastify.supabase.from('payroll_adjustments').insert({
             tenant_id:       req.tenantId,
             employee_id:     app.employee_id,
@@ -353,9 +377,15 @@ export default async function bulkOpsRoutes(fastify: FastifyInstance) {
             )
           }
         }
-      }
 
-      approvedIds.push(app.id)
+        return { kind: 'approved' as const, id: app.id }
+      }))
+
+      for (const r of chunkResults) {
+        if (r.kind === 'failed')        failedIds.push({ id: r.id, reason: r.reason })
+        else if (r.kind === 'advanced') advancedIds.push(r.id)
+        else                            approvedIds.push(r.id)
+      }
     }
 
     return reply.send({
