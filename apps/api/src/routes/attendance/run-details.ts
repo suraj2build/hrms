@@ -14,6 +14,7 @@
  */
 import type { FastifyInstance } from 'fastify'
 import { z }                   from 'zod'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 export default async function runDetailsRoute(fastify: FastifyInstance) {
   const auth = { preHandler: [fastify.authenticate] }
@@ -40,8 +41,7 @@ export default async function runDetailsRoute(fastify: FastifyInstance) {
       .limit(limit)
 
     if (error) {
-      req.log.error({ err: error, module: 'attendance', route: 'runs-list' }, 'query failed')
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Could not fetch processing runs' })
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Could not fetch processing runs')
     }
 
     // Derive `status` from columns (no explicit status column in schema)
@@ -76,8 +76,7 @@ export default async function runDetailsRoute(fastify: FastifyInstance) {
         .maybeSingle()
 
       if (error) {
-        req.log.error({ err: error, module: 'attendance', route: 'run-details', run_id: runId }, 'query failed')
-        return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Could not fetch run details' })
+        return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Could not fetch run details')
       }
 
       if (!data) {
