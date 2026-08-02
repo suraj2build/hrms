@@ -9,6 +9,7 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 const dateRe  = /^\d{4}-\d{2}-\d{2}$/
 const monthRe = /^\d{4}-\d{2}$/
@@ -93,8 +94,7 @@ export default async function attendanceConfidenceRoute(fastify: FastifyInstance
       .order('date', { ascending: false })
 
     if (error) {
-      req.log.error({ err: error }, 'confidence employee query failed')
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch confidence history' })
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch confidence history')
     }
 
     const rows = (data ?? []) as Array<{
@@ -159,8 +159,7 @@ export default async function attendanceConfidenceRoute(fastify: FastifyInstance
           .range(rangeFrom, rangeTo),
       ) as Array<{ confidence_score: number | null; confidence_level: string | null }>
     } catch (error) {
-      req.log.error({ err: error }, 'confidence summary query failed')
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch confidence summary' })
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch confidence summary')
     }
 
     const by_level: Record<string, number> = { high: 0, medium: 0, low: 0, critical: 0 }
@@ -220,8 +219,7 @@ export default async function attendanceConfidenceRoute(fastify: FastifyInstance
     const { data, error } = await query
 
     if (error) {
-      req.log.error({ err: error }, 'confidence low query failed')
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch confidence issues' })
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch confidence issues')
     }
 
     // Group by employee and filter to those with >= 3 days
