@@ -17,6 +17,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 const querySchema = z.object({
   from:        z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
@@ -68,8 +69,7 @@ export default async function attendanceAuditRoute(fastify: FastifyInstance) {
     const { data, error, count } = await q
 
     if (error) {
-      req.log.error({ err: error }, 'attendance audit query failed')
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch audit log' })
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch audit log')
     }
 
     const rows = (data ?? []).map((r: any) => ({

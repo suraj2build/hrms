@@ -129,8 +129,7 @@ export default async function attendanceDebugRawRoute(fastify: FastifyInstance) 
           ),
         ]) as [EmpRow[], { employee_id: string }[]]
       } catch (err) {
-        req.log.error({ err }, 'debug-raw: employee/daily-emp fetch failed')
-        return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch employee data' })
+        return serverError(req, reply, err, ErrorCode.QUERY_FAILED, 'Failed to fetch employee data')
       }
 
       // ── Build status distribution from sample rows ───────────────────────────

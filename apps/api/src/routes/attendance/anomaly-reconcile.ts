@@ -95,7 +95,7 @@ export default async function anomalyReconcileRoute(fastify: FastifyInstance) {
           .range(from, to),
       ) as AnomalyRow[]
     } catch (aErr) {
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch anomalies' })
+      return serverError(req, reply, aErr, ErrorCode.QUERY_FAILED, 'Failed to fetch anomalies')
     }
 
     if (rows.length === 0) {

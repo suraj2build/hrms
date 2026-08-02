@@ -9,6 +9,7 @@
  */
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 const logSchema = z.object({
   employee_code: z.string().min(1).max(50),
@@ -73,14 +74,7 @@ export default async function ingestRoute(fastify: FastifyInstance) {
       .select('id')
 
     if (insertError) {
-      req.log.error(
-        { err: insertError, module: 'attendance', route: 'ingest', count: rows.length },
-        'raw log insert failed',
-      )
-      return reply.code(500).send({
-        error: 'INSERT_FAILED',
-        message: 'Failed to store attendance logs',
-      })
+      return serverError(req, reply, insertError, ErrorCode.INSERT_FAILED, 'Failed to store attendance logs')
     }
 
     const insertedCount = insertedRows?.length ?? 0

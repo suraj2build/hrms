@@ -10,6 +10,7 @@
  * null when the tenant has never triggered a processing run.
  */
 import type { FastifyInstance } from 'fastify'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 export default async function lastRunRoute(fastify: FastifyInstance) {
   fastify.get(
@@ -29,8 +30,7 @@ export default async function lastRunRoute(fastify: FastifyInstance) {
         .maybeSingle()
 
       if (error) {
-        req.log.error({ err: error, module: 'attendance', route: 'last-run' }, 'query failed')
-        return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Could not fetch last run' })
+        return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Could not fetch last run')
       }
 
       // Derive `status` (no explicit column in schema)
