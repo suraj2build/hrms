@@ -544,27 +544,42 @@ export default async function attendanceAnomaliesRoute(fastify: FastifyInstance)
       }
     }
 
+    // Each target is a unique employee_id+date recompute, row-scoped by
+    // definition — no shared/aggregate state touched per iteration, so
+    // chunked parallelism is safe. Same convention as poll-scheduler.ts's
+    // SEND_CHUNK_SIZE / leave-reconciliation.ts's REPLAY_CHUNK_SIZE.
+    const RECOMPUTE_CHUNK_SIZE = 25
     let recomputeAttempted = 0
     let recomputeFailed    = 0
     const failedAnomalyIds: string[] = []
 
-    for (const [key, { employee_id, date, tenant_id }] of recomputeTargets) {
-      recomputeAttempted++
-      try {
-        await recomputeRange(fastify.supabase, {
-          tenant_id,
-          employee_id,
-          from_date:  date,
-          to_date:    date,
-          changed_by: req.userId,
-        })
-      } catch (recomputeErr) {
-        recomputeFailed++
-        failedAnomalyIds.push(...(keyToAnomalyIds.get(key) ?? []))
-        req.log.warn(
-          { err: recomputeErr, employee_id, date },
-          'bulk anomaly resolve: attendance recompute failed — re-opening the anomaly so it is not falsely marked resolved',
-        )
+    const targetEntries = [...recomputeTargets.entries()]
+    for (let i = 0; i < targetEntries.length; i += RECOMPUTE_CHUNK_SIZE) {
+      const chunk = targetEntries.slice(i, i + RECOMPUTE_CHUNK_SIZE)
+      const chunkResults = await Promise.all(chunk.map(async ([key, { employee_id, date, tenant_id }]) => {
+        try {
+          await recomputeRange(fastify.supabase, {
+            tenant_id,
+            employee_id,
+            from_date:  date,
+            to_date:    date,
+            changed_by: req.userId,
+          })
+          return { key, ok: true as const }
+        } catch (recomputeErr) {
+          req.log.warn(
+            { err: recomputeErr, employee_id, date },
+            'bulk anomaly resolve: attendance recompute failed — re-opening the anomaly so it is not falsely marked resolved',
+          )
+          return { key, ok: false as const }
+        }
+      }))
+      for (const result of chunkResults) {
+        recomputeAttempted++
+        if (!result.ok) {
+          recomputeFailed++
+          failedAnomalyIds.push(...(keyToAnomalyIds.get(result.key) ?? []))
+        }
       }
     }
 

@@ -667,14 +667,24 @@ export default async function attendanceCorrectionsRoute(fastify: FastifyInstanc
       return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
     }
 
+    // Each id is fully row-scoped through approveOneCorrection() (its own
+    // fetch/update/audit/emit) — no shared/aggregate state touched per
+    // iteration, so chunked parallelism is safe. Same convention as
+    // poll-scheduler.ts's SEND_CHUNK_SIZE / leave-reconciliation.ts's
+    // REPLAY_CHUNK_SIZE.
+    const BULK_APPROVE_CHUNK_SIZE = 25
     const results: Array<{ id: string; ok: boolean; error?: string }> = []
-    for (const id of parsed.data.ids) {
-      try {
-        const result = await approveOneCorrection(req, id)
-        results.push({ id, ok: result.ok, error: result.ok ? undefined : result.message })
-      } catch (err: any) {
-        results.push({ id, ok: false, error: err?.message ?? 'Unknown error' })
-      }
+    for (let i = 0; i < parsed.data.ids.length; i += BULK_APPROVE_CHUNK_SIZE) {
+      const chunk = parsed.data.ids.slice(i, i + BULK_APPROVE_CHUNK_SIZE)
+      const chunkResults = await Promise.all(chunk.map(async (id) => {
+        try {
+          const result = await approveOneCorrection(req, id)
+          return { id, ok: result.ok, error: result.ok ? undefined : result.message }
+        } catch (err: any) {
+          return { id, ok: false, error: err?.message ?? 'Unknown error' }
+        }
+      }))
+      results.push(...chunkResults)
     }
 
     const approved = results.filter(r => r.ok).length

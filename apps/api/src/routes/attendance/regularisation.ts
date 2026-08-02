@@ -319,55 +319,65 @@ export default async function regularisationRoute(fastify: FastifyInstance) {
       }
     }
 
+    // Each id is fully row-scoped (its own approveRegularisation() call, its own
+    // punch inserts, its own recompute, its own event) — no shared/aggregate
+    // state touched per iteration, so chunked parallelism is safe. Same
+    // convention as poll-scheduler.ts's SEND_CHUNK_SIZE / leave-
+    // reconciliation.ts's REPLAY_CHUNK_SIZE.
+    const BULK_APPROVE_CHUNK_SIZE = 25
     const results: Array<{ id: string; ok: boolean; error?: string }> = []
 
-    for (const id of parsed.data.ids) {
-      try {
-        const result = await approveRegularisation(fastify.supabase, {
-          tenantId:         req.tenantId,
-          regularisationId: id,
-          ctx: { approverId: req.userId, approverRole: req.userRole, tenantId: req.tenantId },
-        })
-        if (result.ok) {
-          const approved = result.value
-          // Multi-level chain: skip punch/recompute side-effects on an intermediate
-          // advance (status still 'pending') — only finalize on the last level.
-          if (approved.status === 'approved') {
-            const punchRows: any[] = []
-            if (approved.requested_check_in) punchRows.push({ tenant_id: req.tenantId, employee_id: approved.employee_id, punched_at: approved.requested_check_in, direction: 'IN', source: 'regularisation', notes: `Regularisation ${id}` })
-            if (approved.requested_check_out) punchRows.push({ tenant_id: req.tenantId, employee_id: approved.employee_id, punched_at: approved.requested_check_out, direction: 'OUT', source: 'regularisation', notes: `Regularisation ${id}` })
-            if (punchRows.length > 0) {
-              await fastify.supabase.from('attendance_punch_logs').insert(punchRows).then(() => {}, () => {})
-            }
-            await recomputeRange(fastify.supabase, {
-              tenant_id: req.tenantId, employee_id: approved.employee_id,
-              from_date: approved.date, to_date: approved.date, changed_by: req.userId,
-            }).catch(() => {})
+    for (let i = 0; i < parsed.data.ids.length; i += BULK_APPROVE_CHUNK_SIZE) {
+      const chunk = parsed.data.ids.slice(i, i + BULK_APPROVE_CHUNK_SIZE)
+      const chunkResults = await Promise.all(chunk.map(async (id) => {
+        try {
+          const result = await approveRegularisation(fastify.supabase, {
+            tenantId:         req.tenantId,
+            regularisationId: id,
+            ctx: { approverId: req.userId, approverRole: req.userRole, tenantId: req.tenantId },
+          })
+          if (result.ok) {
+            const approved = result.value
+            // Multi-level chain: skip punch/recompute side-effects on an intermediate
+            // advance (status still 'pending') — only finalize on the last level.
+            if (approved.status === 'approved') {
+              const punchRows: any[] = []
+              if (approved.requested_check_in) punchRows.push({ tenant_id: req.tenantId, employee_id: approved.employee_id, punched_at: approved.requested_check_in, direction: 'IN', source: 'regularisation', notes: `Regularisation ${id}` })
+              if (approved.requested_check_out) punchRows.push({ tenant_id: req.tenantId, employee_id: approved.employee_id, punched_at: approved.requested_check_out, direction: 'OUT', source: 'regularisation', notes: `Regularisation ${id}` })
+              if (punchRows.length > 0) {
+                await fastify.supabase.from('attendance_punch_logs').insert(punchRows).then(() => {}, () => {})
+              }
+              await recomputeRange(fastify.supabase, {
+                tenant_id: req.tenantId, employee_id: approved.employee_id,
+                from_date: approved.date, to_date: approved.date, changed_by: req.userId,
+              }).catch(() => {})
 
-            // In-process event bus (PEND-75 follow-up) — mirrors the single
-            // approve route's emission below; bulk-approve previously fired
-            // on neither event system, so webhook fan-out and SLA-compliance
-            // automation missed every bulk-approved correction.
-            eventBus.emit({
-              type:          'correction.approved',
-              tenantId:      req.tenantId,
-              correlationId: req.correlationId,
-              payload: {
-                tenantId:     req.tenantId,
-                employeeId:   approved.employee_id,
-                correctionId: approved.id,
-                approverId:   req.userId,
-                date:         approved.date,
-              },
-            })
+              // In-process event bus (PEND-75 follow-up) — mirrors the single
+              // approve route's emission below; bulk-approve previously fired
+              // on neither event system, so webhook fan-out and SLA-compliance
+              // automation missed every bulk-approved correction.
+              eventBus.emit({
+                type:          'correction.approved',
+                tenantId:      req.tenantId,
+                correlationId: req.correlationId,
+                payload: {
+                  tenantId:     req.tenantId,
+                  employeeId:   approved.employee_id,
+                  correctionId: approved.id,
+                  approverId:   req.userId,
+                  date:         approved.date,
+                },
+              })
+            }
+            return { id, ok: true }
+          } else {
+            return { id, ok: false, error: result.error.message }
           }
-          results.push({ id, ok: true })
-        } else {
-          results.push({ id, ok: false, error: result.error.message })
+        } catch (err: any) {
+          return { id, ok: false, error: err?.message ?? 'Unknown error' }
         }
-      } catch (err: any) {
-        results.push({ id, ok: false, error: err?.message ?? 'Unknown error' })
-      }
+      }))
+      results.push(...chunkResults)
     }
 
     const approved = results.filter(r => r.ok).length
@@ -419,40 +429,47 @@ export default async function regularisationRoute(fastify: FastifyInstance) {
       .eq('tenant_id', req.tenantId)
     const regEventMap = new Map((regsForEvent ?? []).map((r: any) => [r.id, r]))
 
+    // Row-scoped per id (own rejectRegularisation() call, own event) — safe to
+    // chunk-parallelize. Same convention as the bulk-approve route above.
+    const BULK_REJECT_CHUNK_SIZE = 25
     const results: Array<{ id: string; ok: boolean; error?: string }> = []
 
-    for (const id of parsed.data.ids) {
-      try {
-        const result = await rejectRegularisation(fastify.supabase, {
-          tenantId: req.tenantId, regularisationId: id,
-          ctx: { approverId: req.userId, approverRole: req.userRole, tenantId: req.tenantId },
-          rejectionReason: parsed.data.rejection_reason,
-        })
-        results.push({ id, ok: result.ok, error: result.ok ? undefined : (result as any).error?.message })
+    for (let i = 0; i < parsed.data.ids.length; i += BULK_REJECT_CHUNK_SIZE) {
+      const chunk = parsed.data.ids.slice(i, i + BULK_REJECT_CHUNK_SIZE)
+      const chunkResults = await Promise.all(chunk.map(async (id) => {
+        try {
+          const result = await rejectRegularisation(fastify.supabase, {
+            tenantId: req.tenantId, regularisationId: id,
+            ctx: { approverId: req.userId, approverRole: req.userRole, tenantId: req.tenantId },
+            rejectionReason: parsed.data.rejection_reason,
+          })
 
-        if (result.ok) {
-          const regForEvent = regEventMap.get(id)
-          if (regForEvent) {
-            // In-process event bus (PEND-75 follow-up) — mirrors the single
-            // reject route's emission; bulk-reject previously fired on
-            // neither event system at all.
-            eventBus.emit({
-              type:          'correction.rejected',
-              tenantId:      req.tenantId,
-              correlationId: req.correlationId,
-              payload: {
-                tenantId:     req.tenantId,
-                employeeId:   regForEvent.employee_id,
-                correctionId: regForEvent.id,
-                approverId:   req.userId,
-                reason:       parsed.data.rejection_reason,
-              },
-            })
+          if (result.ok) {
+            const regForEvent = regEventMap.get(id)
+            if (regForEvent) {
+              // In-process event bus (PEND-75 follow-up) — mirrors the single
+              // reject route's emission; bulk-reject previously fired on
+              // neither event system at all.
+              eventBus.emit({
+                type:          'correction.rejected',
+                tenantId:      req.tenantId,
+                correlationId: req.correlationId,
+                payload: {
+                  tenantId:     req.tenantId,
+                  employeeId:   regForEvent.employee_id,
+                  correctionId: regForEvent.id,
+                  approverId:   req.userId,
+                  reason:       parsed.data.rejection_reason,
+                },
+              })
+            }
           }
+          return { id, ok: result.ok, error: result.ok ? undefined : (result as any).error?.message }
+        } catch (err: any) {
+          return { id, ok: false, error: err?.message ?? 'Unknown error' }
         }
-      } catch (err: any) {
-        results.push({ id, ok: false, error: err?.message ?? 'Unknown error' })
-      }
+      }))
+      results.push(...chunkResults)
     }
 
     const rejected = results.filter(r => r.ok).length
