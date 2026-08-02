@@ -11,8 +11,10 @@
  *    receiving endpoint can verify authenticity.
  *  - Timeout: AbortController is wired to webhook.timeout_seconds so slow
  *    endpoints do not hang the process.
- *  - Retry metadata: on failure the delivery row gets next_retry_at computed
- *    from webhook.retry_delay_seconds so a separate job can pick it up.
+ *  - Retry metadata: on failure the delivery row is marked 'retrying' with
+ *    next_retry_at computed from webhook.retry_delay_seconds, and picked up
+ *    by webhook-retry-scheduler.ts's poll loop, up to webhook.max_retries
+ *    attempts — past which the delivery is marked 'dead_lettered'.
  */
 
 import { createHmac }    from 'crypto'
@@ -29,14 +31,16 @@ interface WebhookRow {
   headers:         Record<string, string> | null
   timeout_seconds: number
   retry_delay_seconds: number
+  max_retries:     number
   event_types:     string[]
 }
 
 interface DeliveryRow {
-  id:         string
-  webhook_id: string
-  tenant_id:  string
-  webhooks:   WebhookRow
+  id:             string
+  webhook_id:     string
+  tenant_id:      string
+  attempt_number: number
+  webhooks:       WebhookRow
 }
 
 // ── WebhookService ─────────────────────────────────────────────────────────────
@@ -67,7 +71,7 @@ export class WebhookService {
     // 1. Find webhooks that want this event type
     const { data: webhooks, error: fetchErr } = await this.supabase
       .from('webhooks')
-      .select('id, url, secret, headers, timeout_seconds, retry_delay_seconds, event_types')
+      .select('id, url, secret, headers, timeout_seconds, retry_delay_seconds, max_retries, event_types')
       .eq('tenant_id', tenantId)
       .eq('is_active', true)
       .contains('event_types', [eventType])
@@ -101,7 +105,7 @@ export class WebhookService {
     // Fetch the delivery row joined to its webhook
     const { data: delivery, error: fetchErr } = await this.supabase
       .from('webhook_deliveries')
-      .select('id, webhook_id, tenant_id, webhooks(id, url, secret, headers, timeout_seconds, retry_delay_seconds, event_types)')
+      .select('id, webhook_id, tenant_id, attempt_number, webhooks(id, url, secret, headers, timeout_seconds, retry_delay_seconds, max_retries, event_types)')
       .eq('id', deliveryId)
       .eq('tenant_id', tenantId)
       .single()
@@ -117,6 +121,11 @@ export class WebhookService {
       return { success: false, error: 'Associated webhook not found' }
     }
 
+    // This is the attempt about to be made — used below to decide whether a
+    // failure still has retries left (webhook.max_retries) or should be
+    // dead-lettered.
+    const attemptNumber = (d.attempt_number ?? 1) + 1
+
     // Atomically claim the delivery row before dispatching the outbound HTTP
     // call — two concurrent retry requests (double-click, two admin tabs, or
     // a manual retry racing an automated one) would otherwise both pass the
@@ -125,7 +134,7 @@ export class WebhookService {
     // occupies during its own attempt.
     const { data: claimed, error: claimErr } = await this.supabase
       .from('webhook_deliveries')
-      .update({ status: 'delivering' })
+      .update({ status: 'delivering', attempt_number: attemptNumber })
       .eq('id', deliveryId)
       .eq('tenant_id', tenantId)
       .in('status', ['failed', 'retrying'])
@@ -172,16 +181,18 @@ export class WebhookService {
 
       return { success: true, http_status: result.http_status }
     } else {
-      // Update delivery row as failed
-      const nextRetry = new Date(Date.now() + (webhook.retry_delay_seconds ?? 300) * 1000).toISOString()
+      // Update delivery row as failed — 'retrying' with a next_retry_at if
+      // attempts remain (SYSCERT_AUDIT_2026-08-02.md High #12's
+      // webhook-retry-scheduler.ts polls this state), else 'dead_lettered'.
+      const nextState = this._nextFailureState(attemptNumber, webhook)
       await this.supabase
         .from('webhook_deliveries')
         .update({
-          status:        'failed',
+          status:        nextState.status,
           http_status:   result.http_status ?? null,
           duration_ms:   result.duration_ms,
           last_error:    result.error,
-          next_retry_at: nextRetry,
+          next_retry_at: nextState.next_retry_at,
         })
         .eq('id', deliveryId)
 
@@ -193,6 +204,25 @@ export class WebhookService {
 
       return { success: false, http_status: result.http_status, error: result.error }
     }
+  }
+
+  // ── Private: decide next state after a failed delivery attempt ────────────
+  // Shared by _deliverToWebhook and retryDelivery so the retry-vs-dead-letter
+  // decision is made the same way regardless of which path triggered the
+  // attempt.
+  private _nextFailureState(
+    attemptNumber: number,
+    webhook:       WebhookRow,
+  ): { status: 'retrying' | 'dead_lettered'; next_retry_at: string | null } {
+    const maxRetries = webhook.max_retries ?? 3
+    if (attemptNumber < maxRetries) {
+      const retryDelaySec = webhook.retry_delay_seconds ?? 300
+      return {
+        status:        'retrying',
+        next_retry_at: new Date(Date.now() + retryDelaySec * 1000).toISOString(),
+      }
+    }
+    return { status: 'dead_lettered', next_retry_at: null }
   }
 
   // ── Private: update webhook aggregate delivery counters ────────────────────
@@ -294,18 +324,18 @@ export class WebhookService {
 
       await this._updateWebhookStats(webhook.id, tenantId, true)
     } else {
-      // 3b. Mark failed
-      const retryDelaySec = webhook.retry_delay_seconds ?? 300
-      const nextRetry     = new Date(Date.now() + retryDelaySec * 1000).toISOString()
+      // 3b. Mark 'retrying' (if attempts remain) or 'dead_lettered' — this is
+      // the delivery's first attempt, matching the DB default attempt_number = 1.
+      const nextState = this._nextFailureState(1, webhook)
 
       await this.supabase
         .from('webhook_deliveries')
         .update({
-          status:        'failed',
+          status:        nextState.status,
           http_status:   result.http_status ?? null,
           duration_ms:   result.duration_ms,
           last_error:    result.error,
-          next_retry_at: nextRetry,
+          next_retry_at: nextState.next_retry_at,
         })
         .eq('id', deliveryId)
 

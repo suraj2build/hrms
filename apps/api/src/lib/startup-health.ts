@@ -56,6 +56,7 @@ const OPTIONAL_MODULES = [
   'absconding-scanner',
   'poll-scheduler',
   'verification-retry-scanner',
+  'webhook-retry-scheduler',
 ] as const
 
 type OptionalModule = typeof OPTIONAL_MODULES[number]

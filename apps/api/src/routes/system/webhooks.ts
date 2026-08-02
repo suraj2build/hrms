@@ -43,7 +43,7 @@ const updateBodySchema = createBodySchema.partial().extend({
 })
 
 const deliveriesQuerySchema = z.object({
-  status: z.enum(['pending', 'delivered', 'failed', 'retrying']).optional(),
+  status: z.enum(['pending', 'delivering', 'delivered', 'failed', 'retrying', 'dead_lettered']).optional(),
   limit:  z.coerce.number().int().min(1).max(200).default(50),
   offset: z.coerce.number().int().min(0).default(0),
 })

@@ -23,6 +23,7 @@ import { registerIntelligenceScanner }   from './lib/intelligence-scanner.js'
 import { registerDigestScheduler }       from './lib/digest-scheduler.js'
 import { registerWoCreditScheduler }     from './lib/wo-credit-reconciler.js'
 import { registerPollScheduler }         from './lib/poll-scheduler.js'
+import { registerWebhookRetryScheduler, runWebhookRetryTick } from './lib/webhook-retry-scheduler.js'
 import { scan as runSlaScan }            from './lib/sla-scanner.js'
 import { scan as runVerificationRetryScan } from './lib/verification-retry-scanner.js'
 import { runAllScans as runIntelligenceScan } from './lib/intelligence-scanner.js'
@@ -514,6 +515,13 @@ async function start() {
     registerPollScheduler(fastify.supabase)
   }, fastify.log)
 
+  // Webhook retry scheduler (SYSCERT_AUDIT_2026-08-02.md High #12) — polls
+  // webhook_deliveries in status='retrying' whose next_retry_at has elapsed
+  // and re-attempts them; previously retry was entirely manual.
+  await safeRegisterModule('webhook-retry-scheduler', async () => {
+    registerWebhookRetryScheduler(fastify.supabase)
+  }, fastify.log)
+
   // Absconding case scanner — daily scan for UA employees, auto-escalates state machine.
   // Scheduling only: sets up enqueue timers. Handler registered below with other durable handlers.
   await safeRegisterModule('absconding-scanner', async () => {
@@ -565,6 +573,9 @@ async function start() {
   })
   durableQueue.register('send-pulse-poll', async (_payload, _job) => {
     await runPollTick(fastify.supabase)
+  })
+  durableQueue.register('webhook-retry-scan', async (_payload, _job) => {
+    await runWebhookRetryTick(fastify.supabase)
   })
   durableQueue.register('leave-scheduler-tick', async (_payload, _job) => {
     await runLeaveSchedulerTick(fastify.supabase, fastify.log)
