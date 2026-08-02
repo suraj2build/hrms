@@ -11,58 +11,21 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
-import { notify, notifyHrAdmins } from '../../lib/notify.js'
+import { notify } from '../../lib/notify.js'
 import { logAction } from '../../lib/audit-service.js'
 import { resolveAssistantChain } from '../../lib/ai/config.js'
 import { chatCompleteWithFallback } from '../../lib/ai/llm.js'
-import { WhatsAppProvider } from '../../lib/whatsapp-provider.js'
 import { serverError, notFound, forbidden, validationError, conflictError, ErrorCode } from '../../lib/api-errors.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
-import { resolveTicketSla } from '../../lib/helpdesk-sla.js'
+import { createHelpdeskTicket, HELPDESK_CATEGORIES, HELPDESK_PRIORITIES } from '../../lib/helpdesk-ticket-service.js'
 
 // Default SLA windows by priority (used when no tenant policy row exists).
 // Response = time to first HR reply; Resolution = time to resolve/close.
 const SLA_HOURS: Record<string, number> = { urgent: 4, high: 8, medium: 24, low: 48 }
 const RESOLUTION_HOURS: Record<string, number> = { urgent: 24, high: 48, medium: 72, low: 120 }
 
-// ── AI keyword-based category detection ──────────────────────────────────────
-const TEAM_MAP: Record<string, string> = {
-  payroll:    'HR-Payroll',
-  leave:      'HR-Operations',
-  attendance: 'HR-Operations',
-  it:         'IT-Support',
-  facilities: 'Admin',
-  posh:       'ICC',
-  compliance: 'Compliance',
-  hr_policy:  'HR-Operations',
-  grievance:  'HR-Manager',
-  other:      'HR-Operations',
-}
-
-function detectCategory(text: string, currentCategory: string): { category: string; confidence: number; suggested_team: string } {
-  const t = text.toLowerCase()
-  const rules: [string[], string, number][] = [
-    [['salary', 'payslip', 'pay', 'deduction', 'pf', 'esic', 'tds', 'tax', 'bonus', 'incentive', 'arrear'], 'payroll', 90],
-    [['leave', 'absence', 'holiday', 'lop', 'comp off'], 'leave', 85],
-    [['attendance', 'shift', 'overtime', 'punch', 'biometric'], 'attendance', 85],
-    [['laptop', 'computer', 'system', 'software', 'access', 'login', 'password', 'email', 'network', 'printer', 'hardware', 'vpn'], 'it', 85],
-    [['harassment', 'sexual', 'posh', 'icc'], 'posh', 95],
-    [['statutory', 'compliance', 'labour law', 'epf filing', 'esic filing'], 'compliance', 85],
-    [['policy', 'handbook', 'rule', 'notice period', 'probation'], 'hr_policy', 80],
-    [['grievance', 'complaint', 'unfair', 'bully', 'discrimination'], 'grievance', 85],
-    [['offer letter', 'form 16', 'experience letter', 'noc', 'relieving', 'certificate', 'document'], 'hr_policy', 80],
-  ]
-  for (const [keywords, category, conf] of rules) {
-    if (keywords.some(k => t.includes(k))) {
-      return { category, confidence: conf, suggested_team: TEAM_MAP[category] ?? 'HR-Operations' }
-    }
-  }
-  const fallback = TEAM_MAP[currentCategory] ?? 'HR-Operations'
-  return { category: currentCategory, confidence: 30, suggested_team: fallback }
-}
-
-const CATEGORIES = ['payroll', 'leave', 'attendance', 'it', 'facilities', 'hr_policy', 'grievance', 'posh', 'compliance', 'other'] as const
-const PRIORITIES = ['low', 'medium', 'high', 'urgent'] as const
+const CATEGORIES = HELPDESK_CATEGORIES
+const PRIORITIES = HELPDESK_PRIORITIES
 const STATUSES   = ['open', 'in_progress', 'awaiting_employee', 'resolved', 'closed'] as const
 
 async function resolveCallerEmployeeId(fastify: any, userId: string, tenantId: string): Promise<string | null> {
@@ -139,107 +102,19 @@ export default async function helpdeskRoutes(fastify: FastifyInstance) {
     const parsed = schema.safeParse(req.body)
     if (!parsed.success) return validationError(reply, 'VALIDATION_ERROR', parsed.error.issues[0]?.message ?? 'Validation failed')
 
-    // AI category detection
-    const aiResult = detectCategory(
-      `${parsed.data.subject} ${parsed.data.description}`,
-      parsed.data.category,
-    )
-    // Override category if AI is confident and the user left it as default/other
-    const isDefaultCategory = (parsed.data.category as string) === 'other' || (parsed.data.category as string) === 'general'
-    const effectiveCategory = aiResult.confidence >= 70 && isDefaultCategory
-      ? aiResult.category
-      : (parsed.data.category as string)
-
-    // Prefer category-based SLA; fall back to priority SLA
-    const sla = await resolveTicketSla(fastify.supabase, req.tenantId, effectiveCategory, parsed.data.priority)
-
-    const { data, error } = await fastify.supabase
-      .from('helpdesk_tickets')
-      .insert({
-        tenant_id:              req.tenantId,
-        subject:                parsed.data.subject,
-        description:            parsed.data.description,
-        category:               effectiveCategory,
-        priority:               parsed.data.priority,
-        status:                 'open',
-        employee_id:            employeeId,
-        created_by:             req.userId,
-        sla_hours:              sla.response_hours,
-        sla_due_at:             sla.sla_due_at,
-        resolution_due_at:      sla.resolution_due_at,
-        ai_suggested_category:  aiResult.category,
-        ai_routing_confidence:  aiResult.confidence,
-        ai_suggested_team:      aiResult.suggested_team,
-      })
-      .select()
-      .single()
-
-    if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create ticket')
-
-    const ticketId     = (data as any).id
-    const ticketNumber = (data as any).ticket_number ?? ticketId.slice(0, 8).toUpperCase()
-
-    // Auto-acknowledgement system comment. Fresh audit finding:
-    // author_role: 'system' is not in helpdesk_ticket_comments' CHECK
-    // constraint (only 'employee'/'hr' are allowed) — this insert has
-    // always failed the CHECK, and its error was never checked, so this
-    // acknowledgement comment has never actually been created. 'hr' is the
-    // established convention this codebase already uses for other
-    // automated/system-generated comments in this table (see the merge-note
-    // insert further down) — the ticket-merge one renders correctly as "HR
-    // Team" in both EssHelpdesk.tsx and AdminHelpdesk.tsx, which only
-    // special-case author_role === 'hr'.
-    const ackComment = `Your query has been received. Ticket ${ticketNumber} is assigned to our ${aiResult.suggested_team} team. Expected response within ${sla.response_hours}h, resolution within ${sla.resolution_hours}h.`
-    const { error: ackErr } = await fastify.supabase.from('helpdesk_ticket_comments').insert({
-      tenant_id:   req.tenantId,
-      ticket_id:   ticketId,
-      author_id:   req.userId,
-      author_role: 'hr',
-      body:        ackComment,
-      is_internal: false,
-    })
-    if (ackErr) req.log.warn({ err: ackErr, ticket_id: ticketId }, 'helpdesk: auto-acknowledgement comment insert failed')
-
-    // WhatsApp auto-acknowledgement (best-effort — never block ticket creation success)
-    const { data: empWithPhone } = await fastify.supabase
-      .from('employees').select('phone').eq('id', employeeId).eq('tenant_id', req.tenantId).maybeSingle()
-    if ((empWithPhone as any)?.phone) {
-      try {
-        const wa = new WhatsAppProvider(fastify.supabase)
-        await wa.sendTemplate(req.tenantId, (empWithPhone as any).phone, 'ticket_acknowledgement', {
-          ticket_number: ticketNumber,
-          sla_hours:     String(sla.response_hours),
-        })
-      } catch (waErr) {
-        fastify.log.warn({ err: waErr }, 'helpdesk: WhatsApp acknowledgement failed — ticket still created')
-      }
-    }
-
-    await logAction(fastify.supabase, {
+    const result = await createHelpdeskTicket(fastify.supabase, req.log, {
       tenantId:    req.tenantId,
-      tableName:   'helpdesk_tickets',
-      recordId:    ticketId,
-      action:      'INSERT',
-      performedBy: req.userId,
-      onBehalfOf:  employeeId,
-      newData:     { subject: parsed.data.subject, category: parsed.data.category, priority: parsed.data.priority, status: 'open' },
+      employeeId,
+      userId:      req.userId,
+      subject:     parsed.data.subject,
+      description: parsed.data.description,
+      category:    parsed.data.category,
+      priority:    parsed.data.priority,
     })
 
-    // Notify HR admins (best-effort)
-    await notifyHrAdmins(fastify.supabase, {
-      tenantId:     req.tenantId,
-      senderId:     req.userId,
-      item_type:    'general',
-      title:        `New helpdesk ticket: ${parsed.data.subject}`,
-      summary:      `A ${parsed.data.priority} priority ${effectiveCategory} ticket was raised. Response SLA ${sla.response_hours}h, resolution ${sla.resolution_hours}h.${aiResult.confidence >= 70 ? ` AI routing: ${aiResult.category} (${aiResult.confidence}%).` : ''}`,
-      severity:     parsed.data.priority === 'urgent' ? 'warning' : 'info',
-      entity_type:  'helpdesk_ticket',
-      entity_id:    ticketId,
-      action_route: '/admin/helpdesk',
-      action_label: 'Open helpdesk queue',
-    })
+    if (!result.ok) return serverError(req, reply, result.error, ErrorCode.INSERT_FAILED, 'Failed to create ticket')
 
-    return reply.code(201).send({ data })
+    return reply.code(201).send({ data: result.data })
   })
 
   // GET /helpdesk/tickets/:id — detail + comments (owner or HR)

@@ -17,7 +17,7 @@ import { fetchTenantTz } from '../attendance-engine.js'
 import { getLocalDate } from '../org-context.js'
 import { createLeaveRequest, cancelLeaveRequest as cancelLeaveRequestService } from '../leave-request-service.js'
 import { submitRegularisation } from '../regularisation-service.js'
-import { resolveTicketSla } from '../helpdesk-sla.js'
+import { createHelpdeskTicket as createHelpdeskTicketService, HELPDESK_CATEGORIES, HELPDESK_PRIORITIES } from '../helpdesk-ticket-service.js'
 import type { ToolDef } from './llm.js'
 import type { AssistantCaller } from './assistant-context.js'
 
@@ -893,37 +893,24 @@ async function createHelpdeskTicket(ctx: ToolCtx, args: { subject: string; descr
 
   const category = args.category ?? 'other'
   const priority  = args.priority  ?? 'medium'
-  const validCategories = ['payroll', 'leave', 'attendance', 'it', 'facilities', 'hr_policy', 'posh', 'grievance', 'compliance', 'other']
-  const validPriorities  = ['low', 'medium', 'high']
-  if (!validCategories.includes(category)) return `Invalid category. Use one of: ${validCategories.join(', ')}`
-  if (!validPriorities.includes(priority))  return `Invalid priority. Use one of: ${validPriorities.join(', ')}`
+  if (!(HELPDESK_CATEGORIES as readonly string[]).includes(category)) return `Invalid category. Use one of: ${HELPDESK_CATEGORIES.join(', ')}`
+  if (!(HELPDESK_PRIORITIES as readonly string[]).includes(priority))  return `Invalid priority. Use one of: ${HELPDESK_PRIORITIES.join(', ')}`
 
-  // sla_due_at/resolution_due_at must be set the same way POST /helpdesk/tickets
-  // sets them — the SLA-breach scanner queries .lt('sla_due_at', now), and NULL
-  // never satisfies that, making a ticket permanently invisible to breach detection.
-  const sla = await resolveTicketSla(ctx.supabase, ctx.caller.tenantId, category, priority)
+  // Delegates to the same governed service POST /helpdesk/tickets uses — the
+  // AI tool previously hand-rolled its own insert that skipped the auto-ack
+  // comment, the audit-log entry, and the HR-admin notification entirely.
+  const result = await createHelpdeskTicketService(ctx.supabase, console, {
+    tenantId:    ctx.caller.tenantId,
+    employeeId:  ctx.employeeId,
+    userId:      ctx.caller.userId,
+    subject:     args.subject.slice(0, 120),
+    description: args.description,
+    category,
+    priority,
+  })
 
-  const { data, error } = await ctx.supabase
-    .from('helpdesk_tickets')
-    .insert({
-      tenant_id:         ctx.caller.tenantId,
-      employee_id:       ctx.employeeId,
-      subject:           args.subject.slice(0, 120),
-      description:       args.description,
-      category,
-      priority,
-      status:            'open',
-      created_by:        ctx.caller.userId,
-      sla_hours:         sla.response_hours,
-      sla_due_at:        sla.sla_due_at,
-      resolution_due_at: sla.resolution_due_at,
-    })
-    .select('id, ticket_number')
-    .single()
-
-  if (error) return 'Failed to create the helpdesk ticket. Please try again.'
-  const ticketRef = (data as any).ticket_number ?? data.id.slice(0, 8)
-  return `✅ Helpdesk ticket #${ticketRef} created. Subject: "${args.subject}". Category: ${category}, Priority: ${priority}. HR will respond shortly.`
+  if (!result.ok) return 'Failed to create the helpdesk ticket. Please try again.'
+  return `✅ Helpdesk ticket #${result.ticketNumber} created. Subject: "${args.subject}". Category: ${result.category}, Priority: ${result.priority}. HR will respond shortly.`
 }
 
 // ── New write tools ──────────────────────────────────────────────────────────
@@ -1149,11 +1136,11 @@ async function updateEmergencyContact(ctx: ToolCtx, args: { name?: string; relat
   if (!ctx.employeeId) return 'No employee profile linked to your account.'
   if (!args.name?.trim() || !args.phone?.trim()) return 'Name and phone are required.'
 
-  // emergency_contacts is 1:N (no UNIQUE(employee_id, tenant_id) constraint exists —
-  // only a non-unique index), so upsert(onConflict: 'employee_id,tenant_id') always
-  // fails with "no unique or exclusion constraint matching the ON CONFLICT
-  // specification". Find the existing primary contact and update it, or insert
-  // a new one, instead of relying on a constraint that isn't there.
+  // Same governed path as POST/PUT /ess/me/emergency-contacts (routes/ess/self-service.ts):
+  // emergency_contacts is 1:N and migration 412's partial unique index allows at
+  // most one is_primary=true row per employee, so no plain insert/update may ever
+  // write is_primary=true directly — only set_primary_emergency_contact_atomic()
+  // may, which clears the old primary and sets the new one in one transaction.
   const { data: existing, error: findErr } = await ctx.supabase
     .from('emergency_contacts')
     .select('id')
@@ -1163,19 +1150,31 @@ async function updateEmergencyContact(ctx: ToolCtx, args: { name?: string; relat
     .maybeSingle()
   if (findErr) return 'Failed to update your emergency contact. Please try again.'
 
-  const payload = {
+  const fields = {
     employee_id:  ctx.employeeId,
     tenant_id:    ctx.caller.tenantId,
     name:         args.name.trim(),
     phone:        args.phone.trim(),
     relationship: args.relationship ?? null,
-    is_primary:   true,
   }
-  const { error } = existing
-    ? await ctx.supabase.from('emergency_contacts').update(payload).eq('id', (existing as any).id).eq('tenant_id', ctx.caller.tenantId)
-    : await ctx.supabase.from('emergency_contacts').insert(payload)
 
-  if (error) return 'Failed to update your emergency contact. Please try again.'
+  let contactId: string
+  if (existing) {
+    const { error } = await ctx.supabase.from('emergency_contacts').update(fields).eq('id', (existing as any).id).eq('tenant_id', ctx.caller.tenantId)
+    if (error) return 'Failed to update your emergency contact. Please try again.'
+    contactId = (existing as any).id
+  } else {
+    const { data: inserted, error } = await ctx.supabase
+      .from('emergency_contacts').insert({ ...fields, is_primary: false }).select('id').single()
+    if (error || !inserted) return 'Failed to update your emergency contact. Please try again.'
+    contactId = (inserted as any).id
+  }
+
+  const { error: primErr } = await ctx.supabase.rpc('set_primary_emergency_contact_atomic', {
+    p_tenant_id: ctx.caller.tenantId, p_employee_id: ctx.employeeId, p_contact_id: contactId,
+  })
+  if (primErr) return 'Failed to update your emergency contact. Please try again.'
+
   return `Emergency contact updated: ${args.name} (${args.relationship ?? 'N/A'}) — ${args.phone}.`
 }
 
