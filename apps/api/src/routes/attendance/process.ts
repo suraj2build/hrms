@@ -277,10 +277,9 @@ export default async function processRoute(fastify: FastifyInstance) {
           { warn: (obj, msg) => req.log.warn({ ...obj, module: 'attendance', route: 'process' }, msg) },
         )
       } catch (err) {
-        req.log.error({ err, module: 'attendance', route: 'process' }, 'table lock acquire error')
         // Release advisory lock we already hold before returning
         if (advisoryAcquired) await releaseAdvisoryLock(fastify.supabase, tenantId).catch(() => undefined)
-        return reply.code(500).send({ error: 'LOCK_ERROR', message: 'Could not acquire processing lock' })
+        return serverError(req, reply, err, ErrorCode.COMPUTE_FAILED, 'Could not acquire processing lock')
       }
 
       if (!tableAcquired) {
@@ -304,7 +303,6 @@ export default async function processRoute(fastify: FastifyInstance) {
         return reply.send(result)
       } catch (err) {
         const errMsg = err instanceof Error ? err.message : 'Attendance processing failed'
-        req.log.error({ err, module: 'attendance', route: 'process', date }, 'processing failed')
 
         // Step 3: write a failure audit row so every run is traceable
         await writeFailedAuditRun(
@@ -313,7 +311,7 @@ export default async function processRoute(fastify: FastifyInstance) {
           userId, req.log,
         ).catch(() => undefined)  // non-fatal
 
-        return reply.code(500).send({ error: 'PROCESS_FAILED', message: errMsg })
+        return serverError(req, reply, err, ErrorCode.COMPUTE_FAILED, 'Attendance processing failed')
       } finally {
         // ── Release both locks — always, even on error ──────────────────────
         if (tableAcquired) {
