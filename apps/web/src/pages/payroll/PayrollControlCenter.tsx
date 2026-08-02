@@ -10,7 +10,8 @@
 
 import React, { useState, useCallback, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useQuery, useMutation } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { invalidateAllPayrollRunViews } from './PayrollRuns'
 import {
   ClipboardCheck,
   AlertTriangle,
@@ -377,6 +378,7 @@ function PreviousStepChecklist({
 
 export function PayrollControlCenter(): JSX.Element {
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
   const { isDeadlineMode, activateDeadline, deactivateDeadline, hoursUntilDeadline } =
     usePayrollDeadline()
 
@@ -561,6 +563,11 @@ export function PayrollControlCenter(): JSX.Element {
       setIsRunning(false)
       setLastRunId(data?.run_id ?? null)
       completeStep('final-lock')
+      // A run triggered here must be visible to every other Payroll Center
+      // page sharing the underlying /payroll/runs list (SYSCERT_AUDIT_2026-08-02.md
+      // High #16 — this reopened ISSUE-134's fix by adding a new trigger path
+      // that never called the shared invalidation helper).
+      invalidateAllPayrollRunViews(queryClient)
       // Stay in the workspace — show payout link inline rather than ejecting to /admin/payroll
       toast.success(`Payroll run submitted — ID: ${data?.run_id ?? 'N/A'}`)
     },
