@@ -18,6 +18,7 @@ import {
 import { resolveEmployeeOrgContext, getLocalDate } from '../../lib/org-context.js'
 import { fetchTenantTz } from '../../lib/attendance-engine.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 const dateRe = /^\d{4}-\d{2}-\d{2}$/
 
@@ -109,7 +110,7 @@ export default async function leaveCollisionRoutes(fastify: FastifyInstance) {
       if (error.code === '42P01' || error.message?.includes('does not exist')) {
         return reply.send({ data: [], total: 0, limit, offset })
       }
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch collision log' })
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch collision log')
     }
 
     const rows = (data ?? []).map((r: any) => ({
@@ -147,7 +148,7 @@ export default async function leaveCollisionRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', req.tenantId)
       .maybeSingle()
 
-    if (fetchErr) return reply.code(500).send({ error: 'QUERY_FAILED', message: fetchErr.message })
+    if (fetchErr) return serverError(req, reply, fetchErr, ErrorCode.QUERY_FAILED, 'Failed to fetch collision log entry')
     if (!entry)   return reply.code(404).send({ error: 'NOT_FOUND', message: 'Collision log entry not found' })
 
     // Idempotent — already acknowledged is fine
@@ -162,7 +163,7 @@ export default async function leaveCollisionRoutes(fastify: FastifyInstance) {
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
 
-    if (updateErr) return reply.code(500).send({ error: 'UPDATE_FAILED', message: updateErr.message })
+    if (updateErr) return serverError(req, reply, updateErr, ErrorCode.UPDATE_FAILED, 'Failed to acknowledge collision entry')
 
     return reply.send({ message: 'Collision entry acknowledged', acknowledged_at: now })
   })
@@ -250,10 +251,7 @@ export default async function leaveCollisionRoutes(fastify: FastifyInstance) {
       .lte('date', yEnd)
       .order('date')
 
-    if (error) {
-      req.log.error({ err: error }, 'ess holidays list failed')
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch holidays' })
-    }
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch holidays')
 
     // Applicability + per-date priority (location > site > group > global).
     const rank = (h: any) =>
@@ -325,7 +323,7 @@ export default async function leaveCollisionRoutes(fastify: FastifyInstance) {
 
     if (error) {
       if (error.code === '23505') return reply.code(409).send({ error: 'ALREADY_SELECTED', message: 'Already selected' })
-      return reply.code(500).send({ error: 'INSERT_FAILED', message: 'Failed to select holiday' })
+      return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to select holiday')
     }
 
     return reply.code(201).send({ data })
@@ -353,7 +351,7 @@ export default async function leaveCollisionRoutes(fastify: FastifyInstance) {
       .eq('employee_id', profData.employee_id)
       .eq('pool_id', poolId)
 
-    if (error) return reply.code(500).send({ error: 'DELETE_FAILED', message: 'Failed to remove selection' })
+    if (error) return serverError(req, reply, error, ErrorCode.DELETE_FAILED, 'Failed to remove selection')
     return reply.code(204).send()
   })
 
@@ -378,7 +376,7 @@ export default async function leaveCollisionRoutes(fastify: FastifyInstance) {
       .eq('year', year)
       .order('id')
 
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch pool' })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch pool')
 
     // Count employee selections per pool entry
     const poolIds = (pool ?? []).map((p: any) => p.id)
@@ -443,7 +441,7 @@ export default async function leaveCollisionRoutes(fastify: FastifyInstance) {
 
     if (error) {
       if (error.code === '23505') return reply.code(409).send({ error: 'DUPLICATE', message: 'Holiday already in pool' })
-      return reply.code(500).send({ error: 'INSERT_FAILED', message: 'Failed to add to pool' })
+      return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to add to pool')
     }
     return reply.code(201).send({ data })
   })
@@ -462,7 +460,7 @@ export default async function leaveCollisionRoutes(fastify: FastifyInstance) {
       .eq('id', poolId)
       .eq('tenant_id', req.tenantId)
 
-    if (error) return reply.code(500).send({ error: 'DELETE_FAILED', message: 'Failed to remove from pool' })
+    if (error) return serverError(req, reply, error, ErrorCode.DELETE_FAILED, 'Failed to remove from pool')
     return reply.code(204).send()
   })
 }
