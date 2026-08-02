@@ -13,6 +13,7 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 // ── Zod schema ────────────────────────────────────────────────────────────────
 
@@ -280,8 +281,7 @@ export default async function simulatePolicyRoute(fastify: FastifyInstance) {
         return q.range(from, to)
       }) as unknown as DailyRow[]
     } catch (error) {
-      req.log.error({ err: error }, 'simulate-policy attendance_daily fetch failed')
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch attendance data' })
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch attendance data')
     }
 
     if (rows.length === 0) {
