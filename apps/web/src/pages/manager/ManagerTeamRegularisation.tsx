@@ -27,6 +27,7 @@ import { PageContainer } from '@/components/layout/PageContainer'
 import { PageHeader }    from '@/components/layout/PageHeader'
 import { SectionCard }   from '@/components/layout/SectionCard'
 import { Button }        from '@/components/ui/button'
+import { PromptDialog }  from '@/components/ui/ConfirmDialog'
 import { cn }            from '@/lib/utils'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -70,7 +71,7 @@ function typeLabel(t: string | null) {
 
 export function ManagerTeamRegularisation() {
   const [selected, setSelected] = useState<Set<string>>(new Set())
-  const [rejectReason, setRejectReason] = useState('')
+  const [rejectDialogOpen, setRejectDialogOpen] = useState(false)
   const qc = useQueryClient()
 
   const { data, isFetching, refetch } = useQuery<{ data: RegReq[]; total: number }>({
@@ -122,7 +123,7 @@ export function ManagerTeamRegularisation() {
       const { rejected = 0, failed, total } = res.summary
       toast.success(`Rejected ${rejected} of ${total}${failed > 0 ? ` · ${failed} failed` : ''}`)
       setSelected(new Set())
-      setRejectReason('')
+      setRejectDialogOpen(false)
       qc.invalidateQueries({ queryKey: ['manager-team-regularisation'] })
       qc.invalidateQueries({ queryKey: ['reg-pending'] })
       qc.invalidateQueries({ queryKey: ['ess-approvals-corrections'] })
@@ -180,22 +181,11 @@ export function ManagerTeamRegularisation() {
                 variant="destructive"
                 className="h-8 gap-1.5"
                 disabled={isBusy}
-                onClick={() => {
-                  if (confirm(`Reject ${selected.size} regularisation request(s)? This cannot be undone.`)) {
-                    bulkRejectMut.mutate({ ids: selectedIds, reason: rejectReason || undefined })
-                  }
-                }}
+                onClick={() => setRejectDialogOpen(true)}
               >
                 {bulkRejectMut.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <X className="h-3.5 w-3.5" />}
                 Reject {selected.size}
               </Button>
-              <input
-                type="text"
-                placeholder="Rejection reason (optional)"
-                value={rejectReason}
-                onChange={e => setRejectReason(e.target.value)}
-                className="flex-1 min-w-[160px] h-8 rounded-md border border-border bg-background px-3 text-xs placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-              />
             </>
           )}
         </div>
@@ -273,6 +263,18 @@ export function ManagerTeamRegularisation() {
           </div>
         )}
       </SectionCard>
+
+      {/* Styled confirmation dialog — matches RegularisationApproval.tsx's
+          reject flow (SYSCERT_AUDIT_2026-08-02.md High #19: this page
+          previously used a native window.confirm() while the HR-admin
+          queue used a styled dialog for the same action). */}
+      <PromptDialog
+        open={rejectDialogOpen}
+        title={`Reject ${selected.size} Regularisation Request${selected.size !== 1 ? 's' : ''}`}
+        placeholder="Rejection reason (optional)"
+        onConfirm={reason => bulkRejectMut.mutate({ ids: selectedIds, reason: reason || undefined })}
+        onCancel={() => setRejectDialogOpen(false)}
+      />
     </PageContainer>
   )
 }
