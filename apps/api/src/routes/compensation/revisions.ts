@@ -122,7 +122,7 @@ export default async function compensationRevisionsRoute(fastify: FastifyInstanc
           id, revision_type, effective_date, status, reason, submitted_at, decided_at,
           before_ctc_annual, new_ctc_annual, delta_amount, delta_pct, retro_months, employee_id
         `))
-        if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch revisions' })
+        if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch revisions')
       }
     }
 
@@ -168,7 +168,7 @@ export default async function compensationRevisionsRoute(fastify: FastifyInstanc
       .eq('tenant_id', req.tenantId)
       .maybeSingle()
 
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch revision' })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch revision')
     if (!data)  return reply.code(404).send({ error: 'NOT_FOUND', message: 'Revision not found' })
 
     // Unlike the list route above, this single-record lookup had no
@@ -295,9 +295,7 @@ export default async function compensationRevisionsRoute(fastify: FastifyInstanc
       .select('id, status, submitted_at, delta_pct')
       .single()
 
-    if (insertErr) {
-      return reply.code(500).send({ error: 'INSERT_FAILED', message: 'Failed to create revision request' })
-    }
+    if (insertErr) return serverError(req, reply, insertErr, ErrorCode.INSERT_FAILED, 'Failed to create revision request')
 
     return reply.code(201).send({ data: revision })
   })
@@ -318,7 +316,7 @@ export default async function compensationRevisionsRoute(fastify: FastifyInstanc
       .eq('tenant_id', req.tenantId)
       .maybeSingle()
 
-    if (fetchErr) return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch revision' })
+    if (fetchErr) return serverError(req, reply, fetchErr, ErrorCode.QUERY_FAILED, 'Failed to fetch revision')
     if (!rev)      return reply.code(404).send({ error: 'NOT_FOUND', message: 'Revision not found' })
     if (rev.status !== 'pending') {
       return reply.code(409).send({ error: 'INVALID_STATE', message: `Revision is already ${rev.status}` })
@@ -380,7 +378,7 @@ export default async function compensationRevisionsRoute(fastify: FastifyInstanc
         .eq('id', id)
         .eq('tenant_id', req.tenantId)
         .eq('status', 'approved')
-      return reply.code(500).send({ error: 'COMP_CREATE_FAILED', message: 'Failed to create compensation record' })
+      return serverError(req, reply, compErr, ErrorCode.INSERT_FAILED, 'Failed to create compensation record')
     }
 
     const newCTCMonthly = Number(rev.new_ctc_annual) / 12
@@ -658,7 +656,7 @@ export default async function compensationRevisionsRoute(fastify: FastifyInstanc
       .eq('employee_id', empId)
       .order('submitted_at', { ascending: false })
 
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch revisions' })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch revisions')
 
     return reply.send({ data: data ?? [], employee_id: empId })
   })
@@ -806,8 +804,8 @@ export default async function compensationRevisionsRoute(fastify: FastifyInstanc
         if (gradeId)                empQ = empQ.eq('grade_id', gradeId)
         return empQ.range(from, to)
       })
-    } catch {
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to resolve cohort' })
+    } catch (cohortErr) {
+      return serverError(req, reply, cohortErr, ErrorCode.QUERY_FAILED, 'Failed to resolve cohort')
     }
     if (!cohort.length) return reply.send({ created: [], skipped: [], cohort_size: 0 })
 
@@ -904,7 +902,7 @@ export default async function compensationRevisionsRoute(fastify: FastifyInstanc
         .from('compensation_revisions')
         .insert(rowsToInsert)
         .select('id, employee_id, before_ctc_annual, new_ctc_annual, delta_pct')
-      if (insErr) return reply.code(500).send({ error: 'INSERT_FAILED', message: 'Failed to create revision rows' })
+      if (insErr) return serverError(req, reply, insErr, ErrorCode.INSERT_FAILED, 'Failed to create revision rows')
       created = (inserted ?? []).map((r: any) => ({ ...r, name: nameFor(r.employee_id) }))
     }
 
