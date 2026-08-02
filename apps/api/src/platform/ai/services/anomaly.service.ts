@@ -35,7 +35,9 @@ export class AnomalyService {
       risk_score:    riskScore,
       explainability: {
         summary:              `Event ${event.event_type} classified with risk score ${riskScore}`,
-        confidence_score:     0.5,
+        // Sprint 1: rule-based, no ML model — omit rather than present a
+        // fixed constant as a real AI confidence estimate
+        // (SYSCERT_AUDIT_2026-08-02.md High #13).
         contributing_factors: [`severity=${severity}`],
       },
     }

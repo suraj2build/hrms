@@ -8,7 +8,9 @@ import type { TrustScoreResult, DuplicateDetectionResult } from '../types/trust-
 export function explainTrustScore(score: TrustScoreResult): ExplainabilityResult {
   return {
     summary: `Trust score ${score.score}/100 (${score.severity} risk) for ${score.score_type} ${score.entity_id}`,
-    confidence_score: 0.9,
+    // No LLM wired up yet — a hardcoded literal here would present as a real
+    // AI confidence estimate on the Trust dashboard when it's actually a
+    // fixed constant (SYSCERT_AUDIT_2026-08-02.md High #13).
     contributing_factors: score.factors,
     recommended_actions: score.severity === 'critical'
       ? ['Immediate HR review required', 'Do not process payroll until resolved']
@@ -23,7 +25,7 @@ export function explainTrustScore(score: TrustScoreResult): ExplainabilityResult
 export function explainDuplicate(dup: DuplicateDetectionResult): ExplainabilityResult {
   return {
     summary: `Duplicate ${dup.duplicate_type} detected across ${dup.matching_entity_ids.length + 1} employees`,
-    confidence_score: 0.95,
+    // See explainTrustScore's note above.
     contributing_factors: [
       `Duplicate type: ${dup.duplicate_type}`,
       `Affected employee count: ${dup.matching_entity_ids.length + 1}`,

@@ -59,7 +59,10 @@ export class ExplainabilityService {
   }): ExplainabilityResult {
     return {
       summary: `Compliance violation — ${params.violation_type} for ${params.entity_type} ${params.entity_id}`,
-      confidence_score: 0.95,
+      // No LLM wired up yet (Sprint 2 template, not a real confidence
+      // estimate) — omit rather than present a fabricated precision number
+      // on the Trust/Compliance dashboards (SYSCERT_AUDIT_2026-08-02.md
+      // High #13). Matches explain()'s established convention.
       contributing_factors: [
         `Violation type: ${params.violation_type}`,
         ...(params.value !== undefined && params.threshold !== undefined
@@ -85,7 +88,7 @@ export class ExplainabilityService {
   }): ExplainabilityResult {
     return {
       summary:              `Risk classification: ${params.risk_type} — score ${params.score}/100`,
-      confidence_score:     0.8,
+      // No LLM wired up yet — see explainComplianceViolation's note above.
       contributing_factors: params.factors,
       recommended_actions:  params.score > 75
         ? ['Immediate review required — escalate to compliance team']
@@ -107,7 +110,7 @@ export class ExplainabilityService {
   }): ExplainabilityResult {
     return {
       summary:              `Governance drift detected in ${params.module}: ${params.description}`,
-      confidence_score:     0.75,
+      // No LLM wired up yet — see explainComplianceViolation's note above.
       contributing_factors: [`Signal: ${params.signal}`, `Module: ${params.module}`],
       recommended_actions:  [
         'Audit recent activity in the affected module',

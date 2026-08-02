@@ -12,7 +12,8 @@ import type { RiskScore }            from '../scoring/risk-score.service.js'
 export function explainRiskScore(score: RiskScore): ExplainabilityResult {
   return {
     summary:          `Risk score ${score.score.toFixed(0)}/100 for ${score.type} ${score.entity_id}`,
-    confidence_score: 0.8,
+    // No LLM wired up yet — omit rather than present a fixed constant as a
+    // real AI confidence estimate (SYSCERT_AUDIT_2026-08-02.md High #13).
     contributing_factors: score.contributing_classifications.map(
       c => `${c.risk_type}: ${c.score.toFixed(0)}`,
     ),
