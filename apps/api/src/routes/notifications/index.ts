@@ -42,13 +42,27 @@ export default async function notificationsRoutes(fastify: FastifyInstance) {
     const limit   = Math.min(parseInt(query.limit  ?? '50', 10) || 50, 100)
     const offset  = Math.max(parseInt(query.offset ?? '0',  10) || 0,  0)
 
-    const { data, error } = await fastify.supabase
-      .from('notifications')
-      .select('id, title, body, link, is_read, created_at, event_id')
-      .eq('tenant_id', req.tenantId)
-      .eq('recipient_id', req.userId)
-      .order('created_at', { ascending: false })
-      .range(offset, offset + limit - 1)
+    const [listResult, countResult] = await Promise.all([
+      fastify.supabase
+        .from('notifications')
+        .select('id, title, body, link, is_read, created_at, event_id')
+        .eq('tenant_id', req.tenantId)
+        .eq('recipient_id', req.userId)
+        .order('created_at', { ascending: false })
+        .range(offset, offset + limit - 1),
+      // SYSCERT_AUDIT_2026-08-02.md H2: unread_count was derived from
+      // `.filter(n => !n.is_read)` on this page's rows only (default limit
+      // 50) — any unread notification beyond the first page was silently
+      // dropped from the bell badge. Count unread across ALL of the user's
+      // notifications, matching GET /notifications/count exactly.
+      fastify.supabase
+        .from('notifications')
+        .select('id', { count: 'exact', head: true })
+        .eq('tenant_id', req.tenantId)
+        .eq('recipient_id', req.userId)
+        .eq('is_read', false),
+    ])
+    const { data, error } = listResult
 
     // Fresh audit finding: a genuine query failure was previously reported
     // identically to "you have zero notifications" (200, empty list) — the
@@ -56,9 +70,10 @@ export default async function notificationsRoutes(fastify: FastifyInstance) {
     // the user could miss time-sensitive alerts (leave approvals, payroll
     // blockers) with no indication anything went wrong.
     if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch notifications')
+    if (countResult.error) return serverError(req, reply, countResult.error, ErrorCode.QUERY_FAILED, 'Failed to fetch unread count')
     return reply.send({
       data:         data ?? [],
-      unread_count: (data ?? []).filter((n: any) => !n.is_read).length,
+      unread_count: countResult.count ?? 0,
       pagination:   { offset, limit, returned: (data ?? []).length },
     })
   })
