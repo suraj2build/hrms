@@ -19,6 +19,7 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -281,8 +282,7 @@ export default async function workforceOptimizationRoute(fastify: FastifyInstanc
           .range(rangeFrom, rangeTo),
       )
     } catch (error) {
-      req.log.error({ err: error }, 'attendance_daily consecutive-shifts fetch failed')
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch attendance records' })
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch attendance records')
     }
 
     // Group by employee
@@ -787,10 +787,7 @@ export default async function workforceOptimizationRoute(fastify: FastifyInstanc
         .eq('tenant_id', req.tenantId)
         .maybeSingle()
 
-      if (fetchErr) {
-        req.log.error({ err: fetchErr }, 'workforce_optimization_hints fetch by id failed')
-        return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch hint' })
-      }
+      if (fetchErr) return serverError(req, reply, fetchErr, ErrorCode.QUERY_FAILED, 'Failed to fetch hint')
 
       if (!existing) {
         return reply.code(404).send({ error: 'NOT_FOUND', message: 'Hint not found' })
@@ -812,10 +809,7 @@ export default async function workforceOptimizationRoute(fastify: FastifyInstanc
         .select('id')
         .maybeSingle()
 
-      if (updateErr) {
-        req.log.error({ err: updateErr }, 'workforce_optimization_hints resolve update failed')
-        return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to resolve hint' })
-      }
+      if (updateErr) return serverError(req, reply, updateErr, ErrorCode.UPDATE_FAILED, 'Failed to resolve hint')
       if (!updated) {
         return reply.code(409).send({ error: 'ALREADY_RESOLVED', message: 'Hint is already resolved' })
       }
@@ -859,8 +853,7 @@ export default async function workforceOptimizationRoute(fastify: FastifyInstanc
           .range(from, to),
       )
     } catch (err) {
-      req.log.error({ err }, 'employee fetch for compute failed')
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch active employees' })
+      return serverError(req, reply, err, ErrorCode.QUERY_FAILED, 'Failed to fetch active employees')
     }
     if (employees.length === 0) {
       return reply.send({ employees_computed: 0, hints_generated: 0 })
@@ -894,8 +887,7 @@ export default async function workforceOptimizationRoute(fastify: FastifyInstanc
           .range(rangeFrom, rangeTo),
       )
     } catch (dailyErr) {
-      req.log.error({ err: dailyErr }, 'attendance_daily fetch for compute failed')
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch attendance data' })
+      return serverError(req, reply, dailyErr, ErrorCode.QUERY_FAILED, 'Failed to fetch attendance data')
     }
 
     const daily = dailyRows as any[]
@@ -1085,10 +1077,7 @@ export default async function workforceOptimizationRoute(fastify: FastifyInstanc
           onConflict: 'tenant_id,employee_id,period_start,period_end',
         })
 
-      if (upsertErr) {
-        req.log.error({ err: upsertErr, batch_start: i }, 'workforce_shift_balance upsert failed')
-        return reply.code(500).send({ error: 'UPSERT_FAILED', message: 'Failed to persist shift balance records' })
-      }
+      if (upsertErr) return serverError(req, reply, upsertErr, ErrorCode.UPDATE_FAILED, 'Failed to persist shift balance records')
     }
 
     // ── Step 7: Insert hints (delete stale open hints first for this period) ─
