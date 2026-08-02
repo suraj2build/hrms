@@ -264,10 +264,11 @@ export function ManagerTeamRegularisation() {
         )}
       </SectionCard>
 
-      {/* Styled confirmation dialog — matches RegularisationApproval.tsx's
-          reject flow (SYSCERT_AUDIT_2026-08-02.md High #19: this page
-          previously used a native window.confirm() while the HR-admin
-          queue used a styled dialog for the same action). */}
+      {/* Styled confirmation dialog — matches the HR-admin regularisation
+          queue's (ManagerRegularisationQueue.tsx) reject flow
+          (SYSCERT_AUDIT_2026-08-02.md High #19: this page previously used a
+          native window.confirm() while the HR-admin queue used a styled
+          dialog for the same action). */}
       <PromptDialog
         open={rejectDialogOpen}
         title={`Reject ${selected.size} Regularisation Request${selected.size !== 1 ? 's' : ''}`}
