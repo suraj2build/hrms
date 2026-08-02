@@ -19,6 +19,7 @@ import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { recomputeRange }              from '../../lib/attendance-engine.js'
 import { fetchAllRows }                from '../../lib/supabase-paginate.js'
 import { assertRangeNotFinalized, PeriodLockedError } from '../../lib/period-lock.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 const dateRe = /^\d{4}-\d{2}-\d{2}$/
 
@@ -41,8 +42,7 @@ export default async function attendanceRecomputeRoute(fastify: FastifyInstance)
       .limit(10)
 
     if (error) {
-      req.log.error({ err: error }, 'recompute/runs query failed')
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch recompute runs' })
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch recompute runs')
     }
 
     return reply.send({ runs: data ?? [] })
@@ -131,8 +131,7 @@ export default async function attendanceRecomputeRoute(fastify: FastifyInstance)
           duration_ms: Date.now() - started,
         })
       } catch (err) {
-        req.log.error({ err, employee_id, from_date, to_date }, 'recompute failed')
-        return reply.code(500).send({ error: 'RECOMPUTE_FAILED', message: 'Recompute failed' })
+        return serverError(req, reply, err, ErrorCode.COMPUTE_FAILED, 'Recompute failed')
       }
     }
 
@@ -158,8 +157,7 @@ export default async function attendanceRecomputeRoute(fastify: FastifyInstance)
       )
       empIds = empRows.map((e) => e.id)
     } catch (empErr: any) {
-      req.log.error({ err: empErr }, 'failed to fetch employees for recompute')
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch employees' })
+      return serverError(req, reply, empErr, ErrorCode.QUERY_FAILED, 'Failed to fetch employees')
     }
 
     if (empIds.length === 0) {
