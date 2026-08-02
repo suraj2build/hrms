@@ -111,10 +111,7 @@ export default async function attendanceHealthIndexRoute(fastify: FastifyInstanc
 
     const { data, error, count } = await q
 
-    if (error) {
-      req.log.error({ err: error }, 'attendance_health_scores list failed')
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch health scores' })
-    }
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch health scores')
 
     // scope_id is a bare string whose meaning depends on scope (employee_id /
     // department_id / site_id / tenant_id) — resolve a human-readable name
@@ -184,8 +181,7 @@ export default async function attendanceHealthIndexRoute(fastify: FastifyInstanc
           .range(from, to),
       ) as Array<{ health_score: number; health_grade: string }>
     } catch (error) {
-      req.log.error({ err: error }, 'attendance_health_scores summary failed')
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch health summary' })
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch health summary')
     }
 
     const byGrade: Record<string, number> = { A: 0, B: 0, C: 0, D: 0, F: 0 }
@@ -261,10 +257,7 @@ export default async function attendanceHealthIndexRoute(fastify: FastifyInstanc
         .in('period_month', months)
         .order('period_month', { ascending: true })
 
-      if (error) {
-        req.log.error({ err: error }, 'employee health score trend fetch failed')
-        return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch health trend' })
-      }
+      if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch health trend')
 
       const e = emp as any
 
@@ -317,8 +310,7 @@ export default async function attendanceHealthIndexRoute(fastify: FastifyInstanc
               .range(from, to),
           )
         } catch (empErr) {
-          req.log.error({ err: empErr }, 'employee fetch for health compute failed')
-          return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch active employees' })
+          return serverError(req, reply, empErr, ErrorCode.QUERY_FAILED, 'Failed to fetch active employees')
         }
         targetIds = activeEmps.map((e) => e.id)
       }
@@ -373,8 +365,7 @@ export default async function attendanceHealthIndexRoute(fastify: FastifyInstanc
           ),
         ])
       } catch (err: any) {
-        req.log.error({ err }, 'health-index batch fetch failed')
-        return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch attendance data for health compute' })
+        return serverError(req, reply, err, ErrorCode.QUERY_FAILED, 'Failed to fetch attendance data for health compute')
       }
 
       // Aggregate per employee
@@ -479,10 +470,7 @@ export default async function attendanceHealthIndexRoute(fastify: FastifyInstanc
           .from('attendance_health_scores')
           .upsert(batch, { onConflict: 'tenant_id,scope,scope_id,period_month' })
 
-        if (upsertErr) {
-          req.log.error({ err: upsertErr, batch_start: i }, 'health score upsert failed')
-          return reply.code(500).send({ error: 'UPSERT_FAILED', message: 'Failed to persist health scores' })
-        }
+        if (upsertErr) return serverError(req, reply, upsertErr, ErrorCode.UPDATE_FAILED, 'Failed to persist health scores')
       }
 
       return reply.send({ computed: upsertRows.length, period_month })
@@ -499,9 +487,7 @@ export default async function attendanceHealthIndexRoute(fastify: FastifyInstanc
         .eq('scope', 'employee')
         .eq('period_month', period_month)
 
-      if (scErr) {
-        return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch employee scores for department aggregation' })
-      }
+      if (scErr) return serverError(req, reply, scErr, ErrorCode.QUERY_FAILED, 'Failed to fetch employee scores for department aggregation')
 
       // Fetch employee → department mapping
       const empIds = ((empScores ?? []) as any[]).map((r) => r.scope_id)
@@ -548,9 +534,7 @@ export default async function attendanceHealthIndexRoute(fastify: FastifyInstanc
         const { error: upsertErr } = await fastify.supabase
           .from('attendance_health_scores')
           .upsert(deptUpsert, { onConflict: 'tenant_id,scope,scope_id,period_month' })
-        if (upsertErr) {
-          return reply.code(500).send({ error: 'UPSERT_FAILED', message: 'Failed to persist department health scores' })
-        }
+        if (upsertErr) return serverError(req, reply, upsertErr, ErrorCode.UPDATE_FAILED, 'Failed to persist department health scores')
       }
 
       return reply.send({ computed: deptUpsert.length, period_month })
@@ -565,9 +549,7 @@ export default async function attendanceHealthIndexRoute(fastify: FastifyInstanc
         .eq('scope', 'employee')
         .eq('period_month', period_month)
 
-      if (scErr) {
-        return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch employee scores for tenant aggregation' })
-      }
+      if (scErr) return serverError(req, reply, scErr, ErrorCode.QUERY_FAILED, 'Failed to fetch employee scores for tenant aggregation')
 
       const scores = ((empScores ?? []) as any[]).map((r) => r.health_score as number)
       if (scores.length === 0) {
@@ -593,9 +575,7 @@ export default async function attendanceHealthIndexRoute(fastify: FastifyInstanc
           { onConflict: 'tenant_id,scope,scope_id,period_month' },
         )
 
-      if (upsertErr) {
-        return reply.code(500).send({ error: 'UPSERT_FAILED', message: 'Failed to persist tenant health score' })
-      }
+      if (upsertErr) return serverError(req, reply, upsertErr, ErrorCode.UPDATE_FAILED, 'Failed to persist tenant health score')
 
       return reply.send({ computed: 1, period_month })
     }
