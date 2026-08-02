@@ -18,6 +18,7 @@
  */
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 import { expandDateRange, shiftDate } from '../../lib/leave-engine.js'
 import { checkIdempotency, storeIdempotency } from '../../lib/idempotency.js'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
@@ -75,10 +76,7 @@ export default async function rosterRoute(fastify: FastifyInstance) {
       .eq('date', today)
       .maybeSingle()
 
-    if (error) {
-      req.log.error({ err: error }, 'roster employee today fetch failed')
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch roster' })
-    }
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch roster')
 
     return reply.send({ data: row ?? null })
   })
@@ -148,8 +146,7 @@ export default async function rosterRoute(fastify: FastifyInstance) {
 
     if (empError || shiftError || rosterError || standingError || jobError) {
       const err = empError ?? shiftError ?? rosterError ?? standingError ?? jobError
-      req.log.error({ err }, 'roster data fetch failed')
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch roster data' })
+      return serverError(req, reply, err, ErrorCode.QUERY_FAILED, 'Failed to fetch roster data')
     }
 
     const jobMap = new Map(
@@ -302,10 +299,7 @@ export default async function rosterRoute(fastify: FastifyInstance) {
       .select('id, employee_id, date, shift_id')
       .single()
 
-    if (error) {
-      req.log.error({ err: error }, 'roster assign upsert failed')
-      return reply.code(500).send({ error: 'UPSERT_FAILED', message: 'Failed to assign shift' })
-    }
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to assign shift')
 
     return reply.code(201).send({ data })
   })
@@ -370,10 +364,7 @@ export default async function rosterRoute(fastify: FastifyInstance) {
       .from('shift_roster')
       .upsert(rows, { onConflict: 'tenant_id,employee_id,date' })
 
-    if (error) {
-      req.log.error({ err: error }, 'roster bulk upsert failed')
-      return reply.code(500).send({ error: 'UPSERT_FAILED', message: 'Failed to bulk assign shifts' })
-    }
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to bulk assign shifts')
 
     return reply.send({ assigned: rows.length, employees: employee_ids.length, days: dates.length })
   })
@@ -413,10 +404,7 @@ export default async function rosterRoute(fastify: FastifyInstance) {
 
     const { data: sourceRows, error: fetchErr } = await q
 
-    if (fetchErr) {
-      req.log.error({ err: fetchErr }, 'copy-week source fetch failed')
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch source week roster' })
-    }
+    if (fetchErr) return serverError(req, reply, fetchErr, ErrorCode.QUERY_FAILED, 'Failed to fetch source week roster')
 
     if (!sourceRows?.length) {
       return reply.send({ message: 'No roster overrides in source week to copy', rows_copied: 0 })
@@ -436,10 +424,7 @@ export default async function rosterRoute(fastify: FastifyInstance) {
       .from('shift_roster')
       .upsert(newRows, { onConflict: 'tenant_id,employee_id,date' })
 
-    if (upsertErr) {
-      req.log.error({ err: upsertErr }, 'copy-week upsert failed')
-      return reply.code(500).send({ error: 'UPSERT_FAILED', message: 'Failed to copy roster entries' })
-    }
+    if (upsertErr) return serverError(req, reply, upsertErr, ErrorCode.UPDATE_FAILED, 'Failed to copy roster entries')
 
     return reply.send({ message: 'Week copied successfully', rows_copied: newRows.length })
   })
@@ -568,10 +553,7 @@ export default async function rosterRoute(fastify: FastifyInstance) {
       .from('shift_roster')
       .upsert(rows, { onConflict: 'tenant_id,employee_id,date' })
 
-    if (upsertErr) {
-      req.log.error({ err: upsertErr }, 'roster csv upsert failed')
-      return reply.code(500).send({ error: 'UPSERT_FAILED', message: 'Failed to upsert roster rows' })
-    }
+    if (upsertErr) return serverError(req, reply, upsertErr, ErrorCode.UPDATE_FAILED, 'Failed to upsert roster rows')
 
     const csvResponseBody = { rows_inserted: rows.length, errors }
 
@@ -641,10 +623,7 @@ export default async function rosterRoute(fastify: FastifyInstance) {
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
 
-    if (error) {
-      req.log.error({ err: error }, 'roster delete failed')
-      return reply.code(500).send({ error: 'DELETE_FAILED', message: 'Failed to remove roster entry' })
-    }
+    if (error) return serverError(req, reply, error, ErrorCode.DELETE_FAILED, 'Failed to remove roster entry')
 
     return reply.code(204).send()
   })
