@@ -9,6 +9,7 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { fetchTenantTz, utcToLocalDate } from '../../lib/attendance-engine.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 const dateRe = /^\d{4}-\d{2}-\d{2}$/
 
@@ -74,8 +75,7 @@ export default async function attendanceInferenceRoute(fastify: FastifyInstance)
     const { data, error, count } = await q
 
     if (error) {
-      req.log.error({ err: error }, 'attendance_inference_log query failed')
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch inference log' })
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch inference log')
     }
 
     const rows = ((data ?? []) as Array<Record<string, any>>).map((r) => {
@@ -136,8 +136,7 @@ export default async function attendanceInferenceRoute(fastify: FastifyInstance)
       .order('created_at', { ascending: false })
 
     if (error) {
-      req.log.error({ err: error }, 'inference employee query failed')
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch inference history' })
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch inference history')
     }
 
     const rows = (data ?? []) as Array<{
@@ -196,8 +195,7 @@ export default async function attendanceInferenceRoute(fastify: FastifyInstance)
       .maybeSingle()
 
     if (error) {
-      req.log.error({ err: error, log_id: logId }, 'inference approve failed')
-      return reply.code(500).send({ error: 'UPDATE_FAILED', message: 'Failed to approve inference record' })
+      return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to approve inference record')
     }
 
     if (!data) {
