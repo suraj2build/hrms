@@ -97,8 +97,7 @@ export default async function assetsRoutes(fastify: FastifyInstance) {
         return q.range(from, to)
       })
     } catch (err) {
-      req.log.error({ err }, 'assets list query failed')
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch assets' })
+      return serverError(req, reply, err, ErrorCode.QUERY_FAILED, 'Failed to fetch assets')
     }
 
     const rows = data.map((a: any) => ({
@@ -485,8 +484,7 @@ export default async function assetsRoutes(fastify: FastifyInstance) {
       )
       return reply.send({ data: data.map((r: any) => ({ ...r, category_name: r.asset_categories?.name ?? null, asset_categories: undefined })) })
     } catch (err) {
-      req.log.error({ err }, 'ess asset-requests list query failed')
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch asset requests' })
+      return serverError(req, reply, err, ErrorCode.QUERY_FAILED, 'Failed to fetch asset requests')
     }
   })
 
@@ -510,8 +508,7 @@ export default async function assetsRoutes(fastify: FastifyInstance) {
         asset_categories: undefined, employees: undefined,
       })) })
     } catch (err) {
-      req.log.error({ err }, 'asset-requests list query failed')
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch asset requests' })
+      return serverError(req, reply, err, ErrorCode.QUERY_FAILED, 'Failed to fetch asset requests')
     }
   })
 
