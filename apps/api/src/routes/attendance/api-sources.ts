@@ -18,6 +18,7 @@ import type { FastifyInstance } from 'fastify'
 import { z }                    from 'zod'
 import { ssrfCheck }            from '../../lib/ssrf-guard.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 // ── Shared schemas ────────────────────────────────────────────────────────────
 
@@ -296,8 +297,7 @@ export default async function attendanceApiSourcesRoutes(fastify: FastifyInstanc
       .order('created_at', { ascending: false })
 
     if (error) {
-      req.log.error({ err: error }, 'api-sources list failed')
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch API sources' })
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch API sources')
     }
 
     return reply.send({ data: data ?? [], total: count ?? 0 })
@@ -339,8 +339,7 @@ export default async function attendanceApiSourcesRoutes(fastify: FastifyInstanc
       .single()
 
     if (error) {
-      req.log.error({ err: error }, 'api-source insert failed')
-      return reply.code(500).send({ error: 'INSERT_FAILED', message: 'Failed to create API source' })
+      return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create API source')
     }
 
     return reply.code(201).send({ data })
