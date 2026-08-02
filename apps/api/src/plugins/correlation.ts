@@ -43,9 +43,15 @@ async function correlationPlugin(fastify: FastifyInstance) {
     void reply.header('X-Request-At',     req.requestedAt)
   })
 
-  // Structured log enrichment — Fastify pino will pick this up automatically
+  // Structured log enrichment (SYSCERT_AUDIT_2026-08-02.md H21): pino only
+  // includes fields passed via a log call's merging object or bound via
+  // .child(bindings) — mutating a property directly on the logger instance
+  // (the previous `req.log.correlationId = ...`) is silently ignored and
+  // never appears in log output. Rebind req.log to a child logger with
+  // correlationId bound, so every req.log.info/warn/error call downstream
+  // includes it automatically.
   fastify.addHook('onRequest', async (req: FastifyRequest) => {
-    ;(req.log as any).correlationId = req.correlationId
+    req.log = req.log.child({ correlationId: req.correlationId })
   })
 }
 
