@@ -298,6 +298,35 @@ export async function creditEmployeeDays(
     )
 }
 
+// ── Batch-fetch helper ──────────────────────────────────────────────────────────
+//
+// SYSCERT_AUDIT_2026-08-02.md High #9: runMonthlyAccrual / runYearlyCredit /
+// runCarryForward used to issue a SELECT + upsert PER (employee, policy) pair,
+// fully sequential, inside the admin-triggered HTTP request. At enterprise
+// scale (thousands of employees × several policies) this is tens of thousands
+// of round trips synchronously in-request. Batch-fetch the whole policy's
+// balances in ONE query so the per-employee work becomes in-memory
+// computation — mirrors the C8 fix already applied to leave-jobs.ts.
+
+/** employee_id → current balance for (leaveType, year), for in-memory balance math. */
+async function fetchBalanceMap(
+  supabase:    SupabaseClient,
+  tenantId:    string,
+  leaveTypeId: string,
+  year:        number,
+): Promise<Map<string, number>> {
+  const rows = await fetchAllRows<{ employee_id: string; balance: number }>((from, to) =>
+    supabase
+      .from('employee_leave_balance')
+      .select('employee_id, balance')
+      .eq('tenant_id', tenantId)
+      .eq('leave_type_id', leaveTypeId)
+      .eq('year', year)
+      .range(from, to),
+  )
+  return new Map(rows.map(r => [r.employee_id, Number(r.balance)]))
+}
+
 // ── Batch: Monthly accrual ─────────────────────────────────────────────────────
 
 /**
@@ -374,23 +403,56 @@ export async function runMonthlyAccrual(
     const accrualAmount = computeMonthlyAccrualAmount(p)
     if (accrualAmount <= 0) continue
 
-    for (const emp of employees) {
-      if (!emp.joining_date) { result.skipped++; continue }
-
+    const eligible = employees.filter(emp => {
+      if (!emp.joining_date) { result.skipped++; return false }
       const elig = checkEligibility(emp.joining_date, p, asOf)
-      if (!elig.eligible) { result.skipped++; continue }
+      if (!elig.eligible) { result.skipped++; return false }
+      return true
+    })
+    if (!eligible.length) continue
 
-      try {
-        await creditEmployeeDays(
-          supabase, tenantId, emp.id, leaveTypeId,
-          accrualAmount, year, p.max_accrual_balance,
-        )
-        result.employees_processed++
-        result.total_days_credited = round1(result.total_days_credited + accrualAmount)
-      } catch (err: any) {
-        result.errors.push(`emp ${emp.id} / type ${leaveTypeId}: ${err?.message ?? 'unknown error'}`)
-      }
+    let balanceMap: Map<string, number>
+    try {
+      balanceMap = await fetchBalanceMap(supabase, tenantId, leaveTypeId, year)
+    } catch (err: any) {
+      result.errors.push(`Policy ${p.id}: balance pre-fetch failed — ${err?.message ?? 'unknown error'}`)
+      continue
     }
+
+    const balUpserts = eligible.map(emp => {
+      const current = balanceMap.get(emp.id) ?? 0
+      let   newBal  = current + accrualAmount
+      if (p.max_accrual_balance != null && newBal > p.max_accrual_balance) {
+        newBal = p.max_accrual_balance
+      }
+      return {
+        tenant_id:     tenantId,
+        employee_id:   emp.id,
+        leave_type_id: leaveTypeId,
+        year,
+        balance:       round1(newBal),
+        updated_at:    new Date().toISOString(),
+      }
+    })
+
+    // Counts are only credited AFTER the batch write is confirmed — a failed
+    // batch must not report these employees as processed (no fabricated
+    // success; the original per-employee call never checked its own upsert's
+    // error at all, which this fixes as part of the batching rewrite).
+    const { error: balErr } = await supabase
+      .from('employee_leave_balance')
+      .upsert(balUpserts, { onConflict: 'tenant_id,employee_id,leave_type_id,year' })
+    if (balErr) {
+      console.warn(
+        `[leave-entitlement-service] monthly accrual employee_leave_balance batch upsert failed policy=${p.id} year=${year} month=${month}:`,
+        balErr.message,
+      )
+      result.errors.push(`Policy ${p.id}: balance batch write failed — ${balErr.message}`)
+      continue
+    }
+
+    result.employees_processed += balUpserts.length
+    result.total_days_credited  = round1(result.total_days_credited + accrualAmount * balUpserts.length)
   }
 
   return result
@@ -463,55 +525,68 @@ export async function runYearlyCredit(
     const p           = policy as LeavePolicy
     const leaveTypeId = p.leave_type_id
 
+    let balanceMap: Map<string, number>
+    try {
+      balanceMap = await fetchBalanceMap(supabase, tenantId, leaveTypeId, leaveYear)
+    } catch (err: any) {
+      result.errors.push(`Policy ${p.id}: balance pre-fetch failed — ${err?.message ?? 'unknown error'}`)
+      continue
+    }
+
+    const daysByEmp: Map<string, number> = new Map()
+    const toInsert: Record<string, unknown>[] = []
+
     for (const emp of employees) {
       if (!emp.joining_date) { result.skipped++; continue }
 
       const days = computeEntitlement(emp.joining_date, p, leaveYear)
       if (days <= 0) { result.skipped++; continue }
 
-      try {
-        // Check for an existing row — prevents double-crediting on re-run
-        const { data: existing } = await supabase
-          .from('employee_leave_balance')
-          .select('id')
-          .eq('tenant_id',     tenantId)
-          .eq('employee_id',   emp.id)
-          .eq('leave_type_id', leaveTypeId)
-          .eq('year',          leaveYear)
-          .maybeSingle()
+      // Prevents double-crediting on re-run — idempotent per year.
+      if (balanceMap.has(emp.id)) { result.skipped++; continue }
 
-        if (existing) {
-          result.skipped++
-          continue
-        }
-
-        // Supabase-js resolves { error } rather than throwing, so the
-        // surrounding try/catch alone would never observe a DB failure here.
-        const { error: balInsErr } = await supabase.from('employee_leave_balance').insert({
-          tenant_id:     tenantId,
-          employee_id:   emp.id,
-          leave_type_id: leaveTypeId,
-          year:          leaveYear,
-          balance:       days,
-          updated_at:    new Date().toISOString(),
-        })
-        if (balInsErr) {
-          // A missing initial balance row silently manifests to the employee
-          // as "0 entitlement" with no trace of why — make it discoverable.
-          result.errors.push(`emp ${emp.id} / type ${leaveTypeId}: employee_leave_balance insert failed — ${balInsErr.message}`)
-          console.warn(
-            `[leave-entitlement-service] employee_leave_balance insert failed employee=${emp.id} leaveType=${leaveTypeId} year=${leaveYear}:`,
-            balInsErr.message,
-          )
-          continue
-        }
-
-        result.employees_processed++
-        result.total_days_credited = round1(result.total_days_credited + days)
-      } catch (err: any) {
-        result.errors.push(`emp ${emp.id} / type ${leaveTypeId}: ${err?.message ?? 'unknown error'}`)
-      }
+      daysByEmp.set(emp.id, days)
+      toInsert.push({
+        tenant_id:     tenantId,
+        employee_id:   emp.id,
+        leave_type_id: leaveTypeId,
+        year:          leaveYear,
+        balance:       days,
+        updated_at:    new Date().toISOString(),
+      })
     }
+
+    if (!toInsert.length) continue
+
+    // ignoreDuplicates covers the race window between the balance pre-fetch
+    // above and this write (e.g. a concurrent duplicate run) — the unique
+    // constraint on (tenant_id,employee_id,leave_type_id,year) means a
+    // conflicting row is silently skipped rather than erroring, and .select()
+    // returns only the rows that were actually inserted so counts stay
+    // accurate.
+    const { data: inserted, error: balInsErr } = await supabase
+      .from('employee_leave_balance')
+      .upsert(toInsert, { onConflict: 'tenant_id,employee_id,leave_type_id,year', ignoreDuplicates: true })
+      .select('employee_id')
+
+    if (balInsErr) {
+      // A missing initial balance row silently manifests to the employee
+      // as "0 entitlement" with no trace of why — make it discoverable.
+      result.errors.push(`Policy ${p.id}: employee_leave_balance batch insert failed — ${balInsErr.message}`)
+      console.warn(
+        `[leave-entitlement-service] yearly credit employee_leave_balance batch insert failed policy=${p.id} year=${leaveYear}:`,
+        balInsErr.message,
+      )
+      continue
+    }
+
+    const insertedIds = new Set((inserted ?? []).map((r: any) => r.employee_id as string))
+    result.skipped += toInsert.length - insertedIds.size
+
+    result.employees_processed += insertedIds.size
+    let creditedDays = 0
+    for (const id of insertedIds) creditedDays += daysByEmp.get(id) ?? 0
+    result.total_days_credited = round1(result.total_days_credited + creditedDays)
   }
 
   return result
@@ -583,6 +658,17 @@ export async function runCarryForward(
     }
     if (!balances?.length) continue
 
+    let toYearBalanceMap: Map<string, number>
+    try {
+      toYearBalanceMap = await fetchBalanceMap(supabase, tenantId, leaveTypeId, toYear)
+    } catch (err: any) {
+      result.errors.push(`Policy ${p.id}: toYear balance pre-fetch failed — ${err?.message ?? 'unknown error'}`)
+      continue
+    }
+
+    const carryByEmp: Map<string, number> = new Map()
+    const upserts: Record<string, unknown>[] = []
+
     for (const b of balances) {
       const balance  = Number(b.balance)
       const maxCarry = p.carry_forward_max_days
@@ -590,54 +676,41 @@ export async function runCarryForward(
 
       if (carryAmt <= 0) { result.skipped++; continue }
 
-      try {
-        // Fetch existing toYear row (runYearlyCredit may have already run)
-        const { data: existing } = await supabase
-          .from('employee_leave_balance')
-          .select('id, balance')
-          .eq('tenant_id',     tenantId)
-          .eq('employee_id',   b.employee_id)
-          .eq('leave_type_id', leaveTypeId)
-          .eq('year',          toYear)
-          .maybeSingle()
-
-        if (!existing) {
-          // No toYear row yet — insert with carry-forward amount
-          const { error: balInsErr } = await supabase.from('employee_leave_balance').insert({
-            tenant_id:     tenantId,
-            employee_id:   b.employee_id,
-            leave_type_id: leaveTypeId,
-            year:          toYear,
-            balance:       round1(carryAmt),
-            updated_at:    new Date().toISOString(),
-          })
-          if (balInsErr) {
-            // A missing carry-forward balance row silently manifests to the
-            // employee as "0 entitlement" with no trace of why.
-            result.errors.push(`emp ${b.employee_id} / type ${leaveTypeId}: employee_leave_balance insert failed — ${balInsErr.message}`)
-            console.warn(
-              `[leave-entitlement-service] carry-forward employee_leave_balance insert failed employee=${b.employee_id} leaveType=${leaveTypeId} year=${toYear}:`,
-              balInsErr.message,
-            )
-            continue
-          }
-        } else {
-          // Add carry-forward on top of existing toYear balance (e.g. yearly credit)
-          const newBal = round1(Number(existing.balance) + carryAmt)
-          await supabase
-            .from('employee_leave_balance')
-            .update({ balance: newBal, updated_at: new Date().toISOString() })
-            .eq('id', existing.id)
-        }
-
-        result.employees_processed++
-        result.total_days_credited = round1(result.total_days_credited + carryAmt)
-      } catch (err: any) {
-        result.errors.push(
-          `emp ${b.employee_id} / type ${leaveTypeId}: ${err?.message ?? 'unknown error'}`,
-        )
-      }
+      // Add carry-forward on top of any existing toYear balance (e.g. a prior
+      // yearly credit) — matches the original per-employee insert-or-update.
+      const existingBal = toYearBalanceMap.get(b.employee_id) ?? 0
+      carryByEmp.set(b.employee_id, carryAmt)
+      upserts.push({
+        tenant_id:     tenantId,
+        employee_id:   b.employee_id,
+        leave_type_id: leaveTypeId,
+        year:          toYear,
+        balance:       round1(existingBal + carryAmt),
+        updated_at:    new Date().toISOString(),
+      })
     }
+
+    if (!upserts.length) continue
+
+    const { error: upErr } = await supabase
+      .from('employee_leave_balance')
+      .upsert(upserts, { onConflict: 'tenant_id,employee_id,leave_type_id,year' })
+
+    if (upErr) {
+      // A missing carry-forward balance row silently manifests to the
+      // employee as "0 entitlement" with no trace of why.
+      result.errors.push(`Policy ${p.id}: employee_leave_balance batch write failed — ${upErr.message}`)
+      console.warn(
+        `[leave-entitlement-service] carry-forward employee_leave_balance batch upsert failed policy=${p.id} toYear=${toYear}:`,
+        upErr.message,
+      )
+      continue
+    }
+
+    result.employees_processed += upserts.length
+    let creditedDays = 0
+    for (const amt of carryByEmp.values()) creditedDays += amt
+    result.total_days_credited = round1(result.total_days_credited + creditedDays)
   }
 
   return result
