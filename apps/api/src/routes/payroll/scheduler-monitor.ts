@@ -215,7 +215,7 @@ export default async function schedulerMonitorRoutes(fastify: FastifyInstance) {
     })
 
     if (!newJobId) {
-      return reply.code(500).send({ error: 'RETRY_FAILED', message: 'Failed to create retry job log entry' })
+      return serverError(req, reply, null, ErrorCode.INSERT_FAILED, 'Failed to create retry job log entry')
     }
 
     return reply.code(201).send({
