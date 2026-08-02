@@ -25,6 +25,7 @@ import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { buildMonthReadModel, PAYABLE_STATUSES } from '../../lib/attendance-read-model.js'
 import { normalizeAttendanceStatus } from '../../lib/attendance-utils.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 const querySchema = z.object({
   month: z.string().regex(/^\d{4}-\d{2}$/, 'month must be YYYY-MM'),
@@ -47,7 +48,7 @@ export default async function reconciliationValidateRoute(fastify: FastifyInstan
     // ── Surface A: canonical read model ───────────────────────────────────────
     const modelResult = await buildMonthReadModel(fastify.supabase, req.tenantId, month)
     if ('error' in modelResult) {
-      return reply.code(500).send({ error: 'READ_MODEL_FAILED', message: modelResult.error })
+      return serverError(req, reply, modelResult.error, ErrorCode.QUERY_FAILED, 'Failed to build attendance read model')
     }
     const { totals: modelTotals, rows: modelRows } = modelResult
 
@@ -74,10 +75,7 @@ export default async function reconciliationValidateRoute(fastify: FastifyInstan
           .range(from, to),
       )
     } catch (rawErr) {
-      return reply.code(500).send({
-        error:   'RAW_QUERY_FAILED',
-        message: rawErr instanceof Error ? rawErr.message : 'Failed to fetch raw attendance rows',
-      })
+      return serverError(req, reply, rawErr, ErrorCode.QUERY_FAILED, 'Failed to fetch raw attendance rows')
     }
 
     // Tally raw counts using the same canonical status mapping (PAYABLE_STATUSES from read model)
