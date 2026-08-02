@@ -685,6 +685,18 @@ export default async function reimbursementsRoutes(fastify: FastifyInstance) {
       })
     }
 
+    // No server-side cap meant an approver could set approved_amount to
+    // anything — including well above what the employee actually claimed —
+    // and it would flow straight into payroll as a real payout
+    // (SYSCERT_AUDIT_2026-08-02.md Medium finding). An approver may approve
+    // for less (partial approval) but never more than what was claimed.
+    if (parsed.data.approved_amount > Number((existing as any).claimed_amount)) {
+      return reply.code(400).send({
+        error:   'VALIDATION_ERROR',
+        message: `approved_amount (${parsed.data.approved_amount}) cannot exceed the claimed amount (${(existing as any).claimed_amount})`,
+      })
+    }
+
     // Segregation of duties — an HR admin may not approve their own claim.
     // gateApprove()'s self-approval guard only fires when a chain IS
     // configured for reimbursement_claim; the legacy/no-chain path below
@@ -1021,6 +1033,15 @@ export default async function reimbursementsRoutes(fastify: FastifyInstance) {
       return reply.code(409).send({ error: 'INVALID_STATUS', message: `Claim is not in a reviewable state (status: ${(existing as any).status})` })
     }
 
+    // No server-side cap — see /claims/:id/approve for why this must reject
+    // rather than silently accept an approved_amount above what was claimed.
+    if (parsed.data.approved_amount > Number((existing as any).claimed_amount)) {
+      return reply.code(400).send({
+        error:   'VALIDATION_ERROR',
+        message: `approved_amount (${parsed.data.approved_amount}) cannot exceed the claimed amount (${(existing as any).claimed_amount})`,
+      })
+    }
+
     // Segregation of duties — see /claims/:id/approve for why this can't
     // rely on gateApprove() alone.
     if (await isSelfApproval(fastify.supabase, req.tenantId as string, req.userId, (existing as any).employee_id)) {
@@ -1094,6 +1115,20 @@ export default async function reimbursementsRoutes(fastify: FastifyInstance) {
     if (!existing) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Claim not found' })
     if (!['submitted', 'under_review'].includes((existing as any).status)) {
       return reply.code(409).send({ error: 'INVALID_STATUS', message: `Claim is not in a reviewable state (status: ${(existing as any).status})` })
+    }
+
+    // No server-side cap — see /claims/:id/approve for why this must reject
+    // rather than silently accept an approved_amount above what was claimed.
+    // An omitted approved_amount defaults to claimed_amount below and never
+    // needs this check; only an explicitly-provided value can exceed it.
+    if (
+      approveBodyParsed.data.approved_amount != null &&
+      approveBodyParsed.data.approved_amount > Number((existing as any).claimed_amount)
+    ) {
+      return reply.code(400).send({
+        error:   'VALIDATION_ERROR',
+        message: `approved_amount (${approveBodyParsed.data.approved_amount}) cannot exceed the claimed amount (${(existing as any).claimed_amount})`,
+      })
     }
 
     // Segregation of duties — see /claims/:id/approve for why this can't
