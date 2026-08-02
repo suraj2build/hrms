@@ -14,6 +14,7 @@
  */
 import type { FastifyInstance } from 'fastify'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 export default async function statusRoute(fastify: FastifyInstance) {
   fastify.get(
@@ -31,8 +32,7 @@ export default async function statusRoute(fastify: FastifyInstance) {
         .maybeSingle()
 
       if (error) {
-        req.log.error({ err: error, module: 'attendance', route: 'status' }, 'status query failed')
-        return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Could not fetch processing status' })
+        return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Could not fetch processing status')
       }
 
       // No lock row yet (tenant has never processed) → not running
