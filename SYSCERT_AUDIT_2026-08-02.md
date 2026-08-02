@@ -7,6 +7,11 @@ Date: 2026-08-02 · Baseline A1 (`sk-skill-syscert`) · Read-only, evidence-base
 
 - **Health Score: 0 / 100** *(100 − 25×Critical − 8×High − 2×Medium − 0.5×Low, floored)*
 - **Verdict: NOT READY** — 9 open Criticals, each independently sufficient to block certification.
+- **Post-audit correction (2026-08-02):** C7 was reviewed against `BILLING.md` (not cross-referenced at
+  audit time) and found to be documented, intentional self-serve billing architecture, not a bug — see
+  the C7 section below. Effective Critical count after fix rounds + this correction: see
+  `AUDIT_CONSTITUTION.md` §14.6 for live remaining-item tracking; the totals table below is left
+  unchanged as the historical record of what this audit run found.
 
 ## Per-audit summary
 
@@ -68,9 +73,12 @@ No `.range()`/`fetchAllRows()`, despite the write-side compute endpoint in the s
 **Fix:** wrap all six queries in `fetchAllRows()`. Effort: Low.
 
 ### C7. Billing webhook writes `tenants.status` directly, contradicting the single-writer contract
-**Severity:** Critical · **Category:** security/architecture · **File:** `apps/api/src/routes/billing/index.ts` L159-197
+**Severity:** ~~Critical~~ **CORRECTED — not a bug** (see below) · **Category:** security/architecture · **File:** `apps/api/src/routes/billing/index.ts` L159-197
 CLAUDE.md: "HRMS never writes license state... owner portal is responsible." A Razorpay webhook independently flips `tenants.status`, the same field the write-gate reads — a third uncoordinated writer alongside `routes/owner/index.ts`.
-**Fix:** decide the single authoritative writer; remove this webhook's direct writes or add explicit reconciliation/ordering. Regression risk: Medium (needs product decision).
+
+**Correction (2026-08-02, post-audit review):** this finding was raised without cross-referencing `BILLING.md`, which documents this exact write path as an intentional, designed feature — CognixHR's **self-serve Razorpay subscription billing**, distinct from the owner-portal-managed enterprise licensing flow CLAUDE.md's "single writer" contract describes. `BILLING.md`'s architecture diagram shows `tenant.status = active ◄── POST /billing/webhook (signed)` explicitly, with a go-live checklist, DB migration (278), and full test-mode → live-mode rollout plan. Signature-verified (HMAC + timing-safe compare), idempotent (`tenant_subscription_events.razorpay_event_id` unique), and fails closed (a DB write error returns 5xx so Razorpay retries rather than silently losing the event).
+
+Removing this write path, as originally recommended, would have broken a real, documented, revenue-critical feature. **No code change made.** The one residual, genuine architectural question — whether a tenant can simultaneously be enterprise-managed (owner portal) *and* self-serve-subscribed (Razorpay), and if so which write should win on conflict — is a real product question (are these mutually exclusive customer populations today?) that needs a business answer, not a code fix; not resolved here.
 
 ### C8. Leave accrual/carry-forward jobs run 3 unbatched O(employees×policies) implementations
 **Severity:** Critical · **Category:** database/performance · **File:** `apps/api/src/lib/leave-jobs.ts`, `apps/api/src/lib/leave-entitlement-service.ts`
@@ -138,7 +146,7 @@ Zero circular dependencies across the entire codebase (madge-verified, 4 trees, 
 2. **C5** (AI bank-fraud vector — exploitable today via chat)
 3. **C1** (payroll-integrity gate — period lock)
 4. **C2, C3** (wrong-money payroll/leave calculations)
-5. **C7** (billing webhook contract violation — company-wide lockout risk)
+5. ~~C7~~ (corrected — not a bug, see C7 section above)
 6. **C6** (statutory filing truncation — compliance exposure)
 7. **C4** (leave forfeiture, no audit trail)
 8. **C8** (accrual job scalability)
