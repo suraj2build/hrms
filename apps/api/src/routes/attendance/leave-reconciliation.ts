@@ -24,6 +24,7 @@ import type { FastifyInstance } from 'fastify'
 import { z }                    from 'zod'
 import { runLeaveReconciliation } from '../../lib/leave-reconciliation.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 export default async function leaveReconciliationRoutes(fastify: FastifyInstance) {
   const auth = { preHandler: [fastify.authenticate] }
@@ -58,8 +59,7 @@ export default async function leaveReconciliationRoutes(fastify: FastifyInstance
       )
       return reply.code(201).send({ data: result })
     } catch (err: any) {
-      req.log.error({ err, module: 'leave-reconciliation' }, 'leave reconciliation run failed')
-      return reply.code(500).send({ error: 'RECONCILIATION_FAILED', message: err.message })
+      return serverError(req, reply, err, ErrorCode.COMPUTE_FAILED, 'Failed to run leave reconciliation')
     }
   })
 
@@ -88,7 +88,7 @@ export default async function leaveReconciliationRoutes(fastify: FastifyInstance
       .order('started_at', { ascending: false })
       .range(offset, offset + limit - 1)
 
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch reconciliation runs')
     return reply.send({ data: data ?? [], total: count ?? 0, limit, offset })
   })
 
@@ -160,7 +160,7 @@ export default async function leaveReconciliationRoutes(fastify: FastifyInstance
     if (resolved !== undefined) q = q.eq('resolved', resolved === 'true')
 
     const { data, error, count } = await q
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch reconciliation issues')
     return reply.send({ data: data ?? [], total: count ?? 0, limit, offset })
   })
 
@@ -224,7 +224,7 @@ export default async function leaveReconciliationRoutes(fastify: FastifyInstance
     if (year)     q = q.eq('year', year)
 
     const { data, error, count } = await q
-    if (error) return reply.code(500).send({ error: 'QUERY_FAILED', message: error.message })
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch reconciliation summary')
 
     const byType: Record<string, number> = {}
     const bySeverity: Record<string, number> = {}
