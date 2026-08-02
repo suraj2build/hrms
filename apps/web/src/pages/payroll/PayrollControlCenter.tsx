@@ -501,6 +501,12 @@ export function PayrollControlCenter(): JSX.Element {
     onSuccess: () => {
       setIsFrozen(true)
       completeStep('freeze')
+      // AttendancePeriods.tsx queries the same period-lock rows under
+      // ['period-locks'] / ['period-lock', month] with a 30s staleTime — a
+      // freeze triggered here left that page showing "unfrozen" for up to
+      // 30s (SYSCERT_AUDIT_2026-08-02.md High #17).
+      queryClient.invalidateQueries({ queryKey: ['period-locks'] })
+      queryClient.invalidateQueries({ queryKey: ['period-lock', payrollMonth] })
       toast.success('Attendance period frozen')
     },
     onError: () => toast.error('Freeze failed'),
