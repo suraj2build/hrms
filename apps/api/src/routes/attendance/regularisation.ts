@@ -143,10 +143,7 @@ export default async function regularisationRoute(fastify: FastifyInstance) {
 
     const [{ data, count, error }, { count: pendingCount }] = await Promise.all([query, pendingCountQ])
 
-    if (error) {
-      req.log.error({ err: error }, 'regularisation my-list query failed')
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch requests' })
-    }
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch requests')
 
     return reply.send({ data: data ?? [], total: count ?? 0, pending_count: pendingCount ?? 0, limit, offset })
   })
@@ -171,8 +168,7 @@ export default async function regularisationRoute(fastify: FastifyInstance) {
           .range(from, to)
       )
     } catch (err) {
-      req.log.error({ err }, 'regularisation pending query failed')
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch pending requests' })
+      return serverError(req, reply, err, ErrorCode.QUERY_FAILED, 'Failed to fetch pending requests')
     }
 
     // Flatten employee info for easier frontend consumption
@@ -259,8 +255,7 @@ export default async function regularisationRoute(fastify: FastifyInstance) {
         return query.range(rangeFrom, rangeTo)
       })
     } catch (err) {
-      req.log.error({ err }, 'regularisation team-list query failed')
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch team requests' })
+      return serverError(req, reply, err, ErrorCode.QUERY_FAILED, 'Failed to fetch team requests')
     }
 
     const now = new Date()
@@ -792,7 +787,7 @@ export default async function regularisationRoute(fastify: FastifyInstance) {
         .maybeSingle(),
     ])
 
-    if (pendingRes.error) return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch summary' })
+    if (pendingRes.error) return serverError(req, reply, pendingRes.error, ErrorCode.QUERY_FAILED, 'Failed to fetch summary')
 
     let oldestPendingDays: number | null = null
     if (oldestRes.data?.created_at) {
