@@ -613,6 +613,25 @@ export async function rejectLeaveRequest(
     to_date:     req.to_date,
   })
 
+  // Also emit on the in-process eventBus (SYSCERT_AUDIT_2026-08-02.md H7) —
+  // mirrors the leave.approved fix above (PEND-75): this is the system that
+  // actually drives tenant-configured webhook fan-out and the SLA-on-rejection
+  // automation in event-bus-automation.ts's eventBus.on('leave.rejected', ...)
+  // handler. Without this, that handler (and any tenant webhook subscribed to
+  // leave.rejected) never fired for a real UI-driven rejection.
+  eventBus.emit({
+    type:          'leave.rejected',
+    tenantId,
+    correlationId: 'system',
+    payload: {
+      tenantId,
+      employeeId: req.employee_id,
+      leaveId:    requestId,
+      approverId: ctx.approverId,
+      reason:     rejectionReason ?? undefined,
+    },
+  })
+
   return { ok: true, value: rejected }
 }
 
