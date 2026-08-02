@@ -288,7 +288,9 @@ export function MyAssistant() {
 
               {/* Trust caption — persistent, mirrors the backend's no-fabrication rule. */}
               <p className="px-1 text-[11px] text-muted-foreground">
-                AI can be wrong — verify important details.
+                {view.outcome.kind === 'answer' && view.outcome.toolsUsed.length > 0
+                  ? '✓ From your data — verify important details.'
+                  : 'General guidance, not looked up from your data — verify important details.'}
               </p>
 
               {/* Conversation is the FALLBACK, never the front door. */}

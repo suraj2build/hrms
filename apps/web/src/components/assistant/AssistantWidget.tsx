@@ -16,7 +16,7 @@ import { api } from '@/lib/api/client'
 import { useAuthStore } from '@/stores/authStore'
 import { DEMO_MODE } from '@/lib/demo'
 
-interface Msg { role: 'user' | 'assistant'; content: string }
+interface Msg { role: 'user' | 'assistant'; content: string; toolsUsed?: string[] }
 interface ChatResp { data: { reply: string | null; not_configured?: boolean; error?: boolean; tools_used?: string[] } }
 interface StatusResp { data: { enabled: boolean; provider: string; model: string } }
 
@@ -77,7 +77,7 @@ export function AssistantWidget() {
       if (res.data.not_configured) {
         setMsgs(m => [...m, { role: 'assistant', content: '__NOT_CONFIGURED__' }])
       } else {
-        setMsgs(m => [...m, { role: 'assistant', content: res.data.reply ?? '…' }])
+        setMsgs(m => [...m, { role: 'assistant', content: res.data.reply ?? '…', toolsUsed: res.data.tools_used }])
       }
     } catch {
       setMsgs(m => [...m, { role: 'assistant', content: 'Sorry — I could not reach the assistant. Please try again.' }])
@@ -148,10 +148,15 @@ export function AssistantWidget() {
                     ) : 'Ask an admin to enable it in Settings → AI Assistant.'}
                   </div>
                 ) : (
-                  <div className={`max-w-[85%] whitespace-pre-wrap rounded-xl px-3 py-2 text-xs ${
-                    m.role === 'user' ? 'bg-primary text-primary-foreground' : 'bg-muted text-foreground'
-                  }`}>
-                    {m.content}
+                  <div className="max-w-[85%]">
+                    <div className={`whitespace-pre-wrap rounded-xl px-3 py-2 text-xs ${
+                      m.role === 'user' ? 'bg-primary text-primary-foreground' : 'bg-muted text-foreground'
+                    }`}>
+                      {m.content}
+                    </div>
+                    {m.role === 'assistant' && m.toolsUsed && m.toolsUsed.length > 0 && (
+                      <p className="mt-1 px-1 text-[10px] text-muted-foreground">✓ From your data</p>
+                    )}
                   </div>
                 )}
               </div>
