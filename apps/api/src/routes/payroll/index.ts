@@ -2398,6 +2398,44 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       }
     }
 
+    // ── Validation-run gate ─────────────────────────────────────────────────────
+    // The UI's Validate → Reconcile → Finalize stepper implied Validate was a
+    // required prior stage, but nothing here ever checked it — an operator could
+    // finalize having never run the validation rule engine (MISSING_COMPENSATION,
+    // MISSING_BANK, etc. never executed) or after running it with critical errors
+    // still open. Require the latest validation run for this month to exist,
+    // have completed, and not be blocking — overridable with force_finalize,
+    // same as the open-blockers gate above.
+    {
+      const { data: latestValidation } = await fastify.supabase
+        .from('payroll_validation_runs')
+        .select('id, status, is_payroll_blocked, error_count, completed_at')
+        .eq('tenant_id', tenantId)
+        .eq('validation_month', run.month)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+
+      const validationMissing = !latestValidation || latestValidation.status !== 'completed'
+      const validationBlocked = !!latestValidation?.is_payroll_blocked
+
+      if ((validationMissing || validationBlocked) && !force_finalize) {
+        return reply.code(422).send({
+          error:   'VALIDATION_NOT_CLEARED',
+          message: validationMissing
+            ? `No completed validation run found for ${run.month}. Run Validate before finalizing, or pass force_finalize=true with an override_reason.`
+            : `The latest validation run for ${run.month} has ${latestValidation!.error_count} unresolved critical error(s). ` +
+              'Resolve them, or pass force_finalize=true with an override_reason.',
+        })
+      }
+      if ((validationMissing || validationBlocked) && force_finalize) {
+        req.log.warn(
+          { run_id: id, month: run.month, overridden_by: req.userId, override_reason: override_reason ?? '(none)', validation_missing: validationMissing, validation_blocked: validationBlocked },
+          'payroll finalization override: proceeding without a cleared validation run',
+        )
+      }
+    }
+
     // ── Staleness guard ─────────────────────────────────────────────────────────
     // If any leave was approved AFTER this run was created, those employees'
     // attendance_daily rows may be stale.  Auto-recompute and refresh their slips
