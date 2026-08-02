@@ -261,6 +261,272 @@ function emptyResult(jobId: string, jobType: string, startedAt: number): JobResu
   }
 }
 
+/** Round to 1 decimal place (matches leave-entitlement-service.ts's internal round1). */
+function round1(n: number): number {
+  return Math.round(n * 10) / 10
+}
+
+// ── Batch-fetch helpers ──────────────────────────────────────────────────────
+//
+// SYSCERT_AUDIT_2026-08-02.md C8: monthlyAccrualJob / yearlyAccrualJob /
+// carryForwardJob's "Phase 2: Legacy" loops used to issue 1-2 DB round trips
+// PER (employee, policy) pair (idempotency SELECT + balance SELECT/upsert +
+// ledger upsert), fully sequential. These helpers batch-fetch the whole
+// policy's relevant rows in ONE query (paginated via fetchAllRows to avoid
+// PostgREST's 1,000-row max-rows ceiling), so the per-employee work below
+// becomes pure in-memory computation — mirrors accrual-engine.ts's
+// processCarryForward() pattern.
+
+/**
+ * Which employees already have a leave_accrual_ledger row for this exact
+ * (leaveType, year, accrualType, accruedOn) cycle — the same disambiguating
+ * tuple a per-employee cycle_key encodes. One query replaces N idempotency
+ * SELECTs.
+ */
+async function fetchCreditedEmployeeIds(
+  supabase:    SupabaseClient,
+  tenantId:    string,
+  leaveTypeId: string,
+  year:        number,
+  accrualType: string,
+  accruedOn:   string,
+): Promise<Set<string>> {
+  const rows = await fetchAllRows<{ employee_id: string }>((from, to) =>
+    supabase
+      .from('leave_accrual_ledger')
+      .select('employee_id')
+      .eq('tenant_id', tenantId)
+      .eq('leave_type_id', leaveTypeId)
+      .eq('year', year)
+      .eq('accrual_type', accrualType)
+      .eq('accrued_on', accruedOn)
+      .range(from, to),
+  )
+  return new Set(rows.map(r => r.employee_id))
+}
+
+/** Which employees already have an employee_leave_balance row for (leaveType, year). */
+async function fetchExistingBalanceEmployeeIds(
+  supabase:    SupabaseClient,
+  tenantId:    string,
+  leaveTypeId: string,
+  year:        number,
+): Promise<Set<string>> {
+  const rows = await fetchAllRows<{ employee_id: string }>((from, to) =>
+    supabase
+      .from('employee_leave_balance')
+      .select('employee_id')
+      .eq('tenant_id', tenantId)
+      .eq('leave_type_id', leaveTypeId)
+      .eq('year', year)
+      .range(from, to),
+  )
+  return new Set(rows.map(r => r.employee_id))
+}
+
+/** employee_id → current balance for (leaveType, year), for in-memory balance math. */
+async function fetchBalanceMap(
+  supabase:    SupabaseClient,
+  tenantId:    string,
+  leaveTypeId: string,
+  year:        number,
+): Promise<Map<string, number>> {
+  const rows = await fetchAllRows<{ employee_id: string; balance: number }>((from, to) =>
+    supabase
+      .from('employee_leave_balance')
+      .select('employee_id, balance')
+      .eq('tenant_id', tenantId)
+      .eq('leave_type_id', leaveTypeId)
+      .eq('year', year)
+      .range(from, to),
+  )
+  return new Map(rows.map(r => [r.employee_id, Number(r.balance)]))
+}
+
+/**
+ * Which employees already have a 'carry_forward' ledger row for (leaveType,
+ * toYear) — matches the semantics of carryForwardJob's original per-employee
+ * `existingCF` count check (no accrued_on filter: a carry-forward is expected
+ * exactly once per employee/leaveType/toYear regardless of run date).
+ */
+async function fetchCarryForwardedEmployeeIds(
+  supabase:    SupabaseClient,
+  tenantId:    string,
+  leaveTypeId: string,
+  toYear:      number,
+): Promise<Set<string>> {
+  const rows = await fetchAllRows<{ employee_id: string }>((from, to) =>
+    supabase
+      .from('leave_accrual_ledger')
+      .select('employee_id')
+      .eq('tenant_id', tenantId)
+      .eq('leave_type_id', leaveTypeId)
+      .eq('year', toYear)
+      .eq('accrual_type', 'carry_forward')
+      .range(from, to),
+  )
+  return new Set(rows.map(r => r.employee_id))
+}
+
+/**
+ * Batch-process one legacy policy's monthly/quarterly accrual for a whole
+ * tenant in constant round trips (idempotency pre-check + balance pre-fetch +
+ * ledger batch upsert + balance batch upsert = 4 calls, regardless of
+ * employee count — was up to 4 sequential calls PER employee).
+ *
+ * checkEligibility() is pure/synchronous (no DB call) so it's run in-memory
+ * per candidate employee, same as the original per-employee loop.
+ *
+ * Batching granularity is per-policy (matching accrual-engine.ts's per-rule
+ * convention): a DB error on this policy's batch write is logged and does
+ * not abort other policies' batches, but — like accrual-engine.ts's own
+ * runMonthlyAccrual/processCarryForward — the ledger and balance batch
+ * writes are attempted independently and are not gated on each other's
+ * success (see leave-jobs.ts module-level rewrite notes).
+ */
+async function processLegacyAccrualBatch(
+  supabase:        SupabaseClient,
+  tenantId:        string,
+  policy:          LeavePolicy,
+  employees:       Array<{ id: string; joining_date: string }>,
+  engineProcessed: Set<string>,
+  year:            number,
+  accrualType:     'monthly' | 'quarterly',
+  accrualDays:     number,
+  accrualDate:     string,   // YYYY-MM-DD posting date
+  cycleLabel:      string,   // cycle descriptor for generateCycleKey / notes
+  expiresOn:       string | null,
+  lineageId:       string,
+  nowIso:          string,
+  errors:          string[],
+): Promise<{ employees_processed: number; total_days_credited: number; skipped: number }> {
+  let localSkipped   = 0
+  let localProcessed = 0
+  let localDays      = 0
+
+  // Step 1: exclude employees already credited by Phase 1 (engine) — in memory.
+  const candidates = employees.filter(emp => {
+    if (engineProcessed.has(emp.id)) { localSkipped++; return false }
+    return true
+  })
+  if (!candidates.length) return { employees_processed: 0, total_days_credited: 0, skipped: localSkipped }
+
+  // Eligibility is pure/synchronous — safe and cheap to evaluate per candidate.
+  const asOfDate = new Date(`${accrualDate}T12:00:00.000Z`)
+  const eligible = candidates.filter(emp => {
+    const elig = checkEligibility(emp.joining_date, policy, asOfDate)
+    if (!elig.eligible) { localSkipped++; return false }
+    return true
+  })
+  if (!eligible.length) return { employees_processed: 0, total_days_credited: 0, skipped: localSkipped }
+
+  // Idempotency: ONE query for the whole policy instead of one SELECT per employee.
+  let alreadyCredited: Set<string>
+  try {
+    alreadyCredited = await fetchCreditedEmployeeIds(supabase, tenantId, policy.leave_type_id, year, accrualType, accrualDate)
+  } catch (e: unknown) {
+    errors.push(`Policy ${policy.id} (${accrualType}): idempotency pre-check failed — ${(e as Error).message}`)
+    return { employees_processed: 0, total_days_credited: 0, skipped: localSkipped }
+  }
+
+  const toCredit = eligible.filter(emp => {
+    if (alreadyCredited.has(emp.id)) { localSkipped++; return false }
+    return true
+  })
+  if (!toCredit.length) return { employees_processed: 0, total_days_credited: 0, skipped: localSkipped }
+
+  // Batch-fetch existing balances so new balances can be computed in memory
+  // without a per-employee SELECT (eliminates the C8 N+1).
+  let balanceMap: Map<string, number>
+  try {
+    balanceMap = await fetchBalanceMap(supabase, tenantId, policy.leave_type_id, year)
+  } catch (e: unknown) {
+    errors.push(`Policy ${policy.id} (${accrualType}): balance pre-fetch failed — ${(e as Error).message}`)
+    return { employees_processed: 0, total_days_credited: 0, skipped: localSkipped }
+  }
+
+  const ledInserts: Record<string, unknown>[] = []
+  const balUpserts:  Record<string, unknown>[] = []
+  const label = accrualType === 'monthly' ? 'Monthly' : 'Quarterly'
+
+  for (const emp of toCredit) {
+    const cycleKey = generateCycleKey(tenantId, emp.id, policy.leave_type_id, year, cycleLabel, accrualType)
+
+    ledInserts.push({
+      tenant_id:        tenantId,
+      employee_id:      emp.id,
+      leave_type_id:    policy.leave_type_id,
+      year,
+      accrual_type:     accrualType,
+      days:             accrualDays,
+      accrued_on:       accrualDate,
+      expires_on:       expiresOn,
+      notes:            `${label} accrual ${cycleLabel}`,
+      lineage_id:       lineageId,
+      parent_replay_id: null,
+      snapshot_id:      null,
+      policy_rule_id:   null,
+      cycle_key:        cycleKey,
+    })
+
+    const currentBalance = balanceMap.get(emp.id) ?? 0
+    let newBalance = currentBalance + accrualDays
+    if (policy.max_accrual_balance != null && newBalance > policy.max_accrual_balance) {
+      newBalance = policy.max_accrual_balance
+    }
+    balUpserts.push({
+      tenant_id:     tenantId,
+      employee_id:   emp.id,
+      leave_type_id: policy.leave_type_id,
+      year,
+      balance:       round1(newBalance),
+      updated_at:    nowIso,
+    })
+  }
+
+  // Batch write: 2 calls per policy regardless of employee count
+  // (was up to 4 sequential calls × N_employees — the C8 finding).
+  //
+  // Counts are only credited AFTER the ledger write is confirmed — matching
+  // the original per-employee code's behavior, where writeLedgerEntry() threw
+  // on a DB error and the surrounding try/catch skipped employees_processed++
+  // for that employee entirely. A batch-wide ledger failure must not report
+  // this whole batch as processed (no fabricated success).
+  const { error: ledErr } = await supabase
+    .from('leave_accrual_ledger')
+    .upsert(ledInserts, { onConflict: 'cycle_key', ignoreDuplicates: true })
+  if (ledErr) {
+    // A missing ledger batch write leaves this policy's employees with no
+    // audit trail for the accrual — log loudly so it's discoverable, same
+    // convention as accrual-engine.ts's cfLedErr/cfAlErr handling.
+    console.warn(
+      `[leave-jobs] ${accrualType} accrual leave_accrual_ledger batch upsert failed policy=${policy.id} cycle=${cycleLabel}:`,
+      ledErr.message,
+    )
+    errors.push(`Policy ${policy.id} (${accrualType}): ledger batch write failed — ${ledErr.message}`)
+    return { employees_processed: 0, total_days_credited: 0, skipped: localSkipped }
+  }
+
+  localProcessed = toCredit.length
+  localDays      = parseFloat((accrualDays * toCredit.length).toFixed(2))
+
+  // Balance write failure does NOT roll back the processed count — matches
+  // the original creditEmployeeDays() call, which never checked its own
+  // upsert's error and always let employees_processed++ proceed after it.
+  const { error: balErr } = await supabase
+    .from('employee_leave_balance')
+    .upsert(balUpserts, { onConflict: 'tenant_id,employee_id,leave_type_id,year' })
+  if (balErr) {
+    console.warn(
+      `[leave-jobs] ${accrualType} accrual employee_leave_balance batch upsert failed policy=${policy.id} cycle=${cycleLabel}:`,
+      balErr.message,
+    )
+    errors.push(`Policy ${policy.id} (${accrualType}): balance batch write failed — ${balErr.message}`)
+  }
+
+  return { employees_processed: localProcessed, total_days_credited: localDays, skipped: localSkipped }
+}
+
 // ── Job 1: Monthly Accrual ─────────────────────────────────────────────────────
 //
 // Credits 1/12th of the annual entitlement (rounded to 1 dp) to every active
@@ -342,8 +608,11 @@ export async function monthlyAccrualJob(
     const quarterlyPolicies = QUARTER_MONTHS.includes(month as 1 | 4 | 7 | 10)
       ? policies.filter(p => p.accrual_type === 'quarterly')
       : []
+    const nowIso = new Date().toISOString()
 
     // ── Monthly ──────────────────────────────────────────────────────────────
+    // C8 fix: batch-fetch idempotency + balances per policy instead of a
+    // per-employee round trip (see processLegacyAccrualBatch).
     if (monthlyPolicies.length && employees.length) {
       for (const policy of monthlyPolicies) {
         const monthlyDays = computeMonthlyAccrualAmount(policy)
@@ -357,41 +626,14 @@ export async function monthlyAccrualJob(
           ? shiftDay(accrualDate, policy.expiry_days)
           : null
 
-        for (const emp of employees) {
-          // Step 1: skip employees already credited by Phase 1 (engine)
-          if (engineProcessed.has(emp.id)) { skipped++; continue }
-
-          try {
-            const asOfDate = new Date(`${accrualDate}T12:00:00.000Z`)
-            const elig = checkEligibility(emp.joining_date, policy, asOfDate)
-            if (!elig.eligible) { skipped++; continue }
-
-            // Deterministic cycle key — idempotency guard for replay
-            const cycleKey = generateCycleKey(tenantId, emp.id, policy.leave_type_id, year, cycleLabel, 'monthly')
-
-            // Ledger is the authority — write it first. Only credit the (non-
-            // idempotent) balance cache when the ledger row was actually inserted,
-            // so a re-run of the same cycle never double-credits the cache.
-            const { skipped: alreadyCredited } = await writeLedgerEntry(
-              supabase, tenantId, emp.id, policy.leave_type_id, year,
-              'monthly', monthlyDays, accrualDate, expiresOn,
-              `Monthly accrual ${cycleLabel}`,
-              { lineageId, cycleKey },
-            )
-            if (alreadyCredited) { skipped++; continue }
-
-            // Credit balance (respects max_accrual_balance cap)
-            await creditEmployeeDays(
-              supabase, tenantId, emp.id, policy.leave_type_id,
-              monthlyDays, year, policy.max_accrual_balance ?? undefined,
-            )
-
-            employees_processed++
-            total_days_credited = parseFloat((total_days_credited + monthlyDays).toFixed(2))
-          } catch (e: unknown) {
-            errors.push(`Emp ${emp.id} policy ${policy.id}: ${(e as Error).message}`)
-          }
-        }
+        const r = await processLegacyAccrualBatch(
+          supabase, tenantId, policy, employees, engineProcessed, year,
+          'monthly', monthlyDays, accrualDate, cycleLabel, expiresOn,
+          lineageId, nowIso, errors,
+        )
+        employees_processed += r.employees_processed
+        total_days_credited  = parseFloat((total_days_credited + r.total_days_credited).toFixed(2))
+        skipped              += r.skipped
       }
     }
 
@@ -408,37 +650,14 @@ export async function monthlyAccrualJob(
           ? shiftDay(accrualDate, policy.expiry_days)
           : null
 
-        for (const emp of employees) {
-          if (engineProcessed.has(emp.id)) { skipped++; continue }
-
-          try {
-            const asOfDate = new Date(`${accrualDate}T12:00:00.000Z`)
-            const elig = checkEligibility(emp.joining_date, policy, asOfDate)
-            if (!elig.eligible) { skipped++; continue }
-
-            // Deterministic cycle key — idempotency guard for replay
-            const cycleKey = generateCycleKey(tenantId, emp.id, policy.leave_type_id, year, quarterLabel, 'quarterly')
-
-            // Ledger-first, then gate the non-idempotent cache credit on insertion.
-            const { skipped: alreadyCredited } = await writeLedgerEntry(
-              supabase, tenantId, emp.id, policy.leave_type_id, year,
-              'quarterly', quarterlyDays, accrualDate, expiresOn,
-              `Quarterly accrual ${quarterLabel}`,
-              { lineageId, cycleKey },
-            )
-            if (alreadyCredited) { skipped++; continue }
-
-            await creditEmployeeDays(
-              supabase, tenantId, emp.id, policy.leave_type_id,
-              quarterlyDays, year, policy.max_accrual_balance ?? undefined,
-            )
-
-            employees_processed++
-            total_days_credited = parseFloat((total_days_credited + quarterlyDays).toFixed(2))
-          } catch (e: unknown) {
-            errors.push(`Emp ${emp.id} policy ${policy.id}: ${(e as Error).message}`)
-          }
-        }
+        const r = await processLegacyAccrualBatch(
+          supabase, tenantId, policy, employees, engineProcessed, year,
+          'quarterly', quarterlyDays, accrualDate, quarterLabel, expiresOn,
+          lineageId, nowIso, errors,
+        )
+        employees_processed += r.employees_processed
+        total_days_credited  = parseFloat((total_days_credited + r.total_days_credited).toFixed(2))
+        skipped              += r.skipped
       }
     }
 
@@ -527,73 +746,119 @@ export async function yearlyAccrualJob(
 
     const yearlyPolicies = (policies ?? []) as LeavePolicy[]
 
+    // C8 fix: batch-fetch idempotency + build ledger/balance batches per
+    // policy instead of a per-employee round trip (was up to 4 sequential
+    // calls × N_employees — matches processLegacyAccrualBatch's approach for
+    // monthlyAccrualJob, adapted here for yearly's insert-once semantics).
     if (yearlyPolicies.length) {
       const employees = await fetchActiveEmployees(supabase, tenantId)
+      const yearlyNowIso = new Date().toISOString()
 
       for (const policy of yearlyPolicies) {
-        for (const emp of employees) {
-          // Step 1: skip employees already handled by the engine in Phase 1
-          if (engineProcessed.has(emp.id)) { skipped++; continue }
+        // Step 1: exclude employees already handled by Phase 1 (engine), and
+        // those without a joining date — in memory.
+        const candidates = employees.filter(emp => {
+          if (engineProcessed.has(emp.id)) { skipped++; return false }
+          if (!emp.joining_date)           { skipped++; return false }
+          return true
+        })
+        if (!candidates.length) continue
 
-          if (!emp.joining_date) { skipped++; continue }
+        // computeEntitlement() is pure/synchronous — safe to call per candidate.
+        const withDays = candidates
+          .map(emp => ({ emp, days: computeEntitlement(emp.joining_date, policy, leaveYear) }))
+          .filter(({ days }) => {
+            if (days <= 0) { skipped++; return false }
+            return true
+          })
+        if (!withDays.length) continue
 
-          const days = computeEntitlement(emp.joining_date, policy, leaveYear)
-          if (days <= 0) { skipped++; continue }
+        // Idempotency: ONE query per policy instead of a SELECT per employee.
+        let existingIds: Set<string>
+        try {
+          existingIds = await fetchExistingBalanceEmployeeIds(supabase, tenantId, policy.leave_type_id, leaveYear)
+        } catch (e: unknown) {
+          errors.push(`Policy ${policy.id} (yearly): idempotency pre-check failed — ${(e as Error).message}`)
+          continue
+        }
 
-          try {
-            // Idempotency: skip if already credited this year
-            const { data: existing } = await supabase
-              .from('employee_leave_balance')
-              .select('id')
-              .eq('tenant_id',     tenantId)
-              .eq('employee_id',   emp.id)
-              .eq('leave_type_id', policy.leave_type_id)
-              .eq('year',          leaveYear)
-              .maybeSingle()
+        const toCredit = withDays.filter(({ emp }) => {
+          if (existingIds.has(emp.id)) { skipped++; return false }
+          return true
+        })
+        if (!toCredit.length) continue
 
-            if (existing) { skipped++; continue }
+        const yearStartStr = asOf ?? `${leaveYear}-01-01`
 
-            // Supabase-js resolves { error } rather than throwing, so the
-            // surrounding try/catch alone would never observe a DB failure here.
-            const { error: balInsErr } = await supabase.from('employee_leave_balance').insert({
-              tenant_id:     tenantId,
-              employee_id:   emp.id,
-              leave_type_id: policy.leave_type_id,
-              year:          leaveYear,
-              balance:       days,
-              updated_at:    new Date().toISOString(),
-            })
-            if (balInsErr) {
-              // A missing accrual balance row silently manifests to the employee
-              // as "0 entitlement" with no trace of why — make it discoverable.
-              errors.push(`Emp ${emp.id} leaveType ${policy.leave_type_id} year ${leaveYear}: employee_leave_balance insert failed — ${balInsErr.message}`)
-              console.warn(
-                `[leave-jobs] employee_leave_balance insert failed employee=${emp.id} leaveType=${policy.leave_type_id} year=${leaveYear}:`,
-                balInsErr.message,
-              )
-              continue
-            }
+        // Supabase-js resolves { error } rather than throwing, so a plain
+        // try/catch alone would never observe a DB failure on this insert.
+        const balInserts = toCredit.map(({ emp, days }) => ({
+          tenant_id:     tenantId,
+          employee_id:   emp.id,
+          leave_type_id: policy.leave_type_id,
+          year:          leaveYear,
+          balance:       days,
+          updated_at:    yearlyNowIso,
+        }))
 
-            const yearStartStr = asOf ?? `${leaveYear}-01-01`
-            // Deterministic cycle key — idempotency guard for replay
-            const cycleKey = generateCycleKey(
-              tenantId, emp.id, policy.leave_type_id,
-              leaveYear, String(leaveYear), policy.accrual_type,
-            )
+        const { error: balInsErr } = await supabase.from('employee_leave_balance').insert(balInserts)
+        if (balInsErr) {
+          // A missing accrual balance row silently manifests to the employee
+          // as "0 entitlement" with no trace of why — make it discoverable.
+          errors.push(`Policy ${policy.id} (yearly): employee_leave_balance batch insert failed — ${balInsErr.message}`)
+          console.warn(
+            `[leave-jobs] yearly employee_leave_balance batch insert failed policy=${policy.id} year=${leaveYear}:`,
+            balInsErr.message,
+          )
+          // Mirrors the original per-employee `continue` on insert failure:
+          // no ledger write and no employees_processed++ for this policy's batch.
+          continue
+        }
 
-            await writeLedgerEntry(
-              supabase, tenantId, emp.id, policy.leave_type_id, leaveYear,
-              policy.accrual_type, days, yearStartStr,
-              policy.expiry_days ? shiftDay(yearStartStr, policy.expiry_days) : null,
-              `Yearly accrual ${leaveYear}`,
-              { lineageId, cycleKey },
-            )
-
-            employees_processed++
-            total_days_credited = parseFloat((total_days_credited + days).toFixed(2))
-          } catch (e: unknown) {
-            errors.push(`Emp ${emp.id} policy ${policy.id}: ${(e as Error).message}`)
+        // Balance insert succeeded for the whole batch — now write ledger
+        // entries. Counts are only credited AFTER the ledger write is
+        // confirmed — matching the original per-employee code's behavior,
+        // where writeLedgerEntry() threw on a DB error and the surrounding
+        // try/catch skipped employees_processed++ for that employee entirely
+        // (no fabricated success on a batch-wide ledger failure).
+        const ledInserts: Record<string, unknown>[] = toCredit.map(({ emp, days }) => {
+          const cycleKey = generateCycleKey(
+            tenantId, emp.id, policy.leave_type_id,
+            leaveYear, String(leaveYear), policy.accrual_type,
+          )
+          return {
+            tenant_id:        tenantId,
+            employee_id:      emp.id,
+            leave_type_id:    policy.leave_type_id,
+            year:             leaveYear,
+            accrual_type:     policy.accrual_type,
+            days,
+            accrued_on:       yearStartStr,
+            expires_on:       policy.expiry_days ? shiftDay(yearStartStr, policy.expiry_days) : null,
+            notes:            `Yearly accrual ${leaveYear}`,
+            lineage_id:       lineageId,
+            parent_replay_id: null,
+            snapshot_id:      null,
+            policy_rule_id:   null,
+            cycle_key:        cycleKey,
           }
+        })
+
+        const { error: ledErr } = await supabase
+          .from('leave_accrual_ledger')
+          .upsert(ledInserts, { onConflict: 'cycle_key', ignoreDuplicates: true })
+        if (ledErr) {
+          console.warn(
+            `[leave-jobs] yearly leave_accrual_ledger batch upsert failed policy=${policy.id} year=${leaveYear}:`,
+            ledErr.message,
+          )
+          errors.push(`Policy ${policy.id} (yearly): ledger batch write failed — ${ledErr.message}`)
+          continue
+        }
+
+        for (const { days } of toCredit) {
+          employees_processed++
+          total_days_credited = parseFloat((total_days_credited + days).toFixed(2))
         }
       }
     }
@@ -812,79 +1077,167 @@ export async function carryForwardJob(
 
     // Date label for ledger entry — Jan 1 of new year
     const cfDate = `${toYear}-01-01`
+    const cfNowIso = new Date().toISOString()
 
+    // C8 fix: batch-fetch idempotency + fromYear/toYear balances per policy
+    // instead of the original ~6 sequential round trips PER (policy, employee)
+    // pair — mirrors accrual-engine.ts's processCarryForward() pattern
+    // exactly (same table, same cap/forfeiture logic, same non-gated
+    // independent-batch-write error convention for cfLedErr/cfBalErr).
     for (const policy of cfPolicies) {
-      for (const emp of employees) {
-        try {
-          // Idempotency: skip if a carry_forward ledger entry already exists for toYear
-          const { count: existingCF } = await supabase
-            .from('leave_accrual_ledger')
-            .select('id', { count: 'exact', head: true })
-            .eq('tenant_id', tenantId)
-            .eq('employee_id', emp.id)
-            .eq('leave_type_id', policy.leave_type_id)
-            .eq('year', toYear)
-            .eq('accrual_type', 'carry_forward')
+      // Idempotency: ONE query per policy instead of a per-employee COUNT.
+      // No accrued_on filter — matches the original existingCF check's
+      // semantics (a carry-forward is expected at most once per
+      // employee/leaveType/toYear regardless of run date).
+      let alreadyCarried: Set<string>
+      try {
+        alreadyCarried = await fetchCarryForwardedEmployeeIds(supabase, tenantId, policy.leave_type_id, toYear)
+      } catch (e: unknown) {
+        errors.push(`Policy ${policy.id} (carry-forward): idempotency pre-check failed — ${(e as Error).message}`)
+        continue
+      }
 
-          if ((existingCF ?? 0) > 0) { skipped++; continue }
+      const candidates = employees.filter(emp => !alreadyCarried.has(emp.id))
+      skipped += employees.length - candidates.length
+      if (!candidates.length) continue
 
-          // fromYear balance
-          const { data: fromBal } = await supabase
-            .from('employee_leave_balance')
-            .select('balance')
-            .eq('tenant_id', tenantId)
-            .eq('employee_id', emp.id)
-            .eq('leave_type_id', policy.leave_type_id)
-            .eq('year', fromYear)
-            .maybeSingle()
+      // Batch-fetch fromYear balances (source) and toYear balances (may
+      // already carry a yearly credit from yearlyAccrualJob) for the whole
+      // policy at once — no per-employee SELECT.
+      let fromBalanceMap: Map<string, number>
+      let toBalanceMap:   Map<string, number>
+      try {
+        [fromBalanceMap, toBalanceMap] = await Promise.all([
+          fetchBalanceMap(supabase, tenantId, policy.leave_type_id, fromYear),
+          fetchBalanceMap(supabase, tenantId, policy.leave_type_id, toYear),
+        ])
+      } catch (e: unknown) {
+        errors.push(`Policy ${policy.id} (carry-forward): balance pre-fetch failed — ${(e as Error).message}`)
+        continue
+      }
 
-          const fromBalance = Number(fromBal?.balance ?? 0)
-          if (fromBalance <= 0) { skipped++; continue }
+      const ledInserts: Record<string, unknown>[] = []
+      const balUpserts:  Record<string, unknown>[] = []
+      const credited:    Array<{ carryDays: number }> = []
 
-          // Apply carry-forward cap
-          const carryDays = policy.carry_forward_max_days != null
-            ? Math.min(fromBalance, policy.carry_forward_max_days)
-            : fromBalance
+      for (const emp of candidates) {
+        const fromBalance = fromBalanceMap.get(emp.id) ?? 0
+        if (fromBalance <= 0) { skipped++; continue }
 
-          if (carryDays <= 0) { skipped++; continue }
+        // Apply carry-forward cap
+        const carryDays = policy.carry_forward_max_days != null
+          ? Math.min(fromBalance, policy.carry_forward_max_days)
+          : fromBalance
+        if (carryDays <= 0) { skipped++; continue }
 
-          // Ledger-first, then gate the non-idempotent cache credit on insertion
-          // so a re-run of carry-forward doesn't double-credit toYear's balance.
-          const { skipped: alreadyCarried } = await writeLedgerEntry(
-            supabase, tenantId, emp.id, policy.leave_type_id, toYear,
-            'carry_forward', carryDays, cfDate, null,
-            `Carry-forward from ${fromYear}: ${carryDays} day(s)`,
-          )
-          if (alreadyCarried) { skipped++; continue }
+        ledInserts.push({
+          tenant_id:        tenantId,
+          employee_id:      emp.id,
+          leave_type_id:    policy.leave_type_id,
+          year:             toYear,
+          accrual_type:     'carry_forward',
+          days:             carryDays,
+          accrued_on:       cfDate,
+          expires_on:       null,
+          notes:            `Carry-forward from ${fromYear}: ${carryDays} day(s)`,
+          lineage_id:       null,
+          parent_replay_id: null,
+          snapshot_id:      null,
+          policy_rule_id:   null,
+        })
 
-          // ISSUE-156: the cap can forfeit balance with no record of it
-          // anywhere — write a debit ledger entry against fromYear so the gap
-          // between the employee's actual balance and what carried over is
-          // auditable instead of silently vanishing. Naturally idempotent:
-          // this only runs when the existingCF check above found no prior
-          // carry_forward entry for toYear, so a job re-run never reaches here
-          // for an employee/policy pair already processed.
-          const forfeitedDays = parseFloat((fromBalance - carryDays).toFixed(2))
-          if (forfeitedDays > 0) {
-            await writeLedgerEntry(
-              supabase, tenantId, emp.id, policy.leave_type_id, fromYear,
-              'forfeiture', -forfeitedDays, cfDate, null,
-              `Forfeited at year-end carry-forward cap (max ${policy.carry_forward_max_days} day(s)): ` +
+        // ISSUE-156: the cap can forfeit balance with no record of it
+        // anywhere — write a debit ledger entry against fromYear so the gap
+        // between the employee's actual balance and what carried over is
+        // auditable instead of silently vanishing. Naturally idempotent:
+        // this only runs for employees the batch pre-check above found no
+        // prior carry_forward entry for, so a job re-run never reaches here
+        // for an employee/policy pair already processed.
+        const forfeitedDays = parseFloat((fromBalance - carryDays).toFixed(2))
+        if (forfeitedDays > 0) {
+          ledInserts.push({
+            tenant_id:        tenantId,
+            employee_id:      emp.id,
+            leave_type_id:    policy.leave_type_id,
+            year:             fromYear,
+            accrual_type:     'forfeiture',
+            days:             -forfeitedDays,
+            accrued_on:       cfDate,
+            expires_on:       null,
+            notes:            `Forfeited at year-end carry-forward cap (max ${policy.carry_forward_max_days} day(s)): ` +
               `${forfeitedDays} of ${fromBalance} day(s) from ${fromYear} balance did not carry over`,
-            )
-          }
-
-          // Credit toYear balance
-          await creditEmployeeDays(
-            supabase, tenantId, emp.id, policy.leave_type_id,
-            carryDays, toYear, policy.max_accrual_balance ?? undefined,
-          )
-
-          employees_processed++
-          total_days_credited = parseFloat((total_days_credited + carryDays).toFixed(2))
-        } catch (e: unknown) {
-          errors.push(`Emp ${emp.id} policy ${policy.id}: ${(e as Error).message}`)
+            lineage_id:       null,
+            parent_replay_id: null,
+            snapshot_id:      null,
+            policy_rule_id:   null,
+          })
         }
+
+        // Credit toYear balance (respects max_accrual_balance cap)
+        const existingToBalance = toBalanceMap.get(emp.id) ?? 0
+        let newToBalance = existingToBalance + carryDays
+        if (policy.max_accrual_balance != null && newToBalance > policy.max_accrual_balance) {
+          newToBalance = policy.max_accrual_balance
+        }
+        balUpserts.push({
+          tenant_id:     tenantId,
+          employee_id:   emp.id,
+          leave_type_id: policy.leave_type_id,
+          year:          toYear,
+          balance:       round1(newToBalance),
+          updated_at:    cfNowIso,
+        })
+
+        credited.push({ carryDays })
+      }
+
+      if (!ledInserts.length) continue
+
+      // Batch write: 2 calls per policy regardless of employee count
+      // (was up to 6 sequential calls × N_employees — the C8 finding).
+      // Legacy composite-key upsert (no cycle_key) — matches the original
+      // writeLedgerEntry() call sites for carry-forward/forfeiture, which
+      // never passed a cycleKey.
+      //
+      // Counts are only credited AFTER the ledger write is confirmed —
+      // matching the original per-employee code's behavior, where the
+      // carry_forward writeLedgerEntry() call threw on a DB error and the
+      // surrounding try/catch skipped employees_processed++ for that
+      // employee entirely (no fabricated success on a batch-wide failure).
+      const { error: ledErr } = await supabase
+        .from('leave_accrual_ledger')
+        .upsert(ledInserts, {
+          onConflict:       'tenant_id,employee_id,leave_type_id,year,accrual_type,accrued_on',
+          ignoreDuplicates: true,
+        })
+      if (ledErr) {
+        // A missing/failed carry-forward ledger write leaves no audit trail
+        // for the carry — log loudly so it's discoverable (same convention
+        // as accrual-engine.ts's cfLedErr/cfAlErr handling).
+        console.warn(
+          `[leave-jobs] carry-forward leave_accrual_ledger batch upsert failed policy=${policy.id} toYear=${toYear}:`,
+          ledErr.message,
+        )
+        errors.push(`Policy ${policy.id} (carry-forward): ledger batch write failed — ${ledErr.message}`)
+        continue
+      }
+
+      for (const { carryDays } of credited) {
+        employees_processed++
+        total_days_credited = parseFloat((total_days_credited + carryDays).toFixed(2))
+      }
+
+      const { error: balErr } = await supabase
+        .from('employee_leave_balance')
+        .upsert(balUpserts, { onConflict: 'tenant_id,employee_id,leave_type_id,year' })
+      if (balErr) {
+        // A missing/failed carry-forward balance write manifests to the
+        // employee as "0 entitlement" with no trace of why.
+        console.warn(
+          `[leave-jobs] carry-forward employee_leave_balance batch upsert failed policy=${policy.id} toYear=${toYear}:`,
+          balErr.message,
+        )
+        errors.push(`Policy ${policy.id} (carry-forward): balance batch write failed — ${balErr.message}`)
       }
     }
 
