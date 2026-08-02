@@ -190,202 +190,208 @@ export async function scan(supabase: SupabaseClient): Promise<void> {
   const tenantIds = tenants.map(t => t.id)
 
   for (const tenantId of tenantIds) {
-    const hrProfileIds = await fetchHrProfileIds(supabase, tenantId).catch(() => [] as string[])
-    if (!hrProfileIds.length) continue
+    // Mirrors poll-scheduler.ts's runPollTick: one tenant's exception must not
+    // abort the scan for every subsequent tenant in this loop (SYSCERT High #25).
+    try {
+      const hrProfileIds = await fetchHrProfileIds(supabase, tenantId).catch(() => [] as string[])
+      if (!hrProfileIds.length) continue
 
-    // ── 0. Auto-advance stale multi-level instances (P2.2) ─────────────────────
-    await autoAdvanceStaleInstances(supabase, tenantId, hrProfileIds).catch(() => void 0)
+      // ── 0. Auto-advance stale multi-level instances (P2.2) ─────────────────────
+      await autoAdvanceStaleInstances(supabase, tenantId, hrProfileIds).catch(() => void 0)
 
-    // ── 1. Overdue leave requests ──────────────────────────────────────────────
-    // fetchAllRows: a tenant with an approval backlog can exceed 1,000
-    // simultaneously-overdue rows, past which the plain-select form silently
-    // dropped the excess from SLA-breach notification (same as the ticket
-    // queries below, which already use fetchAllRows).
-    const overLeave = await fetchAllRows<any>((from, to) =>
-      supabase
-        .from('leave_requests')
-        .select('id, employee_id, created_at, employees(first_name, last_name)')
-        .eq('tenant_id', tenantId)
-        .eq('status', 'PENDING')
-        .lt('created_at', cutoffLeave)
-        .range(from, to),
-    ).catch(() => [] as any[])
-
-    for (const row of overLeave) {
-      const dedupeKey = `leave:${row.id}`
-      if (notifiedIds.has(dedupeKey)) continue
-
-      const emp    = Array.isArray(row.employees) ? row.employees[0] : row.employees
-      const name   = emp ? `${(emp as any).first_name} ${(emp as any).last_name}` : 'An employee'
-      const elapsed = Math.round((Date.now() - new Date(row.created_at).getTime()) / 3_600_000)
-
-      // Fire observable event (also writes to audit_logs via event-bus-automation)
-      eventBus.emit({
-        type:          'sla.breached',
-        tenantId,
-        correlationId: `sla-scan-leave-${row.id}`,
-        payload: {
-          tenantId,
-          entityType:   'leave',
-          entityId:     row.id,
-          slaHours:     LEAVE_SLA_HOURS,
-          elapsedHours: elapsed,
-        },
-      })
-
-      // Write in-app notification to all HR managers for this tenant
-      await writeNotifications(
-        supabase, tenantId, hrProfileIds,
-        'SLA Breach — Leave Request',
-        `${name}'s leave request has been pending for ${elapsed} hours (SLA: ${LEAVE_SLA_HOURS}h). Please approve or reject.`,
-        '/admin/approvals',
-        row.id,
-      ).catch(() => void 0)   // non-fatal
-
-      notifiedIds.add(dedupeKey)
-    }
-
-    // ── 2. Overdue correction requests ─────────────────────────────────────────
-    const overCorr = await fetchAllRows<any>((from, to) =>
-      supabase
-        .from('attendance_regularisation')
-        .select('id, employee_id, created_at, employees(first_name, last_name)')
-        .eq('tenant_id', tenantId)
-        .eq('status', 'pending')
-        .lt('created_at', cutoffCorrection)
-        .range(from, to),
-    ).catch(() => [] as any[])
-
-    for (const row of overCorr) {
-      const dedupeKey = `correction:${row.id}`
-      if (notifiedIds.has(dedupeKey)) continue
-
-      const emp    = Array.isArray(row.employees) ? row.employees[0] : row.employees
-      const name   = emp ? `${(emp as any).first_name} ${(emp as any).last_name}` : 'An employee'
-      const elapsed = Math.round((Date.now() - new Date(row.created_at).getTime()) / 3_600_000)
-
-      eventBus.emit({
-        type:          'sla.breached',
-        tenantId,
-        correlationId: `sla-scan-correction-${row.id}`,
-        payload: {
-          tenantId,
-          entityType:   'correction',
-          entityId:     row.id,
-          slaHours:     CORRECTION_SLA_HOURS,
-          elapsedHours: elapsed,
-        },
-      })
-
-      await writeNotifications(
-        supabase, tenantId, hrProfileIds,
-        'SLA Breach — Attendance Correction',
-        `${name}'s correction request has been pending for ${elapsed} hours (SLA: ${CORRECTION_SLA_HOURS}h). Please action it.`,
-        '/admin/attendance/regularisation',
-        row.id,
-      ).catch(() => void 0)
-
-      notifiedIds.add(dedupeKey)
-    }
-
-    // ── 3. Overdue helpdesk tickets (ESS-05) ───────────────────────────────────
-    // sla_due_at is set per-ticket from priority at creation. A ticket breaches
-    // when now > sla_due_at and it is not yet resolved/closed. Stamp
-    // sla_breached_at once so the admin queue can flag it.
-    const nowIso = new Date().toISOString()
-    const overTickets = await fetchAllRows<any>((from, to) =>
-      supabase
-        .from('helpdesk_tickets')
-        .select('id, subject, priority, sla_hours, sla_due_at, created_at, employees(first_name, last_name)')
-        .eq('tenant_id', tenantId)
-        .is('sla_breached_at', null)
-        .not('status', 'in', '(resolved,closed)')
-        .lt('sla_due_at', nowIso)
-        .range(from, to)
-    )
-
-    for (const row of overTickets) {
-      const dedupeKey = `helpdesk:${row.id}`
-      if (notifiedIds.has(dedupeKey)) continue
-
-      const emp     = Array.isArray(row.employees) ? row.employees[0] : row.employees
-      const name    = emp ? `${(emp as any).first_name} ${(emp as any).last_name}` : 'An employee'
-      const elapsed = Math.round((Date.now() - new Date(row.created_at).getTime()) / 3_600_000)
-
-      // Stamp the breach so the queue can show a badge (best-effort).
-      try {
-        await supabase
-          .from('helpdesk_tickets')
-          .update({ sla_breached_at: nowIso })
-          .eq('id', row.id)
+      // ── 1. Overdue leave requests ──────────────────────────────────────────────
+      // fetchAllRows: a tenant with an approval backlog can exceed 1,000
+      // simultaneously-overdue rows, past which the plain-select form silently
+      // dropped the excess from SLA-breach notification (same as the ticket
+      // queries below, which already use fetchAllRows).
+      const overLeave = await fetchAllRows<any>((from, to) =>
+        supabase
+          .from('leave_requests')
+          .select('id, employee_id, created_at, employees(first_name, last_name)')
           .eq('tenant_id', tenantId)
-      } catch { /* non-fatal */ }
+          .eq('status', 'PENDING')
+          .lt('created_at', cutoffLeave)
+          .range(from, to),
+      ).catch(() => [] as any[])
 
-      eventBus.emit({
-        type:          'sla.breached',
-        tenantId,
-        correlationId: `sla-scan-helpdesk-${row.id}`,
-        payload: {
+      for (const row of overLeave) {
+        const dedupeKey = `leave:${row.id}`
+        if (notifiedIds.has(dedupeKey)) continue
+
+        const emp    = Array.isArray(row.employees) ? row.employees[0] : row.employees
+        const name   = emp ? `${(emp as any).first_name} ${(emp as any).last_name}` : 'An employee'
+        const elapsed = Math.round((Date.now() - new Date(row.created_at).getTime()) / 3_600_000)
+
+        // Fire observable event (also writes to audit_logs via event-bus-automation)
+        eventBus.emit({
+          type:          'sla.breached',
           tenantId,
-          entityType:   'approval',   // closest existing entityType in the union
-          entityId:     row.id,
-          slaHours:     (row as any).sla_hours ?? 24,
-          elapsedHours: elapsed,
-        },
-      })
+          correlationId: `sla-scan-leave-${row.id}`,
+          payload: {
+            tenantId,
+            entityType:   'leave',
+            entityId:     row.id,
+            slaHours:     LEAVE_SLA_HOURS,
+            elapsedHours: elapsed,
+          },
+        })
 
-      await writeNotifications(
-        supabase, tenantId, hrProfileIds,
-        'SLA Breach — Helpdesk Ticket',
-        `${name}'s ticket "${(row as any).subject}" has breached its ${(row as any).sla_hours ?? 24}h SLA (open ${elapsed}h). Please action it.`,
-        '/admin/helpdesk',
-        row.id,
-      ).catch(() => void 0)
+        // Write in-app notification to all HR managers for this tenant
+        await writeNotifications(
+          supabase, tenantId, hrProfileIds,
+          'SLA Breach — Leave Request',
+          `${name}'s leave request has been pending for ${elapsed} hours (SLA: ${LEAVE_SLA_HOURS}h). Please approve or reject.`,
+          '/admin/approvals',
+          row.id,
+        ).catch(() => void 0)   // non-fatal
 
-      notifiedIds.add(dedupeKey)
-    }
+        notifiedIds.add(dedupeKey)
+      }
 
-    // ── 4. Resolution-SLA breaches (ESS-05) ────────────────────────────────────
-    // resolution_due_at is set per-ticket from priority at creation. A ticket
-    // breaches its resolution SLA when now > resolution_due_at and it is still
-    // open. Stamp resolution_breached_at once and alert HR.
-    const unresolved = await fetchAllRows<any>((from, to) =>
-      supabase
-        .from('helpdesk_tickets')
-        .select('id, subject, resolution_due_at, created_at, employees(first_name, last_name)')
-        .eq('tenant_id', tenantId)
-        .is('resolution_breached_at', null)
-        .not('resolution_due_at', 'is', null)
-        .not('status', 'in', '(resolved,closed)')
-        .lt('resolution_due_at', nowIso)
-        .range(from, to)
-    )
-
-    for (const row of unresolved) {
-      const dedupeKey = `helpdesk-res:${row.id}`
-      if (notifiedIds.has(dedupeKey)) continue
-
-      const emp     = Array.isArray(row.employees) ? row.employees[0] : row.employees
-      const name    = emp ? `${(emp as any).first_name} ${(emp as any).last_name}` : 'An employee'
-      const elapsed = Math.round((Date.now() - new Date(row.created_at).getTime()) / 3_600_000)
-
-      try {
-        await supabase
-          .from('helpdesk_tickets')
-          .update({ resolution_breached_at: nowIso })
-          .eq('id', row.id)
+      // ── 2. Overdue correction requests ─────────────────────────────────────────
+      const overCorr = await fetchAllRows<any>((from, to) =>
+        supabase
+          .from('attendance_regularisation')
+          .select('id, employee_id, created_at, employees(first_name, last_name)')
           .eq('tenant_id', tenantId)
-      } catch { /* non-fatal */ }
+          .eq('status', 'pending')
+          .lt('created_at', cutoffCorrection)
+          .range(from, to),
+      ).catch(() => [] as any[])
 
-      await writeNotifications(
-        supabase, tenantId, hrProfileIds,
-        'Resolution SLA Breach — Helpdesk Ticket',
-        `${name}'s ticket "${(row as any).subject}" has breached its resolution SLA (open ${elapsed}h). Please resolve it.`,
-        '/admin/helpdesk',
-        row.id,
-      ).catch(() => void 0)
+      for (const row of overCorr) {
+        const dedupeKey = `correction:${row.id}`
+        if (notifiedIds.has(dedupeKey)) continue
 
-      notifiedIds.add(dedupeKey)
+        const emp    = Array.isArray(row.employees) ? row.employees[0] : row.employees
+        const name   = emp ? `${(emp as any).first_name} ${(emp as any).last_name}` : 'An employee'
+        const elapsed = Math.round((Date.now() - new Date(row.created_at).getTime()) / 3_600_000)
+
+        eventBus.emit({
+          type:          'sla.breached',
+          tenantId,
+          correlationId: `sla-scan-correction-${row.id}`,
+          payload: {
+            tenantId,
+            entityType:   'correction',
+            entityId:     row.id,
+            slaHours:     CORRECTION_SLA_HOURS,
+            elapsedHours: elapsed,
+          },
+        })
+
+        await writeNotifications(
+          supabase, tenantId, hrProfileIds,
+          'SLA Breach — Attendance Correction',
+          `${name}'s correction request has been pending for ${elapsed} hours (SLA: ${CORRECTION_SLA_HOURS}h). Please action it.`,
+          '/admin/attendance/regularisation',
+          row.id,
+        ).catch(() => void 0)
+
+        notifiedIds.add(dedupeKey)
+      }
+
+      // ── 3. Overdue helpdesk tickets (ESS-05) ───────────────────────────────────
+      // sla_due_at is set per-ticket from priority at creation. A ticket breaches
+      // when now > sla_due_at and it is not yet resolved/closed. Stamp
+      // sla_breached_at once so the admin queue can flag it.
+      const nowIso = new Date().toISOString()
+      const overTickets = await fetchAllRows<any>((from, to) =>
+        supabase
+          .from('helpdesk_tickets')
+          .select('id, subject, priority, sla_hours, sla_due_at, created_at, employees(first_name, last_name)')
+          .eq('tenant_id', tenantId)
+          .is('sla_breached_at', null)
+          .not('status', 'in', '(resolved,closed)')
+          .lt('sla_due_at', nowIso)
+          .range(from, to)
+      ).catch(() => [] as any[])
+
+      for (const row of overTickets) {
+        const dedupeKey = `helpdesk:${row.id}`
+        if (notifiedIds.has(dedupeKey)) continue
+
+        const emp     = Array.isArray(row.employees) ? row.employees[0] : row.employees
+        const name    = emp ? `${(emp as any).first_name} ${(emp as any).last_name}` : 'An employee'
+        const elapsed = Math.round((Date.now() - new Date(row.created_at).getTime()) / 3_600_000)
+
+        // Stamp the breach so the queue can show a badge (best-effort).
+        try {
+          await supabase
+            .from('helpdesk_tickets')
+            .update({ sla_breached_at: nowIso })
+            .eq('id', row.id)
+            .eq('tenant_id', tenantId)
+        } catch { /* non-fatal */ }
+
+        eventBus.emit({
+          type:          'sla.breached',
+          tenantId,
+          correlationId: `sla-scan-helpdesk-${row.id}`,
+          payload: {
+            tenantId,
+            entityType:   'approval',   // closest existing entityType in the union
+            entityId:     row.id,
+            slaHours:     (row as any).sla_hours ?? 24,
+            elapsedHours: elapsed,
+          },
+        })
+
+        await writeNotifications(
+          supabase, tenantId, hrProfileIds,
+          'SLA Breach — Helpdesk Ticket',
+          `${name}'s ticket "${(row as any).subject}" has breached its ${(row as any).sla_hours ?? 24}h SLA (open ${elapsed}h). Please action it.`,
+          '/admin/helpdesk',
+          row.id,
+        ).catch(() => void 0)
+
+        notifiedIds.add(dedupeKey)
+      }
+
+      // ── 4. Resolution-SLA breaches (ESS-05) ────────────────────────────────────
+      // resolution_due_at is set per-ticket from priority at creation. A ticket
+      // breaches its resolution SLA when now > resolution_due_at and it is still
+      // open. Stamp resolution_breached_at once and alert HR.
+      const unresolved = await fetchAllRows<any>((from, to) =>
+        supabase
+          .from('helpdesk_tickets')
+          .select('id, subject, resolution_due_at, created_at, employees(first_name, last_name)')
+          .eq('tenant_id', tenantId)
+          .is('resolution_breached_at', null)
+          .not('resolution_due_at', 'is', null)
+          .not('status', 'in', '(resolved,closed)')
+          .lt('resolution_due_at', nowIso)
+          .range(from, to)
+      ).catch(() => [] as any[])
+
+      for (const row of unresolved) {
+        const dedupeKey = `helpdesk-res:${row.id}`
+        if (notifiedIds.has(dedupeKey)) continue
+
+        const emp     = Array.isArray(row.employees) ? row.employees[0] : row.employees
+        const name    = emp ? `${(emp as any).first_name} ${(emp as any).last_name}` : 'An employee'
+        const elapsed = Math.round((Date.now() - new Date(row.created_at).getTime()) / 3_600_000)
+
+        try {
+          await supabase
+            .from('helpdesk_tickets')
+            .update({ resolution_breached_at: nowIso })
+            .eq('id', row.id)
+            .eq('tenant_id', tenantId)
+        } catch { /* non-fatal */ }
+
+        await writeNotifications(
+          supabase, tenantId, hrProfileIds,
+          'Resolution SLA Breach — Helpdesk Ticket',
+          `${name}'s ticket "${(row as any).subject}" has breached its resolution SLA (open ${elapsed}h). Please resolve it.`,
+          '/admin/helpdesk',
+          row.id,
+        ).catch(() => void 0)
+
+        notifiedIds.add(dedupeKey)
+      }
+    } catch (err) {
+      logger.error({ err, tenantId }, `[sla-scanner] tenant=${tenantId} error`)
     }
   }
 }
