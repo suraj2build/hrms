@@ -39,8 +39,7 @@ export default async function attendanceIntelligenceRoute(fastify: FastifyInstan
       .maybeSingle()
 
     if (error) {
-      req.log.error({ err: error }, 'intelligence snapshot fetch failed')
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch intelligence snapshot' })
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch intelligence snapshot')
     }
 
     // No cached snapshot — compute on first call
@@ -123,7 +122,7 @@ export default async function attendanceIntelligenceRoute(fastify: FastifyInstan
     const { data, error, count } = await q
 
     if (error) {
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch risk flags' })
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch risk flags')
     }
 
     const rows = ((data ?? []) as Array<{
@@ -194,7 +193,7 @@ export default async function attendanceIntelligenceRoute(fastify: FastifyInstan
       .maybeSingle()
 
     if (error) {
-      return reply.code(500).send({ error: 'UPDATE_FAILED', message: 'Failed to dismiss flag' })
+      return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to dismiss flag')
     }
     if (!data) {
       return reply.code(404).send({ error: 'NOT_FOUND', message: 'Flag not found or already dismissed' })
