@@ -1,6 +1,6 @@
 import fp from 'fastify-plugin'
 import type { FastifyPluginAsync, FastifyRequest, FastifyReply } from 'fastify'
-import { createHmac } from 'node:crypto'
+import { createHmac, timingSafeEqual } from 'node:crypto'
 
 declare module 'fastify' {
   interface FastifyInstance {
@@ -56,7 +56,14 @@ function verifySupabaseJwt(token: string, secret: string): { sub: string } | nul
     const expected = createHmac('sha256', secret)
       .update(`${headerB64}.${payloadB64}`)
       .digest('base64url')
-    if (expected !== sigB64) return null
+    // Constant-time compare (SYSCERT_AUDIT_2026-08-02.md H11) — a plain `!==`
+    // string comparison short-circuits on the first differing byte, leaking a
+    // timing side-channel an attacker could use to forge a valid signature
+    // byte-by-byte. Matches the same pattern already used for the billing
+    // webhook's HMAC check in routes/billing/index.ts.
+    const expectedBuf = Buffer.from(expected)
+    const sigBuf      = Buffer.from(sigB64)
+    if (expectedBuf.length !== sigBuf.length || !timingSafeEqual(expectedBuf, sigBuf)) return null
     const payload = JSON.parse(Buffer.from(payloadB64, 'base64url').toString())
     if (payload.exp && payload.exp < Math.floor(Date.now() / 1000)) return null
     if (!payload.sub || typeof payload.sub !== 'string') return null
