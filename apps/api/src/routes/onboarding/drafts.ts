@@ -715,7 +715,20 @@ export default async function draftRoutes(fastify: FastifyInstance) {
       return reply.code(404).send({ error: 'NOT_FOUND', message: 'Draft profile not found' })
     }
 
-    const { error: updateError } = await fastify.supabase
+    // SYSCERT_AUDIT_2026-08-02.md H3: previously no status-transition guard at
+    // all — a draft already 'approved' (with a real employees row already
+    // created) or already 'employee_created' could still be flipped to
+    // 'rejected', leaving status inconsistent with the employee record that
+    // already exists; a 'rejected' draft could be re-rejected repeatedly.
+    // Terminal states (approved/rejected/employee_created) are excluded.
+    // Atomically claim via the UPDATE's own WHERE clause — same pattern as
+    // the approve handler above — so a race against a concurrent
+    // approve/reject request can't both succeed.
+    const rejectableStatuses = [
+      'draft_ready', 'extraction_complete', 'hr_review_pending',
+      'validation_pending', 'approval_pending',
+    ]
+    const { data: claimed, error: updateError } = await fastify.supabase
       .from('draft_employee_profiles')
       .update({
         status: 'rejected',
@@ -723,8 +736,18 @@ export default async function draftRoutes(fastify: FastifyInstance) {
         updated_at: new Date().toISOString(),
       })
       .eq('id', id)
+      .eq('tenant_id', req.tenantId)
+      .in('status', rejectableStatuses)
+      .select('id')
+      .maybeSingle()
 
     if (updateError) return reply.code(500).send({ error: 'DB_ERROR', message: updateError.message })
+    if (!claimed) {
+      return reply.code(409).send({
+        error:   'INVALID_STATUS',
+        message: 'Draft was already approved, rejected, or actioned by another request',
+      })
+    }
 
     // Update session status
     await fastify.supabase
