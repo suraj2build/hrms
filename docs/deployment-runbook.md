@@ -8,9 +8,16 @@
 
 ## Overview
 
-This runbook covers every deployment of the CognixHR API and web application
-to Railway (production) or the staging environment. Follow every step in order.
-Mark each step complete in the War Room thread before proceeding to the next.
+This runbook covers every deployment of the CognixHR API and web application.
+The two deploy independently: the **API** (`apps/api`) to Railway (production)
+or the staging environment; the **web app** (`apps/web`) to Vercel (per its
+committed `vercel.json`). Follow every step in order. Mark each step complete
+in the War Room thread before proceeding to the next.
+
+> If either platform assignment above has changed since this was written,
+> confirm the current setup with the ops owner before following the
+> Railway-specific steps below — this repo has no committed `railway.toml`,
+> so Railway's own dashboard is the source of truth for its configuration.
 
 ---
 
@@ -26,6 +33,39 @@ Mark each step complete in the War Room thread before proceeding to the next.
 | 6 | Typecheck + lint | `npm run typecheck && npm run lint` |
 
 **Gate:** All six checks must be green. Do not merge a branch with a failing ratchet — update the baseline only after the underlying violation is genuinely fixed.
+
+---
+
+## Database migrations
+
+Production is **not** migrated by an auto-apply framework — `supabase/migrations/*.sql`
+is applied manually, and production's schema is only a *partial* application of
+that history (some early migrations were superseded by a consolidated snapshot
+and are not safe to re-run as-is; see `scripts/db/check-schema-drift.mjs`'s
+`KNOWN_FAILING` list for the specific files and why). Before any deploy that
+adds new migration file(s):
+
+1. **Detect what's missing from production**: run `supabase/audit_schema_drift.sql`
+   against `$PROD_DATABASE_URL` (or use `check-schema-drift.mjs` locally against a
+   throwaway DB seeded from a production dump) to see which migration files'
+   objects don't yet exist in prod.
+2. **Generate an idempotent bundle** for the missing migrations — see
+   `supabase/apply_missing_migrations.sql` for the established pattern: wrap
+   `CREATE INDEX`/`CREATE TRIGGER`/`CREATE VIEW`/`CREATE POLICY`/seed `INSERT`
+   in their `IF NOT EXISTS` / `OR REPLACE` / `DROP ... IF EXISTS` / `ON CONFLICT
+   DO NOTHING` equivalents, and wrap the whole bundle in one transaction
+   (all-or-nothing, safe to re-run if it fails partway).
+3. **Apply it**: `psql "$PROD_DATABASE_URL" -f supabase/<your-bundle>.sql`
+4. **Never edit an already-applied migration file in place** — add a new
+   numbered migration instead (see `supabase/migrations/README.md` for the
+   numbering convention; gaps in the sequence are expected and documented,
+   don't try to fill them).
+5. Re-run the pre-flight schema-drift check (`npm run db:check-drift`) after
+   applying, to confirm prod and the migration history have converged.
+
+This is a manual, ops-driven step today — there is no CI job that applies
+migrations automatically. Treat it as part of the deploy, not a separate
+process: do it *before* pushing code that depends on the new schema.
 
 ---
 
@@ -45,7 +85,10 @@ Expected build time: **2–4 minutes** for API cold compile; web is faster.
 
 ### Step A — Wait for Railway health
 
-Railway's health check probes the `/health` endpoint (configured in `railway.toml`).
+Railway's health check probes the `/health` endpoint (configured in the Railway
+dashboard under the service's **Settings → Deploy → Healthcheck Path** — this
+repo does not commit a `railway.toml`, so that setting lives only in Railway
+itself; confirm it with the current ops owner if you need to change it).
 Wait until the deployment status shows **Active** (green dot) before proceeding.
 If the deployment rolls back automatically, treat it as a P0 — do not proceed
 to step B; jump straight to the Rollback procedure.
