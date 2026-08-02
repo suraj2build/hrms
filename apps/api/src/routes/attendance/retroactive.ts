@@ -10,6 +10,7 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { fetchTenantTz, utcToLocalDate } from '../../lib/attendance-engine.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 const dateRe = /^\d{4}-\d{2}-\d{2}$/
 
@@ -94,10 +95,7 @@ export default async function attendanceRetroactiveRoute(fastify: FastifyInstanc
 
     const { data, error, count } = await q
 
-    if (error) {
-      req.log.error({ err: error }, 'attendance_retroactive_impacts query failed')
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch retroactive impacts' })
-    }
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch retroactive impacts')
 
     const rows = ((data ?? []) as Array<Record<string, any>>).map((r) => {
       const emp = Array.isArray(r.employees) ? r.employees[0] : r.employees
@@ -154,10 +152,7 @@ export default async function attendanceRetroactiveRoute(fastify: FastifyInstanc
       .lte('affected_date', to)
       .order('created_at', { ascending: false })
 
-    if (error) {
-      req.log.error({ err: error }, 'retroactive employee query failed')
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch retroactive impacts' })
-    }
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch retroactive impacts')
 
     const rows = (data ?? []) as Array<{ impact_type: string; [key: string]: unknown }>
 
@@ -203,10 +198,7 @@ export default async function attendanceRetroactiveRoute(fastify: FastifyInstanc
 
     const { data: auditRows, error: auditError } = await auditQ
 
-    if (auditError) {
-      req.log.error({ err: auditError }, 'retroactive detect audit query failed')
-      return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Failed to query audit log' })
-    }
+    if (auditError) return serverError(req, reply, auditError, ErrorCode.QUERY_FAILED, 'Failed to query audit log')
 
     // Filter to rows where before_status != after_status (actual changes)
     const changes = ((auditRows ?? []) as Array<{
@@ -268,10 +260,7 @@ export default async function attendanceRetroactiveRoute(fastify: FastifyInstanc
         .insert(impactRows)
         .select('id')
 
-      if (insertError) {
-        req.log.error({ err: insertError }, 'retroactive detect insert failed')
-        return reply.code(500).send({ error: 'INSERT_FAILED', message: 'Failed to insert retroactive impact records' })
-      }
+      if (insertError) return serverError(req, reply, insertError, ErrorCode.INSERT_FAILED, 'Failed to insert retroactive impact records')
 
       inserted = (insertedData ?? []).length
     }
@@ -305,10 +294,7 @@ export default async function attendanceRetroactiveRoute(fastify: FastifyInstanc
       .select()
       .maybeSingle()
 
-    if (error) {
-      req.log.error({ err: error, impact_id: id }, 'retroactive status update failed')
-      return reply.code(500).send({ error: 'UPDATE_FAILED', message: 'Failed to update propagation status' })
-    }
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update propagation status')
 
     if (!data) {
       return reply.code(404).send({ error: 'NOT_FOUND', message: 'Retroactive impact record not found' })
