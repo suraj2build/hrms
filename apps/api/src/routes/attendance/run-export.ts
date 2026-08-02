@@ -27,6 +27,7 @@
 import type { FastifyInstance } from 'fastify'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
+import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 /** Escape a CSV cell value: wrap in quotes if it contains commas, quotes, or newlines */
 function csvCell(value: string | number | null | undefined): string {
@@ -59,8 +60,7 @@ export default async function runExportRoute(fastify: FastifyInstance) {
         .maybeSingle()
 
       if (runError) {
-        req.log.error({ err: runError, module: 'attendance', route: 'run-export', run_id: runId }, 'run query failed')
-        return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Could not fetch run' })
+        return serverError(req, reply, runError, ErrorCode.QUERY_FAILED, 'Could not fetch run')
       }
       if (!run) {
         return reply.code(404).send({ error: 'NOT_FOUND', message: 'Run not found' })
@@ -85,8 +85,7 @@ export default async function runExportRoute(fastify: FastifyInstance) {
             .range(from, to),
         )
       } catch (dailyError) {
-        req.log.error({ err: dailyError, module: 'attendance', route: 'run-export' }, 'daily query failed')
-        return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Could not fetch daily records' })
+        return serverError(req, reply, dailyError, ErrorCode.QUERY_FAILED, 'Could not fetch daily records')
       }
 
       // ── 3. Fetch attendance_logs for that date ────────────────────────────────
@@ -106,8 +105,7 @@ export default async function runExportRoute(fastify: FastifyInstance) {
             .range(from, to),
         )
       } catch (logsError) {
-        req.log.error({ err: logsError, module: 'attendance', route: 'run-export' }, 'logs query failed')
-        return reply.code(500).send({ error: 'QUERY_FAILED', message: 'Could not fetch log entries' })
+        return serverError(req, reply, logsError, ErrorCode.QUERY_FAILED, 'Could not fetch log entries')
       }
 
       // ── 4. Build per-employee log summary (first in, last out) ───────────────
