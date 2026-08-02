@@ -175,7 +175,7 @@ export default async function leaveEmployeeRoutes(fastify: FastifyInstance) {
     })
 
     if (!result.ok) {
-      return reply.code(500).send({ error: result.error.type, message: result.error.message })
+      return serverError(req, reply, result.error, ErrorCode.QUERY_FAILED, result.error.message)
     }
 
     return reply.send({
@@ -241,7 +241,7 @@ export default async function leaveEmployeeRoutes(fastify: FastifyInstance) {
     })
 
     if (!result.ok) {
-      return reply.code(500).send({ error: result.error.type, message: result.error.message })
+      return serverError(req, reply, result.error, ErrorCode.QUERY_FAILED, result.error.message)
     }
 
     // Return plain array — the workspace does Array.isArray(data) check
