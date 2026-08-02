@@ -266,8 +266,7 @@ export default async function attendanceExceptionsRoute(fastify: FastifyInstance
       .single()
 
     if (error) {
-      req.log.error({ err: error }, 'attendance_exceptions insert failed')
-      return reply.code(500).send({ error: 'INSERT_FAILED', message: 'Failed to create exception' })
+      return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create exception')
     }
 
     return reply.code(201).send({ data: inserted })
@@ -338,8 +337,7 @@ export default async function attendanceExceptionsRoute(fastify: FastifyInstance
       .maybeSingle()
 
     if (error) {
-      req.log.error({ err: error, exception_id: id }, 'attendance_exceptions update failed')
-      return reply.code(500).send({ error: 'UPDATE_FAILED', message: 'Failed to update exception' })
+      return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update exception')
     }
     if (!data) {
       return reply.code(409).send({ error: 'CONFLICT', message: 'This exception was already resolved or dismissed' })
