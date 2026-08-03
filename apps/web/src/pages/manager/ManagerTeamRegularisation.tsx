@@ -16,7 +16,7 @@
  *   POST /attendance/regularisation/:id/reject  (single)
  */
 
-import { useState }                              from 'react'
+import { useState, useRef }                      from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast }                                 from 'sonner'
 import {
@@ -95,9 +95,12 @@ export function ManagerTeamRegularisation() {
     })
   }
 
+  const bulkApproveKey = useRef(crypto.randomUUID())
   const bulkApproveMut = useMutation({
-    mutationFn: (ids: string[]) => api.post('/attendance/regularisation/bulk-approve', { ids }) as Promise<BulkResult>,
+    mutationFn: (ids: string[]) => api.post('/attendance/regularisation/bulk-approve', { ids },
+      { headers: { 'Idempotency-Key': bulkApproveKey.current } }) as Promise<BulkResult>,
     onSuccess:  (res: BulkResult) => {
+      bulkApproveKey.current = crypto.randomUUID()
       const { approved = 0, failed, total } = res.summary
       toast.success(`Approved ${approved} of ${total}${failed > 0 ? ` · ${failed} failed` : ''}`)
       setSelected(new Set())
@@ -116,10 +119,13 @@ export function ManagerTeamRegularisation() {
     onError: (err: unknown) => toast.error(err instanceof Error ? err.message : 'Bulk approve failed'),
   })
 
+  const bulkRejectKey = useRef(crypto.randomUUID())
   const bulkRejectMut = useMutation({
     mutationFn: ({ ids, reason }: { ids: string[]; reason?: string }) =>
-      api.post('/attendance/regularisation/bulk-reject', { ids, rejection_reason: reason || undefined }) as Promise<BulkResult>,
+      api.post('/attendance/regularisation/bulk-reject', { ids, rejection_reason: reason || undefined },
+        { headers: { 'Idempotency-Key': bulkRejectKey.current } }) as Promise<BulkResult>,
     onSuccess:  (res: BulkResult) => {
+      bulkRejectKey.current = crypto.randomUUID()
       const { rejected = 0, failed, total } = res.summary
       toast.success(`Rejected ${rejected} of ${total}${failed > 0 ? ` · ${failed} failed` : ''}`)
       setSelected(new Set())

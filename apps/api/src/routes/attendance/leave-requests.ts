@@ -342,6 +342,15 @@ export default async function leaveRequestsRoutes(fastify: FastifyInstance) {
   fastify.post('/leave-requests/:id/approve', auth, async (req: any, reply) => {
     const { id } = req.params as { id: string }
 
+    const iKey = (req.headers['idempotency-key'] as string | undefined)?.trim()
+    if (iKey) {
+      const cached = await checkIdempotency(fastify.supabase, req.tenantId, iKey, 'leave-approve')
+      if (cached) {
+        reply.header('Idempotency-Replayed', 'true')
+        return reply.code(cached.status_code).send(cached.response)
+      }
+    }
+
     try {
       const result = await approveLeaveRequest(fastify.supabase, {
         tenantId:  req.tenantId,
@@ -388,7 +397,11 @@ export default async function leaveRequestsRoutes(fastify: FastifyInstance) {
           correlation_id: req.correlationId ?? undefined,
         })
       }
-      return reply.send({ data: result.value })
+      const responseBody = { data: result.value }
+      if (iKey) {
+        await storeIdempotency(fastify.supabase, req.tenantId, iKey, 'leave-approve', 200, responseBody)
+      }
+      return reply.send(responseBody)
     } catch (err: unknown) {
       return serverError(req, reply, err, ErrorCode.LEAVE_APPLY_FAILED, 'Failed to approve leave request')
     }
@@ -451,6 +464,15 @@ export default async function leaveRequestsRoutes(fastify: FastifyInstance) {
       })
     }
 
+    const iKey = (req.headers['idempotency-key'] as string | undefined)?.trim()
+    if (iKey) {
+      const cached = await checkIdempotency(fastify.supabase, req.tenantId, iKey, 'leave-reject')
+      if (cached) {
+        reply.header('Idempotency-Replayed', 'true')
+        return reply.code(cached.status_code).send(cached.response)
+      }
+    }
+
     try {
       const result = await rejectLeaveRequest(fastify.supabase, {
         tenantId:        req.tenantId,
@@ -470,7 +492,11 @@ export default async function leaveRequestsRoutes(fastify: FastifyInstance) {
         })
       }
 
-      return reply.send({ data: result.value })
+      const responseBody = { data: result.value }
+      if (iKey) {
+        await storeIdempotency(fastify.supabase, req.tenantId, iKey, 'leave-reject', 200, responseBody)
+      }
+      return reply.send(responseBody)
     } catch (err: unknown) {
       return serverError(req, reply, err, ErrorCode.LEAVE_APPLY_FAILED, 'Failed to reject leave request')
     }

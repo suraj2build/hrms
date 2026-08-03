@@ -13,7 +13,7 @@
  * Design: design-system tokens only — no raw hex / bg-gray-* colors.
  */
 
-import { useState, Fragment }                                        from 'react'
+import { useState, useRef, Fragment }                                 from 'react'
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query'
 import {
   Inbox, CheckCircle2, XCircle, Loader2,
@@ -233,9 +233,19 @@ function LeaveRequestsTable({
   const [rejectRowId,   setRejectRowId]   = useState<string | null>(null)
   const [expandedRowId, setExpandedRowId] = useState<string | null>(null)
 
+  // Mutation is shared across all rows in the list, so the key is keyed per
+  // request id — a network-retried request needs a stable key so the retry
+  // replays the original response instead of erroring on an already-actioned row.
+  const approveIdempotencyKeys = useRef(new Map<string, string>())
   const approveMutation = useMutation({
-    mutationFn: (id: string) => api.post(`/leave-requests/${id}/approve`, {}),
+    mutationFn: (id: string) => {
+      if (!approveIdempotencyKeys.current.has(id)) approveIdempotencyKeys.current.set(id, crypto.randomUUID())
+      return api.post(`/leave-requests/${id}/approve`, {}, {
+        headers: { 'Idempotency-Key': approveIdempotencyKeys.current.get(id)! },
+      })
+    },
     onSuccess: (_, id) => {
+      approveIdempotencyKeys.current.delete(id)
       const item = items.find(i => i.id === id)
       toast.success('Leave request approved', {
         description: item ? `${employeeName(item.employees)} · ${fmtDate(item.from_date)}` : undefined,
@@ -259,10 +269,16 @@ function LeaveRequestsTable({
     },
   })
 
+  const rejectIdempotencyKeys = useRef(new Map<string, string>())
   const rejectMutation = useMutation({
-    mutationFn: ({ id, reason }: { id: string; reason: string }) =>
-      api.post(`/leave-requests/${id}/reject`, { rejection_reason: reason || undefined }),
+    mutationFn: ({ id, reason }: { id: string; reason: string }) => {
+      if (!rejectIdempotencyKeys.current.has(id)) rejectIdempotencyKeys.current.set(id, crypto.randomUUID())
+      return api.post(`/leave-requests/${id}/reject`, { rejection_reason: reason || undefined }, {
+        headers: { 'Idempotency-Key': rejectIdempotencyKeys.current.get(id)! },
+      })
+    },
     onSuccess: (_, { id }) => {
+      rejectIdempotencyKeys.current.delete(id)
       const item = items.find(i => i.id === id)
       toast.success('Leave request rejected', {
         description: item ? `${employeeName(item.employees)} · ${fmtDate(item.from_date)}` : undefined,
@@ -482,9 +498,16 @@ function RegularisationTable({
   const [rejectRowId,   setRejectRowId]   = useState<string | null>(null)
   const [expandedRowId, setExpandedRowId] = useState<string | null>(null)
 
+  const approveIdempotencyKeys = useRef(new Map<string, string>())
   const approveMutation = useMutation({
-    mutationFn: (id: string) => api.post(`/attendance/regularisation/${id}/approve`, {}),
+    mutationFn: (id: string) => {
+      if (!approveIdempotencyKeys.current.has(id)) approveIdempotencyKeys.current.set(id, crypto.randomUUID())
+      return api.post(`/attendance/regularisation/${id}/approve`, {}, {
+        headers: { 'Idempotency-Key': approveIdempotencyKeys.current.get(id)! },
+      })
+    },
     onSuccess: (_, id) => {
+      approveIdempotencyKeys.current.delete(id)
       const item = items.find(i => i.id === id)
       toast.success('Correction approved', {
         description: item ? `${employeeName(item.employees)} · ${fmtDate(item.date)}` : undefined,
@@ -505,10 +528,16 @@ function RegularisationTable({
     },
   })
 
+  const rejectIdempotencyKeys = useRef(new Map<string, string>())
   const rejectMutation = useMutation({
-    mutationFn: ({ id, reason }: { id: string; reason: string }) =>
-      api.post(`/attendance/regularisation/${id}/reject`, { rejection_reason: reason || undefined }),
+    mutationFn: ({ id, reason }: { id: string; reason: string }) => {
+      if (!rejectIdempotencyKeys.current.has(id)) rejectIdempotencyKeys.current.set(id, crypto.randomUUID())
+      return api.post(`/attendance/regularisation/${id}/reject`, { rejection_reason: reason || undefined }, {
+        headers: { 'Idempotency-Key': rejectIdempotencyKeys.current.get(id)! },
+      })
+    },
     onSuccess: (_, { id }) => {
+      rejectIdempotencyKeys.current.delete(id)
       const item = items.find(i => i.id === id)
       toast.success('Correction rejected', {
         description: item ? `${employeeName(item.employees)} · ${fmtDate(item.date)}` : undefined,

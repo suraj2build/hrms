@@ -158,6 +158,19 @@ export default async function advancesRoutes(fastify: FastifyInstance) {
       return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
     }
 
+    // Idempotency (fresh audit finding — same pattern already used on
+    // /disburse below): a double-click or client retry must not risk logging
+    // a duplicate approval audit action for what's otherwise a real money-
+    // affecting decision.
+    const iKey = (req.headers['idempotency-key'] as string | undefined)?.trim()
+    if (iKey) {
+      const cached = await checkIdempotency(fastify.supabase, req.tenantId, iKey, 'advance-approve')
+      if (cached) {
+        reply.header('Idempotency-Replayed', 'true')
+        return reply.code(cached.status_code).send(cached.response)
+      }
+    }
+
     // Fetch advance
     const { data: advance, error: fetchErr } = await fastify.supabase
       .from('advance_salary_requests')
@@ -197,7 +210,7 @@ export default async function advancesRoutes(fastify: FastifyInstance) {
 
     const now = new Date().toISOString()
 
-    const { error: updateErr } = await fastify.supabase
+    const { data: approvedRow, error: updateErr } = await fastify.supabase
       .from('advance_salary_requests')
       .update({
         status: 'approved',
@@ -209,8 +222,15 @@ export default async function advancesRoutes(fastify: FastifyInstance) {
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
       .in('status', ['pending', 'pending_hr'])
+      .select('id')
+      .maybeSingle()
 
     if (updateErr) return serverError(req, reply, updateErr, ErrorCode.UPDATE_FAILED, 'Failed to approve advance')
+    // 0-row match (fresh audit finding, adjacent to F37): a concurrent request
+    // already moved this advance out of pending/pending_hr — tell the caller
+    // honestly instead of logging/returning success for a state change this
+    // request didn't make.
+    if (!approvedRow) return reply.code(409).send({ error: 'INVALID_STATE', message: 'Advance is no longer pending' })
 
     await logAction(fastify.supabase, {
       tenantId:    req.tenantId,
@@ -222,7 +242,9 @@ export default async function advancesRoutes(fastify: FastifyInstance) {
       newData:     { status: 'approved', approved_amount: parsed.data.approved_amount },
     })
 
-    return reply.send({ message: 'Advance approved', advance_id: id })
+    const responseBody = { message: 'Advance approved', advance_id: id }
+    if (iKey) await storeIdempotency(fastify.supabase, req.tenantId, iKey, 'advance-approve', 200, responseBody)
+    return reply.send(responseBody)
   })
 
   // ── POST /payroll/advances/:id/reject ────────────────────────────────────────
@@ -236,6 +258,16 @@ export default async function advancesRoutes(fastify: FastifyInstance) {
     const parsed = schema.safeParse(req.body)
     if (!parsed.success) {
       return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+    }
+
+    // Idempotency (fresh audit finding) — same pattern as /approve above.
+    const iKey = (req.headers['idempotency-key'] as string | undefined)?.trim()
+    if (iKey) {
+      const cached = await checkIdempotency(fastify.supabase, req.tenantId, iKey, 'advance-reject')
+      if (cached) {
+        reply.header('Idempotency-Replayed', 'true')
+        return reply.code(cached.status_code).send(cached.response)
+      }
     }
 
     const { data: adv, error: advFetchErr } = await fastify.supabase
@@ -289,7 +321,9 @@ export default async function advancesRoutes(fastify: FastifyInstance) {
       newData:     { status: 'rejected', rejection_reason: parsed.data.rejection_reason },
     })
 
-    return reply.send({ message: 'Advance rejected' })
+    const responseBody = { message: 'Advance rejected' }
+    if (iKey) await storeIdempotency(fastify.supabase, req.tenantId, iKey, 'advance-reject', 200, responseBody)
+    return reply.send(responseBody)
   })
 
   // ── POST /payroll/advances/:id/disburse ──────────────────────────────────────

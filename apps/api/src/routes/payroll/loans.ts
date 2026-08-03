@@ -128,6 +128,17 @@ export default async function loansRoutes(fastify: FastifyInstance) {
     const { id } = req.params as { id: string }
     const now = new Date().toISOString()
 
+    // Idempotency (fresh audit finding) — same pattern already used on
+    // /disburse and /foreclose below.
+    const iKey = (req.headers['idempotency-key'] as string | undefined)?.trim()
+    if (iKey) {
+      const cached = await checkIdempotency(fastify.supabase, req.tenantId, iKey, 'loan-approve')
+      if (cached) {
+        reply.header('Idempotency-Replayed', 'true')
+        return reply.code(cached.status_code).send(cached.response)
+      }
+    }
+
     const { data: loan, error: loanFetchErr } = await fastify.supabase
       .from('employee_loans')
       .select('id, status, employee_id, principal_amount')
@@ -175,7 +186,9 @@ export default async function loansRoutes(fastify: FastifyInstance) {
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to approve loan')
     if (!data) return reply.code(409).send({ error: 'INVALID_STATE', message: 'Loan not found or not in a pending/pending_hr state' })
 
-    return reply.send({ data })
+    const responseBody = { data }
+    if (iKey) await storeIdempotency(fastify.supabase, req.tenantId, iKey, 'loan-approve', 200, responseBody)
+    return reply.send(responseBody)
   })
 
   // ── POST /payroll/loans/:id/reject ────────────────────────────────────────────
@@ -189,6 +202,16 @@ export default async function loansRoutes(fastify: FastifyInstance) {
     const parsed = schema.safeParse(req.body)
     if (!parsed.success) {
       return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+    }
+
+    // Idempotency (fresh audit finding) — same pattern as /approve above.
+    const iKey = (req.headers['idempotency-key'] as string | undefined)?.trim()
+    if (iKey) {
+      const cached = await checkIdempotency(fastify.supabase, req.tenantId, iKey, 'loan-reject')
+      if (cached) {
+        reply.header('Idempotency-Replayed', 'true')
+        return reply.code(cached.status_code).send(cached.response)
+      }
     }
 
     const { data: loan, error: loanFetchErr } = await fastify.supabase
@@ -232,7 +255,9 @@ export default async function loansRoutes(fastify: FastifyInstance) {
 
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to reject loan')
     if (!rejected) return reply.code(409).send({ error: 'INVALID_STATE', message: 'Loan not found or not in a pending state' })
-    return reply.send({ message: 'Loan rejected' })
+    const responseBody = { message: 'Loan rejected' }
+    if (iKey) await storeIdempotency(fastify.supabase, req.tenantId, iKey, 'loan-reject', 200, responseBody)
+    return reply.send(responseBody)
   })
 
   // ── POST /payroll/loans/:id/disburse ─────────────────────────────────────────

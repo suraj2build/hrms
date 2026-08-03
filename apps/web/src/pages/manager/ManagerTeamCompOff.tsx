@@ -7,7 +7,7 @@
  * POST /attendance/comp-off/:id/approve, POST /attendance/comp-off/:id/reject.
  */
 
-import { useState }                              from 'react'
+import { useState, useRef }                      from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast }                                 from 'sonner'
 import {
@@ -143,9 +143,16 @@ export function ManagerTeamCompOff({ embedded = false }: { embedded?: boolean })
     staleTime: 60_000,
   })
 
+  const approveIdempotencyKeys = useRef(new Map<string, string>())
   const approveMut = useMutation({
-    mutationFn: (id: string) => api.post(`/attendance/comp-off/${id}/approve`, {}),
-    onSuccess:  () => {
+    mutationFn: (id: string) => {
+      if (!approveIdempotencyKeys.current.has(id)) approveIdempotencyKeys.current.set(id, crypto.randomUUID())
+      return api.post(`/attendance/comp-off/${id}/approve`, {}, {
+        headers: { 'Idempotency-Key': approveIdempotencyKeys.current.get(id)! },
+      })
+    },
+    onSuccess:  (_data, id) => {
+      approveIdempotencyKeys.current.delete(id)
       toast.success('Comp-off approved')
       qc.invalidateQueries({ queryKey: ['manager-team-compoff'] })
       // The employee's own ESS approvals tracker, the admin CompOff view, the
@@ -170,9 +177,16 @@ export function ManagerTeamCompOff({ embedded = false }: { embedded?: boolean })
     },
   })
 
+  const rejectIdempotencyKeys = useRef(new Map<string, string>())
   const rejectMut = useMutation({
-    mutationFn: ({ id, notes }: { id: string; notes: string }) => api.post(`/attendance/comp-off/${id}/reject`, { notes }),
-    onSuccess:  () => {
+    mutationFn: ({ id, notes }: { id: string; notes: string }) => {
+      if (!rejectIdempotencyKeys.current.has(id)) rejectIdempotencyKeys.current.set(id, crypto.randomUUID())
+      return api.post(`/attendance/comp-off/${id}/reject`, { notes }, {
+        headers: { 'Idempotency-Key': rejectIdempotencyKeys.current.get(id)! },
+      })
+    },
+    onSuccess:  (_data, { id }) => {
+      rejectIdempotencyKeys.current.delete(id)
       toast.success('Comp-off rejected')
       qc.invalidateQueries({ queryKey: ['manager-team-compoff'] })
       qc.invalidateQueries({ queryKey: ['ess-approvals-compoff'] })

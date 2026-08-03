@@ -41,6 +41,7 @@ import { assertRangeOpen, isMonthLocked, monthOf, PeriodLockedError } from '../.
 import { isSelfApproval } from '../../lib/approval-guards.js'
 import { gateApprove, gateReject } from '../../lib/approval-orchestrator.js'
 import { MANAGER_ROLES } from '../../lib/rbac.js'
+import { checkIdempotency, storeIdempotency } from '../../lib/idempotency.js'
 import { conflictError, serverError, ErrorCode } from '../../lib/api-errors.js'
 
 const generateSchema = z.object({
@@ -265,6 +266,15 @@ export default async function compOffRoute(fastify: FastifyInstance) {
       return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
     }
 
+    const iKey = (req.headers['idempotency-key'] as string | undefined)?.trim()
+    if (iKey) {
+      const cached = await checkIdempotency(fastify.supabase, req.tenantId, iKey, 'comp-off-approve')
+      if (cached) {
+        reply.header('Idempotency-Replayed', 'true')
+        return reply.code(cached.status_code).send(cached.response)
+      }
+    }
+
     // Fetch the CO request
     const { data: co, error: fetchErr } = await fastify.supabase
       .from('comp_off_requests')
@@ -300,7 +310,11 @@ export default async function compOffRoute(fastify: FastifyInstance) {
           action: 'UPDATE', performedBy: req.userId,
           newData: { status: 'pending', approval_level: gate.nextLevel, total_levels: gate.totalLevels },
         })
-        return reply.send({ data: { id, status: 'pending', advanced_to_level: gate.nextLevel, total_levels: gate.totalLevels } })
+        const responseBody = { data: { id, status: 'pending', advanced_to_level: gate.nextLevel, total_levels: gate.totalLevels } }
+        if (iKey) {
+          await storeIdempotency(fastify.supabase, req.tenantId, iKey, 'comp-off-approve', 200, responseBody)
+        }
+        return reply.send(responseBody)
       }
       // gate.kind === 'finalize' → fall through to the credit logic below.
     } catch (err: unknown) {
@@ -468,14 +482,18 @@ export default async function compOffRoute(fastify: FastifyInstance) {
       newData:     { status: 'approved', expires_on: expiresOnStr, days: (co as any).days_to_credit },
     })
 
-    return reply.send({
+    const responseBody = {
       data: {
         id,
         status:      'approved',
         expires_on:  expiresOnStr,
         days_credited: Number((co as any).days_to_credit),
       },
-    })
+    }
+    if (iKey) {
+      await storeIdempotency(fastify.supabase, req.tenantId, iKey, 'comp-off-approve', 200, responseBody)
+    }
+    return reply.send(responseBody)
   })
 
   // ── POST /attendance/comp-off/:id/reject ─────────────────────────────────
@@ -486,6 +504,15 @@ export default async function compOffRoute(fastify: FastifyInstance) {
     const parsed = rejectSchema.safeParse(req.body)
     if (!parsed.success) {
       return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+    }
+
+    const iKey = (req.headers['idempotency-key'] as string | undefined)?.trim()
+    if (iKey) {
+      const cached = await checkIdempotency(fastify.supabase, req.tenantId, iKey, 'comp-off-reject')
+      if (cached) {
+        reply.header('Idempotency-Replayed', 'true')
+        return reply.code(cached.status_code).send(cached.response)
+      }
     }
 
     const { data: co } = await fastify.supabase
@@ -558,6 +585,10 @@ export default async function compOffRoute(fastify: FastifyInstance) {
       newData:     { status: 'rejected' },
     })
 
-    return reply.code(200).send({ data: { id, status: 'rejected' } })
+    const responseBody = { data: { id, status: 'rejected' } }
+    if (iKey) {
+      await storeIdempotency(fastify.supabase, req.tenantId, iKey, 'comp-off-reject', 200, responseBody)
+    }
+    return reply.code(200).send(responseBody)
   })
 }

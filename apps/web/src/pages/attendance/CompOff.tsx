@@ -9,7 +9,7 @@
  *   Summary      — quick stats: pending, approved this month, total balance by employee
  */
 
-import { useState }                              from 'react'
+import { useState, useRef }                      from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   CalendarPlus, ShieldAlert, RefreshCw, CheckCircle2,
@@ -150,10 +150,16 @@ export function CompOff() {
     qc.invalidateQueries({ queryKey: ['manager-team-compoff'] })
   }
 
+  const approveIdempotencyKeys = useRef(new Map<string, string>())
   const approveMutation = useMutation({
-    mutationFn: ({ id, notes }: { id: string; notes?: string }) =>
-      api.post(`/attendance/comp-off/${id}/approve`, { notes }),
-    onSuccess: () => {
+    mutationFn: ({ id, notes }: { id: string; notes?: string }) => {
+      if (!approveIdempotencyKeys.current.has(id)) approveIdempotencyKeys.current.set(id, crypto.randomUUID())
+      return api.post(`/attendance/comp-off/${id}/approve`, { notes }, {
+        headers: { 'Idempotency-Key': approveIdempotencyKeys.current.get(id)! },
+      })
+    },
+    onSuccess: (_data, { id }) => {
+      approveIdempotencyKeys.current.delete(id)
       invalidate()
       closeAction()
       toast.success('Comp-off approved and balance credited')
@@ -167,10 +173,16 @@ export function CompOff() {
     },
   })
 
+  const rejectIdempotencyKeys = useRef(new Map<string, string>())
   const rejectMutation = useMutation({
-    mutationFn: ({ id, notes }: { id: string; notes?: string }) =>
-      api.post(`/attendance/comp-off/${id}/reject`, { notes }),
-    onSuccess: () => {
+    mutationFn: ({ id, notes }: { id: string; notes?: string }) => {
+      if (!rejectIdempotencyKeys.current.has(id)) rejectIdempotencyKeys.current.set(id, crypto.randomUUID())
+      return api.post(`/attendance/comp-off/${id}/reject`, { notes }, {
+        headers: { 'Idempotency-Key': rejectIdempotencyKeys.current.get(id)! },
+      })
+    },
+    onSuccess: (_data, { id }) => {
+      rejectIdempotencyKeys.current.delete(id)
       invalidate()
       closeAction()
       toast.success('Comp-off request rejected')

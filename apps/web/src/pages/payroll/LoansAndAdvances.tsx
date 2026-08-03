@@ -185,13 +185,15 @@ function ApproveAdvanceDialog({
   const qc = useQueryClient()
   const [approvedAmount, setApprovedAmount] = useState('')
   const [recoveryMonths, setRecoveryMonths] = useState('3')
+  const idempotencyKey = useRef(crypto.randomUUID())
 
   const mutation = useMutation({
     mutationFn: () => api.post(`/payroll/advances/${advance!.id}/approve`, {
       approved_amount: Number(approvedAmount),
       recovery_months: Number(recoveryMonths),
-    }),
+    }, { headers: { 'Idempotency-Key': idempotencyKey.current } }),
     onSuccess: () => {
+      idempotencyKey.current = crypto.randomUUID()
       qc.invalidateQueries({ queryKey: ['advances'] })
       // The employee's own ESS view and the manager's approval queue read
       // the same record under separate keys.
@@ -263,13 +265,16 @@ function RejectDialog({
 }) {
   const qc = useQueryClient()
   const [reason, setReason] = useState('')
+  const idempotencyKey = useRef(crypto.randomUUID())
 
   const mutation = useMutation({
     mutationFn: () => api.post(
       `/payroll/${type === 'advance' ? 'advances' : 'loans'}/${id}/reject`,
       { rejection_reason: reason },
+      { headers: { 'Idempotency-Key': idempotencyKey.current } },
     ),
     onSuccess: () => {
+      idempotencyKey.current = crypto.randomUUID()
       qc.invalidateQueries({ queryKey: [type === 'advance' ? 'advances' : 'loans'] })
       qc.invalidateQueries({ queryKey: [type === 'advance' ? 'ess-advances' : 'ess-loans'] })
       qc.invalidateQueries({ queryKey: ['manager-loan-pending'] })
@@ -1078,9 +1083,11 @@ function AdvancesTab({ isAdmin }: { isAdmin: boolean }) {
 
 function ApproveLoanDialog({ open, loan, onClose }: { open: boolean; loan: EmployeeLoan | null; onClose: () => void }) {
   const qc = useQueryClient()
+  const idempotencyKey = useRef(crypto.randomUUID())
   const mutation = useMutation({
-    mutationFn: () => api.post(`/payroll/loans/${loan!.id}/approve`, {}),
+    mutationFn: () => api.post(`/payroll/loans/${loan!.id}/approve`, {}, { headers: { 'Idempotency-Key': idempotencyKey.current } }),
     onSuccess: () => {
+      idempotencyKey.current = crypto.randomUUID()
       qc.invalidateQueries({ queryKey: ['loans'] })
       qc.invalidateQueries({ queryKey: ['ess-loans'] })
       qc.invalidateQueries({ queryKey: ['manager-loan-pending'] })

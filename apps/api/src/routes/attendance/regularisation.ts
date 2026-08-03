@@ -23,6 +23,7 @@ import {
   isHrAdmin, resolveCallerEmployeeId, getDirectReportIds,
 } from '../../lib/manager-scope.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
+import { checkIdempotency, storeIdempotency } from '../../lib/idempotency.js'
 import { serverError, ErrorCode } from '../../lib/api-errors.js'
 import { submitRegularisation, type RegularisationError } from '../../lib/regularisation-service.js'
 
@@ -291,6 +292,15 @@ export default async function regularisationRoute(fastify: FastifyInstance) {
     const parsed = schema.safeParse(req.body)
     if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
 
+    const iKey = (req.headers['idempotency-key'] as string | undefined)?.trim()
+    if (iKey) {
+      const cached = await checkIdempotency(fastify.supabase, req.tenantId, iKey, 'regularisation-bulk-approve')
+      if (cached) {
+        reply.header('Idempotency-Replayed', 'true')
+        return reply.code(cached.status_code).send(cached.response)
+      }
+    }
+
     // Direct-report ownership guard — HR admins bypass; managers are scoped.
     if (!isHrAdmin(req.userRole)) {
       const myEmpId = await resolveCallerEmployeeId(fastify.supabase, req.userId, req.tenantId)
@@ -377,7 +387,11 @@ export default async function regularisationRoute(fastify: FastifyInstance) {
 
     const approved = results.filter(r => r.ok).length
     const failed   = results.filter(r => !r.ok).length
-    return reply.send({ results, summary: { approved, failed, total: parsed.data.ids.length } })
+    const responseBody = { results, summary: { approved, failed, total: parsed.data.ids.length } }
+    if (iKey) {
+      await storeIdempotency(fastify.supabase, req.tenantId, iKey, 'regularisation-bulk-approve', 200, responseBody)
+    }
+    return reply.send(responseBody)
   })
 
   // ── POST /attendance/regularisation/bulk-reject ───────────────────────────────
@@ -390,6 +404,15 @@ export default async function regularisationRoute(fastify: FastifyInstance) {
     })
     const parsed = schema.safeParse(req.body)
     if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+
+    const iKey = (req.headers['idempotency-key'] as string | undefined)?.trim()
+    if (iKey) {
+      const cached = await checkIdempotency(fastify.supabase, req.tenantId, iKey, 'regularisation-bulk-reject')
+      if (cached) {
+        reply.header('Idempotency-Replayed', 'true')
+        return reply.code(cached.status_code).send(cached.response)
+      }
+    }
 
     // Direct-report ownership guard — HR admins bypass; managers are scoped.
     if (!isHrAdmin(req.userRole)) {
@@ -469,7 +492,11 @@ export default async function regularisationRoute(fastify: FastifyInstance) {
 
     const rejected = results.filter(r => r.ok).length
     const failed   = results.filter(r => !r.ok).length
-    return reply.send({ results, summary: { rejected, failed, total: parsed.data.ids.length } })
+    const responseBody = { results, summary: { rejected, failed, total: parsed.data.ids.length } }
+    if (iKey) {
+      await storeIdempotency(fastify.supabase, req.tenantId, iKey, 'regularisation-bulk-reject', 200, responseBody)
+    }
+    return reply.send(responseBody)
   })
 
   // ── POST /attendance/regularisation/:id/approve ───────────────────────────────
@@ -478,6 +505,15 @@ export default async function regularisationRoute(fastify: FastifyInstance) {
   // Auth: any authenticated user — ApprovalService validates manager/admin role.
   fastify.post('/attendance/regularisation/:id/approve', auth, async (req: any, reply) => {
     const { id } = req.params as { id: string }
+
+    const iKey = (req.headers['idempotency-key'] as string | undefined)?.trim()
+    if (iKey) {
+      const cached = await checkIdempotency(fastify.supabase, req.tenantId, iKey, 'regularisation-approve')
+      if (cached) {
+        reply.header('Idempotency-Replayed', 'true')
+        return reply.code(cached.status_code).send(cached.response)
+      }
+    }
 
     const result = await approveRegularisation(fastify.supabase, {
       tenantId:         req.tenantId,
@@ -505,7 +541,11 @@ export default async function regularisationRoute(fastify: FastifyInstance) {
     // next level. Skip every finalize side-effect (punch logs, recompute, ledger,
     // orchestration) until the final approval flips status to 'approved'.
     if (approved.status !== 'approved') {
-      return reply.send({ message: 'Approval recorded', data: { id: approved.id, status: approved.status } })
+      const responseBody = { message: 'Approval recorded', data: { id: approved.id, status: approved.status } }
+      if (iKey) {
+        await storeIdempotency(fastify.supabase, req.tenantId, iKey, 'regularisation-approve', 200, responseBody)
+      }
+      return reply.send(responseBody)
     }
 
     // Insert approved check-in/out into attendance_punch_logs (source = 'regularisation')
@@ -622,7 +662,11 @@ export default async function regularisationRoute(fastify: FastifyInstance) {
       req.log.warn({ err, regularisationId: id }, 'workforce orchestration failed for regularisation approval')
     })
 
-    return reply.send({ message: 'Approved successfully', data: { id: approved.id, status: approved.status } })
+    const responseBody = { message: 'Approved successfully', data: { id: approved.id, status: approved.status } }
+    if (iKey) {
+      await storeIdempotency(fastify.supabase, req.tenantId, iKey, 'regularisation-approve', 200, responseBody)
+    }
+    return reply.send(responseBody)
   })
 
   // ── POST /attendance/regularisation/:id/reject ────────────────────────────────
@@ -635,6 +679,15 @@ export default async function regularisationRoute(fastify: FastifyInstance) {
     const parsed = schema.safeParse(req.body)
     if (!parsed.success) {
       return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+    }
+
+    const iKey = (req.headers['idempotency-key'] as string | undefined)?.trim()
+    if (iKey) {
+      const cached = await checkIdempotency(fastify.supabase, req.tenantId, iKey, 'regularisation-reject')
+      if (cached) {
+        reply.header('Idempotency-Replayed', 'true')
+        return reply.code(cached.status_code).send(cached.response)
+      }
     }
 
     // Pre-fetch reg fields needed for event emission after rejection
@@ -693,7 +746,11 @@ export default async function regularisationRoute(fastify: FastifyInstance) {
       })
     }
 
-    return reply.send({ message: 'Rejected successfully', data: result.value })
+    const responseBody = { message: 'Rejected successfully', data: result.value }
+    if (iKey) {
+      await storeIdempotency(fastify.supabase, req.tenantId, iKey, 'regularisation-reject', 200, responseBody)
+    }
+    return reply.send(responseBody)
   })
 
   // ── POST /attendance/regularisation/:id/cancel ───────────────────────────────
