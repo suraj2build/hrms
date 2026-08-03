@@ -518,7 +518,7 @@ export default async function policyRoutes(fastify: FastifyInstance) {
       })
       .eq('tenant_id', tenantId)
       .eq('id', id)
-      .not('status', 'eq', 'archived')
+      .eq('status', 'draft')
       .select('title, requires_acknowledgement')
       .single()
 
@@ -526,11 +526,18 @@ export default async function policyRoutes(fastify: FastifyInstance) {
     // straight to the client instead of being logged server-side — PGRST116
     // (.single() with 0 matching rows, i.e. not found or already archived)
     // is the only case that should surface as this route's own 422.
+    //
+    // The status filter is now an exact CAS match on 'draft' (was
+    // not('status','eq','archived'), which still matched an
+    // already-'published' row) — a double-click, client retry after a slow
+    // response, or a second manual call would otherwise re-fire the full
+    // in-app + WhatsApp broadcast to every active employee a second time,
+    // with no idempotency guard anywhere in this route.
     if (error && error.code !== 'PGRST116') {
       return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to publish policy')
     }
     if (!policy) {
-      return reply.status(422).send({ error: 'NOT_PUBLISHABLE', message: 'Policy not found or already archived' })
+      return reply.status(422).send({ error: 'NOT_PUBLISHABLE', message: 'Policy not found, already published, or archived' })
     }
 
     // Notify all active employees if acknowledgement is required
