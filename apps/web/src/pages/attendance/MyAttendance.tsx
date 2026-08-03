@@ -11,7 +11,7 @@
 
 import { useState, useMemo, useCallback, type ReactNode } from 'react'
 import { createPortal }           from 'react-dom'
-import { useNavigate }            from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   ChevronLeft, ChevronRight, Clock, AlertTriangle, CalendarDays,
@@ -599,6 +599,7 @@ function InsightChip({ icon, text, tone }: { icon: ReactNode; text: string; tone
 export function MyAttendance() {
   const { profile }  = useAuthStore()
   const navigate     = useNavigate()
+  const [searchParams] = useSearchParams()
   const employeeId   = profile?.employee_id ?? null
 
   const [viewDate,    setViewDate]    = useState(() => new Date())
@@ -608,7 +609,9 @@ export function MyAttendance() {
   const [regForm,     setRegForm]     = useState<RegForm>({ regType: '', checkIn: '', checkOut: '', reason: '' })
   const [regError,    setRegError]    = useState('')
   const [punchError,  setPunchError]  = useState('')
-  const [activeTab,       setActiveTab]       = useState<'calendar' | 'requests'>('calendar')
+  const [activeTab,       setActiveTab]       = useState<'calendar' | 'requests'>(
+    searchParams.get('tab') === 'requests' ? 'requests' : 'calendar',
+  )
   const [reqStatusFilter, setReqStatusFilter] = useState<string>('')
   const [cancellingId,    setCancellingId]    = useState<string | null>(null)
 

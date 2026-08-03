@@ -87,15 +87,27 @@ export function BulkActionPanel({ actions, onComplete, compact = false }: BulkAc
     const toExecute = actions.filter(a => selectedIds.has(a.id))
     if (toExecute.length === 0) return
     setExecuting(true)
-    for (const action of toExecute) {
-      if (action.requiresConfirmation) {
-        // Skip actions that need confirmation in bulk run
-        toast(`"${action.label}" requires manual confirmation — skipped`)
-        continue
+    try {
+      for (const action of toExecute) {
+        if (action.requiresConfirmation) {
+          // Skip actions that need confirmation in bulk run
+          toast(`"${action.label}" requires manual confirmation — skipped`)
+          continue
+        }
+        // mutateAsync rejects on failure even though onError already shows a
+        // toast — without this catch, one failed action in the batch would
+        // abort the loop (skipping every remaining selected action) and
+        // leave the button permanently disabled, since the finally below
+        // would never run without it either.
+        try {
+          await executeMutation.mutateAsync(action)
+        } catch {
+          // onError already surfaced the failure toast — continue the batch
+        }
       }
-      await executeMutation.mutateAsync(action)
+    } finally {
+      setExecuting(false)
     }
-    setExecuting(false)
   }, [actions, selectedIds, executeMutation])
 
   const toggleSelected = useCallback((id: string) => {

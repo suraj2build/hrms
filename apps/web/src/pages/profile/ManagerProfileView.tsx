@@ -192,7 +192,7 @@ function PendingCard({
           Reject
         </Button>
         <Link
-          to="/attendance/manager"
+          to="/manager/team/attendance"
           className="ml-auto text-[10px] text-muted-foreground hover:text-primary flex items-center gap-0.5"
         >
           Full inbox <ChevronRight className="h-3 w-3" />
@@ -436,7 +436,7 @@ export function ManagerProfileView({ employeeId }: { employeeId: string }) {
             </div>
             {/* Quick nav */}
             <div className="flex flex-col gap-1.5 flex-shrink-0">
-              <Link to={`/attendance/manager`}>
+              <Link to={`/manager/team/attendance`}>
                 <Button variant="outline" size="sm" className="h-7 text-xs gap-1.5">
                   <UserCheck className="h-3.5 w-3.5" />
                   Approval Inbox
@@ -493,7 +493,7 @@ export function ManagerProfileView({ employeeId }: { employeeId: string }) {
               title="This Month"
               icon={<CalendarDays className="h-4 w-4 text-muted-foreground" />}
               action={
-                <Link to={`/attendance/manager`} className="text-[10px] text-primary hover:underline">
+                <Link to={`/manager/team/attendance`} className="text-[10px] text-primary hover:underline">
                   View all
                 </Link>
               }
@@ -542,8 +542,8 @@ export function ManagerProfileView({ employeeId }: { employeeId: string }) {
             >
               <div className="space-y-1">
                 {[
-                  { label: 'View full attendance',     href: `/attendance/manager`, icon: CalendarDays },
-                  { label: 'All team requests',        href: `/attendance/manager`, icon: Users        },
+                  { label: 'View full attendance',     href: `/manager/team/attendance`, icon: CalendarDays },
+                  { label: 'All team requests',        href: `/manager/team/attendance`, icon: Users        },
                   { label: 'Leave conflict check',     href: `/admin/attendance`,   icon: CalendarOff  },
                   { label: 'Send message (HR)',        href: `/ess/hr-support`,     icon: MessageSquare },
                 ].map(item => {
