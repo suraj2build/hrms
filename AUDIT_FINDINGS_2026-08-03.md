@@ -59,18 +59,18 @@
 
 | ID | File | One-line description |
 |----|------|----------------------|
-| F1 | `attendance/corrections.ts:65-108` | Missing self-approval guard — the only approval surface in the codebase without one; an HR admin can approve their own attendance correction. |
-| F2 | `lib/approval-service.ts:403-524` | Approved-leave reversal has no partial/date-aware handling — cancelling a partially-elapsed multi-day leave over-credits balance and retroactively marks already-taken days as unauthorized absence. |
-| F7 | `lib/attendance-engine.ts:994` + `lib/leave-engine.ts:240-281` | Fractional-leave day still bypasses real punch-pairing — any single stray punch grants full-day credit regardless of actual minutes worked; `work_hours`/`overtime_minutes` remain hardcoded to 0, corrupting downstream consumers. |
-| F8 | `lib/statutory/tax-computation-engine.ts:239-246` | DB-fallback standard deduction is regime-blind — applies the new-regime ₹75,000 figure to old-regime employees too when the config row is missing, understating taxable income by ₹25,000. |
-| F13 | `routes/payroll/runs.ts` + `lib/payroll-engine.ts` | No mid-month-joiner proration found anywhere in the payroll computation path — plausible full-month overpayment for new hires (needs live/staging confirmation before treating as certain). |
-| F16 | `routes/trust/intelligence.ts` | 4 endpoints (`/trust/scores` etc.) report a fabricated `total: data.length` from an already-capped query — silent truncation with no signal, guaranteed to trigger for any tenant of real size. |
-| F17 | `routes/payroll/slips.ts` | Slip-search employee-match query sits exactly at the 1000-row PostgREST ceiling. |
-| F37 | Loan/advance approve-reject mutations (frontend) | Missing Idempotency-Key, inconsistent with this codebase's own established pattern for financial mutations. |
-| F39 | `lib/leave-scheduler.ts:301-311` | Entire leave-job pipeline (accrual, carry-forward, CO-expiry) computes "today" once in server UTC and applies it to every tenant — never received the ISSUE-154 tenant-local-time fix applied elsewhere. |
-| F40 | `lib/wo-credit-reconciler.ts:466-495` | Identical UTC-global-date bug, driving an actual financial ledger write (weekly-off LOP/extra-pay finalization). |
-| F41 | `lib/durable-queue.ts:412-448` | Job timeout doesn't cancel in-flight work, and `send-pulse-poll`/`send-digest` have no explicit `timeoutMs` override — can produce duplicate WhatsApp/digest-email sends at scale. |
-| F49 | `plugins/owner-auth.ts:61` | JWT signature check is not constant-time — the sibling tenant-facing `auth.ts` was already hardened for this exact issue (H11), but the fix never propagated to the higher-privilege owner-portal copy. |
+| F1 | `attendance/corrections.ts:65-108` | ✅ FIXED (2026-08-03) — Missing self-approval guard — the only approval surface in the codebase without one; an HR admin can approve their own attendance correction. |
+| F2 | `lib/approval-service.ts:403-524` | **(Open)** Approved-leave reversal has no partial/date-aware handling — cancelling a partially-elapsed multi-day leave over-credits balance and retroactively marks already-taken days as unauthorized absence. |
+| F7 | `lib/attendance-engine.ts:994` + `lib/leave-engine.ts:240-281` | **(Open)** Fractional-leave day still bypasses real punch-pairing — any single stray punch grants full-day credit regardless of actual minutes worked; `work_hours`/`overtime_minutes` remain hardcoded to 0, corrupting downstream consumers. |
+| F8 | `lib/statutory/tax-computation-engine.ts:239-246` | ✅ FIXED (2026-08-03) — DB-fallback standard deduction is regime-blind — applies the new-regime ₹75,000 figure to old-regime employees too when the config row is missing, understating taxable income by ₹25,000. |
+| F13 | `routes/payroll/runs.ts` + `lib/payroll-engine.ts` | ✅ FIXED (2026-08-03) — No mid-month-joiner proration found anywhere in the payroll computation path — plausible full-month overpayment for new hires (needs live/staging confirmation before treating as certain). |
+| F16 | `routes/trust/intelligence.ts` | ✅ FIXED (2026-08-03) — 4 endpoints (`/trust/scores` etc.) report a fabricated `total: data.length` from an already-capped query — silent truncation with no signal, guaranteed to trigger for any tenant of real size. |
+| F17 | `routes/payroll/slips.ts` | ✅ FIXED (2026-08-03) — Slip-search employee-match query sits exactly at the 1000-row PostgREST ceiling. |
+| F37 | Loan/advance approve-reject mutations (frontend) | ✅ FIXED (2026-08-03) — Missing Idempotency-Key, inconsistent with this codebase's own established pattern for financial mutations. |
+| F39 | `lib/leave-scheduler.ts:301-311` | ✅ FIXED (2026-08-03) — Entire leave-job pipeline (accrual, carry-forward, CO-expiry) computes "today" once in server UTC and applies it to every tenant — never received the ISSUE-154 tenant-local-time fix applied elsewhere. |
+| F40 | `lib/wo-credit-reconciler.ts:466-495` | ✅ FIXED (2026-08-03) — Identical UTC-global-date bug, driving an actual financial ledger write (weekly-off LOP/extra-pay finalization). |
+| F41 | `lib/durable-queue.ts:412-448` | ✅ FIXED (2026-08-03) — Job timeout doesn't cancel in-flight work, and `send-pulse-poll`/`send-digest` have no explicit `timeoutMs` override — can produce duplicate WhatsApp/digest-email sends at scale. |
+| F49 | `plugins/owner-auth.ts:61` | ✅ FIXED (2026-08-03) — JWT signature check is not constant-time — the sibling tenant-facing `auth.ts` was already hardened for this exact issue (H11), but the fix never propagated to the higher-privilege owner-portal copy. |
 
 *(Full detail — root cause, reproduction, recommended fix — for each of the above is in the source chat transcript of this audit; summarized here for planning purposes. Expand any row before starting work on it.)*
 
@@ -94,7 +94,7 @@
 | F26 | `routes/policy/index.ts` | 3 raw `reply.status(500)` calls — invisible to `check-manual-500s.mjs`'s ratchet, which only regexes `reply.code(500)`. |
 | F28 | `routes/billing/index.ts:159` | Webhook writes `tenants.status` directly — re-flags an already-investigated architectural question (prior round ruled it intentional/self-serve-billing-specific; the enterprise-vs-self-serve conflict-resolution question is still genuinely open per that round's own notes). |
 | F31–F36 | Frontend caching (Surveys, Policy Library, Optional Holiday Pool, Holidays) | 6 distinct cache-fragmentation gaps + 1 stale-closure race in a holiday-toggle handler — same bug class as ~15 already-fixed instances in this codebase, just not yet swept from these newer features. |
-| F38 | Comp-off / leave / regularisation approve-reject (frontend) | Missing Idempotency-Key, same pattern as F37 but lower financial stakes. |
+| F38 | Comp-off / leave / regularisation approve-reject (frontend) | ✅ FIXED (2026-08-03) — Missing Idempotency-Key, same pattern as F37 but lower financial stakes. |
 | F42 | `lib/digest-scheduler.ts` | "Due" gate uses UTC calendar while content uses tenant-local calendar (self-documented simplification; no outright miss found in the ±14h/−12h range checked). |
 | F43 | `lib/intelligence-scanner.ts` | 18 parallel scans silently discard rejected results — zero logging on any scan failure, unlike every sibling job file. |
 | F44 | `lib/verification-retry-scanner.ts` | Swallows PAN/bank verification retry errors with no logging. |
@@ -143,17 +143,17 @@ Sequencing follows this repo's own established pipeline for every fix: **grep-co
 3. ~~**C3** — replace the phantom-success fallback in `buildStatutoryRecon` with an explicit "not generated" state; never synthesize `payable` from `computed` or vice versa.~~ Done.
 4. Verification completed: `tsc --noEmit` clean, `check-manual-500s.mjs`/`check-console-error.mjs` both unchanged at 0, and the pre-existing vitest suite's 12 failures (3 unrelated files) confirmed identical with/without this diff via `git stash`. **Still outstanding**: no automated regression test was added for the >1,000-employee finalize scenario or the concurrent-freeze-during-finalize race — tracked in Phase 6's test-coverage buildout, not closed by this fix.
 
-### Phase 2 — High severity (target: this week)
-1. **F49** — apply `auth.ts`'s existing `timingSafeEqual` pattern to `owner-auth.ts` (mechanical, low risk, copy an already-solved fix).
-2. **F8** — make the TDS standard-deduction fallback regime-aware (`regime === 'new' ? 75_000 : 50_000`).
-3. **F39, F40** — apply the existing `fetchTenantTz`+`getLocalDate` pattern (already used in `digest-builder.ts`, `poll-scheduler.ts`, `intelligence-scanner.ts`, `absconding-engine.ts`) to `leave-scheduler.ts` and `wo-credit-reconciler.ts`.
-4. **F1** — add the same `isSelfApproval()` guard used everywhere else to `corrections.ts`'s `authoriseApprover`.
-5. **F37, F38** — add Idempotency-Key handling to loan/advance/comp-off/leave/regularisation approve-reject mutations, mirroring the pattern already used elsewhere in this codebase.
-6. **F41** — set explicit, generous `timeoutMs` values on the `send-pulse-poll`/`send-digest` enqueue calls.
-7. **F16, F17** — apply `fetchAllRows()`/paired exact-count to `trust/intelligence.ts`'s 4 endpoints and `payroll/slips.ts`'s slip search.
-8. **F7** — run real punch-pairing (`pairPunches()`) unconditionally before the fractional-leave branch in `computeDay()`; derive the worked-remainder status from actual worked minutes, not `punches.length > 0`. **Flag as the highest-complexity item in this phase** — it touches core attendance computation with several downstream consumers (Muster Roll, overtime detection, `wo-credit-reconciler.ts`); budget extra review time and re-verify each consumer after the change.
-9. **F13** — once Phase 0's repro confirms the bug is real, cap the eligible-days window per employee at `max(date_of_joining, month_start)` in the LOP/working-days computation.
-10. **F2** — as a first-pass mitigation, block reversal of an approved leave request once any date in its range is in the past (tenant-local); treat true partial-reversal (crediting back only the unconsumed remainder) as a follow-up design task, not part of this phase.
+### Phase 2 — High severity (target: this week) — ✅ 8/10 DONE (2026-08-03); F7, F2 still open
+1. ~~**F49** — apply `auth.ts`'s existing `timingSafeEqual` pattern to `owner-auth.ts` (mechanical, low risk, copy an already-solved fix).~~ Done.
+2. ~~**F8** — make the TDS standard-deduction fallback regime-aware (`regime === 'new' ? 75_000 : 50_000`).~~ Done.
+3. ~~**F39, F40** — apply the existing `fetchTenantTz`+`getLocalDate` pattern (already used in `digest-builder.ts`, `poll-scheduler.ts`, `intelligence-scanner.ts`, `absconding-engine.ts`) to `leave-scheduler.ts` and `wo-credit-reconciler.ts`.~~ Done — `leave-scheduler.ts` needed a widened ±1-day UTC boundary window + dayKey-based re-triggering (not just a naive per-tenant date swap) to avoid silently skipping tenants whose local clock lags UTC; `wo-credit-reconciler.ts` was simpler since its jobs are already fully idempotent.
+4. ~~**F1** — add the same `isSelfApproval()` guard used everywhere else to `corrections.ts`'s `authoriseApprover`.~~ Done.
+5. ~~**F37, F38** — add Idempotency-Key handling to loan/advance/comp-off/leave/regularisation approve-reject mutations, mirroring the pattern already used elsewhere in this codebase.~~ Done — wired `advances.ts`, `loans.ts`, `leave-requests.ts`, `regularisation.ts` (incl. bulk-approve/bulk-reject), and `comp-off.ts` end-to-end (backend check/store + frontend header). Adjacent bug found and fixed alongside F37: `advances.ts`'s `/approve` endpoint's status-guarded UPDATE never checked for a 0-row match, silently returning success on a concurrent duplicate request.
+6. ~~**F41** — set explicit, generous `timeoutMs` values on the `send-pulse-poll`/`send-digest` enqueue calls.~~ Done.
+7. ~~**F16, F17** — apply `fetchAllRows()`/paired exact-count to `trust/intelligence.ts`'s 4 endpoints and `payroll/slips.ts`'s slip search.~~ Done.
+8. **F7** — run real punch-pairing (`pairPunches()`) unconditionally before the fractional-leave branch in `computeDay()`; derive the worked-remainder status from actual worked minutes, not `punches.length > 0`. **Flag as the highest-complexity item in this phase** — it touches core attendance computation with several downstream consumers (Muster Roll, overtime detection, `wo-credit-reconciler.ts`); budget extra review time and re-verify each consumer after the change. **(Still open.)**
+9. ~~**F13** — once Phase 0's repro confirms the bug is real, cap the eligible-days window per employee at `max(date_of_joining, month_start)` in the LOP/working-days computation.~~ Done.
+10. **F2** — as a first-pass mitigation, block reversal of an approved leave request once any date in its range is in the past (tenant-local); treat true partial-reversal (crediting back only the unconsumed remainder) as a follow-up design task, not part of this phase. **(Still open.)**
 
 ### Phase 3 — Process/tooling fixes (parallel track, cheap, do alongside Phase 1–2)
 1. **F6** — fix the 3 files causing the currently-red `npm run lint` gate; this is blocking hygiene and should not wait.
