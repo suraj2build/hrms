@@ -122,9 +122,9 @@ export default async function trustIntelligenceRoutes(fastify: FastifyInstance) 
   fastify.get('/trust/duplicates', adminAuth, async (req, reply) => {
     const tenantId = (req as any).tenantId
     const { limit = '50' } = req.query as any
-    const { data, error } = await fastify.supabase
+    const { data, error, count } = await fastify.supabase
       .from('duplicate_detection_events')
-      .select('*')
+      .select('*', { count: 'exact' })
       .eq('tenant_id', tenantId)
       .order('detected_at', { ascending: false })
       .limit(Number(limit))
@@ -137,7 +137,11 @@ export default async function trustIntelligenceRoutes(fastify: FastifyInstance) 
       employee_name: nameMap[d.entity_id]?.name          ?? null,
       employee_code: nameMap[d.entity_id]?.employee_code ?? null,
     }))
-    return { duplicates: enriched, total: enriched.length }
+    // total is the real tenant-wide count (fresh audit finding: this used to
+    // report enriched.length — the size of the capped page, not the true
+    // total — silently understating the count for any tenant with more than
+    // `limit` events).
+    return { duplicates: enriched, total: count ?? enriched.length }
   })
 
   /**
@@ -149,12 +153,12 @@ export default async function trustIntelligenceRoutes(fastify: FastifyInstance) 
     const { limit = '50', employee_id } = req.query as any
     let q = fastify.supabase
       .from('verification_events')
-      .select('*')
+      .select('*', { count: 'exact' })
       .eq('tenant_id', tenantId)
       .order('verified_at', { ascending: false })
       .limit(Number(limit))
     if (employee_id) q = q.eq('entity_id', employee_id)
-    const { data, error } = await q
+    const { data, error, count } = await q
     if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch verification events')
 
     const verifications = data ?? []
@@ -164,7 +168,8 @@ export default async function trustIntelligenceRoutes(fastify: FastifyInstance) 
       employee_name: nameMap[v.entity_id]?.name          ?? null,
       employee_code: nameMap[v.entity_id]?.employee_code ?? null,
     }))
-    return { verifications: enriched, total: enriched.length }
+    // total is the real tenant-wide count — see /trust/duplicates for why.
+    return { verifications: enriched, total: count ?? enriched.length }
   })
 
   /**
@@ -178,14 +183,14 @@ export default async function trustIntelligenceRoutes(fastify: FastifyInstance) 
 
     let q = fastify.supabase
       .from('workforce_trust_scores')
-      .select('id, entity_id, entity_type, score_type, score, severity, factors, computed_at')
+      .select('id, entity_id, entity_type, score_type, score, severity, factors, computed_at', { count: 'exact' })
       .eq('tenant_id', tenantId)
       .order('score', { ascending: true })  // lowest trust first
       .limit(Number(limit))
 
     if (score_type) q = q.eq('score_type', score_type)
 
-    const { data, error } = await q
+    const { data, error, count } = await q
     if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch trust scores')
 
     const scores = data ?? []
@@ -197,7 +202,10 @@ export default async function trustIntelligenceRoutes(fastify: FastifyInstance) 
       employee_code: nameMap[s.entity_id]?.employee_code ?? null,
     }))
 
-    return { scores: enriched, total: enriched.length }
+    // total is the real tenant-wide count (fresh audit finding: workforce_trust_scores
+    // is ~1 row per employee, guaranteed to exceed the default limit(50) for any
+    // tenant of real size — this used to silently report only the page size).
+    return { scores: enriched, total: count ?? enriched.length }
   })
 
   /**
@@ -234,7 +242,7 @@ export default async function trustIntelligenceRoutes(fastify: FastifyInstance) 
     const { status } = req.query as any
     let q = fastify.supabase
       .from('compliance_revision_events')
-      .select('*')
+      .select('*', { count: 'exact' })
       .order('ingested_at', { ascending: false })
       .limit(100)
     if (status) q = q.eq('status', status)
@@ -242,9 +250,10 @@ export default async function trustIntelligenceRoutes(fastify: FastifyInstance) 
     // Column was org_id → renamed to tenant_id by migration 350.
     const tenantId = (req as any).tenantId
     q = q.or(`tenant_id.eq.${tenantId},tenant_id.is.null`)
-    const { data, error } = await q
+    const { data, error, count } = await q
     if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch regulatory revisions')
-    return { revisions: data ?? [], total: (data ?? []).length }
+    // total is the real matching count — see /trust/duplicates for why.
+    return { revisions: data ?? [], total: count ?? (data ?? []).length }
   })
 
   /**

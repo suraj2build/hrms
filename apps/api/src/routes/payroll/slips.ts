@@ -13,6 +13,7 @@ import { z } from 'zod'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { serverError, notFound, forbidden, validationError, ErrorCode } from '../../lib/api-errors.js'
 import { sanitizeOrFilterTerm } from '../../lib/postgrest-filter.js'
+import { fetchAllRows } from '../../lib/supabase-paginate.js'
 import {
   buildPayrollVisibilityState,
   buildEmployeePayslipView,
@@ -54,14 +55,25 @@ export default async function payrollSlipsRoutes(fastify: FastifyInstance) {
     let matchedEmployeeIds: string[] | null = null
     if (search && search.trim()) {
       const term = `%${sanitizeOrFilterTerm(search.trim())}%`
-      const { data: matches, error: matchErr } = await fastify.supabase
-        .from('employees')
-        .select('id')
-        .eq('tenant_id', req.tenantId)
-        .or(`first_name.ilike.${term},last_name.ilike.${term},employee_code.ilike.${term}`)
-        .limit(1000)
-      if (matchErr) return serverError(req, reply, matchErr, ErrorCode.QUERY_FAILED, 'Failed to search employees')
-      matchedEmployeeIds = (matches ?? []).map((m: { id: string }) => m.id)
+      // fetchAllRows() — was .limit(1000), sitting exactly at PostgREST's
+      // 1,000-row max-rows ceiling (fresh audit finding). A broad search term
+      // (common surname, short employee_code prefix) on a tenant near/above
+      // 1,000 employees could silently drop matches past the cutoff, making
+      // the slip search box miss real employees with no truncation signal.
+      let matches: { id: string }[]
+      try {
+        matches = await fetchAllRows<{ id: string }>((from, to) =>
+          fastify.supabase
+            .from('employees')
+            .select('id')
+            .eq('tenant_id', req.tenantId)
+            .or(`first_name.ilike.${term},last_name.ilike.${term},employee_code.ilike.${term}`)
+            .range(from, to),
+        )
+      } catch (matchErr: any) {
+        return serverError(req, reply, matchErr, ErrorCode.QUERY_FAILED, 'Failed to search employees')
+      }
+      matchedEmployeeIds = matches.map((m) => m.id)
       if (!matchedEmployeeIds.length) {
         return reply.send({ data: [], total: 0, limit, offset })
       }

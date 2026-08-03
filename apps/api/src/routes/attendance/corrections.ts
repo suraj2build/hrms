@@ -37,6 +37,7 @@ import { isMonthLocked, monthOf }       from '../../lib/period-lock.js'
 
 import { HR_ADMIN_ROLES, MANAGER_ROLES } from '../../lib/rbac.js'
 import { serverError, ErrorCode } from '../../lib/api-errors.js'
+import { isSelfApproval } from '../../lib/approval-guards.js'
 
 const dateRe      = /^\d{4}-\d{2}-\d{2}$/
 const ALLOW_ROLES = MANAGER_ROLES
@@ -68,6 +69,16 @@ export default async function attendanceCorrectionsRoute(fastify: FastifyInstanc
     tenantId:     string,
     employeeId:   string,
   ): Promise<{ ok: true } | { ok: false; code: number; error: string; message: string }> {
+    // Self-approval guard (fresh audit finding — every other approval surface
+    // in this codebase already has this: leave, regularisation, comp-off,
+    // overtime, reimbursements. corrections.ts was the one exception, letting
+    // an HR admin who is also linked to an employee record submit and approve
+    // their own attendance correction, self-crediting punch times that feed
+    // payroll. Checked before the HR-admin bypass so it can't be skipped.
+    if (await isSelfApproval(fastify.supabase, tenantId, approverId, employeeId)) {
+      return { ok: false, code: 403, error: 'FORBIDDEN', message: 'You cannot approve your own attendance correction' }
+    }
+
     if ((HR_ADMIN_ROLES as readonly string[]).includes(approverRole)) return { ok: true }
 
     const approverEmpId = await resolveEmployeeId(approverId, tenantId)

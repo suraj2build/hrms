@@ -57,7 +57,12 @@ export async function runPollTick(supabase: SupabaseClient): Promise<void> {
 export function registerPollScheduler(supabase: SupabaseClient): void {
   const enqueue = () => {
     const key = `send-pulse-poll:${new Date().toISOString().slice(0, 13)}`
-    durableQueue.enqueue('send-pulse-poll', {}, { idempotencyKey: key }).catch(
+    // Explicit timeoutMs (fresh audit finding) — this fans out sequential
+    // chunked WhatsApp sends across every active tenant's employees and can
+    // exceed the queue's 120s default at real scale, and a timed-out (but
+    // still-running) execution racing a re-enqueued retry is exactly the
+    // TOCTOU window that produces a duplicate WhatsApp send.
+    durableQueue.enqueue('send-pulse-poll', {}, { idempotencyKey: key, timeoutMs: 10 * 60 * 1_000 }).catch(
       e => logger.error({ err: e }, '[poll-scheduler] enqueue error'),
     )
   }

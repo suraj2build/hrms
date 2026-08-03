@@ -253,7 +253,12 @@ export async function tick(supabase: SupabaseClient): Promise<void> {
 export function registerDigestScheduler(supabase: SupabaseClient): void {
   const enqueue = () => {
     const key = `send-digest:${new Date().toISOString().slice(0, 13)}`
-    durableQueue.enqueue('send-digest', {}, { idempotencyKey: key }).catch(
+    // Explicit timeoutMs (fresh audit finding) — loops every tenant × every
+    // due frequency × every HR admin doing DB counts + email sends, which
+    // can exceed the queue's 120s default at real scale; without this, a
+    // timed-out (but still-running) execution can race a re-enqueued retry
+    // and send a duplicate digest email to the same recipient.
+    durableQueue.enqueue('send-digest', {}, { idempotencyKey: key, timeoutMs: 10 * 60 * 1_000 }).catch(
       e => logger.error({ err: e }, '[digest] enqueue error'),
     )
   }
