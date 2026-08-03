@@ -2163,30 +2163,42 @@ export default async function payrollRunsRoutes(fastify: FastifyInstance) {
       const monthStart = `${run.month}-01`
       const monthEnd   = new Date(runYear, runMon, 0).toISOString().slice(0, 10)
 
-      // Collect all employee IDs in the draft run
-      const { data: draftSlips } = await fastify.supabase
-        .from('payroll_slips')
-        .select('employee_id')
-        .eq('run_id', id)
-        .eq('status', 'draft')
+      // Collect all employee IDs in the draft run.
+      // fetchAllRows() — a run can have >1,000 draft slips (was a plain query,
+      // silently capped at PostgREST's 1,000-row max-rows, which flagged the
+      // vast majority of a large tenant's roster as MISSING_ATTENDANCE_DATA
+      // even when their attendance was complete).
+      const draftSlips = await fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('payroll_slips')
+          .select('employee_id')
+          .eq('run_id', id)
+          .eq('status', 'draft')
+          .range(from, to),
+      )
 
-      const draftEmpIds = (draftSlips ?? []).map((s: { employee_id: string }) => s.employee_id)
+      const draftEmpIds = draftSlips.map((s: { employee_id: string }) => s.employee_id)
 
       if (draftEmpIds.length > 0) {
         // Which of these employees have at least one PROCESSED attendance_daily row?
         // A row with NULL day_fraction is unprocessed (engine never ran) and would
         // be treated as full-present (0 LOP) by payroll — so it must NOT count as
         // valid attendance here, else stale rows finalize silently at full pay.
-        const { data: attRows } = await fastify.supabase
-          .from('attendance_daily')
-          .select('employee_id, day_fraction')
-          .eq('tenant_id', tenantId)
-          .in('employee_id', draftEmpIds)
-          .gte('date', monthStart)
-          .lte('date', monthEnd)
+        // fetchAllRows() over tenant+month (not .in(employee_id, ...), which both
+        // avoids the same 1,000-row ceiling and the query-length risk of a large
+        // .in() list) — matches the pattern already used by GET /payroll/runs/blockers.
+        const attRows = await fetchAllRows((from, to) =>
+          fastify.supabase
+            .from('attendance_daily')
+            .select('employee_id, day_fraction')
+            .eq('tenant_id', tenantId)
+            .gte('date', monthStart)
+            .lte('date', monthEnd)
+            .range(from, to),
+        )
 
         const hasAttendance = new Set(
-          (attRows ?? [])
+          attRows
             .filter((r: { day_fraction: number | null }) => r.day_fraction !== null)
             .map((r: { employee_id: string }) => r.employee_id)
         )
@@ -2476,6 +2488,20 @@ export default async function payrollRunsRoutes(fastify: FastifyInstance) {
     // 'finalized' but payroll_slips remained 'draft' — employees saw no payslips and
     // re-finalization was permanently blocked by the ALREADY_FINALIZED guard.
 
+    // Re-check the freeze guard immediately before writing. The initial check
+    // (top of this handler) can be stale by the time we get here — the stale-
+    // employee recompute loop above can run long enough for a concurrent
+    // POST /freeze on this same run's month to land in between. Catching it
+    // here, right before Step 1, closes that window down to the width of this
+    // one request rather than the whole recompute loop.
+    const freezeRecheck = await checkFreezeGuard(fastify.supabase, tenantId, run.month)
+    if (freezeRecheck.checkFailed) {
+      return reply.code(503).send({ error: 'FREEZE_CHECK_FAILED', message: freezeRecheck.reason })
+    }
+    if (freezeRecheck.frozen) {
+      return conflictError(reply, 'RUN_FROZEN', freezeRecheck.reason ?? `Payroll for ${run.month} was frozen while finalization was in progress. No slips were finalized.`)
+    }
+
     // Step 1: Finalize draft slips
     const { error: slipFinalizeErr } = await fastify.supabase
       .from('payroll_slips')
@@ -2502,13 +2528,20 @@ export default async function payrollRunsRoutes(fastify: FastifyInstance) {
     // ── Mark advance recovery schedules and loan EMIs as paid ─────────────────
     // Non-fatal: failures here must never block finalization.
     try {
-      const { data: finalizedSlips } = await fastify.supabase
-        .from('payroll_slips')
-        .select('employee_id')
-        .eq('run_id', id)
-        .eq('status', 'finalized')
+      // fetchAllRows() — a run can have >1,000 finalized slips (ISSUE: was a
+      // plain query, silently capped at PostgREST's 1,000-row max-rows,
+      // leaving loan/advance recoveries for employees past the cutoff stuck
+      // 'pending' and re-deducted the following month).
+      const finalizedSlips = await fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('payroll_slips')
+          .select('employee_id')
+          .eq('run_id', id)
+          .eq('status', 'finalized')
+          .range(from, to),
+      )
 
-      const finalizedEmpIds = (finalizedSlips ?? []).map((s: any) => s.employee_id as string)
+      const finalizedEmpIds = finalizedSlips.map((s: any) => s.employee_id as string)
 
       if (finalizedEmpIds.length > 0) {
         const now = new Date().toISOString()
@@ -2518,16 +2551,20 @@ export default async function payrollRunsRoutes(fastify: FastifyInstance) {
         // that fit within available net pay; installments that don't fit are
         // deferred and must be rolled forward, NOT marked paid (otherwise the loan
         // ledger records money the employee never actually paid).
-        const { data: finalizedSlipRows } = await fastify.supabase
-          .from('payroll_slips')
-          .select('component_breakdown')
-          .eq('tenant_id', req.tenantId)
-          .eq('run_id', id)
-          .eq('status', 'finalized')
+        // fetchAllRows() — same 1,000-row ceiling risk as finalizedSlips above.
+        const finalizedSlipRows = await fetchAllRows((from, to) =>
+          fastify.supabase
+            .from('payroll_slips')
+            .select('component_breakdown')
+            .eq('tenant_id', req.tenantId)
+            .eq('run_id', id)
+            .eq('status', 'finalized')
+            .range(from, to),
+        )
 
         const recoveredAdvanceIds = new Set<string>()
         const recoveredLoanIds    = new Set<string>()
-        for (const s of (finalizedSlipRows ?? []) as any[]) {
+        for (const s of finalizedSlipRows as any[]) {
           for (const c of (s.component_breakdown ?? []) as any[]) {
             if (!c?.salary_component_id) continue
             if (c.code === 'ADVANCE_RECOVERY') recoveredAdvanceIds.add(c.salary_component_id as string)
@@ -2684,18 +2721,35 @@ export default async function payrollRunsRoutes(fastify: FastifyInstance) {
     // The status filter makes this an ATOMIC seal: only a draft/partial_failed run
     // can be flipped, so a concurrent or duplicated finalize request cannot
     // re-stamp an already-finalized run (and re-run its side-effects).
-    const { error: runFinalizeErr } = await fastify.supabase
+    //
+    // .select('id') so we can tell "0 rows matched" apart from "1 row updated" —
+    // a bare .update() with no matching row returns no error at all, so without
+    // this a losing caller (run already finalized elsewhere, or frozen between
+    // the recheck above and this write) would fall through and get told
+    // finalize succeeded, even though this specific call changed nothing.
+    const { data: runFinalizeRows, error: runFinalizeErr } = await fastify.supabase
       .from('payroll_runs')
       .update({ status: 'finalized', finalized_by: req.userId, finalized_at: new Date().toISOString() })
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
       .in('status', ['draft', 'partial_failed'])
+      .select('id')
 
     if (runFinalizeErr) {
       // Slips are finalized; run status is not.  Retrying finalization is safe:
       // the slip update will match 0 draft rows (no-op) and only the run status
       // update will re-execute.
       return serverError(req, reply, runFinalizeErr, 'RUN_STATUS_UPDATE_FAILED', 'Payroll slips were finalized but run status update failed — retry finalization to complete.')
+    }
+    if (!runFinalizeRows || runFinalizeRows.length === 0) {
+      // Slips are already finalized (Step 1 above is itself idempotent — it
+      // only matches 'draft' slips, so this is safe to have happened). The run
+      // record just didn't match draft/partial_failed anymore: either it was
+      // frozen by a concurrent request that landed after our recheck above, or
+      // another finalize call already completed it first. Either way, tell the
+      // caller honestly instead of returning 200 for a state change this
+      // request didn't actually make.
+      return conflictError(reply, 'RUN_STATE_CHANGED', 'This payroll run was frozen or finalized by another request while this finalize was in progress. Refresh and check its current status before retrying.')
     }
 
     // ── Auto-compute statutory contributions (EPF / ESI / PTax) ──────────────

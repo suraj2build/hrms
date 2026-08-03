@@ -100,17 +100,24 @@ export default async function payrollStatutoryReconRoutes(fastify: FastifyInstan
     recon.pt.filed  = (ptaxRows.data?.length ?? 0) > 0
     recon.tds.filed = (tdsRows.data?.length  ?? 0) > 0
 
-    // The amount DEPOSITED to each authority is exactly what was deducted on the
-    // finalized payslips (employee + employer for PF/ESI, the PT slab for PT, the
-    // TDS line for income tax). The per-scheme filing tables (epf/esi/ptax_contributions,
-    // tds_monthly_projections) are a convenience copy that may not be populated yet.
-    // So whenever a head has no filing rows, fall back to the slip-aggregated amount
-    // as the payable — the recon then reflects the real liability sourced from payroll.
+    // NOTE: a head with NO filing rows must stay filed:false / payable:0 here —
+    // do NOT fall back to treating the slip-aggregated amount as "payable", even
+    // though that number is a reasonable estimate of the real liability. Setting
+    // payable = computed (and filed = true) manufactures a zero variance for a
+    // month whose independent filing data (epf/esi/ptax_contributions,
+    // tds_monthly_projections) was simply never generated — isReconciled() and
+    // POST /close both read filed/variance straight off this struct, so that
+    // used to let a month with zero real filing rows pass the "ready to file"
+    // gate and get marked filed. `close`'s own skip-reason logic
+    // ('no_contributions_generated', below) already assumed filed stays false
+    // in this case — this fallback was the only thing making that branch dead.
+    //
+    // The other direction is legitimate and kept as-is: filing rows CAN exist
+    // with no matching slip line (e.g. TDS, which isn't its own slip component) —
+    // there payable is the real, already-independently-confirmed number, so
+    // showing it as computed too is correct, not a fabrication.
     for (const k of STATUTE_KEYS) {
-      if (!recon[k].filed && recon[k].computed > 0) {
-        recon[k].payable = recon[k].computed
-        recon[k].filed   = true
-      } else if (recon[k].computed === 0 && recon[k].payable > 0) {
+      if (recon[k].computed === 0 && recon[k].payable > 0) {
         // Filing rows exist but slip had no line (e.g. TDS not on slip) — show payable.
         recon[k].computed = recon[k].payable
       }
