@@ -524,6 +524,13 @@ export async function countWorkingDaysInMonth(
  * Fallback: when no roster weekly-off is configured for the employee, defaults
  * to Sat/Sun ([0,6]) so tenants without rosters keep the previous behavior.
  *
+ * Clamped to the employee's joining_date when it falls inside this month
+ * (fresh audit finding): attendance_daily is punch-driven, so a mid-month
+ * joiner has no rows — and therefore no LOP — for the days before they
+ * joined. Without this clamp, total_working_days spanned the full month
+ * while lop_days only ever summed the days that actually have a row,
+ * silently paying a full month's salary for a partial month worked.
+ *
  * Throws on holiday DB error (mirrors countWorkingDaysInMonth) so a run aborts
  * rather than silently producing wrong denominators.
  */
@@ -534,8 +541,26 @@ export async function countWorkingDaysForEmployee(
   month:      string,   // 'YYYY-MM'
 ): Promise<number> {
   const [year, mon] = month.split('-').map(Number)
-  const firstDay    = `${month}-01`
+  const monthStart  = `${month}-01`
   const lastDay     = new Date(Date.UTC(year, mon, 0)).toISOString().slice(0, 10)
+
+  const { data: empRow, error: empErr } = await supabase
+    .from('employees')
+    .select('joining_date')
+    .eq('id', employeeId)
+    .eq('tenant_id', tenantId)
+    .maybeSingle()
+  if (empErr) {
+    throw new Error(
+      `DB error fetching joining_date for employee ${employeeId}: ` +
+      `${empErr.message} [code=${empErr.code}] — payroll run aborted to prevent ` +
+      'incorrect working-day counts',
+    )
+  }
+  const joiningDate = (empRow as { joining_date: string | null } | null)?.joining_date ?? null
+  const firstDay     = joiningDate && joiningDate > monthStart ? joiningDate : monthStart
+  if (firstDay > lastDay) return 0   // joined after this month entirely
+
   const allDates    = expandDateRange(firstDay, lastDay)
 
   const ctx = await resolveEmployeeOrgContext(supabase, tenantId, employeeId, firstDay)
