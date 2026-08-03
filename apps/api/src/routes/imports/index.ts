@@ -17,6 +17,7 @@ import { durableQueue }         from '../../lib/durable-queue.js'
 import { HR_ADMIN_ROLES }       from '../../lib/rbac.js'
 import { conflictError, serverError, ErrorCode } from '../../lib/api-errors.js'
 import { checkIdempotency, storeIdempotency, claimIdempotency, releaseIdempotencyClaim } from '../../lib/idempotency.js'
+import { escapeCsvField } from '../../lib/csv-utils.js'
 import {
   createImportJob,
   getImportJob,
@@ -237,8 +238,8 @@ export default async function importsRoutes(fastify: FastifyInstance) {
           e.row_key   ?? '',
           e.error_stage,
           e.error_code ?? '',
-          `"${(e.error_message ?? '').replace(/"/g, '""')}"`,
-        ].join(',')
+          e.error_message ?? '',
+        ].map(escapeCsvField).join(',')
       ),
     ]
 

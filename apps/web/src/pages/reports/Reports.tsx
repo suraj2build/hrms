@@ -45,6 +45,7 @@ import { PageContainer }                  from '@/components/layout/PageContaine
 import { PageHeader }                     from '@/components/layout/PageHeader'
 import { useBasePath }                    from '@/lib/routing'
 import { cn }                             from '@/lib/utils'
+import { escapeCsvField }                 from '@/lib/csv-utils'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -275,12 +276,7 @@ function exportCSV(filename: string, rows: Record<string, unknown>[], label: str
   const cols   = Object.keys(rows[0])
   const header = cols.join(',')
   const body   = rows.map(r =>
-    cols.map(c => {
-      const v = r[c] ?? ''
-      const s = String(v)
-      return s.includes(',') || s.includes('"') || s.includes('\n')
-        ? `"${s.replace(/"/g, '""')}"` : s
-    }).join(',')
+    cols.map(c => escapeCsvField(r[c])).join(',')
   ).join('\n')
   const blob = new Blob([header + '\n' + body], { type: 'text/csv' })
   const url  = URL.createObjectURL(blob)

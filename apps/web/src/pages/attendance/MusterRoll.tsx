@@ -33,6 +33,7 @@ import { usePeriodLock }    from '@/hooks/usePeriodLock'
 import { Button }        from '@/components/ui/button'
 import { Input }         from '@/components/ui/input'
 import { api }           from '@/lib/api/client'
+import { escapeCsvField } from '@/lib/csv-utils'
 import { useAuthStore }  from '@/stores/authStore'
 import { cn }            from '@/lib/utils'
 import {
@@ -188,7 +189,7 @@ function exportMusterCsv(employees: EmployeeMuster[], dates: string[], monthLabe
     ]
   })
   const csv = [header, ...rows]
-    .map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(','))
+    .map(r => r.map(escapeCsvField).join(','))
     .join('\n')
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
   const url  = URL.createObjectURL(blob)

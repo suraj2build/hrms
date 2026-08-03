@@ -26,18 +26,7 @@ import { z } from 'zod'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
 import { serverError, ErrorCode } from '../../lib/api-errors.js'
-
-function toCSV(headers: string[], rows: Record<string, unknown>[]): string {
-  const escape = (v: unknown): string => {
-    const s = v == null ? '' : String(v)
-    return s.includes(',') || s.includes('"') || s.includes('\n')
-      ? `"${s.replace(/"/g, '""')}"`
-      : s
-  }
-  const header = headers.join(',')
-  const body   = rows.map(r => headers.map(h => escape(r[h])).join(',')).join('\n')
-  return `${header}\n${body}`
-}
+import { toCSV } from '../../lib/csv-utils.js'
 
 function setCsvHeaders(reply: any, filename: string) {
   reply.header('Content-Type', 'text/csv; charset=utf-8')

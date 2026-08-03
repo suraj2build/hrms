@@ -28,19 +28,10 @@ import type { FastifyInstance } from 'fastify'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
 import { serverError, ErrorCode } from '../../lib/api-errors.js'
-
-/** Escape a CSV cell value: wrap in quotes if it contains commas, quotes, or newlines */
-function csvCell(value: string | number | null | undefined): string {
-  if (value === null || value === undefined) return ''
-  const str = String(value)
-  if (str.includes(',') || str.includes('"') || str.includes('\n')) {
-    return `"${str.replace(/"/g, '""')}"`
-  }
-  return str
-}
+import { escapeCsvField } from '../../lib/csv-utils.js'
 
 function csvRow(...cells: (string | number | null | undefined)[]): string {
-  return cells.map(csvCell).join(',')
+  return cells.map(escapeCsvField).join(',')
 }
 
 export default async function runExportRoute(fastify: FastifyInstance) {
@@ -148,7 +139,7 @@ export default async function runExportRoute(fastify: FastifyInstance) {
         lines.push('')   // blank separator line
         lines.push('skipped_code')
         for (const code of skippedCodes) {
-          lines.push(csvCell(code))
+          lines.push(escapeCsvField(code))
         }
       }
 

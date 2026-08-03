@@ -39,11 +39,17 @@ export interface PayrollExportInput {
 // Helpers
 // ---------------------------------------------------------------------------
 
+// A leading =, +, -, or @ is interpreted as a formula by Excel/Sheets the
+// moment the file is opened — dangerous since ledger/narration values here
+// can originate from user-controlled data (employee name, cost centre).
+// Prefixing a single quote forces text interpretation without changing the
+// visible value in any spreadsheet application.
 function escapeCSV(value: string): string {
-  if (value.includes(',') || value.includes('"') || value.includes('\n')) {
-    return `"${value.replace(/"/g, '""')}"`
+  const safe = /^[=+\-@]/.test(value) ? `'${value}` : value
+  if (safe.includes(',') || safe.includes('"') || safe.includes('\n')) {
+    return `"${safe.replace(/"/g, '""')}"`
   }
-  return value
+  return safe
 }
 
 function tallyDate(isoDate: string): string {

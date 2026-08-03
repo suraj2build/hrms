@@ -31,6 +31,7 @@ import { Input }                  from '@/components/ui/input'
 import { OperationalErrorBanner } from '@/components/async'
 import { toast }                  from 'sonner'
 import { api }                    from '@/lib/api/client'
+import { escapeCsvField }         from '@/lib/csv-utils'
 import { useAuthStore }           from '@/stores/authStore'
 import { cn }                     from '@/lib/utils'
 
@@ -231,17 +232,17 @@ export function PayrollReconciliation() {
     const header = ['Employee Code', 'Employee Name', 'Category', 'Severity', 'Description', 'Payroll Value', 'Expected Value', 'Variance', 'Variance %', 'Status', 'Month'].join(',')
     const rows = filtered.map(item => [
       item.employee_code,
-      `"${item.employee_name}"`,
+      item.employee_name,
       CATEGORY_LABELS[item.category] ?? item.category,
       item.severity,
-      `"${item.description.replace(/"/g, '""')}"`,
+      item.description,
       item.payroll_value,
       item.expected_value,
       item.variance,
       (item.variance_pct ?? 0).toFixed(2),
       item.status,
       item.month,
-    ].join(','))
+    ].map(escapeCsvField).join(','))
     const csv  = [header, ...rows].join('\n')
     const blob = new Blob([csv], { type: 'text/csv' })
     const url  = URL.createObjectURL(blob)

@@ -36,6 +36,7 @@ import { OperationalErrorBanner } from '@/components/async'
 import { MetricCard, MetricRow }  from '@/components/dashboard/MetricCard'
 import { api }                    from '@/lib/api/client'
 import { supabase }               from '@/lib/supabase/client'
+import { escapeCsvField }         from '@/lib/csv-utils'
 import { useAuthStore }           from '@/stores/authStore'
 import { cn }                     from '@/lib/utils'
 
@@ -1080,7 +1081,7 @@ export function AttendanceUploadWorkspace() {
                     variant="outline" size="sm" className="h-7 text-xs gap-1.5"
                     onClick={() => {
                       const rows = result.failed_rows.map(
-                        fr => `"${(fr.row ?? '').replace(/"/g, '""')}","${fr.error.replace(/"/g, '""')}"`
+                        fr => [fr.row ?? '', fr.error].map(escapeCsvField).join(',')
                       )
                       const blob = new Blob([`row_data,error\n${rows.join('\n')}`], { type: 'text/csv' })
                       const a = document.createElement('a')

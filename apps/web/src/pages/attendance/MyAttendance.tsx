@@ -27,6 +27,7 @@ import { Button }                 from '@/components/ui/button'
 import { Input }                  from '@/components/ui/input'
 import { MetricCard, MetricRow } from '@/components/dashboard/MetricCard'
 import { api }                    from '@/lib/api/client'
+import { escapeCsvField }         from '@/lib/csv-utils'
 import { useAuthStore }           from '@/stores/authStore'
 import { cn }                     from '@/lib/utils'
 import { usePeriodLock }          from '@/hooks/usePeriodLock'
@@ -244,11 +245,6 @@ function monthStart(y: number, m: number) {
 function monthEnd(y: number, m: number) {
   const days = new Date(y, m + 1, 0).getDate()   // day-0 trick gives last day of month
   return `${y}-${String(m + 1).padStart(2, '0')}-${String(days).padStart(2, '0')}`
-}
-
-function csvCell(value: string | number) {
-  const s = String(value)
-  return s.includes(',') || s.includes('"') || s.includes('\n') ? `"${s.replace(/"/g, '""')}"` : s
 }
 
 // ── Portal tooltip ─────────────────────────────────────────────────────────────
@@ -905,7 +901,7 @@ export function MyAttendance() {
       const dow = new Date(`${d.date}T00:00:00`).toLocaleDateString('default', { weekday: 'short' })
       return [d.date, dow, d.status.replace('_', ' '), d.work_hours, d.late_minutes, d.overtime_minutes, dayLogs.length]
     })
-    const csv = [header, ...rows].map(row => row.map(csvCell).join(',')).join('\n')
+    const csv = [header, ...rows].map(row => row.map(escapeCsvField).join(',')).join('\n')
     const filename = `attendance-${from.slice(0, 7)}-${data?.employee?.employee_code ?? 'emp'}.csv`
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
     const url  = URL.createObjectURL(blob)

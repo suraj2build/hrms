@@ -21,21 +21,12 @@ import { fetchAllRows } from '../../lib/supabase-paginate.js'
 import { serverError, ErrorCode } from '../../lib/api-errors.js'
 import { fetchTenantTz } from '../../lib/attendance-engine.js'
 import { getLocalDate } from '../../lib/org-context.js'
+import { toCSV } from '../../lib/csv-utils.js'
 
 // ── Shared helpers ────────────────────────────────────────────────────────────
 
 function r2(n: number) { return Math.round(n * 100) / 100 }
 function sum(arr: any[], key: string) { return r2(arr.reduce((s, r) => s + (r[key] ?? 0), 0)) }
-
-function toCSV(headers: string[], rows: Record<string, unknown>[]): string {
-  const esc = (v: unknown): string => {
-    const s = v == null ? '' : String(v)
-    return s.includes(',') || s.includes('"') || s.includes('\n')
-      ? `"${s.replace(/"/g, '""')}"`
-      : s
-  }
-  return `${headers.join(',')}\n${rows.map(r => headers.map(h => esc(r[h])).join(',')).join('\n')}`
-}
 
 function setCsvHeaders(reply: any, filename: string) {
   reply.header('Content-Type', 'text/csv; charset=utf-8')

@@ -13,6 +13,7 @@ import {
   AlertCircle,
 } from 'lucide-react'
 import { api }             from '@/lib/api/client'
+import { escapeCsvField }  from '@/lib/csv-utils'
 import { PageContainer }   from '@/components/layout/PageContainer'
 import { PageHeader }      from '@/components/layout/PageHeader'
 import { Input }           from '@/components/ui/input'
@@ -62,7 +63,7 @@ function fmtDate(iso: string) {
 }
 
 function downloadCSV(filename: string, rows: string[][]) {
-  const csv  = rows.map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n')
+  const csv  = rows.map(r => r.map(escapeCsvField).join(',')).join('\n')
   const blob = new Blob([csv], { type: 'text/csv' })
   const url  = URL.createObjectURL(blob)
   const a    = document.createElement('a'); a.href = url; a.download = filename; a.click()

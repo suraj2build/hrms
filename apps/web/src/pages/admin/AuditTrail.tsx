@@ -21,6 +21,7 @@ import { Badge }         from '@/components/ui/badge'
 import { Button }        from '@/components/ui/button'
 import { DateInput }     from '@/components/ui/date-input'
 import { api }           from '@/lib/api/client'
+import { escapeCsvField } from '@/lib/csv-utils'
 import { useAuthStore }  from '@/stores/authStore'
 import { cn }            from '@/lib/utils'
 
@@ -106,7 +107,7 @@ export function AuditTrail() {
     const lines = rows.map(r => [
       fmtDateTime(r.created_at), r.table_name, r.action, r.record_id,
       r.performed_by_name ?? r.performed_by ?? '', r.on_behalf_of ?? '',
-    ].map(v => `"${String(v).replace(/"/g, '""')}"`).join(','))
+    ].map(escapeCsvField).join(','))
     const blob = new Blob([[headers.join(','), ...lines].join('\n')], { type: 'text/csv' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')

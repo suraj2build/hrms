@@ -25,6 +25,7 @@ import {
 import { StatusChangePill }   from '@/components/operational/AttendanceDiff'
 
 import { PageContainer }    from '@/components/layout/PageContainer'
+import { escapeCsvField }   from '@/lib/csv-utils'
 import { PageHeader }        from '@/components/layout/PageHeader'
 import { SectionCard }       from '@/components/layout/SectionCard'
 import { PeriodLockBanner }  from '@/components/layout/PeriodLockBanner'
@@ -171,7 +172,7 @@ function fmtDate(iso: string) {
 /** Convert rows to CSV and trigger browser download */
 function exportCsv(rows: AuditRow[]) {
   const headers = ['Date', 'Employee Name', 'Employee Code', 'Source', 'Before Status', 'After Status', 'Changed At', 'Changed By']
-  const escape  = (v: string | null) => (v === null || v === undefined) ? '' : `"${String(v).replace(/"/g, '""')}"`
+  const escape  = escapeCsvField
   const lines   = [
     headers.join(','),
     ...rows.map(r => [

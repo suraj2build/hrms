@@ -40,6 +40,7 @@ import { computeTaxWithDB, fetchTaxTableCache } from '../../lib/statutory/tax-co
 import type { TaxTableCache } from '../../lib/statutory/tax-computation-engine.js'
 import { round2 as round2fn } from '../../lib/payroll-engine.js'
 import { sanitizeOrFilterTerm } from '../../lib/postgrest-filter.js'
+import { escapeCsvField } from '../../lib/csv-utils.js'
 
 /** Indian financial year (Apr–Mar) for a YYYY-MM month → e.g. '2026-27'. */
 function financialYearOf(month: string): string {
@@ -3134,7 +3135,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       const name = r.employees ? `${r.employees.first_name} ${r.employees.last_name}` : ''
       return [
         r.employees?.employee_code ?? '',
-        `"${name}"`,
+        name,
         r.month,
         r.total_working_days,
         r.payable_days,
@@ -3145,7 +3146,7 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
         r.lop_amount,
         r.total_deductions,
         r.net_pay,
-      ].join(',')
+      ].map(escapeCsvField).join(',')
     })
 
     const csv = [header, ...rows].join('\n')
@@ -3200,14 +3201,13 @@ export default async function payrollRoutes(fastify: FastifyInstance) {
       }
     }
 
-    const csvField = (v: string) => `"${v.replace(/"/g, '""')}"`
     const header = ['Employee Code', 'Employee Name', 'Failure Stage', 'Reason'].join(',')
     const rows = flatRows.map(r => [
-      csvField(r.employee_code),
-      csvField(nameByCode.get(r.employee_code) ?? ''),
-      csvField(STAGE_LABEL[r.stage] ?? r.stage),
-      csvField(r.reason),
-    ].join(','))
+      r.employee_code,
+      nameByCode.get(r.employee_code) ?? '',
+      STAGE_LABEL[r.stage] ?? r.stage,
+      r.reason,
+    ].map(escapeCsvField).join(','))
 
     const csv = [header, ...rows].join('\n')
     reply.header('Content-Type', 'text/csv')
