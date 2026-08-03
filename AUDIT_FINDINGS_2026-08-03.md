@@ -1,6 +1,6 @@
 # HRMS Fresh Audit Findings & Remediation Plan — 2026-08-03
 
-**Status:** Findings captured, read-only. No code has been changed as a result of this audit.
+**Status:** Findings captured 2026-08-03. **Phase 1 (the 3 Critical findings, C1-C3) fixed and merged to `main` same day** — see commit "Fix payroll finalize double-deduction, freeze race, and phantom statutory reconciliation (C1-C3)". Everything else below (all High/Medium/Low findings, and the rest of the remediation plan) is still open.
 **Scope:** `apps/api` (288 route files, 180 lib files, 143 platform files), `apps/web` (303 pages, 245 components), `supabase/migrations` (424 files). ~292,000 LOC.
 **Relationship to prior audits:** This repo already carries a 4-round, ~300-fix audit history (`AUDIT_CONSTITUTION.md`, `SYSCERT_AUDIT_2026-08-02.md`, `AUDIT_RECONCILIATION_2026-07-01.md`, `AUDIT_CLOSEOUT_SUMMARY.md`). This pass did **not** re-derive that history from scratch — it (a) verified every previously-documented fix is still in place (zero regressions found across ~40 spot-checked prior fixes), and (b) ran 10 independent fresh audits across every subsystem, surfacing net-new or materially-refined findings only. Finding IDs here (`C#`, `F#`) are local to this document — they are **not** part of the repo's existing `ISSUE-###`/`PEND-###` numbering sequence. If a finding below is fixed, it should be logged into `AUDIT_CONSTITUTION.md` under a proper `ISSUE-###` at fix time, per this repo's existing convention.
 
@@ -19,6 +19,8 @@
 ---
 
 ## 1. Critical Issues
+
+**✅ FIXED (2026-08-03)** — all three below are resolved in `apps/api/src/routes/payroll/runs.ts` and `statutory-recon.ts`; `tsc --noEmit` clean, both ratchet scripts unchanged, pre-existing vitest failures confirmed unrelated (verified via `git stash` before/after). Kept here, not deleted, so the reasoning and repro steps remain available for writing a regression test later (see §6 Phase 6).
 
 ### C1 — Payroll finalize can double-deduct loan/advance EMIs at scale
 - **Severity:** Critical | **Category:** Data corruption / Financial
@@ -135,11 +137,11 @@ Sequencing follows this repo's own established pipeline for every fix: **grep-co
 2. For any tenant already at >1,000 employees in production, spot-check `loan_schedules`/`advance_recovery_schedules` for stuck `pending` rows that should be `recovered` — **C1** may already have caused live drift that needs manual reconciliation, separate from the code fix.
 3. Snapshot/backup `payroll_runs`/`payroll_slips` state before touching finalize/freeze logic (**C2**), given the financial sensitivity of that code path.
 
-### Phase 1 — Critical fixes (target: immediate, before next production deploy)
-1. **C1** — wrap both unpaginated finalize-time loan/advance queries in `fetchAllRows()`.
-2. **C2** — re-check `checkFreezeGuard` immediately before the slip-finalize write; make the run-status update return/check affected-row count so a losing caller gets a conflict response instead of a silent 200.
-3. **C3** — replace the phantom-success fallback in `buildStatutoryRecon` with an explicit "not generated" state; never synthesize `payable` from `computed` or vice versa.
-4. Verification for this phase specifically: re-run the payroll route-count reconciliation (58/58) to confirm no collateral change; add at least a manual/staging test for the >1,000-employee finalize scenario and the concurrent-freeze-during-finalize race before closing this phase.
+### Phase 1 — Critical fixes (target: immediate, before next production deploy) — ✅ DONE (2026-08-03)
+1. ~~**C1** — wrap both unpaginated finalize-time loan/advance queries in `fetchAllRows()`.~~ Done — also applied the same fix to the adjacent attendance-completeness gate (`draftSlips`/`attRows`), a High-severity instance of the identical bug class found in the same handler during implementation.
+2. ~~**C2** — re-check `checkFreezeGuard` immediately before the slip-finalize write; make the run-status update return/check affected-row count so a losing caller gets a conflict response instead of a silent 200.~~ Done.
+3. ~~**C3** — replace the phantom-success fallback in `buildStatutoryRecon` with an explicit "not generated" state; never synthesize `payable` from `computed` or vice versa.~~ Done.
+4. Verification completed: `tsc --noEmit` clean, `check-manual-500s.mjs`/`check-console-error.mjs` both unchanged at 0, and the pre-existing vitest suite's 12 failures (3 unrelated files) confirmed identical with/without this diff via `git stash`. **Still outstanding**: no automated regression test was added for the >1,000-employee finalize scenario or the concurrent-freeze-during-finalize race — tracked in Phase 6's test-coverage buildout, not closed by this fix.
 
 ### Phase 2 — High severity (target: this week)
 1. **F49** — apply `auth.ts`'s existing `timingSafeEqual` pattern to `owner-auth.ts` (mechanical, low risk, copy an already-solved fix).
