@@ -9,7 +9,7 @@
  */
 import fp from 'fastify-plugin'
 import type { FastifyPluginAsync, FastifyRequest, FastifyReply } from 'fastify'
-import { createHmac } from 'node:crypto'
+import { createHmac, timingSafeEqual } from 'node:crypto'
 
 declare module 'fastify' {
   interface FastifyInstance {
@@ -58,7 +58,13 @@ function verifySupabaseJwt(token: string, secret: string): { sub: string } | nul
       .update(signingInput)
       .digest('base64url')
 
-    if (expected !== sigB64) return null
+    // Constant-time compare (fresh audit finding — the identical `!==` timing
+    // side-channel already fixed in plugins/auth.ts under SYSCERT H11 was
+    // never propagated to this file's copy of the same check, even though
+    // this is the higher-privilege owner/platform-admin path).
+    const expectedBuf = Buffer.from(expected)
+    const sigBuf      = Buffer.from(sigB64)
+    if (expectedBuf.length !== sigBuf.length || !timingSafeEqual(expectedBuf, sigBuf)) return null
 
     const payload = JSON.parse(Buffer.from(payloadB64, 'base64url').toString())
     if (payload.exp && payload.exp < Math.floor(Date.now() / 1000)) return null

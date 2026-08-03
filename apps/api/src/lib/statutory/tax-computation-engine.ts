@@ -237,8 +237,17 @@ async function loadStdConfig(
     .maybeSingle()
 
   if (error || !data) {
+    // Regime- and FY-aware fallback (fresh audit finding: this previously
+    // returned 75_000 unconditionally for BOTH regimes — the Finance Act 2024
+    // enhanced standard deduction applies only to the new regime; old regime
+    // remains 50_000. Matches tds-engine.ts's standardDeductionFor(), which
+    // already got this right).
+    const fyStart = parseInt(financialYear.split('-')[0], 10)
+    const standardDeduction = regime === 'new' && Number.isFinite(fyStart) && fyStart >= 2024
+      ? 75_000
+      : 50_000
     return {
-      standard_deduction: 75_000,   // Finance Act 2024-25 enhanced std deduction
+      standard_deduction: standardDeduction,
       rebate_87a_limit:   regime === 'new' ? 700_000 : 500_000,
       rebate_87a_amount:  regime === 'new' ? 25_000  : 12_500,
       cess_rate:          0.04,

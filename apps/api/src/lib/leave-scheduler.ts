@@ -39,6 +39,8 @@ import { runEventGrantsForTenant }                from './leave-event-engine.js'
 import { runLeaveReconciliation }                  from './leave-reconciliation.js'
 import { durableQueue }                            from './durable-queue.js'
 import { fetchAllRows }                            from './supabase-paginate.js'
+import { fetchTenantTz }                           from './attendance-engine.js'
+import { getLocalDate }                            from './org-context.js'
 
 // Suppress unused-import warning — processCarryForward is re-exported for
 // callers that need it directly (e.g. admin one-shot endpoints).
@@ -56,11 +58,15 @@ const MONTHLY_SAFE_DAYS = 3
 // Resets on restart; durability comes from leave_job_log in the database.
 
 const ran = {
-  /** 'YYYY' of the last year for which yearly accrual ran. */
+  /** 'YYYY-MM-DD' of the last day yearly-accrual was enqueued (dayKey, not yearKey —
+   *  fresh audit finding: fires once per UTC day within the boundary window so
+   *  every tenant timezone gets a chance to be reached at its own local boundary). */
   yearlyAccrual: '',
-  /** 'YYYY-MM' of the last month for which monthly accrual ran. */
+  /** 'YYYY-MM-DD' of the last day monthly accrual was enqueued (dayKey, not monthKey —
+   *  same reasoning as yearlyAccrual above). */
   monthlyAccrual: '',
-  /** 'YYYY' of the last year for which carry-forward ran. */
+  /** 'YYYY-MM-DD' of the last day carry-forward was enqueued (dayKey, not yearKey —
+   *  same reasoning as yearlyAccrual above). */
   carryForward: '',
   /** 'YYYY-MM-DD' of the last day CO expiry ran. */
   coExpiry: '',
@@ -116,6 +122,25 @@ async function fetchAllTenantIds(supabase: SupabaseClient, log: FastifyBaseLogge
     log.error({ err: error }, '[leave-scheduler] Failed to fetch tenants')
     return []
   }
+}
+
+/**
+ * A tenant's own local (year, month, day) — fresh audit finding: every
+ * boundary check in this file (year-end, month-start) used to derive its
+ * date from server UTC and apply that SAME date to every tenant, so a
+ * tenant behind UTC (e.g. US Pacific) got next year's/month's accrual
+ * credited hours before its own local boundary had actually arrived, while
+ * a tenant ahead of UTC (e.g. IST) could be credited hours late. Each
+ * per-tenant loop below now resolves this per tenant and only proceeds
+ * when THAT tenant's own local calendar is actually at the boundary —
+ * safe to call on every day of the surrounding window because the
+ * underlying credit writes are idempotent per (tenant, employee,
+ * leave_type, year) (see leave-entitlement-service.ts's onConflict upserts).
+ */
+async function tenantLocalYMD(supabase: SupabaseClient, tenantId: string): Promise<{ y: number; m: number; d: number }> {
+  const tz = await fetchTenantTz(supabase, tenantId)
+  const [y, m, d] = getLocalDate(new Date().toISOString(), tz).split('-').map(Number)
+  return { y, m, d }
 }
 
 /**
@@ -197,11 +222,21 @@ export async function execLeaveYearlyAccrual(
   payload:  { isCalYearStart: boolean; year: number; leaveYear: number; dayKey: string },
   log:      FastifyBaseLogger,
 ): Promise<void> {
-  const { leaveYear, dayKey } = payload
-  log.info({ leaveYear }, '[leave-scheduler] job:yearly-accrual')
+  const { dayKey } = payload
+  log.info({ dayKey }, '[leave-scheduler] job:yearly-accrual')
   for (const tenantId of await fetchAllTenantIds(supabase, log)) {
-    await yearlyAccrualJob(supabase, tenantId, leaveYear, null, dayKey)
-      .then(r => log.info({ tenantId, credited: r.total_days_credited, employees: r.employees_processed }, '[leave-scheduler] yearly_accrual ok'))
+    // Tenant-local boundary check (fresh audit finding — see tenantLocalYMD) —
+    // only credit a tenant whose OWN local calendar is actually at Jan-1/Apr-1
+    // right now; a tenant not yet there is simply skipped this run and picked
+    // up on a later day within this job's enqueue window (see tick()).
+    const { y, m, d } = await tenantLocalYMD(supabase, tenantId)
+    let leaveYearForTenant: number | null = null
+    if (m === 1 && d === 1) leaveYearForTenant = y        // calendar year start
+    else if (m === 4 && d === 1) leaveYearForTenant = y - 1 // financial year start
+    if (leaveYearForTenant === null) continue
+
+    await yearlyAccrualJob(supabase, tenantId, leaveYearForTenant, null, dayKey)
+      .then(r => log.info({ tenantId, leaveYear: leaveYearForTenant, credited: r.total_days_credited, employees: r.employees_processed }, '[leave-scheduler] yearly_accrual ok'))
       .catch((e: Error) => log.error({ err: e, tenantId }, '[leave-scheduler] yearly_accrual error'))
   }
 }
@@ -211,15 +246,17 @@ export async function execLeaveMonthlyAccrual(
   payload:  { year: number; monthNum: number },
   log:      FastifyBaseLogger,
 ): Promise<void> {
-  const { year, monthNum } = payload
-  const monthKey = `${year}-${String(monthNum).padStart(2, '0')}`
-  log.info({ monthKey }, '[leave-scheduler] job:monthly-accrual')
+  log.info({}, '[leave-scheduler] job:monthly-accrual')
   for (const tenantId of await fetchAllTenantIds(supabase, log)) {
-    await monthlyAccrualJob(supabase, tenantId, year, monthNum)
-      .then(r => log.info({ tenantId, credited: r.total_days_credited, employees: r.employees_processed }, '[leave-scheduler] monthly_accrual ok'))
+    // Tenant-local month/day (fresh audit finding — see tenantLocalYMD).
+    const { y, m, d } = await tenantLocalYMD(supabase, tenantId)
+    if (d > MONTHLY_SAFE_DAYS) continue // not yet this tenant's monthly-accrual window
+
+    await monthlyAccrualJob(supabase, tenantId, y, m)
+      .then(r => log.info({ tenantId, year: y, month: m, credited: r.total_days_credited, employees: r.employees_processed }, '[leave-scheduler] monthly_accrual ok'))
       .catch((e: Error) => log.error({ err: e, tenantId }, '[leave-scheduler] monthly_accrual error'))
-    await runMonthlyAccrual(supabase, tenantId, year, monthNum)
-      .then(r => log.info({ tenantId, credited: r.total_days_credited, employees: r.employees_credited, errors: r.errors.length }, '[leave-scheduler] rule_accrual ok'))
+    await runMonthlyAccrual(supabase, tenantId, y, m)
+      .then(r => log.info({ tenantId, year: y, month: m, credited: r.total_days_credited, employees: r.employees_credited, errors: r.errors.length }, '[leave-scheduler] rule_accrual ok'))
       .catch((e: Error) => log.error({ err: e, tenantId }, '[leave-scheduler] rule_accrual error'))
   }
 }
@@ -229,11 +266,19 @@ export async function execLeaveCarryForward(
   payload:  { fromYear: number; toYear: number },
   log:      FastifyBaseLogger,
 ): Promise<void> {
-  const { fromYear, toYear } = payload
-  log.info({ fromYear, toYear }, '[leave-scheduler] job:carry-forward')
+  log.info({}, '[leave-scheduler] job:carry-forward')
   for (const tenantId of await fetchAllTenantIds(supabase, log)) {
+    // Tenant-local boundary check (fresh audit finding — see tenantLocalYMD) —
+    // only carry-forward a tenant whose OWN local calendar is at Dec-31/Mar-31.
+    const { y, m, d } = await tenantLocalYMD(supabase, tenantId)
+    let fromYear: number | null = null
+    let toYear:   number | null = null
+    if (m === 12 && d === 31) { fromYear = y;     toYear = y + 1 } // calendar year-end
+    else if (m === 3 && d === 31) { fromYear = y - 1; toYear = y } // financial year-end
+    if (fromYear === null || toYear === null) continue
+
     await carryForwardJob(supabase, tenantId, fromYear, toYear)
-      .then(r => log.info({ tenantId, credited: r.total_days_credited, employees: r.employees_processed }, '[leave-scheduler] carry_forward ok'))
+      .then(r => log.info({ tenantId, fromYear, toYear, credited: r.total_days_credited, employees: r.employees_processed }, '[leave-scheduler] carry_forward ok'))
       .catch((e: Error) => log.error({ err: e, tenantId }, '[leave-scheduler] carry_forward error'))
   }
 }
@@ -307,8 +352,6 @@ export async function tick(supabase: SupabaseClient, log: FastifyBaseLogger): Pr
   const monthNum  = monthIdx + 1            // 1-indexed
   const dom       = now.getUTCDate()
   const dayKey    = now.toISOString().slice(0, 10)
-  const monthKey  = `${year}-${String(monthNum).padStart(2, '0')}`
-  const yearKey   = String(year)
 
   // Write a heartbeat immediately so liveness is updated even if jobs are skipped.
   await writeHeartbeat(supabase, log, 'ok', { tick: tickCount, day: dayKey })
@@ -319,48 +362,53 @@ export async function tick(supabase: SupabaseClient, log: FastifyBaseLogger): Pr
     (e: Error) => log.warn({ err: e }, '[leave-scheduler] upload orphan sweep error'),
   )
 
-  // ── Year-boundary flags ──────────────────────────────────────────────────────
-  const isDecYearEnd   = (monthIdx === 11 && dom === 31)
-  const isMarYearEnd   = (monthIdx === 2  && dom === 31)
-  const isCalYearStart = (monthNum === 1  && dom === 1)
-  const isFYStart      = (monthNum === 4  && dom === 1)
+  // ── Year-boundary windows ────────────────────────────────────────────────────
+  // Widened to a ±1-UTC-day pad around each true boundary (fresh audit finding)
+  // — no single-instant UTC check can be "the" boundary for every tenant
+  // timezone (real-world offsets run UTC-12 to UTC+14, i.e. a tenant's local
+  // date can differ from UTC's by up to a day in either direction). Gating
+  // below now fires once per UTC day within this window (not once per year),
+  // so a tenant whose local clock hasn't reached its own boundary on the
+  // first day of the window still gets a later day's firing to catch it —
+  // the exec* functions' per-tenant local-date check (tenantLocalYMD) decides
+  // the actual leaveYear per tenant and is safe to re-run across the window
+  // because the underlying credit writes are idempotent per tenant/year.
+  const isNearCalYearBoundary = (monthIdx === 11 && dom >= 30) || (monthNum === 1 && dom <= 2)
+  const isNearFYBoundary      = (monthIdx === 2  && dom >= 30) || (monthNum === 4 && dom <= 2)
 
   // ── 1. Yearly accrual ────────────────────────────────────────────────────────
-  if ((isCalYearStart || isFYStart) && ran.yearlyAccrual !== yearKey) {
-    const leaveYear = isCalYearStart ? year : year - 1
-    log.info({ leaveYear }, '[leave-scheduler] yearly accrual due — enqueuing sub-job')
+  if ((isNearCalYearBoundary || isNearFYBoundary) && ran.yearlyAccrual !== dayKey) {
+    log.info({ dayKey }, '[leave-scheduler] near yearly-accrual boundary — enqueuing sub-job')
     await durableQueue.enqueue(
       'leave-yearly-accrual',
-      { isCalYearStart, year, leaveYear, dayKey },
-      { idempotencyKey: `leave-yearly-accrual:${yearKey}`, timeoutMs: 5 * 60 * 1_000 },
+      { isCalYearStart: isNearCalYearBoundary, year, leaveYear: year, dayKey },
+      { idempotencyKey: `leave-yearly-accrual:${dayKey}`, timeoutMs: 5 * 60 * 1_000 },
     ).catch((e: Error) => log.error({ err: e }, '[leave-scheduler] enqueue leave-yearly-accrual failed'))
-    ran.yearlyAccrual = yearKey
+    ran.yearlyAccrual = dayKey
   }
 
   // ── 2. Monthly accrual ───────────────────────────────────────────────────────
-  if (dom <= MONTHLY_SAFE_DAYS && ran.monthlyAccrual !== monthKey) {
-    log.info({ monthKey }, '[leave-scheduler] monthly accrual due — enqueuing sub-job')
+  if (dom <= MONTHLY_SAFE_DAYS && ran.monthlyAccrual !== dayKey) {
+    log.info({ dayKey }, '[leave-scheduler] monthly accrual window — enqueuing sub-job')
     await durableQueue.enqueue(
       'leave-monthly-accrual',
       { year, monthNum },
-      { idempotencyKey: `leave-monthly-accrual:${monthKey}`, timeoutMs: 5 * 60 * 1_000 },
+      { idempotencyKey: `leave-monthly-accrual:${dayKey}`, timeoutMs: 5 * 60 * 1_000 },
     ).catch((e: Error) => log.error({ err: e }, '[leave-scheduler] enqueue leave-monthly-accrual failed'))
-    ran.monthlyAccrual = monthKey
+    ran.monthlyAccrual = dayKey
   }
 
   // ── 3. Carry forward ────────────────────────────────────────────────────────
   // Enqueued BEFORE co-expiry. The durable queue is FIFO for a single worker,
   // so carry-forward completes first on year-end days before CO expiry runs.
-  if ((isDecYearEnd || isMarYearEnd) && ran.carryForward !== yearKey) {
-    const fromYear = isDecYearEnd ? year     : year - 1
-    const toYear   = isDecYearEnd ? year + 1 : year
-    log.info({ fromYear, toYear }, '[leave-scheduler] carry-forward due — enqueuing sub-job')
+  if ((isNearCalYearBoundary || isNearFYBoundary) && ran.carryForward !== dayKey) {
+    log.info({ dayKey }, '[leave-scheduler] near carry-forward boundary — enqueuing sub-job')
     await durableQueue.enqueue(
       'leave-carry-forward',
-      { fromYear, toYear },
-      { idempotencyKey: `leave-carry-forward:${yearKey}`, timeoutMs: 5 * 60 * 1_000 },
+      { fromYear: year, toYear: year },
+      { idempotencyKey: `leave-carry-forward:${dayKey}`, timeoutMs: 5 * 60 * 1_000 },
     ).catch((e: Error) => log.error({ err: e }, '[leave-scheduler] enqueue leave-carry-forward failed'))
-    ran.carryForward = yearKey
+    ran.carryForward = dayKey
   }
 
   // ── 4. CO expiry ────────────────────────────────────────────────────────────
@@ -402,8 +450,6 @@ async function restoreState(supabase: SupabaseClient, log: FastifyBaseLogger): P
   const year     = now.getUTCFullYear()
   const monthNum = now.getUTCMonth() + 1
   const dayKey   = now.toISOString().slice(0, 10)
-  const monthKey = `${year}-${String(monthNum).padStart(2, '0')}`
-  const yearKey  = String(year)
 
   try {
     const [hasYearly, hasMonthly, hasCF, hasExpiry, hasEventGrants, hasRecon] = await Promise.all([
@@ -414,9 +460,14 @@ async function restoreState(supabase: SupabaseClient, log: FastifyBaseLogger): P
       hasJobRunForKey(supabase, 'event_grants',     { as_of: dayKey }),
       hasJobRunForKey(supabase, 'reconciliation',   { as_of: dayKey }),
     ])
-    if (hasYearly)     ran.yearlyAccrual  = yearKey
-    if (hasMonthly)    ran.monthlyAccrual = monthKey
-    if (hasCF)         ran.carryForward   = yearKey
+    // NOTE: ran.yearlyAccrual/monthlyAccrual/carryForward now track "did we
+    // already enqueue TODAY" (dayKey), not the whole year/month — the queue's
+    // own per-dayKey idempotencyKey is the authoritative guard against a
+    // duplicate enqueue; this restore is only a soft optimization to skip a
+    // redundant attempt on the very first tick after a restart.
+    if (hasYearly)     ran.yearlyAccrual  = dayKey
+    if (hasMonthly)    ran.monthlyAccrual = dayKey
+    if (hasCF)         ran.carryForward   = dayKey
     if (hasExpiry)     ran.coExpiry       = dayKey
     if (hasEventGrants) ran.eventGrants   = dayKey
     if (hasRecon)      ran.reconciliation = dayKey

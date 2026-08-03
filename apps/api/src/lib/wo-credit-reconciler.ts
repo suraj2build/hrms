@@ -22,6 +22,8 @@ import { isMonthLocked } from './period-lock.js'
 import { durableQueue }  from './durable-queue.js'
 import { fetchAllRows }  from './supabase-paginate.js'
 import { logger }        from './logger.js'
+import { fetchTenantTz } from './attendance-engine.js'
+import { getLocalDate }  from './org-context.js'
 
 const RECON_INTERVAL_MS = 6 * 60 * 60 * 1_000   // every 6h (daily-grain; cheap + idempotent)
 const WARMUP_MS         = 7 * 60 * 1_000
@@ -464,21 +466,28 @@ export async function finalizeTenantMonth(
 
 // ── Scheduler ───────────────────────────────────────────────────────────────
 export async function tick(supabase: SupabaseClient): Promise<void> {
-  const now = new Date()
-  const year = now.getUTCFullYear()
-  const month = now.getUTCMonth() + 1
-  const dayOfMonth = now.getUTCDate()
-
-  // Once the new month is past the grace window (~10th), finalise the prior month.
-  const finalizePrior = dayOfMonth >= 10
-  const priorMonth = month === 1 ? 12 : month - 1
-  const priorYear  = month === 1 ? year - 1 : year
-
   const tenants = await fetchAllRows<{ id: string }>((from, to) =>
     supabase.from('tenants').select('id').range(from, to),
   )
   for (const t of tenants) {
     try {
+      // Tenant-local year/month/day (fresh audit finding: this used to derive
+      // "today" once from server UTC and apply it to every tenant, skewing
+      // the month-finalize boundary — and the LOP/extra-pay figures it
+      // writes — by up to ~14h for tenants far from UTC). Safe to resolve
+      // per tenant on every 6-hourly tick: reconcileTenantMonth/
+      // finalizeTenantMonth are both fully idempotent (recompute-from-
+      // attendance each run, per this file's own header comment), so there's
+      // no "already ran" state to keep in sync across the timezone switch.
+      const tz    = await fetchTenantTz(supabase, t.id)
+      const today = getLocalDate(new Date().toISOString(), tz)
+      const [year, month, dayOfMonth] = today.split('-').map(Number)
+
+      // Once the new month is past the grace window (~10th), finalise the prior month.
+      const finalizePrior = dayOfMonth >= 10
+      const priorMonth = month === 1 ? 12 : month - 1
+      const priorYear  = month === 1 ? year - 1 : year
+
       const res = await reconcileTenantMonth(supabase, t.id, year, month)
       const applied = res.reduce((s, r) => s + r.auto_applied, 0)
       if (applied > 0) console.log(`[wo-credit] tenant=${t.id} applied ${applied} weekly-off(s) across ${res.length} employees`)
