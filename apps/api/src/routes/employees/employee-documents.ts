@@ -20,6 +20,19 @@ const STORAGE_BUCKET  = 'employee-files'
 const SIGNED_URL_TTL  = 3600    // 1 hour
 const MAX_FILE_SIZE   = 5 * 1024 * 1024  // 5 MB
 
+// Matches routes/documents/index.ts's whitelist — this route wrote metadata
+// for the same `documents` table with no MIME/extension gate at all, so an
+// admin could register (and later sign) an .html/.svg/executable as a
+// "document" via this endpoint even though the equivalent admin console
+// route enforces PDF/JPG/PNG only.
+const ALLOWED_MIME_TYPES = new Set([
+  'application/pdf',
+  'image/jpeg',
+  'image/jpg',
+  'image/png',
+])
+const ALLOWED_EXTENSIONS = new Set(['pdf', 'jpg', 'jpeg', 'png'])
+
 // documents.doc_type CHECK constraint (migration 005) — the ground truth for
 // valid document types. Matches the frontend's DocType union (types/index.ts).
 const DOC_TYPES = ['aadhaar', 'pan', 'offer_letter', 'contract', 'certificate',
@@ -109,6 +122,21 @@ export default async function employeeDocumentsRoutes(fastify: FastifyInstance) 
     // tenant's file. Matches the check in routes/documents/index.ts.
     if (!parsed.data.storage_path.startsWith(`${req.tenantId}/`)) {
       return validationError(reply, ErrorCode.VALIDATION_ERROR, 'storage_path must be within your tenant namespace')
+    }
+
+    const { mime_type, name } = parsed.data
+    if (mime_type && !ALLOWED_MIME_TYPES.has(mime_type)) {
+      return reply.code(415).send({
+        error:   'UNSUPPORTED_FILE_TYPE',
+        message: `File type "${mime_type}" is not allowed. Accepted: PDF, JPG, PNG`,
+      })
+    }
+    const ext = name.split('.').pop()?.toLowerCase() ?? ''
+    if (!ALLOWED_EXTENSIONS.has(ext)) {
+      return reply.code(415).send({
+        error:   'UNSUPPORTED_FILE_TYPE',
+        message: `File extension ".${ext}" is not allowed. Accepted: .pdf, .jpg, .jpeg, .png`,
+      })
     }
 
     const { data, error } = await (fastify as any).supabase

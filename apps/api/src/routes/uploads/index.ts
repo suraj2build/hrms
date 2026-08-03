@@ -53,6 +53,21 @@ const REFERENCE_TYPES = [
   'tenant',
 ] as const
 
+// Matches routes/documents/index.ts's whitelist — document/photo-style
+// upload types had no MIME/extension gate at all, so a client could
+// register (and later have a viewer open) an .html/.svg/executable as an
+// "employee_document" via this general-purpose session tracker. Left
+// unrestricted for the CSV/import types, which legitimately need
+// non-image/PDF formats.
+const DOC_LIKE_UPLOAD_TYPES = new Set(['employee_document', 'onboarding_document', 'profile_photo'])
+const ALLOWED_DOC_MIME_TYPES = new Set([
+  'application/pdf',
+  'image/jpeg',
+  'image/jpg',
+  'image/png',
+])
+const ALLOWED_DOC_EXTENSIONS = new Set(['pdf', 'jpg', 'jpeg', 'png'])
+
 const createSessionSchema = z.object({
   upload_type:    z.enum(UPLOAD_TYPES),
   file_name:      z.string().min(1).max(500),
@@ -157,6 +172,23 @@ export default async function uploadSessionRoutes(fastify: FastifyInstance) {
         error:   'INVALID_STORAGE_PATH',
         message: 'storage_path must be within your tenant namespace',
       })
+    }
+
+    if (DOC_LIKE_UPLOAD_TYPES.has(parsed.data.upload_type)) {
+      const { mime_type, file_name } = parsed.data
+      if (mime_type && !ALLOWED_DOC_MIME_TYPES.has(mime_type)) {
+        return reply.code(415).send({
+          error:   'UNSUPPORTED_FILE_TYPE',
+          message: `File type "${mime_type}" is not allowed. Accepted: PDF, JPG, PNG`,
+        })
+      }
+      const ext = file_name.split('.').pop()?.toLowerCase() ?? ''
+      if (!ALLOWED_DOC_EXTENSIONS.has(ext)) {
+        return reply.code(415).send({
+          error:   'UNSUPPORTED_FILE_TYPE',
+          message: `File extension ".${ext}" is not allowed. Accepted: .pdf, .jpg, .jpeg, .png`,
+        })
+      }
     }
 
     // Fresh audit finding: reference_id/reference_type had no tenant check

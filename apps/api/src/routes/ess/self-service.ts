@@ -35,6 +35,18 @@ const MAX_FILE_SIZE  = 5 * 1024 * 1024  // 5 MB
 // contract, relieving/experience letters) are intentionally excluded.
 const ESS_DOC_TYPES = ['certificate', 'aadhaar', 'pan', 'other'] as const
 
+// Matches routes/documents/index.ts's whitelist — this route wrote metadata
+// for the same `documents` table with no MIME/extension gate at all, so an
+// employee could self-register (and later have HR open) an .html/.svg/
+// executable as a "document" via ESS.
+const ALLOWED_MIME_TYPES = new Set([
+  'application/pdf',
+  'image/jpeg',
+  'image/jpg',
+  'image/png',
+])
+const ALLOWED_EXTENSIONS = new Set(['pdf', 'jpg', 'jpeg', 'png'])
+
 const documentSchema = z.object({
   name:         z.string().min(1).max(200),
   doc_type:     z.enum(ESS_DOC_TYPES),
@@ -422,6 +434,20 @@ export default async function essSelfServiceRoutes(fastify: FastifyInstance) {
     // path pointing at another tenant's or another employee's file.
     if (!parsed.data.storage_path.startsWith(`${req.tenantId}/${empId}/`)) {
       return validationError(reply, ErrorCode.VALIDATION_ERROR, 'storage_path must be within your own employee namespace')
+    }
+    const { mime_type, name } = parsed.data
+    if (mime_type && !ALLOWED_MIME_TYPES.has(mime_type)) {
+      return reply.code(415).send({
+        error:   'UNSUPPORTED_FILE_TYPE',
+        message: `File type "${mime_type}" is not allowed. Accepted: PDF, JPG, PNG`,
+      })
+    }
+    const ext = name.split('.').pop()?.toLowerCase() ?? ''
+    if (!ALLOWED_EXTENSIONS.has(ext)) {
+      return reply.code(415).send({
+        error:   'UNSUPPORTED_FILE_TYPE',
+        message: `File extension ".${ext}" is not allowed. Accepted: .pdf, .jpg, .jpeg, .png`,
+      })
     }
     const { data, error } = await fastify.supabase
       .from('documents')
