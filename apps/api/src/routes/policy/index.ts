@@ -190,8 +190,7 @@ export default async function policyRoutes(fastify: FastifyInstance) {
         return q.range(from, to)
       })
     } catch (err) {
-      req.log.error({ err }, 'hr_policies list query failed')
-      return reply.status(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch policies' })
+      return serverError(req, reply, err, ErrorCode.QUERY_FAILED, 'Failed to fetch policies')
     }
 
     const employeeId = await getEmployeeId(req.userId)
@@ -234,8 +233,7 @@ export default async function policyRoutes(fastify: FastifyInstance) {
         return q.range(from, to)
       })
     } catch (err) {
-      req.log.error({ err }, 'hr_policies admin list query failed')
-      return reply.status(500).send({ error: 'QUERY_FAILED', message: 'Failed to fetch policies' })
+      return serverError(req, reply, err, ErrorCode.QUERY_FAILED, 'Failed to fetch policies')
     }
 
     // Attach ack counts for published policies
@@ -440,8 +438,7 @@ export default async function policyRoutes(fastify: FastifyInstance) {
       .single()
 
     if (error) {
-      req.log.error({ err: error, tenantId }, 'policy/create: insert failed')
-      return reply.status(500).send({ error: 'INSERT_FAILED', message: 'Failed to create policy' })
+      return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create policy')
     }
 
     await logAction(supabase, {

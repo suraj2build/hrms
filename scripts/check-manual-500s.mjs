@@ -26,9 +26,12 @@ const ROUTES    = path.join(ROOT, 'apps/api/src/routes')
 const BASELINE  = path.join(ROOT, 'scripts/manual-500s-baseline.json')
 const UPDATE    = process.argv.includes('--update')
 
-// Pattern: reply.code(500).send({ ... message: <anything> })
-// The risk is leaking error.message; we flag the entire reply.code(500).send() pattern.
-const PATTERN = /reply\.code\(500\)\.send\(/g
+// Pattern: reply.code(500).send({ ... message: <anything> }) or reply.status(500).send(...)
+// Fastify's reply object accepts both .code() and .status() as aliases for the same
+// call — F26 found a raw reply.status(500) in policy/index.ts that this ratchet's
+// original .code()-only regex silently missed. The risk is leaking error.message; we
+// flag the entire reply.code(500).send()/reply.status(500).send() pattern either way.
+const PATTERN = /reply\.(?:code|status)\(500\)\.send\(/g
 
 function walkTs(dir, out = []) {
   for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
