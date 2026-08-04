@@ -160,7 +160,12 @@ export function AdminPolicyLibrary() {
 
   // ── Mutations ──────────────────────────────────────────────────────────────
 
-  const invalidate = () => qc.invalidateQueries({ queryKey: ['policy-library'] })
+  // F32: also invalidate the employee-facing policy library — create/update/
+  // publish/archive here previously left EssPolicies.tsx showing stale data.
+  const invalidate = () => {
+    qc.invalidateQueries({ queryKey: ['policy-library'] })
+    qc.invalidateQueries({ queryKey: ['ess-policies'] })
+  }
 
   const createPolicy = useMutation({
     mutationFn: (body: PolicyForm) => api.post('/policies', body),

@@ -106,6 +106,9 @@ export function OptionalHolidayPool() {
       api.post('/leave/optional-holidays/pool', { holiday_id: holidayId, year }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['optional-pool-admin', year] })
+      // F33: the employee-facing picker reads a separate key and previously
+      // didn't see newly-added pool holidays without a manual refresh.
+      qc.invalidateQueries({ queryKey: ['optional-holidays-ess'] })
       setSelectedHolidayId('')
       setAddMode(false)
       toast.success('Holiday added to pool')
@@ -119,6 +122,8 @@ export function OptionalHolidayPool() {
       api.delete(`/leave/optional-holidays/pool/${poolId}`),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['optional-pool-admin', year] })
+      // F33: same as add — the employee picker must lose a removed holiday too.
+      qc.invalidateQueries({ queryKey: ['optional-holidays-ess'] })
       setConfirmRemoveId(null)
       toast.success('Holiday removed from pool')
     },

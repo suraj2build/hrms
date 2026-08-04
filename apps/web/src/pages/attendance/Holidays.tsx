@@ -114,6 +114,9 @@ export function Holidays() {
     qc.invalidateQueries({ queryKey: ['holidays-calendar'] })
     qc.invalidateQueries({ queryKey: ['holiday-groups-list'] })
     qc.invalidateQueries({ queryKey: ['holiday-groups'] })
+    // F34: EssCompanyHolidays.tsx reads a distinct key not covered above —
+    // stayed stale after add/edit/delete/seed until a manual refresh.
+    qc.invalidateQueries({ queryKey: ['ess-company-holidays'] })
   }, [qc, year, MATRIX_KEY])
   const { data: matrix, isLoading, refetch } = useQuery<{
     holidays: Holiday[]; groups: HolidayGroup[]; assignments: Assignment[]
@@ -157,27 +160,32 @@ export function Holidays() {
   })
 
   const handleToggle = useCallback((holidayId: string, groupId: string) => {
-    const key      = `${holidayId}|${groupId}`
-    const assigned = localAssign.has(key)
+    const key = `${holidayId}|${groupId}`
 
-    // 1. Immediate local state update
+    // F34 stale-closure fix: `assigned`/`newGroups` must be derived from the
+    // functional updater's `prev`/`next`, not the outer `localAssign` closure
+    // — rapid toggles on the same holiday (e.g. two group checkboxes clicked
+    // before a re-render lands) previously each read the same pre-click
+    // `localAssign` snapshot, so the second syncMutation.mutate() call
+    // silently overwrote the first toggle's server-side group_ids. React
+    // guarantees the updater always sees the latest pending state, even
+    // across synchronous back-to-back setState calls, so computing newGroups
+    // inside it is race-free.
+    let newGroups: string[] = []
     setLocalAssign(prev => {
+      const assigned = prev.has(key)
       const next = new Set(prev)
       if (assigned) next.delete(key); else next.add(key)
+
+      newGroups = [...next]
+        .filter(k => k.startsWith(`${holidayId}|`))
+        .map(k => k.split('|')[1])
+
       return next
     })
 
-    // 2. Compute new group_ids for this holiday from the updated local state
-    const currentGroups = [...localAssign]
-      .filter(k => k.startsWith(`${holidayId}|`))
-      .map(k => k.split('|')[1])
-    const newGroups = assigned
-      ? currentGroups.filter(g => g !== groupId)
-      : [...currentGroups, groupId]
-
-    // 3. Fire server sync — non-blocking
     syncMutation.mutate({ holidayId, groupIds: newGroups })
-  }, [localAssign, syncMutation])
+  }, [syncMutation])
 
   // ── Add holiday ────────────────────────────────────────────────────────────
   const addMutation = useMutation({

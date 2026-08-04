@@ -1,6 +1,6 @@
 import { useState }                   from 'react'
 import { useParams, useNavigate }     from 'react-router-dom'
-import { useQuery, useMutation }      from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { CheckCircle2, ArrowLeft }    from 'lucide-react'
 import { toast }                      from 'sonner'
 import { Button }                     from '@/components/ui/button'
@@ -123,6 +123,7 @@ function MultiQuestion({
 export function SurveyTake() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
+  const qc = useQueryClient()
 
   const [answers, setAnswers] = useState<Record<string, unknown>>({})
   const [submitted, setSubmitted] = useState(false)
@@ -141,7 +142,16 @@ export function SurveyTake() {
       }))
       return api.post(`/surveys/${id}/submit`, { responses })
     },
-    onSuccess: () => setSubmitted(true),
+    onSuccess: () => {
+      setSubmitted(true)
+      // F31: submitting was never invalidating anything — SurveyNudge/EssSurveys
+      // kept showing this survey as pending, and the admin detail/results/list
+      // views (response counts, response rate) went stale until manual refresh.
+      qc.invalidateQueries({ queryKey: ['my-surveys'] })
+      qc.invalidateQueries({ queryKey: ['admin-survey', id] })
+      qc.invalidateQueries({ queryKey: ['admin-survey-results', id] })
+      qc.invalidateQueries({ queryKey: ['admin-surveys'] })
+    },
     onError:   () => toast.error('Could not submit survey — please try again'),
   })
 

@@ -100,6 +100,9 @@ export function EssPolicies() {
     mutationFn: (id: string) => api.post(`/policies/${id}/ack`, {}),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['ess-policies'] })
+      // F32: admin's ack-stats panel ("who has acknowledged") also reads
+      // this policy and previously stayed stale after an employee acked.
+      qc.invalidateQueries({ queryKey: ['policy-library'] })
       toast.success('Policy acknowledged — thank you!')
     },
     onError: (e: Error) => toast.error('Failed to acknowledge', { description: e.message }),

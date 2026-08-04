@@ -79,6 +79,9 @@ export function EssOptionalHolidays() {
       api.post('/leave/optional-holidays/select', { pool_id: poolId }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['optional-holidays-ess'] })
+      // F33: admin's pool view shows a per-holiday selection_count that
+      // previously went stale after an employee selected a holiday.
+      qc.invalidateQueries({ queryKey: ['optional-pool-admin'] })
       toast.success('Optional holiday selected')
     },
     onError: (e: Error) => toast.error('Failed to select holiday', { description: e.message }),
@@ -90,6 +93,8 @@ export function EssOptionalHolidays() {
       api.delete(`/leave/optional-holidays/${poolId}`),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['optional-holidays-ess'] })
+      // F33: same as select — keep admin's per-holiday selection_count fresh.
+      qc.invalidateQueries({ queryKey: ['optional-pool-admin'] })
       setRemoveTarget(null)
       toast.success('Optional holiday removed')
     },
