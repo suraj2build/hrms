@@ -30,6 +30,7 @@ import { api }           from '@/lib/api/client'
 import { useAuthStore }  from '@/stores/authStore'
 import { cn }            from '@/lib/utils'
 import { toast }         from 'sonner'
+import { useVersionConflict, withExpectedVersion } from '@/hooks/useVersionConflict'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -60,6 +61,7 @@ interface SalaryComponent {
   default_value:            number | null
   is_reimbursement:        boolean
   exemption_limit_annual:  number | null
+  version:              number
   created_at:           string
 }
 
@@ -138,6 +140,8 @@ export function SalaryComponents() {
     qc.invalidateQueries({ queryKey: ['salary-components-list'] })  // EmployeeProfile Setup Compensation dialog
   }
 
+  const versionConflict = useVersionConflict([['salary-components-mgmt']])
+
   const createMutation = useMutation({
     mutationFn: (body: object) => api.post('/masters/salary-components', body),
     onSuccess: () => { toast.success('Component created'); invalidate(); resetForm() },
@@ -145,10 +149,15 @@ export function SalaryComponents() {
   })
 
   const updateMutation = useMutation({
-    mutationFn: ({ id, body }: { id: string; body: object }) =>
-      api.put(`/masters/salary-components/${id}`, body),
+    mutationFn: ({ id, body }: { id: string; body: Record<string, unknown> }) => {
+      const row = (components ?? []).find((c) => c.id === id)
+      return api.put(`/masters/salary-components/${id}`, withExpectedVersion(body, row))
+    },
     onSuccess: () => { toast.success('Component updated'); invalidate(); resetForm() },
-    onError: (e: Error) => { toast.error('Failed to update component', { description: e.message }) },
+    onError: (e: Error) => {
+      if (versionConflict(e)) return
+      toast.error('Failed to update component', { description: e.message })
+    },
   })
 
   const deleteMutation = useMutation({

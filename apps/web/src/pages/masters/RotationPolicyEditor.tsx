@@ -14,6 +14,7 @@ import {
 import { Button }  from '@/components/ui/button'
 import { Badge }   from '@/components/ui/badge'
 import { cn }      from '@/lib/utils'
+import { useVersionConflict, withExpectedVersion } from '@/hooks/useVersionConflict'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -46,6 +47,7 @@ interface PolicyData {
   name:        string
   description: string | null
   is_active:   boolean
+  version:     number
   rules:       Array<{
     id:             string
     condition_type: ConditionType
@@ -287,11 +289,13 @@ export default function RotationPolicyEditor() {
 
   // ── Mutations ────────────────────────────────────────────────────────────────
 
+  const versionConflict = useVersionConflict([['rotation-policy', id]])
+
   const saveMutation = useMutation({
     mutationFn: (payload: object) =>
       isNew
         ? api.post('/masters/rotation-policies', payload)
-        : api.put(`/masters/rotation-policies/${id}`, payload),
+        : api.put(`/masters/rotation-policies/${id}`, withExpectedVersion(payload as Record<string, unknown>, policyQuery.data?.data)),
     onSuccess: () => {
       toast.success(isNew ? 'Rotation policy created' : 'Policy saved')
       queryClient.invalidateQueries({ queryKey: ['rotation-policies'] })
@@ -299,8 +303,10 @@ export default function RotationPolicyEditor() {
       if (isNew) navigate('/admin/masters/rotation-policies')
       else queryClient.invalidateQueries({ queryKey: ['rotation-policy', id] })
     },
-    onError: (err: Error) =>
-      toast.error(err.message ?? 'Failed to save policy'),
+    onError: (err: Error) => {
+      if (versionConflict(err)) return
+      toast.error(err.message ?? 'Failed to save policy')
+    },
   })
 
   // ── Handlers ─────────────────────────────────────────────────────────────────

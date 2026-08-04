@@ -38,6 +38,7 @@ import { Input }         from '@/components/ui/input'
 import { api }           from '@/lib/api/client'
 import { useAuthStore }  from '@/stores/authStore'
 import { cn }            from '@/lib/utils'
+import { useVersionConflict, withExpectedVersion } from '@/hooks/useVersionConflict'
 
 // ── Generic master record ──────────────────────────────────────────────────────
 
@@ -45,6 +46,7 @@ interface MasterRecord {
   id:        string
   name:      string
   code?:     string
+  version?:  number
   [key: string]: unknown
 }
 
@@ -314,6 +316,11 @@ function MasterTab({ tab }: { tab: TabDef }) {
   })
   const rows = data?.data ?? []
 
+  // ── CAS (optimistic concurrency) ─────────────────────────────────────────
+  // Generic across every tab: keyed off this tab's own list query, not any
+  // one table's name.
+  const versionConflict = useVersionConflict([['masters', tab.id]])
+
   // ── Create mutation ──────────────────────────────────────────────────────
   const createMutation = useMutation({
     mutationFn: (body: Record<string, unknown>) => api.post(tab.endpoint, body),
@@ -323,10 +330,15 @@ function MasterTab({ tab }: { tab: TabDef }) {
 
   // ── Update mutation ──────────────────────────────────────────────────────
   const updateMutation = useMutation({
-    mutationFn: ({ id, body }: { id: string; body: Record<string, unknown> }) =>
-      api.put(`${tab.endpoint}/${id}`, body),
+    mutationFn: ({ id, body }: { id: string; body: Record<string, unknown> }) => {
+      const row = rows.find((r) => r.id === id)
+      return api.put(`${tab.endpoint}/${id}`, withExpectedVersion(body, row))
+    },
     onSuccess:  () => { qc.invalidateQueries({ queryKey: ['masters', tab.id] }); setEditId(null); toast.success('Updated') },
-    onError: (e: Error) => toast.error('Failed to update record', { description: e.message }),
+    onError: (e: Error) => {
+      if (versionConflict(e)) return
+      toast.error('Failed to update record', { description: e.message })
+    },
   })
 
   // ── Delete mutation ──────────────────────────────────────────────────────

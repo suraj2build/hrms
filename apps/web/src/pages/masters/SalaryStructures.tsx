@@ -25,6 +25,7 @@ import {
 }                         from '@/components/ui/dialog'
 import { api }            from '@/lib/api/client'
 import { useAuthStore }   from '@/stores/authStore'
+import { useVersionConflict, withExpectedVersion } from '@/hooks/useVersionConflict'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -52,6 +53,7 @@ interface SalaryStructure {
   description: string | null
   is_active:   boolean
   is_default:  boolean
+  version:     number
   created_at:  string
   salary_structure_components: StructureComponent[]
 }
@@ -111,6 +113,8 @@ export function SalaryStructures() {
     })
   }
 
+  const versionConflict = useVersionConflict([['salary-structures'], ['salary-structures-list']])
+
   const saveMut = useMutation({
     mutationFn: (body: typeof EMPTY) => {
       const payload = {
@@ -120,7 +124,7 @@ export function SalaryStructures() {
         is_active:   body.is_active,
       }
       return editItem
-        ? api.put(`/masters/salary-structures/${editItem.id}`, payload)
+        ? api.put(`/masters/salary-structures/${editItem.id}`, withExpectedVersion(payload, editItem))
         : api.post('/masters/salary-structures', payload)
     },
     onSuccess: () => {
@@ -132,6 +136,7 @@ export function SalaryStructures() {
       toast.success(editItem ? 'Structure updated' : 'Structure created')
     },
     onError: (e: Error) => {
+      if (versionConflict(e)) return
       setErr(e.message ?? 'Failed to save')
       toast.error('Save failed', { description: e.message })
     },
@@ -148,13 +153,17 @@ export function SalaryStructures() {
   })
 
   const setDefaultMut = useMutation({
-    mutationFn: (id: string) => api.put(`/masters/salary-structures/${id}`, { is_default: true }),
+    mutationFn: (structure: SalaryStructure) =>
+      api.put(`/masters/salary-structures/${structure.id}`, withExpectedVersion({ is_default: true }, structure)),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['salary-structures'] })
       qc.invalidateQueries({ queryKey: ['salary-structures-list'] })
       toast.success('Default structure updated')
     },
-    onError: (e: Error) => toast.error('Failed to set default', { description: e.message }),
+    onError: (e: Error) => {
+      if (versionConflict(e)) return
+      toast.error('Failed to set default', { description: e.message })
+    },
   })
 
   return (
@@ -249,7 +258,7 @@ export function SalaryStructures() {
                             className="h-7 w-7 text-muted-foreground hover:text-[#15B8A6]"
                             title="Set as default"
                             disabled={setDefaultMut.isPending}
-                            onClick={() => setDefaultMut.mutate(s.id)}
+                            onClick={() => setDefaultMut.mutate(s)}
                           >
                             <Star className="h-3.5 w-3.5" />
                           </Button>

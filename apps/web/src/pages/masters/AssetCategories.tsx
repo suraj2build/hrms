@@ -19,6 +19,7 @@ import {
 import { ConfirmDialog }                          from '@/components/ui/ConfirmDialog'
 import { api }                                    from '@/lib/api/client'
 import { useAuthStore }                           from '@/stores/authStore'
+import { useVersionConflict, withExpectedVersion } from '@/hooks/useVersionConflict'
 
 interface AssetCategory {
   id:                   string
@@ -31,6 +32,7 @@ interface AssetCategory {
   requires_return:      boolean
   is_trackable:         boolean
   is_active:            boolean
+  version:              number
   created_at:           string
 }
 
@@ -40,7 +42,7 @@ const DEPR_LABELS: Record<string, string> = {
   none:              'None',
 }
 
-const EMPTY: Omit<AssetCategory, 'id' | 'created_at'> = {
+const EMPTY: Omit<AssetCategory, 'id' | 'created_at' | 'version'> = {
   code: '', name: '', description: '',
   depreciation_method: 'straight_line',
   useful_life_years: null, salvage_value_pct: null,
@@ -91,6 +93,8 @@ export function AssetCategories() {
   const setBool = (key: keyof typeof EMPTY) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setForm((p) => ({ ...p, [key]: e.target.checked }))
 
+  const versionConflict = useVersionConflict([['asset-categories']])
+
   const saveMut = useMutation({
     mutationFn: (body: typeof EMPTY) => {
       const payload = {
@@ -100,7 +104,7 @@ export function AssetCategories() {
         salvage_value_pct: body.salvage_value_pct  || null,
       }
       return editItem
-        ? api.put(`/masters/asset-categories/${editItem.id}`, payload)
+        ? api.put(`/masters/asset-categories/${editItem.id}`, withExpectedVersion(payload, editItem))
         : api.post('/masters/asset-categories', payload)
     },
     onSuccess: () => {
@@ -109,6 +113,7 @@ export function AssetCategories() {
       toast.success(editItem ? 'Asset category updated' : 'Asset category created')
     },
     onError: (e: Error) => {
+      if (versionConflict(e)) return
       setErr(e.message ?? 'Failed to save')
       toast.error('Save failed', { description: e.message })
     },

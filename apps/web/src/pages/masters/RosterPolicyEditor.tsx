@@ -30,6 +30,7 @@ import { Button }   from '@/components/ui/button'
 import { Badge }    from '@/components/ui/badge'
 import { api }      from '@/lib/api/client'
 import { cn }       from '@/lib/utils'
+import { useVersionConflict, withExpectedVersion } from '@/hooks/useVersionConflict'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -55,6 +56,7 @@ interface RosterPolicy {
     matrix?:         PolicyMatrix
   }
   is_active:    boolean
+  version:      number
   wo_credit_structure_id: string | null
   created_at:   string
   updated_at:   string | null
@@ -537,6 +539,8 @@ export function RosterPolicyEditor() {
   const summaryLines = useMemo(() => generateSummary(matrix), [matrix])
 
   // ── Save mutation ─────────────────────────────────────────────────────────
+  const versionConflict = useVersionConflict([['roster-policy', id]])
+
   const saveMut = useMutation({
     mutationFn: () => {
       const payload = {
@@ -549,7 +553,7 @@ export function RosterPolicyEditor() {
       }
       return isNew
         ? api.post<{ data?: { id?: string } }>('/masters/rosters', payload)
-        : api.put<{ data?: { id?: string } }>(`/masters/rosters/${id}`, payload)
+        : api.put<{ data?: { id?: string } }>(`/masters/rosters/${id}`, withExpectedVersion(payload, policyData?.data))
     },
     onSuccess: (res) => {
       qc.invalidateQueries({ queryKey: ['roster-policies'] })
@@ -565,12 +569,15 @@ export function RosterPolicyEditor() {
         navigate(`/admin/masters/rosters/${res.data.id}`, { replace: true })
       }
     },
-    onError: (e: Error) => toast.error('Failed to save policy', { description: e.message }),
+    onError: (e: Error) => {
+      if (versionConflict(e)) return
+      toast.error('Failed to save policy', { description: e.message })
+    },
   })
 
   // ── Archive toggle mutation ───────────────────────────────────────────────
   const archiveMut = useMutation({
-    mutationFn: () => api.put(`/masters/rosters/${id}`, { is_active: !isActive }),
+    mutationFn: () => api.put(`/masters/rosters/${id}`, withExpectedVersion({ is_active: !isActive }, policyData?.data)),
     onSuccess: () => {
       const next = !isActive
       setIsActive(next)
@@ -580,7 +587,10 @@ export function RosterPolicyEditor() {
       qc.invalidateQueries({ queryKey: ['roster-templates'] })
       toast.success(next ? 'Policy restored' : 'Policy archived')
     },
-    onError: (e: Error) => toast.error('Failed to update status', { description: e.message }),
+    onError: (e: Error) => {
+      if (versionConflict(e)) return
+      toast.error('Failed to update status', { description: e.message })
+    },
   })
 
   // ── Loading skeleton ──────────────────────────────────────────────────────

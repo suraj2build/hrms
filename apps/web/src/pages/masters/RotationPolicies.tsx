@@ -26,6 +26,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { cn } from '@/lib/utils'
 import { PageHeader } from '@/components/layout/PageHeader'
+import { useVersionConflict, withExpectedVersion } from '@/hooks/useVersionConflict'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -34,6 +35,7 @@ interface RotationPolicy {
   name:           string
   description:    string | null
   is_active:      boolean
+  version:        number
   rule_count:     number
   employee_count: number
   site_count:     number
@@ -61,7 +63,7 @@ interface PolicyCardProps {
   policy:      RotationPolicy
   onEdit:      (id: string) => void
   onDuplicate: (id: string) => void
-  onToggle:    (id: string, active: boolean, name: string, siteCount: number, employeeCount: number) => void
+  onToggle:    (id: string, active: boolean, name: string, siteCount: number, employeeCount: number, version: number) => void
 }
 
 function PolicyCard({ policy, onEdit, onDuplicate, onToggle }: PolicyCardProps) {
@@ -114,7 +116,7 @@ function PolicyCard({ policy, onEdit, onDuplicate, onToggle }: PolicyCardProps) 
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem
-                onClick={(e) => { e.stopPropagation(); onToggle(policy.id, !policy.is_active, policy.name, policy.site_count, policy.employee_count) }}
+                onClick={(e) => { e.stopPropagation(); onToggle(policy.id, !policy.is_active, policy.name, policy.site_count, policy.employee_count, policy.version) }}
                 className={policy.is_active ? 'text-destructive' : 'text-success'}
               >
                 {policy.is_active ? (
@@ -229,15 +231,20 @@ export default function RotationPolicies() {
       toast.error(err.message ?? 'Failed to duplicate policy'),
   })
 
+  const versionConflict = useVersionConflict([['rotation-policies']])
+
   const toggleMutation = useMutation({
-    mutationFn: ({ id, is_active }: { id: string; is_active: boolean }) =>
-      api.put(`/masters/rotation-policies/${id}`, { is_active }),
+    mutationFn: ({ id, is_active, version }: { id: string; is_active: boolean; version?: number }) =>
+      api.put(`/masters/rotation-policies/${id}`, withExpectedVersion({ is_active }, { version })),
     onSuccess: (_, vars) => {
       toast.success(vars.is_active ? 'Policy restored' : 'Policy archived')
       queryClient.invalidateQueries({ queryKey: ['rotation-policies'] })
       queryClient.invalidateQueries({ queryKey: ['rotation-policies-list'] })
     },
-    onError: () => toast.error('Failed to update policy'),
+    onError: (e: Error) => {
+      if (versionConflict(e)) return
+      toast.error('Failed to update policy')
+    },
   })
 
   const handleEdit = useCallback(
@@ -251,9 +258,9 @@ export default function RotationPolicies() {
   )
 
   const handleToggle = useCallback(
-    (id: string, active: boolean, name: string, siteCount: number, employeeCount: number) => {
+    (id: string, active: boolean, name: string, siteCount: number, employeeCount: number, version: number) => {
       if (!active && !confirm(`Archive "${name}"? It is assigned to ${siteCount} site(s) and ${employeeCount} employee(s).`)) return
-      toggleMutation.mutate({ id, is_active: active })
+      toggleMutation.mutate({ id, is_active: active, version })
     },
     [toggleMutation],
   )

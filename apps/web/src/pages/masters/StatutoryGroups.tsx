@@ -15,6 +15,7 @@ import {
 import { ConfirmDialog }                          from '@/components/ui/ConfirmDialog'
 import { api }                                    from '@/lib/api/client'
 import { useAuthStore }                           from '@/stores/authStore'
+import { useVersionConflict, withExpectedVersion } from '@/hooks/useVersionConflict'
 
 interface StatutoryGroup {
   id:               string
@@ -29,10 +30,11 @@ interface StatutoryGroup {
   pf_wage_ceiling:  number | null
   esi_wage_ceiling: number | null
   is_active:        boolean
+  version:          number
   created_at:       string
 }
 
-const EMPTY: Omit<StatutoryGroup, 'id' | 'created_at'> = {
+const EMPTY: Omit<StatutoryGroup, 'id' | 'created_at' | 'version'> = {
   code: '', name: '', state: '',
   pf_enabled: true, esi_enabled: true, pt_enabled: false, lwf_enabled: false,
   pf_ceiling_mode: 'default',
@@ -93,6 +95,8 @@ export function StatutoryGroups() {
   const setBool = (key: keyof typeof EMPTY) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setForm((p) => ({ ...p, [key]: e.target.checked }))
 
+  const versionConflict = useVersionConflict([['statutory-groups']])
+
   const saveMut = useMutation({
     mutationFn: (body: typeof EMPTY) => {
       const payload = {
@@ -102,7 +106,7 @@ export function StatutoryGroups() {
         esi_wage_ceiling: body.esi_wage_ceiling || null,
       }
       return editItem
-        ? api.put(`/masters/statutory-groups/${editItem.id}`, payload)
+        ? api.put(`/masters/statutory-groups/${editItem.id}`, withExpectedVersion(payload, editItem))
         : api.post('/masters/statutory-groups', payload)
     },
     onSuccess: () => {
@@ -111,6 +115,7 @@ export function StatutoryGroups() {
       toast.success(editItem ? 'Statutory group updated' : 'Statutory group created')
     },
     onError: (e: Error) => {
+      if (versionConflict(e)) return
       setErr(e.message ?? 'Failed to save')
       toast.error('Save failed', { description: e.message })
     },

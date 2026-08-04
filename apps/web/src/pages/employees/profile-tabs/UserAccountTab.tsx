@@ -20,10 +20,11 @@ import {
 } from 'lucide-react'
 import { KV, type BadgeVariant, type Section } from './shared'
 import { fmtDate } from './format-helpers'
+import { useVersionConflict, withExpectedVersion } from '@/hooks/useVersionConflict'
 
 interface UserAccountData {
   status:    'no_account' | 'pending_verification' | 'active' | 'suspended'
-  profile:   { id: string; role: string; is_active: boolean; full_name: string; created_at: string } | null
+  profile:   { id: string; role: string; is_active: boolean; full_name: string; created_at: string; version: number } | null
   auth_user: { email: string; email_confirmed_at: string | null; last_sign_in_at: string | null; created_at: string } | null
   email:     string | null
 }
@@ -78,13 +79,19 @@ export function UserAccountTab({ id, isAdmin, subTab, visited, employeeEmail }: 
     onError: (e: Error) => toast.error('Failed to create account', { description: e.message }),
   })
 
+  const versionConflict = useVersionConflict([['user-account', id]])
+
   const patchAccountMutation = useMutation({
-    mutationFn: (action: 'suspend' | 'reactivate') => api.patch(`/employees/${id}/user-account`, { action }),
+    mutationFn: (action: 'suspend' | 'reactivate') =>
+      api.patch(`/employees/${id}/user-account`, withExpectedVersion({ action }, userAccountData?.profile)),
     onSuccess: (_, action) => {
       toast.success(action === 'suspend' ? 'Account suspended' : 'Account reactivated')
       refetchUserAccount()
     },
-    onError: (e: Error) => toast.error('Failed to update account', { description: e.message }),
+    onError: (e: Error) => {
+      if (versionConflict(e)) return
+      toast.error('Failed to update account', { description: e.message })
+    },
   })
   const [resetPwdOpen, setResetPwdOpen]   = useState(false)
   const [resetPwdValue, setResetPwdValue] = useState('')

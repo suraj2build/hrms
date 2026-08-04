@@ -30,6 +30,7 @@ import { api }            from '@/lib/api/client'
 import { useAuthStore }   from '@/stores/authStore'
 import { formatDate }     from '@/lib/utils'
 import { cn }             from '@/lib/utils'
+import { useVersionConflict, withExpectedVersion } from '@/hooks/useVersionConflict'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -55,6 +56,7 @@ interface RosterPolicy {
     matrix?:         PolicyMatrix
   }
   is_active:       boolean
+  version:         number
   created_at:      string
   updated_at:      string | null
   site_count?:     number
@@ -334,9 +336,11 @@ export function RosterPolicies() {
     onError: (e: Error) => toast.error('Failed to duplicate policy', { description: e.message }),
   })
 
+  const versionConflict = useVersionConflict([['roster-policies']])
+
   const toggleActiveMut = useMutation({
-    mutationFn: ({ id, is_active }: { id: string; is_active: boolean }) =>
-      api.put(`/masters/rosters/${id}`, { is_active }),
+    mutationFn: ({ id, is_active, version }: { id: string; is_active: boolean; version?: number }) =>
+      api.put(`/masters/rosters/${id}`, withExpectedVersion({ is_active }, { version })),
     onSuccess: (_, { is_active }) => {
       qc.invalidateQueries({ queryKey: ['roster-policies'] })
       qc.invalidateQueries({ queryKey: ['rosters'] })
@@ -344,7 +348,10 @@ export function RosterPolicies() {
       qc.invalidateQueries({ queryKey: ['roster-templates'] })
       toast.success(is_active ? 'Policy restored' : 'Policy archived')
     },
-    onError: (e: Error) => toast.error('Failed to update policy', { description: e.message }),
+    onError: (e: Error) => {
+      if (versionConflict(e)) return
+      toast.error('Failed to update policy', { description: e.message })
+    },
   })
 
   // ── Render ────────────────────────────────────────────────────────────────
@@ -430,7 +437,7 @@ export function RosterPolicies() {
               onDuplicate={() => duplicateMut.mutate(policy.id)}
               onToggleActive={() => {
                 if (policy.is_active && !confirm(`Archive "${policy.name}"? It is assigned to ${policy.site_count ?? 0} site(s) and ${policy.employee_count ?? 0} employee(s).`)) return
-                toggleActiveMut.mutate({ id: policy.id, is_active: !policy.is_active })
+                toggleActiveMut.mutate({ id: policy.id, is_active: !policy.is_active, version: policy.version })
               }}
             />
           ))}

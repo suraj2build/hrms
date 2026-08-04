@@ -19,6 +19,7 @@ import {
 import { ConfirmDialog }                          from '@/components/ui/ConfirmDialog'
 import { api }                                    from '@/lib/api/client'
 import { useAuthStore }                           from '@/stores/authStore'
+import { useVersionConflict, withExpectedVersion } from '@/hooks/useVersionConflict'
 
 interface PayrollGroup {
   id:               string
@@ -30,6 +31,7 @@ interface PayrollGroup {
   payout_day:       number
   currency_code:    string
   is_active:        boolean
+  version:          number
   created_at:       string
 }
 
@@ -39,7 +41,7 @@ const CYCLE_LABELS: Record<string, string> = {
   weekly:   'Weekly',
 }
 
-const EMPTY: Omit<PayrollGroup, 'id' | 'created_at'> = {
+const EMPTY: Omit<PayrollGroup, 'id' | 'created_at' | 'version'> = {
   code: '', name: '', cycle_type: 'monthly',
   cycle_start_day: 1, cutoff_day: 25, payout_day: 1, currency_code: 'INR', is_active: true,
 }
@@ -131,10 +133,12 @@ export function PayrollGroups() {
     setDlgOpen(true)
   }
 
+  const versionConflict = useVersionConflict([['payroll-groups']])
+
   const saveMut = useMutation({
     mutationFn: (body: typeof EMPTY) =>
       editItem
-        ? api.put(`/masters/payroll-groups/${editItem.id}`, body)
+        ? api.put(`/masters/payroll-groups/${editItem.id}`, withExpectedVersion(body, editItem))
         : api.post('/masters/payroll-groups', body),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['payroll-groups'] })
@@ -142,6 +146,7 @@ export function PayrollGroups() {
       toast.success(editItem ? 'Payroll group updated' : 'Payroll group created')
     },
     onError: (e: Error) => {
+      if (versionConflict(e)) return
       setErr(e.message ?? 'Failed to save')
       toast.error('Save failed', { description: e.message })
     },

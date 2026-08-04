@@ -44,6 +44,7 @@ import { MergeDeleteDialog }    from '@/components/ui/merge-delete-dialog'
 import { api }                  from '@/lib/api/client'
 import { useAuthStore }         from '@/stores/authStore'
 import { cn }                   from '@/lib/utils'
+import { useVersionConflict, withExpectedVersion } from '@/hooks/useVersionConflict'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -58,6 +59,7 @@ interface WorkLocation {
   country:   string
   pincode:   string | null
   is_active: boolean
+  version:   number
   created_at: string
 }
 
@@ -598,6 +600,8 @@ export function WorkLocations() {
   }
 
   // ── Mutations ─────────────────────────────────────────────────────────────
+  const versionConflict = useVersionConflict([['work-locations']])
+
   const saveMut = useMutation({
     mutationFn: (body: typeof EMPTY_FORM) => {
       const payload = {
@@ -612,7 +616,7 @@ export function WorkLocations() {
         is_active: body.is_active,
       }
       return editItem
-        ? api.put(`/masters/work-locations/${editItem.id}`, payload)
+        ? api.put(`/masters/work-locations/${editItem.id}`, withExpectedVersion(payload, editItem))
         : api.post('/masters/work-locations', payload)
     },
     onSuccess: () => {
@@ -621,6 +625,7 @@ export function WorkLocations() {
       toast.success(editItem ? 'Work location updated' : 'Work location created')
     },
     onError: (e: Error) => {
+      if (versionConflict(e)) return
       setErr(e?.message ?? 'Failed to save')
       toast.error('Failed to save work location')
     },

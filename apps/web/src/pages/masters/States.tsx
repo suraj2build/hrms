@@ -23,6 +23,7 @@ import { api }                                    from '@/lib/api/client'
 import { useAuthStore }                           from '@/stores/authStore'
 import { MergeDeleteDialog }                      from '@/components/ui/merge-delete-dialog'
 import { useOpenOnParam }                         from '@/lib/runbooks/useOpenOnParam'
+import { useVersionConflict, withExpectedVersion } from '@/hooks/useVersionConflict'
 
 interface State {
   id:             string
@@ -35,6 +36,7 @@ interface State {
   lwf_frequency:  string | null
   min_wage_zone:  string | null
   is_active:      boolean
+  version:        number
   created_at:     string
 }
 
@@ -90,6 +92,8 @@ export function States() {
     setDlgOpen(true)
   }
 
+  const versionConflict = useVersionConflict([['states']])
+
   const saveMut = useMutation({
     mutationFn: (body: typeof EMPTY_FORM) => {
       const payload = {
@@ -102,7 +106,7 @@ export function States() {
         is_active:      body.is_active,
       }
       return editItem
-        ? api.put(`/masters/states/${editItem.id}`, payload)
+        ? api.put(`/masters/states/${editItem.id}`, withExpectedVersion(payload, editItem))
         : api.post('/masters/states', payload)
     },
     onSuccess: () => {
@@ -111,6 +115,7 @@ export function States() {
       toast.success(editItem ? 'State updated' : 'State created')
     },
     onError: (e: Error) => {
+      if (versionConflict(e)) return
       setErr(e.message ?? 'Failed to save')
       toast.error('Failed to save state')
     },

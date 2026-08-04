@@ -37,6 +37,7 @@ import { api } from '@/lib/api/client'
 import { useAuthStore } from '@/stores/authStore'
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
+import { useVersionConflict, withExpectedVersion } from '@/hooks/useVersionConflict'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -50,6 +51,7 @@ interface OrgNode {
   department: string | null
   profile_photo: string | null
   manager_id: string | null
+  version?: number
   children: OrgNode[]
 }
 
@@ -227,9 +229,11 @@ function ChangeManagerDialog({
   })
   const results = searchResp?.data ?? []
 
+  const versionConflict = useVersionConflict([['employees', 'org-tree']])
+
   const mutation = useMutation({
     mutationFn: ({ empId, managerId }: { empId: string; managerId: string | null }) =>
-      api.put(`/employees/${empId}/manager`, { manager_id: managerId }),
+      api.put(`/employees/${empId}/manager`, withExpectedVersion({ manager_id: managerId }, target)),
     onSuccess: (_data, vars) => {
       qc.invalidateQueries({ queryKey: ['employees', 'org-tree'] })
       // Employee Profile's Job tab reads the same manager under a separate key.
@@ -242,6 +246,7 @@ function ChangeManagerDialog({
       handleClose()
     },
     onError: (e: unknown) => {
+      if (versionConflict(e)) return
       const err = e as { body?: { message?: string }; message?: string } | null
       toast.error('Could not update manager', {
         description: err?.body?.message ?? err?.message ?? 'Check for circular reporting chains',

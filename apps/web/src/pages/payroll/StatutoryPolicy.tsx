@@ -29,6 +29,7 @@ import { Button }        from '@/components/ui/button'
 import { Badge }         from '@/components/ui/badge'
 import { api }           from '@/lib/api/client'
 import { useAuthStore }  from '@/stores/authStore'
+import { useVersionConflict, withExpectedVersion } from '@/hooks/useVersionConflict'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -39,6 +40,7 @@ interface CompensationPolicy {
   pf_employer_rate: number
   pf_cap_amount:    number
   is_configured:    boolean
+  version?:         number
 }
 
 interface EpfConfig {
@@ -126,13 +128,18 @@ export function StatutoryPolicy() {
     }
   }, [policy])
 
+  const versionConflict = useVersionConflict([['compensation-policy']])
+
   const save = useMutation({
     mutationFn: (body: object) => api.put('/compensation-policy', body),
     onSuccess: () => {
       toast.success('Statutory policy saved')
       qc.invalidateQueries({ queryKey: ['compensation-policy'] })
     },
-    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : 'Failed to save policy'),
+    onError: (e: unknown) => {
+      if (versionConflict(e)) return
+      toast.error(e instanceof Error ? e.message : 'Failed to save policy')
+    },
   })
 
   // ── Payroll statutory settings (TDS enable + default regime) ────────────────
@@ -158,10 +165,10 @@ export function StatutoryPolicy() {
   })
 
   function handleSave() {
-    save.mutate({
+    save.mutate(withExpectedVersion({
       nlc_enabled: form.nlc_enabled,
       pf_enabled:  form.pf_enabled,
-    })
+    }, policy))
   }
 
   if (isLoading) {

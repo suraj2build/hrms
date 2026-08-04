@@ -39,6 +39,7 @@ import { api }              from '@/lib/api/client'
 import { useAuthStore }     from '@/stores/authStore'
 import { cn }               from '@/lib/utils'
 import { useOpenOnParam }   from '@/lib/runbooks/useOpenOnParam'
+import { useVersionConflict, withExpectedVersion } from '@/hooks/useVersionConflict'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -74,6 +75,7 @@ interface Site {
   default_rotation_policy_id:   string | null
   default_leave_policy_id:      string | null
   holiday_group_id:             string | null
+  version:                      number
   created_at:                   string
 }
 
@@ -575,6 +577,8 @@ export function Sites() {
     setDlgOpen(true)
   }
 
+  const versionConflict = useVersionConflict([['sites']])
+
   const saveMut = useMutation({
     mutationFn: (body: typeof EMPTY_FORM) => {
       const payload = {
@@ -608,7 +612,7 @@ export function Sites() {
         holiday_group_id:           body.holiday_group_id           || null,
       }
       return editSite
-        ? api.put(`/masters/sites/${editSite.id}`, payload)
+        ? api.put(`/masters/sites/${editSite.id}`, withExpectedVersion(payload, editSite))
         : api.post('/masters/sites', payload)
     },
     onSuccess: () => {
@@ -617,6 +621,7 @@ export function Sites() {
       toast.success('Site saved')
     },
     onError: (e: Error) => {
+      if (versionConflict(e)) return
       setErr(e.message ?? 'Failed to save')
       toast.error('Failed to save site', { description: e.message })
     },

@@ -15,6 +15,7 @@ import {
 import { ConfirmDialog }                          from '@/components/ui/ConfirmDialog'
 import { api }                                    from '@/lib/api/client'
 import { useAuthStore }                           from '@/stores/authStore'
+import { useVersionConflict, withExpectedVersion } from '@/hooks/useVersionConflict'
 
 interface EmploymentCategory {
   id:                   string
@@ -29,10 +30,11 @@ interface EmploymentCategory {
   notice_period_days:   number
   probation_days:       number
   is_active:            boolean
+  version:              number
   created_at:           string
 }
 
-const EMPTY: Omit<EmploymentCategory, 'id' | 'created_at'> = {
+const EMPTY: Omit<EmploymentCategory, 'id' | 'created_at' | 'version'> = {
   code: '', name: '', description: '',  // code populated by backend on create
   benefits_eligible: true, pf_applicable: true, esi_applicable: true,
   pt_applicable: true, gratuity_eligible: true,
@@ -91,11 +93,13 @@ export function EmploymentCategories() {
   const setBool = (key: keyof typeof EMPTY) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setForm((p) => ({ ...p, [key]: e.target.checked }))
 
+  const versionConflict = useVersionConflict([['employment-categories']])
+
   const saveMut = useMutation({
     mutationFn: (body: typeof EMPTY) => {
       const payload = { ...body, description: body.description || null }
       return editItem
-        ? api.put(`/masters/employment-categories/${editItem.id}`, payload)
+        ? api.put(`/masters/employment-categories/${editItem.id}`, withExpectedVersion(payload, editItem))
         : api.post('/masters/employment-categories', payload)
     },
     onSuccess: () => {
@@ -104,6 +108,7 @@ export function EmploymentCategories() {
       toast.success(editItem ? 'Category updated' : 'Category created')
     },
     onError: (e: Error) => {
+      if (versionConflict(e)) return
       setErr(e.message ?? 'Failed to save')
       toast.error('Save failed', { description: e.message })
     },

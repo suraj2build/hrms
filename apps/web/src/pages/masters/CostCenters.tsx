@@ -21,6 +21,7 @@ import {
 import { api }                                    from '@/lib/api/client'
 import { useAuthStore }                           from '@/stores/authStore'
 import { MergeDeleteDialog }                      from '@/components/ui/merge-delete-dialog'
+import { useVersionConflict, withExpectedVersion } from '@/hooks/useVersionConflict'
 
 interface CostCenter {
   id:          string
@@ -28,6 +29,7 @@ interface CostCenter {
   code:        string | null
   description: string | null
   is_active:   boolean
+  version:     number
   created_at:  string
 }
 
@@ -74,6 +76,8 @@ export function CostCenters() {
     setDlgOpen(true)
   }
 
+  const versionConflict = useVersionConflict([['cost-centers']])
+
   const saveMut = useMutation({
     mutationFn: (body: typeof EMPTY_FORM) => {
       const payload = {
@@ -83,7 +87,7 @@ export function CostCenters() {
         is_active:   body.is_active,
       }
       return editItem
-        ? api.put(`/masters/cost-centers/${editItem.id}`, payload)
+        ? api.put(`/masters/cost-centers/${editItem.id}`, withExpectedVersion(payload, editItem))
         : api.post('/masters/cost-centers', payload)
     },
     onSuccess: () => {
@@ -92,6 +96,7 @@ export function CostCenters() {
       toast.success(editItem ? 'Cost center updated' : 'Cost center created')
     },
     onError: (e: Error) => {
+      if (versionConflict(e)) return
       setErr(e.message ?? 'Failed to save')
       toast.error('Failed to save cost center')
     },

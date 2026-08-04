@@ -16,6 +16,7 @@ import { cn }                                     from '@/lib/utils'
 import { ConfirmDialog }                          from '@/components/ui/ConfirmDialog'
 import { api }                                    from '@/lib/api/client'
 import { useAuthStore }                           from '@/stores/authStore'
+import { useVersionConflict, withExpectedVersion } from '@/hooks/useVersionConflict'
 
 interface Roster {
   id:           string
@@ -23,6 +24,7 @@ interface Roster {
   code:         string | null
   cycle_days:   number
   pattern_json: { weekly_off_days: number[] }
+  version:      number
   created_at:   string
 }
 
@@ -84,6 +86,8 @@ export function Rosters() {
     setDlgOpen(true)
   }
 
+  const versionConflict = useVersionConflict([['rosters']])
+
   const saveMut = useMutation({
     mutationFn: (f: typeof EMPTY_FORM) => {
       const payload = {
@@ -93,11 +97,14 @@ export function Rosters() {
         pattern_json: { weekly_off_days: f.weekly_off_days },
       }
       return editRoster
-        ? api.put(`/masters/rosters/${editRoster.id}`, payload)
+        ? api.put(`/masters/rosters/${editRoster.id}`, withExpectedVersion(payload, editRoster))
         : api.post('/masters/rosters', payload)
     },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['rosters'] }); setDlgOpen(false); toast.success('Roster saved') },
-    onError:   (e: Error) => { setErr(e.message ?? 'Failed to save'); toast.error('Failed to save roster', { description: e.message }) },
+    onError:   (e: Error) => {
+      if (versionConflict(e)) return
+      setErr(e.message ?? 'Failed to save'); toast.error('Failed to save roster', { description: e.message })
+    },
   })
 
   const delMut = useMutation({

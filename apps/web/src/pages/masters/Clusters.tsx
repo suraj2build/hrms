@@ -25,6 +25,7 @@ import { MergeDeleteDialog }                      from '@/components/ui/merge-de
 import { EmployeeSelector }                       from '@/components/filters/EmployeeSelector'
 import { EmployeeLabel }                          from '@/components/employee/EmployeeLabel'
 import { useOpenOnParam }                         from '@/lib/runbooks/useOpenOnParam'
+import { useVersionConflict, withExpectedVersion } from '@/hooks/useVersionConflict'
 
 interface Cluster {
   id:                 string
@@ -35,6 +36,7 @@ interface Cluster {
   parent_cluster_id:  string | null
   description:        string | null
   is_active:          boolean
+  version:            number
   created_at:         string
 }
 
@@ -96,6 +98,8 @@ export function Clusters() {
     setDlgOpen(true)
   }
 
+  const versionConflict = useVersionConflict([['clusters']])
+
   const saveMut = useMutation({
     mutationFn: (body: typeof EMPTY_FORM) => {
       const payload = {
@@ -108,7 +112,7 @@ export function Clusters() {
         is_active:          body.is_active,
       }
       return editItem
-        ? api.put(`/masters/clusters/${editItem.id}`, payload)
+        ? api.put(`/masters/clusters/${editItem.id}`, withExpectedVersion(payload, editItem))
         : api.post('/masters/clusters', payload)
     },
     onSuccess: () => {
@@ -117,6 +121,7 @@ export function Clusters() {
       toast.success(editItem ? 'Cluster updated' : 'Cluster created')
     },
     onError: (e: Error) => {
+      if (versionConflict(e)) return
       setErr(e.message ?? 'Failed to save')
       toast.error('Failed to save cluster')
     },

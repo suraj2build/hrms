@@ -15,6 +15,7 @@ import {
 import { api }                                    from '@/lib/api/client'
 import { useAuthStore }                           from '@/stores/authStore'
 import { MergeDeleteDialog }                      from '@/components/ui/merge-delete-dialog'
+import { useVersionConflict, withExpectedVersion } from '@/hooks/useVersionConflict'
 
 interface Grade {
   id:             string
@@ -25,10 +26,11 @@ interface Grade {
   ctc_min_annual: number | null
   ctc_max_annual: number | null
   is_active:      boolean
+  version:        number
   created_at:     string
 }
 
-const EMPTY: Omit<Grade, 'id' | 'created_at'> = {
+const EMPTY: Omit<Grade, 'id' | 'created_at' | 'version'> = {
   code: '', name: '', description: '', level_order: 0,
   ctc_min_annual: null, ctc_max_annual: null, is_active: true,
 }
@@ -74,6 +76,8 @@ export function Grades() {
     setDlgOpen(true)
   }
 
+  const versionConflict = useVersionConflict([['grades']])
+
   const saveMut = useMutation({
     mutationFn: (body: typeof EMPTY) => {
       const payload = {
@@ -83,7 +87,7 @@ export function Grades() {
         ctc_max_annual: body.ctc_max_annual || null,
       }
       return editItem
-        ? api.put(`/masters/grades/${editItem.id}`, payload)
+        ? api.put(`/masters/grades/${editItem.id}`, withExpectedVersion(payload, editItem))
         : api.post('/masters/grades', payload)
     },
     onSuccess: () => {
@@ -92,6 +96,7 @@ export function Grades() {
       toast.success(editItem ? 'Grade updated' : 'Grade created')
     },
     onError: (e: Error) => {
+      if (versionConflict(e)) return
       setErr(e.message ?? 'Failed to save')
       toast.error('Save failed', { description: e.message })
     },
