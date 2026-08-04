@@ -664,3 +664,54 @@ export function validateSessionSpan(span: LeaveSessionSpan): string[] {
 
   return errors
 }
+
+// ── Year-boundary balance-bucket split (PEND-103) ───────────────────────────
+
+export interface YearBucket {
+  year: number
+  days: number
+}
+
+/**
+ * Group a leave request's per-day breakdown by calendar year, summing
+ * days_charged within each year. A request that doesn't straddle Dec 31 →
+ * Jan 1 still produces a single-element array — this is the general case,
+ * not a special one.
+ *
+ * `employee_leave_balance`/`leave_accrual_ledger` are bucketed by CALENDAR
+ * year only (`year INT NOT NULL DEFAULT EXTRACT(YEAR FROM CURRENT_DATE)`,
+ * migration 036) — there is no fiscal-year concept anywhere in this engine,
+ * so calendar-year grouping is the correct and only split needed.
+ *
+ * Falls back to a single bucket keyed on `fallbackDate`'s year, carrying
+ * `fallbackDays`, when `perDay` is empty/missing — e.g. rows created before
+ * the duration engine existed, or any future `duration_breakdown` shape gap.
+ * This must never hard-fail approval for legacy data.
+ */
+export function splitByCalendarYear(
+  perDay:        PerDayEntry[] | null | undefined,
+  fallbackDate:  string,
+  fallbackDays:  number,
+): YearBucket[] {
+  if (!perDay || perDay.length === 0) {
+    return [{ year: new Date(fallbackDate).getFullYear(), days: fallbackDays }]
+  }
+
+  const byYear = new Map<number, number>()
+  for (const entry of perDay) {
+    if (!entry.days_charged) continue // holidays/weekly-offs/etc. charge 0 — skip, no bucket needed
+    const year = Number(entry.date.slice(0, 4))
+    byYear.set(year, (byYear.get(year) ?? 0) + entry.days_charged)
+  }
+
+  if (byYear.size === 0) {
+    // Every day charged 0 (shouldn't happen for an approved/payable request,
+    // but don't produce an empty bucket array — fall back rather than skip
+    // the balance step entirely).
+    return [{ year: new Date(fallbackDate).getFullYear(), days: fallbackDays }]
+  }
+
+  return [...byYear.entries()]
+    .sort(([a], [b]) => a - b)
+    .map(([year, days]) => ({ year, days: Math.round(days * 100) / 100 }))
+}

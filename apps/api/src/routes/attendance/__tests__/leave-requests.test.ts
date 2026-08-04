@@ -211,7 +211,7 @@ describe('POST /leave-requests/:id/approve', () => {
       p_is_paid:       true,
       p_employee_id:   row.employee_id,
       p_leave_type_id: row.leave_type_id,
-      p_days:          row.computed_days,
+      p_buckets:       [{ year: 2099, days: row.computed_days }],
       p_year:          2099,
     }))
   })
@@ -279,6 +279,35 @@ describe('POST /leave-requests/:id/approve', () => {
     expect(JSON.parse(res.body).message).toMatch(/locked/)
     expect(rpcMock).not.toHaveBeenCalled()
   })
+
+  it('year-straddling request (Dec 29 – Jan 2) splits into two p_buckets, one per calendar year (PEND-103)', async () => {
+    const perDay = (date: string, days_charged: number) => ({
+      date, day_of_week: 'Mon', is_holiday: false, is_weekly_off: false, is_sandwich: false,
+      is_attendance_overlap: false, session: 'full_day', days_charged, reason: '',
+    })
+    const row = leaveRequestRow({
+      from_date: '2099-12-29', to_date: '2100-01-02', computed_days: 5,
+      duration_breakdown: {
+        per_day: [
+          perDay('2099-12-29', 1), perDay('2099-12-30', 1), perDay('2099-12-31', 1),
+          perDay('2100-01-01', 1), perDay('2100-01-02', 1),
+        ],
+      },
+    })
+    getLeaveRequestMock.mockResolvedValue(okResult(row))
+    const { app, rpcMock } = await buildApp()
+    rpcMock.mockResolvedValue({ data: { id: REQUEST_ID, status: 'APPROVED' }, error: null })
+
+    const res = await app.inject({ method: 'POST', url: `/leave-requests/${REQUEST_ID}/approve`, headers: HEADERS })
+
+    expect(res.statusCode).toBe(200)
+    expect(rpcMock).toHaveBeenCalledWith('approve_leave_request_atomic', expect.objectContaining({
+      p_buckets: [
+        { year: 2099, days: 3 },
+        { year: 2100, days: 2 },
+      ],
+    }))
+  })
 })
 
 // ── Reverse (cancel-approved) ────────────────────────────────────────────────
@@ -301,7 +330,7 @@ describe('POST /leave-requests/:id/cancel-approved', () => {
       p_is_paid:       true,
       p_employee_id:   row.employee_id,
       p_leave_type_id: row.leave_type_id,
-      p_days:          row.computed_days,
+      p_buckets:       [{ year: 2099, days: row.computed_days }],
       p_year:          2099,
     }))
     expect(publishMock).toHaveBeenCalledOnce()

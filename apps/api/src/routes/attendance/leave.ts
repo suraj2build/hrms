@@ -500,7 +500,7 @@ export default async function leaveRoute(fastify: FastifyInstance) {
             is_expired:        false,
             notes:             `Reversal — lost race on concurrent approval of application ${id}`,
             source_request_id: id,
-          }, { onConflict: 'tenant_id,accrual_type,source_request_id', ignoreDuplicates: true })
+          }, { onConflict: 'tenant_id,accrual_type,source_request_id,year', ignoreDuplicates: true })
         if (ledgerErr) {
           req.log.error({ err: ledgerErr, id }, 'leave approve: race-rollback ledger write failed — balance may be double-deducted')
         }
@@ -618,7 +618,7 @@ export default async function leaveRoute(fastify: FastifyInstance) {
           is_expired:        false,
           notes:             `Leave consumed ${app.from_date}…${app.to_date}`,
           source_request_id: app.id,
-        }, { onConflict: 'tenant_id,accrual_type,source_request_id', ignoreDuplicates: true })
+        }, { onConflict: 'tenant_id,accrual_type,source_request_id,year', ignoreDuplicates: true })
       if (ledgerErr) req.log.warn({ err: ledgerErr }, 'leave consumption ledger write failed — approval committed, balance deducted')
     }
 
@@ -933,7 +933,7 @@ export default async function leaveRoute(fastify: FastifyInstance) {
           is_expired:        false,
           notes:             `Leave reversal — cancelled application ${app.from_date}…${app.to_date}`,
           source_request_id: app.id,
-        }, { onConflict: 'tenant_id,accrual_type,source_request_id', ignoreDuplicates: true })
+        }, { onConflict: 'tenant_id,accrual_type,source_request_id,year', ignoreDuplicates: true })
 
       if (ledgerErr) {
         req.log.warn({ err: ledgerErr }, 'leave cancel: reversal ledger write failed — cancellation committed')
@@ -1592,7 +1592,7 @@ export default async function leaveRoute(fastify: FastifyInstance) {
                   accrual_type: 'consumption', days: -Math.abs(wd.computed_days),
                   accrued_on: from_date, is_expired: false,
                   notes: `Leave consumed ${from_date}…${to_date} (bulk)`, source_request_id: appId,
-                }, { onConflict: 'tenant_id,accrual_type,source_request_id', ignoreDuplicates: true })
+                }, { onConflict: 'tenant_id,accrual_type,source_request_id,year', ignoreDuplicates: true })
               if (ledgerErr) req.log.warn({ err: ledgerErr, emp_id }, 'bulk-assign consumption ledger write failed — balance deducted')
             }
           }

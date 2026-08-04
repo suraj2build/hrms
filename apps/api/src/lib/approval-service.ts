@@ -37,6 +37,7 @@ import { getLocalDate }                         from './org-context.js'
 import { isSelfApproval }                       from './approval-guards.js'
 import { gateApprove, gateReject }              from './approval-orchestrator.js'
 import { getLockedMonths, monthsInRange }       from './period-lock.js'
+import { splitByCalendarYear, type PerDayEntry } from './leave-duration-engine.js'
 
 // ── Shared types ───────────────────────────────────────────────────────────────
 
@@ -247,20 +248,35 @@ export async function approveLeaveRequest(
   }
 
   // ── 4. Balance validation (paid leaves only) ─────────────────────────────────
+  // PEND-103: a request spanning a calendar-year boundary (e.g. Dec 28-Jan 3)
+  // must be validated — and later deducted — per year-bucket, not as one
+  // lump sum against from_date's year alone. A pooled/single-year check here
+  // would either falsely reject a valid split-year approval (this year's
+  // bucket alone doesn't cover the total, even though the true per-bucket
+  // sum does) or let a genuinely-short bucket slip through undetected until
+  // the RPC's own strict per-bucket check aborts it there instead — this
+  // pre-check exists only to fail fast with an accurate currentBalance,
+  // mirroring the RPC's per-bucket strictness rather than second-guessing it.
   const lt = req.leave_types as { id: string; name: string; is_paid: boolean; allow_sandwich: boolean } | null
+  const buckets = splitByCalendarYear(
+    (req.duration_breakdown as { per_day?: PerDayEntry[] } | null)?.per_day,
+    req.from_date,
+    req.computed_days,
+  )
   if (lt?.is_paid) {
-    const year  = new Date(req.from_date).getFullYear()
-    const check = await validateBalance(
-      supabase, tenantId, req.employee_id, req.leave_type_id, req.computed_days, year,
-    )
-    if (!check.valid) {
-      return {
-        ok:    false,
-        error: {
-          type:           'INSUFFICIENT_BALANCE',
-          message:        check.message ?? 'Insufficient leave balance',
-          currentBalance: check.currentBalance,
-        },
+    for (const bucket of buckets) {
+      const check = await validateBalance(
+        supabase, tenantId, req.employee_id, req.leave_type_id, bucket.days, bucket.year,
+      )
+      if (!check.valid) {
+        return {
+          ok:    false,
+          error: {
+            type:           'INSUFFICIENT_BALANCE',
+            message:        check.message ?? `Insufficient leave balance for ${bucket.year}`,
+            currentBalance: check.currentBalance,
+          },
+        }
       }
     }
   }
@@ -279,7 +295,7 @@ export async function approveLeaveRequest(
       p_is_paid:       lt?.is_paid ?? false,
       p_employee_id:   req.employee_id,
       p_leave_type_id: req.leave_type_id,
-      p_days:          req.computed_days,
+      p_buckets:       buckets,
       p_year:          year,
     },
   )
@@ -478,6 +494,15 @@ export async function reverseApprovedLeaveRequest(
 
   const lt   = req.leave_types as { id: string; name: string; is_paid: boolean } | null
   const year = new Date(req.from_date).getFullYear()
+  // PEND-103: credit back the same per-year buckets approval originally
+  // deducted from — a single lump-sum reversal keyed on from_date's year
+  // alone would only restore one of a split-year approval's two buckets,
+  // permanently losing the other year's credit-back.
+  const buckets = splitByCalendarYear(
+    (req.duration_breakdown as { per_day?: PerDayEntry[] } | null)?.per_day,
+    req.from_date,
+    req.computed_days,
+  )
 
   // ── 4. Atomic reversal (status + credit-back + ledger) ───────────────────────
   const { data: rpcData, error: rpcErr } = await supabase.rpc('reverse_leave_request_atomic', {
@@ -487,7 +512,7 @@ export async function reverseApprovedLeaveRequest(
     p_is_paid:       lt?.is_paid ?? false,
     p_employee_id:   req.employee_id,
     p_leave_type_id: req.leave_type_id,
-    p_days:          req.computed_days,
+    p_buckets:       buckets,
     p_year:          year,
   })
   if (rpcErr) return { ok: false, error: parseRpcError(rpcErr) }
