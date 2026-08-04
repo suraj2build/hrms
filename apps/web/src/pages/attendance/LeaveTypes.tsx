@@ -31,6 +31,7 @@ import { toast }         from 'sonner'
 import { api }           from '@/lib/api/client'
 import { useAuthStore }  from '@/stores/authStore'
 import { cn }            from '@/lib/utils'
+import { useVersionConflict, withExpectedVersion } from '@/hooks/useVersionConflict'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -43,6 +44,7 @@ interface LeaveType {
   allow_hourly:      boolean
   max_hours_per_day: number | null
   is_active:         boolean
+  version:           number
   created_at:        string
 }
 
@@ -136,11 +138,14 @@ export function LeaveTypes() {
   const leaveTypes = data?.data ?? []
 
   // ── Mutations ──────────────────────────────────────────────────────────────
+  const versionConflict = useVersionConflict([['leave-types']])
+
   const saveMutation = useMutation({
-    mutationFn: (body: LeaveTypeForm) =>
-      editId
-        ? api.put(`/masters/leave-types/${editId}`, body)
-        : api.post('/masters/leave-types', body),
+    mutationFn: (body: LeaveTypeForm) => {
+      if (!editId) return api.post('/masters/leave-types', body)
+      const editingRow = leaveTypes.find(lt => lt.id === editId)
+      return api.put(`/masters/leave-types/${editId}`, withExpectedVersion({ ...body }, editingRow))
+    },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['leave-types'] })
       setSuccess(editId ? 'Leave type updated.' : 'Leave type created.')
@@ -150,7 +155,10 @@ export function LeaveTypes() {
       }, 2000)
       toast.success('Leave type saved')
     },
-    onError: (e: Error) => toast.error('Failed to save leave type', { description: e.message }),
+    onError: (e: Error) => {
+      if (versionConflict(e)) return
+      toast.error('Failed to save leave type', { description: e.message })
+    },
   })
 
   const seedMutation = useMutation<{ data: { created: number; skipped: number } }, Error>({

@@ -32,6 +32,7 @@ import { Badge }              from '@/components/ui/badge'
 import { api }                from '@/lib/api/client'
 import { useAuthStore }       from '@/stores/authStore'
 import { cn }                 from '@/lib/utils'
+import { useVersionConflict, withExpectedVersion } from '@/hooks/useVersionConflict'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -41,6 +42,7 @@ interface Holiday {
   name:             string
   is_optional:      boolean
   holiday_group_id: string | null
+  version?:         number
 }
 
 interface HolidayGroup {
@@ -202,15 +204,20 @@ export function Holidays() {
   })
 
   // ── Edit holiday ───────────────────────────────────────────────────────────
+  const versionConflict = useVersionConflict([MATRIX_KEY])
+
   const editMutation = useMutation({
-    mutationFn: ({ id, name, date, is_optional }: { id: string; name: string; date: string; is_optional: boolean }) =>
-      api.patch(`/masters/holidays/${id}`, { name, date, is_optional }),
+    mutationFn: ({ id, name, date, is_optional, item }: { id: string; name: string; date: string; is_optional: boolean; item: Holiday }) =>
+      api.patch(`/masters/holidays/${id}`, withExpectedVersion({ name, date, is_optional }, item)),
     onSuccess: () => {
       invalidateHolidayCaches()
       setEditId(null)
       toast.success('Holiday updated')
     },
-    onError: (e: unknown) => toast.error('Failed', { description: e instanceof Error ? e.message : undefined }),
+    onError: (e: unknown) => {
+      if (versionConflict(e)) return
+      toast.error('Failed', { description: e instanceof Error ? e.message : undefined })
+    },
   })
 
   // ── Delete holiday ─────────────────────────────────────────────────────────
@@ -405,7 +412,7 @@ export function Holidays() {
                         {isEditing ? (
                           <div className="flex items-center justify-end gap-1">
                             <Button size="sm" className="h-6 text-[10px]" disabled={editMutation.isPending}
-                              onClick={() => editMutation.mutate({ id: h.id, name: editName, date: editDate, is_optional: editOptional })}>
+                              onClick={() => editMutation.mutate({ id: h.id, name: editName, date: editDate, is_optional: editOptional, item: h })}>
                               {editMutation.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <><Check className="h-3 w-3 mr-0.5" />Save</>}
                             </Button>
                             <Button size="sm" variant="outline" className="h-6 text-[10px]" onClick={() => setEditId(null)}>✕</Button>

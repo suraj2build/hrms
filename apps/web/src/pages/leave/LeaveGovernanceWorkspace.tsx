@@ -61,6 +61,7 @@ import { api }           from '@/lib/api/client'
 import { EmployeeLabel }  from '@/components/employee/EmployeeLabel'
 import { useAuthStore }  from '@/stores/authStore'
 import { cn, fmtDate }   from '@/lib/utils'
+import { useVersionConflict, withExpectedVersion } from '@/hooks/useVersionConflict'
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -78,6 +79,7 @@ interface DateType {
   description: string | null
   is_system:   boolean
   is_active:   boolean
+  version:     number
   created_at:  string
 }
 
@@ -530,6 +532,8 @@ export default function LeaveGovernanceWorkspace() {
 
   // ── Mutations ─────────────────────────────────────────────────────────────
 
+  const versionConflict = useVersionConflict([['important-date-types']])
+
   const createMut = useMutation({
     mutationFn: (f: DateTypeForm) =>
       api.post('/masters/important-date-types', {
@@ -548,19 +552,21 @@ export default function LeaveGovernanceWorkspace() {
   })
 
   const updateMut = useMutation({
-    mutationFn: ({ id, f }: { id: string; f: DateTypeForm }) =>
-      api.put(`/masters/important-date-types/${id}`, {
+    mutationFn: ({ id, f, item }: { id: string; f: DateTypeForm; item: DateType }) =>
+      api.put(`/masters/important-date-types/${id}`, withExpectedVersion({
         name:        f.name,
         description: f.description || null,
         is_active:   f.is_active,
-      }),
+      }, item)),
     onSuccess: () => {
       toast.success('Date type updated')
       qc.invalidateQueries({ queryKey: ['important-date-types'] })
       setDialog(null)
     },
-    onError: (err) =>
-      toast.error(errMessage(err, 'Failed to update date type')),
+    onError: (err) => {
+      if (versionConflict(err)) return
+      toast.error(errMessage(err, 'Failed to update date type'))
+    },
   })
 
   const deleteMut = useMutation({
@@ -575,10 +581,13 @@ export default function LeaveGovernanceWorkspace() {
   })
 
   const toggleMut = useMutation({
-    mutationFn: ({ id, is_active }: { id: string; is_active: boolean }) =>
-      api.put(`/masters/important-date-types/${id}`, { is_active }),
+    mutationFn: ({ id, is_active, item }: { id: string; is_active: boolean; item: DateType }) =>
+      api.put(`/masters/important-date-types/${id}`, withExpectedVersion({ is_active }, item)),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['important-date-types'] }),
-    onError:   () => toast.error('Failed to toggle status'),
+    onError:   (err) => {
+      if (versionConflict(err)) return
+      toast.error('Failed to toggle status')
+    },
   })
 
   // ── Form helpers ──────────────────────────────────────────────────────────
@@ -591,7 +600,7 @@ export default function LeaveGovernanceWorkspace() {
     if (dialog?.mode === 'create') {
       createMut.mutate(form)
     } else if (dialog?.mode === 'edit') {
-      updateMut.mutate({ id: dialog.item.id, f: form })
+      updateMut.mutate({ id: dialog.item.id, f: form, item: dialog.item })
     }
   }
 
@@ -817,7 +826,7 @@ export default function LeaveGovernanceWorkspace() {
                           size="icon"
                           className="h-7 w-7"
                           title={dt.is_active ? 'Disable' : 'Enable'}
-                          onClick={() => toggleMut.mutate({ id: dt.id, is_active: !dt.is_active })}
+                          onClick={() => toggleMut.mutate({ id: dt.id, is_active: !dt.is_active, item: dt })}
                         >
                           <Power className={cn(
                             'h-3.5 w-3.5',

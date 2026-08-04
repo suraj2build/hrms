@@ -36,6 +36,7 @@ import { api }            from '@/lib/api/client'
 import { useAuthStore }   from '@/stores/authStore'
 import { toast }          from 'sonner'
 import { cn }             from '@/lib/utils'
+import { useVersionConflict, withExpectedVersion } from '@/hooks/useVersionConflict'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -48,6 +49,7 @@ interface AttendancePolicyRow {
   half_day_threshold_pct:    number
   excessive_hours_threshold: number
   is_default:                boolean
+  version:                   number
   created_at:                string
   updated_at:                string
 }
@@ -213,11 +215,16 @@ export function AttendancePolicy() {
     onError: (e: Error) => toast.error('Create failed', { description: e.message }),
   })
 
+  const versionConflict = useVersionConflict([['attendance-policies']])
+
   const updateMutation = useMutation({
     mutationFn: (body: typeof EMPTY_FORM) =>
-      api.put(`/masters/attendance-policies/${selectedId}`, body),
+      api.put(`/masters/attendance-policies/${selectedId}`, withExpectedVersion(body, selected)),
     onSuccess: () => { invalidate(); toast.success('Policy updated') },
-    onError:   (e: Error) => toast.error('Update failed', { description: e.message }),
+    onError:   (e: Error) => {
+      if (versionConflict(e)) return
+      toast.error('Update failed', { description: e.message })
+    },
   })
 
   const deleteMutation = useMutation({

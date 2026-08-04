@@ -33,6 +33,7 @@ import { useAuthStore }                                    from '@/stores/authSt
 import { usePeriodLock }                                   from '@/hooks/usePeriodLock'
 import { cn }                                              from '@/lib/utils'
 import { ConfirmDialog }                                   from '@/components/ui/ConfirmDialog'
+import { useVersionConflict, withExpectedVersion }          from '@/hooks/useVersionConflict'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -45,6 +46,7 @@ interface Shift {
   grace_minutes:  number
   is_night_shift: boolean
   is_active:      boolean
+  version:        number
 }
 
 interface FormState {
@@ -103,18 +105,24 @@ export function ShiftMaster() {
 
   // ── Mutations ─────────────────────────────────────────────────────────────────
 
+  const versionConflict = useVersionConflict([['shifts']])
+
   const saveMutation = useMutation({
-    mutationFn: (body: FormState) =>
-      editId
-        ? api.put(`/masters/shifts/${editId}`, body)
-        : api.post('/masters/shifts', body),
+    mutationFn: (body: FormState) => {
+      if (!editId) return api.post('/masters/shifts', body)
+      const editingRow = shifts.find(s => s.id === editId)
+      return api.put(`/masters/shifts/${editId}`, withExpectedVersion({ ...body }, editingRow))
+    },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['shifts'] })
       qc.invalidateQueries({ queryKey: ['shifts-list'] })
       toast.success(editId ? 'Shift updated' : 'Shift created')
       closeForm()
     },
-    onError: (e: Error) => toast.error(editId ? 'Failed to update shift' : 'Failed to create shift', { description: e.message }),
+    onError: (e: Error) => {
+      if (versionConflict(e)) return
+      toast.error(editId ? 'Failed to update shift' : 'Failed to create shift', { description: e.message })
+    },
   })
 
   const deleteMutation = useMutation({

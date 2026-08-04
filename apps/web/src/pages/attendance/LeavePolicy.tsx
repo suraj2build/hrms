@@ -30,6 +30,7 @@ import { api }                  from '@/lib/api/client'
 import { useAuthStore }         from '@/stores/authStore'
 import { cn }                   from '@/lib/utils'
 import { SubTabs }              from '@/components/ui/SubTabs'
+import { useVersionConflict, withExpectedVersion } from '@/hooks/useVersionConflict'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -43,6 +44,7 @@ interface LeaveType {
 interface LeavePolicy {
   id:                     string
   leave_type_id:          string
+  version:                number
   accrual_type:           'monthly' | 'quarterly' | 'yearly' | 'upfront'
   accrual_days_per_year:  number
   max_accrual_balance:    number | null
@@ -90,7 +92,7 @@ interface PolicyWithType extends LeavePolicy {
   leave_types: LeaveType
 }
 
-type PolicyForm = Omit<LeavePolicy, 'id' | 'leave_type_id'>
+type PolicyForm = Omit<LeavePolicy, 'id' | 'leave_type_id' | 'version'>
 
 type PolicyTab = 'accrual' | 'sessions' | 'windows' | 'lifecycle'
 
@@ -1071,11 +1073,13 @@ export function LeavePolicy() {
   const policyById = new Map(policies.map(p => [p.leave_type_id, p]))
 
   // ── Mutations ────────────────────────────────────────────────────────────────
+  const versionConflict = useVersionConflict([['leave-policies']])
+
   const saveMutation = useMutation({
     mutationFn: (body: PolicyForm & { leave_type_id: string }) => {
       const existing = policyById.get(body.leave_type_id)
       return existing
-        ? api.put(`/masters/leave-policies/${existing.id}`, body)
+        ? api.put(`/masters/leave-policies/${existing.id}`, withExpectedVersion(body, existing))
         : api.post('/masters/leave-policies', body)
     },
     onSuccess: () => {
@@ -1083,6 +1087,7 @@ export function LeavePolicy() {
       toast.success('Policy saved')
     },
     onError: (e) => {
+      if (versionConflict(e)) return
       toast.error('Policy save failed', { description: (e as Error).message })
     },
   })
