@@ -16,7 +16,7 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { generateUniqueCode } from '../../lib/generate-code.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
-import { serverError, ErrorCode } from '../../lib/api-errors.js'
+import { serverError, conflictError, ErrorCode } from '../../lib/api-errors.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
 
 const schema = z.object({
@@ -29,6 +29,13 @@ const schema = z.object({
   country:   z.string().optional().default('India'),
   pincode:   z.string().optional(),
   is_active: z.boolean().optional().default(true),
+})
+
+// expected_version is optional so this stays backward-compatible with a
+// frontend that hasn't been updated to send it yet (PEND-105 Phase C) — the
+// CAS check below only runs when a caller actually provides it.
+const updateSchema = schema.partial().extend({
+  expected_version: z.number().int().positive().optional(),
 })
 
 export default async function workLocationsRoutes(fastify: FastifyInstance) {
@@ -57,7 +64,7 @@ export default async function workLocationsRoutes(fastify: FastifyInstance) {
     const data = await fetchAllRows<any>((from, to) => {
       let query = fastify.supabase
         .from('work_locations')
-        .select('id, name, code, site_id, address, city, state, country, pincode, is_active, created_at')
+        .select('id, name, code, site_id, address, city, state, country, pincode, is_active, version, created_at')
         .eq('tenant_id', req.tenantId)
         .order('name')
 
@@ -73,7 +80,7 @@ export default async function workLocationsRoutes(fastify: FastifyInstance) {
   fastify.get('/:id', auth, async (req: any, reply) => {
     const { data, error } = await fastify.supabase
       .from('work_locations')
-      .select('id, name, code, site_id, address, city, state, country, pincode, is_active, created_at')
+      .select('id, name, code, site_id, address, city, state, country, pincode, is_active, version, created_at')
       .eq('id', req.params.id)
       .eq('tenant_id', req.tenantId)
       .maybeSingle()
@@ -112,7 +119,7 @@ export default async function workLocationsRoutes(fastify: FastifyInstance) {
     const { data, error } = await fastify.supabase
       .from('work_locations')
       .insert({ ...parsed.data, code, tenant_id: req.tenantId })
-      .select('id, name, code, site_id, address, city, state, country, pincode, is_active, created_at')
+      .select('id, name, code, site_id, address, city, state, country, pincode, is_active, version, created_at')
       .single()
 
     if (error) {
@@ -129,16 +136,18 @@ export default async function workLocationsRoutes(fastify: FastifyInstance) {
 
   // ── PUT /masters/work-locations/:id ───────────────────────────────────────
   fastify.put('/:id', adminAuth, async (req: any, reply) => {
-    const parsed = schema.partial().safeParse(req.body)
+    const parsed = updateSchema.safeParse(req.body)
     if (!parsed.success)
       return reply.code(400).send({ error: 'VALIDATION', message: parsed.error.issues[0].message })
 
+    const { expected_version, ...fields } = parsed.data
+
     // Validate site_id belongs to this tenant (only when supplied)
-    if (parsed.data.site_id) {
+    if (fields.site_id) {
       const { data: site } = await fastify.supabase
         .from('sites')
         .select('id')
-        .eq('id', parsed.data.site_id)
+        .eq('id', fields.site_id)
         .eq('tenant_id', req.tenantId)
         .maybeSingle()
       if (!site) {
@@ -150,16 +159,39 @@ export default async function workLocationsRoutes(fastify: FastifyInstance) {
       }
     }
 
-    const { data, error } = await fastify.supabase
+    let query = fastify.supabase
       .from('work_locations')
-      .update(parsed.data)
+      .update(fields)
       .eq('id', req.params.id)
       .eq('tenant_id', req.tenantId)
-      .select('id, name, code, site_id, address, city, state, country, pincode, is_active, created_at')
+    // PEND-105: optimistic-concurrency check — only applied when the caller
+    // sends expected_version (see updateSchema comment above).
+    if (expected_version !== undefined) query = query.eq('version', expected_version)
+
+    const { data, error } = await query
+      .select('id, name, code, site_id, address, city, state, country, pincode, is_active, version, created_at')
       .maybeSingle()
 
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update work location')
-    if (!data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Work location not found' })
+    if (!data) {
+      // 0 rows matched — either the record doesn't exist, or it does but
+      // `version` moved on since expected_version was read. Disambiguate
+      // with a plain existence check so a genuinely-deleted record still
+      // reports 404, not a confusing 409.
+      if (expected_version !== undefined) {
+        const { data: exists } = await fastify.supabase
+          .from('work_locations')
+          .select('id')
+          .eq('id', req.params.id)
+          .eq('tenant_id', req.tenantId)
+          .maybeSingle()
+        if (exists) {
+          return conflictError(reply, ErrorCode.VERSION_CONFLICT,
+            'This work location was changed by someone else. Reload and try again.')
+        }
+      }
+      return reply.code(404).send({ error: 'NOT_FOUND', message: 'Work location not found' })
+    }
     return reply.send({ data })
   })
 

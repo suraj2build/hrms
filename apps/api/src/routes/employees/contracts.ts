@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { optStr, optDate } from '../../lib/zod-form.js'
-import { serverError, notFound, forbidden, ErrorCode } from '../../lib/api-errors.js'
+import { serverError, notFound, forbidden, conflictError, ErrorCode } from '../../lib/api-errors.js'
 
 const STORAGE_BUCKET = 'employee-files'
 const SIGNED_URL_TTL = 3600 // 1 hour
@@ -32,6 +32,13 @@ const schema = z.object({
   storage_path:  optStr,
   status:        z.preprocess((v) => (v === '' || v === null ? undefined : v), z.enum(['draft','active','expired','terminated']).optional().default('active')),
   notes:         optStr,
+})
+
+// expected_version is optional so this stays backward-compatible with a
+// frontend that hasn't been updated to send it yet (PEND-105 Phase C) — the
+// CAS check below only runs when a caller actually provides it.
+const updateSchema = schema.partial().extend({
+  expected_version: z.number().int().positive().optional(),
 })
 
 async function verifyEmployee(fastify: any, employeeId: string, tenantId: string) {
@@ -97,21 +104,44 @@ export default async function contractsRoutes(fastify: FastifyInstance) {
   })
 
   fastify.put('/employees/:id/contracts/:contractId', hrAdminAuth, async (req: any, reply) => {
-    const parsed = schema.partial().safeParse(req.body)
+    const parsed = updateSchema.safeParse(req.body)
     if (!parsed.success)
       return reply.code(400).send({ error: 'VALIDATION', message: parsed.error.issues[0].message })
     if (parsed.data.storage_path && !parsed.data.storage_path.startsWith(`${req.tenantId}/`)) {
       return reply.code(400).send({ error: 'INVALID_STORAGE_PATH', message: 'storage_path must be within your tenant namespace' })
     }
-    const { data, error } = await fastify.supabase
+    const { expected_version, ...fields } = parsed.data
+    let query = fastify.supabase
       .from('employee_contracts')
-      .update(parsed.data)
+      .update(fields)
       .eq('id', req.params.contractId)
       .eq('employee_id', req.params.id)
       .eq('tenant_id', req.tenantId)
-      .select().maybeSingle()
+    // PEND-105: optimistic-concurrency check — only applied when the caller
+    // sends expected_version (see updateSchema comment above).
+    if (expected_version !== undefined) query = query.eq('version', expected_version)
+    const { data, error } = await query.select().maybeSingle()
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update employee contract')
-    if (!data) return notFound(reply, 'CONTRACT_NOT_FOUND', 'Contract not found')
+    if (!data) {
+      // 0 rows matched — either the record doesn't exist, or it does but
+      // `version` moved on since expected_version was read. Disambiguate
+      // with a plain existence check so a genuinely-deleted record still
+      // reports 404, not a confusing 409.
+      if (expected_version !== undefined) {
+        const { data: exists } = await fastify.supabase
+          .from('employee_contracts')
+          .select('id')
+          .eq('id', req.params.contractId)
+          .eq('employee_id', req.params.id)
+          .eq('tenant_id', req.tenantId)
+          .maybeSingle()
+        if (exists) {
+          return conflictError(reply, ErrorCode.VERSION_CONFLICT,
+            'Contract was changed by someone else. Reload and try again.')
+        }
+      }
+      return notFound(reply, 'CONTRACT_NOT_FOUND', 'Contract not found')
+    }
     return reply.send(data)
   })
 

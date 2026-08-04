@@ -14,7 +14,7 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { STANDARD_LEAVE_TYPES } from '../../lib/standard-leave-types.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
-import { serverError, notFound, ErrorCode } from '../../lib/api-errors.js'
+import { serverError, notFound, conflictError, ErrorCode } from '../../lib/api-errors.js'
 
 const schema = z.object({
   name:              z.string().min(1, 'Name is required').max(50, 'Name must be 50 characters or less'),
@@ -24,6 +24,13 @@ const schema = z.object({
   allow_hourly:      z.boolean().default(false),
   max_hours_per_day: z.number().positive().max(24).nullable().optional(),
   is_active:         z.boolean().default(true),
+})
+
+// expected_version is optional so this stays backward-compatible with a
+// frontend that hasn't been updated to send it yet (PEND-105 Phase C) — the
+// CAS check below only runs when a caller actually provides it.
+const updateSchema = schema.partial().extend({
+  expected_version: z.number().int().positive().optional(),
 })
 
 export default async function leaveTypesRoutes(fastify: FastifyInstance) {
@@ -44,7 +51,7 @@ export default async function leaveTypesRoutes(fastify: FastifyInstance) {
   fastify.get('/', auth, async (req: any, reply) => {
     const { data, error } = await fastify.supabase
       .from('leave_types')
-      .select('id, name, is_paid, allow_sandwich, allow_half_day, allow_hourly, max_hours_per_day, is_active, created_at')
+      .select('id, name, is_paid, allow_sandwich, allow_half_day, allow_hourly, max_hours_per_day, is_active, version, created_at')
       .eq('tenant_id', req.tenantId)
       .order('name')
 
@@ -100,7 +107,7 @@ export default async function leaveTypesRoutes(fastify: FastifyInstance) {
     const { data, error } = await fastify.supabase
       .from('leave_types')
       .insert({ tenant_id: req.tenantId, ...parsed.data })
-      .select('id, name, is_paid, allow_sandwich, allow_half_day, allow_hourly, max_hours_per_day, is_active, created_at')
+      .select('id, name, is_paid, allow_sandwich, allow_half_day, allow_hourly, max_hours_per_day, is_active, version, created_at')
       .single()
 
     if (error) {
@@ -120,7 +127,7 @@ export default async function leaveTypesRoutes(fastify: FastifyInstance) {
   fastify.put('/:id', auth, async (req: any, reply) => {
     if (!requireAdmin(req, reply)) return
 
-    const parsed = schema.partial().safeParse(req.body)
+    const parsed = updateSchema.safeParse(req.body)
     if (!parsed.success) {
       return reply.code(400).send({
         error:   'VALIDATION_ERROR',
@@ -128,12 +135,19 @@ export default async function leaveTypesRoutes(fastify: FastifyInstance) {
       })
     }
 
-    const { data, error } = await fastify.supabase
+    const { expected_version, ...fields } = parsed.data
+
+    let query = fastify.supabase
       .from('leave_types')
-      .update(parsed.data)
+      .update(fields)
       .eq('id', (req.params as { id: string }).id)
       .eq('tenant_id', req.tenantId)
-      .select('id, name, is_paid, allow_sandwich, allow_half_day, allow_hourly, max_hours_per_day, is_active, created_at')
+    // PEND-105: optimistic-concurrency check — only applied when the caller
+    // sends expected_version (see updateSchema comment above).
+    if (expected_version !== undefined) query = query.eq('version', expected_version)
+
+    const { data, error } = await query
+      .select('id, name, is_paid, allow_sandwich, allow_half_day, allow_hourly, max_hours_per_day, is_active, version, created_at')
       .maybeSingle()
 
     if (error) {
@@ -144,6 +158,22 @@ export default async function leaveTypesRoutes(fastify: FastifyInstance) {
     }
 
     if (!data) {
+      // 0 rows matched — either the record doesn't exist, or it does but
+      // `version` moved on since expected_version was read. Disambiguate
+      // with a plain existence check so a genuinely-deleted record still
+      // reports 404, not a confusing 409.
+      if (expected_version !== undefined) {
+        const { data: exists } = await fastify.supabase
+          .from('leave_types')
+          .select('id')
+          .eq('id', (req.params as { id: string }).id)
+          .eq('tenant_id', req.tenantId)
+          .maybeSingle()
+        if (exists) {
+          return conflictError(reply, ErrorCode.VERSION_CONFLICT,
+            'This leave type was changed by someone else. Reload and try again.')
+        }
+      }
       return reply.code(404).send({ error: 'NOT_FOUND', message: 'Leave type not found' })
     }
 

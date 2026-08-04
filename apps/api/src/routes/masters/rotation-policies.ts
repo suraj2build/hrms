@@ -18,7 +18,7 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
-import { serverError, ErrorCode } from '../../lib/api-errors.js'
+import { serverError, conflictError, ErrorCode } from '../../lib/api-errors.js'
 
 // ── Zod schemas ───────────────────────────────────────────────────────────────
 
@@ -43,9 +43,16 @@ const policySchema = z.object({
   rules:       z.array(ruleSchema).optional().default([]),
 })
 
+// expected_version is optional so this stays backward-compatible with a
+// frontend that hasn't been updated to send it yet (PEND-105 Phase C) — the
+// CAS check below only runs when a caller actually provides it.
+const updateSchema = policySchema.partial().extend({
+  expected_version: z.number().int().positive().optional(),
+})
+
 // ── Columns to select ─────────────────────────────────────────────────────────
 
-const POLICY_COLS = 'id, tenant_id, name, description, is_active, created_at, updated_at'
+const POLICY_COLS = 'id, tenant_id, name, description, is_active, version, created_at, updated_at'
 
 // rotation_policy_rules.shift_id only FKs to shifts(id) — no tenant compound
 // key (migration 153_rotation_policies.sql) — so the DB alone won't stop a
@@ -214,11 +221,11 @@ export default async function rotationPoliciesRoutes(fastify: FastifyInstance) {
   // ── PUT /:id — full update (metadata + rules) ─────────────────────────────────
 
   fastify.put('/:id', hrAdminAuth, async (req: any, reply) => {
-    const parsed = policySchema.partial().safeParse(req.body)
+    const parsed = updateSchema.safeParse(req.body)
     if (!parsed.success)
       return reply.code(400).send({ error: 'VALIDATION', message: parsed.error.issues[0].message })
 
-    const { rules, ...meta } = parsed.data
+    const { rules, expected_version, ...meta } = parsed.data
 
     // The metadata UPDATE below is the only place that normally checks the
     // policy id belongs to this tenant, but it's skipped when the body is
@@ -231,11 +238,18 @@ export default async function rotationPoliciesRoutes(fastify: FastifyInstance) {
 
     // Update metadata
     if (Object.keys(meta).length > 0) {
-      const { data, error } = await fastify.supabase
+      let query = fastify.supabase
         .from('rotation_policies')
         .update(meta)
         .eq('id', req.params.id)
         .eq('tenant_id', req.tenantId)
+      // PEND-105: optimistic-concurrency check — only applied when the
+      // caller sends expected_version (see updateSchema comment above).
+      // Note: this CAS check targets rotation_policies only, not the
+      // sibling rotation_policy_rules replace below.
+      if (expected_version !== undefined) query = query.eq('version', expected_version)
+
+      const { data, error } = await query
         .select(POLICY_COLS)
         .maybeSingle()
       if (error) {
@@ -243,7 +257,25 @@ export default async function rotationPoliciesRoutes(fastify: FastifyInstance) {
           return reply.code(409).send({ error: 'DUPLICATE', message: 'A policy with this name already exists' })
         return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update rotation policy')
       }
-      if (!data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Policy not found' })
+      if (!data) {
+        // 0 rows matched — either the record doesn't exist, or it does but
+        // `version` moved on since expected_version was read. Disambiguate
+        // with a plain existence check so a genuinely-deleted record still
+        // reports 404, not a confusing 409.
+        if (expected_version !== undefined) {
+          const { data: exists } = await fastify.supabase
+            .from('rotation_policies')
+            .select('id')
+            .eq('id', req.params.id)
+            .eq('tenant_id', req.tenantId)
+            .maybeSingle()
+          if (exists) {
+            return conflictError(reply, ErrorCode.VERSION_CONFLICT,
+              'This rotation policy was changed by someone else. Reload and try again.')
+          }
+        }
+        return reply.code(404).send({ error: 'NOT_FOUND', message: 'Policy not found' })
+      }
     }
 
     // Replace rules if provided — TEMPORAL versioning (AHI-3). Instead of

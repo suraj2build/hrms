@@ -11,7 +11,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
-import { serverError, notFound, ErrorCode } from '../../lib/api-errors.js'
+import { serverError, notFound, conflictError, ErrorCode } from '../../lib/api-errors.js'
 
 const createSchema = z.object({
   record_type:    z.enum(['passport', 'visa']),
@@ -25,7 +25,12 @@ const createSchema = z.object({
   notes:          z.string().max(1000).optional().nullable(),
 })
 
-const updateSchema = createSchema.partial()
+// expected_version is optional so this stays backward-compatible with a
+// frontend that hasn't been updated to send it yet (PEND-105 Phase C) — the
+// CAS check below only runs when a caller actually provides it.
+const updateSchema = createSchema.partial().extend({
+  expected_version: z.number().int().positive().optional(),
+})
 
 async function verifyEmployee(fastify: any, employeeId: string, tenantId: string) {
   const { data } = await fastify.supabase
@@ -96,17 +101,43 @@ export default async function passportVisaRoutes(fastify: FastifyInstance) {
     if (!parsed.success)
       return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
 
-    const { data, error } = await fastify.supabase
+    const { expected_version, ...fields } = parsed.data
+
+    let query = fastify.supabase
       .from('employee_passport_visa')
-      .update({ ...parsed.data, updated_at: new Date().toISOString() })
+      .update({ ...fields, updated_at: new Date().toISOString() })
       .eq('id', req.params.pvId)
       .eq('employee_id', req.params.id)
       .eq('tenant_id', req.tenantId)
+    // PEND-105: optimistic-concurrency check — only applied when the caller
+    // sends expected_version (see updateSchema comment above).
+    if (expected_version !== undefined) query = query.eq('version', expected_version)
+
+    const { data, error } = await query
       .select('*')
       .maybeSingle()
 
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update passport/visa record')
-    if (!data) return notFound(reply, 'NOT_FOUND', 'Record not found')
+    if (!data) {
+      // 0 rows matched — either the record doesn't exist, or it does but
+      // `version` moved on since expected_version was read. Disambiguate
+      // with a plain existence check so a genuinely-deleted record still
+      // reports 404, not a confusing 409.
+      if (expected_version !== undefined) {
+        const { data: exists } = await fastify.supabase
+          .from('employee_passport_visa')
+          .select('id')
+          .eq('id', req.params.pvId)
+          .eq('employee_id', req.params.id)
+          .eq('tenant_id', req.tenantId)
+          .maybeSingle()
+        if (exists) {
+          return conflictError(reply, ErrorCode.VERSION_CONFLICT,
+            'Passport/visa record was changed by someone else. Reload and try again.')
+        }
+      }
+      return notFound(reply, 'NOT_FOUND', 'Record not found')
+    }
     return reply.send({ data })
   })
 

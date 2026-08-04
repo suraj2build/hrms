@@ -288,9 +288,14 @@ export default async function compensationRoutes(fastify: FastifyInstance) {
     return reply.send({ data: { ...policy, is_configured: !!data } })
   })
 
-  // ── PUT /compensation-policy  → upsert tenant statutory policy ───────────────
+  // ── PUT /compensation-policy  → upsert-with-CAS tenant statutory policy ──────
   // Writes the EXISTING compensation_policies table only. No engine/calc change:
   // the engine already reads this row; this just lets admins set it via UI.
+  //
+  // PEND-105: rewritten from a plain .upsert() to select-then-insert-or-update
+  // (same rationale as personal-info.ts/bank-statutory.ts) so a CAS version
+  // check can be applied on the update branch — supabase-js's upsert() has no
+  // way to add a WHERE clause to its ON CONFLICT DO UPDATE.
   const policySchema = z.object({
     nlc_enabled:      z.boolean(),
     pf_enabled:       z.boolean(),
@@ -298,26 +303,70 @@ export default async function compensationRoutes(fastify: FastifyInstance) {
     pf_employer_rate: z.number().min(0).max(30).optional(),
     pf_cap_amount:    z.number().min(0).optional(),
   })
+  // expected_version is optional so this stays backward-compatible with a
+  // frontend that hasn't been updated to send it yet (PEND-105 Phase C).
+  const policyUpdateSchema = policySchema.extend({
+    expected_version: z.number().int().positive().optional(),
+  })
 
   fastify.put('/compensation-policy', auth, async (req: any, reply) => {
     if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole))
       return forbidden(reply, 'FORBIDDEN', 'HR admin access required')
 
-    const parsed = policySchema.safeParse(req.body)
+    const parsed = policyUpdateSchema.safeParse(req.body)
     if (!parsed.success)
       return validationError(reply, ErrorCode.VALIDATION_ERROR, parsed.error.issues[0]?.message ?? 'Invalid policy')
 
-    const { data, error } = await fastify.supabase
-      .from('compensation_policies')
-      .upsert(
-        { tenant_id: req.tenantId, ...parsed.data, updated_at: new Date().toISOString() },
-        { onConflict: 'tenant_id' },
-      )
-      .select('nlc_enabled, pf_enabled, pf_employee_rate, pf_employer_rate, pf_cap_amount')
-      .single()
+    const { expected_version, ...fields } = parsed.data
+    const responseCols = 'nlc_enabled, pf_enabled, pf_employee_rate, pf_employer_rate, pf_cap_amount'
 
-    if (error)
-      return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to save compensation policy')
+    const { data: existing, error: existingErr } = await fastify.supabase
+      .from('compensation_policies')
+      .select('tenant_id, version')
+      .eq('tenant_id', req.tenantId)
+      .maybeSingle()
+    if (existingErr) return serverError(req, reply, existingErr, ErrorCode.QUERY_FAILED, 'Failed to load compensation policy')
+
+    let data: any
+    if (!existing) {
+      const { data: inserted, error: insertErr } = await fastify.supabase
+        .from('compensation_policies')
+        .insert({ tenant_id: req.tenantId, ...fields, updated_at: new Date().toISOString() })
+        .select(responseCols)
+        .single()
+      if (insertErr) {
+        if (insertErr.code === '23505') {
+          // Lost the race — another request inserted this tenant's row
+          // concurrently. Nothing to CAS-check from this caller's side.
+          const { data: retryData, error: retryErr } = await fastify.supabase
+            .from('compensation_policies')
+            .update({ ...fields, updated_at: new Date().toISOString() })
+            .eq('tenant_id', req.tenantId)
+            .select(responseCols)
+            .maybeSingle()
+          if (retryErr) return serverError(req, reply, retryErr, ErrorCode.UPDATE_FAILED, 'Failed to save compensation policy')
+          data = retryData
+        } else {
+          return serverError(req, reply, insertErr, ErrorCode.INSERT_FAILED, 'Failed to save compensation policy')
+        }
+      } else {
+        data = inserted
+      }
+    } else {
+      let query = fastify.supabase
+        .from('compensation_policies')
+        .update({ ...fields, updated_at: new Date().toISOString() })
+        .eq('tenant_id', req.tenantId)
+      if (expected_version !== undefined) query = query.eq('version', expected_version)
+
+      const { data: updated, error: updateErr } = await query.select(responseCols).maybeSingle()
+      if (updateErr) return serverError(req, reply, updateErr, ErrorCode.UPDATE_FAILED, 'Failed to save compensation policy')
+      if (!updated) {
+        return conflictError(reply, ErrorCode.VERSION_CONFLICT,
+          'Compensation policy was changed by someone else. Reload and try again.')
+      }
+      data = updated
+    }
 
     return reply.send({ data: { ...data, is_configured: true } })
   })

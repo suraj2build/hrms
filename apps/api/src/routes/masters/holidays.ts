@@ -22,7 +22,7 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { CENTRAL_HOLIDAYS_BY_YEAR, SUPPORTED_HOLIDAY_YEARS } from '../../lib/standard-holidays.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
-import { serverError, ErrorCode } from '../../lib/api-errors.js'
+import { serverError, conflictError, ErrorCode } from '../../lib/api-errors.js'
 
 const createSchema = z.object({
   date:        z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'date must be YYYY-MM-DD'),
@@ -32,6 +32,13 @@ const createSchema = z.object({
   location_id: z.string().uuid().optional().nullable(),
   // Holiday group applicability (NULL = all-India / applies to everyone)
   holiday_group_id: z.string().uuid().optional().nullable(),
+})
+
+// expected_version is optional so this stays backward-compatible with a
+// frontend that hasn't been updated to send it yet (PEND-105 Phase C) — the
+// CAS check below only runs when a caller actually provides it.
+const updateSchema = createSchema.partial().extend({
+  expected_version: z.number().int().positive().optional(),
 })
 
 const querySchema = z.object({
@@ -77,7 +84,7 @@ export default async function holidaysRoutes(fastify: FastifyInstance) {
 
     let query = fastify.supabase
       .from('holiday_calendar')
-      .select('id, date, name, is_optional, site_id, location_id, holiday_group_id, created_at')
+      .select('id, date, name, is_optional, site_id, location_id, holiday_group_id, version, created_at')
       .eq('tenant_id', req.tenantId)
       .order('date', { ascending: true })
 
@@ -115,7 +122,7 @@ export default async function holidaysRoutes(fastify: FastifyInstance) {
     const { data, error } = await fastify.supabase
       .from('holiday_calendar')
       .insert({ ...parsed.data, tenant_id: req.tenantId })
-      .select('id, date, name, is_optional, site_id, location_id, holiday_group_id, created_at')
+      .select('id, date, name, is_optional, site_id, location_id, holiday_group_id, version, created_at')
       .single()
 
     if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create holiday')
@@ -172,30 +179,55 @@ export default async function holidaysRoutes(fastify: FastifyInstance) {
       return reply.code(403).send({ error: 'FORBIDDEN', message: 'hr_admin or super_admin required' })
     }
 
-    const parsed = createSchema.partial().safeParse(req.body)
+    const parsed = updateSchema.safeParse(req.body)
     if (!parsed.success) {
       return reply.code(400).send({ error: 'VALIDATION', message: parsed.error.issues[0]?.message })
     }
-    if (Object.keys(parsed.data).length === 0) {
+
+    const { expected_version, ...fields } = parsed.data
+    if (Object.keys(fields).length === 0) {
       return reply.code(400).send({ error: 'VALIDATION', message: 'No fields to update' })
     }
 
-    const refErr = await verifyTenantRefs(fastify, req.tenantId, parsed.data)
+    const refErr = await verifyTenantRefs(fastify, req.tenantId, fields)
     if (refErr) return reply.code(400).send({ error: 'VALIDATION', message: refErr })
 
-    const { data, error } = await fastify.supabase
+    let query = fastify.supabase
       .from('holiday_calendar')
-      .update(parsed.data)
+      .update(fields)
       .eq('id', req.params.id)
       .eq('tenant_id', req.tenantId)
-      .select('id, date, name, is_optional, site_id, location_id, holiday_group_id, created_at')
+    // PEND-105: optimistic-concurrency check — only applied when the caller
+    // sends expected_version (see updateSchema comment above).
+    if (expected_version !== undefined) query = query.eq('version', expected_version)
+
+    const { data, error } = await query
+      .select('id, date, name, is_optional, site_id, location_id, holiday_group_id, version, created_at')
       .maybeSingle()
 
     if (error) {
       if (error.code === '23505') return reply.code(409).send({ error: 'DUPLICATE', message: 'A holiday already exists on that date' })
       return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update holiday')
     }
-    if (!data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Holiday not found' })
+    if (!data) {
+      // 0 rows matched — either the record doesn't exist, or it does but
+      // `version` moved on since expected_version was read. Disambiguate
+      // with a plain existence check so a genuinely-deleted record still
+      // reports 404, not a confusing 409.
+      if (expected_version !== undefined) {
+        const { data: exists } = await fastify.supabase
+          .from('holiday_calendar')
+          .select('id')
+          .eq('id', req.params.id)
+          .eq('tenant_id', req.tenantId)
+          .maybeSingle()
+        if (exists) {
+          return conflictError(reply, ErrorCode.VERSION_CONFLICT,
+            'This holiday was changed by someone else. Reload and try again.')
+        }
+      }
+      return reply.code(404).send({ error: 'NOT_FOUND', message: 'Holiday not found' })
+    }
     return reply.send(data)
   })
 

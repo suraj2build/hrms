@@ -12,6 +12,13 @@ const schema = z.object({
   notes:         optStr,
 })
 
+// expected_version is optional so this stays backward-compatible with a
+// frontend that hasn't been updated to send it yet (PEND-105 Phase C) — the
+// CAS check below only runs when a caller actually provides it.
+const updateSchema = schema.partial().extend({
+  expected_version: z.number().int().positive().optional(),
+})
+
 async function verifyEmployee(fastify: any, employeeId: string, tenantId: string) {
   const { data } = await fastify.supabase
     .from('employees').select('id').eq('id', employeeId).eq('tenant_id', tenantId).single()
@@ -53,22 +60,45 @@ export default async function accessCardsRoutes(fastify: FastifyInstance) {
   })
 
   fastify.put('/employees/:id/access-cards/:cardId', hrAdminAuth, async (req: any, reply) => {
-    const parsed = schema.partial().safeParse(req.body)
+    const parsed = updateSchema.safeParse(req.body)
     if (!parsed.success)
       return validationError(reply, ErrorCode.VALIDATION_ERROR, parsed.error.issues[0].message)
-    const { data, error } = await fastify.supabase
+    const { expected_version, ...fields } = parsed.data
+    let query = fastify.supabase
       .from('employee_access_cards')
-      .update(parsed.data)
+      .update(fields)
       .eq('id', req.params.cardId)
       .eq('employee_id', req.params.id)
       .eq('tenant_id', req.tenantId)
-      .select().maybeSingle()
+    // PEND-105: optimistic-concurrency check — only applied when the caller
+    // sends expected_version (see updateSchema comment above).
+    if (expected_version !== undefined) query = query.eq('version', expected_version)
+    const { data, error } = await query.select().maybeSingle()
     if (error) {
       if (error.code === '23505')
         return conflictError(reply, 'DUPLICATE', 'Card number already in use')
       return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update access card')
     }
-    if (!data) return notFound(reply, 'NOT_FOUND', 'Access card not found')
+    if (!data) {
+      // 0 rows matched — either the record doesn't exist, or it does but
+      // `version` moved on since expected_version was read. Disambiguate
+      // with a plain existence check so a genuinely-deleted record still
+      // reports 404, not a confusing 409.
+      if (expected_version !== undefined) {
+        const { data: exists } = await fastify.supabase
+          .from('employee_access_cards')
+          .select('id')
+          .eq('id', req.params.cardId)
+          .eq('employee_id', req.params.id)
+          .eq('tenant_id', req.tenantId)
+          .maybeSingle()
+        if (exists) {
+          return conflictError(reply, ErrorCode.VERSION_CONFLICT,
+            'Access card was changed by someone else. Reload and try again.')
+        }
+      }
+      return notFound(reply, 'NOT_FOUND', 'Access card not found')
+    }
     return reply.send(data)
   })
 }

@@ -26,6 +26,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { STANDARD_SALARY_COMPONENTS } from './standard-salary-components.js'
 import { fetchAllRows } from './supabase-paginate.js'
 import { STATUTORY_CODE } from './statutory-payroll.js'
+import { ErrorCode } from './api-errors.js'
 
 // ── Schemas (the one true contract) ──────────────────────────────────────────────
 
@@ -55,7 +56,12 @@ export const componentCreateSchema = z.object({
   display_order:      z.number().int().optional().default(0),
   is_active:          z.boolean().optional().default(true),
 })
-export const componentUpdateSchema = componentCreateSchema.partial()
+// expected_version is optional so this stays backward-compatible with a
+// frontend that hasn't been updated to send it yet (PEND-105 Phase C) — the
+// CAS check below only runs when a caller actually provides it.
+export const componentUpdateSchema = componentCreateSchema.partial().extend({
+  expected_version: z.number().int().positive().optional(),
+})
 
 export const structureSchema = z.object({
   name:            z.string().min(1, 'Name is required').max(200),
@@ -68,7 +74,12 @@ export const structureSchema = z.object({
   tds_applicable:  z.boolean().optional().default(true),
   pf_ceiling_mode: z.enum(['capped', 'actual', 'follow_policy']).optional().default('follow_policy'),
 })
-export const structureUpdateSchema = structureSchema.partial()
+// expected_version is optional so this stays backward-compatible with a
+// frontend that hasn't been updated to send it yet (PEND-105 Phase C) — the
+// CAS check below only runs when a caller actually provides it.
+export const structureUpdateSchema = structureSchema.partial().extend({
+  expected_version: z.number().int().positive().optional(),
+})
 
 export const structureComponentSchema = z.object({
   salary_component_id: z.string().uuid('Invalid component ID'),
@@ -77,7 +88,12 @@ export const structureComponentSchema = z.object({
   sequence:            z.number().int().optional().default(0),
   is_active:           z.boolean().optional().default(true),
 })
-export const structureComponentUpdateSchema = structureComponentSchema.partial()
+// expected_version is optional so this stays backward-compatible with a
+// frontend that hasn't been updated to send it yet (PEND-105 Phase C) — the
+// CAS check below only runs when a caller actually provides it.
+export const structureComponentUpdateSchema = structureComponentSchema.partial().extend({
+  expected_version: z.number().int().positive().optional(),
+})
 
 // ── Result type ───────────────────────────────────────────────────────────────
 
@@ -163,11 +179,12 @@ export async function updateComponent(
 ): Promise<StoreResult> {
   const parsed = componentUpdateSchema.safeParse(body)
   if (!parsed.success) return fail(400, 'VALIDATION', parsed.error.issues[0]?.message ?? 'Invalid component')
-  if (parsed.data.code !== undefined) {
+  const { expected_version, ...fields } = parsed.data
+  if (fields.code !== undefined) {
     // component_type may not be in this partial update — fall back to the
     // component's current type so a code-only rename is still checked
     // against the type it actually has.
-    let componentType = parsed.data.component_type
+    let componentType = fields.component_type
     if (componentType === undefined) {
       const { data: existing, error: lookupErr } = await supabase
         .from('salary_components')
@@ -180,19 +197,41 @@ export async function updateComponent(
       if (lookupErr) return dbFail(lookupErr)
       componentType = (existing as { component_type?: string } | null)?.component_type as any
     }
-    if (isReservedStatutoryCode(parsed.data.code, componentType)) {
-      return fail(400, 'RESERVED_CODE', `"${parsed.data.code}" is a reserved statutory code and would be silently overwritten by the statutory engine on every payroll run. Choose a different code.`)
+    if (isReservedStatutoryCode(fields.code, componentType)) {
+      return fail(400, 'RESERVED_CODE', `"${fields.code}" is a reserved statutory code and would be silently overwritten by the statutory engine on every payroll run. Choose a different code.`)
     }
   }
-  const { data, error } = await supabase
+  let query = supabase
     .from('salary_components')
-    .update({ ...parsed.data })
+    .update({ ...fields })
     .eq('id', id)
     .eq('tenant_id', tenantId)
+  // PEND-105: optimistic-concurrency check — only applied when the caller
+  // sends expected_version (see componentUpdateSchema comment above).
+  if (expected_version !== undefined) query = query.eq('version', expected_version)
+
+  const { data, error } = await query
     .select()
     .maybeSingle()
   if (error) return dbFail(error)
-  if (!data) return fail(404, 'NOT_FOUND', 'Salary component not found')
+  if (!data) {
+    // 0 rows matched — either the record doesn't exist, or it does but
+    // `version` moved on since expected_version was read. Disambiguate
+    // with a plain existence check so a genuinely-deleted record still
+    // reports 404, not a confusing 409.
+    if (expected_version !== undefined) {
+      const { data: exists } = await supabase
+        .from('salary_components')
+        .select('id')
+        .eq('id', id)
+        .eq('tenant_id', tenantId)
+        .maybeSingle()
+      if (exists) {
+        return fail(409, ErrorCode.VERSION_CONFLICT, 'This salary component was changed by someone else. Reload and try again.')
+      }
+    }
+    return fail(404, 'NOT_FOUND', 'Salary component not found')
+  }
   return ok(data)
 }
 
@@ -315,11 +354,12 @@ export async function updateStructure(
 ): Promise<StoreResult> {
   const parsed = structureUpdateSchema.safeParse(body)
   if (!parsed.success) return fail(400, 'VALIDATION', parsed.error.issues[0]?.message ?? 'Invalid structure')
+  const { expected_version, ...fields } = parsed.data
 
   // Atomically clear the existing default before setting this one.
   // The partial-unique index (WHERE is_default = true) only allows one per tenant,
   // so we must clear first to avoid a constraint violation.
-  if (parsed.data.is_default === true) {
+  if (fields.is_default === true) {
     // Verify the target row exists FIRST — clearing every other row's default
     // and only then discovering `id` is stale/wrong (0 rows matched below)
     // would leave the tenant with no default structure at all, silently.
@@ -341,15 +381,37 @@ export async function updateStructure(
     if (clearErr) return dbFail(clearErr)
   }
 
-  const { data, error } = await supabase
+  let query = supabase
     .from('salary_structures')
-    .update(parsed.data)
+    .update(fields)
     .eq('id', id)
     .eq('tenant_id', tenantId)
+  // PEND-105: optimistic-concurrency check — only applied when the caller
+  // sends expected_version (see structureUpdateSchema comment above).
+  if (expected_version !== undefined) query = query.eq('version', expected_version)
+
+  const { data, error } = await query
     .select()
     .maybeSingle()
   if (error) return dbFail(error)
-  if (!data) return fail(404, 'NOT_FOUND', 'Salary structure not found')
+  if (!data) {
+    // 0 rows matched — either the record doesn't exist, or it does but
+    // `version` moved on since expected_version was read. Disambiguate
+    // with a plain existence check so a genuinely-deleted record still
+    // reports 404, not a confusing 409.
+    if (expected_version !== undefined) {
+      const { data: exists } = await supabase
+        .from('salary_structures')
+        .select('id')
+        .eq('id', id)
+        .eq('tenant_id', tenantId)
+        .maybeSingle()
+      if (exists) {
+        return fail(409, ErrorCode.VERSION_CONFLICT, 'This salary structure was changed by someone else. Reload and try again.')
+      }
+    }
+    return fail(404, 'NOT_FOUND', 'Salary structure not found')
+  }
   return ok(data)
 }
 
@@ -521,27 +583,51 @@ export async function updateStructureComponent(
 ): Promise<StoreResult> {
   const parsed = structureComponentUpdateSchema.safeParse(body)
   if (!parsed.success) return fail(400, 'VALIDATION', parsed.error.issues[0]?.message ?? 'Invalid component')
+  const { expected_version, ...fields } = parsed.data
 
   // salary_component_id is caller-supplied and, if re-pointed, must belong to
   // this tenant — otherwise the update (and its response embed) would read
   // and link to another tenant's salary_components row.
-  if (parsed.data.salary_component_id) {
+  if (fields.salary_component_id) {
     const { data: comp, error: compErr } = await supabase
-      .from('salary_components').select('id').eq('id', parsed.data.salary_component_id).eq('tenant_id', tenantId).maybeSingle()
+      .from('salary_components').select('id').eq('id', fields.salary_component_id).eq('tenant_id', tenantId).maybeSingle()
     if (compErr) return dbFail(compErr)
     if (!comp) return fail(404, 'NOT_FOUND', 'Salary component not found')
   }
 
-  const { data, error } = await supabase
+  let query = supabase
     .from('salary_structure_components')
-    .update(parsed.data)
+    .update(fields)
     .eq('id', componentId)
     .eq('salary_structure_id', structureId)
     .eq('tenant_id', tenantId)
+  // PEND-105: optimistic-concurrency check — only applied when the caller
+  // sends expected_version (see structureComponentUpdateSchema comment above).
+  if (expected_version !== undefined) query = query.eq('version', expected_version)
+
+  const { data, error } = await query
     .select('*, salary_components(*)')
     .maybeSingle()
   if (error) return dbFail(error)
-  if (!data) return fail(404, 'NOT_FOUND', 'Component not found')
+  if (!data) {
+    // 0 rows matched — either the record doesn't exist, or it does but
+    // `version` moved on since expected_version was read. Disambiguate
+    // with a plain existence check so a genuinely-deleted record still
+    // reports 404, not a confusing 409.
+    if (expected_version !== undefined) {
+      const { data: exists } = await supabase
+        .from('salary_structure_components')
+        .select('id')
+        .eq('id', componentId)
+        .eq('salary_structure_id', structureId)
+        .eq('tenant_id', tenantId)
+        .maybeSingle()
+      if (exists) {
+        return fail(409, ErrorCode.VERSION_CONFLICT, 'This structure component was changed by someone else. Reload and try again.')
+      }
+    }
+    return fail(404, 'NOT_FOUND', 'Component not found')
+  }
   return ok(data)
 }
 

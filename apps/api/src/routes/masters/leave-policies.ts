@@ -15,7 +15,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z }                    from 'zod'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
-import { serverError, ErrorCode } from '../../lib/api-errors.js'
+import { serverError, conflictError, ErrorCode } from '../../lib/api-errors.js'
 
 // ── Validation schema ──────────────────────────────────────────────────────────
 
@@ -55,6 +55,13 @@ const policySchema = z.object({
   maximum_future_days:                  z.number().int().min(0).nullable().optional(),
   future_application_requires_approval: z.boolean().default(false),
   same_day_application_mode:            z.enum(['allowed', 'restricted', 'manager_override_only']).default('allowed'),
+})
+
+// expected_version is optional so this stays backward-compatible with a
+// frontend that hasn't been updated to send it yet (PEND-105 Phase C) — the
+// CAS check below only runs when a caller actually provides it.
+const updateSchema = policySchema.omit({ leave_type_id: true }).partial().extend({
+  expected_version: z.number().int().positive().optional(),
 })
 
 // ── Route plugin ───────────────────────────────────────────────────────────────
@@ -152,8 +159,7 @@ export default async function leavePoliciesRoutes(fastify: FastifyInstance) {
   fastify.put('/:id', auth, async (req: any, reply) => {
     if (!requireAdmin(req, reply)) return
 
-    const partial = policySchema.omit({ leave_type_id: true }).partial()
-    const parsed  = partial.safeParse(req.body)
+    const parsed = updateSchema.safeParse(req.body)
     if (!parsed.success) {
       return reply.code(400).send({
         error:   'VALIDATION_ERROR',
@@ -161,11 +167,19 @@ export default async function leavePoliciesRoutes(fastify: FastifyInstance) {
       })
     }
 
-    const { data, error } = await fastify.supabase
+    const { expected_version, ...fields } = parsed.data
+    const id = (req.params as any).id
+
+    let query = fastify.supabase
       .from('leave_policies')
-      .update({ ...parsed.data, updated_at: new Date().toISOString() })
-      .eq('id',        (req.params as any).id)
+      .update({ ...fields, updated_at: new Date().toISOString() })
+      .eq('id',        id)
       .eq('tenant_id', req.tenantId)
+    // PEND-105: optimistic-concurrency check — only applied when the caller
+    // sends expected_version (see updateSchema comment above).
+    if (expected_version !== undefined) query = query.eq('version', expected_version)
+
+    const { data, error } = await query
       .select('*')
       .maybeSingle()
 
@@ -173,6 +187,22 @@ export default async function leavePoliciesRoutes(fastify: FastifyInstance) {
       return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update leave policy')
     }
     if (!data) {
+      // 0 rows matched — either the record doesn't exist, or it does but
+      // `version` moved on since expected_version was read. Disambiguate
+      // with a plain existence check so a genuinely-deleted record still
+      // reports 404, not a confusing 409.
+      if (expected_version !== undefined) {
+        const { data: exists } = await fastify.supabase
+          .from('leave_policies')
+          .select('id')
+          .eq('id',        id)
+          .eq('tenant_id', req.tenantId)
+          .maybeSingle()
+        if (exists) {
+          return conflictError(reply, ErrorCode.VERSION_CONFLICT,
+            'This leave policy was changed by someone else. Reload and try again.')
+        }
+      }
       return reply.code(404).send({ error: 'NOT_FOUND', message: 'Policy not found' })
     }
     return reply.send({ data })

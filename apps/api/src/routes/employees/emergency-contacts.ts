@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { optStr } from '../../lib/zod-form.js'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
-import { serverError, notFound, ErrorCode } from '../../lib/api-errors.js'
+import { serverError, notFound, conflictError, ErrorCode } from '../../lib/api-errors.js'
 
 const schema = z.object({
   name:            z.string().min(1, 'Name is required'),
@@ -12,6 +12,13 @@ const schema = z.object({
   email:           z.preprocess((v) => (v === '' || v === null ? undefined : v), z.string().email().optional()),
   address:         optStr,
   is_primary:      z.boolean().optional().default(false),
+})
+
+// expected_version is optional so this stays backward-compatible with a
+// frontend that hasn't been updated to send it yet (PEND-105 Phase C) — the
+// CAS check below only runs when a caller actually provides it.
+const updateSchema = schema.partial().extend({
+  expected_version: z.number().int().positive().optional(),
 })
 
 async function verifyEmployee(fastify: any, employeeId: string, tenantId: string) {
@@ -64,10 +71,11 @@ export default async function emergencyContactsRoutes(fastify: FastifyInstance) 
   })
 
   fastify.put('/employees/:id/emergency-contacts/:contactId', hrAdminAuth, async (req: any, reply) => {
-    const parsed = schema.partial().safeParse(req.body)
+    const parsed = updateSchema.safeParse(req.body)
     if (!parsed.success)
       return reply.code(400).send({ error: 'VALIDATION', message: parsed.error.issues[0].message })
-    if (parsed.data.is_primary) {
+    const { expected_version, ...fields } = parsed.data
+    if (fields.is_primary) {
       await fastify.supabase
         .from('emergency_contacts')
         .update({ is_primary: false })
@@ -75,15 +83,37 @@ export default async function emergencyContactsRoutes(fastify: FastifyInstance) 
         .eq('tenant_id', req.tenantId)
         .neq('id', req.params.contactId)
     }
-    const { data, error } = await fastify.supabase
+    let query = fastify.supabase
       .from('emergency_contacts')
-      .update(parsed.data)
+      .update(fields)
       .eq('id', req.params.contactId)
       .eq('employee_id', req.params.id)
       .eq('tenant_id', req.tenantId)
-      .select().maybeSingle()
+    // PEND-105: optimistic-concurrency check — only applied when the caller
+    // sends expected_version (see updateSchema comment above).
+    if (expected_version !== undefined) query = query.eq('version', expected_version)
+    const { data, error } = await query.select().maybeSingle()
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update emergency contact')
-    if (!data) return notFound(reply, 'NOT_FOUND', 'Contact not found')
+    if (!data) {
+      // 0 rows matched — either the record doesn't exist, or it does but
+      // `version` moved on since expected_version was read. Disambiguate
+      // with a plain existence check so a genuinely-deleted record still
+      // reports 404, not a confusing 409.
+      if (expected_version !== undefined) {
+        const { data: exists } = await fastify.supabase
+          .from('emergency_contacts')
+          .select('id')
+          .eq('id', req.params.contactId)
+          .eq('employee_id', req.params.id)
+          .eq('tenant_id', req.tenantId)
+          .maybeSingle()
+        if (exists) {
+          return conflictError(reply, ErrorCode.VERSION_CONFLICT,
+            'Emergency contact was changed by someone else. Reload and try again.')
+        }
+      }
+      return notFound(reply, 'NOT_FOUND', 'Contact not found')
+    }
     return reply.send(data)
   })
 

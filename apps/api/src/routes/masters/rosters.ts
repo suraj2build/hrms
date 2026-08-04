@@ -34,7 +34,7 @@ import { z }                    from 'zod'
 import { generateUniqueCode }   from '../../lib/generate-code.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { fetchAllRows }   from '../../lib/supabase-paginate.js'
-import { serverError, ErrorCode } from '../../lib/api-errors.js'
+import { serverError, conflictError, ErrorCode } from '../../lib/api-errors.js'
 
 // ── Schemas ───────────────────────────────────────────────────────────────────
 
@@ -85,7 +85,14 @@ const schema = z.object({
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-const SELECT_COLS = 'id, name, code, description, cycle_days, pattern_json, is_active, wo_credit_structure_id, created_at, updated_at'
+const SELECT_COLS = 'id, name, code, description, cycle_days, pattern_json, is_active, wo_credit_structure_id, version, created_at, updated_at'
+
+// expected_version is optional so this stays backward-compatible with a
+// frontend that hasn't been updated to send it yet (PEND-105 Phase C) — the
+// CAS check below only runs when a caller actually provides it.
+const updateSchema = schema.partial().extend({
+  expected_version: z.number().int().positive().optional(),
+})
 
 const DOW_MAP: Record<string, number> = { sun: 0, mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6 }
 
@@ -253,7 +260,7 @@ export default async function rostersRoutes(fastify: FastifyInstance) {
 
   // ── PUT /masters/rosters/:id ──────────────────────────────────────────────
   fastify.put('/:id', adminAuth, async (req: any, reply) => {
-    const parsed = schema.partial().safeParse(req.body)
+    const parsed = updateSchema.safeParse(req.body)
     if (!parsed.success) {
       return reply.code(400).send({
         error:   'VALIDATION',
@@ -261,7 +268,9 @@ export default async function rostersRoutes(fastify: FastifyInstance) {
       })
     }
 
-    const payload: Record<string, unknown> = { ...parsed.data }
+    const { expected_version, ...fields } = parsed.data
+    const payload: Record<string, unknown> = { ...fields }
+    const id = (req.params as any).id
 
     // Derive weekly_off_days from matrix when provided
     if (payload.pattern_json && (payload.pattern_json as any).matrix) {
@@ -270,11 +279,16 @@ export default async function rostersRoutes(fastify: FastifyInstance) {
       )
     }
 
-    const { data, error } = await fastify.supabase
+    let query = fastify.supabase
       .from('rosters')
       .update(payload)
-      .eq('id', (req.params as any).id)
+      .eq('id', id)
       .eq('tenant_id', req.tenantId)
+    // PEND-105: optimistic-concurrency check — only applied when the caller
+    // sends expected_version (see updateSchema comment above).
+    if (expected_version !== undefined) query = query.eq('version', expected_version)
+
+    const { data, error } = await query
       .select(SELECT_COLS)
       .maybeSingle()
 
@@ -282,6 +296,22 @@ export default async function rostersRoutes(fastify: FastifyInstance) {
       return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update roster policy')
     }
     if (!data) {
+      // 0 rows matched — either the record doesn't exist, or it does but
+      // `version` moved on since expected_version was read. Disambiguate
+      // with a plain existence check so a genuinely-deleted record still
+      // reports 404, not a confusing 409.
+      if (expected_version !== undefined) {
+        const { data: exists } = await fastify.supabase
+          .from('rosters')
+          .select('id')
+          .eq('id', id)
+          .eq('tenant_id', req.tenantId)
+          .maybeSingle()
+        if (exists) {
+          return conflictError(reply, ErrorCode.VERSION_CONFLICT,
+            'This roster policy was changed by someone else. Reload and try again.')
+        }
+      }
       return reply.code(404).send({ error: 'NOT_FOUND', message: 'Roster policy not found' })
     }
 

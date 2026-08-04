@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
-import { serverError, notFound, validationError, ErrorCode } from '../../lib/api-errors.js'
+import { serverError, notFound, validationError, conflictError, ErrorCode } from '../../lib/api-errors.js'
 import { fetchTenantTz } from '../../lib/attendance-engine.js'
 import { getLocalDate } from '../../lib/org-context.js'
 import { EventType, MODULE } from '../../platform/events/index.js'
@@ -41,6 +41,12 @@ const schema = z.object({
   lwf_state_code: clearableStr,
   // Direct holiday group tag — stored on employees.holiday_group_id
   holiday_group_id: clearableStr,
+})
+
+// expected_version is optional so this stays backward-compatible with a
+// frontend that hasn't been updated to send it yet (PEND-105 Phase C).
+const updateSchema = schema.partial().extend({
+  expected_version: z.number().int().positive().optional(),
 })
 
 async function verifyEmployee(fastify: any, employeeId: string, tenantId: string) {
@@ -142,18 +148,24 @@ export default async function bankStatutoryRoutes(fastify: FastifyInstance) {
     })
   })
 
-  // PUT /employees/:id/bank-statutory  (upsert)
+  // PUT /employees/:id/bank-statutory  (upsert-with-CAS)
+  //
+  // PEND-105: the final employee_bank_statutory write used to be a plain
+  // .upsert() — rewritten below (after the PT/LWF/holiday-group side
+  // effects, which are unrelated to this table's CAS token) as an explicit
+  // select-then-insert-or-update, same rationale as personal-info.ts.
   fastify.put('/employees/:id/bank-statutory', hrAdminAuth, async (req: any, reply) => {
     if (!await verifyEmployee(fastify, req.params.id, req.tenantId))
       return notFound(reply, 'EMPLOYEE_NOT_FOUND', 'Employee not found')
-    const parsed = schema.partial().safeParse(req.body)
+    const parsed = updateSchema.safeParse(req.body)
     if (!parsed.success)
       return validationError(reply, ErrorCode.VALIDATION_ERROR, parsed.error.issues[0].message)
 
     // Extract state codes — go to their own tables, not employee_bank_statutory.
-    const ptStateCode  = parsed.data.pt_state_code
-    const lwfStateCode = parsed.data.lwf_state_code
-    const bankPayload  = { ...parsed.data }
+    const { expected_version, ...rest } = parsed.data
+    const ptStateCode  = rest.pt_state_code
+    const lwfStateCode = rest.lwf_state_code
+    const bankPayload  = { ...rest }
     delete (bankPayload as any).pt_state_code
     delete (bankPayload as any).lwf_state_code
     const today = await tenantTodayStr(fastify, req.tenantId)
@@ -215,15 +227,57 @@ export default async function bankStatutoryRoutes(fastify: FastifyInstance) {
       if (hgErr) return serverError(req, reply, hgErr, ErrorCode.UPDATE_FAILED, 'Failed to update holiday group assignment')
     }
 
-    const { data, error } = await fastify.supabase
+    const { data: existing, error: existingErr } = await fastify.supabase
       .from('employee_bank_statutory')
-      .upsert(
-        { ...bankPayload, employee_id: req.params.id, tenant_id: req.tenantId },
-        { onConflict: 'tenant_id,employee_id' }
-      )
-      .select()
-      .single()
-    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to save bank and statutory information')
+      .select('id, version')
+      .eq('employee_id', req.params.id)
+      .eq('tenant_id', req.tenantId)
+      .maybeSingle()
+    if (existingErr) return serverError(req, reply, existingErr, ErrorCode.QUERY_FAILED, 'Failed to load bank and statutory information')
+
+    let data: any
+    if (!existing) {
+      const { data: inserted, error: insertErr } = await fastify.supabase
+        .from('employee_bank_statutory')
+        .insert({ ...bankPayload, employee_id: req.params.id, tenant_id: req.tenantId })
+        .select()
+        .single()
+      if (insertErr) {
+        if (insertErr.code === '23505') {
+          // Lost the race — another request inserted the first row
+          // concurrently. Nothing to CAS-check from this caller's side
+          // (they believed no row existed yet).
+          const { data: retryData, error: retryErr } = await fastify.supabase
+            .from('employee_bank_statutory')
+            .update(bankPayload)
+            .eq('employee_id', req.params.id)
+            .eq('tenant_id', req.tenantId)
+            .select()
+            .maybeSingle()
+          if (retryErr) return serverError(req, reply, retryErr, ErrorCode.UPDATE_FAILED, 'Failed to save bank and statutory information')
+          data = retryData
+        } else {
+          return serverError(req, reply, insertErr, ErrorCode.INSERT_FAILED, 'Failed to save bank and statutory information')
+        }
+      } else {
+        data = inserted
+      }
+    } else {
+      let query = fastify.supabase
+        .from('employee_bank_statutory')
+        .update(bankPayload)
+        .eq('id', existing.id)
+        .eq('tenant_id', req.tenantId)
+      if (expected_version !== undefined) query = query.eq('version', expected_version)
+
+      const { data: updated, error: updateErr } = await query.select().maybeSingle()
+      if (updateErr) return serverError(req, reply, updateErr, ErrorCode.UPDATE_FAILED, 'Failed to save bank and statutory information')
+      if (!updated) {
+        return conflictError(reply, ErrorCode.VERSION_CONFLICT,
+          'Bank and statutory information was changed by someone else. Reload and try again.')
+      }
+      data = updated
+    }
 
     // Fire-and-forget — never await, never blocks. PAN/bank data doesn't exist
     // yet at EMPLOYEE_CREATED time (see employees/index.ts's comment) — this is

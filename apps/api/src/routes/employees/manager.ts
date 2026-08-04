@@ -107,9 +107,16 @@ export default async function employeeManagerRoutes(fastify: FastifyInstance) {
       })
     }
 
+    // PEND-105: reassign_manager_atomic() (migration 414) performs the UPDATE
+    // itself inside the RPC's own transaction — its current signature has no
+    // p_expected_version param to plumb a CAS check through, and rewriting
+    // the RPC's SQL is out of scope for this batch (needs a matching
+    // migration). `version` is surfaced here so callers can at least read
+    // the post-update value; full CAS protection for this endpoint is
+    // tracked separately.
     const { data, error } = await fastify.supabase
       .from('employees')
-      .select('id, employee_code, first_name, last_name, manager_id')
+      .select('id, employee_code, first_name, last_name, manager_id, version')
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
       .maybeSingle()

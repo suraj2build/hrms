@@ -25,7 +25,7 @@ import type { FastifyInstance } from 'fastify'
 import { z }                   from 'zod'
 import { policyService }       from '../../lib/policy-service.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
-import { serverError, ErrorCode } from '../../lib/api-errors.js'
+import { serverError, conflictError, ErrorCode } from '../../lib/api-errors.js'
 import { fetchAllRows }        from '../../lib/supabase-paginate.js'
 
 // ── Validation schemas ────────────────────────────────────────────────────────
@@ -37,6 +37,15 @@ const policyBody = z.object({
   present_threshold_pct:     z.number().int().min(1).max(100).default(75),
   half_day_threshold_pct:    z.number().int().min(1).max(99).default(50),
   excessive_hours_threshold: z.number().min(0).max(24).default(12),
+})
+
+// expected_version is optional so this stays backward-compatible with a
+// frontend that hasn't been updated to send it yet (PEND-105 Phase C) — the
+// CAS check below only runs when a caller actually provides it. Maps to the
+// `cas_version` column server-side — attendance_policies' own `version`
+// column is an unrelated draft→published governance counter (migration 428).
+const policyUpdateBody = policyBody.partial().extend({
+  expected_version: z.number().int().positive().optional(),
 })
 
 const assignmentBody = z.object({
@@ -103,21 +112,47 @@ export default async function attendancePoliciesRoutes(fastify: FastifyInstance)
     if (!requireHrAdmin(req, reply)) return
 
     const { id } = req.params as { id: string }
-    const parsed = policyBody.partial().safeParse(req.body)
+    const parsed = policyUpdateBody.safeParse(req.body)
     if (!parsed.success) {
       return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
     }
 
-    const { data, error } = await fastify.supabase
+    const { expected_version, ...fields } = parsed.data
+
+    let query = fastify.supabase
       .from('attendance_policies')
-      .update({ ...parsed.data, updated_at: new Date().toISOString() })
+      .update({ ...fields, updated_at: new Date().toISOString() })
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
+    // PEND-105: optimistic-concurrency check — only applied when the caller
+    // sends expected_version (see policyUpdateBody comment above). Maps to
+    // `cas_version`, not `version` (see migration 428's note on this table).
+    if (expected_version !== undefined) query = query.eq('cas_version', expected_version)
+
+    const { data, error } = await query
       .select()
       .maybeSingle()
 
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update attendance policy')
-    if (!data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Policy not found' })
+    if (!data) {
+      // 0 rows matched — either the record doesn't exist, or it does but
+      // `cas_version` moved on since expected_version was read. Disambiguate
+      // with a plain existence check so a genuinely-deleted record still
+      // reports 404, not a confusing 409.
+      if (expected_version !== undefined) {
+        const { data: exists } = await fastify.supabase
+          .from('attendance_policies')
+          .select('id')
+          .eq('id', id)
+          .eq('tenant_id', req.tenantId)
+          .maybeSingle()
+        if (exists) {
+          return conflictError(reply, ErrorCode.VERSION_CONFLICT,
+            'This attendance policy was changed by someone else. Reload and try again.')
+        }
+      }
+      return reply.code(404).send({ error: 'NOT_FOUND', message: 'Policy not found' })
+    }
 
     policyService.clearTenantCache(req.tenantId)
     return reply.send({ data })

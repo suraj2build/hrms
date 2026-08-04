@@ -21,7 +21,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
-import { serverError, ErrorCode } from '../../lib/api-errors.js'
+import { serverError, conflictError, ErrorCode } from '../../lib/api-errors.js'
 
 
 
@@ -33,8 +33,12 @@ const createAccountSchema = z.object({
   is_active:          z.boolean().default(true),
 })
 
+// expected_version is optional so this stays backward-compatible with a
+// frontend that hasn't been updated to send it yet (PEND-105 Phase C) — the
+// CAS check below only runs when a caller actually provides it.
 const patchAccountSchema = z.object({
-  action: z.enum(['suspend', 'reactivate']),
+  action:            z.enum(['suspend', 'reactivate']),
+  expected_version:  z.number().int().positive().optional(),
 })
 
 export default async function userAccountRoutes(fastify: FastifyInstance) {
@@ -64,7 +68,7 @@ export default async function userAccountRoutes(fastify: FastifyInstance) {
     // Look up linked profile
     const { data: profile } = await fastify.supabase
       .from('profiles')
-      .select('id, role, is_active, full_name, created_at')
+      .select('id, role, is_active, full_name, created_at, version')
       .eq('employee_id', id)
       .eq('tenant_id', (req as any).tenantId)
       .maybeSingle()
@@ -107,6 +111,7 @@ export default async function userAccountRoutes(fastify: FastifyInstance) {
         is_active:  profile.is_active,
         full_name:  profile.full_name,
         created_at: profile.created_at,
+        version:    profile.version,
       },
       auth_user: {
         email:              authUser.email,
@@ -297,7 +302,7 @@ export default async function userAccountRoutes(fastify: FastifyInstance) {
       })
     }
 
-    const { action } = parsed.data
+    const { action, expected_version } = parsed.data
     const is_active  = action === 'reactivate'
 
     // Look up profile for this employee
@@ -320,13 +325,38 @@ export default async function userAccountRoutes(fastify: FastifyInstance) {
     }
 
     // Update profiles.is_active
-    const { error: updateErr } = await fastify.supabase
+    let query = fastify.supabase
       .from('profiles')
       .update({ is_active })
       .eq('id', profile.id)
+    // PEND-105: optimistic-concurrency check — only applied when the caller
+    // sends expected_version (see patchAccountSchema comment above).
+    if (expected_version !== undefined) query = query.eq('version', expected_version)
+
+    const { data: updated, error: updateErr } = await query
+      .select('id, is_active, version')
+      .maybeSingle()
 
     if (updateErr) {
       return serverError(req, reply, updateErr, ErrorCode.UPDATE_FAILED, 'Failed to update account status')
+    }
+    if (!updated) {
+      // 0 rows matched — either the record doesn't exist, or it does but
+      // `version` moved on since expected_version was read. Disambiguate
+      // with a plain existence check so a genuinely-deleted record still
+      // reports 404, not a confusing 409.
+      if (expected_version !== undefined) {
+        const { data: exists } = await fastify.supabase
+          .from('profiles')
+          .select('id')
+          .eq('id', profile.id)
+          .maybeSingle()
+        if (exists) {
+          return conflictError(reply, ErrorCode.VERSION_CONFLICT,
+            'Account status was changed by someone else. Reload and try again.')
+        }
+      }
+      return reply.code(404).send({ error: 'NOT_FOUND', message: 'No user account found for this employee' })
     }
 
     // Also ban/unban in Supabase Auth so JWTs are rejected

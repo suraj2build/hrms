@@ -20,7 +20,7 @@ import type { FastifyInstance } from 'fastify'
 import { z }                    from 'zod'
 import { logAction }            from '../../lib/audit-service.js'
 import { HR_ADMIN_ROLES }       from '../../lib/rbac.js'
-import { serverError, ErrorCode } from '../../lib/api-errors.js'
+import { serverError, conflictError, ErrorCode } from '../../lib/api-errors.js'
 
 const ruleSchema = z.object({
   leave_type_id:                z.string().uuid(),
@@ -87,7 +87,7 @@ export default async function leavePolicyRulesRoutes(fastify: FastifyInstance) {
         carry_forward_enabled, carry_forward_max_days,
         expiry_days, max_consecutive_days, min_gap_days,
         event_trigger_date_type_id, event_grant_days, event_validity_days,
-        created_at, updated_at,
+        version, created_at, updated_at,
         leave_types(id, name, is_paid, is_active)
       `)
       .eq('tenant_id', req.tenantId)
@@ -163,7 +163,7 @@ export default async function leavePolicyRulesRoutes(fastify: FastifyInstance) {
         carry_forward_enabled, carry_forward_max_days,
         expiry_days, max_consecutive_days, min_gap_days,
         event_trigger_date_type_id, event_grant_days, event_validity_days,
-        created_at
+        version, created_at
       `)
       .single()
 
@@ -202,7 +202,12 @@ export default async function leavePolicyRulesRoutes(fastify: FastifyInstance) {
 // ── Standalone PUT/DELETE plugin ───────────────────────────────────────────────
 // Registered under /masters/leave-policy-rules prefix.
 
-const ruleUpdateSchema = ruleSchema.omit({ leave_type_id: true }).partial()
+// expected_version is optional so this stays backward-compatible with a
+// frontend that hasn't been updated to send it yet (PEND-105 Phase C) — the
+// CAS check below only runs when a caller actually provides it.
+const ruleUpdateSchema = ruleSchema.omit({ leave_type_id: true }).partial().extend({
+  expected_version: z.number().int().positive().optional(),
+})
 
 export async function leavePolicyRulesMutationsRoutes(fastify: FastifyInstance) {
   const auth = { preHandler: [fastify.authenticate] }
@@ -258,11 +263,18 @@ export async function leavePolicyRulesMutationsRoutes(fastify: FastifyInstance) 
       }
     }
 
-    const { data, error } = await fastify.supabase
+    const { expected_version, ...fields } = parsed.data
+
+    let query = fastify.supabase
       .from('leave_policy_rules')
-      .update({ ...parsed.data, updated_at: new Date().toISOString() })
+      .update({ ...fields, updated_at: new Date().toISOString() })
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
+    // PEND-105: optimistic-concurrency check — only applied when the caller
+    // sends expected_version (see ruleUpdateSchema comment above).
+    if (expected_version !== undefined) query = query.eq('version', expected_version)
+
+    const { data, error } = await query
       .select(`
         id, policy_id, leave_type_id,
         accrual_type, accrual_days_per_year, accrual_timing, max_accrual_balance,
@@ -270,7 +282,7 @@ export async function leavePolicyRulesMutationsRoutes(fastify: FastifyInstance) 
         carry_forward_enabled, carry_forward_max_days,
         expiry_days, max_consecutive_days, min_gap_days,
         event_trigger_date_type_id, event_grant_days, event_validity_days,
-        updated_at
+        version, updated_at
       `)
       .maybeSingle()
 
@@ -281,6 +293,22 @@ export async function leavePolicyRulesMutationsRoutes(fastify: FastifyInstance) 
     // UPDATE would otherwise throw PGRST116 (0 rows) as a generic 500 instead
     // of the benign 404 a legitimate race deserves.
     if (!data) {
+      // 0 rows matched — either the record doesn't exist, or it does but
+      // `version` moved on since expected_version was read. Disambiguate
+      // with a plain existence check so a genuinely-deleted record still
+      // reports 404, not a confusing 409.
+      if (expected_version !== undefined) {
+        const { data: exists } = await fastify.supabase
+          .from('leave_policy_rules')
+          .select('id')
+          .eq('id', id)
+          .eq('tenant_id', req.tenantId)
+          .maybeSingle()
+        if (exists) {
+          return conflictError(reply, ErrorCode.VERSION_CONFLICT,
+            'This rule was changed by someone else. Reload and try again.')
+        }
+      }
       return reply.code(404).send({ error: 'NOT_FOUND', message: 'Rule not found' })
     }
 
@@ -291,7 +319,7 @@ export async function leavePolicyRulesMutationsRoutes(fastify: FastifyInstance) 
       action:      'UPDATE',
       performedBy: req.userId,
       oldData:     { id },
-      newData:     parsed.data,
+      newData:     fields,
     })
 
     return reply.send({ data })

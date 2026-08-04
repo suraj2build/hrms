@@ -17,10 +17,10 @@ import type { FastifyInstance } from 'fastify'
 import { z }                    from 'zod'
 import { generateUniqueCode }   from '../../lib/generate-code.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
-import { serverError, ErrorCode } from '../../lib/api-errors.js'
+import { serverError, conflictError, ErrorCode } from '../../lib/api-errors.js'
 
 const SELECT_COLS =
-  'id, code, name, region, cluster_manager_id, parent_cluster_id, description, is_active, created_at, updated_at'
+  'id, code, name, region, cluster_manager_id, parent_cluster_id, description, is_active, version, created_at, updated_at'
 
 const schema = z.object({
   name:               z.string().min(1, 'Name is required').max(120),
@@ -30,6 +30,13 @@ const schema = z.object({
   parent_cluster_id:  z.string().uuid().optional().nullable(),
   description:        z.string().max(500).optional().nullable(),
   is_active:          z.boolean().optional().default(true),
+})
+
+// expected_version is optional so this stays backward-compatible with a
+// frontend that hasn't been updated to send it yet (PEND-105 Phase C) — the
+// CAS check below only runs when a caller actually provides it.
+const updateSchema = schema.partial().extend({
+  expected_version: z.number().int().positive().optional(),
 })
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -133,7 +140,7 @@ export default async function clustersRoutes(fastify: FastifyInstance) {
   // ── PUT /masters/clusters/:id ─────────────────────────────────────────────
   fastify.put('/:id', adminAuth, async (req: any, reply) => {
     const { id } = req.params as { id: string }
-    const parsed = schema.partial().safeParse(req.body)
+    const parsed = updateSchema.safeParse(req.body)
     if (!parsed.success)
       return reply.code(400).send({ error: 'VALIDATION', message: parsed.error.issues[0].message })
 
@@ -166,11 +173,18 @@ export default async function clustersRoutes(fastify: FastifyInstance) {
       }
     }
 
-    const { data, error } = await fastify.supabase
+    const { expected_version, ...fields } = parsed.data
+
+    let query = fastify.supabase
       .from('clusters')
-      .update(parsed.data)
+      .update(fields)
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
+    // PEND-105: optimistic-concurrency check — only applied when the caller
+    // sends expected_version (see updateSchema comment above).
+    if (expected_version !== undefined) query = query.eq('version', expected_version)
+
+    const { data, error } = await query
       .select(SELECT_COLS)
       .maybeSingle()
 
@@ -179,7 +193,25 @@ export default async function clustersRoutes(fastify: FastifyInstance) {
         return reply.code(409).send({ error: 'DUPLICATE', message: 'Another cluster already uses that code or name' })
       return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update cluster')
     }
-    if (!data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Cluster not found' })
+    if (!data) {
+      // 0 rows matched — either the record doesn't exist, or it does but
+      // `version` moved on since expected_version was read. Disambiguate
+      // with a plain existence check so a genuinely-deleted record still
+      // reports 404, not a confusing 409.
+      if (expected_version !== undefined) {
+        const { data: exists } = await fastify.supabase
+          .from('clusters')
+          .select('id')
+          .eq('id', id)
+          .eq('tenant_id', req.tenantId)
+          .maybeSingle()
+        if (exists) {
+          return conflictError(reply, ErrorCode.VERSION_CONFLICT,
+            'This cluster was changed by someone else. Reload and try again.')
+        }
+      }
+      return reply.code(404).send({ error: 'NOT_FOUND', message: 'Cluster not found' })
+    }
     return reply.send({ data })
   })
 

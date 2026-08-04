@@ -11,7 +11,7 @@ import type { FastifyInstance } from 'fastify'
 import { z }                   from 'zod'
 import { logAction }           from '../../lib/audit-service.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
-import { serverError, notFound, ErrorCode } from '../../lib/api-errors.js'
+import { serverError, notFound, conflictError, ErrorCode } from '../../lib/api-errors.js'
 
 const statutoryGroupSchema = z.object({
   code:              z.string().min(1, 'Code is required').max(50).transform(v => v.toUpperCase().trim()),
@@ -27,6 +27,13 @@ const statutoryGroupSchema = z.object({
   esi_wage_ceiling:  z.number().min(0).optional().nullable(),
   pt_slab_json:      z.string().optional().nullable(),
   is_active:         z.boolean().optional().default(true),
+})
+
+// expected_version is optional so this stays backward-compatible with a
+// frontend that hasn't been updated to send it yet (PEND-105 Phase C) — the
+// CAS check below only runs when a caller actually provides it.
+const statutoryGroupUpdateSchema = statutoryGroupSchema.partial().extend({
+  expected_version: z.number().int().positive().optional(),
 })
 
 export default async function statutoryGroupsRoutes(fastify: FastifyInstance) {
@@ -83,19 +90,26 @@ export default async function statutoryGroupsRoutes(fastify: FastifyInstance) {
   // ── PUT /masters/statutory-groups/:id ─────────────────────────────────────
   fastify.put('/:id', auth, async (req: any, reply) => {
     if (!requireHrAdmin(req, reply)) return
-    const parsed = statutoryGroupSchema.partial().safeParse(req.body)
+    const parsed = statutoryGroupUpdateSchema.safeParse(req.body)
     if (!parsed.success)
       return reply.code(400).send({ error: 'VALIDATION', message: parsed.error.issues[0]?.message })
+
+    const { expected_version, ...fields } = parsed.data
 
     // .maybeSingle() (not .single()) — a nonexistent/cross-tenant :id matches
     // zero rows on UPDATE ... RETURNING, which .single() treats as a
     // PGRST116 error rather than an empty result, so the 404 branch below
     // would otherwise be unreachable dead code.
-    const { data, error } = await fastify.supabase
+    let query = fastify.supabase
       .from('statutory_groups')
-      .update(parsed.data)
+      .update(fields)
       .eq('id', req.params.id)
       .eq('tenant_id', req.tenantId)
+    // PEND-105: optimistic-concurrency check — only applied when the caller
+    // sends expected_version (see statutoryGroupUpdateSchema comment above).
+    if (expected_version !== undefined) query = query.eq('version', expected_version)
+
+    const { data, error } = await query
       .select()
       .maybeSingle()
 
@@ -103,14 +117,32 @@ export default async function statutoryGroupsRoutes(fastify: FastifyInstance) {
       if (error.code === '23505') return reply.code(409).send({ error: 'DUPLICATE', message: 'A statutory group with this code already exists' })
       return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update statutory group')
     }
-    if (!data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Statutory group not found' })
+    if (!data) {
+      // 0 rows matched — either the record doesn't exist, or it does but
+      // `version` moved on since expected_version was read. Disambiguate
+      // with a plain existence check so a genuinely-deleted record still
+      // reports 404, not a confusing 409.
+      if (expected_version !== undefined) {
+        const { data: exists } = await fastify.supabase
+          .from('statutory_groups')
+          .select('id')
+          .eq('id', req.params.id)
+          .eq('tenant_id', req.tenantId)
+          .maybeSingle()
+        if (exists) {
+          return conflictError(reply, ErrorCode.VERSION_CONFLICT,
+            'This statutory group was changed by someone else. Reload and try again.')
+        }
+      }
+      return reply.code(404).send({ error: 'NOT_FOUND', message: 'Statutory group not found' })
+    }
     await logAction(fastify.supabase, {
       tenantId:    req.tenantId,
       tableName:   'statutory_groups',
       recordId:    req.params.id,
       action:      'UPDATE',
       performedBy: req.userId,
-      newData:     parsed.data as Record<string, unknown>,
+      newData:     fields as Record<string, unknown>,
     })
     return reply.send({ data })
   })

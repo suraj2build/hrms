@@ -11,7 +11,7 @@ import type { FastifyInstance } from 'fastify'
 import { z }                   from 'zod'
 import { generateUniqueCode } from '../../lib/generate-code.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
-import { serverError, ErrorCode } from '../../lib/api-errors.js'
+import { serverError, conflictError, ErrorCode } from '../../lib/api-errors.js'
 
 const gradeSchema = z.object({
   code:           z.string().max(50).optional().transform(v => v ? v.toUpperCase().trim() : v),
@@ -21,6 +21,13 @@ const gradeSchema = z.object({
   ctc_min_annual: z.number().min(0).optional().nullable(),
   ctc_max_annual: z.number().min(0).optional().nullable(),
   is_active:      z.boolean().optional().default(true),
+})
+
+// expected_version is optional so this stays backward-compatible with a
+// frontend that hasn't been updated to send it yet (PEND-105 Phase C) — the
+// CAS check below only runs when a caller actually provides it.
+const updateGradeSchema = gradeSchema.partial().extend({
+  expected_version: z.number().int().positive().optional(),
 })
 
 export default async function gradesRoutes(fastify: FastifyInstance) {
@@ -73,15 +80,22 @@ export default async function gradesRoutes(fastify: FastifyInstance) {
   // ── PUT /masters/grades/:id ────────────────────────────────────────────────
   fastify.put('/:id', auth, async (req: any, reply) => {
     if (!requireHrAdmin(req, reply)) return
-    const parsed = gradeSchema.partial().safeParse(req.body)
+    const parsed = updateGradeSchema.safeParse(req.body)
     if (!parsed.success)
       return reply.code(400).send({ error: 'VALIDATION', message: parsed.error.issues[0]?.message })
 
-    const { data, error } = await fastify.supabase
+    const { expected_version, ...fields } = parsed.data
+
+    let query = fastify.supabase
       .from('grades')
-      .update(parsed.data)
+      .update(fields)
       .eq('id', req.params.id)
       .eq('tenant_id', req.tenantId)
+    // PEND-105: optimistic-concurrency check — only applied when the caller
+    // sends expected_version (see updateGradeSchema comment above).
+    if (expected_version !== undefined) query = query.eq('version', expected_version)
+
+    const { data, error } = await query
       .select()
       .maybeSingle()
 
@@ -90,7 +104,25 @@ export default async function gradesRoutes(fastify: FastifyInstance) {
         return reply.code(409).send({ error: 'DUPLICATE', message: `Grade code "${parsed.data.code}" already exists` })
       return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update grade')
     }
-    if (!data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Grade not found' })
+    if (!data) {
+      // 0 rows matched — either the record doesn't exist, or it does but
+      // `version` moved on since expected_version was read. Disambiguate
+      // with a plain existence check so a genuinely-deleted record still
+      // reports 404, not a confusing 409.
+      if (expected_version !== undefined) {
+        const { data: exists } = await fastify.supabase
+          .from('grades')
+          .select('id')
+          .eq('id', req.params.id)
+          .eq('tenant_id', req.tenantId)
+          .maybeSingle()
+        if (exists) {
+          return conflictError(reply, ErrorCode.VERSION_CONFLICT,
+            'This grade was changed by someone else. Reload and try again.')
+        }
+      }
+      return reply.code(404).send({ error: 'NOT_FOUND', message: 'Grade not found' })
+    }
     return reply.send({ data })
   })
 

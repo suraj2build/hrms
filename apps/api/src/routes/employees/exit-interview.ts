@@ -10,7 +10,7 @@ import { z } from 'zod'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { isHrAdmin, resolveCallerEmployeeId } from '../../lib/manager-scope.js'
 import { logAction } from '../../lib/audit-service.js'
-import { serverError, ErrorCode } from '../../lib/api-errors.js'
+import { serverError, conflictError, ErrorCode } from '../../lib/api-errors.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
 
 const SEED_QUESTIONS = [
@@ -33,6 +33,13 @@ const questionSchema = z.object({
   options:       z.array(z.string()).optional().default([]),
   display_order: z.number().int().optional(),
   is_required:   z.boolean().optional().default(false),
+})
+
+// expected_version is optional so this stays backward-compatible with a
+// frontend that hasn't been updated to send it yet (PEND-105 Phase C) — the
+// CAS check below only runs when a caller actually provides it.
+const updateQuestionSchema = questionSchema.partial().extend({
+  expected_version: z.number().int().positive().optional(),
 })
 
 const responsesSchema = z.object({
@@ -106,14 +113,36 @@ export default async function exitInterviewRoutes(fastify: FastifyInstance) {
   })
 
   fastify.put('/exit-interview/questions/:qid', hrAdminAuth, async (req: any, reply) => {
-    const parsed = questionSchema.partial().safeParse(req.body)
+    const parsed = updateQuestionSchema.safeParse(req.body)
     if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION', message: parsed.error.issues[0].message })
-    const { data, error } = await fastify.supabase
+    const { expected_version, ...fields } = parsed.data
+    let query = fastify.supabase
       .from('exit_interview_questions')
-      .update(parsed.data).eq('id', req.params.qid).eq('tenant_id', req.tenantId)
-      .select().maybeSingle()
+      .update(fields).eq('id', req.params.qid).eq('tenant_id', req.tenantId)
+    // PEND-105: optimistic-concurrency check — only applied when the caller
+    // sends expected_version (see updateQuestionSchema comment above).
+    if (expected_version !== undefined) query = query.eq('version', expected_version)
+    const { data, error } = await query.select().maybeSingle()
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update exit interview question')
-    if (!data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Question not found' })
+    if (!data) {
+      // 0 rows matched — either the record doesn't exist, or it does but
+      // `version` moved on since expected_version was read. Disambiguate
+      // with a plain existence check so a genuinely-deleted record still
+      // reports 404, not a confusing 409.
+      if (expected_version !== undefined) {
+        const { data: exists } = await fastify.supabase
+          .from('exit_interview_questions')
+          .select('id')
+          .eq('id', req.params.qid)
+          .eq('tenant_id', req.tenantId)
+          .maybeSingle()
+        if (exists) {
+          return conflictError(reply, ErrorCode.VERSION_CONFLICT,
+            'Question was changed by someone else. Reload and try again.')
+        }
+      }
+      return reply.code(404).send({ error: 'NOT_FOUND', message: 'Question not found' })
+    }
     return reply.send({ data })
   })
 

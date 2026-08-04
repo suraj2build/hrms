@@ -30,7 +30,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z }                    from 'zod'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
-import { serverError, ErrorCode } from '../../lib/api-errors.js'
+import { serverError, conflictError, ErrorCode } from '../../lib/api-errors.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
 
 const SELECT_COLS =
@@ -92,6 +92,13 @@ const schema = z.object({
   contact_phone:               z.string().max(30).optional().nullable(),
   contact_email:               z.string().email().max(160).optional().nullable(),
   sanctioned_headcount:        z.number().int().nonnegative().optional().nullable(),
+})
+
+// expected_version is optional so this stays backward-compatible with a
+// frontend that hasn't been updated to send it yet (PEND-105 Phase C) — the
+// CAS check below only runs when a caller actually provides it.
+const updateSchema = schema.partial().extend({
+  expected_version: z.number().int().positive().optional(),
 })
 
 /**
@@ -324,7 +331,7 @@ export default async function sitesRoutes(fastify: FastifyInstance) {
 
   // ── PUT /masters/sites/:id ────────────────────────────────────────────────
   fastify.put('/:id', adminAuth, async (req: any, reply) => {
-    const parsed = schema.partial().safeParse(req.body)
+    const parsed = updateSchema.safeParse(req.body)
     if (!parsed.success) {
       return reply.code(400).send({
         error:   'VALIDATION',
@@ -406,7 +413,9 @@ export default async function sitesRoutes(fastify: FastifyInstance) {
 
     // Strip migration-dependent optional columns when null/undefined (same
     // resilience pattern as INSERT above — migration 166/217/248/275 may be absent).
-    const { state_code, holiday_group_id, site_type, city, region, zone, ...rest } = parsed.data
+    // expected_version is also stripped here — it's a CAS control field, not
+    // a column to write.
+    const { state_code, holiday_group_id, site_type, city, region, zone, expected_version, ...rest } = parsed.data
     const coreUpdate: Record<string, unknown> = { ...rest }
     for (const k of EXPANSION_KEYS) delete coreUpdate[k]
     const updatePayload: Record<string, unknown> = { ...coreUpdate }
@@ -421,11 +430,18 @@ export default async function sitesRoutes(fastify: FastifyInstance) {
       if (v != null) updatePayload[k] = v
     }
 
-    const { data, error } = await fastify.supabase
+    const id = (req.params as any).id
+
+    let query = fastify.supabase
       .from('sites')
       .update(updatePayload)
-      .eq('id', (req.params as any).id)
+      .eq('id', id)
       .eq('tenant_id', req.tenantId)
+    // PEND-105: optimistic-concurrency check — only applied when the caller
+    // sends expected_version (see updateSchema comment above).
+    if (expected_version !== undefined) query = query.eq('version', expected_version)
+
+    const { data, error } = await query
       .select('*')
       .maybeSingle()
 
@@ -433,6 +449,22 @@ export default async function sitesRoutes(fastify: FastifyInstance) {
       return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update site')
     }
     if (!data) {
+      // 0 rows matched — either the record doesn't exist, or it does but
+      // `version` moved on since expected_version was read. Disambiguate
+      // with a plain existence check so a genuinely-deleted record still
+      // reports 404, not a confusing 409.
+      if (expected_version !== undefined) {
+        const { data: exists } = await fastify.supabase
+          .from('sites')
+          .select('id')
+          .eq('id', id)
+          .eq('tenant_id', req.tenantId)
+          .maybeSingle()
+        if (exists) {
+          return conflictError(reply, ErrorCode.VERSION_CONFLICT,
+            'This site was changed by someone else. Reload and try again.')
+        }
+      }
       return reply.code(404).send({ error: 'NOT_FOUND', message: 'Site not found' })
     }
 

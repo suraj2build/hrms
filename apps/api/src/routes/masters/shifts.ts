@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { z } from 'zod'
-import { serverError, ErrorCode } from '../../lib/api-errors.js'
+import { serverError, conflictError, ErrorCode } from '../../lib/api-errors.js'
 
 const schema = z.object({
   name:           z.string().min(1, 'Name is required'),
@@ -14,6 +14,13 @@ const schema = z.object({
   is_active:      z.boolean().optional().default(true),
   // weekly_off_days was removed from shifts — weekly-off belongs to Roster entities only.
   // This field is intentionally omitted to enforce the architectural separation.
+})
+
+// expected_version is optional so this stays backward-compatible with a
+// frontend that hasn't been updated to send it yet (PEND-105 Phase C) — the
+// CAS check below only runs when a caller actually provides it.
+const updateSchema = schema.partial().extend({
+  expected_version: z.number().int().positive().optional(),
 })
 
 export default async function shiftsRoutes(fastify: FastifyInstance) {
@@ -44,18 +51,41 @@ export default async function shiftsRoutes(fastify: FastifyInstance) {
   })
 
   fastify.put('/:id', hrAdminAuth, async (req: any, reply) => {
-    const parsed = schema.partial().safeParse(req.body)
+    const parsed = updateSchema.safeParse(req.body)
     if (!parsed.success)
       return reply.code(400).send({ error: 'VALIDATION', message: parsed.error.issues[0].message })
-    const { data, error } = await fastify.supabase
+    const { expected_version, ...fields } = parsed.data
+    let query = fastify.supabase
       .from('shifts')
-      .update(parsed.data)
+      .update(fields)
       .eq('id', req.params.id)
       .eq('tenant_id', req.tenantId)
+    // PEND-105: optimistic-concurrency check — only applied when the caller
+    // sends expected_version (see updateSchema comment above).
+    if (expected_version !== undefined) query = query.eq('version', expected_version)
+    const { data, error } = await query
       .select()
       .maybeSingle()
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update shift')
-    if (!data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Shift not found' })
+    if (!data) {
+      // 0 rows matched — either the record doesn't exist, or it does but
+      // `version` moved on since expected_version was read. Disambiguate
+      // with a plain existence check so a genuinely-deleted record still
+      // reports 404, not a confusing 409.
+      if (expected_version !== undefined) {
+        const { data: exists } = await fastify.supabase
+          .from('shifts')
+          .select('id')
+          .eq('id', req.params.id)
+          .eq('tenant_id', req.tenantId)
+          .maybeSingle()
+        if (exists) {
+          return conflictError(reply, ErrorCode.VERSION_CONFLICT,
+            'This shift was changed by someone else. Reload and try again.')
+        }
+      }
+      return reply.code(404).send({ error: 'NOT_FOUND', message: 'Shift not found' })
+    }
     return reply.send(data)
   })
 

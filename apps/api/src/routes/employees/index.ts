@@ -409,8 +409,12 @@ export default async function employeeRoutes(fastify: FastifyInstance) {
       return forbidden(reply, 'NO_EMPLOYEE_LINK', 'Profile not linked to an employee record')
     }
 
+    // expected_version is optional so this stays backward-compatible with a
+    // frontend that hasn't been updated to send it yet (PEND-105 Phase C) —
+    // the CAS check below only runs when a caller actually provides it.
     const schema = z.object({
-      phone: z.string().min(5).max(20).optional(),
+      phone:             z.string().min(5).max(20).optional(),
+      expected_version:  z.number().int().positive().optional(),
     })
 
     const parsed = schema.safeParse(req.body)
@@ -418,19 +422,45 @@ export default async function employeeRoutes(fastify: FastifyInstance) {
       return validationError(reply, ErrorCode.VALIDATION_ERROR, parsed.error.issues[0]?.message ?? 'Validation failed')
     }
 
-    if (Object.keys(parsed.data).length === 0) {
+    const { expected_version, ...fields } = parsed.data
+
+    if (Object.keys(fields).length === 0) {
       return validationError(reply, 'NO_CHANGES', 'No updatable fields provided')
     }
 
-    const { data, error } = await fastify.supabase
+    let query = fastify.supabase
       .from('employees')
-      .update({ ...parsed.data, updated_at: new Date().toISOString() })
+      .update({ ...fields, updated_at: new Date().toISOString() })
       .eq('id', callerProfile.employee_id)
       .eq('tenant_id', req.tenantId)
-      .select('id, first_name, last_name, phone, email')
-      .single()
+    // PEND-105: optimistic-concurrency check — only applied when the caller
+    // sends expected_version (see schema comment above).
+    if (expected_version !== undefined) query = query.eq('version', expected_version)
+
+    const { data, error } = await query
+      .select('id, first_name, last_name, phone, email, version')
+      .maybeSingle()
 
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update employee')
+    if (!data) {
+      // 0 rows matched — either the record doesn't exist, or it does but
+      // `version` moved on since expected_version was read. Disambiguate
+      // with a plain existence check so a genuinely-deleted record still
+      // reports 404, not a confusing 409.
+      if (expected_version !== undefined) {
+        const { data: exists } = await fastify.supabase
+          .from('employees')
+          .select('id')
+          .eq('id', callerProfile.employee_id)
+          .eq('tenant_id', req.tenantId)
+          .maybeSingle()
+        if (exists) {
+          return conflictError(reply, ErrorCode.VERSION_CONFLICT,
+            'Employee record was changed by someone else. Reload and try again.')
+        }
+      }
+      return notFound(reply, 'EMPLOYEE_NOT_FOUND', 'Employee not found')
+    }
     return reply.send({ data })
   })
 
@@ -453,6 +483,10 @@ export default async function employeeRoutes(fastify: FastifyInstance) {
     // (the real one is joining_date, above) — both previously would have
     // failed with "column does not exist" if ever submitted. Neither is
     // sent by the live caller (EmployeeProfile.tsx profileMutation).
+    // expected_version is optional so this stays backward-compatible with a
+    // frontend that hasn't been updated to send it yet (PEND-105 Phase C) —
+    // the CAS check below only runs when a caller actually provides it.
+    expected_version:     z.number().int().positive().optional(),
   })
 
   fastify.put('/employees/:id', hrAdminAuth, async (request, reply) => {
@@ -532,18 +566,43 @@ export default async function employeeRoutes(fastify: FastifyInstance) {
       employee_code: _code,
       created_at: _created,
       created_by: _createdBy,
+      expected_version,
       ...safeUpdates
     } = parsed.data as Record<string, unknown>
 
-    const { data, error } = await fastify.supabase
+    let query = fastify.supabase
       .from('employees')
       .update({ ...safeUpdates, updated_at: new Date().toISOString() })
       .eq('id', id)
       .eq('tenant_id', request.tenantId)
+    // PEND-105: optimistic-concurrency check — only applied when the caller
+    // sends expected_version (see PutEmployeeSchema comment above).
+    if (expected_version !== undefined) query = query.eq('version', expected_version as number)
+
+    const { data, error } = await query
       .select()
-      .single()
+      .maybeSingle()
 
     if (error) return serverError(request, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update employee')
+    if (!data) {
+      // 0 rows matched — either the record doesn't exist, or it does but
+      // `version` moved on since expected_version was read. Disambiguate
+      // with a plain existence check so a genuinely-deleted record still
+      // reports 404, not a confusing 409.
+      if (expected_version !== undefined) {
+        const { data: exists } = await fastify.supabase
+          .from('employees')
+          .select('id')
+          .eq('id', id)
+          .eq('tenant_id', request.tenantId)
+          .maybeSingle()
+        if (exists) {
+          return conflictError(reply, ErrorCode.VERSION_CONFLICT,
+            'Employee was changed by someone else. Reload and try again.')
+        }
+      }
+      return notFound(reply, 'EMPLOYEE_NOT_FOUND', 'Employee not found')
+    }
 
     await logAction(fastify.supabase, {
       tenantId:    request.tenantId,

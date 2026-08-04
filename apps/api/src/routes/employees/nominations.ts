@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { optStr, optDate, optUuid } from '../../lib/zod-form.js'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
-import { serverError, notFound, ErrorCode } from '../../lib/api-errors.js'
+import { serverError, notFound, conflictError, ErrorCode } from '../../lib/api-errors.js'
 
 const schema = z.object({
   scheme:               z.enum(['pf','gratuity','esi','superannuation']),
@@ -13,6 +13,13 @@ const schema = z.object({
   address:              optStr,
   is_minor:             z.boolean().optional().default(false),
   guardian_name:        optStr,
+})
+
+// expected_version is optional so this stays backward-compatible with a
+// frontend that hasn't been updated to send it yet (PEND-105 Phase C) — the
+// CAS check below only runs when a caller actually provides it.
+const updateSchema = schema.partial().extend({
+  expected_version: z.number().int().positive().optional(),
 })
 
 async function verifyEmployee(fastify: any, employeeId: string, tenantId: string) {
@@ -92,7 +99,7 @@ export default async function nominationsRoutes(fastify: FastifyInstance) {
   })
 
   fastify.put('/employees/:id/nominations/:nomId', hrAdminAuth, async (req: any, reply) => {
-    const parsed = schema.partial().safeParse(req.body)
+    const parsed = updateSchema.safeParse(req.body)
     if (!parsed.success)
       return reply.code(400).send({ error: 'VALIDATION', message: parsed.error.issues[0].message })
     if (parsed.data.relationship_type_id && !await verifyRelationshipType(fastify, parsed.data.relationship_type_id, req.tenantId))
@@ -110,15 +117,38 @@ export default async function nominationsRoutes(fastify: FastifyInstance) {
       if (!valid)
         return reply.code(400).send({ error: 'VALIDATION', message: `Total share for ${scheme} would exceed 100%` })
     }
-    const { data, error } = await fastify.supabase
+    const { expected_version, ...fields } = parsed.data
+    let query = fastify.supabase
       .from('employee_nominations')
-      .update(parsed.data)
+      .update(fields)
       .eq('id', req.params.nomId)
       .eq('employee_id', req.params.id)
       .eq('tenant_id', req.tenantId)
-      .select('*, relationship_types(id, name)').maybeSingle()
+    // PEND-105: optimistic-concurrency check — only applied when the caller
+    // sends expected_version (see updateSchema comment above).
+    if (expected_version !== undefined) query = query.eq('version', expected_version)
+    const { data, error } = await query.select('*, relationship_types(id, name)').maybeSingle()
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update nomination')
-    if (!data) return notFound(reply, 'NOT_FOUND', 'Nomination not found')
+    if (!data) {
+      // 0 rows matched — either the record doesn't exist, or it does but
+      // `version` moved on since expected_version was read. Disambiguate
+      // with a plain existence check so a genuinely-deleted record still
+      // reports 404, not a confusing 409.
+      if (expected_version !== undefined) {
+        const { data: exists } = await fastify.supabase
+          .from('employee_nominations')
+          .select('id')
+          .eq('id', req.params.nomId)
+          .eq('employee_id', req.params.id)
+          .eq('tenant_id', req.tenantId)
+          .maybeSingle()
+        if (exists) {
+          return conflictError(reply, ErrorCode.VERSION_CONFLICT,
+            'Nomination was changed by someone else. Reload and try again.')
+        }
+      }
+      return notFound(reply, 'NOT_FOUND', 'Nomination not found')
+    }
     return reply.send(data)
   })
 

@@ -19,7 +19,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
-import { serverError, ErrorCode } from '../../lib/api-errors.js'
+import { serverError, conflictError, ErrorCode } from '../../lib/api-errors.js'
 
 const createSchema = z.object({
   code: z
@@ -36,6 +36,10 @@ const updateSchema = z.object({
   name:        z.string().min(1).max(120).optional(),
   description: z.string().max(500).optional().nullable(),
   is_active:   z.boolean().optional(),
+  // expected_version is optional so this stays backward-compatible with a
+  // frontend that hasn't been updated to send it yet (PEND-105 Phase C) —
+  // the CAS check below only runs when a caller actually provides it.
+  expected_version: z.number().int().positive().optional(),
 })
 
 export default async function importantDateTypesRoutes(fastify: FastifyInstance) {
@@ -58,7 +62,7 @@ export default async function importantDateTypesRoutes(fastify: FastifyInstance)
 
     let query = fastify.supabase
       .from('important_date_types')
-      .select('id, code, name, description, is_system, is_active, created_at')
+      .select('id, code, name, description, is_system, is_active, version, created_at')
       .eq('tenant_id', req.tenantId)
       .order('is_system', { ascending: false })
       .order('name')
@@ -115,7 +119,7 @@ export default async function importantDateTypesRoutes(fastify: FastifyInstance)
         is_system:   false,
         is_active,
       })
-      .select('id, code, name, description, is_system, is_active, created_at')
+      .select('id, code, name, description, is_system, is_active, version, created_at')
       .single()
 
     if (error) {
@@ -165,12 +169,19 @@ export default async function importantDateTypesRoutes(fastify: FastifyInstance)
       return reply.code(400).send({ error: 'NO_CHANGES', message: 'Nothing to update' })
     }
 
-    const { data, error } = await fastify.supabase
+    const { expected_version } = parsed.data
+
+    let query = fastify.supabase
       .from('important_date_types')
       .update(updates)
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
-      .select('id, code, name, description, is_system, is_active, updated_at')
+    // PEND-105: optimistic-concurrency check — only applied when the caller
+    // sends expected_version (see updateSchema comment above).
+    if (expected_version !== undefined) query = query.eq('version', expected_version)
+
+    const { data, error } = await query
+      .select('id, code, name, description, is_system, is_active, version, updated_at')
       .maybeSingle()
 
     if (error) {
@@ -180,6 +191,22 @@ export default async function importantDateTypesRoutes(fastify: FastifyInstance)
     // would otherwise throw PGRST116 (0 rows) as a generic 500 instead of the
     // benign 404 a legitimate race deserves.
     if (!data) {
+      // 0 rows matched — either the record doesn't exist, or it does but
+      // `version` moved on since expected_version was read. Disambiguate
+      // with a plain existence check so a genuinely-deleted record still
+      // reports 404, not a confusing 409.
+      if (expected_version !== undefined) {
+        const { data: exists } = await fastify.supabase
+          .from('important_date_types')
+          .select('id')
+          .eq('id', id)
+          .eq('tenant_id', req.tenantId)
+          .maybeSingle()
+        if (exists) {
+          return conflictError(reply, ErrorCode.VERSION_CONFLICT,
+            'This date type was changed by someone else. Reload and try again.')
+        }
+      }
       return reply.code(404).send({ error: 'NOT_FOUND', message: 'Date type not found' })
     }
 

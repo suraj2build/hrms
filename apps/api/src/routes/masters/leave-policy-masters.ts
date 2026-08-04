@@ -27,13 +27,23 @@ import {
 } from '../../lib/policy-governance.js'
 import { resolveEffectivePolicyForEmployee } from '../../lib/leave-policy-service.js'
 import { HR_ADMIN_ROLES }                    from '../../lib/rbac.js'
-import { serverError, ErrorCode }            from '../../lib/api-errors.js'
+import { serverError, conflictError, ErrorCode } from '../../lib/api-errors.js'
 const masterSchema = z.object({
   name:        z.string().min(1).max(100),
   description: z.string().max(500).optional(),
   is_default:  z.boolean().default(false),
   year_type:   z.enum(['calendar', 'financial']).default('calendar'),
   is_active:   z.boolean().default(true),
+})
+
+// expected_version is optional so this stays backward-compatible with a
+// frontend that hasn't been updated to send it yet (PEND-105 Phase C) — the
+// CAS check below only runs when a caller actually provides it. NOTE: this
+// table's own `version` column is a draft→published governance counter
+// (see GET /:id and POST /:id/rollback/:version below) — unrelated to CAS,
+// which uses the distinct `cas_version` column here instead (migration 428).
+const updateSchema = masterSchema.partial().extend({
+  expected_version: z.number().int().positive().optional(),
 })
 
 export default async function leavePolicyMastersRoutes(fastify: FastifyInstance) {
@@ -54,7 +64,7 @@ export default async function leavePolicyMastersRoutes(fastify: FastifyInstance)
       .from('leave_policy_masters')
       .select(`
         id, name, description, is_default, year_type, is_active,
-        status, version, effective_from, published_by, published_at, publish_notes,
+        status, version, cas_version, effective_from, published_by, published_at, publish_notes,
         created_at, updated_at,
         leave_policy_rules(id),
         leave_policy_assignments(id, scope_type, scope_id)
@@ -75,6 +85,7 @@ export default async function leavePolicyMastersRoutes(fastify: FastifyInstance)
       is_active:        m.is_active,
       status:           m.status,
       version:          m.version,
+      cas_version:      m.cas_version,
       effective_from:   m.effective_from,
       published_at:     m.published_at,
       publish_notes:    m.publish_notes,
@@ -101,7 +112,7 @@ export default async function leavePolicyMastersRoutes(fastify: FastifyInstance)
       .from('leave_policy_masters')
       .select(`
         id, name, description, is_default, year_type, is_active,
-        status, version, effective_from, published_by, published_at, publish_notes,
+        status, version, cas_version, effective_from, published_by, published_at, publish_notes,
         created_at, updated_at,
         leave_policy_rules(
           id, leave_type_id, accrual_type, accrual_days_per_year,
@@ -157,7 +168,7 @@ export default async function leavePolicyMastersRoutes(fastify: FastifyInstance)
         tenant_id:   req.tenantId,
         ...parsed.data,
       })
-      .select('id, name, description, is_default, year_type, is_active, created_at')
+      .select('id, name, description, is_default, year_type, is_active, cas_version, created_at')
       .single()
 
     if (error) {
@@ -199,13 +210,15 @@ export default async function leavePolicyMastersRoutes(fastify: FastifyInstance)
     if (!requireAdmin(req, reply)) return
 
     const { id } = req.params as { id: string }
-    const parsed = masterSchema.partial().safeParse(req.body)
+    const parsed = updateSchema.safeParse(req.body)
     if (!parsed.success) {
       return reply.code(400).send({
         error:   'VALIDATION_ERROR',
         message: parsed.error.issues[0]?.message,
       })
     }
+
+    const { expected_version, ...fields } = parsed.data
 
     // Verify the policy belongs to this tenant
     const { data: existing } = await fastify.supabase
@@ -220,7 +233,7 @@ export default async function leavePolicyMastersRoutes(fastify: FastifyInstance)
     }
 
     // If promoting to default, demote the current default
-    if (parsed.data.is_default === true) {
+    if (fields.is_default === true) {
       await fastify.supabase
         .from('leave_policy_masters')
         .update({ is_default: false, updated_at: new Date().toISOString() })
@@ -229,13 +242,21 @@ export default async function leavePolicyMastersRoutes(fastify: FastifyInstance)
         .neq('id', id)
     }
 
-    const { data, error } = await fastify.supabase
+    let query = fastify.supabase
       .from('leave_policy_masters')
-      .update({ ...parsed.data, updated_at: new Date().toISOString() })
+      .update({ ...fields, updated_at: new Date().toISOString() })
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
-      .select('id, name, description, is_default, year_type, is_active, updated_at')
-      .single()
+    // PEND-105: optimistic-concurrency check — only applied when the caller
+    // sends expected_version (see updateSchema comment above). This table's
+    // CAS token is `cas_version`, NOT the pre-existing `version` column
+    // (that one is the draft→published governance counter — see updateSchema
+    // comment).
+    if (expected_version !== undefined) query = query.eq('cas_version', expected_version)
+
+    const { data, error } = await query
+      .select('id, name, description, is_default, year_type, is_active, cas_version, updated_at')
+      .maybeSingle()
 
     if (error) {
       if (error.code === '23505') {
@@ -250,6 +271,22 @@ export default async function leavePolicyMastersRoutes(fastify: FastifyInstance)
       return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update policy')
     }
     if (!data) {
+      // 0 rows matched — either the record doesn't exist, or it does but
+      // `cas_version` moved on since expected_version was read. Disambiguate
+      // with a plain existence check so a genuinely-deleted record still
+      // reports 404, not a confusing 409.
+      if (expected_version !== undefined) {
+        const { data: exists } = await fastify.supabase
+          .from('leave_policy_masters')
+          .select('id')
+          .eq('id', id)
+          .eq('tenant_id', req.tenantId)
+          .maybeSingle()
+        if (exists) {
+          return conflictError(reply, ErrorCode.VERSION_CONFLICT,
+            'This policy was changed by someone else. Reload and try again.')
+        }
+      }
       return reply.code(404).send({ error: 'NOT_FOUND', message: 'Policy not found' })
     }
 
@@ -260,7 +297,7 @@ export default async function leavePolicyMastersRoutes(fastify: FastifyInstance)
       action:      'UPDATE',
       performedBy: req.userId,
       oldData:     { id },
-      newData:     parsed.data,
+      newData:     fields,
     })
 
     return reply.send({ data })
