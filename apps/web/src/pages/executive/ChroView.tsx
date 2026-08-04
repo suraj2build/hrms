@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { Users2, Sparkles, ShieldCheck, CalendarCheck, Lightbulb, ChevronRight, UserPlus, Clock, Briefcase, Filter, Layers, BadgeCheck } from 'lucide-react'
 import { api } from '@/lib/api/client'
 import { KpiCard } from '@/components/exec/KpiCard'
-import { ExecLayout, StatTile } from '@/components/exec/ExecShell'
+import { ExecLayout, StatTile, ExecErrorBanner } from '@/components/exec/ExecShell'
 import { Viz, DonutBlock, NoData } from '@/components/exec/viz'
 import { CAT, genderColor, tc } from '@/components/exec/exec-utils'
 
@@ -33,7 +33,7 @@ const FUNNEL_STAGES: Array<{ key: keyof HiringFunnel; label: string }> = [
 ]
 
 export default function ChroView() {
-  const { data: chro } = useQuery<ChroSnapshot>({ queryKey: ['exec-chro'], queryFn: () => api.get<{ data?: ChroSnapshot } & ChroSnapshot>('/executive/chro').then((r) => r.data ?? r), staleTime: 5 * 60_000 })
+  const { data: chro, isError, refetch } = useQuery<ChroSnapshot>({ queryKey: ['exec-chro'], queryFn: () => api.get<{ data?: ChroSnapshot } & ChroSnapshot>('/executive/chro').then((r) => r.data ?? r), staleTime: 5 * 60_000 })
 
   const genderData = useMemo(() => Object.entries(chro?.gender_distribution ?? {})
     .filter(([, v]) => v > 0).map(([k, v]) => ({ name: tc(k), value: v, color: genderColor(k) })), [chro])
@@ -51,6 +51,7 @@ export default function ChroView() {
 
   return (
     <ExecLayout title="People & Culture (CHRO)" subtitle="Diversity, talent acquisition and trust · live where available">
+      {isError && <ExecErrorBanner onRetry={() => refetch()} />}
       {/* KPI ribbon — talent & culture */}
       <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <KpiCard label="Leave Utilisation" value={chro ? `${chro.leave_utilization_pct.toFixed(0)}%` : '—'} icon={CalendarCheck} tone="primary" deltaLabel="Of entitlement" />

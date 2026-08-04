@@ -7,7 +7,7 @@ import {
 } from 'recharts'
 import { api } from '@/lib/api/client'
 import { KpiCard } from '@/components/exec/KpiCard'
-import { ExecLayout } from '@/components/exec/ExecShell'
+import { ExecLayout, ExecErrorBanner } from '@/components/exec/ExecShell'
 import { Viz, ChartTip, NoData, PeriodSlicer } from '@/components/exec/viz'
 import { C, GRID, AXIS, fmtMonth, slicePeriod, type Period } from '@/components/exec/exec-utils'
 
@@ -17,7 +17,7 @@ interface TrendsData {
 
 export default function TrendsView() {
   const [period, setPeriod] = useState<Period>('12M')
-  const { data: t } = useQuery<TrendsData>({ queryKey: ['exec-trends'], queryFn: () => api.get<{ data?: TrendsData } & TrendsData>('/executive/trends').then((r) => r.data ?? r), staleTime: 5 * 60_000 })
+  const { data: t, isError, refetch } = useQuery<TrendsData>({ queryKey: ['exec-trends'], queryFn: () => api.get<{ data?: TrendsData } & TrendsData>('/executive/trends').then((r) => r.data ?? r), staleTime: 5 * 60_000 })
   const months = useMemo(() => t?.months ?? [], [t])
 
   const metrics = useMemo(() => {
@@ -50,6 +50,7 @@ export default function TrendsView() {
   return (
     <ExecLayout title="Trends & Forecasting" subtitle="Long-run workforce, cost and attrition trends · live data"
       actions={<PeriodSlicer value={period} onChange={setPeriod} />}>
+      {isError && <ExecErrorBanner onRetry={() => refetch()} />}
       {/* KPI ribbon */}
       <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <KpiCard label="Headcount Growth" value={fmtPct(metrics.cagr)} icon={Users} tone="primary" deltaLabel="Annualised" />

@@ -4,7 +4,7 @@ import { ShieldCheck, ShieldAlert, AlertTriangle, FileWarning, Gauge, ClipboardC
 import { RadialBar, RadialBarChart, PolarAngleAxis, ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts'
 import { api } from '@/lib/api/client'
 import { KpiCard } from '@/components/exec/KpiCard'
-import { ExecLayout, StatTile } from '@/components/exec/ExecShell'
+import { ExecLayout, StatTile, ExecErrorBanner } from '@/components/exec/ExecShell'
 import { Viz, ChartTip, NoData, PeriodSlicer } from '@/components/exec/viz'
 import { CAT, GRID, AXIS, slicePeriod, type Period } from '@/components/exec/exec-utils'
 
@@ -59,7 +59,7 @@ function RiskGauge({ value, fill, text, caption }: { value: number; fill: string
 
 export default function ComplianceView() {
   const [period, setPeriod] = useState<Period>('12M')
-  const { data: c } = useQuery<ComplianceData>({ queryKey: ['exec-compliance'], queryFn: () => api.get<{ data?: ComplianceData } & ComplianceData>('/executive/compliance').then((r) => r.data ?? r), staleTime: 5 * 60_000 })
+  const { data: c, isError, refetch } = useQuery<ComplianceData>({ queryKey: ['exec-compliance'], queryFn: () => api.get<{ data?: ComplianceData } & ComplianceData>('/executive/compliance').then((r) => r.data ?? r), staleTime: 5 * 60_000 })
   const { data: cal } = useQuery<{ data: CalDeadline[] }>({ queryKey: ['exec-compliance-calendar'], queryFn: () => api.get('/compliance/calendar/upcoming?within_days=30'), staleTime: 5 * 60_000 })
   const deadlines = cal?.data ?? []
   const overdue = deadlines.filter(d => d.status === 'overdue')
@@ -84,6 +84,7 @@ export default function ComplianceView() {
   return (
     <ExecLayout title="Compliance & Risk" subtitle="Statutory risk, incidents and governance posture · live data"
       actions={<PeriodSlicer value={period} onChange={setPeriod} />}>
+      {isError && <ExecErrorBanner onRetry={() => refetch()} />}
       {/* KPI ribbon */}
       <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <KpiCard label="Risk Posture Index" value={c?.posture_index != null ? `${postureIdx}` : '—'} icon={ShieldAlert} tone={postureBand === 'high' || postureBand === 'critical' ? 'destructive' : postureBand === 'medium' ? 'warning' : 'success'} deltaLabel={`${postureBand} · composite`} />

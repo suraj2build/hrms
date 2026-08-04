@@ -7,7 +7,7 @@ import {
 } from 'recharts'
 import { api } from '@/lib/api/client'
 import { KpiCard } from '@/components/exec/KpiCard'
-import { ExecLayout } from '@/components/exec/ExecShell'
+import { ExecLayout, ExecErrorBanner } from '@/components/exec/ExecShell'
 import { Viz, DonutBlock, ChartTip, NoData, PeriodSlicer } from '@/components/exec/viz'
 import { C, CAT, GRID, AXIS, genderColor, tc, fmtNum, fmtMonth, slicePeriod, type Period } from '@/components/exec/exec-utils'
 
@@ -22,7 +22,7 @@ interface WorkforceData {
 
 export default function WorkforceView() {
   const [period, setPeriod] = useState<Period>('12M')
-  const { data: wf } = useQuery<WorkforceData>({ queryKey: ['exec-workforce'], queryFn: () => api.get<{ data?: WorkforceData } & WorkforceData>('/executive/workforce').then((r) => r.data ?? r), staleTime: 5 * 60_000 })
+  const { data: wf, isError, refetch } = useQuery<WorkforceData>({ queryKey: ['exec-workforce'], queryFn: () => api.get<{ data?: WorkforceData } & WorkforceData>('/executive/workforce').then((r) => r.data ?? r), staleTime: 5 * 60_000 })
 
   const deptRanked = useMemo(() => [...(wf?.dept_distribution ?? [])]
     .sort((a, b) => b.count - a.count).slice(0, 10)
@@ -41,6 +41,7 @@ export default function WorkforceView() {
   return (
     <ExecLayout title="Workforce Analytics" subtitle="Composition, movement and structure of the manpower base · live data"
       actions={<PeriodSlicer value={period} onChange={setPeriod} />}>
+      {isError && <ExecErrorBanner onRetry={() => refetch()} />}
       {/* KPI ribbon */}
       <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <KpiCard label="Active Headcount" value={fmtNum(wf?.employee_count)} icon={Users} tone="primary" />

@@ -7,7 +7,7 @@ import { toast }         from 'sonner'
 import {
   ArrowLeft, Award, Edit2, Save, X,
   UserPlus, Eye, EyeOff, RefreshCw, KeyRound,
-  ShieldCheck, UserX, UserCheck, Copy, Check, Trash2,
+  ShieldCheck, UserX, UserCheck, Copy, Check, Trash2, Loader2,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input }  from '@/components/ui/input'
@@ -261,8 +261,8 @@ export function OwnerTenantDetail() {
             <h2 className="text-sm font-semibold text-foreground">Details</h2>
             {editing && (
               <div className="flex gap-1.5">
-                <Button onClick={() => updateMut.mutate()} size="sm" className="bg-gradient-to-r from-success via-info to-primary hover:from-success/90 hover:to-primary/90 text-primary-foreground border-0 shadow-md shadow-success/20 h-7 text-xs gap-1">
-                  <Save className="h-3 w-3" /> Save
+                <Button onClick={() => updateMut.mutate()} disabled={updateMut.isPending} size="sm" className="bg-gradient-to-r from-success via-info to-primary hover:from-success/90 hover:to-primary/90 text-primary-foreground border-0 shadow-md shadow-success/20 h-7 text-xs gap-1">
+                  {updateMut.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Save className="h-3 w-3" />} Save
                 </Button>
                 <Button onClick={() => setEditing(false)} size="sm" variant="ghost" className="text-muted-foreground h-7 text-xs gap-1">
                   <X className="h-3 w-3" /> Cancel

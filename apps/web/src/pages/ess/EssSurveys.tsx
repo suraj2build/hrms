@@ -1,7 +1,7 @@
 import { useState } from'react'
 import { useQuery, useMutation, useQueryClient } from'@tanstack/react-query'
 import { useNavigate } from'react-router-dom'
-import { ClipboardList, CheckCircle2, Clock, ChevronRight, Users2, Loader2, RefreshCw } from'lucide-react'
+import { ClipboardList, CheckCircle2, Clock, ChevronRight, Users2, Loader2, RefreshCw, AlertCircle } from'lucide-react'
 import { toast } from'sonner'
 import { api } from'@/lib/api/client'
 import { Button } from'@/components/ui/button'
@@ -43,7 +43,7 @@ export function EssSurveys() {
  const qc = useQueryClient()
  const [nominations, setNominations] = useState<Record<string, string[]>>({})
 
- const { data, isLoading } = useQuery<Assignment[]>({
+ const { data, isLoading, isError } = useQuery<Assignment[]>({
  queryKey: ['my-surveys'],
  queryFn: () => api.get<{ data: Assignment[] }>('/surveys/my').then(r => r.data),
  staleTime: 60_000,
@@ -76,6 +76,15 @@ export function EssSurveys() {
  {[1, 2, 3].map(i => (
  <div key={i} className="h-20 animate-pulse rounded-2xl bg-muted/40" />
  ))}
+ </div>
+ )
+ }
+
+ if (isError) {
+ return (
+ <div className="flex flex-col items-center justify-center py-20 text-center">
+ <AlertCircle className="h-10 w-10 text-destructive/40 mb-3" />
+ <p className="text-sm text-muted-foreground">Couldn't load your surveys. Please try again.</p>
  </div>
  )
  }

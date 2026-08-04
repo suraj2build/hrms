@@ -35,7 +35,7 @@ export function EssWfh() {
   const [to, setTo]     = useState('')
   const [reason, setReason] = useState('')
 
-  const { data: mine } = useQuery<{ data: WfhReq[] }>({ queryKey: ['wfh-my'], queryFn: () => api.get('/attendance/wfh/my') })
+  const { data: mine, isLoading: mineLoading, isError: mineError } = useQuery<{ data: WfhReq[] }>({ queryKey: ['wfh-my'], queryFn: () => api.get('/attendance/wfh/my') })
   const { data: pending } = useQuery<{ data: WfhReq[] }>({ queryKey: ['wfh-pending'], queryFn: () => api.get('/attendance/wfh/pending') })
 
   const myReqs = mine?.data ?? []
@@ -110,7 +110,11 @@ export function EssWfh() {
       )}
 
       <SectionCard title="My WFH requests">
-        {myReqs.length === 0 ? (
+        {mineError ? (
+          <p className="text-sm text-destructive py-2">Couldn't load your WFH requests. Please try again.</p>
+        ) : mineLoading ? (
+          <p className="text-sm text-muted-foreground py-2">Loading…</p>
+        ) : myReqs.length === 0 ? (
           <p className="text-sm text-muted-foreground py-2">No WFH requests yet.</p>
         ) : (
           <div className="space-y-2">

@@ -5,7 +5,7 @@
  * + chart helpers that every exec page uses.
  */
 import { NavLink } from 'react-router-dom'
-import { Activity, Users2, Users, DollarSign, ShieldCheck, BarChart3, BarChart2, Brain } from 'lucide-react'
+import { Activity, Users2, Users, DollarSign, ShieldCheck, BarChart3, BarChart2, Brain, AlertTriangle } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 const TABS = [
@@ -62,6 +62,27 @@ export function ExecLayout({ title, subtitle, actions, children }: {
         <ExecNav />
       </div>
       {children}
+    </div>
+  )
+}
+
+/**
+ * F29: exec pages previously had no isError handling on their snapshot
+ * query — a failed fetch rendered every KPI as '—' and every chart as
+ * "No data", identical to a genuinely-empty tenant, with no signal that
+ * anything actually broke. Render this above the page body when the page's
+ * main useQuery reports isError.
+ */
+export function ExecErrorBanner({ onRetry }: { onRetry?: () => void }) {
+  return (
+    <div className="flex items-center gap-2.5 rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+      <AlertTriangle className="h-4 w-4 shrink-0" />
+      <span>Couldn't load this dashboard's data. The numbers below may be missing, not zero.</span>
+      {onRetry && (
+        <button onClick={onRetry} className="ml-auto shrink-0 text-xs font-medium underline underline-offset-2 hover:no-underline">
+          Retry
+        </button>
+      )}
     </div>
   )
 }

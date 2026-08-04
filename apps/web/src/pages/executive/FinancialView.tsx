@@ -7,7 +7,7 @@ import {
 } from 'recharts'
 import { api } from '@/lib/api/client'
 import { KpiCard } from '@/components/exec/KpiCard'
-import { ExecLayout, StatTile } from '@/components/exec/ExecShell'
+import { ExecLayout, StatTile, ExecErrorBanner } from '@/components/exec/ExecShell'
 import { Viz, ChartTip, NoData, PeriodSlicer } from '@/components/exec/viz'
 import { C, CAT, GRID, AXIS, cr, fmtMonth, slicePeriod, type Period } from '@/components/exec/exec-utils'
 
@@ -37,7 +37,7 @@ const flagTone = (f?: FlagTone): 'warning' | 'destructive' | 'success' =>
 
 export default function FinancialView() {
   const [period, setPeriod] = useState<Period>('12M')
-  const { data: fin } = useQuery<FinancialData>({ queryKey: ['exec-financial'], queryFn: () => api.get<{ data?: FinancialData } & FinancialData>('/executive/financial').then((r) => r.data ?? r), staleTime: 5 * 60_000 })
+  const { data: fin, isError, refetch } = useQuery<FinancialData>({ queryKey: ['exec-financial'], queryFn: () => api.get<{ data?: FinancialData } & FinancialData>('/executive/financial').then((r) => r.data ?? r), staleTime: 5 * 60_000 })
 
   const trend = fin?.payroll_cost_trend ?? []
   const latestCph = trend.length ? trend[trend.length - 1].avg_cost_per_head : 0
@@ -67,6 +67,7 @@ export default function FinancialView() {
   return (
     <ExecLayout title="Financial Analytics" subtitle="Payroll cost, department spend and exposure · live data"
       actions={<PeriodSlicer value={period} onChange={setPeriod} />}>
+      {isError && <ExecErrorBanner onRetry={() => refetch()} />}
       {/* KPI ribbon — payroll */}
       <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <KpiCard label="Gross Payroll · MTD" value={cr(fin?.payroll_current_gross ?? 0)} delta={fin?.payroll_mom_change} deltaLabel="MoM" icon={Wallet} tone="primary" />

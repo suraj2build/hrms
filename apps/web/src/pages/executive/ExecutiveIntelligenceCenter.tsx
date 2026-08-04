@@ -25,7 +25,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { MetricCard } from '@/components/dashboard/MetricCard'
 import { DrillDownSheet, type DeptRow } from '@/components/exec/DrillDownSheet'
-import { ExecLayout } from '@/components/exec/ExecShell'
+import { ExecLayout, ExecErrorBanner } from '@/components/exec/ExecShell'
 import { api } from '@/lib/api/client'
 import { cn } from '@/lib/utils'
 
@@ -211,6 +211,12 @@ export default function ExecutiveIntelligenceCenter() {
   ].filter(Boolean) as { label: string; body: string }[]
 
   const loading = ceoQ.isLoading || workforceQ.isLoading
+  // F29: 6 independent snapshot queries feed this page — previously none of
+  // their isError states were checked, so a failed fetch rendered every KPI
+  // as '—' and every chart as "No data", identical to a genuinely-empty
+  // tenant, with no signal anything broke.
+  const anyError = ceoQ.isError || chroQ.isError || workforceQ.isError || financialQ.isError || complianceQ.isError || trendsQ.isError
+  const retryAll = () => { ceoQ.refetch(); chroQ.refetch(); workforceQ.refetch(); financialQ.refetch(); complianceQ.refetch(); trendsQ.refetch() }
   const fmtNum = (n: number | undefined | null) => (n ?? 0).toLocaleString()
   const asOf = new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
 
@@ -245,6 +251,7 @@ export default function ExecutiveIntelligenceCenter() {
         </div>
       }
     >
+      {anyError && <ExecErrorBanner onRetry={retryAll} />}
       {/* Report header band */}
       <section className="relative overflow-hidden rounded-xl border bg-[image:var(--gradient-primary)] px-5 py-4 text-primary-foreground shadow-[var(--shadow-elegant)]">
         <div className="absolute -right-16 -top-20 h-48 w-56 rounded-full bg-white/10 blur-3xl" />
