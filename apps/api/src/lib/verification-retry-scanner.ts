@@ -87,7 +87,10 @@ export async function scan(supabase: SupabaseClient): Promise<void> {
         employee_id: row.employee_id,
         tenant_id:   row.tenant_id,
         pan:         bs.pan_number,
-      }).catch(() => void 0)
+      }).catch(err => logger.error(
+        { tenantId: row.tenant_id, employeeId: row.employee_id, verificationType: 'pan', err },
+        '[verification-retry-scanner] retry failed',
+      ))
     } else if (row.verification_type === 'bank_account' && bs.account_number && bs.ifsc_code) {
       await verificationOrchestrator.verify({
         supabase,
@@ -95,7 +98,10 @@ export async function scan(supabase: SupabaseClient): Promise<void> {
         tenant_id:      row.tenant_id,
         account_number: bs.account_number,
         ifsc_code:      bs.ifsc_code,
-      }).catch(() => void 0)
+      }).catch(err => logger.error(
+        { tenantId: row.tenant_id, employeeId: row.employee_id, verificationType: 'bank_account', err },
+        '[verification-retry-scanner] retry failed',
+      ))
     }
   }
 }

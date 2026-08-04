@@ -1247,27 +1247,36 @@ export async function runAllScans(supabase: SupabaseClient): Promise<void> {
   const tenantIds = await fetchTenantIds(supabase).catch(() => [] as string[])
   if (!tenantIds.length) return
 
+  // F43: named alongside each scan so a rejection can be attributed to the
+  // scan that threw — Promise.allSettled's result order matches this array's.
+  const SCANS: [string, (supabase: SupabaseClient, tenantId: string) => Promise<void>][] = [
+    ['scanRepeatedLate', scanRepeatedLate],
+    ['scanBurnout', scanBurnout],
+    ['scanStaffingShortages', scanStaffingShortages],
+    ['scanPayrollBlockers', scanPayrollBlockers],
+    ['scanAttendanceRisk', scanAttendanceRisk],
+    ['scanComplianceDeadlines', scanComplianceDeadlines],
+    ['scanLifecycleExpiry', scanLifecycleExpiry],
+    ['scanExitIntentSurveys', scanExitIntentSurveys],
+    ['scanAutoPolls', scanAutoPolls],
+    ['scanMoodThemeAlerts', scanMoodThemeAlerts],
+    ['scanBenefitsEnrolment', scanBenefitsEnrolment],
+    ['scanNewJoinerPolicyAssignment', scanNewJoinerPolicyAssignment],
+    ['scanOnboardingSurveys', scanOnboardingSurveys],
+    ['scanPostAppraisalSurveys', scanPostAppraisalSurveys],
+    ['scanPostTransferSurveys', scanPostTransferSurveys],
+    ['scanSurveyNegativeClusters', scanSurveyNegativeClusters],
+    ['scanOnboardingDegradation', scanOnboardingDegradation],
+    ['scanSuccessionAttritionRisk', scanSuccessionAttritionRisk],
+  ]
+
   for (const tenantId of tenantIds) {
-    await Promise.allSettled([
-      scanRepeatedLate(supabase, tenantId),
-      scanBurnout(supabase, tenantId),
-      scanStaffingShortages(supabase, tenantId),
-      scanPayrollBlockers(supabase, tenantId),
-      scanAttendanceRisk(supabase, tenantId),
-      scanComplianceDeadlines(supabase, tenantId),
-      scanLifecycleExpiry(supabase, tenantId),
-      scanExitIntentSurveys(supabase, tenantId),
-      scanAutoPolls(supabase, tenantId),
-      scanMoodThemeAlerts(supabase, tenantId),
-      scanBenefitsEnrolment(supabase, tenantId),
-      scanNewJoinerPolicyAssignment(supabase, tenantId),
-      scanOnboardingSurveys(supabase, tenantId),
-      scanPostAppraisalSurveys(supabase, tenantId),
-      scanPostTransferSurveys(supabase, tenantId),
-      scanSurveyNegativeClusters(supabase, tenantId),
-      scanOnboardingDegradation(supabase, tenantId),
-      scanSuccessionAttritionRisk(supabase, tenantId),
-    ])
+    const results = await Promise.allSettled(SCANS.map(([, fn]) => fn(supabase, tenantId)))
+    results.forEach((r, i) => {
+      if (r.status === 'rejected') {
+        logger.error({ tenantId, scan: SCANS[i][0], err: r.reason }, '[intelligence-scanner] scan failed')
+      }
+    })
   }
 }
 
