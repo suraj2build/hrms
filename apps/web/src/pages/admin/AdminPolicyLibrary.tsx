@@ -17,6 +17,7 @@ import { toast } from 'sonner'
 import { PageContainer } from '@/components/layout/PageContainer'
 import { PageHeader }    from '@/components/layout/PageHeader'
 import { SectionCard }   from '@/components/layout/SectionCard'
+import { fmtDate, fmtDateShort } from '@/lib/utils'
 import { Button }        from '@/components/ui/button'
 import { Badge }         from '@/components/ui/badge'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -92,11 +93,6 @@ function statusBadge(s: PolicyStatus) {
     case 'published': return { variant: 'success'   as const, label: 'Published' }
     case 'archived':  return { variant: 'outline'   as const, label: 'Archived' }
   }
-}
-
-function fmtDate(s: string | null): string {
-  if (!s) return '—'
-  return new Date(s).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
 }
 
 // ── Empty form ────────────────────────────────────────────────────────────────
@@ -534,7 +530,7 @@ export function AdminPolicyLibrary() {
                       {log.question}
                     </p>
                     <span className="text-[10px] text-muted-foreground shrink-0">
-                      {new Date(log.created_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}
+                      {fmtDateShort(log.created_at)}
                     </span>
                   </div>
                   <p className="text-[11px] text-muted-foreground pl-5 line-clamp-2">{log.answer}</p>
@@ -626,7 +622,7 @@ export function AdminPolicyLibrary() {
                     {e.acknowledged ? (
                       <div className="flex items-center gap-1 text-success">
                         <CheckCircle2 className="h-3.5 w-3.5" />
-                        <span className="text-[10px]">{e.acknowledged_at ? new Date(e.acknowledged_at).toLocaleDateString('en-IN') : 'Acked'}</span>
+                        <span className="text-[10px]">{e.acknowledged_at ? fmtDate(e.acknowledged_at) : 'Acked'}</span>
                       </div>
                     ) : (
                       <div className="flex items-center gap-1 text-warning">

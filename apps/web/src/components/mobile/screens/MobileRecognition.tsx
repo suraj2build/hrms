@@ -7,6 +7,7 @@ import { toast } from 'sonner'
 import { api } from '@/lib/api/client'
 import { EmployeeSelector } from '@/components/filters/EmployeeSelector'
 import { glossy } from '../glossy'
+import { fmtDateShort } from '@/lib/utils'
 
 interface Badge { code: string; label: string; icon: string; description: string; points: number }
 interface FeedItem { id: string; from_name?: string; to_name?: string; badge_code?: string; message: string; points: number; created_at: string }
@@ -26,7 +27,7 @@ function timeAgo(iso: string): string {
   const m = Math.floor(s / 60); if (m < 60) return `${m}m ago`
   const h = Math.floor(m / 60); if (h < 24) return `${h}h ago`
   const d = Math.floor(h / 24); if (d < 7) return `${d}d ago`
-  return new Date(iso).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })
+  return fmtDateShort(iso)
 }
 
 export function MobileRecognition({ base: _base }: { base: string }) {

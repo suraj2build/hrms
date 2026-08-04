@@ -27,7 +27,7 @@ import { MetricCard } from '@/components/dashboard/MetricCard'
 import { DrillDownSheet, type DeptRow } from '@/components/exec/DrillDownSheet'
 import { ExecLayout, ExecErrorBanner } from '@/components/exec/ExecShell'
 import { api } from '@/lib/api/client'
-import { cn } from '@/lib/utils'
+import { cn, fmtDate } from '@/lib/utils'
 
 // ── Real /executive response shapes ─────────────────────────────────────────────
 
@@ -218,7 +218,7 @@ export default function ExecutiveIntelligenceCenter() {
   const anyError = ceoQ.isError || chroQ.isError || workforceQ.isError || financialQ.isError || complianceQ.isError || trendsQ.isError
   const retryAll = () => { ceoQ.refetch(); chroQ.refetch(); workforceQ.refetch(); financialQ.refetch(); complianceQ.refetch(); trendsQ.refetch() }
   const fmtNum = (n: number | undefined | null) => (n ?? 0).toLocaleString()
-  const asOf = new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
+  const asOf = fmtDate(new Date())
 
   function exportDepts() {
     const rows = [['Department', 'Headcount', 'Cost (Cr)', 'Cost/Head (K)'], ...deptRows.map(d => [d.name, String(d.headcount), d.cost.toFixed(2), d.costPerHead?.toFixed(1) ?? ''])]

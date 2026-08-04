@@ -3,6 +3,7 @@ import { useParams } from "react-router-dom";
 import { uploadToSignedUrl } from "@/lib/supabase-storage";
 import { LogoMark, Wordmark } from "@/components/brand/Logo";
 import { brandConfig }        from "@/lib/brand-config";
+import { fmtDate }            from "@/lib/utils";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -1425,13 +1426,7 @@ export function PreJoinPortal() {
   if (pageState === "success") return <SuccessScreen candidateName={meta?.candidate_name} />;
 
   // ---- Format joining date ----
-  const joiningDateFormatted = meta?.joining_date
-    ? new Date(meta.joining_date).toLocaleDateString("en-IN", {
-        day: "numeric",
-        month: "long",
-        year: "numeric",
-      })
-    : "";
+  const joiningDateFormatted = meta?.joining_date ? fmtDate(meta.joining_date) : "";
 
   return (
     <div className="min-h-screen bg-muted">

@@ -29,7 +29,7 @@ import { Badge }          from '@/components/ui/badge'
 import { Button }         from '@/components/ui/button'
 import { api }            from '@/lib/api/client'
 import { useAuthStore }   from '@/stores/authStore'
-import { cn, fmtDate }    from '@/lib/utils'
+import { cn, fmtDate, formatCurrency } from '@/lib/utils'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -111,7 +111,7 @@ interface InvestigationData {
 
 function fmtCurrency(n: number | null | undefined): string {
   if (n == null) return '—'
-  return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(n)
+  return formatCurrency(n)
 }
 
 function fmtTime(s: string | null | undefined): string {

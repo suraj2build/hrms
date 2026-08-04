@@ -21,7 +21,7 @@ import { Badge }         from '@/components/ui/badge'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { api }           from '@/lib/api/client'
-import { cn }            from '@/lib/utils'
+import { cn, fmtDate }   from '@/lib/utils'
 import { EmployeeSelector } from '@/components/filters/EmployeeSelector'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -219,7 +219,7 @@ export function AdminCalibration() {
                         <div className="min-w-0">
                           <p className="text-sm font-medium truncate">{s.title}</p>
                           <p className="text-xs text-muted-foreground">
-                            Created {new Date(s.created_at).toLocaleDateString()}
+                            Created {fmtDate(s.created_at)}
                           </p>
                         </div>
                       </div>
@@ -253,7 +253,7 @@ export function AdminCalibration() {
                         <div className="min-w-0">
                           <p className="text-sm font-medium truncate text-muted-foreground">{s.title}</p>
                           <p className="text-xs text-muted-foreground">
-                            Closed {s.closed_at ? new Date(s.closed_at).toLocaleDateString() : '—'}
+                            Closed {s.closed_at ? fmtDate(s.closed_at) : '—'}
                           </p>
                         </div>
                       </div>
@@ -325,8 +325,8 @@ export function AdminCalibration() {
 
               <div className="flex items-center justify-between mt-1">
                 <p className="text-xs text-muted-foreground">
-                  Created {new Date(detail.created_at).toLocaleDateString()}
-                  {detail.closed_at && ` · Closed ${new Date(detail.closed_at).toLocaleDateString()}`}
+                  Created {fmtDate(detail.created_at)}
+                  {detail.closed_at && ` · Closed ${fmtDate(detail.closed_at)}`}
                 </p>
                 {detail.status === 'open' && (
                   <div className="flex items-center gap-2">
@@ -402,7 +402,7 @@ export function AdminCalibration() {
                             )}
                           </div>
                           <span className="text-[11px] text-muted-foreground shrink-0">
-                            {new Date(c.created_at).toLocaleDateString()}
+                            {fmtDate(c.created_at)}
                           </span>
                         </div>
                       </div>

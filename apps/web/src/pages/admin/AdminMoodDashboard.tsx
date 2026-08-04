@@ -14,6 +14,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from'@
 import { ConfirmDialog } from'@/components/ui/ConfirmDialog'
 import { Button } from'@/components/ui/button'
 import { api } from'@/lib/api/client'
+import { fmtDate } from'@/lib/utils'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -471,7 +472,7 @@ export function AdminMoodDashboard() {
  <div key={i} className="rounded-lg bg-background px-3 py-2">
  <p className="text-sm text-foreground">"{r.response}"</p>
  <p className="mt-0.5 text-[10px] text-muted-foreground">
- {new Date(r.created_at).toLocaleDateString()}
+ {fmtDate(r.created_at)}
  </p>
  </div>
  ))}
@@ -693,7 +694,7 @@ export function AdminMoodDashboard() {
  <div key={i} className="rounded-xl border border-[#ef4444]/20 bg-[#ef4444]/5 px-4 py-3">
  <p className="text-sm text-foreground">"{item.note}"</p>
  <p className="mt-1 text-[10px] text-muted-foreground">
- {new Date(item.checkin_date).toLocaleDateString('en-IN', { day:'numeric', month:'short', year:'numeric'})}
+ {fmtDate(item.checkin_date)}
  </p>
  </div>
  ))}

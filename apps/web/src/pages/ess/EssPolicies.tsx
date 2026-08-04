@@ -23,7 +23,7 @@ import { Button }        from '@/components/ui/button'
 import { Badge }         from '@/components/ui/badge'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { api }                from '@/lib/api/client'
-import { cn }                from '@/lib/utils'
+import { cn, fmtDate as fmtDateCanonical } from '@/lib/utils'
 import { isSafeHref }        from '@/lib/sanitize'
 import { PolicyAssistant }   from '@/components/policies/PolicyAssistant'
 
@@ -68,8 +68,7 @@ function ackBadge(status: AckStatus) {
 }
 
 function fmtDate(s: string | null): string {
-  if (!s) return '—'
-  return new Date(s).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+  return fmtDateCanonical(s)
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────

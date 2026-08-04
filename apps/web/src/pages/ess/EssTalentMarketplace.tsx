@@ -31,7 +31,7 @@ import {
 } from'@/components/ui/dialog'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from'@/components/ui/tabs'
 import { api } from'@/lib/api/client'
-import { cn } from'@/lib/utils'
+import { cn, fmtDate, fmtDateShort } from'@/lib/utils'
 import { invalidateTalentMarketplace } from '@/lib/talent-marketplace-cache'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -144,7 +144,7 @@ function RoleCard({ role, onApply }: { role: OpenRole; onApply: (role: OpenRole)
 
  {role.closes_at && (
  <p className="mt-2 text-xs text-muted-foreground">
- Closes {new Date(role.closes_at).toLocaleDateString('en-IN', { day:'numeric', month:'short', year:'numeric'})}
+ Closes {fmtDate(role.closes_at)}
  </p>
  )}
  </div>
@@ -328,7 +328,7 @@ export function EssTalentMarketplace() {
  {role?.department && <span className="text-xs text-muted-foreground">{role.department}</span>}
  {role?.location && <span className="text-xs text-muted-foreground">· {role.location}</span>}
  <span className="text-xs text-muted-foreground">
- Applied {new Date(interest.created_at).toLocaleDateString('en-IN', { day:'numeric', month:'short'})}
+ Applied {fmtDateShort(interest.created_at)}
  </span>
  {interest.availability && (
  <span className="text-xs text-muted-foreground">· {AVAILABILITY_LABELS[interest.availability]}</span>

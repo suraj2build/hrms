@@ -15,7 +15,7 @@ import { Button }        from '@/components/ui/button'
 import { Input }         from '@/components/ui/input'
 import { Textarea }      from '@/components/ui/textarea'
 import { api } from '@/lib/api/client'
-import { cn } from '@/lib/utils'
+import { cn, fmtDate } from '@/lib/utils'
 
 interface WfhReq {
   id: string; from_date: string; to_date: string; days: number; reason: string | null
@@ -27,7 +27,7 @@ const STATUS_CLS: Record<string, string> = {
   pending: 'bg-warning/10 text-warning', approved: 'bg-success/10 text-success',
   rejected: 'bg-destructive/10 text-destructive', cancelled: 'bg-muted text-muted-foreground',
 }
-const fmt = (s: string) => new Date(s).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
+const fmt = (s: string) => fmtDate(s)
 
 export function EssWfh() {
   const qc = useQueryClient()

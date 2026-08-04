@@ -7,6 +7,7 @@
  * row so a manager can read the working pattern at a glance.
  */
 import { Activity } from 'lucide-react'
+import { fmtDate } from '@/lib/utils'
 
 export interface AttendanceTrend {
   window_days:      number
@@ -35,8 +36,7 @@ function rateColor(v: number): string {
 }
 
 function dayNum(d: string): string {
-  try { return new Date(d + 'T12:00:00Z').toLocaleDateString('en-IN', { day: '2-digit' }) }
-  catch { return d.slice(-2) }
+  return fmtDate(d).split('-')[0]
 }
 
 export function AttendanceTrendCard({ trend }: { trend: AttendanceTrend }) {

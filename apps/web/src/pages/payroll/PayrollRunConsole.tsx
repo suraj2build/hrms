@@ -21,7 +21,7 @@ import {
 } from '@/components/ui/dialog'
 import { Badge }                              from '@/components/ui/badge'
 import { api }                                from '@/lib/api/client'
-import { cn, fmtDate }                        from '@/lib/utils'
+import { cn, fmtDate, formatCurrency }        from '@/lib/utils'
 import {
   SeverityBadge,
   IntelligenceEmptyState,
@@ -75,12 +75,7 @@ interface SlipListResponse {
 
 // ── Formatting helpers ─────────────────────────────────────────────────────────
 
-const fmtMoney = (n: number) =>
-  new Intl.NumberFormat('en-IN', {
-    style:                'currency',
-    currency:             'INR',
-    maximumFractionDigits: 0,
-  }).format(n)
+const fmtMoney = (n: number) => formatCurrency(n)
 
 const fmtMonth = (s: string) => {
   const d = new Date(s.slice(0,7) + '-01T12:00:00Z')

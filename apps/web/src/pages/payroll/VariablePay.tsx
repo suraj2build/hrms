@@ -28,7 +28,7 @@ import {
 import { api }            from '@/lib/api/client'
 import { useAuthStore }   from '@/stores/authStore'
 import { toast }          from 'sonner'
-import { fmtDate }        from '@/lib/utils'
+import { fmtDate, formatCurrency } from '@/lib/utils'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -86,8 +86,7 @@ const TEMPLATE_TYPES = [
   'quarterly', 'annual', 'festival', 'retention', 'other',
 ]
 
-const fmt = (n: number) =>
-  new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(n)
+const fmt = (n: number) => formatCurrency(n)
 
 const labelify = (s: string) =>
   s.replace(/_/g, ' ').replace(/^\w/, c => c.toUpperCase())

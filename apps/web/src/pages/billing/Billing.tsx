@@ -10,6 +10,7 @@ import { useQuery } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { Check, CreditCard, ShieldCheck } from 'lucide-react'
 import { api } from '@/lib/api/client'
+import { fmtDate } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 
 type Tier = 'standard' | 'enterprise'
@@ -143,7 +144,7 @@ export function Billing() {
             {s?.current_period_end && (
               <div>
                 <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Renews</p>
-                <p className="text-lg font-semibold text-foreground">{new Date(s.current_period_end).toLocaleDateString()}</p>
+                <p className="text-lg font-semibold text-foreground">{fmtDate(s.current_period_end)}</p>
               </div>
             )}
             {s && !s.configured && (

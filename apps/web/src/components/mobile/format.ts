@@ -1,4 +1,5 @@
 /** Shared formatting helpers for the mobile ESS social surfaces. */
+import { fmtDateShort } from '@/lib/utils'
 
 /** Relative "time ago" label. */
 export function timeAgo(iso: string): string {
@@ -9,7 +10,7 @@ export function timeAgo(iso: string): string {
   const m = Math.floor(s / 60); if (m < 60) return `${m}m ago`
   const h = Math.floor(m / 60); if (h < 24) return `${h}h ago`
   const d = Math.floor(h / 24); if (d < 7) return `${d}d ago`
-  return new Date(iso).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })
+  return fmtDateShort(iso)
 }
 
 /** Deterministic initials from a name. */

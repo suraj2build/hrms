@@ -15,7 +15,7 @@ import { Button }        from '@/components/ui/button'
 import { Input }         from '@/components/ui/input'
 import { Textarea }      from '@/components/ui/textarea'
 import { api } from '@/lib/api/client'
-import { cn } from '@/lib/utils'
+import { cn, fmtDate } from '@/lib/utils'
 
 interface AssetItem { id: string; asset_code: string | null; name: string; serial_number: string | null; status: string }
 interface AssetRequest { id: string; category_name: string | null; item_name: string | null; reason: string | null; status: string; requested_at: string; decision_remarks: string | null }
@@ -26,8 +26,6 @@ const REQ_STATUS: Record<string, string> = {
   rejected: 'bg-destructive/10 text-destructive', fulfilled: 'bg-success/10 text-success',
   cancelled: 'bg-muted text-muted-foreground',
 }
-const fmtDate = (s: string) => new Date(s).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
-
 export function EssAssets() {
   const qc = useQueryClient()
   const [categoryId, setCategoryId] = useState('')

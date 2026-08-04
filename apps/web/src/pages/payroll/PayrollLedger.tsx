@@ -24,7 +24,7 @@ import { EmployeeSelector } from '@/components/filters/EmployeeSelector'
 import { MetricCard }     from '@/components/dashboard/MetricCard'
 import { api }          from '@/lib/api/client'
 import { useAuthStore } from '@/stores/authStore'
-import { cn, fmtDate }  from '@/lib/utils'
+import { cn, fmtDate, formatCurrency } from '@/lib/utils'
 import { toast }        from 'sonner'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -51,7 +51,7 @@ interface LedgerEntry {
 
 function fmt(n: number | null) {
   if (n === null) return '—'
-  return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(n)
+  return formatCurrency(n)
 }
 
 function SourceBadge({ type }: { type: string }) {

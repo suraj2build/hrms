@@ -39,7 +39,7 @@ import { MetricCard, MetricRow } from '@/components/dashboard/MetricCard'
 import { RequisitionApprovalDialog } from '@/components/recruitment/RequisitionApprovalDialog'
 import { JobBoardPostingsDialog } from '@/components/recruitment/JobBoardPostingsDialog'
 import { useAuthStore }  from '@/stores/authStore'
-import { cn }            from '@/lib/utils'
+import { cn, fmtDate }   from '@/lib/utils'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -431,7 +431,7 @@ export function AdminRecruitment() {
                       </td>
                       <td className="py-2 px-3 text-xs text-muted-foreground">
                         {r.target_date
-                          ? <span className="flex items-center gap-1"><CalendarClock className="h-3 w-3" />{new Date(r.target_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}</span>
+                          ? <span className="flex items-center gap-1"><CalendarClock className="h-3 w-3" />{fmtDate(r.target_date)}</span>
                           : '—'}
                       </td>
                       <td className="py-2 px-3">

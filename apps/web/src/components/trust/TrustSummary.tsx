@@ -15,7 +15,7 @@ import {
   ShieldCheck, ShieldAlert, ShieldX, CircleDot,
   CheckCircle2, AlertTriangle, Info, Loader2, ListChecks,
 } from 'lucide-react'
-import { cn } from '@/lib/utils'
+import { cn, fmtDate } from '@/lib/utils'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -132,7 +132,7 @@ export function TrustSummary({ employeeId }: { employeeId: string }) {
         </div>
         {computed_at && (
           <p className="text-[10px] text-muted-foreground">
-            {new Date(computed_at).toLocaleDateString()}
+            {fmtDate(computed_at)}
           </p>
         )}
       </div>
@@ -178,7 +178,7 @@ export function TrustSummary({ employeeId }: { employeeId: string }) {
               <div key={i} className="flex items-start justify-between gap-3 text-xs">
                 <span className="font-mono text-[#2E6FE6]">{s.signal}</span>
                 <span className="text-muted-foreground text-right shrink-0">
-                  {new Date(s.occurred_at).toLocaleDateString()}
+                  {fmtDate(s.occurred_at)}
                 </span>
               </div>
             ))}

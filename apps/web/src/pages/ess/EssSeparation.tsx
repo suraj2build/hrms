@@ -27,7 +27,7 @@ import { Input }         from '@/components/ui/input'
 import { Textarea }      from '@/components/ui/textarea'
 import { api }           from '@/lib/api/client'
 import { useAuthStore }  from '@/stores/authStore'
-import { cn, fmtDate }   from '@/lib/utils'
+import { cn, fmtDate, formatCurrency } from '@/lib/utils'
 import { ExitInterviewForm } from '@/components/separation/ExitInterviewForm'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -65,7 +65,7 @@ interface SeparationResponse { data: Separation | null; clearances: Clearance[];
 
 function fmtCurrency(n: number | null | undefined) {
   if (n == null) return '—'
-  return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(n)
+  return formatCurrency(n)
 }
 
 function cap(s: string | null | undefined) {

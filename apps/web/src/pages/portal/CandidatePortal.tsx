@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { Briefcase, Calendar, Clock, CheckCircle2, XCircle, Loader2, MapPin, Video, Phone, Users } from 'lucide-react'
 import { LogoMark } from '@/components/brand/Logo'
+import { fmtDate as fmtDateUtil } from '@/lib/utils'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -80,7 +81,7 @@ function fmtDate(iso: string | null, withTime = true) {
       hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata',
     }) + ' IST'
   }
-  return d.toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })
+  return fmtDateUtil(iso)
 }
 
 // ── Components ─────────────────────────────────────────────────────────────────

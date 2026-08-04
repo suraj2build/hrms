@@ -17,7 +17,7 @@ import {
 import { api } from '@/lib/api/client'
 import { useAuthStore } from '@/stores/authStore'
 import { uploadEmployeeFile } from '@/lib/supabase-storage'
-import { cn } from '@/lib/utils'
+import { cn, formatCurrency, fmtDate as fmtDateCanonical } from '@/lib/utils'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -152,11 +152,7 @@ function proofStateBadgeVariant(state: DocumentState): BadgeVariant {
 }
 
 function fmtINR(n: number): string {
-  return new Intl.NumberFormat('en-IN', {
-    style:                 'currency',
-    currency:              'INR',
-    maximumFractionDigits: 0,
-  }).format(n)
+  return formatCurrency(n)
 }
 
 // ── Form types ────────────────────────────────────────────────────────────────
@@ -227,8 +223,7 @@ export function TaxDeclarations() {
   const windowActive      = windowConfigured && !windowNotYetOpen && !windowClosed
   const canAddDeclaration = !windowNotYetOpen && !windowClosed  // open if no window configured
 
-  const fmtDate = (d: string) =>
-    new Date(d + 'T00:00:00').toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+  const fmtDate = (d: string) => fmtDateCanonical(d)
 
   const daysUntil = (d: string) => {
     const diff = Math.ceil((new Date(d + 'T00:00:00').getTime() - new Date().getTime()) / 86400000)

@@ -2,14 +2,17 @@ import { useQuery } from '@tanstack/react-query'
 import { PartyPopper } from 'lucide-react'
 import { api } from '@/lib/api/client'
 import { glossy } from '../glossy'
+import { fmtDateShort } from '@/lib/utils'
 
 // GET /leave/holidays only ever returns is_optional=false rows and doesn't
 // even send the field — no is_optional here to match.
 interface HolidayRow { id: string; date: string; name: string }
 
 const fmtDay = (d: string) => {
-  const dt = new Date(d + 'T12:00:00Z')
-  return isNaN(dt.getTime()) ? d : { day: String(dt.getUTCDate()).padStart(2, '0'), mon: dt.toLocaleDateString('en-IN', { month: 'short', timeZone: 'UTC' }) }
+  const s = fmtDateShort(d)
+  if (s === '—') return d
+  const [day, mon] = s.split('-')
+  return { day, mon }
 }
 
 /** Upcoming company holidays — shared across Home & Leave. */

@@ -20,6 +20,7 @@ import {
 } from 'lucide-react'
 import { useAuthStore }  from '@/stores/authStore'
 import { api }           from '@/lib/api/client'
+import { formatCurrency } from '@/lib/utils'
 import { SignedImage }   from '@/components/SignedImage'
 import { MetricCard, MetricRow } from '@/components/dashboard/MetricCard'
 import type { Employee } from '@/types'
@@ -145,7 +146,7 @@ function LinkBtn({ children, onClick }: { children: ReactNode; onClick: () => vo
 
 function fmtINR(n: number | undefined | null): string {
   if (n == null) return '—'
-  return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(n)
+  return formatCurrency(n)
 }
 
 function fmtTime(iso: string | null): string {

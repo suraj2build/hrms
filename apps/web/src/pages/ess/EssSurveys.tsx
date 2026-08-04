@@ -4,6 +4,7 @@ import { useNavigate } from'react-router-dom'
 import { ClipboardList, CheckCircle2, Clock, ChevronRight, Users2, Loader2, RefreshCw, AlertCircle } from'lucide-react'
 import { toast } from'sonner'
 import { api } from'@/lib/api/client'
+import { fmtDate } from'@/lib/utils'
 import { Button } from'@/components/ui/button'
 import { EmployeeSelector } from'@/components/filters/EmployeeSelector'
 
@@ -120,7 +121,7 @@ export function EssSurveys() {
  <p className="text-sm font-medium text-foreground">{a.survey.title}</p>
  <div className="mt-0.5 flex items-center gap-2">
  {a.completed_at
- ? <span className="text-[11px] text-muted-foreground">Completed {new Date(a.completed_at).toLocaleDateString()}</span>
+ ? <span className="text-[11px] text-muted-foreground">Completed {fmtDate(a.completed_at)}</span>
  : <DueBadge date={a.survey.due_date} />
  }
  </div>
@@ -190,7 +191,7 @@ export function EssSurveys() {
  </div>
  {round.deadline_at && (
  <span className="text-[11px] text-muted-foreground">
- Due {new Date(round.deadline_at).toLocaleDateString()}
+ Due {fmtDate(round.deadline_at)}
  </span>
  )}
  </div>

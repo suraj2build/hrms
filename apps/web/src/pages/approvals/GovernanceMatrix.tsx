@@ -24,7 +24,7 @@ import {
 } from '@/components/ui/dialog'
 import { api }            from '@/lib/api/client'
 import { useAuthStore }   from '@/stores/authStore'
-import { cn, formatCurrency as fmtCurrency } from '@/lib/utils'
+import { cn, formatCurrency as fmtCurrency, fmtDate } from '@/lib/utils'
 import { SubTabs }        from '@/components/ui/SubTabs'
 import { EmployeeSelector } from '@/components/filters/EmployeeSelector'
 import { ConfirmDialog }  from '@/components/ui/ConfirmDialog'
@@ -115,12 +115,6 @@ const APPROVER_TYPES: ApproverType[] = ['role', 'employee', 'manager']
 
 function humanLabel(s: string) {
   return s.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
-}
-
-function fmtDate(iso: string) {
-  return new Date(iso).toLocaleDateString('default', {
-    day: 'numeric', month: 'short', year: 'numeric',
-  })
 }
 
 // ── Tab navigation ─────────────────────────────────────────────────────────────

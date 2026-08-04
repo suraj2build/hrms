@@ -22,7 +22,7 @@ import { Badge }         from '@/components/ui/badge'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { api }           from '@/lib/api/client'
-import { cn }            from '@/lib/utils'
+import { cn, fmtDate }   from '@/lib/utils'
 import { EmployeeSelector } from '@/components/filters/EmployeeSelector'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -578,8 +578,8 @@ function IDPSection({
                 </p>
                 {a.target_date && (
                   <p className="text-[9px] text-muted-foreground mt-0.5">
-                    Target: {new Date(a.target_date).toLocaleDateString()}
-                    {a.completed_at && ` · Completed: ${new Date(a.completed_at).toLocaleDateString()}`}
+                    Target: {fmtDate(a.target_date)}
+                    {a.completed_at && ` · Completed: ${fmtDate(a.completed_at)}`}
                   </p>
                 )}
               </div>

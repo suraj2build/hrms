@@ -14,7 +14,7 @@ import {
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { api } from '@/lib/api/client'
-import { cn } from '@/lib/utils'
+import { cn, fmtDate } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
@@ -120,10 +120,7 @@ const ROLE_OPTIONS = [
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function formatDate(iso: string | null | undefined): string {
-  if (!iso) return '—'
-  return new Date(iso).toLocaleDateString('en-IN', {
-    day: '2-digit', month: 'short', year: 'numeric',
-  })
+  return fmtDate(iso)
 }
 
 function categoryLabel(cat: string): string {

@@ -12,7 +12,7 @@ import {
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { api } from '@/lib/api/client'
-import { cn, fmtDate } from '@/lib/utils'
+import { cn, fmtDate, formatCurrency } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
@@ -97,7 +97,7 @@ function stageIndex(stage?: string) {
 
 function fmtMoney(n?: number | null) {
   if (n == null) return '—'
-  return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(n)
+  return formatCurrency(n)
 }
 
 const CLEARANCE_DEPTS: ClearanceDept['department'][] = ['IT', 'Manager', 'Finance', 'Admin', 'HR']

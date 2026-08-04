@@ -19,7 +19,7 @@ import { PageHeader }    from '@/components/layout/PageHeader'
 import { SectionCard }   from '@/components/layout/SectionCard'
 import { Button }        from '@/components/ui/button'
 import { Input }         from '@/components/ui/input'
-import { cn }            from '@/lib/utils'
+import { cn, fmtDate }   from '@/lib/utils'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -86,7 +86,7 @@ function CoRow({ req, onApprove, onReject, busy }: {
         <div className="px-4 pb-3 pt-1 bg-muted/20 text-xs space-y-1">
           {req.leave_type && <p><span className="text-muted-foreground">Leave type:</span> {req.leave_type.name}</p>}
           {req.notes && <p><span className="text-muted-foreground">Notes:</span> {req.notes}</p>}
-          {req.reviewed_at && <p><span className="text-muted-foreground">Reviewed:</span> {new Date(req.reviewed_at).toLocaleDateString()}</p>}
+          {req.reviewed_at && <p><span className="text-muted-foreground">Reviewed:</span> {fmtDate(req.reviewed_at)}</p>}
           {isPending && !rejecting && (
             <div className="flex gap-2 pt-2">
               <Button size="sm" className="h-7 gap-1 bg-success hover:bg-success/90"

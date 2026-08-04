@@ -14,7 +14,7 @@ import {
   Calendar, Activity, User, MapPin, Mail, Phone,
   Briefcase, Building2,
 } from 'lucide-react'
-import { cn, getInitials } from '@/lib/utils'
+import { cn, getInitials, fmtDate } from '@/lib/utils'
 import { api }         from '@/lib/api/client'
 import { Button }      from '@/components/ui/button'
 import { Badge }       from '@/components/ui/badge'
@@ -79,14 +79,7 @@ function row(item: unknown): Record<string, string> {
 }
 
 function formatDate(iso: string | undefined): string {
-  if (!iso) return '—'
-  try {
-    return new Date(iso).toLocaleDateString('en-IN', {
-      day: '2-digit', month: 'short', year: 'numeric',
-    })
-  } catch {
-    return iso
-  }
+  return fmtDate(iso)
 }
 
 // ── Sub-components: tab content ────────────────────────────────────────────────

@@ -16,6 +16,7 @@ import {
  Sheet, SheetContent, SheetHeader, SheetTitle, SheetBody,
 } from'@/components/ui/sheet'
 import { api } from'@/lib/api/client'
+import { fmtDate } from'@/lib/utils'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -629,7 +630,7 @@ export function AdminSurveys() {
  )}
  {s.due_date && (
  <span className="text-[11px] text-muted-foreground">
- Due {new Date(s.due_date).toLocaleDateString()}
+ Due {fmtDate(s.due_date)}
  </span>
  )}
  </div>

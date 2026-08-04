@@ -22,7 +22,7 @@ import { Badge } from'@/components/ui/badge'
 import { Button } from'@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from'@/components/ui/dialog'
 import { api } from'@/lib/api/client'
-import { cn } from'@/lib/utils'
+import { cn, formatCurrency } from'@/lib/utils'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -72,8 +72,7 @@ const PLAN_META: Record<PlanType, { label: string; icon: React.ComponentType<{ c
  other: { label:'Benefit', icon: Gift, tint:'text-accent-violet bg-accent-violet/10 border-accent-violet/30'},
 }
 
-const inr = (n: number) =>
- new Intl.NumberFormat('en-IN', { style:'currency', currency:'INR', maximumFractionDigits: 0 }).format(n || 0)
+const inr = (n: number) => formatCurrency(n || 0)
 
 export function EssBenefits() {
  const qc = useQueryClient()

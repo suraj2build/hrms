@@ -19,7 +19,7 @@ import { SectionCard }   from '@/components/layout/SectionCard'
 import { MetricCard, MetricRow } from '@/components/dashboard/MetricCard'
 import { Button }        from '@/components/ui/button'
 import { Input }         from '@/components/ui/input'
-import { cn }            from '@/lib/utils'
+import { cn, fmtDate }   from '@/lib/utils'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -193,12 +193,12 @@ export function ManagerTeamHelpdesk() {
                         </span>
                       ) : t.sla_due_at ? (
                         <span className="text-[11px] text-muted-foreground tabular-nums">
-                          {new Date(t.sla_due_at).toLocaleDateString()}
+                          {fmtDate(t.sla_due_at)}
                         </span>
                       ) : '—'}
                     </td>
                     <td className="py-2.5 px-3 text-xs text-muted-foreground tabular-nums">
-                      {new Date(t.created_at).toLocaleDateString()}
+                      {fmtDate(t.created_at)}
                     </td>
                   </tr>
                 ))}

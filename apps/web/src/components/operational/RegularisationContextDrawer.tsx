@@ -20,6 +20,7 @@ import {
 import { Badge } from '@/components/ui/badge'
 import { api }   from '@/lib/api/client'
 import { AttendanceTrendCard, type AttendanceTrend } from './AttendanceTrendCard'
+import { fmtDateShort } from '@/lib/utils'
 
 export interface RegularisationContextTarget {
   employeeId:    string
@@ -49,8 +50,7 @@ function fmtTime(iso: string | null | undefined): string {
   catch { return iso }
 }
 function fmtDate(d: string): string {
-  try { return new Date(d + 'T12:00:00Z').toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) }
-  catch { return d }
+  return fmtDateShort(d)
 }
 
 interface Props {

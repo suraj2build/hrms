@@ -15,7 +15,7 @@ import { PageHeader }         from '@/components/layout/PageHeader'
 import { Input }              from '@/components/ui/input'
 import { Button }             from '@/components/ui/button'
 import { Badge }              from '@/components/ui/badge'
-import { cn }                 from '@/lib/utils'
+import { cn, formatCurrency } from '@/lib/utils'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -81,7 +81,7 @@ export function TeamLeaveBalances() {
   const hasLiability = (data?.data ?? []).some(e => e.total_liability != null)
 
   function fmtINR(n: number) {
-    return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(n)
+    return formatCurrency(n)
   }
 
   const rows       = useMemo(() => data?.data ?? [], [data])

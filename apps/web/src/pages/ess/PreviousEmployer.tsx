@@ -38,12 +38,11 @@ import {
 } from '@/components/ui/select'
 import { Card, CardContent } from '@/components/ui/card'
 import { api }  from '@/lib/api/client'
-import { cn }   from '@/lib/utils'
+import { cn, formatCurrency }   from '@/lib/utils'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-const inr = (n: number) =>
-  new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(n)
+const inr = (n: number) => formatCurrency(n)
 
 // Indian FY (Apr–Mar) computed from today, not hardcoded — a fixed year meant
 // the page requested the wrong FY and locked out the actual current period.

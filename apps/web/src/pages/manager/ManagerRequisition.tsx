@@ -16,6 +16,7 @@ import { Button }        from '@/components/ui/button'
 import { Input }         from '@/components/ui/input'
 import { Badge }         from '@/components/ui/badge'
 import { api }           from '@/lib/api/client'
+import { fmtDate as fmtDateUtil } from '@/lib/utils'
 
 interface Department { id: string; name: string }
 interface Requisition {
@@ -114,8 +115,7 @@ export function ManagerRequisition() {
     onError: (e: Error) => toast.error('Failed to submit requisition', { description: e.message }),
   })
 
-  const fmtDate = useMemo(() => (iso: string | null) =>
-    iso ? new Date(iso).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—', [])
+  const fmtDate = useMemo(() => (iso: string | null) => (iso ? fmtDateUtil(iso) : '—'), [])
 
   return (
     <PageContainer>

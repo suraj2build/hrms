@@ -34,7 +34,7 @@ import {
 } from '@/components/ui/select'
 import { api, ApiError }      from '@/lib/api/client'
 import { useAuthStore }      from '@/stores/authStore'
-import { cn }                from '@/lib/utils'
+import { cn, fmtDateShort }  from '@/lib/utils'
 import { isSafeHref }        from '@/lib/sanitize'
 import { OfferLetterDialog } from './OfferLetterDialog'
 
@@ -656,7 +656,7 @@ export function AdminCandidates() {
                             </div>
                             <div className="flex items-center gap-3 mt-1.5 text-[11px] text-muted-foreground">
                               {iv.scheduled_at && (
-                                <span>{new Date(iv.scheduled_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })} · {new Date(iv.scheduled_at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true })}</span>
+                                <span>{fmtDateShort(iv.scheduled_at)} · {new Date(iv.scheduled_at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true })}</span>
                               )}
                               <span className="flex items-center gap-0.5">
                                 {iv.interview_type === 'video' ? <Video className="h-2.5 w-2.5" /> : iv.interview_type === 'in_person' ? <MapPin className="h-2.5 w-2.5" /> : null}

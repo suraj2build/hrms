@@ -9,7 +9,7 @@
 import { useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { BellOff, Loader2, ChevronRight, CheckCircle2, AlertTriangle, Info } from 'lucide-react'
-import { cn } from '@/lib/utils'
+import { cn, fmtDateShort } from '@/lib/utils'
 import {
   useOnboardingNotifications, useMarkNotificationRead, isUnread, isActionRequired,
   type OnboardingNotification,
@@ -24,7 +24,7 @@ function fmtRelative(iso: string): string {
   if (hrs < 24)  return `${hrs}h ago`
   const days = Math.floor(hrs / 24)
   if (days < 30) return `${days}d ago`
-  return new Date(iso).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })
+  return fmtDateShort(iso)
 }
 
 function ItemIcon({ severity, actionRequired }: { severity: string; actionRequired: boolean }) {

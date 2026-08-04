@@ -20,7 +20,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from'@/components/ui
 import { ConfirmDialog } from'@/components/ui/ConfirmDialog'
 import { api } from'@/lib/api/client'
 import { useAuthStore } from'@/stores/authStore'
-import { cn } from'@/lib/utils'
+import { cn, fmtDate, formatCurrency } from'@/lib/utils'
 
 type PlanType ='health'|'term_life'|'accident'|'wellness'|'meal'|'transport'|'nps'|'other'
 const PLAN_TYPES: PlanType[] = ['health','term_life','accident','wellness','meal','transport','nps','other']
@@ -78,8 +78,7 @@ const BLANK: PlanForm = {
  is_esic: false, is_nps: false, eligible_bands: [],
 }
 
-const inr = (n: number) =>
- new Intl.NumberFormat('en-IN', { style:'currency', currency:'INR', maximumFractionDigits: 0 }).format(n || 0)
+const inr = (n: number) => formatCurrency(n || 0)
 
 export function AdminBenefits() {
  const { profile } = useAuthStore()
@@ -293,7 +292,7 @@ export function AdminBenefits() {
  <td className="py-2 px-3 text-xs">{e.benefit_plans?.name ??'—'}</td>
  <td className="py-2 px-3"><Badge variant={e.status ==='enrolled'?'success':'secondary'} className="text-[10px] capitalize">{e.status}</Badge></td>
  <td className="py-2 px-3 text-xs text-right">{e.dependent_ids?.length ?? 0}</td>
- <td className="py-2 px-3 text-[10px] text-muted-foreground">{new Date(e.updated_at).toLocaleDateString('en-IN', { day:'2-digit', month:'short', year:'numeric'})}</td>
+ <td className="py-2 px-3 text-[10px] text-muted-foreground">{fmtDate(e.updated_at)}</td>
  </tr>
  ))}
  </tbody>

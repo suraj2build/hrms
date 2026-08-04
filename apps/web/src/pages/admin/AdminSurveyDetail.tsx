@@ -11,6 +11,7 @@ import { Button } from'@/components/ui/button'
 import { ConfirmDialog } from'@/components/ui/ConfirmDialog'
 import { EmployeeSelector } from'@/components/filters/EmployeeSelector'
 import { api } from'@/lib/api/client'
+import { fmtDate } from'@/lib/utils'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -388,7 +389,7 @@ export function AdminSurveyDetail() {
  {survey.due_date && (
  <>
  <span>·</span>
- <span>Due {new Date(survey.due_date).toLocaleDateString()}</span>
+ <span>Due {fmtDate(survey.due_date)}</span>
  </>
  )}
  </div>

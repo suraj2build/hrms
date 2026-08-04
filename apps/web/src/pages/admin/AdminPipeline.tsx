@@ -29,7 +29,7 @@ import {
 } from '@/components/ui/dialog'
 import { api }           from '@/lib/api/client'
 import { useAuthStore }  from '@/stores/authStore'
-import { cn }            from '@/lib/utils'
+import { cn, fmtDate }   from '@/lib/utils'
 import { isSafeHref }    from '@/lib/sanitize'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -112,11 +112,6 @@ function scoreColor(s: number): string {
   if (s >= 8) return 'text-success'
   if (s >= 5) return 'text-warning'
   return 'text-destructive'
-}
-
-function fmtDate(d?: string | null): string {
-  if (!d) return '—'
-  return new Date(d).toLocaleDateString(undefined, { day: '2-digit', month: 'short', year: 'numeric' })
 }
 
 function initials(first: string, last: string): string {

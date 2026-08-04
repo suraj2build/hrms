@@ -28,6 +28,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { toast }          from 'sonner'
 import { api }            from '@/lib/api/client'
 import { useAuthStore }   from '@/stores/authStore'
+import { formatCurrency } from '@/lib/utils'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -69,8 +70,7 @@ const STATUS_BADGE: Record<string, 'secondary' | 'outline' | 'warning' | 'succes
 
 const STATUS_OPTS = ['All', 'submitted', 'under_review', 'approved', 'rejected', 'paid']
 
-const fmt = (n: number) =>
-  new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(n)
+const fmt = (n: number) => formatCurrency(n)
 
 // ── Review Dialog ──────────────────────────────────────────────────────────────
 

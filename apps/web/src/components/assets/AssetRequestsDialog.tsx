@@ -6,7 +6,7 @@ import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { api } from '@/lib/api/client'
-import { cn } from '@/lib/utils'
+import { cn, fmtDate as fmtDateUtil } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
@@ -22,7 +22,7 @@ const STATUS_CLS: Record<string, string> = {
   rejected: 'bg-destructive/10 text-destructive', fulfilled: 'bg-success/10 text-success',
   cancelled: 'bg-muted text-muted-foreground',
 }
-const fmtDate = (s: string) => new Date(s).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
+const fmtDate = (s: string) => fmtDateUtil(s)
 
 export function AssetRequestsDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
   const qc = useQueryClient()

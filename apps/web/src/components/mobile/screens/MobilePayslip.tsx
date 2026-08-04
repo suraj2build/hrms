@@ -3,13 +3,14 @@ import { useQuery } from '@tanstack/react-query'
 import { TrendingUp, ChevronRight, FileText } from 'lucide-react'
 import { api } from '@/lib/api/client'
 import { glossy } from '../glossy'
+import { fmtMonthYear } from '@/lib/utils'
 
 interface SlipSummary { slip_id: string; month: string; gross_pay: number; net_pay: number }
 
 const inr = (n: number) => `₹${Math.round(n).toLocaleString('en-IN')}`
 const monthLabel = (m: string) => {
   const d = new Date(m.length === 7 ? `${m}-01T12:00:00Z` : m)
-  return isNaN(d.getTime()) ? m : d.toLocaleDateString('en-IN', { month: 'short', year: 'numeric' })
+  return isNaN(d.getTime()) ? m : fmtMonthYear(m)
 }
 
 export function MobilePayslip({ base }: { base: string }) {

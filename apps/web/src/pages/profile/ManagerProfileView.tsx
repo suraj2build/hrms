@@ -32,7 +32,7 @@ import { SectionCard }   from '@/components/layout/SectionCard'
 import { Badge }         from '@/components/ui/badge'
 import { Button }        from '@/components/ui/button'
 import { api }           from '@/lib/api/client'
-import { cn }            from '@/lib/utils'
+import { cn, fmtDate as fmtDateCanonical, fmtDateShort, fmtMonthYear } from '@/lib/utils'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -90,11 +90,12 @@ interface LeaveBalance {
 
 function fmtDate(s: string | null | undefined, opts?: Intl.DateTimeFormatOptions) {
   if (!s) return '—'
-  if (opts) return new Date(`${s}T12:00:00Z`).toLocaleDateString([], opts)
-  const d = new Date(s.length === 10 ? s + 'T12:00:00Z' : s)
-  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
-  if (isNaN(d.getTime())) return '—'
-  return `${String(d.getUTCDate()).padStart(2,'0')}-${M[d.getUTCMonth()]}-${d.getUTCFullYear()}`
+  if (opts) {
+    if (opts.month === 'short' && opts.year === 'numeric' && !opts.day) return fmtMonthYear(s)
+    if (opts.day === 'numeric' && opts.month === 'short' && !opts.year) return fmtDateShort(s)
+    return new Date(`${s}T12:00:00Z`).toLocaleDateString([], opts)
+  }
+  return fmtDateCanonical(s)
 }
 
 function cap(s: string | null | undefined) {

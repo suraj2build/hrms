@@ -16,13 +16,12 @@ import { SectionCard }   from '@/components/layout/SectionCard'
 import { Button }        from '@/components/ui/button'
 import { Badge }         from '@/components/ui/badge'
 import { api }           from '@/lib/api/client'
-import { cn }            from '@/lib/utils'
+import { cn, formatCurrency }            from '@/lib/utils'
 import { printForm16, type Form16Data } from '@/lib/form16-print'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-const inr = (n: number) =>
-  new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(n)
+const inr = (n: number) => formatCurrency(n)
 
 // Indian FY (Apr–Mar) computed from today, not hardcoded — a fixed year meant the
 // statement requested the wrong FY and showed nothing for the current period.

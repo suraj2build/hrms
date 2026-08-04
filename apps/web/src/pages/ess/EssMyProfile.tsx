@@ -36,7 +36,10 @@ import { AadhaarVerifyCard } from '@/components/trust/AadhaarVerifyCard'
 import { MetricCard, MetricRow } from '@/components/dashboard/MetricCard'
 import { api }           from '@/lib/api/client'
 import { useAuthStore }  from '@/stores/authStore'
-import { cn, formatCurrency as fmtCurrency } from '@/lib/utils'
+import {
+  cn, formatCurrency as fmtCurrency,
+  fmtDate as fmtDateCanonical, fmtDateShort, fmtMonthYear,
+} from '@/lib/utils'
 import { MyPersonalTab } from './MyPersonalTab'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -131,11 +134,13 @@ interface Holiday {
 
 function fmtDate(s: string | null | undefined, opts?: Intl.DateTimeFormatOptions) {
   if (!s) return '—'
-  if (opts) return new Date(`${s}T12:00:00Z`).toLocaleDateString([], opts)
-  const d = new Date(s.length === 10 ? s + 'T12:00:00Z' : s)
-  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
-  if (isNaN(d.getTime())) return '—'
-  return `${String(d.getUTCDate()).padStart(2,'0')}-${M[d.getUTCMonth()]}-${d.getUTCFullYear()}`
+  if (opts) {
+    // Only the two option shapes below are used by call sites in this file —
+    // route them through the canonical dash-separated formatters.
+    if (!opts.day) return fmtMonthYear(s)
+    if (!opts.year) return fmtDateShort(s)
+  }
+  return fmtDateCanonical(s)
 }
 
 function cap(s: string | null | undefined) {

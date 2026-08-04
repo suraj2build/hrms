@@ -17,7 +17,7 @@ import { PageHeader }    from '@/components/layout/PageHeader'
 import { SectionCard }   from '@/components/layout/SectionCard'
 import { Badge }         from '@/components/ui/badge'
 import { api } from '@/lib/api/client'
-import { cn }  from '@/lib/utils'
+import { cn, fmtDate as fmtDateCanonical } from '@/lib/utils'
 
 type Status = 'upcoming' | 'due_soon' | 'overdue' | 'completed'
 
@@ -39,8 +39,7 @@ interface CalendarResp {
   counts: Record<Status, number>
 }
 
-const fmtDate = (iso: string) =>
-  new Date(iso + 'T00:00:00Z').toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'UTC' })
+const fmtDate = (iso: string) => fmtDateCanonical(iso + 'T00:00:00Z')
 
 const STATUS_META: Record<Status, { label: string; icon: LucideIcon; cls: string; chip: string }> = {
   overdue:   { label: 'Overdue',   icon: AlertTriangle, cls: 'text-destructive',     chip: 'bg-destructive/10 text-destructive border-destructive/30' },

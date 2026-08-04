@@ -37,7 +37,7 @@ import {
 } from '@/components/ui/select'
 import { api }           from '@/lib/api/client'
 import { useAuthStore }  from '@/stores/authStore'
-import { cn }            from '@/lib/utils'
+import { cn, fmtDateShort } from '@/lib/utils'
 import { isSafeHref }    from '@/lib/sanitize'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 
@@ -106,7 +106,7 @@ const STATUS_META: Record<string, { label: string; className: string }> = {
 function fmtDT(s: string | null): string {
   if (!s) return 'TBD'
   const d = new Date(s)
-  return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) + ' · ' +
+  return fmtDateShort(d) + ' · ' +
     d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true })
 }
 

@@ -7,7 +7,7 @@ import {
   Building2, CheckCircle2, Clock, Ban, AlertTriangle,
   Key, CreditCard, TrendingUp, Users2, ChevronRight,
 } from 'lucide-react'
-import { formatCurrency as fmtCurrency } from '@/lib/utils'
+import { formatCurrency as fmtCurrency, fmtDateShort } from '@/lib/utils'
 
 interface DashData {
   data: {
@@ -39,7 +39,7 @@ function timeAgo(iso: string): string {
   if (diffHrs < 24)    return `${diffHrs}h ago`
   const diffDays = Math.floor(diffHrs / 24)
   if (diffDays < 30)   return `${diffDays}d ago`
-  return new Date(iso).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })
+  return fmtDateShort(iso)
 }
 
 export function OwnerDashboard() {

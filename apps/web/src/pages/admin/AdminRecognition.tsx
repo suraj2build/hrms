@@ -13,6 +13,7 @@ import { toast }   from 'sonner'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Button }  from '@/components/ui/button'
 import { api }     from '@/lib/api/client'
+import { fmtDate } from '@/lib/utils'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -106,11 +107,6 @@ const NOM_STATUS_COLORS: Record<string, string> = {
   shortlisted: 'bg-info text-info dark:bg-info/30 dark:text-info',
   winner: 'bg-warning text-warning dark:bg-warning/30 dark:text-warning',
   not_selected: 'bg-destructive text-destructive dark:bg-destructive/30 dark:text-destructive',
-}
-
-function fmtDate(iso: string | null) {
-  if (!iso) return '—'
-  return new Date(iso).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
 }
 
 // ── Nominations Dialog ────────────────────────────────────────────────────────

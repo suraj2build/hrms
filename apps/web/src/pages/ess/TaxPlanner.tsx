@@ -35,12 +35,11 @@ import {
 import { api }               from '@/lib/api/client'
 import { useAuthStore }      from '@/stores/authStore'
 import { uploadEmployeeFile } from '@/lib/supabase-storage'
-import { cn }                from '@/lib/utils'
+import { cn, formatCurrency, fmtDate } from '@/lib/utils'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-const inr = (n: number) =>
-  new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(n)
+const inr = (n: number) => formatCurrency(n)
 
 function getCurrentFinancialYear(): string {
   const now   = new Date()
@@ -1084,7 +1083,7 @@ export function TaxPlanner() {
                       {regimeElection.regime} Regime
                     </p>
                     <p className="text-xs text-muted-foreground">
-                      Elected on {new Date(regimeElection.effective_from).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
+                      Elected on {fmtDate(regimeElection.effective_from)}
                     </p>
                   </div>
                   <Badge variant="default" className="ml-2 text-xs">Active</Badge>

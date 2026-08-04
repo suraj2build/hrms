@@ -25,7 +25,7 @@ import { Button }        from '@/components/ui/button'
 import { Badge }         from '@/components/ui/badge'
 import { api }           from '@/lib/api/client'
 import { useAuthStore }  from '@/stores/authStore'
-import { cn, formatCurrency as fmtCurrency } from '@/lib/utils'
+import { cn, formatCurrency as fmtCurrency, fmtDate } from '@/lib/utils'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -179,7 +179,7 @@ function SalaryChangesSection({ employeeId, month }: { employeeId: string; month
                   {entry.event_description}
                 </p>
                 <p className="text-[9px] text-muted-foreground/60 mt-0.5">
-                  {new Date(entry.created_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
+                  {fmtDate(entry.created_at)}
                 </p>
               </div>
             </div>

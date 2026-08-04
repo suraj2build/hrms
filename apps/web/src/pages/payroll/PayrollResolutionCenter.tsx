@@ -30,7 +30,7 @@ import { SectionCard }    from '@/components/layout/SectionCard'
 import { Button }         from '@/components/ui/button'
 import { ConfirmDialog }  from '@/components/ui/ConfirmDialog'
 import { api }            from '@/lib/api/client'
-import { cn }             from '@/lib/utils'
+import { cn, fmtDate }    from '@/lib/utils'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -343,7 +343,7 @@ function BlockerGroupCard({
               )}
               {emp.status !== 'open' && emp.resolved_at && (
                 <span className="text-[10px] text-muted-foreground flex-shrink-0">
-                  {new Date(emp.resolved_at).toLocaleDateString()}
+                  {fmtDate(emp.resolved_at)}
                 </span>
               )}
             </div>

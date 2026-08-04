@@ -17,7 +17,7 @@ import { PageHeader }    from '@/components/layout/PageHeader'
 import { SectionCard }   from '@/components/layout/SectionCard'
 import { Button }        from '@/components/ui/button'
 import { Badge }         from '@/components/ui/badge'
-import { cn }            from '@/lib/utils'
+import { cn, formatCurrency } from '@/lib/utils'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -55,7 +55,7 @@ function shiftMonth(m: string, delta: number) {
 }
 
 function fmtINR(n: number) {
-  return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(n)
+  return formatCurrency(n)
 }
 
 function VolatilityBadge({ vi }: { vi: number | null }) {

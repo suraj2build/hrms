@@ -27,7 +27,7 @@ import { SectionCard }   from '@/components/layout/SectionCard'
 import { Input }         from '@/components/ui/input'
 import { Button }        from '@/components/ui/button'
 import { Badge }         from '@/components/ui/badge'
-import { cn }            from '@/lib/utils'
+import { cn, formatCurrency } from '@/lib/utils'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -53,7 +53,7 @@ interface BulkResult {
 }
 
 const inr = (n: number | null | undefined) =>
-  n == null ? '—' : new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(n)
+  n == null ? '—' : formatCurrency(n)
 
 // ── Page ────────────────────────────────────────────────────────────────────────
 

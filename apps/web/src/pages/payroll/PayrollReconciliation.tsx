@@ -33,7 +33,7 @@ import { toast }                  from 'sonner'
 import { api }                    from '@/lib/api/client'
 import { escapeCsvField }         from '@/lib/csv-utils'
 import { useAuthStore }           from '@/stores/authStore'
-import { cn }                     from '@/lib/utils'
+import { cn, formatCurrency }     from '@/lib/utils'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -143,7 +143,7 @@ const CATEGORY_REMEDIATION: Record<string, { steps: string[]; escalateTo: string
 }
 
 function fmt(n: number) {
-  return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(n)
+  return formatCurrency(n)
 }
 
 // ── Summary cards ─────────────────────────────────────────────────────────────

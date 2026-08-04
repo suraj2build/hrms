@@ -7,6 +7,7 @@
 import { useState, useCallback } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '@/lib/api/client'
+import { fmtDate as fmtDateCanonical } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
 import { Search, Loader2, AlertCircle, Users } from 'lucide-react'
 import { PageContainer } from '@/components/layout/PageContainer'
@@ -71,8 +72,7 @@ function statusBadgeClass(status: string) {
 }
 
 function formatDate(d: string | null) {
-  if (!d) return '—'
-  return new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+  return fmtDateCanonical(d)
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────

@@ -19,7 +19,7 @@ import { PageHeader }     from '@/components/layout/PageHeader'
 import { SectionCard }    from '@/components/layout/SectionCard'
 import { Button }         from '@/components/ui/button'
 import { Input }          from '@/components/ui/input'
-import { cn }             from '@/lib/utils'
+import { cn, fmtDate }    from '@/lib/utils'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -100,7 +100,7 @@ function OtRow({ req, onApprove, onReject, busy }: {
           <p><span className="text-muted-foreground">Rate:</span> {req.rate_type} × {req.extra_rate}</p>
           {req.approved_minutes != null && <p><span className="text-muted-foreground">Approved:</span> {fmtMins(req.approved_minutes)}</p>}
           {req.rejection_reason && <p><span className="text-muted-foreground">Reason:</span> {req.rejection_reason}</p>}
-          {req.approved_at && <p><span className="text-muted-foreground">Actioned:</span> {new Date(req.approved_at).toLocaleDateString()}</p>}
+          {req.approved_at && <p><span className="text-muted-foreground">Actioned:</span> {fmtDate(req.approved_at)}</p>}
           {isPending && !rejecting && (
             <div className="flex gap-2 pt-2">
               <Button size="sm" variant="default" className="h-7 gap-1 bg-success hover:bg-success/90"

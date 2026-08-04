@@ -23,7 +23,7 @@ import { Input }         from '@/components/ui/input'
 import { Button }        from '@/components/ui/button'
 import { Badge }         from '@/components/ui/badge'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { cn, fmtDate }   from '@/lib/utils'
+import { cn, fmtDate, formatCurrency } from '@/lib/utils'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -62,8 +62,7 @@ interface HistoryRow {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-const inr = (n: number | null | undefined) =>
-  n == null ? '—' : new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(n)
+const inr = (n: number | null | undefined) => (n == null ? '—' : formatCurrency(n))
 
 const STATUS_TONE: Record<string, 'success' | 'secondary' | 'destructive' | 'outline'> = {
   approved: 'success', pending: 'secondary', rejected: 'destructive', withdrawn: 'outline',

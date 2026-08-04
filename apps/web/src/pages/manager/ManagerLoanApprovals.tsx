@@ -20,6 +20,7 @@ import {
 import { PageContainer } from '@/components/layout/PageContainer'
 import { PageHeader }    from '@/components/layout/PageHeader'
 import { api }           from '@/lib/api/client'
+import { fmtDate as fmtDateUtil } from '@/lib/utils'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -59,8 +60,7 @@ const inr = (n: number) =>
 const fullName = (e: EmployeeRef | null) =>
   e ? `${e.first_name ?? ''} ${e.last_name ?? ''}`.trim() : '—'
 
-const fmtDate = (s: string | null) =>
-  s ? new Date(s).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'
+const fmtDate = (s: string | null) => (s ? fmtDateUtil(s) : '—')
 
 const titleCase = (s: string) =>
   (s ?? '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())

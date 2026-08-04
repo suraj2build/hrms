@@ -22,7 +22,7 @@ import { SectionCard }   from '@/components/layout/SectionCard'
 import { Badge }         from '@/components/ui/badge'
 import { Input }         from '@/components/ui/input'
 import { api } from '@/lib/api/client'
-import { cn }  from '@/lib/utils'
+import { cn, fmtDate as fmtDateUtil } from '@/lib/utils'
 
 type Bucket = 'overdue' | 'due_7' | 'due_30' | 'due_90'
 type Category = 'document' | 'identity' | 'passport' | 'visa' | 'contract' | 'probation' | 'certification'
@@ -54,8 +54,7 @@ interface ExpiryResp {
   departments: { id: string; name: string }[]
 }
 
-const fmtDate = (iso: string) =>
-  new Date(iso + 'T00:00:00Z').toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'UTC' })
+const fmtDate = (iso: string) => fmtDateUtil(iso)
 
 const BUCKET_META: Record<Bucket, { label: string; icon: LucideIcon; cls: string; chip: string }> = {
   overdue: { label: 'Overdue',     icon: AlertTriangle, cls: 'text-destructive',   chip: 'bg-destructive/10 text-destructive border-destructive/30' },

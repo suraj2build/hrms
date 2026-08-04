@@ -10,6 +10,7 @@ import {
   Award, Heart, Users, Lightbulb, Wrench, Sparkles, Gift, Star, PartyPopper, Trophy, Coins, Calendar,
 } from 'lucide-react'
 import { api } from '@/lib/api/client'
+import { fmtDate as fmtDateCanonical } from '@/lib/utils'
 import { PageContainer } from '@/components/layout/PageContainer'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { SectionCard } from '@/components/layout/SectionCard'
@@ -230,8 +231,7 @@ const AWARD_TYPE_COLORS: Record<string, { bg: string; text: string; icon: string
 const defaultColor = { bg: 'bg-primary border-primary dark:bg-primary/10 dark:border-primary/40', text: 'text-primary dark:text-primary', icon: 'text-primary' }
 
 function fmtDate(iso: string | null) {
-  if (!iso) return '—'
-  return new Date(iso).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
+  return fmtDateCanonical(iso)
 }
 
 // ── Nominate Dialog ────────────────────────────────────────────────────────────

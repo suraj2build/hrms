@@ -3103,7 +3103,7 @@ export function PayrollRuns() {
                       const ok = dryRunData.results.filter(r => r.status === 'ok')
                       const totalGross  = ok.reduce((s, r) => s + (r.result?.gross_pay ?? 0), 0)
                       const totalNet    = ok.reduce((s, r) => s + (r.result?.net_pay   ?? 0), 0)
-                      const fmtR = (n: number) => new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(n)
+                      const fmtR = fmtCurrency
                       return (
                         <div className="flex gap-4 p-3 rounded-md bg-success/5 border border-success/20 text-xs">
                           <span className="text-muted-foreground">Projected Gross: <strong className="text-foreground">{fmtR(totalGross)}</strong></span>
@@ -3149,7 +3149,7 @@ export function PayrollRuns() {
                         </thead>
                         <tbody>
                           {dryRunData.results.map(r => {
-                            const fmtN = (n?: number) => n != null ? new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(n) : '—'
+                            const fmtN = (n?: number) => n != null ? fmtCurrency(n) : '—'
                             return (
                               <tr key={r.employee_id} className={cn('border-b border-border/50', r.status === 'failed' && 'bg-destructive/5')}>
                                 <td className="px-3 py-2 font-mono font-medium">{r.employee_code}</td>

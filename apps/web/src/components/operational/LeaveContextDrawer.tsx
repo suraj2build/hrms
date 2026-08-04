@@ -26,6 +26,7 @@ import {
 import { Badge } from '@/components/ui/badge'
 import { api }   from '@/lib/api/client'
 import { AttendanceTrendCard, type AttendanceTrend } from './AttendanceTrendCard'
+import { fmtDateShort } from '@/lib/utils'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -53,9 +54,7 @@ const STATUS_BADGE: Record<string, 'success' | 'warning' | 'destructive' | 'seco
 }
 
 function fmtDate(iso: string): string {
-  try {
-    return new Date(iso + 'T12:00:00Z').toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })
-  } catch { return iso }
+  return fmtDateShort(iso)
 }
 
 function fmtRange(from: string, to: string): string {

@@ -18,7 +18,7 @@ import {
   CalendarClock, TrendingDown, Pause, Play, AlertTriangle,
   Landmark, CreditCard, Calculator, Users, ArrowRight,
 } from 'lucide-react'
-import { cn, fmtDate }           from '@/lib/utils'
+import { cn, fmtDate, formatCurrency } from '@/lib/utils'
 import { SubTabs }               from '@/components/ui/SubTabs'
 import { api }                   from '@/lib/api/client'
 import { useAuthStore }          from '@/stores/authStore'
@@ -96,8 +96,7 @@ interface LoanSchedule {
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
-const fmtINR = (n: number) =>
-  new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(n)
+const fmtINR = (n: number) => formatCurrency(n)
 
 function empName(row: Pick<AdvanceRequest | EmployeeLoan, 'employees' | 'employee_id'>) {
   if (row.employees) return `${row.employees.first_name} ${row.employees.last_name}`
