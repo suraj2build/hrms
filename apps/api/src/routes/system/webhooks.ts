@@ -51,7 +51,7 @@ const deliveriesQuerySchema = z.object({
 // ── Helper ────────────────────────────────────────────────────────────────────
 
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
-import { serverError, ErrorCode } from '../../lib/api-errors.js'
+import { serverError, notFound, forbidden, validationError, ErrorCode } from '../../lib/api-errors.js'
 
 function isAdmin(role: string): boolean {
   return (HR_ADMIN_ROLES as readonly string[]).includes(role)
@@ -84,14 +84,11 @@ export default async function webhooksRoutes(fastify: FastifyInstance) {
   // ── GET /system/webhooks ──────────────────────────────────────────────────
   fastify.get('/system/webhooks', auth, async (req: any, reply) => {
     if (!isAdmin(req.userRole)) {
-      return reply.code(403).send({ error: 'FORBIDDEN', message: 'Admin access required' })
+      return forbidden(reply, ErrorCode.FORBIDDEN, 'Admin access required')
     }
     const parsed = listQuerySchema.safeParse(req.query)
     if (!parsed.success) {
-      return reply.code(400).send({
-        error:   'VALIDATION_ERROR',
-        message: parsed.error.issues[0]?.message,
-      })
+      return validationError(reply, ErrorCode.VALIDATION_ERROR, parsed.error.issues[0]?.message ?? 'Validation failed')
     }
 
     const { is_active, limit } = parsed.data
@@ -124,7 +121,7 @@ export default async function webhooksRoutes(fastify: FastifyInstance) {
   // ── GET /system/webhooks/:id ──────────────────────────────────────────────
   fastify.get('/system/webhooks/:id', auth, async (req: any, reply) => {
     if (!isAdmin(req.userRole)) {
-      return reply.code(403).send({ error: 'FORBIDDEN', message: 'Admin access required' })
+      return forbidden(reply, ErrorCode.FORBIDDEN, 'Admin access required')
     }
     const { id } = req.params as { id: string }
 
@@ -136,7 +133,7 @@ export default async function webhooksRoutes(fastify: FastifyInstance) {
       .single()
 
     if (webhookError || !webhook) {
-      return reply.code(404).send({ error: 'NOT_FOUND', message: 'Webhook not found' })
+      return notFound(reply, ErrorCode.NOT_FOUND, 'Webhook not found')
     }
 
     const { data: deliveries, error: deliveryError } = await fastify.supabase
@@ -165,15 +162,12 @@ export default async function webhooksRoutes(fastify: FastifyInstance) {
   // ── POST /system/webhooks ─────────────────────────────────────────────────
   fastify.post('/system/webhooks', auth, async (req: any, reply) => {
     if (!isAdmin(req.userRole)) {
-      return reply.code(403).send({ error: 'FORBIDDEN', message: 'Admin access required' })
+      return forbidden(reply, ErrorCode.FORBIDDEN, 'Admin access required')
     }
 
     const parsed = createBodySchema.safeParse(req.body)
     if (!parsed.success) {
-      return reply.code(400).send({
-        error:   'VALIDATION_ERROR',
-        message: parsed.error.issues[0]?.message,
-      })
+      return validationError(reply, ErrorCode.VALIDATION_ERROR, parsed.error.issues[0]?.message ?? 'Validation failed')
     }
 
     const {
@@ -219,21 +213,18 @@ export default async function webhooksRoutes(fastify: FastifyInstance) {
   // ── PUT /system/webhooks/:id ──────────────────────────────────────────────
   fastify.put('/system/webhooks/:id', auth, async (req: any, reply) => {
     if (!isAdmin(req.userRole)) {
-      return reply.code(403).send({ error: 'FORBIDDEN', message: 'Admin access required' })
+      return forbidden(reply, ErrorCode.FORBIDDEN, 'Admin access required')
     }
 
     const { id } = req.params as { id: string }
 
     const parsed = updateBodySchema.safeParse(req.body)
     if (!parsed.success) {
-      return reply.code(400).send({
-        error:   'VALIDATION_ERROR',
-        message: parsed.error.issues[0]?.message,
-      })
+      return validationError(reply, ErrorCode.VALIDATION_ERROR, parsed.error.issues[0]?.message ?? 'Validation failed')
     }
 
     if (Object.keys(parsed.data).length === 0) {
-      return reply.code(400).send({ error: 'VALIDATION_ERROR', message: 'No fields provided for update' })
+      return validationError(reply, ErrorCode.VALIDATION_ERROR, 'No fields provided for update')
     }
 
     if (parsed.data.url) {
@@ -256,7 +247,7 @@ export default async function webhooksRoutes(fastify: FastifyInstance) {
     }
 
     if (!data) {
-      return reply.code(404).send({ error: 'NOT_FOUND', message: 'Webhook not found' })
+      return notFound(reply, ErrorCode.NOT_FOUND, 'Webhook not found')
     }
 
     // Never re-serialize the HMAC signing secret — see GET / above.
@@ -267,7 +258,7 @@ export default async function webhooksRoutes(fastify: FastifyInstance) {
   // ── DELETE /system/webhooks/:id ───────────────────────────────────────────
   fastify.delete('/system/webhooks/:id', auth, async (req: any, reply) => {
     if (!isAdmin(req.userRole)) {
-      return reply.code(403).send({ error: 'FORBIDDEN', message: 'Admin access required' })
+      return forbidden(reply, ErrorCode.FORBIDDEN, 'Admin access required')
     }
 
     const { id } = req.params as { id: string }
@@ -281,7 +272,7 @@ export default async function webhooksRoutes(fastify: FastifyInstance) {
       .single()
 
     if (error || !data) {
-      return reply.code(404).send({ error: 'NOT_FOUND', message: 'Webhook not found' })
+      return notFound(reply, ErrorCode.NOT_FOUND, 'Webhook not found')
     }
 
     return reply.send({ message: 'Webhook deactivated', id })
@@ -290,7 +281,7 @@ export default async function webhooksRoutes(fastify: FastifyInstance) {
   // ── POST /system/webhooks/:id/test ────────────────────────────────────────
   fastify.post('/system/webhooks/:id/test', auth, async (req: any, reply) => {
     if (!isAdmin(req.userRole)) {
-      return reply.code(403).send({ error: 'FORBIDDEN', message: 'Admin access required' })
+      return forbidden(reply, ErrorCode.FORBIDDEN, 'Admin access required')
     }
 
     const { id } = req.params as { id: string }
@@ -304,7 +295,7 @@ export default async function webhooksRoutes(fastify: FastifyInstance) {
       .single()
 
     if (webhookError || !webhook) {
-      return reply.code(404).send({ error: 'NOT_FOUND', message: 'Webhook not found' })
+      return notFound(reply, ErrorCode.NOT_FOUND, 'Webhook not found')
     }
 
     // Validate the URL before attempting delivery — this previously checked
@@ -425,16 +416,13 @@ export default async function webhooksRoutes(fastify: FastifyInstance) {
   // ── GET /system/webhooks/:id/deliveries ───────────────────────────────────
   fastify.get('/system/webhooks/:id/deliveries', auth, async (req: any, reply) => {
     if (!isAdmin(req.userRole)) {
-      return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
+      return forbidden(reply, ErrorCode.FORBIDDEN, 'HR admin access required')
     }
     const { id } = req.params as { id: string }
 
     const parsed = deliveriesQuerySchema.safeParse(req.query)
     if (!parsed.success) {
-      return reply.code(400).send({
-        error:   'VALIDATION_ERROR',
-        message: parsed.error.issues[0]?.message,
-      })
+      return validationError(reply, ErrorCode.VALIDATION_ERROR, parsed.error.issues[0]?.message ?? 'Validation failed')
     }
 
     const { status, limit, offset } = parsed.data
@@ -448,7 +436,7 @@ export default async function webhooksRoutes(fastify: FastifyInstance) {
       .single()
 
     if (!webhook) {
-      return reply.code(404).send({ error: 'NOT_FOUND', message: 'Webhook not found' })
+      return notFound(reply, ErrorCode.NOT_FOUND, 'Webhook not found')
     }
 
     let q = fastify.supabase
@@ -474,7 +462,7 @@ export default async function webhooksRoutes(fastify: FastifyInstance) {
   // ── POST /system/webhooks/deliveries/:deliveryId/retry ────────────────────
   fastify.post('/system/webhooks/deliveries/:deliveryId/retry', auth, async (req: any, reply) => {
     if (!isAdmin(req.userRole)) {
-      return reply.code(403).send({ error: 'FORBIDDEN', message: 'Admin access required' })
+      return forbidden(reply, ErrorCode.FORBIDDEN, 'Admin access required')
     }
 
     const { deliveryId } = req.params as { deliveryId: string }
@@ -487,12 +475,12 @@ export default async function webhooksRoutes(fastify: FastifyInstance) {
       .single()
 
     if (fetchError || !delivery) {
-      return reply.code(404).send({ error: 'NOT_FOUND', message: 'Delivery not found' })
+      return notFound(reply, ErrorCode.NOT_FOUND, 'Delivery not found')
     }
 
     const webhookTenantId = (delivery as any).webhooks?.tenant_id
     if (webhookTenantId !== req.tenantId) {
-      return reply.code(404).send({ error: 'NOT_FOUND', message: 'Delivery not found' })
+      return notFound(reply, ErrorCode.NOT_FOUND, 'Delivery not found')
     }
 
     // Actually re-attempt the HTTP delivery. This previously just flipped the

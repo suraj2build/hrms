@@ -542,19 +542,18 @@ export default async function leaveAccrualLifecycleRoutes(fastify: FastifyInstan
       .not('consumption_eligible_from', 'is', null)
 
     if (!entries?.length) {
-      return reply.code(404).send({ error: 'NOT_FOUND', message: 'No held credit entries found' })
+      return notFound(reply, ErrorCode.NOT_FOUND, 'No held credit entries found')
     }
 
-    const released = []
-    const errors   = []
-
-    for (const entry of entries as any[]) {
-      // Insert release event — checked explicitly because supabase-js
-      // never throws on a DB error, so the surrounding try/catch alone
-      // can't catch a failed audit-trail insert. Without this check, a
-      // failed insert still fell through to clearing the hold date below,
-      // reporting the credit as released with zero audit record.
-      const { error: releaseErr } = await fastify.supabase.from('leave_entitlement_releases').insert({
+    // F24: batched equivalent of the old per-entry insert+update loop (bounded
+    // to 100 entries by the schema above, but still up to 200 round trips).
+    // A single multi-row INSERT is all-or-nothing at the DB level, so this
+    // trades the old "some entries silently skipped" partial-success
+    // semantics for a single audit-trail insert covering the whole batch —
+    // either every entry in the request releases, or none do.
+    const releasedAt = new Date().toISOString()
+    const { error: releaseErr } = await fastify.supabase.from('leave_entitlement_releases').insert(
+      (entries as any[]).map(entry => ({
         tenant_id:         req.tenantId,
         employee_id:       entry.employee_id,
         leave_type_id:     entry.leave_type_id,
@@ -563,36 +562,32 @@ export default async function leaveAccrualLifecycleRoutes(fastify: FastifyInstan
         days_released:     entry.days,
         release_trigger:   'manual_release',
         trigger_reference: parsed.data.trigger_reference ?? null,
-        released_at:       new Date().toISOString(),
+        released_at:       releasedAt,
         released_by:       req.userId,
         notes:             parsed.data.notes ?? null,
-      })
+      })),
+    )
 
-      if (releaseErr) {
-        errors.push(`Entry ${entry.id}: failed to record release audit trail`)
-        continue
-      }
+    if (releaseErr) {
+      return serverError(req, reply, releaseErr, ErrorCode.INSERT_FAILED, 'Failed to record release audit trail')
+    }
 
-      // Clear the hold date
-      const { error: clearErr } = await fastify.supabase
-        .from('leave_accrual_ledger')
-        .update({ consumption_eligible_from: null })
-        .eq('id', entry.id)
-        .eq('tenant_id', req.tenantId)
+    const entryIds = (entries as any[]).map(entry => entry.id as string)
+    const { error: clearErr } = await fastify.supabase
+      .from('leave_accrual_ledger')
+      .update({ consumption_eligible_from: null })
+      .eq('tenant_id', req.tenantId)
+      .in('id', entryIds)
 
-      if (clearErr) {
-        errors.push(`Entry ${entry.id}: failed to clear hold date`)
-        continue
-      }
-
-      released.push(entry.id)
+    if (clearErr) {
+      return serverError(req, reply, clearErr, ErrorCode.UPDATE_FAILED, 'Failed to clear hold dates')
     }
 
     return reply.send({
       data: {
-        released_count: released.length,
-        released_ids:   released,
-        errors,
+        released_count: entryIds.length,
+        released_ids:   entryIds,
+        errors:         [] as string[],
       },
     })
   })

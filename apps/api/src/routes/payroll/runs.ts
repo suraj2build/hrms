@@ -2660,20 +2660,33 @@ export default async function payrollRunsRoutes(fastify: FastifyInstance) {
 
         const affectedAdvanceIds = [...new Set((recoveredScheds ?? []).map((r: any) => r.advance_id as string))]
 
-        for (const advId of affectedAdvanceIds) {
-          const { count: pendingCount } = await fastify.supabase
-            .from('advance_recovery_schedules')
-            .select('id', { count: 'exact', head: true })
-            .eq('advance_id', advId)
-            .eq('tenant_id', req.tenantId)
-            .eq('status', 'pending')
+        // F23: batched equivalent of the old per-advance count+update loop —
+        // one chunked query to find which affected advances still have pending
+        // installments, then two chunked bulk updates instead of 2×N round trips.
+        if (affectedAdvanceIds.length > 0) {
+          const stillPendingRows = await fetchChunked(affectedAdvanceIds, (chunk) =>
+            fastify.supabase
+              .from('advance_recovery_schedules').select('advance_id')
+              .eq('tenant_id', req.tenantId).eq('status', 'pending').in('advance_id', chunk),
+          )
+          const stillPendingIds = new Set(stillPendingRows.map((r: any) => r.advance_id as string))
+          const fullyRecoveredIds = affectedAdvanceIds.filter(advId => !stillPendingIds.has(advId))
+          const recoveringIds     = affectedAdvanceIds.filter(advId => stillPendingIds.has(advId))
 
-          const newStatus = (pendingCount ?? 0) === 0 ? 'fully_recovered' : 'recovering'
-          await fastify.supabase
-            .from('advance_salary_requests')
-            .update({ status: newStatus, updated_at: now })
-            .eq('id', advId)
-            .eq('tenant_id', req.tenantId)
+          for (let i = 0; i < fullyRecoveredIds.length; i += ID_CHUNK) {
+            await fastify.supabase
+              .from('advance_salary_requests')
+              .update({ status: 'fully_recovered', updated_at: now })
+              .eq('tenant_id', req.tenantId)
+              .in('id', fullyRecoveredIds.slice(i, i + ID_CHUNK))
+          }
+          for (let i = 0; i < recoveringIds.length; i += ID_CHUNK) {
+            await fastify.supabase
+              .from('advance_salary_requests')
+              .update({ status: 'recovering', updated_at: now })
+              .eq('tenant_id', req.tenantId)
+              .in('id', recoveringIds.slice(i, i + ID_CHUNK))
+          }
         }
 
         // Loan outstanding balance sweep: reduce by principal_component for each paid EMI.

@@ -57,7 +57,11 @@ export default async function essTeamRoutes(fastify: FastifyInstance) {
     const myMgrId = (me?.manager_id as string | null) ?? null
 
     const SEL = 'id, first_name, last_name, dob, joining_date'
-    const [managerRow, peerRows, reportRows] = await Promise.all([
+    // F21: peers/reports are capped (20/30) for the roster tile display, so the
+    // "Your team — N people" summary sentence below must come from a separate
+    // exact-count query, not the capped arrays' lengths — those undercount any
+    // manager with more direct reports/peers than the display cap.
+    const [managerRow, peerRows, peerTotal, reportRows, reportTotal] = await Promise.all([
       myMgrId
         ? safe(fastify.supabase.from('employees').select(SEL)
             .eq('id', myMgrId).eq('tenant_id', tenantId).maybeSingle().then(r => r.data as any), null)
@@ -67,9 +71,17 @@ export default async function essTeamRoutes(fastify: FastifyInstance) {
             .eq('tenant_id', tenantId).eq('status', 'active').eq('manager_id', myMgrId).neq('id', employeeId).limit(20)
             .then(r => (r.data ?? []) as any[]), [] as any[])
         : Promise.resolve([] as any[]),
+      myMgrId
+        ? safe(fastify.supabase.from('employees').select('id', { count: 'exact', head: true })
+            .eq('tenant_id', tenantId).eq('status', 'active').eq('manager_id', myMgrId).neq('id', employeeId)
+            .then(r => r.count ?? 0), 0)
+        : Promise.resolve(0),
       safe(fastify.supabase.from('employees').select(SEL)
         .eq('tenant_id', tenantId).eq('status', 'active').eq('manager_id', employeeId).limit(30)
         .then(r => (r.data ?? []) as any[]), [] as any[]),
+      safe(fastify.supabase.from('employees').select('id', { count: 'exact', head: true })
+        .eq('tenant_id', tenantId).eq('status', 'active').eq('manager_id', employeeId)
+        .then(r => r.count ?? 0), 0),
     ])
 
     // The people I work with (manager + peers + reports), de-duplicated.
@@ -80,7 +92,9 @@ export default async function essTeamRoutes(fastify: FastifyInstance) {
     const teamIds = [...everyone.keys()]
 
     // Who's away today (availability only — never the reason) + recent team recognition.
-    const [outRows, recogRows] = await Promise.all([
+    // F21: outRows is capped at 40 for the "who's out" tile list — the "N out today"
+    // summary count must come from a separate exact-count query, not outRows.length.
+    const [outRows, outTotal, recogRows] = await Promise.all([
       teamIds.length
         ? safe(fastify.supabase.from('leave_requests')
             .select('employee_id, to_date')
@@ -88,6 +102,12 @@ export default async function essTeamRoutes(fastify: FastifyInstance) {
             .lte('from_date', today).gte('to_date', today).in('employee_id', teamIds).limit(40)
             .then(r => (r.data ?? []) as any[]), [] as any[])
         : Promise.resolve([] as any[]),
+      teamIds.length
+        ? safe(fastify.supabase.from('leave_requests').select('employee_id', { count: 'exact', head: true })
+            .eq('tenant_id', tenantId).in('status', ['approved', 'APPROVED'])
+            .lte('from_date', today).gte('to_date', today).in('employee_id', teamIds)
+            .then(r => r.count ?? 0), 0)
+        : Promise.resolve(0),
       teamIds.length
         ? safe(fastify.supabase.from('recognition')
             .select('id, from_employee, to_employee, badge_code, created_at')
@@ -135,11 +155,11 @@ export default async function essTeamRoutes(fastify: FastifyInstance) {
         title: badge ? `${giver} recognised ${fullName(who)} — ${badge}` : `${giver} recognised ${fullName(who)}` })
     }
 
-    const rosterCount = (managerRow ? 1 : 0) + (peerRows as any[]).length + (reportRows as any[]).length
+    const rosterCount = (managerRow ? 1 : 0) + (peerTotal as number) + (reportTotal as number)
     const isManagerView = (reportRows as any[]).length > 0
     const sentence = rosterCount === 0
       ? 'Your team will appear here as it grows.'
-      : `Your team — ${rosterCount} ${rosterCount === 1 ? 'person' : 'people'}${out.length ? `, ${out.length} out today` : ''}.`
+      : `Your team — ${rosterCount} ${rosterCount === 1 ? 'person' : 'people'}${outTotal ? `, ${outTotal} out today` : ''}.`
 
     // Manager care-insight — "who might need support" (one, gentle, silent otherwise).
     let manager: { insight?: string } | null = null

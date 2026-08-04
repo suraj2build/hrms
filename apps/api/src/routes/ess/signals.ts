@@ -118,22 +118,28 @@ export default async function essSignalsRoutes(fastify: FastifyInstance) {
               .then(r => (r.data ?? []) as any[]), [] as any[])
           : Promise.resolve([] as any[]),
         // Manager approvals — individual pending leave, scoped to reports (admins: tenant-wide).
+        // F21: `rows` is capped at 6 for the card preview, so the "N more waiting"
+        // signal below must come from a separate exact-count query, not rows.length
+        // (which can never exceed 6 and previously undercounted any pending queue > 11).
         isManager && employeeId
           ? (async () => {
               let ids: string[] | null = null
               if (!isAdmin) {
                 ids = await getDirectReportIds(fastify.supabase, tenantId, employeeId)
-                if (!ids.length) return [] as any[]
+                if (!ids.length) return { rows: [] as any[], total: 0 }
               }
               // Fresh audit finding: same uppercase-only status fix as above.
               let q = fastify.supabase.from('leave_requests')
                 .select('id, employee_id, from_date, to_date, leave_types(name)')
                 .eq('tenant_id', tenantId).eq('status', 'PENDING').order('from_date').limit(6)
-              if (ids) q = q.in('employee_id', ids)
-              const { data } = await q
-              return (data ?? []) as any[]
-            })().catch(() => [] as any[])
-          : Promise.resolve([] as any[]),
+              let countQ = fastify.supabase.from('leave_requests')
+                .select('id', { count: 'exact', head: true })
+                .eq('tenant_id', tenantId).eq('status', 'PENDING')
+              if (ids) { q = q.in('employee_id', ids); countQ = countQ.in('employee_id', ids) }
+              const [{ data }, { count }] = await Promise.all([q, countQ])
+              return { rows: (data ?? []) as any[], total: count ?? (data ?? []).length }
+            })().catch(() => ({ rows: [] as any[], total: 0 }))
+          : Promise.resolve({ rows: [] as any[], total: 0 }),
         isManager
           ? safe(fastify.supabase.from('attendance_regularisation').select('id', { count: 'exact', head: true })
               .eq('tenant_id', tenantId).eq('status', 'pending')
@@ -144,7 +150,7 @@ export default async function essSignalsRoutes(fastify: FastifyInstance) {
     const signals: Signal[] = []
 
     // 1. Manager — team approvals, people-first (one card per requester, a face each).
-    const apprRows = mgrLeaveRows as any[]
+    const { rows: apprRows, total: apprTotal } = mgrLeaveRows as { rows: any[]; total: number }
     if (apprRows.length) {
       const ids = [...new Set(apprRows.map(r => r.employee_id).filter(Boolean))]
       const nameMap = new Map<string, string>()
@@ -165,10 +171,10 @@ export default async function essSignalsRoutes(fastify: FastifyInstance) {
           action: { label: 'Review', href: '/flowdesk' },
         })
       }
-      if (apprRows.length > 5) {
+      if (apprTotal > 5) {
         signals.push({
           id: 'appr_more', type: 'approvals', severity: 'info', priority: 50, intent: 'can_wait',
-          title: `${apprRows.length - 5} more approval${apprRows.length - 5 > 1 ? 's' : ''} waiting`,
+          title: `${apprTotal - 5} more approval${apprTotal - 5 > 1 ? 's' : ''} waiting`,
           body: 'Review the rest in FlowDesk.', action: { label: 'Review', href: '/flowdesk' },
         })
       }
