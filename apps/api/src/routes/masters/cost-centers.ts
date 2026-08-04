@@ -15,13 +15,20 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { generateUniqueCode } from '../../lib/generate-code.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
-import { serverError, ErrorCode } from '../../lib/api-errors.js'
+import { serverError, conflictError, ErrorCode } from '../../lib/api-errors.js'
 
 const schema = z.object({
   name:        z.string().min(1, 'Name is required'),
   code:        z.string().optional(),
   description: z.string().optional(),
   is_active:   z.boolean().optional().default(true),
+})
+
+// expected_version is optional so this stays backward-compatible with a
+// frontend that hasn't been updated to send it yet (PEND-105 Phase C) — the
+// CAS check below only runs when a caller actually provides it.
+const updateSchema = schema.partial().extend({
+  expected_version: z.number().int().positive().optional(),
 })
 
 export default async function costCentersRoutes(fastify: FastifyInstance) {
@@ -44,7 +51,7 @@ export default async function costCentersRoutes(fastify: FastifyInstance) {
   fastify.get('/', auth, async (req: any, reply) => {
     const { data, error } = await fastify.supabase
       .from('cost_centers')
-      .select('id, name, code, description, is_active, created_at')
+      .select('id, name, code, description, is_active, version, created_at')
       .eq('tenant_id', req.tenantId)
       .order('name')
 
@@ -56,7 +63,7 @@ export default async function costCentersRoutes(fastify: FastifyInstance) {
   fastify.get('/:id', auth, async (req: any, reply) => {
     const { data, error } = await fastify.supabase
       .from('cost_centers')
-      .select('id, name, code, description, is_active, created_at')
+      .select('id, name, code, description, is_active, version, created_at')
       .eq('id', req.params.id)
       .eq('tenant_id', req.tenantId)
       .maybeSingle()
@@ -78,7 +85,7 @@ export default async function costCentersRoutes(fastify: FastifyInstance) {
     const { data, error } = await fastify.supabase
       .from('cost_centers')
       .insert({ ...parsed.data, code, tenant_id: req.tenantId })
-      .select('id, name, code, description, is_active, created_at')
+      .select('id, name, code, description, is_active, version, created_at')
       .single()
 
     if (error) {
@@ -95,16 +102,23 @@ export default async function costCentersRoutes(fastify: FastifyInstance) {
 
   // ── PUT /masters/cost-centers/:id ─────────────────────────────────────────
   fastify.put('/:id', adminAuth, async (req: any, reply) => {
-    const parsed = schema.partial().safeParse(req.body)
+    const parsed = updateSchema.safeParse(req.body)
     if (!parsed.success)
       return reply.code(400).send({ error: 'VALIDATION', message: parsed.error.issues[0].message })
 
-    const { data, error } = await fastify.supabase
+    const { expected_version, ...fields } = parsed.data
+
+    let query = fastify.supabase
       .from('cost_centers')
-      .update(parsed.data)
+      .update(fields)
       .eq('id', req.params.id)
       .eq('tenant_id', req.tenantId)
-      .select('id, name, code, description, is_active, created_at')
+    // PEND-105: optimistic-concurrency check — only applied when the caller
+    // sends expected_version (see updateSchema comment above).
+    if (expected_version !== undefined) query = query.eq('version', expected_version)
+
+    const { data, error } = await query
+      .select('id, name, code, description, is_active, version, created_at')
       .maybeSingle()
 
     if (error) {
@@ -112,7 +126,25 @@ export default async function costCentersRoutes(fastify: FastifyInstance) {
         return reply.code(409).send({ error: 'DUPLICATE', message: 'Another cost center already uses that code' })
       return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update cost center')
     }
-    if (!data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Cost center not found' })
+    if (!data) {
+      // 0 rows matched — either the record doesn't exist, or it does but
+      // `version` moved on since expected_version was read. Disambiguate
+      // with a plain existence check so a genuinely-deleted record still
+      // reports 404, not a confusing 409.
+      if (expected_version !== undefined) {
+        const { data: exists } = await fastify.supabase
+          .from('cost_centers')
+          .select('id')
+          .eq('id', req.params.id)
+          .eq('tenant_id', req.tenantId)
+          .maybeSingle()
+        if (exists) {
+          return conflictError(reply, ErrorCode.VERSION_CONFLICT,
+            'This cost center was changed by someone else. Reload and try again.')
+        }
+      }
+      return reply.code(404).send({ error: 'NOT_FOUND', message: 'Cost center not found' })
+    }
     return reply.send({ data })
   })
 
