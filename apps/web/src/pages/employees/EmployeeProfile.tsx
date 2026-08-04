@@ -33,6 +33,7 @@ import {
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { api } from '@/lib/api/client'
+import { useVersionConflict, withExpectedVersion } from '@/hooks/useVersionConflict'
 import { useAuthStore } from '@/stores/authStore'
 import { cn } from '@/lib/utils'
 import { SubTabs } from '@/components/ui/SubTabs'
@@ -111,8 +112,9 @@ export function EmployeeProfile() {
 
   const [editProfile, setEditProfile] = useState(false)
   const [profileForm, setProfileForm] = useState<Record<string, string>>({})
+  const profileVersionConflict = useVersionConflict([['employee-full', id]])
   const profileMutation = useMutation({
-    mutationFn: (d: Record<string, string>) => api.put(`/employees/${id}`, d),
+    mutationFn: (d: Record<string, string>) => api.put(`/employees/${id}`, withExpectedVersion(d, emp)),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['employee-full', id] })
       // Name/email/phone/status edited here are also shown in Employee List
@@ -121,7 +123,10 @@ export function EmployeeProfile() {
       setEditProfile(false)
       toast.success('Saved')
     },
-    onError:   () => toast.error('Save failed'),
+    onError:   (e: Error) => {
+      if (profileVersionConflict(e)) return
+      toast.error('Save failed')
+    },
   })
 
   const openSignedUrl = useCallback(async (path: string | null | undefined) => {

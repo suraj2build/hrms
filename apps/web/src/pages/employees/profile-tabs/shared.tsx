@@ -13,10 +13,12 @@ export interface FullProfile {
     site_id:   string | null; roster_id:   string | null
     sites:   { id: string; name: string; timezone: string } | null
     rosters: { id: string; name: string; cycle_days: number } | null
+    version: number
   }
   personal_info: {
     gender: string | null; dob: string | null; marital_status: string | null
     blood_group: string | null; nationality: string | null; profile_photo: string | null
+    version: number
   } | null
   job_info: {
     id: string; employment_type: string; effective_from: string; effective_to: string | null
@@ -54,6 +56,7 @@ export interface FullProfile {
     tax_regime: string | null
     pt_state_code: string | null; lwf_state_code: string | null
     site_state_code: string | null
+    version: number
   } | null
 }
 
@@ -123,6 +126,7 @@ export interface CompHistoryRow {
 export interface ContractRow {
   id: string; contract_type?: string | null; start_date?: string | null; end_date?: string | null
   status?: string | null; notes?: string | null; storage_path?: string | null
+  version?: number | null
 }
 export interface PassportVisaRow {
   id: string; record_type?: string | null; doc_number?: string | null; country?: string | null
@@ -141,6 +145,7 @@ export interface NominationRow {
 export interface AccessCardRow {
   id: string; card_number?: string | null; status?: string | null
   issued_date?: string | null; returned_date?: string | null
+  version?: number | null
 }
 export interface AssetRow { id: string; asset_code?: string | null; name?: string | null; status?: string | null }
 export interface AssetHistoryRow { id?: string; asset_id?: string | null; action?: string | null; action_date?: string | null }

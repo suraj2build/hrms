@@ -22,6 +22,7 @@ import {
   type FormBag, type Section,
 } from './shared'
 import { fmtDate } from './format-helpers'
+import { useVersionConflict, withExpectedVersion } from '@/hooks/useVersionConflict'
 
 // Mandatory document types — used to show missing-doc warnings
 const MANDATORY_DOC_TYPES = [
@@ -124,6 +125,7 @@ export function DocumentsTab({ id, isAdmin, tenantId, subTab, visited, openSigne
 
   const [addContractOpen,  setAddContractOpen]  = useState(false)
   const [editContractId,   setEditContractId]   = useState<string | null>(null)
+  const [editContractRow,  setEditContractRow]  = useState<ContractRow | null>(null)
   const [contractForm, setContractForm] = useState({
     contract_type: 'appointment', start_date: '', end_date: '',
     status: 'active', notes: '',
@@ -131,6 +133,7 @@ export function DocumentsTab({ id, isAdmin, tenantId, subTab, visited, openSigne
   function openContractDialog(c?: ContractRow) {
     if (c) {
       setEditContractId(c.id)
+      setEditContractRow(c)
       setContractForm({
         contract_type: c.contract_type ?? 'appointment',
         start_date:    c.start_date?.slice(0, 10) ?? '',
@@ -140,6 +143,7 @@ export function DocumentsTab({ id, isAdmin, tenantId, subTab, visited, openSigne
       })
     } else {
       setEditContractId(null)
+      setEditContractRow(null)
       setContractForm({ contract_type: 'appointment', start_date: new Date().toISOString().slice(0, 10), end_date: '', status: 'active', notes: '' })
     }
     setAddContractOpen(true)
@@ -153,14 +157,18 @@ export function DocumentsTab({ id, isAdmin, tenantId, subTab, visited, openSigne
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['contracts', id] }); setAddContractOpen(false); toast.success('Contract added') },
     onError:   (e: Error) => toast.error('Failed to add contract', { description: e.message }),
   })
+  const contractVersionConflict = useVersionConflict([['contracts', id]])
   const editContractMutation = useMutation({
-    mutationFn: (contractId: string) => api.put(`/employees/${id}/contracts/${contractId}`, {
+    mutationFn: (contractId: string) => api.put(`/employees/${id}/contracts/${contractId}`, withExpectedVersion({
       ...contractForm,
       end_date: contractForm.end_date || undefined,
       notes:    contractForm.notes    || undefined,
-    }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['contracts', id] }); setAddContractOpen(false); setEditContractId(null); toast.success('Contract updated') },
-    onError:   (e: Error) => toast.error('Failed to update contract', { description: e.message }),
+    }, editContractRow)),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['contracts', id] }); setAddContractOpen(false); setEditContractId(null); setEditContractRow(null); toast.success('Contract updated') },
+    onError:   (e: Error) => {
+      if (contractVersionConflict(e)) return
+      toast.error('Failed to update contract', { description: e.message })
+    },
   })
   const delContractMutation = useMutation({
     mutationFn: (contractId: string) => api.delete(`/employees/${id}/contracts/${contractId}`),
@@ -438,7 +446,7 @@ export function DocumentsTab({ id, isAdmin, tenantId, subTab, visited, openSigne
         </DialogContent>
       </Dialog>
 
-      <Dialog open={addContractOpen} onOpenChange={open=>{ if(!open){ setAddContractOpen(false); setEditContractId(null) } }}>
+      <Dialog open={addContractOpen} onOpenChange={open=>{ if(!open){ setAddContractOpen(false); setEditContractId(null); setEditContractRow(null) } }}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader><DialogTitle>{editContractId ? 'Edit Contract' : 'Add Contract'}</DialogTitle></DialogHeader>
           <div className="space-y-3">
@@ -461,7 +469,7 @@ export function DocumentsTab({ id, isAdmin, tenantId, subTab, visited, openSigne
             <div><Label className="text-xs">Notes</Label><Input className="mt-1 h-8 text-xs" value={contractForm.notes} onChange={e=>setContractForm(f=>({...f,notes:e.target.value}))}/></div>
           </div>
           <DialogFooter>
-            <Button variant="ghost" size="sm" onClick={()=>{ setAddContractOpen(false); setEditContractId(null) }}>Cancel</Button>
+            <Button variant="ghost" size="sm" onClick={()=>{ setAddContractOpen(false); setEditContractId(null); setEditContractRow(null) }}>Cancel</Button>
             <Button size="sm"
               disabled={!contractForm.start_date || addContractMutation.isPending || editContractMutation.isPending}
               onClick={()=> editContractId ? editContractMutation.mutate(editContractId) : addContractMutation.mutate()}>

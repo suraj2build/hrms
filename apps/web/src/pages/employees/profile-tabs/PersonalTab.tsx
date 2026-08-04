@@ -22,6 +22,7 @@ import {
   type FullProfile, type AddressRow, type EmergencyContactRow, type EmergencyContactForm, type FormBag, type Section,
 } from './shared'
 import { fmt } from './format-helpers'
+import { useVersionConflict, withExpectedVersion } from '@/hooks/useVersionConflict'
 
 interface ImportantDateRow {
   id:           string
@@ -49,15 +50,19 @@ export function PersonalTab({ id, isAdmin, subTab, visited, pi, addresses, emerg
 
   const [editPI, setEditPI] = useState(false)
   const [piForm, setPiForm] = useState<Record<string, string>>({})
+  const piVersionConflict = useVersionConflict([['employee-full', id]])
   const piMutation = useMutation({
-    mutationFn: (d: Record<string, string>) => api.put(`/employees/${id}/personal-info`, d),
+    mutationFn: (d: Record<string, string>) => api.put(`/employees/${id}/personal-info`, withExpectedVersion(d, pi)),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['employee-full', id] })
       qc.invalidateQueries({ queryKey: ['employees'] })
       setEditPI(false)
       toast.success('Saved')
     },
-    onError:   () => toast.error('Save failed'),
+    onError:   (e: Error) => {
+      if (piVersionConflict(e)) return
+      toast.error('Save failed')
+    },
   })
 
   const [addrOpen, setAddrOpen] = useState(false)

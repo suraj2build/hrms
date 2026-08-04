@@ -19,6 +19,7 @@ import {
   type AccessCardRow, type AssetRow, type AssetHistoryRow, type BadgeVariant, type FormBag, type Section,
 } from './shared'
 import { fmtDate } from './format-helpers'
+import { useVersionConflict, withExpectedVersion } from '@/hooks/useVersionConflict'
 
 interface AccessCardTabProps {
   id: string | undefined
@@ -46,11 +47,15 @@ export function AccessCardTab({ id, isAdmin, subTab, visited }: AccessCardTabPro
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['access-cards', id] }); setAddCardOpen(false); toast.success('Card issued') },
     onError:   () => toast.error('Failed'),
   })
+  const versionConflict = useVersionConflict([['access-cards', id]])
   const updateCardMutation = useMutation({
-    mutationFn: ({ cardId, status }: { cardId: string; status: string }) =>
-      api.put(`/employees/${id}/access-cards/${cardId}`, { status }),
+    mutationFn: ({ card, status }: { card: AccessCardRow; status: string }) =>
+      api.put(`/employees/${id}/access-cards/${card.id}`, withExpectedVersion({ status }, card)),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['access-cards', id] }); toast.success('Card status updated') },
-    onError:   (e: Error) => toast.error('Failed to update card status', { description: e.message }),
+    onError:   (e: Error) => {
+      if (versionConflict(e)) return
+      toast.error('Failed to update card status', { description: e.message })
+    },
   })
 
   return (
@@ -80,7 +85,7 @@ export function AccessCardTab({ id, isAdmin, subTab, visited }: AccessCardTabPro
                         <div className="flex gap-1">
                           {(['returned','lost','deactivated'] as const).map(s => (
                             <Button key={s} size="sm" variant="outline" className="h-6 text-[10px] capitalize"
-                              onClick={() => updateCardMutation.mutate({ cardId: card.id, status: s })}>{s}</Button>
+                              onClick={() => updateCardMutation.mutate({ card, status: s })}>{s}</Button>
                           ))}
                         </div>
                       )}

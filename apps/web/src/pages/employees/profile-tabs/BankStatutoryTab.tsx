@@ -20,6 +20,7 @@ import {
   EmptySection, Grid2, KV,
   type FullProfile, type HolidayGroupRow, type StateRow, type Section,
 } from './shared'
+import { useVersionConflict, withExpectedVersion } from '@/hooks/useVersionConflict'
 
 interface BankStatutoryTabProps {
   id: string | undefined
@@ -119,6 +120,7 @@ export function BankStatutoryTab({
     })
     setEditBankOpen(true)
   }
+  const bankVersionConflict = useVersionConflict([['employee-full', id]])
   const bankMutation = useMutation({
     mutationFn: () => {
       // A blanked clearable field sends null → the API erases it. Masked fields
@@ -144,7 +146,7 @@ export function BankStatutoryTab({
       if (bankForm.account_number.trim()) body.account_number = bankForm.account_number.trim()
       if (bankForm.aadhaar_number.trim()) body.aadhaar_number = bankForm.aadhaar_number.trim()
 
-      return api.put(`/employees/${id}/bank-statutory`, body)
+      return api.put(`/employees/${id}/bank-statutory`, withExpectedVersion(body, bs))
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['employee-full', id] })
@@ -153,7 +155,10 @@ export function BankStatutoryTab({
       setEditBankOpen(false)
       toast.success('Bank & Statutory details updated')
     },
-    onError: (e: Error) => toast.error('Save failed', { description: e.message }),
+    onError: (e: Error) => {
+      if (bankVersionConflict(e)) return
+      toast.error('Save failed', { description: e.message })
+    },
   })
 
   return (
