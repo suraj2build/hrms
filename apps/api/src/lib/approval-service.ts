@@ -453,6 +453,29 @@ export async function reverseApprovedLeaveRequest(
   const authResult = await validateApprover(supabase, ctx, req.employee_id)
   if (!authResult.ok) return authResult
 
+  // ── 3.5 Elapsed-range guard (F2, SYSCERT_AUDIT_2026-08-03.md) ────────────────
+  // The atomic RPC below credits back the request's FULL computed_days and
+  // deletes/recomputes attendance for the ENTIRE range — correct for a leave
+  // that hasn't started yet, but wrong for a partially- or fully-elapsed one:
+  // days already taken get over-credited back to the balance and retroactively
+  // flipped from LEAVE to whatever the engine now derives from punches (often
+  // unauthorized absence). First-pass mitigation: block reversal outright once
+  // the range has started (tenant-local "today"). True partial reversal
+  // (crediting back only the unconsumed remainder) is a follow-up design task.
+  const tzForReversal = await fetchTenantTz(supabase, tenantId)
+  const todayLocal     = getLocalDate(new Date().toISOString(), tzForReversal)
+  if (req.from_date < todayLocal) {
+    return {
+      ok:    false,
+      error: {
+        type:    'CONFLICT',
+        message: 'Cannot reverse — this leave has already started. Reversing a partially- or ' +
+          'fully-elapsed leave would incorrectly credit back days already taken; contact support ' +
+          'for a manual correction.',
+      },
+    }
+  }
+
   const lt   = req.leave_types as { id: string; name: string; is_paid: boolean } | null
   const year = new Date(req.from_date).getFullYear()
 
