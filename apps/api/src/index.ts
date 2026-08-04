@@ -25,6 +25,7 @@ import { registerWoCreditScheduler }     from './lib/wo-credit-reconciler.js'
 import { registerPollScheduler }         from './lib/poll-scheduler.js'
 import { registerWebhookRetryScheduler, runWebhookRetryTick } from './lib/webhook-retry-scheduler.js'
 import { scan as runSlaScan }            from './lib/sla-scanner.js'
+import { scan as runNoticeOverdueScan }  from './lib/notice-overdue-scanner.js'
 import { scan as runVerificationRetryScan } from './lib/verification-retry-scanner.js'
 import { runAllScans as runIntelligenceScan } from './lib/intelligence-scanner.js'
 import { runDueSources as runAttendanceSources } from './lib/attendance-api-scheduler.js'
@@ -537,6 +538,22 @@ async function start() {
     setInterval(enqueue, TWENTY_FOUR_HOURS)
   }, fastify.log)
 
+  // On-notice overdue scanner (F3) — daily scan for on_notice employees whose
+  // last_working_date has passed while clearance/relieving still lags; auto-
+  // revokes login access as a backstop (see notice-overdue-scanner.ts).
+  // Scheduling only: sets up enqueue timers. Handler registered below.
+  await safeRegisterModule('notice-overdue-scanner', async () => {
+    const TWENTY_FOUR_HOURS = 24 * 60 * 60 * 1_000
+    const enqueue = () => {
+      const key = `notice-overdue-scan:${new Date().toISOString().slice(0, 10)}`
+      durableQueue.enqueue('notice-overdue-scan', {}, { idempotencyKey: key }).catch(
+        e => fastify.log.error({ err: e }, '[notice-overdue-scan] enqueue error'),
+      )
+    }
+    setTimeout(enqueue, 90_000)
+    setInterval(enqueue, TWENTY_FOUR_HOURS)
+  }, fastify.log)
+
   // Register durable queue handlers before start() — without these, every enqueued
   // job dead-letters immediately (ISSUE-011). Handlers close over fastify.supabase
   // which is available here because supabasePlugin was registered above.
@@ -607,6 +624,9 @@ async function start() {
       try { await scanAndEscalate(fastify.supabase, t.id) }
       catch (e) { fastify.log.error({ tenant: t.id, err: e }, 'absconding scan failed') }
     }
+  })
+  durableQueue.register('notice-overdue-scan', async (_payload, _job) => {
+    await runNoticeOverdueScan(fastify.supabase, fastify.log)
   })
   // event-automation is reactive (registerEventBusAutomation wires bus listeners);
   // no standalone scan function exists — complete without action on manual trigger.

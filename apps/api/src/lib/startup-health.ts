@@ -54,6 +54,7 @@ const OPTIONAL_MODULES = [
   'webhook-service',
   'onboarding',
   'absconding-scanner',
+  'notice-overdue-scanner',
   'poll-scheduler',
   'verification-retry-scanner',
   'webhook-retry-scheduler',
