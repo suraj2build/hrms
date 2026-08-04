@@ -988,21 +988,32 @@ export default async function successionRoutes(fastify: FastifyInstance) {
 
     if (!candidates.length) return reply.send({ data: { plotted: 0 } })
 
+    // F22: was one appraisals SELECT per candidate (N+1). Batch-fetch every
+    // appraisal for every candidate's employee_id in a single paginated query,
+    // ordered so the first row seen per employee_id is the latest — same
+    // result as the old per-candidate "order by created_at desc, limit 1".
+    const employeeIds = [...new Set((candidates as any[]).map(c => c.employee_id))]
+    const allAppraisals = await fetchAllRows<any>((from, to) =>
+      supabase
+        .from('appraisals')
+        .select('employee_id, final_rating, potential_rating, created_at')
+        .eq('tenant_id', tenantId)
+        .in('employee_id', employeeIds)
+        .order('employee_id', { ascending: true })
+        .order('created_at', { ascending: false })
+        .range(from, to))
+
+    const latestAppraisalByEmployee = new Map<string, any>()
+    for (const a of allAppraisals) {
+      if (!latestAppraisalByEmployee.has(a.employee_id)) latestAppraisalByEmployee.set(a.employee_id, a)
+    }
+
     let plotted = 0
     for (const c of candidates as any[]) {
-      // Get latest appraisal score
-      const { data: appraisal } = await supabase
-        .from('appraisals')
-        .select('final_rating, potential_rating')
-        .eq('employee_id', c.employee_id)
-        .eq('tenant_id', tenantId)
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle()
-
+      const appraisal = latestAppraisalByEmployee.get(c.employee_id)
       if (!appraisal) continue
-      const perf      = Math.min(3, Math.max(1, Math.ceil(((appraisal as any).final_rating ?? 3) / (10 / 3))))
-      const potential = Math.min(3, Math.max(1, Math.ceil(((appraisal as any).potential_rating ?? 2) / (10 / 3))))
+      const perf      = Math.min(3, Math.max(1, Math.ceil((appraisal.final_rating ?? 3) / (10 / 3))))
+      const potential = Math.min(3, Math.max(1, Math.ceil((appraisal.potential_rating ?? 2) / (10 / 3))))
 
       const { error: updateErr } = await supabase.from('succession_candidates')
         .update({ nine_box_performance: perf, nine_box_potential: potential })

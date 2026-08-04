@@ -247,6 +247,10 @@ export default async function taxGovernanceRoute(fastify: FastifyInstance) {
         rejected:           proofsRejected,
       },
       risk_items: riskItems,
+      // F20: risk_items itself is capped at 50 (the employees name-lookup
+      // query above), but highRiskEmployeeIds is the full, unbounded set —
+      // report its size so the dashboard can signal "showing 50 of N".
+      risk_items_total: highRiskEmployeeIds.size,
       // Extra fields available for future dashboard expansion
       financial_year:               fy,
       no_regime_elected:            noRegimeElected,

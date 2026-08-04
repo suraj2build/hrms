@@ -15,6 +15,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { fetchSourceData }     from '../routes/attendance/api-sources.js'
 import { durableQueue }        from './durable-queue.js'
 import { logger }              from './logger.js'
+import { fetchAllRows }        from './supabase-paginate.js'
 
 // How often the scheduler wakes up and checks for due sources (5 minutes)
 const TICK_MS = 5 * 60 * 1_000
@@ -41,16 +42,26 @@ export async function runDueSources(supabase: SupabaseClient): Promise<void> {
   // Find active sources whose next fetch is overdue
   const now = new Date()
 
-  const { data: sources, error } = await supabase
-    .from('attendance_api_sources')
-    .select('*')
-    .eq('is_active', true)
-    .gt('poll_interval_min', 0)
-
-  if (error || !sources?.length) {
-    if (error) console.warn('[att-api-scheduler] source query failed:', error.message)
+  // F45: plain .select('*') with no .range() — a tenant-wide cross-tenant
+  // scan of every active source, which PostgREST silently caps at 1,000 rows.
+  // Past that cap, sources for whichever tenants sort last simply never get
+  // polled — no error, no signal, just a silently-stopped punch feed.
+  let sources: any[]
+  try {
+    sources = await fetchAllRows<any>((from, to) =>
+      supabase
+        .from('attendance_api_sources')
+        .select('*')
+        .eq('is_active', true)
+        .gt('poll_interval_min', 0)
+        .range(from, to),
+    )
+  } catch (err) {
+    console.warn('[att-api-scheduler] source query failed:', (err as Error).message)
     return
   }
+
+  if (!sources.length) return
 
   const due = sources.filter((s: any) => {
     if (s.last_fetch_status === 'running') {

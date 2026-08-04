@@ -103,11 +103,18 @@ async function autoAdvanceStaleInstances(
   const systemActor = hrProfileIds[0]   // proxy actor for the auto_approved action row
   if (!systemActor) return
 
-  const { data: instances } = await supabase
-    .from('approval_instances')
-    .select('id, entity_type, current_level, total_levels, updated_at')
-    .eq('tenant_id', tenantId)
-    .is('final_approved', null)
+  // F46: sibling queries in this file already use fetchAllRows() (see scan()
+  // below) — this one was missed. A tenant with a large stale-approval
+  // backlog could exceed PostgREST's 1,000-row ceiling on a plain .select(),
+  // silently dropping the excess from the auto-advance pass.
+  const instances = await fetchAllRows<any>((from, to) =>
+    supabase
+      .from('approval_instances')
+      .select('id, entity_type, current_level, total_levels, updated_at')
+      .eq('tenant_id', tenantId)
+      .is('final_approved', null)
+      .range(from, to),
+  ).catch(() => [] as any[])
 
   // Amount-routed workflows (reimbursement/loan/advance) build their chain by
   // filtering levels on min_amount, so the instance's current_level is an index into
@@ -117,7 +124,7 @@ async function autoAdvanceStaleInstances(
   // workflows are unfiltered, so current_level == raw level and the lookup is exact.
   const AMOUNT_ROUTED = new Set(['reimbursement', 'loan', 'advance'])
 
-  for (const inst of (instances ?? []) as any[]) {
+  for (const inst of instances) {
     // Final level is never auto-finalized — only intermediate levels auto-advance.
     if (inst.current_level >= inst.total_levels) continue
 

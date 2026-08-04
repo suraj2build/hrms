@@ -73,7 +73,7 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
       let probationDueCount = 0
       const [
         [
-          { data: noJoin },
+          { data: noJoin }, { count: noJoinCount },
           { data: stalledSessions }, { count: stalledCount },
           { data: pendingSep }, { count: pendingSepCount },
           { data: emptyDocSessions },
@@ -84,9 +84,14 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
         ],
       ] = await Promise.all([
         Promise.all([
-          // 1. Employees missing joining_date
+          // 1. Employees missing joining_date.
+          // F18: .limit(50) only bounds the SAMPLE — the exact count backs
+          // severity/title so a tenant with >50 affected employees isn't
+          // silently reported as capped at 50 (same fix as findings #2/#3 below).
           fastify.supabase.from('employees').select('id, first_name, last_name')
             .eq('tenant_id', tenantId).eq('status', 'active').is('joining_date', null).limit(50),
+          fastify.supabase.from('employees').select('id', { count: 'exact', head: true })
+            .eq('tenant_id', tenantId).eq('status', 'active').is('joining_date', null),
           // 2. Stalled onboarding sessions.
           // .limit(50) only bounds the SAMPLE fetched for the observation body —
           // the true count (used for severity + the KPI tile below) comes from a
@@ -261,13 +266,14 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
 
       // ── Push observations for the batched reads above, same order/logic as before ──
 
+      const noJoinTotal = noJoinCount ?? noJoin?.length ?? 0
       if (noJoin && noJoin.length > 0) {
         observations.push({
           id: 'missing-joining-date', category: 'onboarding',
-          severity: noJoin.length > 3 ? 'high' : 'medium',
-          title: noJoin.length + ' active employee' + (noJoin.length > 1 ? 's' : '') + ' missing joining date',
+          severity: noJoinTotal > 3 ? 'high' : 'medium',
+          title: noJoinTotal + ' active employee' + (noJoinTotal > 1 ? 's' : '') + ' missing joining date',
           body: 'Active employees without a joining date cannot be included in payroll processing or leave accrual. Update their profiles to ensure accurate records.',
-          source_records: [{ table: 'employees', count: noJoin.length, sample: noJoin.slice(0, 3).map((e: any) => e.first_name + ' ' + e.last_name).join(', ') }],
+          source_records: [{ table: 'employees', count: noJoinTotal, sample: noJoin.slice(0, 3).map((e: any) => e.first_name + ' ' + e.last_name).join(', ') }],
           generated_at: now.toISOString(),
         })
       }
@@ -882,15 +888,27 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
     const observations: ActionObservation[] = []
 
     try {
-      // 1. New employees created in last 48h
-      const { data: newEmps, error: newEmpErr } = await fastify.supabase
-        .from('employees')
-        .select('id, first_name, last_name, created_at')
-        .eq('tenant_id', tenantId)
-        .gte('created_at', fortyEightHoursAgo)
-        .limit(100)
+      // 1. New employees created in last 48h.
+      // F18: .limit(100) only bounds the sample — pair it with an exact count
+      // so source_count isn't silently capped at 100 with no signal.
+      const [
+        { data: newEmps, error: newEmpErr },
+        { count: newEmpCount },
+      ] = await Promise.all([
+        fastify.supabase
+          .from('employees')
+          .select('id, first_name, last_name, created_at')
+          .eq('tenant_id', tenantId)
+          .gte('created_at', fortyEightHoursAgo)
+          .limit(100),
+        fastify.supabase
+          .from('employees')
+          .select('id', { count: 'exact', head: true })
+          .eq('tenant_id', tenantId)
+          .gte('created_at', fortyEightHoursAgo),
+      ])
       if (!newEmpErr && newEmps && newEmps.length > 0) {
-        const n = newEmps.length
+        const n = newEmpCount ?? newEmps.length
         observations.push({
           id: 'new-employees-48h',
           event_type: 'new_hire',
@@ -903,14 +921,24 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
       }
 
       // 2. Separations initiated in last 48h (timestamp column is created_at)
-      const { data: newSeps, error: newSepErr } = await fastify.supabase
-        .from('employee_separation')
-        .select('id, employee_id, created_at, lifecycle_stage')
-        .eq('tenant_id', tenantId)
-        .gte('created_at', fortyEightHoursAgo)
-        .limit(100)
+      const [
+        { data: newSeps, error: newSepErr },
+        { count: newSepCount },
+      ] = await Promise.all([
+        fastify.supabase
+          .from('employee_separation')
+          .select('id, employee_id, created_at, lifecycle_stage')
+          .eq('tenant_id', tenantId)
+          .gte('created_at', fortyEightHoursAgo)
+          .limit(100),
+        fastify.supabase
+          .from('employee_separation')
+          .select('id', { count: 'exact', head: true })
+          .eq('tenant_id', tenantId)
+          .gte('created_at', fortyEightHoursAgo),
+      ])
       if (!newSepErr && newSeps && newSeps.length > 0) {
-        const n = newSeps.length
+        const n = newSepCount ?? newSeps.length
         observations.push({
           id: 'separations-initiated-48h',
           event_type: 'separation_initiated',
@@ -924,16 +952,28 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
         // 3. Assets assigned during active separation
         const sepEmpIds = newSeps.map((s: any) => s.employee_id as string)
         if (sepEmpIds.length > 0) {
-          const { data: assetsInSep, error: assetSepErr } = await fastify.supabase
-            .from('employee_asset_ledger')
-            .select('id, employee_id, action_date')
-            .eq('tenant_id', tenantId)
-            .eq('action', 'assigned')
-            .in('employee_id', sepEmpIds)
-            .gte('created_at', fortyEightHoursAgo)
-            .limit(100)
+          const [
+            { data: assetsInSep, error: assetSepErr },
+            { count: assetsInSepCount },
+          ] = await Promise.all([
+            fastify.supabase
+              .from('employee_asset_ledger')
+              .select('id, employee_id, action_date')
+              .eq('tenant_id', tenantId)
+              .eq('action', 'assigned')
+              .in('employee_id', sepEmpIds)
+              .gte('created_at', fortyEightHoursAgo)
+              .limit(100),
+            fastify.supabase
+              .from('employee_asset_ledger')
+              .select('id', { count: 'exact', head: true })
+              .eq('tenant_id', tenantId)
+              .eq('action', 'assigned')
+              .in('employee_id', sepEmpIds)
+              .gte('created_at', fortyEightHoursAgo),
+          ])
           if (!assetSepErr && assetsInSep && assetsInSep.length > 0) {
-            const na = assetsInSep.length
+            const na = assetsInSepCount ?? assetsInSep.length
             observations.push({
               id: 'assets-assigned-during-separation-48h',
               event_type: 'asset_separation_overlap',
@@ -948,15 +988,26 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
       }
 
       // 4. Assets assigned in last 48h (general — ledger action='assigned')
-      const { data: recentAssets, error: assetErr } = await fastify.supabase
-        .from('employee_asset_ledger')
-        .select('id, employee_id, action_date')
-        .eq('tenant_id', tenantId)
-        .eq('action', 'assigned')
-        .gte('created_at', fortyEightHoursAgo)
-        .limit(100)
+      const [
+        { data: recentAssets, error: assetErr },
+        { count: recentAssetsCount },
+      ] = await Promise.all([
+        fastify.supabase
+          .from('employee_asset_ledger')
+          .select('id, employee_id, action_date')
+          .eq('tenant_id', tenantId)
+          .eq('action', 'assigned')
+          .gte('created_at', fortyEightHoursAgo)
+          .limit(100),
+        fastify.supabase
+          .from('employee_asset_ledger')
+          .select('id', { count: 'exact', head: true })
+          .eq('tenant_id', tenantId)
+          .eq('action', 'assigned')
+          .gte('created_at', fortyEightHoursAgo),
+      ])
       if (!assetErr && recentAssets && recentAssets.length > 0) {
-        const n = recentAssets.length
+        const n = recentAssetsCount ?? recentAssets.length
         // Only add if not already covered by the separation overlap observation
         observations.push({
           id: 'assets-assigned-48h',
@@ -970,15 +1021,26 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
       }
 
       // 5. Employees who became on_notice recently (updated_at in last 48h and status = on_notice)
-      const { data: onNoticeRecent, error: noticeErr } = await fastify.supabase
-        .from('employees')
-        .select('id, first_name, last_name, updated_at')
-        .eq('tenant_id', tenantId)
-        .eq('status', 'on_notice')
-        .gte('updated_at', fortyEightHoursAgo)
-        .limit(100)
+      const [
+        { data: onNoticeRecent, error: noticeErr },
+        { count: onNoticeRecentCount },
+      ] = await Promise.all([
+        fastify.supabase
+          .from('employees')
+          .select('id, first_name, last_name, updated_at')
+          .eq('tenant_id', tenantId)
+          .eq('status', 'on_notice')
+          .gte('updated_at', fortyEightHoursAgo)
+          .limit(100),
+        fastify.supabase
+          .from('employees')
+          .select('id', { count: 'exact', head: true })
+          .eq('tenant_id', tenantId)
+          .eq('status', 'on_notice')
+          .gte('updated_at', fortyEightHoursAgo),
+      ])
       if (!noticeErr && onNoticeRecent && onNoticeRecent.length > 0) {
-        const n = onNoticeRecent.length
+        const n = onNoticeRecentCount ?? onNoticeRecent.length
         observations.push({
           id: 'on-notice-recent-48h',
           event_type: 'on_notice',

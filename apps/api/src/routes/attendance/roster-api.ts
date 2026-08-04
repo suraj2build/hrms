@@ -41,7 +41,11 @@ const assignSchema = z.object({
 })
 
 const bulkSchema = z.object({
-  employee_ids: z.array(z.string().uuid()).min(1, 'at least one employee required'),
+  // F25: date range is already capped at 31 days below, but employee_ids had
+  // no cap at all — rows.length = employee_ids.length * dates.length, an
+  // unbounded in-memory array build (and single upsert payload) with no
+  // guard. Same cap as the sibling attendance/leave.ts bulk-assign endpoint.
+  employee_ids: z.array(z.string().uuid()).min(1, 'at least one employee required').max(200, 'cannot assign more than 200 employees at once'),
   from_date:    z.string().regex(dateRe, 'from_date must be YYYY-MM-DD'),
   to_date:      z.string().regex(dateRe, 'to_date must be YYYY-MM-DD'),
   shift_id:     z.string().uuid(),

@@ -83,6 +83,7 @@ interface RiskItem {
 interface ComplianceData {
   stats: ComplianceStats
   risk_items: RiskItem[]
+  risk_items_total?: number
 }
 
 // ── Sub-components ────────────────────────────────────────────────────────────
@@ -442,7 +443,15 @@ export function TaxGovernance() {
                 </MetricRow>
 
                 {/* Risk table */}
-                <SectionCard title="High-Risk Declarations">
+                <SectionCard
+                  title="High-Risk Declarations"
+                  description={
+                    complianceData.risk_items_total !== undefined &&
+                    complianceData.risk_items_total > complianceData.risk_items.length
+                      ? `Showing ${complianceData.risk_items.length} of ${complianceData.risk_items_total.toLocaleString('en-IN')}`
+                      : undefined
+                  }
+                >
                   {complianceData.risk_items.length === 0 ? (
                     <div className="flex items-center gap-2 py-4 text-sm text-muted-foreground">
                       <ShieldCheck className="h-4 w-4 text-success" />

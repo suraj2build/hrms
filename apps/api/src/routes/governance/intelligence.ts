@@ -9,6 +9,7 @@
 import type { FastifyInstance } from 'fastify'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { serverError, ErrorCode } from '../../lib/api-errors.js'
+import { fetchAllRows } from '../../lib/supabase-paginate.js'
 
 function requireHrAdmin(req: any, reply: any, done: () => void) {
   if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
@@ -108,21 +109,31 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
   // ── GET /governance/risk/summary ──────────────────────────────────────────
   fastify.get('/risk/summary', adminAuth, async (req, reply) => {
     const tenantId = (req as any).tenantId
-    const { data, error } = await fastify.supabase
-      .from('platform_events')
-      .select('entity_type, entity_id, severity, event_type, timestamp')
-      .eq('tenant_id', tenantId)
-      .in('severity', ['high', 'critical'])
-      .order('timestamp', { ascending: false })
-      .limit(100)
-    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch risk summary')
+    // F19: was .limit(100) — risk scores/counts were computed only from the
+    // 100 most-recent high/critical events, so an entity's older events past
+    // that window silently dropped out of its cumulative score. fetchAllRows
+    // computes the score from the complete high/critical event set.
+    let data: any[]
+    try {
+      data = await fetchAllRows<any>((from, to) =>
+        fastify.supabase
+          .from('platform_events')
+          .select('entity_type, entity_id, severity, event_type, timestamp')
+          .eq('tenant_id', tenantId)
+          .in('severity', ['high', 'critical'])
+          .order('timestamp', { ascending: false })
+          .range(from, to),
+      )
+    } catch (error) {
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch risk summary')
+    }
 
     // Group by entity, compute simple cumulative score
     const entityMap = new Map<
       string,
       { entity_id: string; entity_type: string; score: number; severity: string; count: number }
     >()
-    for (const row of (data ?? [])) {
+    for (const row of data) {
       const key = `${row.entity_type}:${row.entity_id}`
       const add = row.severity === 'critical' ? 30 : 15
       const ex  = entityMap.get(key)
