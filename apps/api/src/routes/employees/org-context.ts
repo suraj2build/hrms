@@ -100,7 +100,7 @@ export default async function employeeOrgContextRoutes(fastify: FastifyInstance)
       .maybeSingle()
     const empRotationId = (empRow as any)?.rotation_policy_id ?? null
     const { data: siteRotRow } = orgCtx.site_id
-      ? await fastify.supabase.from('sites').select('default_rotation_policy_id').eq('id', orgCtx.site_id).maybeSingle()
+      ? await fastify.supabase.from('sites').select('default_rotation_policy_id').eq('id', orgCtx.site_id).eq('tenant_id', req.tenantId).maybeSingle()
       : { data: null as any }
     const siteRotationId = (siteRotRow as any)?.default_rotation_policy_id ?? null
     const effectiveRotationId = empRotationId ?? siteRotationId
