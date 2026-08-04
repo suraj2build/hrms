@@ -41,7 +41,7 @@ const IS_ACTIVE_TTL   = 60 * 1000
  * (5 min) after suspension, violating the "reads fresh, never from the
  * profile cache" contract CLAUDE.md documents.
  */
-function isTenantBlocked(tenant: { status: string; trial_ends_at: string | null }): { blocked: boolean; trialExpired: boolean } {
+export function isTenantBlocked(tenant: { status: string; trial_ends_at: string | null }): { blocked: boolean; trialExpired: boolean } {
   const trialExpired = tenant.status === 'trial' && tenant.trial_ends_at != null &&
     new Date(tenant.trial_ends_at).getTime() < Date.now()
   const blocked = ['suspended', 'expired', 'cancelled'].includes(tenant.status) || trialExpired
@@ -57,13 +57,13 @@ function isTenantBlocked(tenant: { status: string; trial_ends_at: string | null 
  * exactly `/billing`/`/support`, or a sub-path of it — not any string with
  * that prefix.
  */
-function isExemptFromWriteGate(url: string): boolean {
+export function isExemptFromWriteGate(url: string): boolean {
   const path = url.split('?')[0]
   return path === '/billing' || path.startsWith('/billing/') ||
     path === '/support' || path.startsWith('/support/')
 }
 
-function verifySupabaseJwt(token: string, secret: string): { sub: string } | null {
+export function verifySupabaseJwt(token: string, secret: string): { sub: string } | null {
   try {
     const parts = token.split('.')
     if (parts.length !== 3) return null
