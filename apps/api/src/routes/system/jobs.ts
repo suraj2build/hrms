@@ -518,9 +518,14 @@ export default async function jobQueueRoutes(fastify: FastifyInstance) {
 
   // ── GET /system/module-health ─────────────────────────────────────────────────
   // Returns durable module health state from DB (replaces in-memory platformHealth.modules).
+  // Fresh-audit F4: module_health is platform-wide (no tenant_id column — its own
+  // RLS policy, migration 197, restricts it to super_admin), but this route was
+  // gated on HR_ADMIN_ROLES (super_admin OR hr_admin), letting any tenant's
+  // hr_admin read every tenant's platform-level infra health. Tightened to match
+  // the table's own documented access level.
   fastify.get('/system/module-health', auth, async (req: any, reply) => {
-    if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
-      return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
+    if (req.userRole !== 'super_admin') {
+      return reply.code(403).send({ error: 'FORBIDDEN', message: 'Platform admin access required' })
     }
 
     const { data: modules, error } = await fastify.supabase
