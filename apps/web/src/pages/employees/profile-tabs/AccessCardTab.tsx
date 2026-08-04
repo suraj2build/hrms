@@ -15,9 +15,10 @@ import { Input } from '@/components/ui/input'
 import { DateInput } from '@/components/ui/date-input'
 import { Plus, CreditCard, Package, Loader2 } from 'lucide-react'
 import {
-  EmptySection, fmtDate,
+  EmptySection,
   type AccessCardRow, type AssetRow, type AssetHistoryRow, type BadgeVariant, type FormBag, type Section,
 } from './shared'
+import { fmtDate } from './format-helpers'
 
 interface AccessCardTabProps {
   id: string | undefined

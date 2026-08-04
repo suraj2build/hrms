@@ -9,7 +9,7 @@
 
 import React, { useState, useRef, useEffect }    from 'react'
 import { Link, useNavigate }                     from 'react-router-dom'
-import { useQuery, useMutation, useQueryClient, keepPreviousData, type QueryClient } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query'
 import {
   ChevronLeft, ChevronRight, Play, Lock,
   ShieldAlert, Download, Eye, Loader2,
@@ -34,6 +34,7 @@ import {
 import { api, ApiError } from '@/lib/api/client'
 import { useAuthStore }  from '@/stores/authStore'
 import { cn }            from '@/lib/utils'
+import { invalidateAllPayrollRunViews } from '@/lib/payroll-runs-cache'
 import { toast }         from 'sonner'
 import { EmployeeSelector } from '@/components/filters/EmployeeSelector'
 import {
@@ -1405,7 +1406,6 @@ function DryRunProgressView({ total: totalProp, progress }: {
     )
   }
 
-  const cap        = total <= 10 ? total : Math.floor(total * 0.93)
   const numBatches = Math.max(1, Math.ceil(total / BATCH_SIZE))
   const overallPct = total > 0 ? Math.round((display / total) * 100) : 0
   const activeBatchIdx = Math.min(numBatches - 1, Math.floor(display / BATCH_SIZE))
@@ -2367,30 +2367,6 @@ function PayrollAuditTimeline({ run }: { run: PayrollRun }) {
       )}
     </div>
   )
-}
-
-// Every other Payroll Center page independently queries the same underlying
-// /payroll/runs list under its own query key rather than sharing ['payroll-runs'].
-// A mutation here that changes run state (trigger/finalize/freeze/reopen) must
-// invalidate all of them, or a sibling page already mounted in the session keeps
-// showing pre-mutation data — most consequential for freeze/reopen, which gate
-// statutory filing and bank payout.
-export const PAYROLL_RUNS_SIBLING_KEYS = [
-  'payroll-runs-forensics',
-  'payroll-runs-accounting',
-  'payroll-runs-payout-recon',
-  'payroll-runs-statutory',
-  'payroll-runs-variance-list',
-  'payroll-runs-history',
-  'payroll-runs-console',
-  'payroll-recent-runs-for-blockers',
-  'payroll-runs-recent',
-  'payroll-runs-finalize',
-] as const
-
-export function invalidateAllPayrollRunViews(qc: QueryClient) {
-  qc.invalidateQueries({ queryKey: ['payroll-runs'] })
-  for (const key of PAYROLL_RUNS_SIBLING_KEYS) qc.invalidateQueries({ queryKey: [key] })
 }
 
 // ── Main Page ─────────────────────────────────────────────────────────────────

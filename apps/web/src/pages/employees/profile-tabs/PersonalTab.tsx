@@ -18,9 +18,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Switch } from '@/components/ui/switch'
 import { Edit2, Check, X, Plus, Trash2, BookOpen, Home, Phone, CalendarClock, Loader2 } from 'lucide-react'
 import {
-  EmptySection, Grid2, fmt,
+  EmptySection, Grid2,
   type FullProfile, type AddressRow, type EmergencyContactRow, type EmergencyContactForm, type FormBag, type Section,
 } from './shared'
+import { fmt } from './format-helpers'
 
 interface ImportantDateRow {
   id:           string

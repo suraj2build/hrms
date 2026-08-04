@@ -32,7 +32,7 @@ import { TableToolbar, EmptyTableState } from '@/components/table'
 import { usePeriodLock }    from '@/hooks/usePeriodLock'
 import { Button }        from '@/components/ui/button'
 import { Input }         from '@/components/ui/input'
-import { api }           from '@/lib/api/client'
+import { api, ApiError } from '@/lib/api/client'
 import { escapeCsvField } from '@/lib/csv-utils'
 import { useAuthStore }  from '@/stores/authStore'
 import { cn }            from '@/lib/utils'
@@ -480,13 +480,13 @@ export function MusterRoll() {
       })
     },
     onSuccess: (data) => {
-      if ((data as any)?.status === 'processing') {
+      if (data?.status === 'processing') {
         // 202 — background job started; track the run and poll every 30s for grid refresh
         setProcessingMonth(ms)
-        const rid = (data as any)?.run_id ?? null
+        const rid = data?.run_id ?? null
         setActiveRunId(rid)
         toast.info(`Recompute started for ${monthLabel}`, {
-          description: `${(data as any)?.employees_queued ?? '?'} employees queued. Status updates every 10 seconds.`,
+          description: `${data?.employees_queued ?? '?'} employees queued. Status updates every 10 seconds.`,
           duration: 10_000,
         })
         if (processingPollRef.current) clearInterval(processingPollRef.current)
@@ -499,9 +499,9 @@ export function MusterRoll() {
         refetch()
       }
     },
-    onError: (err: any) => {
-      const msg = (err?.message ?? '') as string
-      if (err?.error === 'PERIOD_LOCKED') {
+    onError: (err: Error | ApiError) => {
+      const msg = err?.message ?? ''
+      if (err instanceof ApiError && err.error === 'PERIOD_LOCKED') {
         toast.error('Period is finalized', { description: 'Reverse the payroll finalization before reprocessing.' })
       } else {
         toast.error('Failed to start recompute', { description: msg || 'Unexpected error. Check server logs.' })

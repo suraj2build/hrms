@@ -28,7 +28,7 @@ import { Input }         from '@/components/ui/input'
 import { api }           from '@/lib/api/client'
 import { cn }            from '@/lib/utils'
 import { toast }         from 'sonner'
-import { invalidateAllPayrollRunViews } from './PayrollRuns'
+import { invalidateAllPayrollRunViews } from '@/lib/payroll-runs-cache'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 

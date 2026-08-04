@@ -16,9 +16,10 @@ import { DateInput } from '@/components/ui/date-input'
 import { Switch } from '@/components/ui/switch'
 import { Plus, Trash2, Users, Loader2 } from 'lucide-react'
 import {
-  EmptySection, fmtDate,
+  EmptySection,
   type FamilyRow, type NominationRow, type MasterOption, type FamilyForm, type Section,
 } from './shared'
+import { fmtDate } from './format-helpers'
 
 interface FamilyTabProps {
   id: string | undefined

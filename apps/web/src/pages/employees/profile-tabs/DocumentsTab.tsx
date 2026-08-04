@@ -17,10 +17,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Plus, Trash2, Edit2, Files, FileText, Fingerprint, Globe, AlertTriangle, Loader2 } from 'lucide-react'
 import { uploadEmployeeFile } from '@/lib/supabase-storage'
 import {
-  EmptySection, fmtDate,
+  EmptySection,
   type DocumentRow, type IdentityRow, type ContractRow, type PassportVisaRow, type MasterOption,
   type FormBag, type Section,
 } from './shared'
+import { fmtDate } from './format-helpers'
 
 // Mandatory document types — used to show missing-doc warnings
 const MANDATORY_DOC_TYPES = [

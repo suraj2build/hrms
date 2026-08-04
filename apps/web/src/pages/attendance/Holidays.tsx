@@ -15,7 +15,7 @@
  *     on focus — only explicit invalidations update it.
  */
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient }       from '@tanstack/react-query'
 import { toast }                                       from 'sonner'
 import {
@@ -101,7 +101,7 @@ export function Holidays() {
   const [assignLoaded, setAssignLoaded] = useState(false)
 
   // ── Matrix query ───────────────────────────────────────────────────────────
-  const MATRIX_KEY = ['holiday-matrix', year]
+  const MATRIX_KEY = useMemo(() => ['holiday-matrix', year], [year])
 
   // Structural changes (add/edit/delete holiday, add group, seed) affect several
   // other pages' independent holiday caches — invalidate all of them alongside

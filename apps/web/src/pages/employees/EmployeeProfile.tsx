@@ -42,9 +42,9 @@ import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { uploadEmployeeFile, getSignedUrl } from '@/lib/supabase-storage'
 import { SignedImage } from '@/components/SignedImage'
 import {
-  STATUS_VARIANT, fmtDate,
   type Section, type FullProfile, type AddressRow, type EmergencyContactRow, type JobHistoryRow,
 } from './profile-tabs/shared'
+import { STATUS_VARIANT, fmtDate } from './profile-tabs/format-helpers'
 import { OverviewTab } from './profile-tabs/OverviewTab'
 import { PersonalTab } from './profile-tabs/PersonalTab'
 import { EducationTab } from './profile-tabs/EducationTab'

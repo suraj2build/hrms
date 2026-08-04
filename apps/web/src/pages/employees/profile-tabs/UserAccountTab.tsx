@@ -18,7 +18,8 @@ import { Switch } from '@/components/ui/switch'
 import {
   KeyRound, ShieldCheck, ShieldOff, ShieldAlert, Mail, Send, Copy, CheckCircle2, Loader2,
 } from 'lucide-react'
-import { KV, fmtDate, type BadgeVariant, type Section } from './shared'
+import { KV, type BadgeVariant, type Section } from './shared'
+import { fmtDate } from './format-helpers'
 
 interface UserAccountData {
   status:    'no_account' | 'pending_verification' | 'active' | 'suspended'

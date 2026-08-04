@@ -64,7 +64,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
-import { api } from '@/lib/api/client'
+import { api, ApiError } from '@/lib/api/client'
 import { useAuthStore } from '@/stores/authStore'
 import { cn } from '@/lib/utils'
 
@@ -1263,9 +1263,9 @@ export function ImportWorkspace() {
       }
 
     },
-    onError: (e: Error) => {
+    onError: (e: Error | ApiError) => {
       // Surface concurrency conflict with a specific message + link to history
-      const body = (e as any)?.response?.data ?? (e as any)?.data
+      const body = e instanceof ApiError ? e.data : undefined
       if (body?.error === 'IMPORT_ALREADY_RUNNING') {
         toast.error('Import already running', {
           description: `A ${selectedMaster} import is still in progress. Check Import History or cancel it first.`,
@@ -1466,7 +1466,7 @@ export function ImportWorkspace() {
         toast.error('Import failed', { description: 'Check Import History for details.' })
       }
     }
-  }, [polledJob])
+  }, [polledJob, queryClient])
 
   // ── Reset Workflow ─────────────────────────────────────────────────────────
   function resetWorkflow() {

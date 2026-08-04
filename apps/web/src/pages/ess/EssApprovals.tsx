@@ -199,13 +199,17 @@ export function EssApprovals({ embedded = false }: { embedded?: boolean } = {}) 
   const { data: corrData, isLoading: corrLoading } = useQuery<{ data: CorrectionReq[] }>({
     queryKey: ['ess-approvals-corrections'],
     queryFn:  async () => {
-      const res = await api.get<{ data: any[] }>('/attendance/regularisation/my?limit=50')
+      const res = await api.get<{ data: Array<{
+        id: string; date: string; status: string; reason: string | null
+        requested_check_in: string | null; requested_check_out: string | null
+        created_at: string
+      }> }>('/attendance/regularisation/my?limit=50')
       return {
         data: (res.data ?? []).map((r) => ({
           id:            r.id,
           date:          r.date,
           status:        r.status,
-          reason:        r.reason,
+          reason:        r.reason ?? '',
           corrected_in:  r.requested_check_in  ?? null,
           corrected_out: r.requested_check_out ?? null,
           created_at:    r.created_at,
@@ -227,7 +231,7 @@ export function EssApprovals({ embedded = false }: { embedded?: boolean } = {}) 
   // ── Comp-off ───────────────────────────────────────────────────────────────
   const { data: compOffData, isLoading: compOffLoading } = useQuery<{ data: CompOffReq[] }>({
     queryKey: ['ess-approvals-compoff'],
-    queryFn:  () => api.get('/attendance/comp-off'),
+    queryFn:  () => api.get<{ data: CompOffReq[] }>('/attendance/comp-off'),
     enabled:  !!employeeId,
     staleTime: 30_000,
   })

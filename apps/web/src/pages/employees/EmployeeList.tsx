@@ -322,7 +322,7 @@ export function EmployeeList() {
   const serverTotal   = data?.total ?? 0
   const sites         = sitesData?.data ?? []
   const departments   = deptsData?.data ?? []
-  const locations     = locsData?.data  ?? []
+  const locations     = useMemo(() => locsData?.data ?? [], [locsData])
   const cities        = useMemo(
     () => new Set(locations.map(l => l.city).filter(Boolean)).size,
     [locations],

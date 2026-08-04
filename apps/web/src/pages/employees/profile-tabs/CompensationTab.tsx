@@ -18,9 +18,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetBody, SheetFooter } from '@/components/ui/sheet'
 import { AlertTriangle, Banknote, DollarSign, Edit2, History, Info, Loader2, Plus, Trash2, TrendingUp, X } from 'lucide-react'
 import {
-  EmptySection, Grid2, KV, fmtDate, fmtMoney,
+  EmptySection, Grid2, KV,
   type FullProfile, type RevisionRow, type CompComponentRow, type CompHistoryRow, type BadgeVariant, type Section,
 } from './shared'
+import { fmtDate, fmtMoney } from './format-helpers'
 
 // ── Compensation Revision Drawer ──────────────────────────────────────────────
 

@@ -16,9 +16,10 @@ import { DateInput } from '@/components/ui/date-input'
 import { EmployeeSelector } from '@/components/filters/EmployeeSelector'
 import { Building2, History, LayoutGrid, MapPin, Pencil, Plus, Trash2, Loader2 } from 'lucide-react'
 import {
-  EmptySection, Grid2, KV, fmtDate,
+  EmptySection, Grid2, KV,
   type FullProfile, type JobHistoryRow, type PrevEmploymentRow, type JobFormState, type Section,
 } from './shared'
+import { fmtDate } from './format-helpers'
 
 interface OrgContextData {
   site:               { id: string; name: string; timezone: string } | null

@@ -30,7 +30,7 @@ import { api }          from '@/lib/api/client'
 import { useAuthStore } from '@/stores/authStore'
 import { cn }           from '@/lib/utils'
 import { toast }        from 'sonner'
-import { invalidateAllPayrollRunViews } from './PayrollRuns'
+import { invalidateAllPayrollRunViews } from '@/lib/payroll-runs-cache'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 

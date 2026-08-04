@@ -16,9 +16,10 @@ import { DateInput } from '@/components/ui/date-input'
 import { EmployeeSelector } from '@/components/filters/EmployeeSelector'
 import { AlarmClock, AlertTriangle, CalendarClock, History, Loader2 } from 'lucide-react'
 import {
-  EmptySection, Grid2, fmtDate,
+  EmptySection, Grid2,
   type FullProfile, type JobHistoryRow, type ShiftHistoryRow, type Section,
 } from './shared'
+import { fmtDate } from './format-helpers'
 
 interface RosterToday {
   id: string; date: string; shift_id: string

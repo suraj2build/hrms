@@ -6,14 +6,13 @@ import {
 import {
   Award, Heart, Users, Lightbulb, Wrench, Sparkles, Gift, Star,
   Plus, Trophy, TrendingUp, ToggleLeft, ToggleRight,
-  Calendar, Medal, Flame, UserCheck, ChevronRight, Gavel,
-  CheckCircle, XCircle, Clock, Edit2, Archive,
+  Medal, Flame, UserCheck, ChevronRight, Gavel,
+  CheckCircle, XCircle, Clock, Archive,
 } from 'lucide-react'
 import { toast }   from 'sonner'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Button }  from '@/components/ui/button'
 import { api }     from '@/lib/api/client'
-import { EmployeeSelector } from '@/components/filters/EmployeeSelector'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -97,16 +96,16 @@ const TYPE_LABELS: Record<string, string> = {
   peer_choice: 'Peer Choice', store_of_month: 'Store of Month', custom: 'Custom',
 }
 const STATUS_COLORS: Record<string, string> = {
-  open: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400',
-  review: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400',
-  closed: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400',
+  open: 'bg-info text-info dark:bg-info/30 dark:text-info',
+  review: 'bg-warning text-warning dark:bg-warning/30 dark:text-warning',
+  closed: 'bg-success text-success dark:bg-success/30 dark:text-success',
   cancelled: 'bg-muted text-muted-foreground',
 }
 const NOM_STATUS_COLORS: Record<string, string> = {
   pending: 'bg-muted text-muted-foreground',
-  shortlisted: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400',
-  winner: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400',
-  not_selected: 'bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400',
+  shortlisted: 'bg-info text-info dark:bg-info/30 dark:text-info',
+  winner: 'bg-warning text-warning dark:bg-warning/30 dark:text-warning',
+  not_selected: 'bg-destructive text-destructive dark:bg-destructive/30 dark:text-destructive',
 }
 
 function fmtDate(iso: string | null) {
@@ -371,7 +370,7 @@ function RoundsPanel({ award, onClose }: { award: FormalAward; onClose: () => vo
                         </p>
                       )}
                       {r.status === 'closed' && winner && (
-                        <p className="text-xs text-amber-600 dark:text-amber-400 mt-0.5 flex items-center gap-1">
+                        <p className="text-xs text-warning dark:text-warning mt-0.5 flex items-center gap-1">
                           <Trophy className="h-3 w-3" /> Winner: {winner.first_name} {winner.last_name}
                         </p>
                       )}
@@ -704,15 +703,15 @@ export function AdminRecognition() {
             </div>
             <p className="text-xl font-bold text-foreground">{rnrSummary.active_award_programs}</p>
           </div>
-          <div className="rounded-2xl border border-blue-200 bg-blue-50 dark:border-blue-800/40 dark:bg-blue-900/10 p-4">
-            <div className="mb-1.5 flex items-center gap-1.5 text-blue-600 dark:text-blue-400">
+          <div className="rounded-2xl border border-info bg-info dark:border-info/40 dark:bg-info/10 p-4">
+            <div className="mb-1.5 flex items-center gap-1.5 text-info dark:text-info">
               <Clock className="h-3.5 w-3.5" />
               <span className="text-[10px] font-medium">Open Rounds</span>
             </div>
             <p className="text-xl font-bold text-foreground">{rnrSummary.open_rounds}</p>
           </div>
-          <div className="rounded-2xl border border-amber-200 bg-amber-50 dark:border-amber-800/40 dark:bg-amber-900/10 p-4">
-            <div className="mb-1.5 flex items-center gap-1.5 text-amber-600 dark:text-amber-400">
+          <div className="rounded-2xl border border-warning bg-warning dark:border-warning/40 dark:bg-warning/10 p-4">
+            <div className="mb-1.5 flex items-center gap-1.5 text-warning dark:text-warning">
               <UserCheck className="h-3.5 w-3.5" />
               <span className="text-[10px] font-medium">Pending Nominations</span>
             </div>
@@ -828,7 +827,7 @@ export function AdminRecognition() {
                   {analytics.top_givers.map((g, i) => (
                     <div key={g.employee_id} className="flex items-center gap-3 rounded-lg px-1 py-1.5">
                       <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-bold ${
-                        i === 0 ? 'bg-amber-100 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400' : 'bg-muted text-muted-foreground'
+                        i === 0 ? 'bg-warning text-warning dark:bg-warning/30 dark:text-warning' : 'bg-muted text-muted-foreground'
                       }`}>
                         {i === 0 ? <Trophy className="h-3 w-3" /> : i + 1}
                       </span>
@@ -857,7 +856,7 @@ export function AdminRecognition() {
                   {analytics.top_receivers.map((r, i) => (
                     <div key={r.employee_id} className="flex items-center gap-3 rounded-lg px-1 py-1.5">
                       <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-bold ${
-                        i === 0 ? 'bg-amber-100 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400' : 'bg-muted text-muted-foreground'
+                        i === 0 ? 'bg-warning text-warning dark:bg-warning/30 dark:text-warning' : 'bg-muted text-muted-foreground'
                       }`}>
                         {i === 0 ? <Trophy className="h-3 w-3" /> : i + 1}
                       </span>
@@ -982,10 +981,10 @@ export function AdminRecognition() {
         <div className="space-y-6">
           {/* Long Service Alerts */}
           {longAlerts.length > 0 && (
-            <div className="rounded-2xl border border-amber-200 bg-amber-50 dark:border-amber-800/40 dark:bg-amber-900/10 p-5 space-y-3">
+            <div className="rounded-2xl border border-warning bg-warning dark:border-warning/40 dark:bg-warning/10 p-5 space-y-3">
               <div className="flex items-center gap-2">
-                <Flame className="h-4 w-4 text-amber-600 dark:text-amber-400" />
-                <p className="text-sm font-semibold text-amber-700 dark:text-amber-300">Long Service Milestones This Month</p>
+                <Flame className="h-4 w-4 text-warning dark:text-warning" />
+                <p className="text-sm font-semibold text-warning dark:text-warning">Long Service Milestones This Month</p>
               </div>
               <div className="space-y-2">
                 {longAlerts.map(a => (
@@ -994,7 +993,7 @@ export function AdminRecognition() {
                       <span className="text-sm font-medium text-foreground">{a.first_name} {a.last_name}</span>
                       <span className="ml-1.5 text-[11px] text-muted-foreground font-mono">{a.employee_code}</span>
                       <p className="text-[11px] text-muted-foreground mt-0.5">
-                        {a.designation ?? 'Employee'} · {a.department ?? '—'} · completing <span className="font-semibold text-amber-600">{a.milestone_years} year{a.milestone_years > 1 ? 's' : ''}</span> on {fmtDate(a.date_of_joining.replace(/(\d{4})-(\d{2})-(\d{2})/, `${new Date().getFullYear()}-$2-$3`))}
+                        {a.designation ?? 'Employee'} · {a.department ?? '—'} · completing <span className="font-semibold text-warning">{a.milestone_years} year{a.milestone_years > 1 ? 's' : ''}</span> on {fmtDate(a.date_of_joining.replace(/(\d{4})-(\d{2})-(\d{2})/, `${new Date().getFullYear()}-$2-$3`))}
                       </p>
                     </div>
                     <Button size="sm" variant="outline" className="h-7 text-xs shrink-0">

@@ -118,7 +118,7 @@ export function ImportJobCard({ jobId, onRetry, onCancel, initialJob }: Props) {
       {(job.success_rows > 0 || job.failed_rows > 0) && (
         <div className="flex gap-4 text-xs">
           {job.success_rows > 0 && (
-            <span className="text-emerald-600 dark:text-emerald-400">
+            <span className="text-success">
               ✓ {job.success_rows.toLocaleString()} succeeded
             </span>
           )}

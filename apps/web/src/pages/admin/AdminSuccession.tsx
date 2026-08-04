@@ -9,7 +9,7 @@ import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Users, TrendingUp, AlertTriangle, Shield,
-  Plus, ChevronRight, Loader2, UserCheck, Clock, Target,
+  Plus, ChevronRight, Loader2, UserCheck, Target,
   Edit2, Trash2, X, CheckCircle2, Brain, Award, Layers,
   Sparkles, GitFork,
 } from 'lucide-react'
@@ -175,17 +175,9 @@ function riskLabel(r: RiskLevel): string {
 function riskBadgeClass(r: RiskLevel): string {
   switch (r) {
     case 'critical': return 'bg-destructive/10 text-destructive border-destructive/30'
-    case 'high':     return 'bg-orange-500/10 text-orange-600 border-orange-500/30'
+    case 'high':     return 'bg-accent-coral/10 text-accent-coral border-accent-coral/30'
     case 'medium':   return 'bg-warning/10 text-warning border-warning/30'
     case 'low':      return 'bg-success/10 text-success border-success/30'
-  }
-}
-
-function readinessLabel(r: ReadinessLevel): string {
-  switch (r) {
-    case 'ready_now':       return 'Ready Now'
-    case 'ready_1_2_years': return '1–2 Years'
-    case 'ready_3_5_years': return '3–5 Years'
   }
 }
 
@@ -228,22 +220,22 @@ function computeWeightedScore(c: Candidate): number {
 
 // 9-Box cell definitions: (performance, potential)
 const NINE_BOX_LABELS: Record<string, { label: string; color: string; textColor: string }> = {
-  '3,3': { label: 'Star',               color: 'bg-emerald-500/20 border-emerald-500/40', textColor: 'text-emerald-700 dark:text-emerald-400' },
-  '3,2': { label: 'High Performer',     color: 'bg-green-500/15 border-green-500/30',     textColor: 'text-green-700 dark:text-green-400' },
-  '2,3': { label: 'Rising Star',        color: 'bg-teal-500/15 border-teal-500/30',       textColor: 'text-teal-700 dark:text-teal-400' },
-  '3,1': { label: 'Dependable Expert',  color: 'bg-blue-500/10 border-blue-500/30',       textColor: 'text-blue-700 dark:text-blue-400' },
-  '2,2': { label: 'Key Player',         color: 'bg-sky-500/10 border-sky-500/30',         textColor: 'text-sky-700 dark:text-sky-400' },
-  '1,3': { label: 'Rough Diamond',      color: 'bg-violet-500/10 border-violet-500/30',   textColor: 'text-violet-700 dark:text-violet-400' },
-  '2,1': { label: 'Solid Contributor',  color: 'bg-yellow-500/10 border-yellow-500/30',   textColor: 'text-yellow-700 dark:text-yellow-400' },
-  '1,2': { label: 'Core Player',        color: 'bg-orange-500/10 border-orange-500/30',   textColor: 'text-orange-700 dark:text-orange-400' },
-  '1,1': { label: 'Underperformer',     color: 'bg-red-500/10 border-red-500/30',         textColor: 'text-red-700 dark:text-red-400' },
+  '3,3': { label: 'Star',               color: 'bg-success/20 border-success/40', textColor: 'text-success dark:text-success' },
+  '3,2': { label: 'High Performer',     color: 'bg-success/15 border-success/30',     textColor: 'text-success dark:text-success' },
+  '2,3': { label: 'Rising Star',        color: 'bg-accent-teal/15 border-accent-teal/30',       textColor: 'text-accent-teal dark:text-accent-teal' },
+  '3,1': { label: 'Dependable Expert',  color: 'bg-info/10 border-info/30',       textColor: 'text-info dark:text-info' },
+  '2,2': { label: 'Key Player',         color: 'bg-info/10 border-info/30',         textColor: 'text-info dark:text-info' },
+  '1,3': { label: 'Rough Diamond',      color: 'bg-accent-violet/10 border-accent-violet/30',   textColor: 'text-accent-violet dark:text-accent-violet' },
+  '2,1': { label: 'Solid Contributor',  color: 'bg-warning/10 border-warning/30',   textColor: 'text-warning dark:text-warning' },
+  '1,2': { label: 'Core Player',        color: 'bg-accent-coral/10 border-accent-coral/30',   textColor: 'text-accent-coral dark:text-accent-coral' },
+  '1,1': { label: 'Underperformer',     color: 'bg-destructive/10 border-destructive/30',         textColor: 'text-destructive dark:text-destructive' },
 }
 
 function tierBadgeClass(tier: string): string {
   switch (tier) {
-    case 'Ready Now':          return 'bg-green-500/10 text-green-700 border-green-500/30 dark:text-green-400'
-    case 'Ready in 12 Months': return 'bg-blue-500/10 text-blue-700 border-blue-500/30 dark:text-blue-400'
-    case 'Ready in 24 Months': return 'bg-orange-500/10 text-orange-700 border-orange-500/30 dark:text-orange-400'
+    case 'Ready Now':          return 'bg-success/10 text-success border-success/30 dark:text-success'
+    case 'Ready in 12 Months': return 'bg-info/10 text-info border-info/30 dark:text-info'
+    case 'Ready in 24 Months': return 'bg-accent-coral/10 text-accent-coral border-accent-coral/30 dark:text-accent-coral'
     default:                   return 'bg-muted text-muted-foreground border-border'
   }
 }
@@ -260,11 +252,11 @@ function actionTypeLabel(t: ActionType): string {
 
 function actionTypeBadgeClass(t: ActionType): string {
   switch (t) {
-    case 'course':        return 'bg-blue-500/10 text-blue-700 border-blue-500/30 dark:text-blue-400'
-    case 'assignment':    return 'bg-purple-500/10 text-purple-700 border-purple-500/30 dark:text-purple-400'
-    case 'mentoring':     return 'bg-teal-500/10 text-teal-700 border-teal-500/30 dark:text-teal-400'
-    case 'certification': return 'bg-amber-500/10 text-amber-700 border-amber-500/30 dark:text-amber-400'
-    case 'coaching':      return 'bg-rose-500/10 text-rose-700 border-rose-500/30 dark:text-rose-400'
+    case 'course':        return 'bg-info/10 text-info border-info/30 dark:text-info'
+    case 'assignment':    return 'bg-primary/10 text-primary border-primary/30 dark:text-primary'
+    case 'mentoring':     return 'bg-accent-teal/10 text-accent-teal border-accent-teal/30 dark:text-accent-teal'
+    case 'certification': return 'bg-warning/10 text-warning border-warning/30 dark:text-warning'
+    case 'coaching':      return 'bg-destructive/10 text-destructive border-destructive/30 dark:text-destructive'
   }
 }
 
@@ -274,7 +266,6 @@ function NineBoxGrid({ data }: { data: NineBoxData }) {
   // Rows: potential 3 (top) → 1 (bottom); Cols: performance 1 → 3
   const potentials  = [3, 2, 1]
   const performances = [1, 2, 3]
-  const potentialLabels  = ['Low', 'Medium', 'High']
   const performanceLabels = ['Low', 'Medium', 'High']
 
   return (
@@ -403,9 +394,9 @@ function AIRecommendationsPanel({ data }: { data: AIRecommendationsData[] }) {
                         <div
                           className={cn(
                             'h-full rounded-full transition-all',
-                            rec.readiness_tier === 'Ready Now'          ? 'bg-green-500' :
-                            rec.readiness_tier === 'Ready in 12 Months' ? 'bg-blue-500'  :
-                            rec.readiness_tier === 'Ready in 24 Months' ? 'bg-orange-500':
+                            rec.readiness_tier === 'Ready Now'          ? 'bg-success' :
+                            rec.readiness_tier === 'Ready in 12 Months' ? 'bg-info'  :
+                            rec.readiness_tier === 'Ready in 24 Months' ? 'bg-accent-coral':
                             'bg-muted-foreground/40',
                           )}
                           style={{ width: `${(rec.weighted_score / 10) * 100}%` }}
@@ -501,7 +492,7 @@ function IDPSection({
             onClick={() => aiGenerateMut.mutate()}
             disabled={aiGenerateMut.isPending}
             title="Generate IDP actions using AI"
-            className="flex items-center gap-0.5 text-[10px] text-purple-600 hover:underline disabled:opacity-50"
+            className="flex items-center gap-0.5 text-[10px] text-primary hover:underline disabled:opacity-50"
           >
             {aiGenerateMut.isPending
               ? <Loader2 className="h-3 w-3 animate-spin" />

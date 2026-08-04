@@ -17,7 +17,8 @@ import { Input } from '@/components/ui/input'
 import { DateInput } from '@/components/ui/date-input'
 import { Switch } from '@/components/ui/switch'
 import { LogOut, Edit2, Loader2 } from 'lucide-react'
-import { EmptySection, Grid2, KV, fmtDate, type SeparationData, type Section } from './shared'
+import { EmptySection, Grid2, KV, type SeparationData, type Section } from './shared'
+import { fmtDate } from './format-helpers'
 
 interface SeparationTabProps {
   id: string | undefined

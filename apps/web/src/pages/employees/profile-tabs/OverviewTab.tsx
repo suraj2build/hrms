@@ -16,7 +16,8 @@ import { Input } from '@/components/ui/input'
 import { Check, X, GraduationCap } from 'lucide-react'
 import { Employee360Tab } from '@/pages/intelligence/Employee360Tab'
 import { MetricCard, MetricRow } from '@/components/dashboard/MetricCard'
-import { Grid2, fmtDate, type OnboardingDocItem, type Section } from './shared'
+import { Grid2, type OnboardingDocItem, type Section } from './shared'
+import { fmtDate } from './format-helpers'
 
 interface OnboardingStatus {
   session: { id: string; status: string; created_at: string; updated_at: string } | null

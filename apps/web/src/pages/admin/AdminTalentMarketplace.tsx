@@ -12,9 +12,9 @@ import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import {
-  Briefcase, Plus, Users, Tag, MapPin, Building2,
-  Clock, CheckCircle2, XCircle, Loader2, ChevronRight,
-  ToggleLeft, Edit2, Eye, Star, AlertCircle, Sparkles,
+  Briefcase, Plus, Users, MapPin, Building2,
+  Clock, XCircle, Loader2,
+  Edit2, Eye, Star,
 } from 'lucide-react'
 
 import { PageContainer } from '@/components/layout/PageContainer'
@@ -28,9 +28,6 @@ import { Label }         from '@/components/ui/label'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog'
-import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from '@/components/ui/select'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { api } from '@/lib/api/client'
@@ -78,11 +75,11 @@ interface Interest {
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const STATUS_CONFIG: Record<InterestStatus, { label: string; color: string }> = {
-  interested:   { label: 'Applied',      color: 'bg-blue-100 text-blue-700' },
-  shortlisted:  { label: 'Shortlisted',  color: 'bg-yellow-100 text-yellow-700' },
-  selected:     { label: 'Selected',     color: 'bg-green-100 text-green-700' },
-  not_selected: { label: 'Not Selected', color: 'bg-gray-100 text-gray-500' },
-  withdrawn:    { label: 'Withdrawn',    color: 'bg-gray-100 text-gray-400' },
+  interested:   { label: 'Applied',      color: 'bg-info text-info' },
+  shortlisted:  { label: 'Shortlisted',  color: 'bg-warning text-warning' },
+  selected:     { label: 'Selected',     color: 'bg-success text-success' },
+  not_selected: { label: 'Not Selected', color: 'bg-muted text-muted-foreground' },
+  withdrawn:    { label: 'Withdrawn',    color: 'bg-muted text-muted-foreground' },
 }
 
 const AVAIL_LABELS: Record<string, string> = {
@@ -149,7 +146,7 @@ function PostRoleDialog({
 
         <div className="space-y-4 pt-2">
           <div className="space-y-1">
-            <Label>Title <span className="text-red-500">*</span></Label>
+            <Label>Title <span className="text-destructive">*</span></Label>
             <Input value={title} onChange={e => setTitle(e.target.value)} placeholder="e.g. Senior Product Manager" />
           </div>
 
@@ -175,7 +172,7 @@ function PostRoleDialog({
           </div>
 
           <div className="space-y-1">
-            <Label>Skills Required <span className="text-gray-400 font-normal">(comma-separated)</span></Label>
+            <Label>Skills Required <span className="text-muted-foreground font-normal">(comma-separated)</span></Label>
             <Input
               value={skills}
               onChange={e => setSkills(e.target.value)}
@@ -224,8 +221,6 @@ function InterestPanel({ role, onClose }: { role: TalentRole; onClose: () => voi
   })
   const interests = interestsData ?? []
 
-  const [reviewNote, setReviewNote] = useState('')
-
   const updateMutation = useMutation({
     mutationFn: ({ iid, status, notes }: { iid: string; status: InterestStatus; notes: string }) =>
       api.put(`/talent/interests/${iid}`, { status, reviewer_notes: notes }),
@@ -246,16 +241,16 @@ function InterestPanel({ role, onClose }: { role: TalentRole; onClose: () => voi
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div>
-          <h3 className="text-base font-semibold text-gray-900">{role.title}</h3>
-          <p className="text-sm text-gray-500">{active.length} active applicant{active.length !== 1 ? 's' : ''}</p>
+          <h3 className="text-base font-semibold text-muted-foreground">{role.title}</h3>
+          <p className="text-sm text-muted-foreground">{active.length} active applicant{active.length !== 1 ? 's' : ''}</p>
         </div>
         <Button size="sm" variant="ghost" onClick={onClose}><XCircle className="h-4 w-4" /></Button>
       </div>
 
       {isLoading ? (
-        <div className="flex justify-center py-8"><Loader2 className="h-5 w-5 animate-spin text-gray-400" /></div>
+        <div className="flex justify-center py-8"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
       ) : active.length === 0 ? (
-        <div className="text-center py-8 text-gray-400">
+        <div className="text-center py-8 text-muted-foreground">
           <Users className="h-8 w-8 mx-auto mb-2 opacity-40" />
           <p className="text-sm">No applicants yet</p>
         </div>
@@ -264,18 +259,18 @@ function InterestPanel({ role, onClose }: { role: TalentRole; onClose: () => voi
           {active.map(interest => {
             const emp = interest.employees
             return (
-              <div key={interest.id} className="border border-gray-200 rounded-lg p-4 space-y-3">
+              <div key={interest.id} className="border border-border rounded-lg p-4 space-y-3">
                 <div className="flex items-start justify-between gap-2">
                   <div>
-                    <p className="font-medium text-gray-900">
+                    <p className="font-medium text-muted-foreground">
                       {emp ? `${emp.first_name} ${emp.last_name}` : 'Unknown'}
-                      {emp?.employee_code && <span className="text-xs text-gray-400 ml-1">({emp.employee_code})</span>}
+                      {emp?.employee_code && <span className="text-xs text-muted-foreground ml-1">({emp.employee_code})</span>}
                     </p>
                     <div className="flex gap-2 flex-wrap mt-0.5">
-                      {emp?.designation && <span className="text-xs text-gray-500">{emp.designation}</span>}
-                      {emp?.department  && <span className="text-xs text-gray-400">· {emp.department}</span>}
+                      {emp?.designation && <span className="text-xs text-muted-foreground">{emp.designation}</span>}
+                      {emp?.department  && <span className="text-xs text-muted-foreground">· {emp.department}</span>}
                       {interest.availability && (
-                        <span className="text-xs text-gray-400">· {AVAIL_LABELS[interest.availability] ?? interest.availability}</span>
+                        <span className="text-xs text-muted-foreground">· {AVAIL_LABELS[interest.availability] ?? interest.availability}</span>
                       )}
                     </div>
                   </div>
@@ -285,13 +280,13 @@ function InterestPanel({ role, onClose }: { role: TalentRole; onClose: () => voi
                 </div>
 
                 {interest.cover_note && (
-                  <p className="text-sm text-gray-600 bg-gray-50 rounded p-2 italic">{interest.cover_note}</p>
+                  <p className="text-sm text-muted-foreground bg-muted rounded p-2 italic">{interest.cover_note}</p>
                 )}
 
                 {(interest.skills ?? []).length > 0 && (
                   <div className="flex flex-wrap gap-1">
                     {interest.skills.map(s => (
-                      <span key={s} className="text-xs bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full">{s}</span>
+                      <span key={s} className="text-xs bg-info text-info px-2 py-0.5 rounded-full">{s}</span>
                     ))}
                   </div>
                 )}
@@ -316,7 +311,7 @@ function InterestPanel({ role, onClose }: { role: TalentRole; onClose: () => voi
           })}
 
           {withdrawn.length > 0 && (
-            <p className="text-xs text-gray-400 text-center">{withdrawn.length} withdrawn application{withdrawn.length !== 1 ? 's' : ''}</p>
+            <p className="text-xs text-muted-foreground text-center">{withdrawn.length} withdrawn application{withdrawn.length !== 1 ? 's' : ''}</p>
           )}
         </div>
       )}
@@ -357,7 +352,6 @@ export function AdminTalentMarketplace() {
   }
 
   // Summary stats
-  const openCount  = roles.filter(r => r.is_open).length
   const totalInterests = roles.reduce((s, r) => s + (r.interest_count ?? 0), 0)
 
   return (
@@ -375,21 +369,21 @@ export function AdminTalentMarketplace() {
       {/* Stats row */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-6">
         {[
-          { label: 'Open Roles',       value: roles.filter(r => r.is_open).length,  icon: Briefcase,    color: 'text-blue-600'   },
-          { label: 'Total Applicants', value: totalInterests,                         icon: Users,        color: 'text-emerald-600' },
-          { label: 'Roles w/ Interest',value: roles.filter(r => r.interest_count > 0).length, icon: Star, color: 'text-yellow-600' },
+          { label: 'Open Roles',       value: roles.filter(r => r.is_open).length,  icon: Briefcase,    color: 'text-info'   },
+          { label: 'Total Applicants', value: totalInterests,                         icon: Users,        color: 'text-success' },
+          { label: 'Roles w/ Interest',value: roles.filter(r => r.interest_count > 0).length, icon: Star, color: 'text-warning' },
           { label: 'Closing Soon',     value: roles.filter(r => {
             if (!r.closes_at || !r.is_open) return false
             const diff = (new Date(r.closes_at).getTime() - Date.now()) / 86400000
             return diff >= 0 && diff <= 7
-          }).length, icon: Clock, color: 'text-red-500' },
+          }).length, icon: Clock, color: 'text-destructive' },
         ].map(({ label, value, icon: Icon, color }) => (
           <SectionCard key={label} className="p-4">
             <div className="flex items-center gap-2">
               <Icon className={cn('h-5 w-5', color)} />
               <div>
-                <p className="text-xs text-gray-500">{label}</p>
-                <p className="text-xl font-bold text-gray-900">{value}</p>
+                <p className="text-xs text-muted-foreground">{label}</p>
+                <p className="text-xl font-bold text-muted-foreground">{value}</p>
               </div>
             </div>
           </SectionCard>
@@ -398,7 +392,7 @@ export function AdminTalentMarketplace() {
 
       {/* Talent pool panel (slide-in) */}
       {viewingRole && (
-        <SectionCard className="mt-4 border-blue-200 bg-blue-50/30">
+        <SectionCard className="mt-4 border-info bg-info/30">
           <InterestPanel role={viewingRole} onClose={() => setViewingRole(null)} />
         </SectionCard>
       )}
@@ -413,11 +407,11 @@ export function AdminTalentMarketplace() {
         {['open', 'closed'].map(t => (
           <TabsContent key={t} value={t} className="mt-3">
             {isLoading ? (
-              <div className="flex justify-center py-10"><Loader2 className="h-6 w-6 animate-spin text-gray-400" /></div>
+              <div className="flex justify-center py-10"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
             ) : roles.length === 0 ? (
               <SectionCard>
-                <div className="text-center py-10 text-gray-500">
-                  <Briefcase className="h-10 w-10 mx-auto mb-3 text-gray-300" />
+                <div className="text-center py-10 text-muted-foreground">
+                  <Briefcase className="h-10 w-10 mx-auto mb-3 text-muted-foreground" />
                   <p className="font-medium">No {t} roles</p>
                   {t === 'open' && <p className="text-sm mt-1">Post your first internal role using the button above.</p>}
                 </div>
@@ -425,42 +419,42 @@ export function AdminTalentMarketplace() {
             ) : (
               <div className="space-y-3">
                 {roles.map(role => (
-                  <SectionCard key={role.id} className={cn('p-4', viewingRole?.id === role.id && 'border-blue-400 ring-1 ring-blue-300')}>
+                  <SectionCard key={role.id} className={cn('p-4', viewingRole?.id === role.id && 'border-info ring-1 ring-info')}>
                     <div className="flex items-start gap-3">
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
-                          <h3 className="font-semibold text-gray-900">{role.title}</h3>
+                          <h3 className="font-semibold text-muted-foreground">{role.title}</h3>
                           <Badge variant={role.is_open ? 'default' : 'secondary'} className="text-xs">
                             {role.is_open ? 'Open' : 'Closed'}
                           </Badge>
                         </div>
                         <div className="flex flex-wrap gap-3 mt-1">
                           {role.department && (
-                            <span className="flex items-center gap-1 text-xs text-gray-500">
+                            <span className="flex items-center gap-1 text-xs text-muted-foreground">
                               <Building2 className="h-3 w-3" /> {role.department}
                             </span>
                           )}
                           {role.location && (
-                            <span className="flex items-center gap-1 text-xs text-gray-500">
+                            <span className="flex items-center gap-1 text-xs text-muted-foreground">
                               <MapPin className="h-3 w-3" /> {role.location}
                             </span>
                           )}
                           {role.experience_min != null && (
-                            <span className="flex items-center gap-1 text-xs text-gray-500">
+                            <span className="flex items-center gap-1 text-xs text-muted-foreground">
                               <Clock className="h-3 w-3" /> {role.experience_min}+ yrs
                             </span>
                           )}
-                          <span className="flex items-center gap-1 text-xs text-blue-600 font-medium">
+                          <span className="flex items-center gap-1 text-xs text-info font-medium">
                             <Users className="h-3 w-3" /> {role.interest_count} applicant{role.interest_count !== 1 ? 's' : ''}
                           </span>
                         </div>
                         {(role.skills_required ?? []).length > 0 && (
                           <div className="flex flex-wrap gap-1 mt-2">
                             {role.skills_required.slice(0, 4).map(s => (
-                              <span key={s} className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">{s}</span>
+                              <span key={s} className="text-xs bg-muted text-muted-foreground px-2 py-0.5 rounded-full">{s}</span>
                             ))}
                             {role.skills_required.length > 4 && (
-                              <span className="text-xs text-gray-400">+{role.skills_required.length - 4}</span>
+                              <span className="text-xs text-muted-foreground">+{role.skills_required.length - 4}</span>
                             )}
                           </div>
                         )}
@@ -487,7 +481,7 @@ export function AdminTalentMarketplace() {
                           <Button
                             size="sm"
                             variant="outline"
-                            className="h-8 text-red-600 hover:text-red-700 border-red-200 hover:border-red-300"
+                            className="h-8 text-destructive hover:text-destructive border-destructive hover:border-destructive"
                             onClick={() => setCloseTarget(role)}
                             disabled={closeMutation.isPending}
                           >

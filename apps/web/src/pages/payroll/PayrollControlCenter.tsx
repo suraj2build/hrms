@@ -11,7 +11,7 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { invalidateAllPayrollRunViews } from './PayrollRuns'
+import { invalidateAllPayrollRunViews } from '@/lib/payroll-runs-cache'
 import {
   ClipboardCheck,
   AlertTriangle,

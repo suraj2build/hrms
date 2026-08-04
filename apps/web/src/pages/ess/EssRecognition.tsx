@@ -223,11 +223,11 @@ function FeedCard({ r, badges }: { r: RecognitionRow; badges: Badge[] }) {
 
 // ── Award type colour map ──────────────────────────────────────────────────────
 const AWARD_TYPE_COLORS: Record<string, { bg: string; text: string; icon: string }> = {
-  employee_of_month: { bg: 'bg-amber-50 border-amber-200 dark:bg-amber-900/10 dark:border-amber-800/40', text: 'text-amber-700 dark:text-amber-300', icon: 'text-amber-500' },
-  long_service:      { bg: 'bg-teal-50 border-teal-200 dark:bg-teal-900/10 dark:border-teal-800/40',   text: 'text-teal-700 dark:text-teal-300',   icon: 'text-teal-500' },
-  store_of_month:    { bg: 'bg-blue-50 border-blue-200 dark:bg-blue-900/10 dark:border-blue-800/40',   text: 'text-blue-700 dark:text-blue-300',   icon: 'text-blue-500' },
+  employee_of_month: { bg: 'bg-warning border-warning dark:bg-warning/10 dark:border-warning/40', text: 'text-warning dark:text-warning', icon: 'text-warning' },
+  long_service:      { bg: 'bg-accent-teal border-accent-teal dark:bg-accent-teal/10 dark:border-accent-teal/40',   text: 'text-accent-teal dark:text-accent-teal',   icon: 'text-accent-teal' },
+  store_of_month:    { bg: 'bg-info border-info dark:bg-info/10 dark:border-info/40',   text: 'text-info dark:text-info',   icon: 'text-info' },
 }
-const defaultColor = { bg: 'bg-purple-50 border-purple-200 dark:bg-purple-900/10 dark:border-purple-800/40', text: 'text-purple-700 dark:text-purple-300', icon: 'text-purple-500' }
+const defaultColor = { bg: 'bg-primary border-primary dark:bg-primary/10 dark:border-primary/40', text: 'text-primary dark:text-primary', icon: 'text-primary' }
 
 function fmtDate(iso: string | null) {
   if (!iso) return '—'
