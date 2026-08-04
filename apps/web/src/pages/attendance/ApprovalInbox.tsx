@@ -28,7 +28,7 @@ import { SectionCard }   from '@/components/layout/SectionCard'
 import { Badge }         from '@/components/ui/badge'
 import { Button }        from '@/components/ui/button'
 import { api }           from '@/lib/api/client'
-import { cn }            from '@/lib/utils'
+import { cn, fmtDate }   from '@/lib/utils'
 import { ApprovalChainStepper } from '@/components/approvals/ApprovalChainStepper'
 import { LeaveContextDrawer, type LeaveContextTarget } from '@/components/operational/LeaveContextDrawer'
 import { RegularisationContextDrawer, type RegularisationContextTarget } from '@/components/operational/RegularisationContextDrawer'
@@ -85,15 +85,6 @@ type FilterTab = 'all' | 'leave' | 'regularisation' | 'overtime' | 'comp-off' | 
 const PAGE_LIMIT = 20
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-
-function fmtDate(iso: string | null) {
-  if (!iso) return '—'
-  const s = iso
-  const d = new Date(s.length === 10 ? s + 'T12:00:00Z' : s)
-  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
-  if (isNaN(d.getTime())) return '—'
-  return `${String(d.getUTCDate()).padStart(2,'0')}-${M[d.getUTCMonth()]}-${d.getUTCFullYear()}`
-}
 
 function fmtTime(iso: string | null) {
   if (!iso) return '—'

@@ -33,7 +33,7 @@ import {
 } from '@/components/ui/dialog'
 import { api, ApiError } from '@/lib/api/client'
 import { useAuthStore }  from '@/stores/authStore'
-import { cn }            from '@/lib/utils'
+import { cn, formatCurrency as fmtCurrency } from '@/lib/utils'
 import { invalidateAllPayrollRunViews } from '@/lib/payroll-runs-cache'
 import { toast }         from 'sonner'
 import { EmployeeSelector } from '@/components/filters/EmployeeSelector'
@@ -265,14 +265,6 @@ interface VarianceReport {
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-
-function fmtCurrency(n: number): string {
-  return new Intl.NumberFormat('en-IN', {
-    style:    'currency',
-    currency: 'INR',
-    maximumFractionDigits: 0,
-  }).format(n)
-}
 
 function fmtMonth(m: string): string {
   const d = new Date(m.slice(0,7) + '-01T12:00:00Z')

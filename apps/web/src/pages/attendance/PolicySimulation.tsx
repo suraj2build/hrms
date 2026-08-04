@@ -32,7 +32,7 @@ import { MetricCard, MetricRow } from '@/components/dashboard/MetricCard'
 import { toast }          from 'sonner'
 import { api }            from '@/lib/api/client'
 import { useAuthStore }   from '@/stores/authStore'
-import { cn }             from '@/lib/utils'
+import { cn, fmtDate }    from '@/lib/utils'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -130,14 +130,6 @@ function buildScenarioPayload(entry: ScenarioEntry) {
         to_pct:   parseFloat(entry.to_pct   ?? '0'),
       }
   }
-}
-
-function fmtDate(iso: string): string {
-  const s = iso
-  const d = new Date(s.length === 10 ? s + 'T12:00:00Z' : s)
-  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
-  if (isNaN(d.getTime())) return '—'
-  return `${String(d.getUTCDate()).padStart(2,'0')}-${M[d.getUTCMonth()]}-${d.getUTCFullYear()}`
 }
 
 function signedNum(n: number, unit = ''): string {

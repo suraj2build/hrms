@@ -36,7 +36,7 @@ import { AadhaarVerifyCard } from '@/components/trust/AadhaarVerifyCard'
 import { MetricCard, MetricRow } from '@/components/dashboard/MetricCard'
 import { api }           from '@/lib/api/client'
 import { useAuthStore }  from '@/stores/authStore'
-import { cn }            from '@/lib/utils'
+import { cn, formatCurrency as fmtCurrency } from '@/lib/utils'
 import { MyPersonalTab } from './MyPersonalTab'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -136,11 +136,6 @@ function fmtDate(s: string | null | undefined, opts?: Intl.DateTimeFormatOptions
   const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
   if (isNaN(d.getTime())) return '—'
   return `${String(d.getUTCDate()).padStart(2,'0')}-${M[d.getUTCMonth()]}-${d.getUTCFullYear()}`
-}
-
-function fmtCurrency(n: number | null | undefined) {
-  if (n == null) return '—'
-  return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(n)
 }
 
 function cap(s: string | null | undefined) {

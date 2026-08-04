@@ -27,7 +27,7 @@ import {
 import { EmployeeSelector } from '@/components/filters/EmployeeSelector'
 import { api }            from '@/lib/api/client'
 import { useAuthStore }   from '@/stores/authStore'
-import { cn }             from '@/lib/utils'
+import { cn, fmtDateTime, formatCurrency as fmtCurrency } from '@/lib/utils'
 import { toast }          from 'sonner'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -149,23 +149,8 @@ const STATUS_VARIANT: Record<IncidentStatus, BadgeVariant> = {
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
-function fmtDateTime(iso: string) {
-  const d = new Date(iso)
-  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
-  if (isNaN(d.getTime())) return '—'
-  const hr = String(d.getHours()).padStart(2,'0')
-  const mn = String(d.getMinutes()).padStart(2,'0')
-  return `${String(d.getDate()).padStart(2,'0')}-${M[d.getMonth()]}-${d.getFullYear()} ${hr}:${mn}`
-}
-
 function humanLabel(s: string) {
   return s.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
-}
-
-function fmtCurrency(n: number) {
-  return new Intl.NumberFormat('en-IN', {
-    style: 'currency', currency: 'INR', maximumFractionDigits: 0,
-  }).format(n)
 }
 
 // ── Create Incident Dialog ─────────────────────────────────────────────────────

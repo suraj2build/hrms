@@ -33,7 +33,7 @@ import {
 import { toast }        from 'sonner'
 import { api, ApiError } from '@/lib/api/client'
 import { useAuthStore } from '@/stores/authStore'
-import { cn }           from '@/lib/utils'
+import { cn, fmtDate, formatCurrency as fmtCurrency } from '@/lib/utils'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -64,17 +64,6 @@ interface PayrollRun {
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-
-function fmtDate(s: string) {
-  const dt = new Date(s.length === 10 ? s + 'T12:00:00Z' : s)
-  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
-  if (isNaN(dt.getTime())) return '—'
-  return `${String(dt.getUTCDate()).padStart(2,'0')}-${M[dt.getUTCMonth()]}-${dt.getUTCFullYear()}`
-}
-
-function fmtCurrency(n: number) {
-  return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(n)
-}
 
 function SeverityBadge({ severity }: { severity: string }) {
   const map: Record<string, { cls: string; label: string }> = {

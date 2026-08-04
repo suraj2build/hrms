@@ -15,6 +15,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@/components/ui/dialog'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
+import { fmtDate, formatCurrency as fmtCurrency } from '@/lib/utils'
 
 interface TenantDetail {
   id: string; name: string; slug: string; plan: string; status: string
@@ -33,17 +34,6 @@ interface TenantAdmin { id: string; full_name: string; email: string | null; rol
 const STATUS_COLOR: Record<string, string> = {
   active:    'text-success', trial: 'text-warning',
   suspended: 'text-destructive',    expired: 'text-warning', cancelled: 'text-muted-foreground',
-}
-
-function fmtDate(d: string | null) {
-  if (!d) return '—'
-  const dt = new Date(d.length === 10 ? d + 'T12:00:00Z' : d)
-  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
-  if (isNaN(dt.getTime())) return '—'
-  return `${String(dt.getUTCDate()).padStart(2,'0')}-${M[dt.getUTCMonth()]}-${dt.getUTCFullYear()}`
-}
-function fmtCurrency(n: number) {
-  return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(n)
 }
 
 function generatePassword(): string {

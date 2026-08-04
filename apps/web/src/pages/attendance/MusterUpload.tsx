@@ -28,7 +28,7 @@ import { useAuthStore } from '@/stores/authStore'
 import { Button }     from '@/components/ui/button'
 import { Badge }      from '@/components/ui/badge'
 import { DateInput }  from '@/components/ui/date-input'
-import { cn }         from '@/lib/utils'
+import { cn, fmtDate, fmtDateTime } from '@/lib/utils'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -81,22 +81,6 @@ function firstOfMonth() {
   return d.toISOString().slice(0, 10)
 }
 
-function fmtDate(iso: string) {
-  const s = iso
-  const d = new Date(s.length === 10 ? s + 'T12:00:00Z' : s)
-  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
-  if (isNaN(d.getTime())) return '—'
-  return `${String(d.getUTCDate()).padStart(2,'0')}-${M[d.getUTCMonth()]}-${d.getUTCFullYear()}`
-}
-
-function fmtDateTime(iso: string) {
-  const d = new Date(iso)
-  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
-  if (isNaN(d.getTime())) return '—'
-  const hr = String(d.getHours()).padStart(2,'0')
-  const mn = String(d.getMinutes()).padStart(2,'0')
-  return `${String(d.getDate()).padStart(2,'0')}-${M[d.getMonth()]}-${d.getFullYear()} ${hr}:${mn}`
-}
 
 function normaliseHeader(h: unknown): string {
   return String(h ?? '').trim().toLowerCase()

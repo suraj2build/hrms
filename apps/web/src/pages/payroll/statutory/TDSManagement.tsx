@@ -31,7 +31,7 @@ import {
 import { toast }         from 'sonner'
 import { api }           from '@/lib/api/client'
 import { useAuthStore }  from '@/stores/authStore'
-import { cn }            from '@/lib/utils'
+import { cn, formatCurrency as fmtCurrency } from '@/lib/utils'
 import { useStatutoryMonth } from '@/components/compliance/StatutoryMonthPicker'
 import { PromptDialog }  from '@/components/ui/ConfirmDialog'
 
@@ -111,12 +111,6 @@ interface ProofRow {
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-
-function fmtCurrency(n: number): string {
-  return new Intl.NumberFormat('en-IN', {
-    style: 'currency', currency: 'INR', maximumFractionDigits: 0,
-  }).format(n)
-}
 
 function currentFY(): string {
   const now = new Date()

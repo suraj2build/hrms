@@ -46,7 +46,7 @@ import {
 } from '@/components/ui/tabs'
 import { api }           from '@/lib/api/client'
 import { useAuthStore }  from '@/stores/authStore'
-import { cn }            from '@/lib/utils'
+import { cn, fmtDate }   from '@/lib/utils'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -132,15 +132,6 @@ function fmtDatetime(iso: string | null) {
   const hr = String(d.getHours()).padStart(2,'0')
   const mn = String(d.getMinutes()).padStart(2,'0')
   return `${String(d.getDate()).padStart(2,'0')}-${M[d.getMonth()]}-${d.getFullYear()} ${hr}:${mn}`
-}
-
-function fmtDate(str: string | null) {
-  if (!str) return '—'
-  const s = str
-  const d = new Date(s.length === 10 ? s + 'T12:00:00Z' : s)
-  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
-  if (isNaN(d.getTime())) return '—'
-  return `${String(d.getUTCDate()).padStart(2,'0')}-${M[d.getUTCMonth()]}-${d.getUTCFullYear()}`
 }
 
 type BadgeVariant = 'default' | 'secondary' | 'warning' | 'destructive' | 'outline' | 'success'

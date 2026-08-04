@@ -6,13 +6,9 @@
 
 export function fmt(val?: string | null) { return val ?? '—' }
 
-export function fmtDate(s?: string | null) {
-  if (!s) return '—'
-  const d = new Date(s.length === 10 ? s + 'T12:00:00Z' : s)
-  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
-  if (isNaN(d.getTime())) return '—'
-  return `${String(d.getUTCDate()).padStart(2,'0')}-${M[d.getUTCMonth()]}-${d.getUTCFullYear()}`
-}
+// Re-exported so existing `./format-helpers` imports across the profile tabs
+// keep working without touching every call site.
+export { fmtDate } from '@/lib/utils'
 
 export function fmtMoney(n?: number | null) {
   if (n == null) return '—'

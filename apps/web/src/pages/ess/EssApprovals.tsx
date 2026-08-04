@@ -28,6 +28,7 @@ import { Button }        from '@/components/ui/button'
 import { api }           from '@/lib/api/client'
 import { useAuthStore }  from '@/stores/authStore'
 import { ApprovalChainStepper } from '@/components/approvals/ApprovalChainStepper'
+import { fmtDate, fmtDateTime as fmtDatetime } from '@/lib/utils'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -51,21 +52,6 @@ interface CompOffReq {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function fmtDate(s: string) {
-  if (!s) return '—'
-  const d = new Date(s.length === 10 ? s + 'T12:00:00Z' : s)
-  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
-  if (isNaN(d.getTime())) return '—'
-  return `${String(d.getUTCDate()).padStart(2,'0')}-${M[d.getUTCMonth()]}-${d.getUTCFullYear()}`
-}
-function fmtDatetime(s: string) {
-  const d = new Date(s)
-  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
-  if (isNaN(d.getTime())) return '—'
-  const hr = String(d.getHours()).padStart(2,'0')
-  const mn = String(d.getMinutes()).padStart(2,'0')
-  return `${String(d.getDate()).padStart(2,'0')}-${M[d.getMonth()]}-${d.getFullYear()} ${hr}:${mn}`
-}
 
 const PENDING_LEAVE   = (s: string) => s === 'pending'
 const PENDING_CORR    = (s: string) => s === 'pending' || s === 'processing'

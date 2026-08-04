@@ -39,6 +39,7 @@ import {
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
+import { formatDate } from '@/lib/utils'
 
 // ── Helpers ─────────────────────────────────────────────────────────────────────
 
@@ -198,16 +199,6 @@ interface InviteForm {
   designation: string
   department: string
   joining_date: string
-}
-
-// ── Helpers ────────────────────────────────────────────────────────────────────
-
-function formatDate(iso?: string | null): string {
-  if (!iso) return '—'
-  const d = new Date(iso.length === 10 ? iso + 'T12:00:00Z' : iso)
-  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
-  if (isNaN(d.getTime())) return '—'
-  return `${String(d.getUTCDate()).padStart(2,'0')}-${M[d.getUTCMonth()]}-${d.getUTCFullYear()}`
 }
 
 const STATUS_CONFIG: Record<InviteStatus, { label: string; className: string }> = {

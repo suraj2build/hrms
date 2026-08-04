@@ -14,6 +14,7 @@ import { Input }   from '@/components/ui/input'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@/components/ui/dialog'
+import { fmtDate, formatCurrency as fmtCurrency } from '@/lib/utils'
 
 interface Tenant {
   id: string; name: string; slug: string; plan: string; status: string
@@ -48,18 +49,6 @@ const STATUS_COLOR: Record<string, string> = {
   suspended: 'border-destructive/30 text-destructive bg-destructive/15',
   expired:   'border-warning/30 text-warning bg-warning/15',
   cancelled: 'border-border text-muted-foreground bg-muted',
-}
-
-function fmtDate(d: string | null) {
-  if (!d) return '—'
-  const dt = new Date(d.length === 10 ? d + 'T12:00:00Z' : d)
-  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
-  if (isNaN(dt.getTime())) return '—'
-  return `${String(dt.getUTCDate()).padStart(2,'0')}-${M[dt.getUTCMonth()]}-${dt.getUTCFullYear()}`
-}
-
-function fmtCurrency(n: number) {
-  return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(n)
 }
 
 function timeAgo(iso: string): string {

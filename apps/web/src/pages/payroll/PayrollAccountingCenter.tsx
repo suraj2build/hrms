@@ -31,7 +31,7 @@ import { SectionCard }   from '@/components/layout/SectionCard'
 import { Button }        from '@/components/ui/button'
 import { Badge }         from '@/components/ui/badge'
 import { api, ApiError } from '@/lib/api/client'
-import { cn }            from '@/lib/utils'
+import { cn, formatCurrency as fmtCurrency, fmtDate } from '@/lib/utils'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -103,21 +103,11 @@ interface GLMapping {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function fmtCurrency(n: number) {
-  return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(n)
-}
 function fmtMonth(m: string) {
   const d = new Date(m.slice(0,7) + '-01T12:00:00Z')
   const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
   if (isNaN(d.getTime())) return '—'
   return `${M[d.getUTCMonth()]}-${d.getUTCFullYear()}`
-}
-function fmtDate(d: string) {
-  const s = d
-  const dt = new Date(s.length === 10 ? s + 'T12:00:00Z' : s)
-  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
-  if (isNaN(dt.getTime())) return '—'
-  return `${String(dt.getUTCDate()).padStart(2,'0')}-${M[dt.getUTCMonth()]}-${dt.getUTCFullYear()}`
 }
 
 const LEDGER_STATUS_COLORS: Record<string, string> = {

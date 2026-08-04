@@ -29,6 +29,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { api } from '@/lib/api/client'
 import { useAuthStore } from '@/stores/authStore'
 import { EssApprovals } from './EssApprovals'
+import { fmtDate } from '@/lib/utils'
 
 // ── Types (subset of the payloads we render) ──────────────────────────────────
 
@@ -39,12 +40,6 @@ interface PendingPayload { leave_requests?: PendingLeave[]; regularisations?: Pe
 interface CompOffItem { id: string; worked_date?: string; days_to_credit?: number; leave_types?: { name?: string } | null; employees?: PendingEmployee }
 interface ReimbItem { id: string; amount?: number; claim_month?: string; employees?: PendingEmployee; reimbursement_categories?: { name?: string } | null }
 
-const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
-function fmtDate(s?: string) {
-  if (!s) return '—'
-  const d = new Date(s.length === 10 ? s + 'T12:00:00Z' : s)
-  return isNaN(d.getTime()) ? '—' : `${String(d.getUTCDate()).padStart(2,'0')}-${M[d.getUTCMonth()]}-${d.getUTCFullYear()}`
-}
 const who = (e?: PendingEmployee) =>
   e ? `${e.first_name ?? ''} ${e.last_name ?? ''}`.trim() || e.employee_code || 'Employee' : 'Employee'
 const money = (n?: number) => (typeof n === 'number' ? `₹${n.toLocaleString('en-IN')}` : '—')

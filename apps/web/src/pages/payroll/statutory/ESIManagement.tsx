@@ -34,7 +34,7 @@ import {
 } from '@/components/ui/dialog'
 import { api, ApiError } from '@/lib/api/client'
 import { useAuthStore }  from '@/stores/authStore'
-import { cn }            from '@/lib/utils'
+import { cn, formatCurrency as fmtCurrency } from '@/lib/utils'
 import { StatutoryMonthPicker, useStatutoryMonth } from '@/components/compliance/StatutoryMonthPicker'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -79,14 +79,6 @@ interface ESIEligibility {
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-
-function fmtCurrency(n: number): string {
-  return new Intl.NumberFormat('en-IN', {
-    style: 'currency',
-    currency: 'INR',
-    maximumFractionDigits: 0,
-  }).format(n)
-}
 
 function getLast6Months(): string[] {
   const now = new Date()

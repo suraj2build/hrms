@@ -29,7 +29,7 @@ import { Badge }          from '@/components/ui/badge'
 import { Button }         from '@/components/ui/button'
 import { api }            from '@/lib/api/client'
 import { useAuthStore }   from '@/stores/authStore'
-import { cn }             from '@/lib/utils'
+import { cn, fmtDate }    from '@/lib/utils'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -112,14 +112,6 @@ interface InvestigationData {
 function fmtCurrency(n: number | null | undefined): string {
   if (n == null) return '—'
   return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(n)
-}
-
-function fmtDate(s: string | null | undefined): string {
-  if (!s) return '—'
-  const dt = new Date(s.length === 10 ? s + 'T12:00:00Z' : s)
-  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
-  if (isNaN(dt.getTime())) return '—'
-  return `${String(dt.getUTCDate()).padStart(2,'0')}-${M[dt.getUTCMonth()]}-${dt.getUTCFullYear()}`
 }
 
 function fmtTime(s: string | null | undefined): string {

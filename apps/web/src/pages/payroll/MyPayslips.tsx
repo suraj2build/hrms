@@ -25,7 +25,7 @@ import { Button }        from '@/components/ui/button'
 import { Badge }         from '@/components/ui/badge'
 import { api }           from '@/lib/api/client'
 import { useAuthStore }  from '@/stores/authStore'
-import { cn }            from '@/lib/utils'
+import { cn, formatCurrency as fmtCurrency } from '@/lib/utils'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -76,12 +76,6 @@ interface LedgerEntry {
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-
-function fmtCurrency(n: number): string {
-  return new Intl.NumberFormat('en-IN', {
-    style: 'currency', currency: 'INR', maximumFractionDigits: 0,
-  }).format(n)
-}
 
 function fmtMonth(m: string): string {
   const [y, mo] = m.split('-')

@@ -28,6 +28,7 @@ import {
 import { api }            from '@/lib/api/client'
 import { useAuthStore }   from '@/stores/authStore'
 import { toast }          from 'sonner'
+import { fmtDate }        from '@/lib/utils'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -87,14 +88,6 @@ const TEMPLATE_TYPES = [
 
 const fmt = (n: number) =>
   new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(n)
-
-const fmtDate = (d: string) => {
-  const s = d
-  const dt = new Date(s.length === 10 ? s + 'T12:00:00Z' : s)
-  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
-  if (isNaN(dt.getTime())) return '—'
-  return `${String(dt.getUTCDate()).padStart(2,'0')}-${M[dt.getUTCMonth()]}-${dt.getUTCFullYear()}`
-}
 
 const labelify = (s: string) =>
   s.replace(/_/g, ' ').replace(/^\w/, c => c.toUpperCase())

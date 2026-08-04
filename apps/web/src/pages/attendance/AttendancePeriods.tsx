@@ -11,7 +11,7 @@ import { Badge }           from '@/components/ui/badge'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
 import { api }             from '@/lib/api/client'
 import { useAuthStore }    from '@/stores/authStore'
-import { cn }              from '@/lib/utils'
+import { cn, fmtDate }     from '@/lib/utils'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -42,15 +42,6 @@ function fmtMonth(ym: string): string {
   const d = new Date(ym.slice(0,7) + '-01T12:00:00Z')
   if (isNaN(d.getTime())) return '—'
   return `${M[d.getUTCMonth()]}-${d.getUTCFullYear()}`
-}
-
-function fmtDate(iso: string | null | undefined): string {
-  if (!iso) return '—'
-  const s = iso
-  const d = new Date(s.length === 10 ? s + 'T12:00:00Z' : s)
-  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
-  if (isNaN(d.getTime())) return '—'
-  return `${String(d.getUTCDate()).padStart(2,'0')}-${M[d.getUTCMonth()]}-${d.getUTCFullYear()}`
 }
 
 // ── State config ──────────────────────────────────────────────────────────────

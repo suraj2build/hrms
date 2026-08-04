@@ -21,7 +21,7 @@ import { Button }        from '@/components/ui/button'
 import { Input }         from '@/components/ui/input'
 import { api }           from '@/lib/api/client'
 import { useAuthStore }  from '@/stores/authStore'
-import { cn }            from '@/lib/utils'
+import { cn, fmtDate }   from '@/lib/utils'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 // Mirrors apps/api/src/routes/attendance/confidence.ts's actual response
@@ -90,14 +90,6 @@ function bandForScore(score: number | null): ConfidenceLevel {
   if (s >= 60) return 'medium'
   if (s >= 40) return 'low'
   return 'critical'
-}
-
-function fmtDate(iso: string) {
-  const s = iso
-  const d = new Date(s.length === 10 ? s + 'T12:00:00Z' : s)
-  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
-  if (isNaN(d.getTime())) return '—'
-  return `${String(d.getUTCDate()).padStart(2,'0')}-${M[d.getUTCMonth()]}-${d.getUTCFullYear()}`
 }
 
 // ── Level distribution card ────────────────────────────────────────────────────

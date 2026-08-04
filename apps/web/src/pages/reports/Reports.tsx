@@ -44,7 +44,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { PageContainer }                  from '@/components/layout/PageContainer'
 import { PageHeader }                     from '@/components/layout/PageHeader'
 import { useBasePath }                    from '@/lib/routing'
-import { cn }                             from '@/lib/utils'
+import { cn, formatCurrency as fmtCurrency } from '@/lib/utils'
 import { escapeCsvField }                 from '@/lib/csv-utils'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -216,9 +216,6 @@ interface PayrollRegisterData {
 
 function fmt(n: number) {
   return new Intl.NumberFormat('en-IN', { maximumFractionDigits: 0 }).format(n)
-}
-function fmtCurrency(n: number) {
-  return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(n)
 }
 function fmtTime(d: Date) {
   return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })

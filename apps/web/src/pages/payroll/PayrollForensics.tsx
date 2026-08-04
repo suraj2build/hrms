@@ -30,7 +30,7 @@ import { Button }        from '@/components/ui/button'
 import { Badge }         from '@/components/ui/badge'
 import { Input }         from '@/components/ui/input'
 import { api }           from '@/lib/api/client'
-import { cn }            from '@/lib/utils'
+import { cn, fmtDateTime, formatCurrency as fmtCurrency } from '@/lib/utils'
 import { toast }         from 'sonner'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -153,23 +153,11 @@ const EVENT_CATEGORIES = [
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function fmtDateTime(s: string) {
-  const iso = s
-  const d = new Date(iso)
-  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
-  if (isNaN(d.getTime())) return '—'
-  const hr = String(d.getHours()).padStart(2,'0')
-  const mn = String(d.getMinutes()).padStart(2,'0')
-  return `${String(d.getDate()).padStart(2,'0')}-${M[d.getMonth()]}-${d.getFullYear()} ${hr}:${mn}`
-}
 function fmtMonth(m: string) {
   const d = new Date(m.slice(0,7) + '-01T12:00:00Z')
   const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
   if (isNaN(d.getTime())) return '—'
   return `${M[d.getUTCMonth()]}-${d.getUTCFullYear()}`
-}
-function fmtCurrency(n: number) {
-  return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(n)
 }
 
 // ── Timeline Event Row ─────────────────────────────────────────────────────────

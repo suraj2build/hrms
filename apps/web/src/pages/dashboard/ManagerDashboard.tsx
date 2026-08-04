@@ -32,6 +32,7 @@ import { MetricCard, MetricRow } from '@/components/dashboard/MetricCard'
 import { ManagerInsights } from '@/pages/intelligence/ManagerInsights'
 import { ManagerLifecycleRails } from '@/pages/manager/ManagerLifecycleRails'
 import type { Employee } from '@/types'
+import { fmtDateShort as fmtDate, fmtDate as fmtDateFull } from '@/lib/utils'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -139,20 +140,6 @@ function fmtTime(iso: string | null) {
   if (!iso) return '—'
   try { return new Date(iso).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false }) }
   catch { return '—' }
-}
-
-function fmtDate(s: string) {
-  const d = new Date(s.length === 10 ? s + 'T12:00:00Z' : s)
-  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
-  if (isNaN(d.getTime())) return '—'
-  return `${String(d.getUTCDate()).padStart(2,'0')}-${M[d.getUTCMonth()]}`
-}
-
-function fmtDateFull(s: string) {
-  const d = new Date(s.length === 10 ? s + 'T12:00:00Z' : s)
-  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
-  if (isNaN(d.getTime())) return '—'
-  return `${String(d.getUTCDate()).padStart(2,'0')}-${M[d.getUTCMonth()]}-${d.getUTCFullYear()}`
 }
 
 function calcTenure(joining?: string | null) {

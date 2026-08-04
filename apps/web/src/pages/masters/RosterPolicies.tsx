@@ -28,6 +28,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { api }            from '@/lib/api/client'
 import { useAuthStore }   from '@/stores/authStore'
+import { formatDate }     from '@/lib/utils'
 import { cn }             from '@/lib/utils'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -133,14 +134,6 @@ function generatePolicySummary(policy: RosterPolicy): string {
   }
 
   return parts.length === 0 ? 'All days working' : parts.join(' · ')
-}
-
-function formatDate(iso: string | null): string {
-  if (!iso) return '—'
-  const d = new Date(iso.length === 10 ? iso + 'T12:00:00Z' : iso)
-  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
-  if (isNaN(d.getTime())) return '—'
-  return `${String(d.getUTCDate()).padStart(2,'0')}-${M[d.getUTCMonth()]}-${d.getUTCFullYear()}`
 }
 
 // ── PolicyCard ────────────────────────────────────────────────────────────────

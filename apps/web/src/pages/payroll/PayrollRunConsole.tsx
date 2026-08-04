@@ -21,7 +21,7 @@ import {
 } from '@/components/ui/dialog'
 import { Badge }                              from '@/components/ui/badge'
 import { api }                                from '@/lib/api/client'
-import { cn }                                 from '@/lib/utils'
+import { cn, fmtDate }                        from '@/lib/utils'
 import {
   SeverityBadge,
   IntelligenceEmptyState,
@@ -81,14 +81,6 @@ const fmtMoney = (n: number) =>
     currency:             'INR',
     maximumFractionDigits: 0,
   }).format(n)
-
-const fmtDate = (s: string | null) => {
-  if (!s) return '—'
-  const dt = new Date(s.length === 10 ? s + 'T12:00:00Z' : s)
-  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
-  if (isNaN(dt.getTime())) return '—'
-  return `${String(dt.getUTCDate()).padStart(2,'0')}-${M[dt.getUTCMonth()]}-${dt.getUTCFullYear()}`
-}
 
 const fmtMonth = (s: string) => {
   const d = new Date(s.slice(0,7) + '-01T12:00:00Z')

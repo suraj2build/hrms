@@ -46,7 +46,7 @@ import {
 } from '@/components/ui/chart'
 import { api }            from '@/lib/api/client'
 import { useAuthStore }   from '@/stores/authStore'
-import { cn }             from '@/lib/utils'
+import { cn, formatCurrency as fmtCurrency, fmtDate } from '@/lib/utils'
 import { SubTabs }        from '@/components/ui/SubTabs'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -185,12 +185,6 @@ const REV_TYPE_LABEL: Record<string, string> = {
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
-function fmtCurrency(n: number): string {
-  return new Intl.NumberFormat('en-IN', {
-    style: 'currency', currency: 'INR', maximumFractionDigits: 0,
-  }).format(n)
-}
-
 /** Full Indian currency (₹12,00,000). Was compact (K/L) — switched to full per
  *  UAT feedback so salary-structure rates and totals read in plain rupees. */
 function fmtCompact(n: number | null | undefined): string {
@@ -210,13 +204,6 @@ function fmtMonthShort(m: string): string {
   return new Date(Number(y), Number(mo) - 1, 1).toLocaleString('en-IN', {
     month: 'short', year: '2-digit',
   })
-}
-
-function fmtDate(s: string): string {
-  const d = new Date(s.length === 10 ? s + 'T12:00:00Z' : s)
-  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
-  if (isNaN(d.getTime())) return '—'
-  return `${String(d.getUTCDate()).padStart(2,'0')}-${M[d.getUTCMonth()]}-${d.getUTCFullYear()}`
 }
 
 // ── Print utility — isolates one slip to print ─────────────────────────────────

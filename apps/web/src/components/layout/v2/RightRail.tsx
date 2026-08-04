@@ -18,7 +18,7 @@ import {
   CalendarDays, DollarSign, BookOpen,
   Shield, FileSearch, RefreshCw, Loader2,
 } from 'lucide-react'
-import { cn } from '@/lib/utils'
+import { cn, fmtDateTime } from '@/lib/utils'
 import { api } from '@/lib/api/client'
 import { RailSection, PriorityItem, DeadlineItem, HealthRow, HelpfulLink } from '@/components/dashboard/primitives'
 import { ContextualInsightsPanel } from '@/components/panels/ContextualInsightsPanel'
@@ -52,15 +52,6 @@ function fmtDate(s: string) {
   const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
   if (isNaN(d.getTime())) return '—'
   return `${String(d.getUTCDate()).padStart(2,'0')}-${M[d.getUTCMonth()]}`
-}
-
-function fmtDateTime(s: string) {
-  const d = new Date(s)
-  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
-  if (isNaN(d.getTime())) return '—'
-  const hr = String(d.getHours()).padStart(2,'0')
-  const mn = String(d.getMinutes()).padStart(2,'0')
-  return `${String(d.getDate()).padStart(2,'0')}-${M[d.getMonth()]}-${d.getFullYear()} ${hr}:${mn}`
 }
 
 function daysUntil(dateStr: string): number {

@@ -20,7 +20,7 @@ import { Input }           from '@/components/ui/input'
 import { DateInput }       from '@/components/ui/date-input'
 import { Button }          from '@/components/ui/button'
 import { Badge }           from '@/components/ui/badge'
-import { cn }              from '@/lib/utils'
+import { cn, fmtDate }     from '@/lib/utils'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -52,14 +52,6 @@ interface WhoIsInData {
 function today(): string {
   const d = new Date()
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-}
-
-function fmtDate(iso: string) {
-  const s = iso
-  const d = new Date(s.length === 10 ? s + 'T12:00:00Z' : s)
-  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
-  if (isNaN(d.getTime())) return '—'
-  return `${String(d.getUTCDate()).padStart(2,'0')}-${M[d.getUTCMonth()]}-${d.getUTCFullYear()}`
 }
 
 function downloadCSV(filename: string, rows: string[][]) {

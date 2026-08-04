@@ -29,7 +29,7 @@ import { Label }         from '@/components/ui/label'
 import { Textarea }      from '@/components/ui/textarea'
 import { api }           from '@/lib/api/client'
 import { useAuthStore }  from '@/stores/authStore'
-import { cn }            from '@/lib/utils'
+import { cn, fmtDate, fmtDateTime } from '@/lib/utils'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -123,23 +123,6 @@ const ACTION_LABEL: Record<ExceptionStatus, string> = {
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
-
-function fmtDate(iso: string) {
-  const s = iso
-  const d = new Date(s.length === 10 ? s + 'T12:00:00Z' : s)
-  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
-  if (isNaN(d.getTime())) return '—'
-  return `${String(d.getUTCDate()).padStart(2,'0')}-${M[d.getUTCMonth()]}-${d.getUTCFullYear()}`
-}
-
-function fmtDateTime(iso: string) {
-  const d = new Date(iso)
-  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
-  if (isNaN(d.getTime())) return '—'
-  const hr = String(d.getHours()).padStart(2,'0')
-  const mn = String(d.getMinutes()).padStart(2,'0')
-  return `${String(d.getDate()).padStart(2,'0')}-${M[d.getMonth()]}-${d.getFullYear()} ${hr}:${mn}`
-}
 
 function slaLabel(sla_due_at: string | null, sla_breached: boolean): string {
   if (!sla_due_at) return '—'

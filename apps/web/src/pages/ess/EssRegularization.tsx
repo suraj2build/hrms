@@ -31,7 +31,7 @@ import { DateInput }     from '@/components/ui/date-input'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { api }           from '@/lib/api/client'
 import { useAuthStore }  from '@/stores/authStore'
-import { cn }            from '@/lib/utils'
+import { cn, fmtDate, fmtDateTime as fmtDatetime } from '@/lib/utils'
 import { toast }         from 'sonner'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -73,23 +73,6 @@ const REG_TYPE_LABEL: Record<string, string> = Object.fromEntries(REG_TYPES.map(
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function fmtDate(iso: string | null) {
-  if (!iso) return '—'
-  const d = new Date(iso.length === 10 ? iso + 'T12:00:00Z' : iso)
-  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
-  if (isNaN(d.getTime())) return '—'
-  return `${String(d.getUTCDate()).padStart(2,'0')}-${M[d.getUTCMonth()]}-${d.getUTCFullYear()}`
-}
-
-function fmtDatetime(iso: string | null) {
-  if (!iso) return '—'
-  const d = new Date(iso)
-  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
-  if (isNaN(d.getTime())) return '—'
-  const hr = String(d.getHours()).padStart(2,'0')
-  const mn = String(d.getMinutes()).padStart(2,'0')
-  return `${String(d.getDate()).padStart(2,'0')}-${M[d.getMonth()]}-${d.getFullYear()} ${hr}:${mn}`
-}
 
 function fmtTime(iso: string | null) {
   if (!iso) return '—'

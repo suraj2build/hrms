@@ -27,6 +27,7 @@ import { DateInput }      from '@/components/ui/date-input'
 import { api }            from '@/lib/api/client'
 import { useAuthStore }   from '@/stores/authStore'
 import { MetricCard }     from '@/components/dashboard/MetricCard'
+import { fmtDate }        from '@/lib/utils'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -60,14 +61,6 @@ interface ConflictSummary {
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
 const PAGE_SIZE = 50
-
-function fmtDate(iso: string): string {
-  const s = iso
-  const d = new Date(s.length === 10 ? s + 'T12:00:00Z' : s)
-  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
-  if (isNaN(d.getTime())) return '—'
-  return `${String(d.getUTCDate()).padStart(2,'0')}-${M[d.getUTCMonth()]}-${d.getUTCFullYear()}`
-}
 
 function fmtDatetime(iso: string): string {
   const d = new Date(iso)

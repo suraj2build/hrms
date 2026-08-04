@@ -24,7 +24,7 @@ import { EmployeeSelector } from '@/components/filters/EmployeeSelector'
 import { MetricCard }     from '@/components/dashboard/MetricCard'
 import { api }          from '@/lib/api/client'
 import { useAuthStore } from '@/stores/authStore'
-import { cn }           from '@/lib/utils'
+import { cn, fmtDate }  from '@/lib/utils'
 import { toast }        from 'sonner'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -52,13 +52,6 @@ interface LedgerEntry {
 function fmt(n: number | null) {
   if (n === null) return '—'
   return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(n)
-}
-
-function fmtDate(s: string) {
-  const dt = new Date(s.length === 10 ? s + 'T12:00:00Z' : s)
-  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
-  if (isNaN(dt.getTime())) return '—'
-  return `${String(dt.getUTCDate()).padStart(2,'0')}-${M[dt.getUTCMonth()]}-${dt.getUTCFullYear()}`
 }
 
 function SourceBadge({ type }: { type: string }) {

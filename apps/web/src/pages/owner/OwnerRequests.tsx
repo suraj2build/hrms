@@ -9,6 +9,7 @@ import { Input }  from '@/components/ui/input'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@/components/ui/dialog'
+import { fmtDate } from '@/lib/utils'
 
 interface SignupRequest {
   id: string; company_name: string; contact_name: string; contact_email: string
@@ -16,13 +17,6 @@ interface SignupRequest {
   message: string | null; status: 'pending' | 'approved' | 'rejected'
   reviewed_at: string | null; rejection_reason: string | null
   tenant_id: string | null; created_at: string
-}
-
-function fmtDate(d: string) {
-  const dt = new Date(d.length === 10 ? d + 'T12:00:00Z' : d)
-  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
-  if (isNaN(dt.getTime())) return '—'
-  return `${String(dt.getUTCDate()).padStart(2,'0')}-${M[dt.getUTCMonth()]}-${dt.getUTCFullYear()}`
 }
 
 export function OwnerRequests() {

@@ -3,6 +3,7 @@ import { useQuery }      from '@tanstack/react-query'
 import { ownerApi }      from '@/lib/api/ownerApi'
 import { CreditCard } from 'lucide-react'
 import { MetricCard, MetricRow } from '@/components/dashboard/MetricCard'
+import { formatCurrency as fmtCurrency } from '@/lib/utils'
 
 interface Snapshot {
   id: string; tenant_id: string; snapshot_month: string
@@ -10,10 +11,6 @@ interface Snapshot {
   amount_due: number; plan: string; created_at: string
 }
 interface Tenant { id: string; name: string }
-
-function fmtCurrency(n: number) {
-  return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(n)
-}
 
 export function OwnerBilling() {
   const [tenantFilt, setTenantFilt] = useState('')

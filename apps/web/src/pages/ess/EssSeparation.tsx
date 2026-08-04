@@ -27,7 +27,7 @@ import { Input }         from '@/components/ui/input'
 import { Textarea }      from '@/components/ui/textarea'
 import { api }           from '@/lib/api/client'
 import { useAuthStore }  from '@/stores/authStore'
-import { cn }            from '@/lib/utils'
+import { cn, fmtDate }   from '@/lib/utils'
 import { ExitInterviewForm } from '@/components/separation/ExitInterviewForm'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -62,14 +62,6 @@ interface AssetItem {
 interface SeparationResponse { data: Separation | null; clearances: Clearance[]; ff: FfSummary | null }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────────
-
-function fmtDate(s: string | null) {
-  if (!s) return '—'
-  const d = new Date(s.length === 10 ? s + 'T12:00:00Z' : s)
-  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
-  if (isNaN(d.getTime())) return '—'
-  return `${String(d.getUTCDate()).padStart(2,'0')}-${M[d.getUTCMonth()]}-${d.getUTCFullYear()}`
-}
 
 function fmtCurrency(n: number | null | undefined) {
   if (n == null) return '—'

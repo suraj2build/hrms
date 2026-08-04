@@ -23,7 +23,7 @@ import { Input }         from '@/components/ui/input'
 import { Button }        from '@/components/ui/button'
 import { Badge }         from '@/components/ui/badge'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { cn }            from '@/lib/utils'
+import { cn, fmtDate }   from '@/lib/utils'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -64,14 +64,6 @@ interface HistoryRow {
 
 const inr = (n: number | null | undefined) =>
   n == null ? '—' : new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(n)
-
-function fmtDate(s: string | null): string {
-  if (!s) return '—'
-  const d = new Date(s.length === 10 ? s + 'T12:00:00Z' : s)
-  if (isNaN(d.getTime())) return '—'
-  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
-  return `${String(d.getUTCDate()).padStart(2,'0')}-${M[d.getUTCMonth()]}-${d.getUTCFullYear()}`
-}
 
 const STATUS_TONE: Record<string, 'success' | 'secondary' | 'destructive' | 'outline'> = {
   approved: 'success', pending: 'secondary', rejected: 'destructive', withdrawn: 'outline',

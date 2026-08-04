@@ -39,7 +39,7 @@ import { DateInput }       from '@/components/ui/date-input'
 import { StatusChangePill } from '@/components/operational/AttendanceDiff'
 import { api }             from '@/lib/api/client'
 import { useAuthStore }    from '@/stores/authStore'
-import { cn }              from '@/lib/utils'
+import { cn, fmtDateTime } from '@/lib/utils'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -196,18 +196,6 @@ function fmtTime(iso: string | null): string {
   if (!iso) return '—'
   try { return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) }
   catch { return iso }
-}
-
-function fmtDateTime(iso: string | null): string {
-  if (!iso) return '—'
-  try {
-    const d = new Date(iso)
-    const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
-    if (isNaN(d.getTime())) return '—'
-    const hr = String(d.getHours()).padStart(2,'0')
-    const mn = String(d.getMinutes()).padStart(2,'0')
-    return `${String(d.getDate()).padStart(2,'0')}-${M[d.getMonth()]}-${d.getFullYear()} ${hr}:${mn}`
-  } catch { return iso }
 }
 
 function fmtMinutes(m: number): string {

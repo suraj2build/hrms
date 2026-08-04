@@ -29,7 +29,7 @@ import { Button }        from '@/components/ui/button'
 import { Badge }         from '@/components/ui/badge'
 import { api }           from '@/lib/api/client'
 import { useAuthStore }  from '@/stores/authStore'
-import { cn }            from '@/lib/utils'
+import { cn, fmtDate }   from '@/lib/utils'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -80,14 +80,6 @@ const STATUS_FILTERS: Array<{ value: '' | LeaveStatus; label: string }> = [
 ]
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-
-function fmtDate(iso: string) {
-  const s = iso
-  const d = new Date(s.length === 10 ? s + 'T12:00:00Z' : s)
-  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
-  if (isNaN(d.getTime())) return '—'
-  return `${String(d.getUTCDate()).padStart(2,'0')}-${M[d.getUTCMonth()]}-${d.getUTCFullYear()}`
-}
 
 function fmtDays(days: number, halfDay: boolean) {
   if (halfDay) return '0.5 day'

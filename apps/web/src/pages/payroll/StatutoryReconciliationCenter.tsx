@@ -23,7 +23,7 @@ import { SectionCard }   from '@/components/layout/SectionCard'
 import { Button }        from '@/components/ui/button'
 import { Badge }         from '@/components/ui/badge'
 import { api }           from '@/lib/api/client'
-import { cn }            from '@/lib/utils'
+import { cn, formatCurrency as fmtCurrency } from '@/lib/utils'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -49,9 +49,6 @@ interface PayrollRun { id: string; month: string; status: string }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function fmtCurrency(n: number) {
-  return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(n)
-}
 function fmtMonth(m: string) {
   const d = new Date(m.slice(0,7) + '-01T12:00:00Z')
   const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']

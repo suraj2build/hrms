@@ -37,6 +37,7 @@ import {
   OperationalTable,
 } from '@/components/dashboard/primitives'
 import type { OpsTableColumn } from '@/components/dashboard/primitives'
+import { fmtDateShort as fmtDate, fmtDateTime } from '@/lib/utils'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -57,20 +58,6 @@ interface MusterResp     { month: string; employees: MusterEmployee[] }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function fmtDate(s: string) {
-  const d = new Date(s.length === 10 ? s + 'T12:00:00Z' : s)
-  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
-  if (isNaN(d.getTime())) return '—'
-  return `${String(d.getUTCDate()).padStart(2,'0')}-${M[d.getUTCMonth()]}`
-}
-function fmtDateTime(s: string) {
-  const d = new Date(s)
-  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
-  if (isNaN(d.getTime())) return '—'
-  const hr = String(d.getHours()).padStart(2,'0')
-  const mn = String(d.getMinutes()).padStart(2,'0')
-  return `${String(d.getDate()).padStart(2,'0')}-${M[d.getMonth()]}-${d.getFullYear()} ${hr}:${mn}`
-}
 function monthRange() {
   const now = new Date()
   const y = now.getFullYear(), m = now.getMonth()

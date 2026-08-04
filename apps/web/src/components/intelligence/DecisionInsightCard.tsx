@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { X, ChevronDown, ChevronUp, Eye, Users, AlertTriangle, RotateCcw } from 'lucide-react'
-import { cn } from '@/lib/utils'
+import { cn, formatCurrency } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import type { DecisionInsight } from '@/lib/intelligence/types'
@@ -29,14 +29,6 @@ const SEVERITY_HEX: Record<string, string> = {
   high:     '#f97316',
   medium:   '#f59e0b',
   low:      '#3b82f6',
-}
-
-function formatCurrency(amount: number): string {
-  return new Intl.NumberFormat('en-IN', {
-    style:    'currency',
-    currency: 'INR',
-    maximumFractionDigits: 0,
-  }).format(amount)
 }
 
 export function DecisionInsightCard({

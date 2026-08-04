@@ -32,7 +32,7 @@ import {
 } from '@/components/ui/dialog'
 import { api }            from '@/lib/api/client'
 import { useAuthStore }   from '@/stores/authStore'
-import { cn }             from '@/lib/utils'
+import { cn, formatCurrency as fmtCurrency, fmtDate } from '@/lib/utils'
 import { toast }          from 'sonner'
 import {
   StatCountChip,
@@ -112,15 +112,6 @@ function errMessage(e: unknown, fallback: string): string {
   return fallback
 }
 
-function fmtCurrency(n: number) {
-  return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(n)
-}
-function fmtDate(s: string) {
-  const dt = new Date(s.length === 10 ? s + 'T12:00:00Z' : s)
-  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
-  if (isNaN(dt.getTime())) return '—'
-  return `${String(dt.getUTCDate()).padStart(2,'0')}-${M[dt.getUTCMonth()]}-${dt.getUTCFullYear()}`
-}
 function fmtMonth(m: string) {
   const d = new Date(m.slice(0,7) + '-01T12:00:00Z')
   const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']

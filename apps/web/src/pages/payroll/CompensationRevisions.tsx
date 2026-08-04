@@ -33,7 +33,7 @@ import {
 import { toast }            from 'sonner'
 import { api }              from '@/lib/api/client'
 import { useAuthStore }     from '@/stores/authStore'
-import { cn }               from '@/lib/utils'
+import { cn, fmtDate }      from '@/lib/utils'
 import {
   IntelligenceLoadingSkeleton,
   IntelligenceEmptyState,
@@ -95,13 +95,6 @@ const TYPE_LABEL: Record<string, string> = {
 function fmt(n: number | null | undefined) {
   if (n == null) return '—'
   return `₹${Math.round(n).toLocaleString('en-IN')}`
-}
-
-function fmtDate(s: string) {
-  const dt = new Date(s.length === 10 ? s + 'T12:00:00Z' : s)
-  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
-  if (isNaN(dt.getTime())) return '—'
-  return `${String(dt.getUTCDate()).padStart(2,'0')}-${M[dt.getUTCMonth()]}-${dt.getUTCFullYear()}`
 }
 
 // ── Submit form component ──────────────────────────────────────────────────────

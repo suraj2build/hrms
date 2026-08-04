@@ -30,7 +30,7 @@ import {
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { api, ApiError } from '@/lib/api/client'
 import { useAuthStore }  from '@/stores/authStore'
-import { cn }            from '@/lib/utils'
+import { cn, formatCurrency as fmtCurrency } from '@/lib/utils'
 import { StatutoryMonthPicker, useStatutoryMonth } from '@/components/compliance/StatutoryMonthPicker'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -76,14 +76,6 @@ interface EPFContribution {
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-
-function fmtCurrency(n: number): string {
-  return new Intl.NumberFormat('en-IN', {
-    style: 'currency',
-    currency: 'INR',
-    maximumFractionDigits: 0,
-  }).format(n)
-}
 
 function fmtPct(n: number): string { return `${n}%` }
 

@@ -60,7 +60,7 @@ import { MetricCard, MetricRow } from '@/components/dashboard/MetricCard'
 import { api }           from '@/lib/api/client'
 import { EmployeeLabel }  from '@/components/employee/EmployeeLabel'
 import { useAuthStore }  from '@/stores/authStore'
-import { cn }            from '@/lib/utils'
+import { cn, fmtDate }   from '@/lib/utils'
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -383,14 +383,6 @@ function LifecycleAnalyticsTab() {
   )
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-function fmtDate(iso: string): string {
-  const d = new Date(iso.length === 10 ? iso + 'T12:00:00Z' : iso)
-  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
-  if (isNaN(d.getTime())) return '—'
-  return `${String(d.getUTCDate()).padStart(2,'0')}-${M[d.getUTCMonth()]}-${d.getUTCFullYear()}`
-}
 
 // ── Status badge ──────────────────────────────────────────────────────────────
 

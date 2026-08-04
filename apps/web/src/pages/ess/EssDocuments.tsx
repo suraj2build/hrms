@@ -24,7 +24,7 @@ import { Button }        from '@/components/ui/button'
 import { Input }         from '@/components/ui/input'
 import { api }           from '@/lib/api/client'
 import { useAuthStore }  from '@/stores/authStore'
-import { cn }            from '@/lib/utils'
+import { cn, fmtDate }   from '@/lib/utils'
 import { SubTabs }       from '@/components/ui/SubTabs'
 import { toast }         from 'sonner'
 import { uploadEmployeeFile } from '@/lib/supabase-storage'
@@ -78,14 +78,6 @@ interface EmpContract {
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-
-function fmtDate(s: string | null) {
-  if (!s) return '—'
-  const d = new Date(s.length === 10 ? s + 'T12:00:00Z' : s)
-  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
-  if (isNaN(d.getTime())) return '—'
-  return `${String(d.getUTCDate()).padStart(2,'0')}-${M[d.getUTCMonth()]}-${d.getUTCFullYear()}`
-}
 
 function fmtSize(bytes: number | null) {
   if (!bytes) return ''

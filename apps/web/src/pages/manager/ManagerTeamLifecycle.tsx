@@ -24,7 +24,7 @@ import { PageHeader }    from '@/components/layout/PageHeader'
 import { SectionCard }   from '@/components/layout/SectionCard'
 import { Button }        from '@/components/ui/button'
 import { Badge }         from '@/components/ui/badge'
-import { cn }            from '@/lib/utils'
+import { cn, fmtDate }   from '@/lib/utils'
 
 // ── Types (mirror GET /manager/team/lifecycle) ─────────────────────────────────
 
@@ -61,14 +61,6 @@ interface LifecycleData {
   expiry: { items: ExpiryItem[]; summary: { by_bucket: Record<string, number> } }
   separations: Separation[]
   trust_risks: TrustRisk[]
-}
-
-const fmtDate = (s?: string | null) => {
-  if (!s) return '—'
-  const d = new Date(s.length === 10 ? s + 'T12:00:00Z' : s)
-  if (isNaN(d.getTime())) return '—'
-  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
-  return `${String(d.getUTCDate()).padStart(2,'0')}-${M[d.getUTCMonth()]}-${d.getUTCFullYear()}`
 }
 
 const dueLabel = (days?: number) => {

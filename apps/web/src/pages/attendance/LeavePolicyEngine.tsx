@@ -36,7 +36,7 @@ import {
 import { toast }          from 'sonner'
 import { api }            from '@/lib/api/client'
 import { useAuthStore }   from '@/stores/authStore'
-import { cn }             from '@/lib/utils'
+import { cn, fmtDate, fmtDateTime } from '@/lib/utils'
 import { PolicyExplainPanel, PolicyScopeMatrix } from '@/components/operational/PolicyChain'
 import type { PolicyResolutionInfo, PolicyResolvedVia, PolicyScopeSummary } from '@/components/operational/PolicyChain'
 import { ContextualHint, ProcessStepGuide } from '@/components/operational/ContextualHint'
@@ -119,24 +119,6 @@ const OP_LABEL: Record<string, string> = {
   delete:  'Deleted',
 }
 
-function fmtDate(iso: string | null) {
-  if (!iso) return '—'
-  const s = iso
-  const d = new Date(s.length === 10 ? s + 'T12:00:00Z' : s)
-  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
-  if (isNaN(d.getTime())) return '—'
-  return `${String(d.getUTCDate()).padStart(2,'0')}-${M[d.getUTCMonth()]}-${d.getUTCFullYear()}`
-}
-
-function fmtDateTime(iso: string | null) {
-  if (!iso) return '—'
-  const d = new Date(iso)
-  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
-  if (isNaN(d.getTime())) return '—'
-  const hr = String(d.getHours()).padStart(2,'0')
-  const mn = String(d.getMinutes()).padStart(2,'0')
-  return `${String(d.getDate()).padStart(2,'0')}-${M[d.getMonth()]}-${d.getFullYear()} ${hr}:${mn}`
-}
 
 // ── Main component ─────────────────────────────────────────────────────────────
 

@@ -31,7 +31,13 @@ import {
 } from '@/components/ui/intelligence/index.js'
 import { api }               from '@/lib/api/client'
 import { useAuthStore }      from '@/stores/authStore'
-import { cn }                from '@/lib/utils'
+import {
+  cn,
+  fmtDateShort as fmtDate,
+  fmtDateShort,
+  fmtDate as fmtDateIN,
+  fmtDate as fmtDateReadable,
+}                             from '@/lib/utils'
 import { SubTabs }           from '@/components/ui/SubTabs'
 import { MetricCard, MetricRow } from '@/components/dashboard/MetricCard'
 import {
@@ -205,35 +211,6 @@ const CO_REASON_LABEL: Record<WorkedReason, string> = {
 type TabKey = 'overview' | 'ledger' | 'compoff' | 'apply'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-
-function fmtDate(s: string) {
-  const d = new Date(s + 'T12:00:00Z')
-  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
-  if (isNaN(d.getTime())) return '—'
-  return `${String(d.getUTCDate()).padStart(2,'0')}-${M[d.getUTCMonth()]}`
-}
-
-function fmtDateShort(s: string | null) {
-  if (!s) return '—'
-  const d = new Date(s + 'T12:00:00Z')
-  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
-  if (isNaN(d.getTime())) return '—'
-  return `${String(d.getUTCDate()).padStart(2,'0')}-${M[d.getUTCMonth()]}`
-}
-
-function fmtDateIN(d: string) {
-  const dt = new Date(d.length === 10 ? d + 'T12:00:00Z' : d)
-  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
-  if (isNaN(dt.getTime())) return '—'
-  return `${String(dt.getUTCDate()).padStart(2,'0')}-${M[dt.getUTCMonth()]}-${dt.getUTCFullYear()}`
-}
-
-function fmtDateReadable(s: string) {
-  const d = new Date(s + 'T12:00:00Z')
-  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
-  if (isNaN(d.getTime())) return '—'
-  return `${String(d.getUTCDate()).padStart(2,'0')}-${M[d.getUTCMonth()]}-${d.getUTCFullYear()}`
-}
 
 function daysBetween(from: string, to: string) {
   const a = new Date(`${from}T12:00:00Z`)

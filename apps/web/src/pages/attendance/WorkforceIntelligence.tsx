@@ -35,7 +35,7 @@ import { Button }         from '@/components/ui/button'
 import { Input }          from '@/components/ui/input'
 import { api }            from '@/lib/api/client'
 import { useAuthStore }   from '@/stores/authStore'
-import { cn }             from '@/lib/utils'
+import { cn, fmtDateShort as fmtDate, fmtDateTime as fmtDatetime } from '@/lib/utils'
 import {
   getChartColor, getAxisStyle, getGridStyle, getTooltipStyle,
 } from '@/components/ui/chart'
@@ -141,23 +141,6 @@ function riskLabel(score: number): string {
   if (score >= 40) return 'High'
   if (score >= 15) return 'Medium'
   return 'Low'
-}
-
-function fmtDate(iso: string) {
-  const s = iso
-  const d = new Date(s.length === 10 ? s + 'T12:00:00Z' : s)
-  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
-  if (isNaN(d.getTime())) return '—'
-  return `${String(d.getUTCDate()).padStart(2,'0')}-${M[d.getUTCMonth()]}`
-}
-
-function fmtDatetime(iso: string) {
-  const d = new Date(iso)
-  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
-  if (isNaN(d.getTime())) return '—'
-  const hr = String(d.getHours()).padStart(2,'0')
-  const mn = String(d.getMinutes()).padStart(2,'0')
-  return `${String(d.getDate()).padStart(2,'0')}-${M[d.getMonth()]}-${d.getFullYear()} ${hr}:${mn}`
 }
 
 // ── Sub-components ────────────────────────────────────────────────────────────

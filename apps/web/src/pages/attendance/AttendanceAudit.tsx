@@ -40,7 +40,7 @@ import { Input }          from '@/components/ui/input'
 import { DateInput }      from '@/components/ui/date-input'
 import { api }            from '@/lib/api/client'
 import { useAuthStore }   from '@/stores/authStore'
-import { cn }             from '@/lib/utils'
+import { cn, fmtDate }    from '@/lib/utils'
 import { usePeriodLock }  from '@/hooks/usePeriodLock'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -159,14 +159,6 @@ function fmtDatetime(iso: string) {
   const hr = String(d.getHours()).padStart(2,'0')
   const mn = String(d.getMinutes()).padStart(2,'0')
   return `${String(d.getDate()).padStart(2,'0')}-${M[d.getMonth()]}-${d.getFullYear()} ${hr}:${mn}`
-}
-
-function fmtDate(iso: string) {
-  const s = iso
-  const d = new Date(s.length === 10 ? s + 'T12:00:00Z' : s)
-  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
-  if (isNaN(d.getTime())) return '—'
-  return `${String(d.getUTCDate()).padStart(2,'0')}-${M[d.getUTCMonth()]}-${d.getUTCFullYear()}`
 }
 
 /** Convert rows to CSV and trigger browser download */

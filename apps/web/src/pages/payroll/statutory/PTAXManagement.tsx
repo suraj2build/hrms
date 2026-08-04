@@ -26,7 +26,7 @@ import { Input }         from '@/components/ui/input'
 import { DateInput }     from '@/components/ui/date-input'
 import { api }           from '@/lib/api/client'
 import { useAuthStore }  from '@/stores/authStore'
-import { cn }            from '@/lib/utils'
+import { cn, formatCurrency as fmtCurrency } from '@/lib/utils'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { StatutoryMonthPicker, useStatutoryMonth } from '@/components/compliance/StatutoryMonthPicker'
 
@@ -51,14 +51,6 @@ interface PTaxStateConfig {
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-
-function fmtCurrency(n: number): string {
-  return new Intl.NumberFormat('en-IN', {
-    style: 'currency',
-    currency: 'INR',
-    maximumFractionDigits: 0,
-  }).format(n)
-}
 
 function getLast6Months(): string[] {
   const now = new Date()

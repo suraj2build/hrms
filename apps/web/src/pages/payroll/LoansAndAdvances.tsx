@@ -18,7 +18,7 @@ import {
   CalendarClock, TrendingDown, Pause, Play, AlertTriangle,
   Landmark, CreditCard, Calculator, Users, ArrowRight,
 } from 'lucide-react'
-import { cn }                    from '@/lib/utils'
+import { cn, fmtDate }           from '@/lib/utils'
 import { SubTabs }               from '@/components/ui/SubTabs'
 import { api }                   from '@/lib/api/client'
 import { useAuthStore }          from '@/stores/authStore'
@@ -98,14 +98,6 @@ interface LoanSchedule {
 
 const fmtINR = (n: number) =>
   new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(n)
-
-const fmtDate = (d: string | null) => {
-  if (!d) return '—'
-  const dt = new Date(d.length === 10 ? `${d}T12:00:00Z` : d)
-  if (isNaN(dt.getTime())) return '—'
-  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
-  return `${String(dt.getUTCDate()).padStart(2,'0')}-${M[dt.getUTCMonth()]}-${dt.getUTCFullYear()}`
-}
 
 function empName(row: Pick<AdvanceRequest | EmployeeLoan, 'employees' | 'employee_id'>) {
   if (row.employees) return `${row.employees.first_name} ${row.employees.last_name}`
