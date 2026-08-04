@@ -93,6 +93,41 @@ function buildRefNumber(tenantId: string, caseId: string): string {
   return `${prefix}-ABSC-${suffix}`
 }
 
+// Dates (YYYY-MM-DD) within [fromDate,toDate] covered by a PENDING or APPROVED
+// leave request for this employee. Fresh-audit F10: the scan used to ignore
+// in-flight leave applications entirely — an employee whose leave is still
+// awaiting manager approval shows as 'absent' in attendance_daily (nothing
+// marks the day LEAVE until approval), so a slow-to-approve request could
+// still trigger auto-escalation. Consulted by getConsecutiveUaDays below to
+// stop counting a leave-covered day as unauthorised absence.
+async function getLeaveCoveredDates(
+  supabase:   SupabaseClient,
+  tenantId:   string,
+  employeeId: string,
+  fromDate:   string,
+  toDate:     string,
+): Promise<Set<string>> {
+  const { data } = await supabase
+    .from('leave_requests')
+    .select('from_date, to_date')
+    .eq('tenant_id', tenantId)
+    .eq('employee_id', employeeId)
+    .in('status', ['PENDING', 'APPROVED'])
+    .lte('from_date', toDate)
+    .gte('to_date', fromDate)
+
+  const covered = new Set<string>()
+  for (const row of (data ?? []) as { from_date: string; to_date: string }[]) {
+    let d = row.from_date > fromDate ? row.from_date : fromDate
+    const end = row.to_date < toDate ? row.to_date : toDate
+    while (d <= end) {
+      covered.add(d)
+      d = addDaysToDateStr(d, 1)
+    }
+  }
+  return covered
+}
+
 // Counts consecutive UA (unauthorised absence) days ending today.
 // attendance_daily is the single table every other attendance read/write path
 // in this codebase uses (status column, lowercase values) — a prior version
@@ -119,12 +154,18 @@ async function getConsecutiveUaDays(
   if (error) throw new Error(`getConsecutiveUaDays query failed: ${error.message}`)
   if (!data?.length) return 0
 
+  const leaveCovered = await getLeaveCoveredDates(supabase, tenantId, employeeId, fromDate, todayStr)
+
   let count = 0
 
   for (const rec of data as { date: string; status: string }[]) {
     const expected = addDaysToDateStr(todayStr, -count)
     // Allow weekends to not break the streak (optional — check if same diff)
     if (String(rec.date).slice(0, 10) !== expected) break
+    // F10: a day covered by a PENDING/APPROVED leave request is not
+    // unauthorised absence, even though attendance_daily still shows
+    // 'absent' until the leave is approved and recomputed.
+    if (leaveCovered.has(expected)) break
     if (rec.status === 'absent') {
       count++
     } else {
@@ -851,7 +892,23 @@ export async function scanAndEscalate(
         .range(from, to),
     )
 
-    const candidateIds = [...new Set(uaEmployees.map((r: any) => r.employee_id as string))]
+    const rawCandidateIds = [...new Set(uaEmployees.map((r: any) => r.employee_id as string))]
+
+    // F10: an employee already separated (via resignation, another absconding
+    // case, etc.) must never get a NEW case opened or an early-UA alert sent —
+    // they're gone; there's nothing to escalate. Same active-status convention
+    // used tenant-wide for headcount (executive/index.ts et al.).
+    let candidateIds = rawCandidateIds
+    if (rawCandidateIds.length) {
+      const { data: activeEmps } = await supabase
+        .from('employees')
+        .select('id')
+        .eq('tenant_id', tenantId)
+        .in('id', rawCandidateIds)
+        .in('status', ['active', 'on_notice'])
+      const activeIds = new Set(((activeEmps ?? []) as { id: string }[]).map(e => e.id))
+      candidateIds = rawCandidateIds.filter(id => activeIds.has(id))
+    }
 
     // Track employees with already-open cases (skip them)
     const { data: existingCases } = await supabase
@@ -891,9 +948,59 @@ export async function scanAndEscalate(
 
     result.cases_scanned = (openCases ?? []).length
 
+    // F10: bulk-fetch current employee status for every open case up front —
+    // one query instead of one per case — so an employee who separated via
+    // another path (resignation, a different absconding case resolving first,
+    // etc.) can be detected before this loop tries to escalate them further.
+    const caseEmployeeIds = [...new Set((openCases ?? []).map((c: any) => c.employee_id as string))]
+    const employeeStatusById = new Map<string, string>()
+    if (caseEmployeeIds.length) {
+      const { data: empRows } = await supabase
+        .from('employees')
+        .select('id, status')
+        .eq('tenant_id', tenantId)
+        .in('id', caseEmployeeIds)
+      for (const e of (empRows ?? []) as { id: string; status: string }[]) employeeStatusById.set(e.id, e.status)
+    }
+
     for (const c of (openCases ?? []) as { id: string; status: string; first_ua_date: string; ua_days_count: number; employee_id: string }[]) {
       try {
+        // F10: never continue escalating a case for someone already separated
+        // — close it instead of marching toward a redundant termination.
+        const empStatus = employeeStatusById.get(c.employee_id)
+        if (empStatus && !['active', 'on_notice'].includes(empStatus)) {
+          await resolveCase(
+            supabase, c.id, tenantId, 'system',
+            `Auto-closed: employee status is now '${empStatus}' — already separated via another path.`,
+            'closed',
+          )
+          continue
+        }
+
         await updateUaCount(supabase, c.id, tenantId)
+
+        // F10: updateUaCount recomputes ua_days_count via getConsecutiveUaDays,
+        // which now stops counting a day covered by a PENDING/APPROVED leave
+        // request as unauthorised absence. If that recompute lands on 0, the
+        // entire originally-flagged absence window is now explained by leave
+        // that was applied for (or approved) since the case opened — auto-
+        // resolve rather than leaving a stale case open with no future
+        // escalation ever able to fire again (days-since-first-UA only grows).
+        const { data: refreshed } = await supabase
+          .from('absconding_cases')
+          .select('ua_days_count')
+          .eq('id', c.id)
+          .single()
+        const currentUaDays = (refreshed as { ua_days_count: number } | null)?.ua_days_count ?? c.ua_days_count
+
+        if (currentUaDays === 0) {
+          await resolveCase(
+            supabase, c.id, tenantId, 'system',
+            'Auto-resolved: leave was applied for (or approved) covering the previously-flagged absence dates.',
+          )
+          continue
+        }
+
         const days = daysSince(c.first_ua_date, todayStr)
 
         if (c.status === 'flagged' && days >= THRESHOLDS.second_escalation) {
