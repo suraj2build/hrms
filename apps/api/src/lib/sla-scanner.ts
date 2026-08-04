@@ -42,8 +42,30 @@ const WARMUP_MS = 5 * 60 * 1_000    // 5 minutes
 // ── In-process deduplication ──────────────────────────────────────────────────
 // Prevents re-notifying the same item within one process lifetime.
 // Reset on process restart (acceptable — re-notification on restart is low-harm).
+//
+// F47: a plain Set here never evicts, so every SLA-breaching entity ever seen
+// accumulates a permanent entry for the life of the process — a slow memory
+// leak. A time-based clear would be wrong here: entries are keyed by
+// permanent entity id (not by period), so wiping the whole set on a timer
+// would re-notify HR admins every scan cycle for anything still overdue,
+// trading a slow leak for notification spam. BoundedSet instead caps total
+// size and evicts oldest-inserted first — memory stays bounded, and eviction
+// only discards entries once the set holds more distinct breaches than any
+// realistic tenant would produce between scans.
+class BoundedSet<T> {
+  private readonly set = new Set<T>()
+  constructor(private readonly maxSize: number) {}
+  has(v: T): boolean { return this.set.has(v) }
+  add(v: T): void {
+    this.set.add(v)
+    if (this.set.size > this.maxSize) {
+      const oldest = this.set.values().next().value
+      if (oldest !== undefined) this.set.delete(oldest)
+    }
+  }
+}
 
-const notifiedIds = new Set<string>()
+const notifiedIds = new BoundedSet<string>(50_000)
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 

@@ -74,8 +74,31 @@ const RISK_SCORE_HIGH  = 65
 
 // ── In-process dedup ───────────────────────────────────────────────────────────
 // Prevents re-emitting the same event for the same entity within one process lifetime.
+//
+// F47: a plain Set here never evicts. Several keys embed a month/day label
+// (e.g. `repeated-late:${tenantId}:${empId}:${month}`), so this grows every
+// scan cycle for every tenant/employee/event-type/period combination,
+// forever — the worst of the two files with this bug class. A time-based
+// clear would be wrong here too: these keys exist specifically to dedup
+// "once per month" — periodically wiping the whole set would re-fire the
+// same event every clear cycle instead of once a month. BoundedSet caps
+// total size and evicts oldest-inserted first, which bounds memory without
+// disturbing in-month dedup (a key only gets evicted once the set holds far
+// more distinct period-keys than any tenant would produce in a scan cycle).
+class BoundedSet<T> {
+  private readonly set = new Set<T>()
+  constructor(private readonly maxSize: number) {}
+  has(v: T): boolean { return this.set.has(v) }
+  add(v: T): void {
+    this.set.add(v)
+    if (this.set.size > this.maxSize) {
+      const oldest = this.set.values().next().value
+      if (oldest !== undefined) this.set.delete(oldest)
+    }
+  }
+}
 
-const emittedKeys = new Set<string>()
+const emittedKeys = new BoundedSet<string>(100_000)
 
 function shouldEmit(key: string): boolean {
   if (emittedKeys.has(key)) return false
@@ -84,11 +107,6 @@ function shouldEmit(key: string): boolean {
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-
-function currentMonth(): string {
-  const now = new Date()
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
-}
 
 /**
  * Tenant-local "today" as YYYY-MM-DD. Scanners that match exact lifecycle
@@ -123,7 +141,7 @@ async function fetchTenantIds(supabase: SupabaseClient): Promise<string[]> {
 
 async function scanRepeatedLate(supabase: SupabaseClient, tenantId: string): Promise<void> {
   const from = lookbackFrom()
-  const month = currentMonth()
+  const month = (await tenantTodayStr(supabase, tenantId)).slice(0, 7)
 
   const rows = await fetchAllRows((f, t) =>
     supabase
@@ -179,7 +197,7 @@ async function scanRepeatedLate(supabase: SupabaseClient, tenantId: string): Pro
 
 async function scanBurnout(supabase: SupabaseClient, tenantId: string): Promise<void> {
   const from  = lookbackFrom()
-  const month = currentMonth()
+  const month = (await tenantTodayStr(supabase, tenantId)).slice(0, 7)
 
   const rows = await fetchAllRows((f, t) =>
     supabase
@@ -325,7 +343,7 @@ async function scanStaffingShortages(supabase: SupabaseClient, tenantId: string)
 // ── Scanner 4 — Payroll Blockers ──────────────────────────────────────────────
 
 async function scanPayrollBlockers(supabase: SupabaseClient, tenantId: string): Promise<void> {
-  const month = currentMonth()
+  const month = (await tenantTodayStr(supabase, tenantId)).slice(0, 7)
 
   // Get active employees without compensation records
   const employees = await fetchAllRows((f, t) =>
@@ -408,7 +426,7 @@ async function scanPayrollBlockers(supabase: SupabaseClient, tenantId: string): 
 
 async function scanAttendanceRisk(supabase: SupabaseClient, tenantId: string): Promise<void> {
   const from  = lookbackFrom()
-  const month = currentMonth()
+  const month = (await tenantTodayStr(supabase, tenantId)).slice(0, 7)
 
   const rows = await fetchAllRows((f, t) =>
     supabase
@@ -869,13 +887,18 @@ async function scanAutoPolls(supabase: SupabaseClient, tenantId: string): Promis
 // ── Scanner 10 — Mood theme alerts ───────────────────────────────────────────
 
 async function scanMoodThemeAlerts(supabase: SupabaseClient, tenantId: string): Promise<void> {
-  const sevenDaysAgo = new Date(); sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7)
-  const week = `${new Date().getFullYear()}-W${String(Math.ceil(new Date().getDate() / 7)).padStart(2, '0')}`
+  // F48: was server-local (new Date()) for both the lookback window and the
+  // dedup week label — derive both from tenant-local "today" instead, same
+  // fix pattern as currentMonth() above.
+  const today       = await tenantTodayStr(supabase, tenantId)
+  const sevenDaysAgo = shiftDateStr(today, -7)
+  const [yStr, , dStr] = today.split('-')
+  const week = `${yStr}-W${String(Math.ceil(Number(dStr) / 7)).padStart(2, '0')}`
 
   const { data: checkins } = await supabase
     .from('mood_checkins').select('employee_id, sentiment_category, employees!inner(work_location_id, tenant_id)')
     .eq('tenant_id', tenantId).eq('sentiment_label', 'negative')
-    .gte('checkin_date', sevenDaysAgo.toISOString().slice(0, 10))
+    .gte('checkin_date', sevenDaysAgo)
     .not('sentiment_category', 'is', null)
 
   if (!checkins?.length) return
@@ -1139,7 +1162,7 @@ async function scanSurveyNegativeClusters(supabase: SupabaseClient, tenantId: st
 // ── Scanner 17 — Onboarding score degradation ─────────────────────────────────
 
 async function scanOnboardingDegradation(supabase: SupabaseClient, tenantId: string): Promise<void> {
-  const month = currentMonth()
+  const month = (await tenantTodayStr(supabase, tenantId)).slice(0, 7)
 
   // Find employees who have completed both D30 and D60 surveys
   const d30Results = await fetchAllRows<{ employee_id: string }>((from, to) =>
@@ -1203,7 +1226,7 @@ async function scanOnboardingDegradation(supabase: SupabaseClient, tenantId: str
 // ── Scanner 18 — Succession candidate attrition risk ─────────────────────────
 
 async function scanSuccessionAttritionRisk(supabase: SupabaseClient, tenantId: string): Promise<void> {
-  const month = currentMonth()
+  const month = (await tenantTodayStr(supabase, tenantId)).slice(0, 7)
 
   const { data: candidates } = await supabase.from('succession_candidates')
     .select('id, employee_id, plan_id')

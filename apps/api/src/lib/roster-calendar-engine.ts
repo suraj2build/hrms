@@ -136,6 +136,13 @@ function daysBetween(a: Date, b: Date): number {
   return Math.floor((b.getTime() - a.getTime()) / 86_400_000)
 }
 
+/** Shift a YYYY-MM-DD string by deltaDays via Date.UTC at UTC-noon — DST-safe,
+ *  unlike subtracting raw milliseconds from a local-timezone Date. */
+function shiftDateStrUtc(dateStr: string, deltaDays: number): string {
+  const [y, m, d] = dateStr.split('-').map(Number)
+  return new Date(Date.UTC(y, m - 1, d + deltaDays, 12)).toISOString().slice(0, 10)
+}
+
 // ── Saturday Helpers ──────────────────────────────────────────────────────────
 
 /**
@@ -579,7 +586,12 @@ export async function checkFatigueRisk(
   const maxConsec   = fatigueRules?.max_consecutive_workdays ?? 6
   const minRest     = fatigueRules?.min_rest_hours           ?? 8
 
-  const lookback    = formatDate(new Date(parseDate(dateStr).getTime() - 14 * 86_400_000))
+  // F11: shift the 14-day lookback via Date.UTC at UTC-noon (mirrors
+  // intelligence-scanner.ts's shiftDateStr) rather than subtracting raw
+  // milliseconds from a local-timezone Date — the old form isn't DST-safe on
+  // any host whose process TZ observes DST, which could silently shrink/grow
+  // the lookback window by a day around a DST transition.
+  const lookback    = shiftDateStrUtc(dateStr, -14)
 
   const { data: rows } = await supabase
     .from('attendance_daily')
