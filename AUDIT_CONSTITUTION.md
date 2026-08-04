@@ -562,7 +562,7 @@ Code cannot be written until the product team makes a decision on the open quest
 
 | ID | Title | Blocked on |
 |----|-------|-----------|
-| ~~PD-1 / AF-001~~ | ~~Employee lifecycle ↔ auth revocation sync~~ | **CLOSED 2026-07-03** — implemented in `separation-workflow.ts`; CC6.3 now `implemented`. |
+| ~~PD-1 / AF-001~~ | ~~Employee lifecycle ↔ auth revocation sync~~ | **CLOSED 2026-07-25 (ISSUE-136)**, not 2026-07-03 as originally recorded here — the 2026-07-03 claim covered only 1 of 5 separation paths (`separation-workflow.ts`) and was false; verified and fixed across all 5 paths via `revokeEmployeeAuth()`. See §6.6 for the full correction. CC6.3 now `implemented` (migration 390). The narrower revocation-*timing* question (grace period vs. immediate) that AF-001 also raised remains genuinely open per §6.6 — not part of this closure. |
 | PD-2 | Helpdesk admin ticket list — `GET /helpdesk/tickets` bulk "Select All" semantics unknown; scope of safe pagination depends on whether Select All is page-scoped or match-all. | Product decision on Select All behaviour |
 
 ---

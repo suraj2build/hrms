@@ -4,6 +4,8 @@
 **Authoritative record:** [`AUDIT_CONSTITUTION.md`](./AUDIT_CONSTITUTION.md)  
 **Branch:** `claude/cool-planck-k749sn` (83 commits from audit-remediation start to close)
 
+> **Correction (2026-07-25):** the AF-001/PD-1 status below ("SOC 2 CC6.3 in_progress", "product decision on revocation timing pending") is stale. AF-001 was reopened, found to be false (only 1 of 5 separation paths actually revoked auth, not all of them as this document originally claimed), and genuinely closed under ISSUE-136 — all 5 paths now call `revokeEmployeeAuth()`; CC6.3 is `implemented`. `AUDIT_CONSTITUTION.md` §6.6 and §11.3 are the current, authoritative record; this document is left as the original point-in-time snapshot and is not itself updated further.
+
 ---
 
 ## What was audited
