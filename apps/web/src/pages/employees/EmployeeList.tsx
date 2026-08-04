@@ -25,7 +25,7 @@ import {
 import { api }            from '@/lib/api/client'
 import { useBasePath }    from '@/lib/routing'
 import { useAuthStore }   from '@/stores/authStore'
-// import { cn }          from '@/lib/utils'
+import { getInitials }    from '@/lib/utils'
 import type { EmployeeListItem } from '@/types'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -64,10 +64,6 @@ function deptColor(name: string): string {
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
-
-function getInitials(first: string, last: string): string {
-  return `${first[0] ?? ''}${last[0] ?? ''}`.toUpperCase()
-}
 
 function tenureDisplay(joining: string): { short: string; full: string; months: number } {
   const ms = Date.now() - new Date(joining).getTime()
@@ -721,7 +717,7 @@ function EmployeeRow({
   const opState  = deriveOpState(emp)
   const access   = deriveAccessDisplay(emp)
   const tenure   = tenureDisplay(emp.joining_date)
-  const initials = getInitials(emp.first_name, emp.last_name)
+  const initials = getInitials(`${emp.first_name} ${emp.last_name}`)
   const avatar   = avatarPalette(emp.employee_code)
   const dept     = emp.department
   const loc      = emp.work_location

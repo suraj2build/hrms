@@ -14,7 +14,7 @@ import {
   Calendar, Activity, User, MapPin, Mail, Phone,
   Briefcase, Building2,
 } from 'lucide-react'
-import { cn }          from '@/lib/utils'
+import { cn, getInitials } from '@/lib/utils'
 import { api }         from '@/lib/api/client'
 import { Button }      from '@/components/ui/button'
 import { Badge }       from '@/components/ui/badge'
@@ -68,15 +68,6 @@ function timeAgo(iso: string): string {
   if (days < 7)  return `${days}d ago`
   const weeks = Math.floor(days / 7)
   return `${weeks}w ago`
-}
-
-function getInitials(name: string): string {
-  return name
-    .split(' ')
-    .map(p => p[0] ?? '')
-    .slice(0, 2)
-    .join('')
-    .toUpperCase()
 }
 
 /** Safely coerce every value in an unknown object to string for display. */
