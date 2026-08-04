@@ -601,21 +601,35 @@ export default async function importRoutes(fastify: FastifyInstance) {
       return reply.code(404).send({ error: 'NOT_FOUND', message: 'Import job not found' })
     }
 
-    if (!['pending', 'validating', 'validated', 'importing'].includes(job.status as string)) {
+    const CANCELLABLE_STATUSES = ['pending', 'validating', 'validated', 'importing']
+    if (!CANCELLABLE_STATUSES.includes(job.status as string)) {
       return reply.code(409).send({
         error:   'CONFLICT',
         message: `Cannot cancel a job with status "${job.status}". Only pending/validating/validated/importing jobs can be cancelled.`,
       })
     }
 
-    const { error: updateErr } = await fastify.supabase
+    // F5: fold the status precondition into the UPDATE's own WHERE clause —
+    // two concurrent /jobs/:id DELETE calls (or a delete racing the import
+    // pipeline's own status writes) would otherwise both pass the earlier
+    // SELECT-based check and both apply, silently duplicating the cancel.
+    const { data: cancelled, error: updateErr } = await fastify.supabase
       .from('import_jobs')
       .update({ status: 'cancelled', completed_at: new Date().toISOString() })
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
+      .in('status', CANCELLABLE_STATUSES)
+      .select('id')
+      .maybeSingle()
 
     if (updateErr) {
       return serverError(req, reply, updateErr, ErrorCode.UPDATE_FAILED, 'Failed to cancel import job')
+    }
+    if (!cancelled) {
+      return reply.code(409).send({
+        error:   'CONFLICT',
+        message: 'Import job status changed before the cancel could be applied — please refresh and retry.',
+      })
     }
 
     return reply.send({ success: true, message: 'Import job cancelled' })
