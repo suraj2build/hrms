@@ -964,58 +964,14 @@ export async function computeDay(
     }
   }
 
-  // 3. Approved leave → LEAVE (session-aware). Only reached on actual working
-  //    days now — rest days above already returned.
-  //
-  // resolveLeaveSessionForDate resolves THIS specific date's session from the
-  // duration engine's per-day breakdown (SYSCERT_AUDIT_2026-08-02.md C3) —
-  // required for multi-day requests with a half-day start/end (the legacy
-  // `session` column holds one value for the whole request, which is wrong
-  // for every day but the boundary it actually applies to). Returns null when
-  // the duration engine resolved this date to no charge (holiday/weekoff skip,
-  // sandwich-exclude, attendance-overlap) — treat as if there's no approved
-  // leave and fall through to the punch-based path below.
-  const resolvedSession = approvedLeave ? resolveLeaveSessionForDate(approvedLeave, date) : null
-  if (approvedLeave && resolvedSession) {
-    const { is_paid, hours_requested } = approvedLeave
-    const isFractional = resolvedSession !== 'full_day'
-    // For a fractional (half-day or hourly) leave, the rest of the day may
-    // have been worked. Treat the presence of punches as the worked remainder
-    // so the day merges to a full payable day instead of losing the worked
-    // portion. For a full-day leave this is a no-op. resolveLeaveDayFraction
-    // also fixes unpaid-fractional-leave-alone handling (→ 0 payable for that
-    // portion). hoursRequested/stdShiftHours only affect the 'hourly' case —
-    // previously 'hourly' fell through to the same flat 0.5 as half-day,
-    // silently over-crediting (paid) or fully zeroing (unpaid) the day
-    // regardless of how many hours were actually requested.
-    const resolved = resolveLeaveDayFraction({
-      session:        resolvedSession,
-      isPaid:         is_paid,
-      existingStatus: isFractional && punches.length > 0 ? 'present' : null,
-      hoursRequested: hours_requested,
-      stdShiftHours:  shift ? shift.durationMin / 60 : 8,
-    })
-    const reason = resolvedSession === 'hourly'
-      ? `Approved ${hours_requested ?? '?'}h leave on ${date}`
-      : (isFractional ? `Approved half-day (${resolvedSession}) leave on ${date}` : `Approved leave on ${date}`)
-    return {
-      tenant_id, employee_id, date,
-      status:               resolved.status,
-      work_hours:           0,
-      late_minutes:         0,
-      overtime_minutes:     0,
-      is_payable:           resolved.is_payable,
-      day_fraction:         resolved.day_fraction,
-      worked_on_weekly_off: false,
-      worked_on_holiday:    false,
-      computed_source:      'engine' as const,
-      ...shiftAttribution,
-      reason,
-      meta:                 { punchesCount: punches.length, hasUnpunchedOut: false },
-    }
-  }
-
-  // ── 4. Punch-based computation ─────────────────────────────────────────────
+  // ── Real punch-pairing (fresh audit finding F7, SYSCERT_AUDIT_2026-08-03.md) ─
+  // Computed unconditionally, BEFORE the leave check below, so a fractional
+  // (half-day/hourly) leave's "did they work the rest of the day?" question is
+  // answered from actual paired-punch minutes against the shift's present/
+  // half-day thresholds — not from a naive `punches.length > 0` proxy, which
+  // previously granted full worked-remainder credit for a single stray punch
+  // (e.g. a forgotten punch-out, or an accidental double punch-in) regardless
+  // of how many minutes were actually worked.
 
   const { sessions: _sessions, workedMinutes, firstInTime, hasUnpunchedOut } = pairPunches(punches, shiftEndFallback)
   const totalMinutes    = workedMinutes   // already clamped to [0, 1440]
@@ -1086,6 +1042,63 @@ export async function computeDay(
   const punchMeta: AttendanceDailyMeta = { punchesCount: punches.length, hasUnpunchedOut }
   // Comp-off credit basis: a half-day's work banks 0.5 comp-off, a full day banks 1.0.
   const workedFraction = status === 'half_day' ? 0.5 : 1.0
+
+  // 3. Approved leave → LEAVE (session-aware). Only reached on actual working
+  //    days now — rest days above already returned.
+  //
+  // resolveLeaveSessionForDate resolves THIS specific date's session from the
+  // duration engine's per-day breakdown (SYSCERT_AUDIT_2026-08-02.md C3) —
+  // required for multi-day requests with a half-day start/end (the legacy
+  // `session` column holds one value for the whole request, which is wrong
+  // for every day but the boundary it actually applies to). Returns null when
+  // the duration engine resolved this date to no charge (holiday/weekoff skip,
+  // sandwich-exclude, attendance-overlap) — treat as if there's no approved
+  // leave and fall through to the punch-based path below.
+  const resolvedSession = approvedLeave ? resolveLeaveSessionForDate(approvedLeave, date) : null
+  if (approvedLeave && resolvedSession) {
+    const { is_paid, hours_requested } = approvedLeave
+    const isFractional = resolvedSession !== 'full_day'
+    // For a fractional (half-day or hourly) leave, the rest of the day may
+    // have been worked. `status`/`dayFraction` above are the REAL punch-paired
+    // outcome for the day (computed against the shift's present/half-day
+    // thresholds, same as the plain punch-based path below) — pass them
+    // through as the worked remainder so the day merges to a full payable day
+    // only when actually earned, not merely punched. For a full-day leave this
+    // is a no-op. resolveLeaveDayFraction also fixes unpaid-fractional-leave-
+    // alone handling (→ 0 payable for that portion). hoursRequested/
+    // stdShiftHours only affect the 'hourly' case — previously 'hourly' fell
+    // through to the same flat 0.5 as half-day, silently over-crediting (paid)
+    // or fully zeroing (unpaid) the day regardless of how many hours were
+    // actually requested.
+    const resolved = resolveLeaveDayFraction({
+      session:          resolvedSession,
+      isPaid:           is_paid,
+      existingStatus:   isFractional ? status : null,
+      existingFraction: isFractional ? dayFraction : null,
+      hoursRequested:   hours_requested,
+      stdShiftHours:    shift ? shift.durationMin / 60 : 8,
+    })
+    const leaveReason = resolvedSession === 'hourly'
+      ? `Approved ${hours_requested ?? '?'}h leave on ${date}`
+      : (isFractional ? `Approved half-day (${resolvedSession}) leave on ${date}` : `Approved leave on ${date}`)
+    return {
+      tenant_id, employee_id, date,
+      status:               resolved.status,
+      work_hours:           isFractional ? workHours : 0,
+      late_minutes:         isFractional ? lateMinutes : 0,
+      overtime_minutes:     isFractional ? overtimeMinutes : 0,
+      is_payable:           resolved.is_payable,
+      day_fraction:         resolved.day_fraction,
+      worked_on_weekly_off: false,
+      worked_on_holiday:    false,
+      computed_source:      'engine' as const,
+      ...shiftAttribution,
+      reason:               leaveReason,
+      meta:                 { punchesCount: punches.length, hasUnpunchedOut: isFractional ? hasUnpunchedOut : false },
+    }
+  }
+
+  // ── 4. Punch-based computation ─────────────────────────────────────────────
 
   // Worked on weekly off → PRESENT + flag (only if enough hours to not be ABSENT —
   // a sub-threshold punch must NOT bank a full comp-off; it falls through to weekly_off).
