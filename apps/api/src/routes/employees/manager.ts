@@ -14,7 +14,7 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { logAction } from '../../lib/audit-service.js'
-import { serverError, ErrorCode } from '../../lib/api-errors.js'
+import { serverError, conflictError, ErrorCode } from '../../lib/api-errors.js'
 
 const MAX_DEPTH = 20   // maximum manager-chain depth before aborting cycle check
 
@@ -63,6 +63,10 @@ export default async function employeeManagerRoutes(fastify: FastifyInstance) {
 
     const bodySchema = z.object({
       manager_id: z.string().uuid('manager_id must be a valid UUID').nullable(),
+      // expected_version is optional so this stays backward-compatible with
+      // a frontend that hasn't been updated to send it yet — the CAS check
+      // below only runs when a caller actually provides it.
+      expected_version: z.number().int().positive().optional(),
     })
     const parsed = bodySchema.safeParse(req.body)
     if (!parsed.success) {
@@ -72,10 +76,11 @@ export default async function employeeManagerRoutes(fastify: FastifyInstance) {
       })
     }
 
-    const { manager_id } = parsed.data
+    const { manager_id, expected_version } = parsed.data
 
-    // reassign_manager_atomic() (migration 414) does the tenant-scope check,
-    // the self-assignment/circular-reference chain-walk, and the UPDATE all
+    // reassign_manager_atomic() (migration 414, CAS support added in 429)
+    // does the tenant-scope check, the self-assignment/circular-reference
+    // chain-walk, the optimistic-concurrency check, and the UPDATE all
     // inside one transaction, serialized against every other manager
     // reassignment for this tenant via an advisory lock — an app-layer
     // chain-walk followed by a separate UPDATE (the old shape) left a gap
@@ -83,10 +88,11 @@ export default async function employeeManagerRoutes(fastify: FastifyInstance) {
     // neither one individually would create.
     const { data: rpcData, error: rpcErr } = await fastify.supabase
       .rpc('reassign_manager_atomic', {
-        p_tenant_id:      req.tenantId,
-        p_employee_id:    id,
-        p_new_manager_id: manager_id,
-        p_max_depth:      MAX_DEPTH,
+        p_tenant_id:        req.tenantId,
+        p_employee_id:      id,
+        p_new_manager_id:   manager_id,
+        p_max_depth:        MAX_DEPTH,
+        p_expected_version: expected_version ?? null,
       })
       .single()
     if (rpcErr) return serverError(req, reply, rpcErr, ErrorCode.UPDATE_FAILED, 'Failed to update manager')
@@ -106,14 +112,11 @@ export default async function employeeManagerRoutes(fastify: FastifyInstance) {
         message: 'Setting this manager would create a circular reporting chain.',
       })
     }
+    if (outcome === 'version_conflict') {
+      return conflictError(reply, ErrorCode.VERSION_CONFLICT,
+        'This employee was changed by someone else. Reload and try again.')
+    }
 
-    // PEND-105: reassign_manager_atomic() (migration 414) performs the UPDATE
-    // itself inside the RPC's own transaction — its current signature has no
-    // p_expected_version param to plumb a CAS check through, and rewriting
-    // the RPC's SQL is out of scope for this batch (needs a matching
-    // migration). `version` is surfaced here so callers can at least read
-    // the post-update value; full CAS protection for this endpoint is
-    // tracked separately.
     const { data, error } = await fastify.supabase
       .from('employees')
       .select('id, employee_code, first_name, last_name, manager_id, version')

@@ -279,13 +279,16 @@ export default async function compensationRoutes(fastify: FastifyInstance) {
   fastify.get('/compensation-policy', auth, async (req: any, reply) => {
     const policy = await fetchCompensationPolicy(fastify, req.tenantId)
     // Tell the client whether a real row exists (vs engine defaults) so the UI
-    // can indicate "using defaults" until the tenant saves.
+    // can indicate "using defaults" until the tenant saves. Also carries
+    // `version` — the engine helper's own return shape stays untouched
+    // (used elsewhere purely for computation, not CAS) so this is fetched
+    // as a second, separate field alongside the existing is_configured check.
     const { data } = await fastify.supabase
       .from('compensation_policies')
-      .select('tenant_id')
+      .select('tenant_id, version')
       .eq('tenant_id', req.tenantId)
       .maybeSingle()
-    return reply.send({ data: { ...policy, is_configured: !!data } })
+    return reply.send({ data: { ...policy, is_configured: !!data, version: data?.version } })
   })
 
   // ── PUT /compensation-policy  → upsert-with-CAS tenant statutory policy ──────

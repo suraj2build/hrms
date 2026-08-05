@@ -110,7 +110,7 @@ export default async function employeeRoutes(fastify: FastifyInstance) {
       emps = await fetchAllRows((from, to) =>
         fastify.supabase
           .from('employees')
-          .select('id, employee_code, first_name, last_name, email, status, manager_id')
+          .select('id, employee_code, first_name, last_name, email, status, manager_id, version')
           .eq('tenant_id', request.tenantId)
           .neq('status', 'separated')
           .order('first_name', { ascending: true })
@@ -149,7 +149,7 @@ export default async function employeeRoutes(fastify: FastifyInstance) {
     interface OrgNode {
       id: string; employee_code: string; name: string; email: string; status: string
       designation: string | null; department: string | null; profile_photo: string | null
-      manager_id: string | null; children: OrgNode[]
+      manager_id: string | null; version: number; children: OrgNode[]
     }
 
     const nodeMap = new Map<string, OrgNode>()
@@ -167,6 +167,7 @@ export default async function employeeRoutes(fastify: FastifyInstance) {
         department:    job?.departments?.name ?? null,
         profile_photo: photoMap.get(e.id) ?? null,
         manager_id:    managerId,
+        version:       e.version,
         children:      [],
       })
     }
