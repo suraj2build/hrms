@@ -146,11 +146,34 @@ Update baselines after a batch conversion: `node scripts/check-manual-500s.mjs -
 
 ## Tenant licensing — the contract HRMS depends on
 
-Tenant licensing is owned by the **owner portal** (a separate deployment,
-`cognix-owner.vercel.app`, which now also hosts the **CogniDesk** license flow).
-The HRMS is a **pure consumer** — it never writes license state. The contract is
-the shared `tenants` row:
+**Decision (2026-08-05, closing AUDIT_FINDINGS_2026-08-03.md's F28 — see
+ISSUE-195 in AUDIT_CONSTITUTION.md): HRMS is now the sole owner and writer of
+its own tenant licensing state.** The previously-separate owner-portal
+deployment (`cognix-owner.vercel.app`) is retired as a functional app — it no
+longer writes `tenants.status`. There are exactly two writers, and both live
+in this repo:
 
+- **`apps/api/src/routes/owner/index.ts`** (`/owner/*`) — manual platform-admin
+  actions (activate / suspend / cancel / issue-license / hard delete), gated by
+  `fastify.authenticateOwner` against `platform_admins`. This is the
+  authoritative layer.
+- **`apps/api/src/routes/billing/index.ts`** (`/billing/webhook`) — automated
+  Razorpay self-serve subscription events, signature-verified (see
+  `BILLING.md`).
+
+**Coordination rule, so the two writers can't race:** `/owner/tenants/:id/suspend`,
+`/cancel`, and the hard `DELETE` each cancel the tenant's live Razorpay
+subscription (if `razorpay_subscription_id` is set) in the same request. This
+stops a delayed/retried webhook event from silently reactivating a tenant an
+owner just suspended or cancelled — the manual action always wins because
+there's no longer a pending subscription left to fire a future event.
+
+This `tenants` table (`supabase/migrations/001`/`202`/`278`) has **no
+product-scoping column** — verified: it is CognixHR's own table, not shared
+with CogniDesk or any other product. If a second product is ever made to
+share this same table, this whole section needs a rewrite before that's safe.
+
+The contract itself is unchanged:
 - **`tenants.status`** drives access: `active` / `trial` allow use;
   `suspended` / `expired` / `cancelled` block writes.
 - **`tenants.trial_ends_at`** ends a `trial` once past.
@@ -163,11 +186,11 @@ open so a lapsed tenant can still reach the billing page to recover.
 
 Rules to avoid breaking this:
 - HRMS must keep gating on **`tenants.status`** — don't couple it to
-  `license_expires_at` or `subscription_status`. The owner portal is responsible
-  for flipping `status → expired` when a license lapses (HRMS already blocks
-  `expired`, so it takes effect on the next write automatically).
-- The owner-side `/owner/*` API in this repo (`apps/api/src/routes/owner`) writes
-  `tenants.status`/`license_*`; the deployed owner portal may differ. Treat
-  `tenants.status` semantics as **HRMS-facing** — be careful that CogniDesk's
-  merged flow doesn't repurpose the same shared field for a different product.
+  `license_expires_at` or `subscription_status`.
+- Never add a third writer of `tenants.status` outside `owner/index.ts` and
+  `billing/index.ts` without also updating the coordination rule above.
+- A platform admin reaches `/owner/*` at this same app's own domain
+  (`/owner/login`) — the old separate owner-portal domain, if it still
+  resolves anywhere, should only ever show a landing page that links here,
+  never a live app with its own DB credentials.
 

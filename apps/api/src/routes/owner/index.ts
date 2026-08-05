@@ -55,6 +55,7 @@ import { z } from 'zod'
 import { testConnection, effectiveModel, type AssistantConfig } from '../../lib/ai/llm.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
 import { serverError, notFound, ErrorCode } from '../../lib/api-errors.js'
+import { getRazorpay, isBillingConfigured } from '../../lib/razorpay.js'
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -112,6 +113,38 @@ async function purgeTenantStorage(supabase: any, tenantId: string): Promise<numb
     if (!error) removed += batch.length
   }
   return removed
+}
+
+/**
+ * Best-effort sync of a tenant's live Razorpay subscription with a manual
+ * owner status change, so a delayed/retried webhook event can never
+ * silently undo it (CLAUDE.md "Tenant licensing" — HRMS is the sole writer
+ * of tenants.status, ISSUE-195). Never throws — the caller's tenants.status
+ * write is the primary action and must still take effect immediately even
+ * if Razorpay is unreachable; a failure here is logged for follow-up, not
+ * blocking. A no-op when billing isn't configured or the tenant has no
+ * live subscription (the common case for enterprise/manually-onboarded
+ * tenants, which never had a razorpay_subscription_id in the first place).
+ */
+async function syncRazorpaySubscription(
+  supabase: any, tenantId: string, action: 'pause' | 'resume' | 'cancel', log: any,
+): Promise<void> {
+  if (!isBillingConfigured()) return
+  const { data: tenant } = await supabase
+    .from('tenants').select('razorpay_subscription_id').eq('id', tenantId).maybeSingle()
+  const subId = tenant?.razorpay_subscription_id as string | undefined | null
+  if (!subId) return
+  try {
+    const rzp = getRazorpay()
+    if (action === 'pause')  await rzp.subscriptions.pause(subId, { pause_at: 'now' })
+    if (action === 'resume') await rzp.subscriptions.resume(subId, { resume_at: 'now' })
+    if (action === 'cancel') await rzp.subscriptions.cancel(subId, false)  // false = immediate, not at cycle end
+  } catch (e: any) {
+    log.error(
+      { err: e, tenant_id: tenantId, subscription_id: subId, action },
+      `owner: failed to ${action} Razorpay subscription during a manual tenant status change — a stray webhook event could still override this tenant's status later`,
+    )
+  }
 }
 
 /** Slugify a company name */
@@ -424,6 +457,10 @@ export default async function ownerRoutes(fastify: FastifyInstance) {
       .from('tenants').update({ status: 'active' }).eq('id', id).select('id, status').maybeSingle()
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to activate tenant')
     if (!data) return notFound(reply, 'TENANT_NOT_FOUND', 'Tenant not found')
+    // Best-effort — resumes a previously-paused self-serve subscription so
+    // billing actually continues for an active tenant; a no-op for
+    // enterprise tenants with no Razorpay subscription at all.
+    await syncRazorpaySubscription(fastify.supabase, id, 'resume', req.log)
     return reply.send({ data })
   })
 
@@ -446,6 +483,11 @@ export default async function ownerRoutes(fastify: FastifyInstance) {
       .eq('id', id).select('id, status').maybeSingle()
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to suspend tenant')
     if (!data) return notFound(reply, 'TENANT_NOT_FOUND', 'Tenant not found')
+    // ISSUE-195 — pause (not cancel) any live Razorpay subscription so a
+    // delayed subscription.charged/activated webhook event can't silently
+    // flip this tenant back to 'active' underneath the manual suspend.
+    // Paused, not cancelled, because suspend is meant to be reversible.
+    await syncRazorpaySubscription(fastify.supabase, id, 'pause', req.log)
     return reply.send({ data })
   })
 
@@ -456,6 +498,10 @@ export default async function ownerRoutes(fastify: FastifyInstance) {
       .from('tenants').update({ status: 'cancelled' }).eq('id', id).select('id, status').maybeSingle()
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to cancel tenant')
     if (!data) return notFound(reply, 'TENANT_NOT_FOUND', 'Tenant not found')
+    // ISSUE-195 — cancel (not pause) any live Razorpay subscription. Unlike
+    // suspend, cancel is meant to be terminal, and cancelling here also
+    // means no further webhook events will ever fire for this subscription.
+    await syncRazorpaySubscription(fastify.supabase, id, 'cancel', req.log)
     return reply.send({ data })
   })
 
@@ -475,6 +521,11 @@ export default async function ownerRoutes(fastify: FastifyInstance) {
     const { data: profileRows } = await fastify.supabase
       .from('profiles').select('id').eq('tenant_id', id)
     const userIds = (profileRows ?? []).map((p: any) => p.id)
+
+    // ISSUE-195 — cancel any live Razorpay subscription BEFORE the row is
+    // gone, since the tenant_id needed to look it up won't exist afterward.
+    // Best-effort: never blocks the delete.
+    await syncRazorpaySubscription(fastify.supabase, id, 'cancel', req.log)
 
     // Delete the tenant — ON DELETE CASCADE removes all dependent tenant rows
     const { error: delErr } = await fastify.supabase

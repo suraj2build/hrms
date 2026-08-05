@@ -16,6 +16,7 @@ import PeoplePage from "./pages/modules/People";
 import RecruitmentPage from "./pages/modules/Recruitment";
 import AnalyticsPage from "./pages/modules/Analytics";
 import ESSPage from "./pages/modules/ESS";
+import OwnerPortalPage from "./pages/OwnerPortal";
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
@@ -34,6 +35,7 @@ createRoot(document.getElementById("root")!).render(
         <Route path="/modules/recruitment" element={<RecruitmentPage />} />
         <Route path="/modules/analytics" element={<AnalyticsPage />} />
         <Route path="/modules/ess" element={<ESSPage />} />
+        <Route path="/owner" element={<OwnerPortalPage />} />
         <Route path="*" element={<NotFound />} />
       </Routes>
     </BrowserRouter>
