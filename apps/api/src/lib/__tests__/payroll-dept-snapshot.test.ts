@@ -157,39 +157,61 @@ describe('aggregateDeptCost — reconciliation invariants', () => {
 
 // ── buildDeptSnapshots against a mocked Supabase ────────────────────────────────
 
-interface Captured { deleted: any; inserted: any[] | null }
+interface Captured {
+  /** Rows passed to the .upsert() call, if it was reached. */
+  inserted: any[] | null
+  /** True if the narrow "delete the null-department row first" call fired. */
+  deletedUnassigned: boolean
+  /** True if the stale-department cleanup delete fired. */
+  deletedStale: boolean
+}
 
 /**
  * Minimal Supabase stub for buildDeptSnapshots. Serves slips for the run and
- * (optionally) prior-month snapshot rows, and captures the delete + insert the
- * writer performs so tests can assert the persisted rows.
+ * (optionally) prior-month snapshot rows, and captures the upsert + the two
+ * possible delete calls the writer performs so tests can assert the
+ * persisted rows.
+ *
+ * buildDeptSnapshots' write path (current shape, not the old delete-then-
+ * insert): upsert first (so a failed write leaves the prior snapshot intact),
+ * then an optional narrow delete of the null-department row (unique
+ * constraints treat NULLs as distinct, so upsert's onConflict can't match a
+ * prior run's null-department row), then a stale-department cleanup delete.
+ * Both deletes share the `.delete().eq().eq()` prefix — disambiguate on the
+ * next call: `.is()` is the narrow unassigned delete, `.not()` is the stale
+ * cleanup.
  */
 function mockSupabase(opts: {
   slips: any[]
   priorSnaps?: Array<{ department_id: string | null; total_gross: number }>
-  insertError?: string
+  upsertError?: string
 }): { supabase: any; captured: Captured } {
-  const captured: Captured = { deleted: null, inserted: null }
+  const captured: Captured = { inserted: null, deletedUnassigned: false, deletedStale: false }
   const supabase = {
     from(table: string) {
       if (table === 'payroll_slips') {
+        // buildDeptSnapshots pages this query via fetchAllRows(), which appends
+        // .order('employee_id').range(from, to) after the .eq() filters — the
+        // chain must support both, and .range() must actually respect its
+        // bounds (return an empty page once exhausted) or fetchAllRows loops
+        // forever re-fetching the same non-empty page.
         return {
-          select: () => ({ eq: () => ({ eq: () => Promise.resolve({ data: opts.slips, error: null }) }) }),
+          select: () => ({ eq: () => ({ eq: () => ({ order: () => ({
+            range: (from: number, to: number) => Promise.resolve({ data: opts.slips.slice(from, to + 1), error: null }),
+          }) }) }) }),
         }
       }
       if (table === 'payroll_dept_snapshots') {
         return {
           // prior-month read
           select: () => ({ eq: () => ({ eq: () => Promise.resolve({ data: opts.priorSnaps ?? [], error: null }) }) }),
-          // replace-by-month delete
-          delete: () => ({ eq: (_c: string, _v: string) => ({ eq: (_c2: string, monthVal: string) => {
-            captured.deleted = monthVal
-            return Promise.resolve({ error: null })
-          } }) }),
-          // insert
-          insert: (rows: any[]) => {
+          delete: () => ({ eq: () => ({ eq: () => ({
+            is: () => { captured.deletedUnassigned = true; return Promise.resolve({ error: null }) },
+            not: () => ({ not: () => { captured.deletedStale = true; return Promise.resolve({ error: null }) } }),
+          }) }) }),
+          upsert: (rows: any[]) => {
             captured.inserted = rows
-            return Promise.resolve({ error: opts.insertError ? { message: opts.insertError } : null })
+            return Promise.resolve({ error: opts.upsertError ? { message: opts.upsertError } : null })
           },
         }
       }
@@ -211,7 +233,8 @@ describe('buildDeptSnapshots', () => {
     const res = await buildDeptSnapshots({ supabase, tenantId: 't1', month: '2026-06', runId: 'r1' })
 
     expect(res).toEqual({ ok: true, rows: 2 })
-    expect(captured.deleted).toBe('2026-06') // replace-by-month before insert
+    expect(captured.deletedStale).toBe(true) // stale-department cleanup after upsert
+    expect(captured.deletedUnassigned).toBe(false) // no null-department row in this run
 
     const eng = captured.inserted!.find(r => r.department_id === 'd-eng')!
     expect(eng).toMatchObject({
@@ -256,18 +279,38 @@ describe('buildDeptSnapshots', () => {
     expect(row.has_high_variance).toBe(false)
   })
 
-  it('no slips → deletes the month, inserts nothing, ok', async () => {
+  it('no slips → refuses to write rather than erasing a real snapshot with zero rows', async () => {
+    // A run producing no department rows must never silently upsert/delete
+    // over a prior, good snapshot — this table is read directly by the
+    // executive dashboard. buildDeptSnapshots returns ok:false and touches
+    // neither upsert nor delete.
     const { supabase, captured } = mockSupabase({ slips: [] })
     const res = await buildDeptSnapshots({ supabase, tenantId: 't1', month: '2026-06', runId: 'r1' })
-    expect(res).toEqual({ ok: true, rows: 0 })
-    expect(captured.deleted).toBe('2026-06')
+    expect(res).toEqual({
+      ok: false, rows: 0,
+      error: 'No department rows computed for this run — refusing to replace existing snapshot',
+    })
     expect(captured.inserted).toBeNull()
+    expect(captured.deletedUnassigned).toBe(false)
+    expect(captured.deletedStale).toBe(false)
   })
 
-  it('surfaces insert failure non-fatally (ok:false + message)', async () => {
-    const { supabase } = mockSupabase({ slips, insertError: 'boom' })
+  it('surfaces upsert failure non-fatally (ok:false + message)', async () => {
+    const { supabase } = mockSupabase({ slips, upsertError: 'boom' })
     const res = await buildDeptSnapshots({ supabase, tenantId: 't1', month: '2026-06', runId: 'r1' })
     expect(res.ok).toBe(false)
     expect(res.error).toBe('boom')
+  })
+
+  it('deletes the null-department bucket first when this run has an unassigned dept', async () => {
+    const { supabase, captured } = mockSupabase({
+      slips: [slip({ gross: 500, net: 450, deptId: null })],
+    })
+    const res = await buildDeptSnapshots({ supabase, tenantId: 't1', month: '2026-06', runId: 'r1' })
+    expect(res).toEqual({ ok: true, rows: 1 })
+    expect(captured.deletedUnassigned).toBe(true)
+    // A single unassigned-only row has no non-null department_id to key the
+    // stale-cleanup delete on, so that branch is skipped.
+    expect(captured.deletedStale).toBe(false)
   })
 })

@@ -13,16 +13,21 @@
 import { describe, it, expect } from 'vitest'
 import { resolveShiftWithAttribution, resolveShiftBatch } from '../shift-resolution-engine.js'
 
-// ── Fixtures ────────────────────────────────────────────────────────────────
-const SHIFTS = {
-  morning: { id: 's-morning', name: 'Morning', start_time: '09:00:00', end_time: '17:00:00', grace_minutes: 15, is_night_shift: false },
-  night:   { id: 's-night',   name: 'Night',   start_time: '22:00:00', end_time: '06:00:00', grace_minutes: 10, is_night_shift: true  },
-  rot:     { id: 's-rot',     name: 'Rotation',start_time: '08:00:00', end_time: '16:00:00', grace_minutes: 5,  is_night_shift: false },
-  site:    { id: 's-site',    name: 'SiteDef', start_time: '10:00:00', end_time: '18:00:00', grace_minutes: 20, is_night_shift: false },
-}
-
 const TENANT = 't1'
 const DATE = '2026-03-10' // a Tuesday → condition 'weekday'
+
+// ── Fixtures ────────────────────────────────────────────────────────────────
+// tenant_id is required on every row: resolveShiftBatch's Step 6 shift-detail
+// query scopes `.eq('tenant_id', tenantId)` (ISSUE-272 cross-tenant IDOR fix,
+// commit 096855b) — without it these fixtures are silently filtered out of
+// shiftDetails and the batch resolver returns nothing, even though the real
+// `shifts` table always carries tenant_id.
+const SHIFTS = {
+  morning: { id: 's-morning', tenant_id: TENANT, name: 'Morning', start_time: '09:00:00', end_time: '17:00:00', grace_minutes: 15, is_night_shift: false },
+  night:   { id: 's-night',   tenant_id: TENANT, name: 'Night',   start_time: '22:00:00', end_time: '06:00:00', grace_minutes: 10, is_night_shift: true  },
+  rot:     { id: 's-rot',     tenant_id: TENANT, name: 'Rotation',start_time: '08:00:00', end_time: '16:00:00', grace_minutes: 5,  is_night_shift: false },
+  site:    { id: 's-site',    tenant_id: TENANT, name: 'SiteDef', start_time: '10:00:00', end_time: '18:00:00', grace_minutes: 20, is_night_shift: false },
+}
 
 /**
  * Minimal Supabase stub. Each table resolves to a fixture array; the fluent
@@ -161,7 +166,7 @@ describe('shift-resolution-engine — single/batch parity', () => {
         sites: { default_rotation_policy_id: null, default_shift_id: SHIFTS.site.id, shifts: SHIFTS.site } }],
       rotation_policy_rules: [],
       employee_shifts: [],
-      sites: [{ id: 'site1', default_shift_id: SHIFTS.site.id }],
+      sites: [{ id: 'site1', tenant_id: TENANT, default_shift_id: SHIFTS.site.id }],
       shifts: [SHIFTS.site],
     }
     const { single, batch } = await bothResolve(tables, 'e4')

@@ -1,28 +1,46 @@
 /**
  * Attendance CSV Upload — minimal regression tests
  *
+ * The route is an async, Supabase-Storage-backed job queue (not a synchronous
+ * CSV-in-body endpoint) — see the header comment on upload.ts for why
+ * (Railway drops connections whose body upload exceeds its proxy timeout on
+ * large files). The browser uploads the CSV to Storage directly, then POSTs
+ * a tiny { storage_path, filename, total_rows } body; the route creates a
+ * job row, replies 202 immediately, and processes the file in the
+ * background (setImmediate) — success/failure lands on the job row, which
+ * the browser polls via GET /attendance/upload/jobs/:jobId.
+ *
  * Scenarios covered:
  *   1. localToUtc — IST tenant: 09:00 local → 03:30 UTC  (core timezone fix)
  *   2. localToUtc — UTC tenant: 09:00 local → 09:00 UTC  (regression: no offset applied)
  *   3. localToUtc — IST cross-midnight: 00:30 local Jan 15 → 19:00 UTC Jan 14
- *   4. Route happy path — IST tenant, standard shift
- *        • HTTP 200 with success_rows = 1
+ *   4. Route happy path — IST tenant
+ *        • POST returns 202 with a job_id immediately
+ *        • the background job completes with success_rows = 2 for a 2-punch day
  *        • source = 'csv_upload' on every stored punch      (constraint compat)
- *        • IN punch stored as 03:30 UTC                     (timezone correctness)
- *        • OUT punch stored as 12:30 UTC                    (timezone correctness)
- *        • recomputeRange called with the correct local date
+ *        • first punch of the day stored as IN, last as OUT (ordinal assignment)
+ *        • punched_at is timezone-shifted correctly for the tenant           (03:30 / 12:30 UTC)
  *   5. Route happy path — UTC tenant
  *        • timestamps unchanged (no shift applied)
- *   6. Route — cross-midnight shift (22:00–06:00 IST)
- *        • OUT punch date is the next calendar day
- *        • recomputeRange called for BOTH the in-date and out-date
- *   7. Route — two CSV rows on the same date
- *        • recomputeRange called exactly once for that date (deduplication)
+ *   6. Route — storage_path outside the caller's tenant folder is rejected (400 INVALID_PATH)
+ *   7. Route — recomputeRange is called once per employee, spanning that
+ *      employee's full min→max punch-date range (not once per date) —
+ *      the grouped-recompute perf fix.
  *
  * What is NOT tested here (separate concern):
  *   - Full CSV validation error paths (missing columns, bad formats)
- *   - Actual database writes / Supabase integration
+ *   - Actual database writes / Supabase Storage integration
  *   - recomputeRange internals (tested in the engine separately)
+ *   - GET /attendance/upload/active-job's stale-job-detection window
+ *
+ * Not carried over from the old (pre-Storage) version of this route: a
+ * "cross-midnight shift" scenario asserting the OUT punch lands on the next
+ * calendar day. That was shift-schedule-aware date attribution the route
+ * itself used to do from separate in_time/out_time columns; the current CSV
+ * format is one `datetime` column per punch and direction is assigned purely
+ * by ordinal position within each row's own calendar date (see upload.ts
+ * step 4) — there is no route-level cross-midnight re-dating left to test.
+ * localToUtc's own cross-midnight conversion is still covered above (#3).
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
@@ -49,61 +67,92 @@ const recomputeSpy = recomputeRange as ReturnType<typeof vi.fn>
 // ── Supabase mock builder ──────────────────────────────────────────────────────
 
 interface MockOpts {
-  timezone:  string
-  employees: Array<{ id: string; employee_code: string }>
+  timezone:   string
+  employees:  Array<{ id: string; employee_code: string }>
+  csvContent: string
 }
 
 /**
- * Build a minimal Supabase client stub.
- *
- * Supports exactly the three query chains the upload route makes:
+ * Build a minimal Supabase client stub covering every table/bucket
+ * processUploadJob and the route touch:
+ *   storage.from(bucket).download(path)         — serves the fixture CSV
+ *   storage.from(bucket).remove([path])         — fire-and-forget cleanup
+ *   from('attendance_upload_jobs').insert/update/select — job lifecycle
+ *   from('attendance_period_locks').select(...) — no locked months by default
  *   from('employees').select(...).eq(...).in(...)
  *   from('tenants').select(...).eq(...).maybeSingle()
  *   from('attendance_punch_logs').upsert(...)
+ *   from('upload_sessions').insert(...)         — best-effort audit row
  *
- * Returns the upsert spy separately so tests can inspect captured rows.
+ * The job row is kept in memory and merged on every .update() call, so a
+ * test can either inspect `jobUpdates` (every partial update, in order) or
+ * fetch the final state through the real GET /attendance/upload/jobs/:jobId
+ * route — mirroring how the browser actually polls it.
  */
 function buildMockSupabase(opts: MockOpts) {
-  const upsertSpy = vi.fn().mockResolvedValue({ error: null })
+  const upsertSpy   = vi.fn().mockResolvedValue({ error: null })
+  const jobUpdates: Array<Record<string, unknown>> = []
+  let jobRow: Record<string, unknown> | null = null
 
   const supabase = {
     from(table: string) {
       if (table === 'employees') {
-        return {
-          select: () => ({
-            eq: () => ({
-              in: () => Promise.resolve({ data: opts.employees, error: null }),
-            }),
-          }),
-        }
+        return { select: () => ({ eq: () => ({ in: () => Promise.resolve({ data: opts.employees, error: null }) }) }) }
       }
       if (table === 'tenants') {
-        return {
-          select: () => ({
-            eq: () => ({
-              maybeSingle: () =>
-                Promise.resolve({ data: { timezone: opts.timezone }, error: null }),
-            }),
-          }),
-        }
+        return { select: () => ({ eq: () => ({ maybeSingle: () => Promise.resolve({ data: { timezone: opts.timezone }, error: null }) }) }) }
       }
       if (table === 'attendance_punch_logs') {
         return { upsert: upsertSpy }
       }
+      if (table === 'attendance_period_locks') {
+        // No finalized/locked months in these fixtures.
+        return { select: () => ({ eq: () => ({ eq: () => Promise.resolve({ data: [], error: null }) }) }) }
+      }
+      if (table === 'upload_sessions') {
+        return { insert: () => Promise.resolve({ error: null }) }
+      }
+      if (table === 'attendance_upload_jobs') {
+        return {
+          insert: (fields: Record<string, unknown>) => {
+            jobRow = { id: 'job-1', ...fields }
+            return { select: () => ({ single: () => Promise.resolve({ data: { id: 'job-1' }, error: null }) }) }
+          },
+          update: (fields: Record<string, unknown>) => {
+            jobUpdates.push(fields)
+            jobRow = { ...(jobRow ?? {}), ...fields }
+            return { eq: () => Promise.resolve({ error: null }) }
+          },
+          select: () => ({ eq: () => ({ eq: () => ({ maybeSingle: () => Promise.resolve({ data: jobRow, error: null }) }) }) }),
+        }
+      }
       throw new Error(`buildMockSupabase: unexpected table "${table}"`)
+    },
+    storage: {
+      from(_bucket: string) {
+        return {
+          download: () => Promise.resolve({ data: { text: async () => opts.csvContent }, error: null }),
+          remove:   () => Promise.resolve({ error: null }),
+        }
+      },
     },
   }
 
-  return { supabase, upsertSpy }
+  return { supabase, upsertSpy, jobUpdates, getJobRow: () => jobRow }
 }
 
 // ── Fastify test app builder ───────────────────────────────────────────────────
 
-async function buildApp(mockOpts: MockOpts): Promise<{
+async function buildApp(mockOpts: Omit<MockOpts, 'csvContent'> & { csvContent?: string }): Promise<{
   app:       FastifyInstance
   upsertSpy: ReturnType<typeof vi.fn>
+  jobUpdates: Array<Record<string, unknown>>
+  getJobRow: () => Record<string, unknown> | null
 }> {
-  const { supabase, upsertSpy } = buildMockSupabase(mockOpts)
+  const { supabase, upsertSpy, jobUpdates, getJobRow } = buildMockSupabase({
+    csvContent: csvBody(['EMP001,2024-01-15 09:00']),
+    ...mockOpts,
+  } as MockOpts)
 
   const app = Fastify({ logger: false })
 
@@ -124,23 +173,34 @@ async function buildApp(mockOpts: MockOpts): Promise<{
   await app.register(uploadRoute)
   await app.ready()
 
-  return { app, upsertSpy }
+  return { app, upsertSpy, jobUpdates, getJobRow }
 }
 
-/** Flush the Node.js setImmediate queue so fire-and-forget recomputes run. */
+/**
+ * Flush the Node.js setImmediate queue so the background job (itself
+ * dispatched via setImmediate from the route handler) runs to completion.
+ * Empirically one flush is enough here: every mocked query resolves an
+ * already-settled Promise, so the whole async chain drains via microtasks
+ * within the same check-phase tick — confirmed by asserting on
+ * `getJobRow().status === 'completed'` rather than a call count, so this
+ * stays correct even if that changes.
+ */
 const flushImmediate = () => new Promise<void>((resolve) => setImmediate(resolve))
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
-function csvBody(rows: string[]): { csv_content: string } {
-  const header = 'employee_code,date,in_time,out_time'
-  return { csv_content: [header, ...rows].join('\n') }
+/** One `datetime` column per punch — current CSV format (see upload.ts). */
+function csvBody(rows: string[]): string {
+  const header = 'employee_code,datetime'
+  return [header, ...rows].join('\n')
 }
 
 const POST_HEADERS = {
   'content-type':  'application/json',
   'authorization': 'Bearer test-token',
 }
+
+const UPLOAD_BODY = { storage_path: 'tenant-test-001/upload.csv', filename: 'upload.csv' }
 
 // ── Section 1: localToUtc — pure unit tests, no mocking ───────────────────────
 
@@ -182,39 +242,54 @@ describe('POST /attendance/upload — happy path', () => {
     recomputeSpy.mockClear()
   })
 
-  it('returns 200 with success_rows = 1 for a single valid row', async () => {
-    const { app } = await buildApp({
-      timezone:  'Asia/Kolkata',
-      employees: [{ id: 'emp-uuid-001', employee_code: 'EMP001' }],
+  it('returns 202 with a job_id immediately, before the file is processed', async () => {
+    const { app, getJobRow } = await buildApp({
+      timezone:   'Asia/Kolkata',
+      employees:  [{ id: 'emp-uuid-001', employee_code: 'EMP001' }],
+      csvContent: csvBody(['EMP001,2024-01-15 09:00', 'EMP001,2024-01-15 18:00']),
     })
 
     const res = await app.inject({
-      method:  'POST',
-      url:     '/attendance/upload',
-      headers: POST_HEADERS,
-      payload: csvBody(['EMP001,2024-01-15,09:00,18:00']),
+      method: 'POST', url: '/attendance/upload', headers: POST_HEADERS, payload: UPLOAD_BODY,
     })
 
-    expect(res.statusCode).toBe(200)
+    expect(res.statusCode).toBe(202)
     const body = res.json()
-    expect(body.success_rows).toBe(1)
-    expect(body.failed_rows).toHaveLength(0)
+    expect(body.job_id).toBe('job-1')
+    // The response is sent before setImmediate dispatches processUploadJob —
+    // the job shouldn't be "completed" yet at the moment of the HTTP reply.
+    expect(getJobRow()?.status).not.toBe('completed')
+
+    await app.close()
+  })
+
+  it('completes the background job with success_rows = 2 for a 2-punch day', async () => {
+    const { app, getJobRow } = await buildApp({
+      timezone:   'Asia/Kolkata',
+      employees:  [{ id: 'emp-uuid-001', employee_code: 'EMP001' }],
+      csvContent: csvBody(['EMP001,2024-01-15 09:00', 'EMP001,2024-01-15 18:00']),
+    })
+
+    await app.inject({ method: 'POST', url: '/attendance/upload', headers: POST_HEADERS, payload: UPLOAD_BODY })
+    await flushImmediate()
+
+    const job = getJobRow()!
+    expect(job.status).toBe('completed')
+    expect(job.success_rows).toBe(2)
+    expect(job.failed_rows).toBe(0)
 
     await app.close()
   })
 
   it('stores punches with source = csv_upload (constraint compatibility)', async () => {
     const { app, upsertSpy } = await buildApp({
-      timezone:  'Asia/Kolkata',
-      employees: [{ id: 'emp-uuid-001', employee_code: 'EMP001' }],
+      timezone:   'Asia/Kolkata',
+      employees:  [{ id: 'emp-uuid-001', employee_code: 'EMP001' }],
+      csvContent: csvBody(['EMP001,2024-01-15 09:00', 'EMP001,2024-01-15 18:00']),
     })
 
-    await app.inject({
-      method:  'POST',
-      url:     '/attendance/upload',
-      headers: POST_HEADERS,
-      payload: csvBody(['EMP001,2024-01-15,09:00,18:00']),
-    })
+    await app.inject({ method: 'POST', url: '/attendance/upload', headers: POST_HEADERS, payload: UPLOAD_BODY })
+    await flushImmediate()
 
     // The upsert spy captures the rows array passed to .upsert()
     const [punchRows] = upsertSpy.mock.calls[0] as [Array<{ source: string }>]
@@ -224,18 +299,15 @@ describe('POST /attendance/upload — happy path', () => {
     await app.close()
   })
 
-  it('stores UTC-correct timestamps for an IST tenant', async () => {
+  it('assigns IN to the first punch and OUT to the last punch of a multi-punch day, timezone-shifted for IST', async () => {
     const { app, upsertSpy } = await buildApp({
-      timezone:  'Asia/Kolkata',
-      employees: [{ id: 'emp-uuid-001', employee_code: 'EMP001' }],
+      timezone:   'Asia/Kolkata',
+      employees:  [{ id: 'emp-uuid-001', employee_code: 'EMP001' }],
+      csvContent: csvBody(['EMP001,2024-01-15 09:00', 'EMP001,2024-01-15 18:00']),
     })
 
-    await app.inject({
-      method:  'POST',
-      url:     '/attendance/upload',
-      headers: POST_HEADERS,
-      payload: csvBody(['EMP001,2024-01-15,09:00,18:00']),
-    })
+    await app.inject({ method: 'POST', url: '/attendance/upload', headers: POST_HEADERS, payload: UPLOAD_BODY })
+    await flushImmediate()
 
     const [punchRows] = upsertSpy.mock.calls[0] as [
       Array<{ punched_at: string; direction: 'IN' | 'OUT' }>
@@ -253,16 +325,13 @@ describe('POST /attendance/upload — happy path', () => {
 
   it('does not shift timestamps for a UTC tenant', async () => {
     const { app, upsertSpy } = await buildApp({
-      timezone:  'UTC',
-      employees: [{ id: 'emp-uuid-001', employee_code: 'EMP001' }],
+      timezone:   'UTC',
+      employees:  [{ id: 'emp-uuid-001', employee_code: 'EMP001' }],
+      csvContent: csvBody(['EMP001,2024-01-15 09:00', 'EMP001,2024-01-15 18:00']),
     })
 
-    await app.inject({
-      method:  'POST',
-      url:     '/attendance/upload',
-      headers: POST_HEADERS,
-      payload: csvBody(['EMP001,2024-01-15,09:00,18:00']),
-    })
+    await app.inject({ method: 'POST', url: '/attendance/upload', headers: POST_HEADERS, payload: UPLOAD_BODY })
+    await flushImmediate()
 
     const [punchRows] = upsertSpy.mock.calls[0] as [
       Array<{ punched_at: string; direction: 'IN' | 'OUT' }>
@@ -276,143 +345,95 @@ describe('POST /attendance/upload — happy path', () => {
     await app.close()
   })
 
-  it('triggers recomputeRange for the correct local date', async () => {
+  it('rejects a storage_path outside the caller\'s tenant folder (400 INVALID_PATH)', async () => {
     const { app } = await buildApp({
       timezone:  'Asia/Kolkata',
       employees: [{ id: 'emp-uuid-001', employee_code: 'EMP001' }],
     })
 
-    await app.inject({
-      method:  'POST',
-      url:     '/attendance/upload',
-      headers: POST_HEADERS,
-      payload: csvBody(['EMP001,2024-01-15,09:00,18:00']),
+    const res = await app.inject({
+      method: 'POST', url: '/attendance/upload', headers: POST_HEADERS,
+      payload: { storage_path: 'some-other-tenant/upload.csv', filename: 'upload.csv' },
     })
 
-    // Flush fire-and-forget setImmediate before asserting
-    await flushImmediate()
-
-    expect(recomputeSpy).toHaveBeenCalledOnce()
-    const callArgs = recomputeSpy.mock.calls[0][1] as {
-      employee_id: string
-      from_date:   string
-      to_date:     string
-    }
-    expect(callArgs.employee_id).toBe('emp-uuid-001')
-    expect(callArgs.from_date).toBe('2024-01-15')
-    expect(callArgs.to_date).toBe('2024-01-15')
-
-    await app.close()
-  })
-})
-
-// ── Section 3: Route — cross-midnight shift ────────────────────────────────────
-
-describe('POST /attendance/upload — cross-midnight (night shift)', () => {
-  beforeEach(async () => {
-    await flushImmediate()
-    recomputeSpy.mockClear()
-  })
-
-  it('places the OUT punch on the next calendar day for a night-shift row', async () => {
-    const { app, upsertSpy } = await buildApp({
-      timezone:  'Asia/Kolkata',
-      employees: [{ id: 'emp-uuid-001', employee_code: 'EMP001' }],
-    })
-
-    // 22:00–06:00 IST → cross-midnight; out_time < in_time
-    await app.inject({
-      method:  'POST',
-      url:     '/attendance/upload',
-      headers: POST_HEADERS,
-      payload: csvBody(['EMP001,2024-01-15,22:00,06:00']),
-    })
-
-    const [punchRows] = upsertSpy.mock.calls[0] as [
-      Array<{ punched_at: string; direction: 'IN' | 'OUT' }>
-    ]
-    const inPunch  = punchRows.find((r) => r.direction === 'IN')!
-    const outPunch = punchRows.find((r) => r.direction === 'OUT')!
-
-    // 22:00 IST on Jan 15 → 16:30 UTC on Jan 15
-    expect(inPunch.punched_at).toBe('2024-01-15T16:30:00.000Z')
-    // 06:00 IST on Jan 16 → 00:30 UTC on Jan 16
-    expect(outPunch.punched_at).toBe('2024-01-16T00:30:00.000Z')
+    expect(res.statusCode).toBe(400)
+    expect(res.json().error).toBe('INVALID_PATH')
 
     await app.close()
   })
 
-  it('triggers recompute for both the in-date and the out-date', async () => {
+  it('returns 400 VALIDATION_ERROR when storage_path is missing from the body', async () => {
     const { app } = await buildApp({
       timezone:  'Asia/Kolkata',
       employees: [{ id: 'emp-uuid-001', employee_code: 'EMP001' }],
     })
 
-    await app.inject({
-      method:  'POST',
-      url:     '/attendance/upload',
-      headers: POST_HEADERS,
-      payload: csvBody(['EMP001,2024-01-15,22:00,06:00']),
+    const res = await app.inject({
+      method: 'POST', url: '/attendance/upload', headers: POST_HEADERS, payload: { filename: 'upload.csv' },
     })
 
-    await flushImmediate()
-
-    // Expect two recompute calls: Jan 15 (in-date) and Jan 16 (out-date)
-    expect(recomputeSpy).toHaveBeenCalledTimes(2)
-
-    const dates = recomputeSpy.mock.calls.map(
-      (call: any[]) => (call[1] as { from_date: string }).from_date,
-    )
-    expect(dates).toContain('2024-01-15')
-    expect(dates).toContain('2024-01-16')
+    expect(res.statusCode).toBe(400)
+    expect(res.json().error).toBe('VALIDATION_ERROR')
 
     await app.close()
   })
 })
 
-// ── Section 4: Route — recompute deduplication ────────────────────────────────
+// ── Section 3: Route — grouped recompute (per employee, not per date) ────────
 
-describe('POST /attendance/upload — recompute deduplication', () => {
+describe('POST /attendance/upload — recompute grouping', () => {
   beforeEach(async () => {
     await flushImmediate()
     recomputeSpy.mockClear()
   })
 
-  it('calls recomputeRange once per unique (employee, date) regardless of row count', async () => {
+  it('calls recomputeRange once per employee, spanning that employee\'s full punch-date range', async () => {
     const { app } = await buildApp({
       timezone:  'Asia/Kolkata',
       employees: [
         { id: 'emp-uuid-001', employee_code: 'EMP001' },
         { id: 'emp-uuid-002', employee_code: 'EMP002' },
       ],
-    })
-
-    // Three rows: EMP001 twice on Jan 15 with different time windows (two shifts),
-    // and EMP002 once on Jan 15.  Recompute should fire twice total:
-    // once for (EMP001, Jan 15) and once for (EMP002, Jan 15).
-    await app.inject({
-      method:  'POST',
-      url:     '/attendance/upload',
-      headers: POST_HEADERS,
-      payload: csvBody([
-        'EMP001,2024-01-15,09:00,13:00',
-        'EMP001,2024-01-15,14:00,18:00',
-        'EMP002,2024-01-15,09:00,18:00',
+      // EMP001 punches on both Jan 15 and Jan 17 (a gap day in between);
+      // EMP002 punches only on Jan 15. Grouping is per-employee across their
+      // whole punch span, not per (employee, date) — this replaces the old
+      // per-date recompute call the route used to make (see file header).
+      csvContent: csvBody([
+        'EMP001,2024-01-15 09:00',
+        'EMP001,2024-01-15 18:00',
+        'EMP001,2024-01-17 09:00',
+        'EMP001,2024-01-17 18:00',
+        'EMP002,2024-01-15 09:00',
+        'EMP002,2024-01-15 18:00',
       ]),
     })
 
+    await app.inject({ method: 'POST', url: '/attendance/upload', headers: POST_HEADERS, payload: UPLOAD_BODY })
+    // Two flushes: the route's own setImmediate dispatches processUploadJob,
+    // which — from *inside* that same macrotask — schedules the recompute
+    // step via its own setImmediate (upload.ts step 13, deliberately
+    // deferred so job completion isn't blocked on recompute). A callback
+    // registered during a check-phase iteration runs in the *next*
+    // iteration, so it needs its own flush to observe.
+    await flushImmediate()
     await flushImmediate()
 
+    // One call per employee, not one per punch-date.
     expect(recomputeSpy).toHaveBeenCalledTimes(2)
 
-    const keys = recomputeSpy.mock.calls.map(
-      (call: any[]) => {
-        const args = call[1] as { employee_id: string; from_date: string }
-        return `${args.employee_id}::${args.from_date}`
-      },
+    const byEmployee = new Map(
+      recomputeSpy.mock.calls.map((call: any[]) => {
+        const args = call[1] as { employee_id: string; from_date: string; to_date: string }
+        return [args.employee_id, args]
+      }),
     )
-    expect(keys).toContain('emp-uuid-001::2024-01-15')
-    expect(keys).toContain('emp-uuid-002::2024-01-15')
+
+    // EMP001's single call spans its full min→max range, Jan 15 through Jan 17
+    // (including the gap day) — recomputeRange itself walks every day in the
+    // span so the gap day still gets marked absent/weekly-off correctly.
+    expect(byEmployee.get('emp-uuid-001')).toMatchObject({ from_date: '2024-01-15', to_date: '2024-01-17' })
+    // EMP002 only punched Jan 15, so its span collapses to a single day.
+    expect(byEmployee.get('emp-uuid-002')).toMatchObject({ from_date: '2024-01-15', to_date: '2024-01-15' })
 
     await app.close()
   })

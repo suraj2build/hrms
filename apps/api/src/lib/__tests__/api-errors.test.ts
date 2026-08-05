@@ -58,7 +58,10 @@ describe('serverError', () => {
     const req   = mockReq()
     const reply = mockReply()
     serverError(req, reply, new Error('boom'), 'QUERY_FAILED', 'Failed to load data')
-    expect(reply._body).toEqual({ error: 'QUERY_FAILED', message: 'Failed to load data' })
+    // requestId is intentionally always present on serverError's body (gate4
+    // observability — lets callers report a failure to support, and its
+    // presence signals the error-sanitizer this message is already safe).
+    expect(reply._body).toEqual({ error: 'QUERY_FAILED', message: 'Failed to load data', requestId: 'req-abc' })
   })
 
   it('never leaks the raw error message or stack to the client', () => {
