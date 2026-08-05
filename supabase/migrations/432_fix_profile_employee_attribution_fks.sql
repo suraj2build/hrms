@@ -19,58 +19,355 @@
 -- other way); nullable column -> SET NULL (preserve the audit-trail row,
 -- just drop the "who did it" reference).
 --
--- A local helper function does the drop-if-exists + re-add so this stays
--- readable across the ~18 constraints fixed here instead of copy-pasting
--- near-identical DO blocks. Dropped again at the end of the migration —
--- it's a one-off tool for this file, not permanent schema.
+-- Each fix is a fully self-contained DO block (same style as 431) rather
+-- than calls into a shared helper function — no cross-statement/session
+-- dependency, so each block can be run independently and in any order.
+-- Idempotent — safe to re-run.
 -- ============================================================
 
-CREATE OR REPLACE FUNCTION _pin432_fix_fk(
-  p_table  TEXT, p_column TEXT, p_target TEXT, p_action TEXT
-) RETURNS VOID LANGUAGE plpgsql AS $$
-DECLARE
-  v_conname TEXT;
+-- ── profiles(id) attribution columns ────────────────────────────────────
+
+DO $$
+DECLARE v_conname TEXT;
 BEGIN
   SELECT con.conname INTO v_conname
   FROM pg_constraint con
-  JOIN pg_class rel     ON rel.oid = con.conrelid
-  JOIN pg_class frel    ON frel.oid = con.confrelid
+  JOIN pg_class rel ON rel.oid = con.conrelid
+  JOIN pg_class frel ON frel.oid = con.confrelid
   JOIN pg_attribute att ON att.attrelid = con.conrelid AND att.attnum = con.conkey[1]
-  WHERE con.contype = 'f' AND rel.relname = p_table
-    AND frel.relname = p_target AND att.attname = p_column
+  WHERE con.contype = 'f' AND rel.relname = 'muster_uploads'
+    AND frel.relname = 'profiles' AND att.attname = 'uploaded_by'
     AND array_length(con.conkey, 1) = 1;
-
   IF v_conname IS NOT NULL THEN
-    EXECUTE format('ALTER TABLE %I DROP CONSTRAINT %I', p_table, v_conname);
+    EXECUTE format('ALTER TABLE muster_uploads DROP CONSTRAINT %I', v_conname);
   END IF;
+  ALTER TABLE muster_uploads
+    ADD CONSTRAINT muster_uploads_uploaded_by_fkey
+    FOREIGN KEY (uploaded_by) REFERENCES profiles(id) ON DELETE CASCADE;
+END $$;
 
-  EXECUTE format(
-    'ALTER TABLE %I ADD CONSTRAINT %I FOREIGN KEY (%I) REFERENCES %I(id) ON DELETE %s',
-    p_table, p_table || '_' || p_column || '_fkey', p_column, p_target, p_action
-  );
-END;
-$$;
+DO $$
+DECLARE v_conname TEXT;
+BEGIN
+  SELECT con.conname INTO v_conname
+  FROM pg_constraint con
+  JOIN pg_class rel ON rel.oid = con.conrelid
+  JOIN pg_class frel ON frel.oid = con.confrelid
+  JOIN pg_attribute att ON att.attrelid = con.conrelid AND att.attnum = con.conkey[1]
+  WHERE con.contype = 'f' AND rel.relname = 'absconding_cases'
+    AND frel.relname = 'profiles' AND att.attname = 'chro_approved_by'
+    AND array_length(con.conkey, 1) = 1;
+  IF v_conname IS NOT NULL THEN
+    EXECUTE format('ALTER TABLE absconding_cases DROP CONSTRAINT %I', v_conname);
+  END IF;
+  ALTER TABLE absconding_cases
+    ADD CONSTRAINT absconding_cases_chro_approved_by_fkey
+    FOREIGN KEY (chro_approved_by) REFERENCES profiles(id) ON DELETE SET NULL;
+END $$;
 
--- ── profiles(id) attribution columns ────────────────────────────────────
-SELECT _pin432_fix_fk('muster_uploads',           'uploaded_by',    'profiles',  'CASCADE');   -- NOT NULL
-SELECT _pin432_fix_fk('absconding_cases',         'chro_approved_by','profiles', 'SET NULL');
-SELECT _pin432_fix_fk('absconding_cases',         'assigned_to',    'profiles',  'SET NULL');
-SELECT _pin432_fix_fk('absconding_cases',         'created_by',     'profiles',  'CASCADE');   -- NOT NULL
-SELECT _pin432_fix_fk('absconding_communications','sent_by',        'profiles',  'SET NULL');  -- the reported blocker
-SELECT _pin432_fix_fk('surveys',                  'created_by',     'profiles',  'SET NULL');
-SELECT _pin432_fix_fk('calibration_changes',      'changed_by',     'profiles',  'CASCADE');   -- NOT NULL
-SELECT _pin432_fix_fk('employees',                'profile_id',     'profiles',  'SET NULL');
-SELECT _pin432_fix_fk('attendance_regularisation','submitted_by',   'profiles',  'SET NULL');
+DO $$
+DECLARE v_conname TEXT;
+BEGIN
+  SELECT con.conname INTO v_conname
+  FROM pg_constraint con
+  JOIN pg_class rel ON rel.oid = con.conrelid
+  JOIN pg_class frel ON frel.oid = con.confrelid
+  JOIN pg_attribute att ON att.attrelid = con.conrelid AND att.attnum = con.conkey[1]
+  WHERE con.contype = 'f' AND rel.relname = 'absconding_cases'
+    AND frel.relname = 'profiles' AND att.attname = 'assigned_to'
+    AND array_length(con.conkey, 1) = 1;
+  IF v_conname IS NOT NULL THEN
+    EXECUTE format('ALTER TABLE absconding_cases DROP CONSTRAINT %I', v_conname);
+  END IF;
+  ALTER TABLE absconding_cases
+    ADD CONSTRAINT absconding_cases_assigned_to_fkey
+    FOREIGN KEY (assigned_to) REFERENCES profiles(id) ON DELETE SET NULL;
+END $$;
+
+DO $$
+DECLARE v_conname TEXT;
+BEGIN
+  SELECT con.conname INTO v_conname
+  FROM pg_constraint con
+  JOIN pg_class rel ON rel.oid = con.conrelid
+  JOIN pg_class frel ON frel.oid = con.confrelid
+  JOIN pg_attribute att ON att.attrelid = con.conrelid AND att.attnum = con.conkey[1]
+  WHERE con.contype = 'f' AND rel.relname = 'absconding_cases'
+    AND frel.relname = 'profiles' AND att.attname = 'created_by'
+    AND array_length(con.conkey, 1) = 1;
+  IF v_conname IS NOT NULL THEN
+    EXECUTE format('ALTER TABLE absconding_cases DROP CONSTRAINT %I', v_conname);
+  END IF;
+  ALTER TABLE absconding_cases
+    ADD CONSTRAINT absconding_cases_created_by_fkey
+    FOREIGN KEY (created_by) REFERENCES profiles(id) ON DELETE CASCADE;
+END $$;
+
+-- the reported blocker
+DO $$
+DECLARE v_conname TEXT;
+BEGIN
+  SELECT con.conname INTO v_conname
+  FROM pg_constraint con
+  JOIN pg_class rel ON rel.oid = con.conrelid
+  JOIN pg_class frel ON frel.oid = con.confrelid
+  JOIN pg_attribute att ON att.attrelid = con.conrelid AND att.attnum = con.conkey[1]
+  WHERE con.contype = 'f' AND rel.relname = 'absconding_communications'
+    AND frel.relname = 'profiles' AND att.attname = 'sent_by'
+    AND array_length(con.conkey, 1) = 1;
+  IF v_conname IS NOT NULL THEN
+    EXECUTE format('ALTER TABLE absconding_communications DROP CONSTRAINT %I', v_conname);
+  END IF;
+  ALTER TABLE absconding_communications
+    ADD CONSTRAINT absconding_communications_sent_by_fkey
+    FOREIGN KEY (sent_by) REFERENCES profiles(id) ON DELETE SET NULL;
+END $$;
+
+DO $$
+DECLARE v_conname TEXT;
+BEGIN
+  SELECT con.conname INTO v_conname
+  FROM pg_constraint con
+  JOIN pg_class rel ON rel.oid = con.conrelid
+  JOIN pg_class frel ON frel.oid = con.confrelid
+  JOIN pg_attribute att ON att.attrelid = con.conrelid AND att.attnum = con.conkey[1]
+  WHERE con.contype = 'f' AND rel.relname = 'surveys'
+    AND frel.relname = 'profiles' AND att.attname = 'created_by'
+    AND array_length(con.conkey, 1) = 1;
+  IF v_conname IS NOT NULL THEN
+    EXECUTE format('ALTER TABLE surveys DROP CONSTRAINT %I', v_conname);
+  END IF;
+  ALTER TABLE surveys
+    ADD CONSTRAINT surveys_created_by_fkey
+    FOREIGN KEY (created_by) REFERENCES profiles(id) ON DELETE SET NULL;
+END $$;
+
+DO $$
+DECLARE v_conname TEXT;
+BEGIN
+  SELECT con.conname INTO v_conname
+  FROM pg_constraint con
+  JOIN pg_class rel ON rel.oid = con.conrelid
+  JOIN pg_class frel ON frel.oid = con.confrelid
+  JOIN pg_attribute att ON att.attrelid = con.conrelid AND att.attnum = con.conkey[1]
+  WHERE con.contype = 'f' AND rel.relname = 'calibration_changes'
+    AND frel.relname = 'profiles' AND att.attname = 'changed_by'
+    AND array_length(con.conkey, 1) = 1;
+  IF v_conname IS NOT NULL THEN
+    EXECUTE format('ALTER TABLE calibration_changes DROP CONSTRAINT %I', v_conname);
+  END IF;
+  ALTER TABLE calibration_changes
+    ADD CONSTRAINT calibration_changes_changed_by_fkey
+    FOREIGN KEY (changed_by) REFERENCES profiles(id) ON DELETE CASCADE;
+END $$;
+
+DO $$
+DECLARE v_conname TEXT;
+BEGIN
+  SELECT con.conname INTO v_conname
+  FROM pg_constraint con
+  JOIN pg_class rel ON rel.oid = con.conrelid
+  JOIN pg_class frel ON frel.oid = con.confrelid
+  JOIN pg_attribute att ON att.attrelid = con.conrelid AND att.attnum = con.conkey[1]
+  WHERE con.contype = 'f' AND rel.relname = 'employees'
+    AND frel.relname = 'profiles' AND att.attname = 'profile_id'
+    AND array_length(con.conkey, 1) = 1;
+  IF v_conname IS NOT NULL THEN
+    EXECUTE format('ALTER TABLE employees DROP CONSTRAINT %I', v_conname);
+  END IF;
+  ALTER TABLE employees
+    ADD CONSTRAINT employees_profile_id_fkey
+    FOREIGN KEY (profile_id) REFERENCES profiles(id) ON DELETE SET NULL;
+END $$;
+
+DO $$
+DECLARE v_conname TEXT;
+BEGIN
+  SELECT con.conname INTO v_conname
+  FROM pg_constraint con
+  JOIN pg_class rel ON rel.oid = con.conrelid
+  JOIN pg_class frel ON frel.oid = con.confrelid
+  JOIN pg_attribute att ON att.attrelid = con.conrelid AND att.attnum = con.conkey[1]
+  WHERE con.contype = 'f' AND rel.relname = 'attendance_regularisation'
+    AND frel.relname = 'profiles' AND att.attname = 'submitted_by'
+    AND array_length(con.conkey, 1) = 1;
+  IF v_conname IS NOT NULL THEN
+    EXECUTE format('ALTER TABLE attendance_regularisation DROP CONSTRAINT %I', v_conname);
+  END IF;
+  ALTER TABLE attendance_regularisation
+    ADD CONSTRAINT attendance_regularisation_submitted_by_fkey
+    FOREIGN KEY (submitted_by) REFERENCES profiles(id) ON DELETE SET NULL;
+END $$;
 
 -- ── employees(id) attribution columns ───────────────────────────────────
-SELECT _pin432_fix_fk('letter_templates',    'created_by',   'employees', 'SET NULL');
-SELECT _pin432_fix_fk('letter_templates',    'updated_by',   'employees', 'SET NULL');
-SELECT _pin432_fix_fk('generated_letters',   'issued_by',    'employees', 'SET NULL');
-SELECT _pin432_fix_fk('generated_letters',   'created_by',   'employees', 'SET NULL');
-SELECT _pin432_fix_fk('letter_approval_log', 'actor_id',     'employees', 'CASCADE');  -- NOT NULL
-SELECT _pin432_fix_fk('letter_requests',     'processed_by', 'employees', 'SET NULL');
-SELECT _pin432_fix_fk('payroll_run_blockers','employee_id',  'employees', 'SET NULL');
-SELECT _pin432_fix_fk('calibration_changes', 'employee_id',  'employees', 'SET NULL');
-SELECT _pin432_fix_fk('survey_responses',    'employee_id',  'employees', 'SET NULL');
 
-DROP FUNCTION _pin432_fix_fk(TEXT, TEXT, TEXT, TEXT);
+DO $$
+DECLARE v_conname TEXT;
+BEGIN
+  SELECT con.conname INTO v_conname
+  FROM pg_constraint con
+  JOIN pg_class rel ON rel.oid = con.conrelid
+  JOIN pg_class frel ON frel.oid = con.confrelid
+  JOIN pg_attribute att ON att.attrelid = con.conrelid AND att.attnum = con.conkey[1]
+  WHERE con.contype = 'f' AND rel.relname = 'letter_templates'
+    AND frel.relname = 'employees' AND att.attname = 'created_by'
+    AND array_length(con.conkey, 1) = 1;
+  IF v_conname IS NOT NULL THEN
+    EXECUTE format('ALTER TABLE letter_templates DROP CONSTRAINT %I', v_conname);
+  END IF;
+  ALTER TABLE letter_templates
+    ADD CONSTRAINT letter_templates_created_by_fkey
+    FOREIGN KEY (created_by) REFERENCES employees(id) ON DELETE SET NULL;
+END $$;
+
+DO $$
+DECLARE v_conname TEXT;
+BEGIN
+  SELECT con.conname INTO v_conname
+  FROM pg_constraint con
+  JOIN pg_class rel ON rel.oid = con.conrelid
+  JOIN pg_class frel ON frel.oid = con.confrelid
+  JOIN pg_attribute att ON att.attrelid = con.conrelid AND att.attnum = con.conkey[1]
+  WHERE con.contype = 'f' AND rel.relname = 'letter_templates'
+    AND frel.relname = 'employees' AND att.attname = 'updated_by'
+    AND array_length(con.conkey, 1) = 1;
+  IF v_conname IS NOT NULL THEN
+    EXECUTE format('ALTER TABLE letter_templates DROP CONSTRAINT %I', v_conname);
+  END IF;
+  ALTER TABLE letter_templates
+    ADD CONSTRAINT letter_templates_updated_by_fkey
+    FOREIGN KEY (updated_by) REFERENCES employees(id) ON DELETE SET NULL;
+END $$;
+
+DO $$
+DECLARE v_conname TEXT;
+BEGIN
+  SELECT con.conname INTO v_conname
+  FROM pg_constraint con
+  JOIN pg_class rel ON rel.oid = con.conrelid
+  JOIN pg_class frel ON frel.oid = con.confrelid
+  JOIN pg_attribute att ON att.attrelid = con.conrelid AND att.attnum = con.conkey[1]
+  WHERE con.contype = 'f' AND rel.relname = 'generated_letters'
+    AND frel.relname = 'employees' AND att.attname = 'issued_by'
+    AND array_length(con.conkey, 1) = 1;
+  IF v_conname IS NOT NULL THEN
+    EXECUTE format('ALTER TABLE generated_letters DROP CONSTRAINT %I', v_conname);
+  END IF;
+  ALTER TABLE generated_letters
+    ADD CONSTRAINT generated_letters_issued_by_fkey
+    FOREIGN KEY (issued_by) REFERENCES employees(id) ON DELETE SET NULL;
+END $$;
+
+DO $$
+DECLARE v_conname TEXT;
+BEGIN
+  SELECT con.conname INTO v_conname
+  FROM pg_constraint con
+  JOIN pg_class rel ON rel.oid = con.conrelid
+  JOIN pg_class frel ON frel.oid = con.confrelid
+  JOIN pg_attribute att ON att.attrelid = con.conrelid AND att.attnum = con.conkey[1]
+  WHERE con.contype = 'f' AND rel.relname = 'generated_letters'
+    AND frel.relname = 'employees' AND att.attname = 'created_by'
+    AND array_length(con.conkey, 1) = 1;
+  IF v_conname IS NOT NULL THEN
+    EXECUTE format('ALTER TABLE generated_letters DROP CONSTRAINT %I', v_conname);
+  END IF;
+  ALTER TABLE generated_letters
+    ADD CONSTRAINT generated_letters_created_by_fkey
+    FOREIGN KEY (created_by) REFERENCES employees(id) ON DELETE SET NULL;
+END $$;
+
+DO $$
+DECLARE v_conname TEXT;
+BEGIN
+  SELECT con.conname INTO v_conname
+  FROM pg_constraint con
+  JOIN pg_class rel ON rel.oid = con.conrelid
+  JOIN pg_class frel ON frel.oid = con.confrelid
+  JOIN pg_attribute att ON att.attrelid = con.conrelid AND att.attnum = con.conkey[1]
+  WHERE con.contype = 'f' AND rel.relname = 'letter_approval_log'
+    AND frel.relname = 'employees' AND att.attname = 'actor_id'
+    AND array_length(con.conkey, 1) = 1;
+  IF v_conname IS NOT NULL THEN
+    EXECUTE format('ALTER TABLE letter_approval_log DROP CONSTRAINT %I', v_conname);
+  END IF;
+  ALTER TABLE letter_approval_log
+    ADD CONSTRAINT letter_approval_log_actor_id_fkey
+    FOREIGN KEY (actor_id) REFERENCES employees(id) ON DELETE CASCADE;
+END $$;
+
+DO $$
+DECLARE v_conname TEXT;
+BEGIN
+  SELECT con.conname INTO v_conname
+  FROM pg_constraint con
+  JOIN pg_class rel ON rel.oid = con.conrelid
+  JOIN pg_class frel ON frel.oid = con.confrelid
+  JOIN pg_attribute att ON att.attrelid = con.conrelid AND att.attnum = con.conkey[1]
+  WHERE con.contype = 'f' AND rel.relname = 'letter_requests'
+    AND frel.relname = 'employees' AND att.attname = 'processed_by'
+    AND array_length(con.conkey, 1) = 1;
+  IF v_conname IS NOT NULL THEN
+    EXECUTE format('ALTER TABLE letter_requests DROP CONSTRAINT %I', v_conname);
+  END IF;
+  ALTER TABLE letter_requests
+    ADD CONSTRAINT letter_requests_processed_by_fkey
+    FOREIGN KEY (processed_by) REFERENCES employees(id) ON DELETE SET NULL;
+END $$;
+
+DO $$
+DECLARE v_conname TEXT;
+BEGIN
+  SELECT con.conname INTO v_conname
+  FROM pg_constraint con
+  JOIN pg_class rel ON rel.oid = con.conrelid
+  JOIN pg_class frel ON frel.oid = con.confrelid
+  JOIN pg_attribute att ON att.attrelid = con.conrelid AND att.attnum = con.conkey[1]
+  WHERE con.contype = 'f' AND rel.relname = 'payroll_run_blockers'
+    AND frel.relname = 'employees' AND att.attname = 'employee_id'
+    AND array_length(con.conkey, 1) = 1;
+  IF v_conname IS NOT NULL THEN
+    EXECUTE format('ALTER TABLE payroll_run_blockers DROP CONSTRAINT %I', v_conname);
+  END IF;
+  ALTER TABLE payroll_run_blockers
+    ADD CONSTRAINT payroll_run_blockers_employee_id_fkey
+    FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE SET NULL;
+END $$;
+
+DO $$
+DECLARE v_conname TEXT;
+BEGIN
+  SELECT con.conname INTO v_conname
+  FROM pg_constraint con
+  JOIN pg_class rel ON rel.oid = con.conrelid
+  JOIN pg_class frel ON frel.oid = con.confrelid
+  JOIN pg_attribute att ON att.attrelid = con.conrelid AND att.attnum = con.conkey[1]
+  WHERE con.contype = 'f' AND rel.relname = 'calibration_changes'
+    AND frel.relname = 'employees' AND att.attname = 'employee_id'
+    AND array_length(con.conkey, 1) = 1;
+  IF v_conname IS NOT NULL THEN
+    EXECUTE format('ALTER TABLE calibration_changes DROP CONSTRAINT %I', v_conname);
+  END IF;
+  ALTER TABLE calibration_changes
+    ADD CONSTRAINT calibration_changes_employee_id_fkey
+    FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE SET NULL;
+END $$;
+
+DO $$
+DECLARE v_conname TEXT;
+BEGIN
+  SELECT con.conname INTO v_conname
+  FROM pg_constraint con
+  JOIN pg_class rel ON rel.oid = con.conrelid
+  JOIN pg_class frel ON frel.oid = con.confrelid
+  JOIN pg_attribute att ON att.attrelid = con.conrelid AND att.attnum = con.conkey[1]
+  WHERE con.contype = 'f' AND rel.relname = 'survey_responses'
+    AND frel.relname = 'employees' AND att.attname = 'employee_id'
+    AND array_length(con.conkey, 1) = 1;
+  IF v_conname IS NOT NULL THEN
+    EXECUTE format('ALTER TABLE survey_responses DROP CONSTRAINT %I', v_conname);
+  END IF;
+  ALTER TABLE survey_responses
+    ADD CONSTRAINT survey_responses_employee_id_fkey
+    FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE SET NULL;
+END $$;
