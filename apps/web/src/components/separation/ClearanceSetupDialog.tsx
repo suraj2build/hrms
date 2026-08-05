@@ -10,8 +10,9 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
+import { useVersionConflict, withExpectedVersion } from '@/hooks/useVersionConflict'
 
-interface Dept { id: string; code: string; label: string; is_active: boolean; display_order: number }
+interface Dept { id: string; code: string; label: string; is_active: boolean; display_order: number; version?: number }
 
 export function ClearanceSetupDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
   const qc = useQueryClient()
@@ -29,10 +30,16 @@ export function ClearanceSetupDialog({ open, onOpenChange }: { open: boolean; on
     onSuccess: () => { invalidate(); setLabel(''); toast.success('Department added') },
     onError: (e: Error) => toast.error('Failed', { description: e.message }),
   })
+  const versionConflict = useVersionConflict([['clearance-departments']])
+
   const toggleMut = useMutation({
-    mutationFn: (p: { id: string; is_active: boolean }) => api.patch(`/settlement/clearance-departments/${p.id}`, { is_active: p.is_active }),
+    mutationFn: (p: { dept: Dept; is_active: boolean }) =>
+      api.patch(`/settlement/clearance-departments/${p.dept.id}`, withExpectedVersion({ is_active: p.is_active }, p.dept)),
     onSuccess: invalidate,
-    onError: (e: Error) => toast.error('Failed to update', { description: e.message }),
+    onError: (e: Error) => {
+      if (versionConflict(e)) return
+      toast.error('Failed to update', { description: e.message })
+    },
   })
   const delMut = useMutation({
     mutationFn: (id: string) => api.delete(`/settlement/clearance-departments/${id}`),
@@ -52,7 +59,7 @@ export function ClearanceSetupDialog({ open, onOpenChange }: { open: boolean; on
               <div key={d.id} className="flex items-center gap-2 rounded-lg border border-border p-2.5">
                 <span className="flex-1 text-sm font-medium">{d.label}</span>
                 <label className="flex items-center gap-1 text-[11px] text-muted-foreground">
-                  <input type="checkbox" checked={d.is_active} onChange={e => toggleMut.mutate({ id: d.id, is_active: e.target.checked })} />
+                  <input type="checkbox" checked={d.is_active} onChange={e => toggleMut.mutate({ dept: d, is_active: e.target.checked })} />
                   active
                 </label>
                 <Button size="icon" variant="ghost" className="h-7 w-7 text-destructive" onClick={() => setDeleteTarget(d)}><Trash2 className="h-3.5 w-3.5" /></Button>

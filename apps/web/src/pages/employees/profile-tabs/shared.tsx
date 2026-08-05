@@ -107,7 +107,7 @@ export interface SeparationData {
   separation_type?: string | null; initiated_by?: string | null
   notice_date?: string | null; last_working_date?: string | null
   exit_reason?: string | null; exit_interview_done?: boolean; clearance_done?: boolean
-  remarks?: string | null; clearances?: ClearanceRow[]
+  remarks?: string | null; clearances?: ClearanceRow[]; version?: number
 }
 export interface RevisionRow {
   id: string; status?: string | null; revision_type?: string | null

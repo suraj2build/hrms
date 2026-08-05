@@ -25,6 +25,7 @@ import { SectionCard }   from '@/components/layout/SectionCard'
 import { Button }        from '@/components/ui/button'
 import { Badge }         from '@/components/ui/badge'
 import { cn, fmtDate }   from '@/lib/utils'
+import { useVersionConflict, withExpectedVersion } from '@/hooks/useVersionConflict'
 
 // ── Types (mirror GET /manager/team/lifecycle) ─────────────────────────────────
 
@@ -47,7 +48,7 @@ interface Separation {
   separation_type: string; notice_date: string | null; last_working_date: string | null
   exit_reason: string | null; lifecycle_stage: string; approval_status: string | null
   clearance_done: boolean
-  manager_clearance: { id: string; status: string } | null
+  manager_clearance: { id: string; status: string; version?: number } | null
 }
 interface TrustRisk {
   employee_id: string; name: string; employee_code: string | null
@@ -102,10 +103,13 @@ export function ManagerTeamLifecycle() {
     onError: (e: unknown) => toast.error(e instanceof Error ? e.message : 'Failed to send recommendation'),
   })
 
+  const versionConflict = useVersionConflict([['manager-team-lifecycle']])
+
   // Manager clearance action (reuses existing separation-clearances endpoint)
   const clearanceMut = useMutation({
-    mutationFn: (p: { employeeId: string; clearanceId: string; status: 'cleared' | 'rejected' }) =>
-      api.patch(`/employees/${p.employeeId}/separation-clearances/${p.clearanceId}`, { status: p.status }),
+    mutationFn: (p: { employeeId: string; clearance: { id: string; version?: number }; status: 'cleared' | 'rejected' }) =>
+      api.patch(`/employees/${p.employeeId}/separation-clearances/${p.clearance.id}`,
+        withExpectedVersion({ status: p.status }, p.clearance)),
     onSuccess: (_d, p) => {
       toast.success(`Manager clearance ${p.status}`)
       invalidate()
@@ -115,7 +119,10 @@ export function ManagerTeamLifecycle() {
       qc.invalidateQueries({ queryKey: ['separation', p.employeeId] })
       qc.invalidateQueries({ queryKey: ['ess-me-separation', p.employeeId] })
     },
-    onError:   (e: unknown) => toast.error(e instanceof Error ? e.message : 'Failed to update clearance'),
+    onError: (e: unknown) => {
+      if (e instanceof Error && versionConflict(e)) return
+      toast.error(e instanceof Error ? e.message : 'Failed to update clearance')
+    },
   })
 
   if (isLoading) {
@@ -299,12 +306,12 @@ export function ManagerTeamLifecycle() {
                       <div className="flex gap-1.5">
                         <Button size="sm" variant="outline" className="h-7 text-xs"
                           disabled={clearanceMut.isPending}
-                          onClick={() => clearanceMut.mutate({ employeeId: s.employee_id, clearanceId: s.manager_clearance!.id, status: 'cleared' })}>
+                          onClick={() => clearanceMut.mutate({ employeeId: s.employee_id, clearance: s.manager_clearance!, status: 'cleared' })}>
                           <Check className="mr-1 h-3 w-3" /> Clear
                         </Button>
                         <Button size="sm" variant="outline" className="h-7 text-xs text-destructive"
                           disabled={clearanceMut.isPending}
-                          onClick={() => clearanceMut.mutate({ employeeId: s.employee_id, clearanceId: s.manager_clearance!.id, status: 'rejected' })}>
+                          onClick={() => clearanceMut.mutate({ employeeId: s.employee_id, clearance: s.manager_clearance!, status: 'rejected' })}>
                           <X className="mr-1 h-3 w-3" /> Reject
                         </Button>
                       </div>

@@ -6,7 +6,7 @@ import { eventBus } from '../../lib/event-bus.js'
 import { computeFnfSettlement } from '../../lib/fnf-settlement-engine.js'
 import { isHrAdmin, resolveCallerEmployeeId, isDirectReport } from '../../lib/manager-scope.js'
 import { revokeEmployeeAuth } from '../../lib/user-account-service.js'
-import { serverError, ErrorCode } from '../../lib/api-errors.js'
+import { serverError, conflictError, ErrorCode } from '../../lib/api-errors.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
 
 // ─── Schemas ─────────────────────────────────────────────────────────────────
@@ -14,6 +14,10 @@ import { fetchAllRows } from '../../lib/supabase-paginate.js'
 const clearanceStatusSchema = z.object({
   status:  z.enum(['cleared', 'rejected']),
   remarks: z.string().optional(),
+  // optional so this stays backward-compatible with a frontend that hasn't
+  // been updated to send it yet — the CAS check below only runs when a
+  // caller actually provides it (PEND-105 follow-up wave).
+  expected_version: z.number().int().positive().optional(),
 })
 
 const ffBodySchema = z.object({
@@ -24,6 +28,9 @@ const ffBodySchema = z.object({
   other_deductions:         z.number().optional().default(0),
   other_additions:          z.number().optional().default(0),
   notes:                    z.string().optional(),
+  // optional — only checked against the update branch (a fresh insert has
+  // no prior version to compare against).
+  expected_version:         z.number().int().positive().optional(),
 })
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -39,11 +46,11 @@ const DEFAULT_CLEARANCE_DEPTS = [
 async function getClearanceDepts(fastify: any, tenantId: string) {
   const { data } = await fastify.supabase
     .from('clearance_departments')
-    .select('id, code, label, display_order, is_active')
+    .select('id, code, label, display_order, is_active, version')
     .eq('tenant_id', tenantId).eq('is_active', true).order('display_order')
   if (data && data.length > 0) return data
   const rows = DEFAULT_CLEARANCE_DEPTS.map((d, i) => ({ tenant_id: tenantId, code: d.code, label: d.label, display_order: i }))
-  const { data: seeded } = await fastify.supabase.from('clearance_departments').insert(rows).select('id, code, label, display_order, is_active')
+  const { data: seeded } = await fastify.supabase.from('clearance_departments').insert(rows).select('id, code, label, display_order, is_active, version')
   return seeded ?? []
 }
 
@@ -110,7 +117,7 @@ export default async function separationWorkflowRoutes(fastify: FastifyInstance)
           .select(`
             id, separation_type, initiated_by, notice_date,
             last_working_date, exit_reason, clearance_done,
-            exit_interview_done, remarks, created_at,
+            exit_interview_done, remarks, created_at, version,
             lifecycle_stage, approval_status, relieved_at, archived_at,
             employees!inner (
               id, first_name, last_name, employee_code,
@@ -129,7 +136,7 @@ export default async function separationWorkflowRoutes(fastify: FastifyInstance)
     const result = await Promise.all(seps.map(async (sep: any) => {
       const { data: clearances } = await fastify.supabase
         .from('separation_clearances')
-        .select('id, department, status, cleared_by, cleared_at, remarks')
+        .select('id, department, status, cleared_by, cleared_at, remarks, version')
         .eq('separation_id', sep.id)
         .eq('tenant_id', req.tenantId)
         .order('created_at')
@@ -155,6 +162,7 @@ export default async function separationWorkflowRoutes(fastify: FastifyInstance)
         approval_status:  sep.approval_status ?? 'pending',
         relieved_at:      sep.relieved_at ?? null,
         archived_at:      sep.archived_at ?? null,
+        version:          sep.version,
         clearances:       clearances ?? [],
         fnf:              ff ?? null,
       }
@@ -300,7 +308,7 @@ export default async function separationWorkflowRoutes(fastify: FastifyInstance)
       }
     }
 
-    const { data: updated, error } = await fastify.supabase
+    let updateQuery = fastify.supabase
       .from('separation_clearances')
       .update({
         status:       parsed.data.status,
@@ -311,13 +319,31 @@ export default async function separationWorkflowRoutes(fastify: FastifyInstance)
       .eq('id', req.params.clearanceId)
       .eq('employee_id', req.params.id)
       .eq('tenant_id', req.tenantId)
-      .select()
-      .single()
+    if (parsed.data.expected_version !== undefined)
+      updateQuery = updateQuery.eq('version', parsed.data.expected_version)
+
+    const { data: updated, error } = await updateQuery.select().maybeSingle()
 
     if (error)
       return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update clearance status')
-    if (!updated)
+    if (!updated) {
+      // Disambiguate "record deleted" (404) from "version moved on since
+      // this was loaded" (409) — only relevant when a CAS check was applied.
+      if (parsed.data.expected_version !== undefined) {
+        const { data: stillExists } = await fastify.supabase
+          .from('separation_clearances')
+          .select('id')
+          .eq('id', req.params.clearanceId)
+          .eq('employee_id', req.params.id)
+          .eq('tenant_id', req.tenantId)
+          .maybeSingle()
+        if (stillExists) {
+          return conflictError(reply, ErrorCode.VERSION_CONFLICT,
+            'This clearance was changed by someone else. Reload and try again.')
+        }
+      }
       return reply.code(404).send({ error: 'NOT_FOUND', message: 'Clearance record not found' })
+    }
 
     // Check if all 5 clearances are now 'cleared'
     const { data: allClearances, error: fetchErr } = await fastify.supabase
@@ -403,30 +429,43 @@ export default async function separationWorkflowRoutes(fastify: FastifyInstance)
       .eq('tenant_id', req.tenantId)
       .maybeSingle()
 
+    // expected_version is a CAS control field, not a DB column — strip it
+    // before spreading into the insert/update payload.
+    const { expected_version, ...ffFields } = parsed.data
+
     let result: any
     let statusCode = 201
 
     if (existing) {
-      const { data, error } = await fastify.supabase
+      let updateQuery = fastify.supabase
         .from('separation_ff_summary')
         .update({
-          ...parsed.data,
+          ...ffFields,
           updated_by: req.userId,
           updated_at: new Date().toISOString(),
         })
         .eq('id', existing.id)
         .eq('tenant_id', req.tenantId)
-        .select()
-        .single()
+      if (expected_version !== undefined)
+        updateQuery = updateQuery.eq('version', expected_version)
+
+      const { data, error } = await updateQuery.select().maybeSingle()
       if (error)
         return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update F&F settlement')
+      if (!data) {
+        if (expected_version !== undefined) {
+          return conflictError(reply, ErrorCode.VERSION_CONFLICT,
+            'This F&F settlement was changed by someone else. Reload and try again.')
+        }
+        return reply.code(404).send({ error: 'NOT_FOUND', message: 'F&F record not found' })
+      }
       result = data
       statusCode = 200
     } else {
       const { data, error } = await fastify.supabase
         .from('separation_ff_summary')
         .insert({
-          ...parsed.data,
+          ...ffFields,
           employee_id:   req.params.id,
           tenant_id:     req.tenantId,
           separation_id: separation.id,
@@ -903,13 +942,18 @@ export default async function separationWorkflowRoutes(fastify: FastifyInstance)
   fastify.get('/settlement/gratuity-config', hrAdminAuth, async (req: any, reply) => {
     const { data } = await fastify.supabase
       .from('gratuity_config')
-      .select('enabled, rate_numerator, rate_denominator, min_years, max_amount, basis, updated_at')
+      .select('enabled, rate_numerator, rate_denominator, min_years, max_amount, basis, updated_at, version')
       .eq('tenant_id', req.tenantId)
       .maybeSingle()
     return reply.send({ data: data ?? { ...GRATUITY_DEFAULTS, is_default: true } })
   })
 
-  // PUT /settlement/gratuity-config — upsert config
+  // PUT /settlement/gratuity-config — insert-or-update with CAS.
+  // Rewritten from .upsert() (PEND-105 follow-up wave) — Supabase's upsert
+  // can't express a WHERE clause on its ON CONFLICT DO UPDATE branch, so an
+  // optimistic-concurrency check needs an explicit select-then-branch here
+  // instead, matching the pattern used for the other upsert-based CAS
+  // endpoints earlier in this project (personal-info.ts, bank-statutory.ts).
   fastify.put('/settlement/gratuity-config', hrAdminAuth, async (req: any, reply) => {
     const schema = z.object({
       enabled:          z.boolean().default(true),
@@ -918,21 +962,71 @@ export default async function separationWorkflowRoutes(fastify: FastifyInstance)
       min_years:        z.number().min(0).max(20),
       max_amount:       z.number().min(0).max(100000000),
       basis:            z.enum(['basic', 'gross']),
+      // optional — a tenant configuring gratuity for the first time has no
+      // prior version to compare against.
+      expected_version: z.number().int().positive().optional(),
     })
     const parsed = schema.safeParse(req.body)
     if (!parsed.success)
       return reply.code(400).send({ error: 'VALIDATION', message: parsed.error.issues[0].message })
 
-    const { data, error } = await fastify.supabase
+    const { expected_version, ...configFields } = parsed.data
+
+    const { data: existing } = await fastify.supabase
       .from('gratuity_config')
-      .upsert({ tenant_id: req.tenantId, ...parsed.data, updated_at: new Date().toISOString(), updated_by: req.userId }, { onConflict: 'tenant_id' })
-      .select()
-      .single()
+      .select('id')
+      .eq('tenant_id', req.tenantId)
+      .maybeSingle()
+
+    let data: any, error: any
+
+    if (existing) {
+      let updateQuery = fastify.supabase
+        .from('gratuity_config')
+        .update({ ...configFields, updated_at: new Date().toISOString(), updated_by: req.userId })
+        .eq('id', existing.id)
+        .eq('tenant_id', req.tenantId)
+      if (expected_version !== undefined)
+        updateQuery = updateQuery.eq('version', expected_version)
+
+      const res = await updateQuery.select().maybeSingle()
+      data = res.data
+      error = res.error
+      if (!error && !data) {
+        if (expected_version !== undefined) {
+          return conflictError(reply, ErrorCode.VERSION_CONFLICT,
+            'This gratuity configuration was changed by someone else. Reload and try again.')
+        }
+        return reply.code(404).send({ error: 'NOT_FOUND', message: 'Gratuity configuration not found' })
+      }
+    } else {
+      const res = await fastify.supabase
+        .from('gratuity_config')
+        .insert({ tenant_id: req.tenantId, ...configFields, updated_at: new Date().toISOString(), updated_by: req.userId })
+        .select()
+        .single()
+      data = res.data
+      error = res.error
+      // A concurrent first-time save for this tenant may have inserted the
+      // row first — fall back to an update instead of surfacing a spurious
+      // unique-violation to the caller.
+      if (error?.code === '23505') {
+        const retry = await fastify.supabase
+          .from('gratuity_config')
+          .update({ ...configFields, updated_at: new Date().toISOString(), updated_by: req.userId })
+          .eq('tenant_id', req.tenantId)
+          .select()
+          .maybeSingle()
+        data = retry.data
+        error = retry.error
+      }
+    }
+
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to save gratuity configuration')
 
     await logAction(fastify.supabase, {
       tenantId: req.tenantId, tableName: 'gratuity_config', recordId: (data as any).id,
-      action: 'UPDATE', performedBy: req.userId, newData: parsed.data as Record<string, unknown>,
+      action: 'UPDATE', performedBy: req.userId, newData: configFields as Record<string, unknown>,
     })
 
     return reply.send({ data })
@@ -961,12 +1055,43 @@ export default async function separationWorkflowRoutes(fastify: FastifyInstance)
   })
 
   fastify.patch('/settlement/clearance-departments/:id', hrAdminAuth, async (req: any, reply) => {
-    const parsed = z.object({ label: z.string().min(1).max(80).optional(), is_active: z.boolean().optional(), display_order: z.number().int().optional() }).safeParse(req.body)
+    const parsed = z.object({
+      label:             z.string().min(1).max(80).optional(),
+      is_active:         z.boolean().optional(),
+      display_order:     z.number().int().optional(),
+      expected_version:  z.number().int().positive().optional(),
+    }).safeParse(req.body)
     if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION', message: parsed.error.issues[0].message })
-    const { data, error } = await fastify.supabase
-      .from('clearance_departments').update(parsed.data).eq('id', req.params.id).eq('tenant_id', req.tenantId).select().single()
+
+    const { expected_version, ...deptFields } = parsed.data
+
+    let updateQuery = fastify.supabase
+      .from('clearance_departments')
+      .update(deptFields)
+      .eq('id', req.params.id)
+      .eq('tenant_id', req.tenantId)
+    if (expected_version !== undefined)
+      updateQuery = updateQuery.eq('version', expected_version)
+
+    // .maybeSingle() — not .single() — so a 0-row match (deleted, or a
+    // stale expected_version) returns { data: null } instead of throwing.
+    const { data, error } = await updateQuery.select().maybeSingle()
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update clearance department')
-    if (!data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Department not found' })
+    if (!data) {
+      if (expected_version !== undefined) {
+        const { data: stillExists } = await fastify.supabase
+          .from('clearance_departments')
+          .select('id')
+          .eq('id', req.params.id)
+          .eq('tenant_id', req.tenantId)
+          .maybeSingle()
+        if (stillExists) {
+          return conflictError(reply, ErrorCode.VERSION_CONFLICT,
+            'This clearance department was changed by someone else. Reload and try again.')
+        }
+      }
+      return reply.code(404).send({ error: 'NOT_FOUND', message: 'Department not found' })
+    }
     return reply.send({ data })
   })
 

@@ -22,6 +22,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { ExitInterviewForm, ExitAnalyticsCard } from '@/components/separation/ExitInterviewForm'
 import { ClearanceSetupDialog } from '@/components/separation/ClearanceSetupDialog'
 import { PageHeader } from '@/components/layout/PageHeader'
+import { useVersionConflict, withExpectedVersion } from '@/hooks/useVersionConflict'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -35,6 +36,7 @@ interface ClearanceDept {
   cleared_at: string | null
   remarks: string | null
   sequence: number
+  version?: number
 }
 
 interface FnF {
@@ -47,6 +49,7 @@ interface FnF {
   other_deductions: number | null
   net_payable: number | null
   status: 'draft' | 'approved' | 'paid'
+  version?: number
 }
 
 interface FfBreakdown {
@@ -73,6 +76,7 @@ interface SeparationRow {
   approval_status?: string
   relieved_at?: string | null
   archived_at?: string | null
+  version?: number
 }
 
 // ── Lifecycle stages ────────────────────────────────────────────────────────
@@ -287,9 +291,14 @@ function ClearancePanel({ row, onClose: _onClose }: { row: SeparationRow; onClos
   const cleared = clearanceCount(row.clearances)
   const allCleared = cleared === (row.clearances.length || CLEARANCE_DEPTS.length)
 
+  const versionConflict = useVersionConflict([
+    ['separations'], ['separation', row.employee_id], ['ess-me-separation', row.employee_id], ['manager-team-lifecycle'],
+  ])
+
   const markMutation = useMutation({
-    mutationFn: ({ deptId, action, remarks }: { deptId: string; action: 'cleared' | 'rejected'; remarks?: string }) =>
-      api.patch(`/employees/${row.employee_id}/separation-clearances/${deptId}`, { status: action, remarks }),
+    mutationFn: ({ dept, action, remarks }: { dept: ClearanceDept; action: 'cleared' | 'rejected'; remarks?: string }) =>
+      api.patch(`/employees/${row.employee_id}/separation-clearances/${dept.id}`,
+        withExpectedVersion({ status: action, remarks }, dept)),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['separations'] })
       qc.invalidateQueries({ queryKey: ['separation', row.employee_id] })
@@ -299,7 +308,10 @@ function ClearancePanel({ row, onClose: _onClose }: { row: SeparationRow; onClos
       qc.invalidateQueries({ queryKey: ['manager-team-lifecycle'] })
       toast.success('Clearance status updated')
     },
-    onError: (e: Error) => toast.error('Failed', { description: e.message }),
+    onError: (e: Error) => {
+      if (versionConflict(e)) return
+      toast.error('Failed', { description: e.message })
+    },
   })
 
   return (
@@ -350,7 +362,7 @@ function ClearancePanel({ row, onClose: _onClose }: { row: SeparationRow; onClos
                     variant="outline"
                     className="h-7 text-xs gap-1 border-success/40 text-success hover:bg-success/10"
                     disabled={markMutation.isPending}
-                    onClick={() => markMutation.mutate({ deptId: cl.id, action: 'cleared', remarks: remarkMap[cl.id] })}
+                    onClick={() => markMutation.mutate({ dept: cl, action: 'cleared', remarks: remarkMap[cl.id] })}
                   >
                     <CheckCircle2 className="h-3.5 w-3.5" />Mark Cleared
                   </Button>
@@ -359,7 +371,7 @@ function ClearancePanel({ row, onClose: _onClose }: { row: SeparationRow; onClos
                     variant="outline"
                     className="h-7 text-xs gap-1 border-destructive/40 text-destructive hover:bg-destructive/10"
                     disabled={markMutation.isPending}
-                    onClick={() => markMutation.mutate({ deptId: cl.id, action: 'rejected', remarks: remarkMap[cl.id] })}
+                    onClick={() => markMutation.mutate({ dept: cl, action: 'rejected', remarks: remarkMap[cl.id] })}
                   >
                     <XCircle className="h-3.5 w-3.5" />Mark Rejected
                   </Button>
@@ -415,21 +427,31 @@ function FnFSection({ row }: { row: SeparationRow }) {
     qc.invalidateQueries({ queryKey: ['manager-team-lifecycle'] })
   }
 
+  const versionConflict = useVersionConflict([
+    ['separations'], ['separation', row.employee_id], ['ess-me-separation', row.employee_id], ['manager-team-lifecycle'],
+  ])
+
   const saveMutation = useMutation({
-    mutationFn: () => api.post(`/employees/${row.employee_id}/separation-ff`, form),
+    mutationFn: () => api.post(`/employees/${row.employee_id}/separation-ff`, withExpectedVersion(form, row.fnf)),
     onSuccess: () => {
       invalidate()
       toast.success('F&F settlement saved')
       setEditOpen(false)
     },
-    onError: (e: Error) => toast.error('Save failed', { description: e.message }),
+    onError: (e: Error) => {
+      if (versionConflict(e)) return
+      toast.error('Save failed', { description: e.message })
+    },
   })
 
   const noticeMutation = useMutation({
     mutationFn: (body: { notice_period_days_override: number | null; notice_waived: boolean }) =>
-      api.put(`/employees/${row.employee_id}/separation`, body),
+      api.put(`/employees/${row.employee_id}/separation`, withExpectedVersion(body, row)),
     onSuccess: () => { invalidate(); toast.success('Notice settings saved — re-run Auto-calculate to apply') },
-    onError: (e: Error) => toast.error('Failed', { description: e.message }),
+    onError: (e: Error) => {
+      if (versionConflict(e)) return
+      toast.error('Failed', { description: e.message })
+    },
   })
 
   const approveMutation = useMutation({

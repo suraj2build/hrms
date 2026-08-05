@@ -3,7 +3,7 @@ import { z } from 'zod'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { logAction } from '../../lib/audit-service.js'
 import { revokeEmployeeAuth } from '../../lib/user-account-service.js'
-import { serverError, notFound, ErrorCode } from '../../lib/api-errors.js'
+import { serverError, notFound, conflictError, ErrorCode } from '../../lib/api-errors.js'
 
 const schema = z.object({
   separation_type:      z.enum(['resignation','termination','retirement','end_of_contract','absconding','deceased','mutual_separation']),
@@ -17,6 +17,10 @@ const schema = z.object({
   remarks:              z.string().optional(),
   notice_period_days_override: z.number().int().min(0).max(365).optional().nullable(),
   notice_waived:        z.boolean().optional(),
+  // optional so this stays backward-compatible with a frontend that hasn't
+  // been updated to send it yet — the CAS check on PUT only runs when a
+  // caller actually provides it (PEND-105 follow-up wave).
+  expected_version:     z.number().int().positive().optional(),
 })
 
 async function verifyEmployee(fastify: any, employeeId: string, tenantId: string) {
@@ -102,14 +106,35 @@ export default async function separationRoutes(fastify: FastifyInstance) {
     const parsed = schema.partial().safeParse(req.body)
     if (!parsed.success)
       return reply.code(400).send({ error: 'VALIDATION', message: parsed.error.issues[0].message })
-    const { data, error } = await fastify.supabase
+
+    // expected_version is a CAS control field, not a DB column.
+    const { expected_version, ...updateFields } = parsed.data
+
+    let updateQuery = fastify.supabase
       .from('employee_separation')
-      .update(parsed.data)
+      .update(updateFields)
       .eq('employee_id', req.params.id)
       .eq('tenant_id', req.tenantId)
-      .select().maybeSingle()
+    if (expected_version !== undefined)
+      updateQuery = updateQuery.eq('version', expected_version)
+
+    const { data, error } = await updateQuery.select().maybeSingle()
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update separation record')
-    if (!data) return notFound(reply, 'NOT_FOUND', 'Separation record not found')
+    if (!data) {
+      if (expected_version !== undefined) {
+        const { data: stillExists } = await fastify.supabase
+          .from('employee_separation')
+          .select('id')
+          .eq('employee_id', req.params.id)
+          .eq('tenant_id', req.tenantId)
+          .maybeSingle()
+        if (stillExists) {
+          return conflictError(reply, ErrorCode.VERSION_CONFLICT,
+            'This separation record was changed by someone else. Reload and try again.')
+        }
+      }
+      return notFound(reply, 'NOT_FOUND', 'Separation record not found')
+    }
 
     // If last_working_date updated and now in past, mark as separated
     if (parsed.data.last_working_date && new Date(parsed.data.last_working_date) <= new Date()) {

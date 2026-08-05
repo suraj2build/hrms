@@ -19,6 +19,7 @@ import { Switch } from '@/components/ui/switch'
 import { LogOut, Edit2, Loader2 } from 'lucide-react'
 import { EmptySection, Grid2, KV, type SeparationData, type Section } from './shared'
 import { fmtDate } from './format-helpers'
+import { useVersionConflict, withExpectedVersion } from '@/hooks/useVersionConflict'
 
 interface SeparationTabProps {
   id: string | undefined
@@ -95,14 +96,18 @@ export function SeparationTab({ id, isAdmin, subTab, visited }: SeparationTabPro
     },
     onError: (e: Error) => toast.error('Failed to initiate separation', { description: e.message }),
   })
+  const versionConflict = useVersionConflict([
+    ['separation', id], ['employee-full', id], ['separations'], ['ess-me-separation', id],
+  ])
+
   const updateSepMutation = useMutation({
-    mutationFn: () => api.put(`/employees/${id}/separation`, {
+    mutationFn: () => api.put(`/employees/${id}/separation`, withExpectedVersion({
       ...sepForm,
       notice_date:       sepForm.notice_date       || undefined,
       last_working_date: sepForm.last_working_date || undefined,
       exit_reason:       sepForm.exit_reason       || undefined,
       remarks:           sepForm.remarks           || undefined,
-    }),
+    }, separationData?.data)),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['separation', id] })
       qc.invalidateQueries({ queryKey: ['employee-full', id] })
@@ -111,7 +116,10 @@ export function SeparationTab({ id, isAdmin, subTab, visited }: SeparationTabPro
       setSepDlgOpen(false)
       toast.success('Separation record updated')
     },
-    onError: (e: Error) => toast.error('Failed to update separation', { description: e.message }),
+    onError: (e: Error) => {
+      if (versionConflict(e)) return
+      toast.error('Failed to update separation', { description: e.message })
+    },
   })
 
   return (
