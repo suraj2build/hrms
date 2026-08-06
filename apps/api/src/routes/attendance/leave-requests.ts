@@ -381,6 +381,10 @@ export default async function leaveRequestsRoutes(fastify: FastifyInstance) {
         // isSelfApproval() already blocks this case upstream today (PEND-94),
         // so it's expected to stay false, but a real computed value means the
         // governance rule still catches a regression in that guard.
+        // policy_mismatch (PEND-94, 2026-08-06): true when the approved span
+        // exceeds the resolved policy's max_consecutive_days, or the gap
+        // since the employee's last approved leave of this type is under
+        // min_gap_days — see approval-service.ts for the full computation.
         fastify.eventPublisher.publish({
           event_type:  EventType.LEAVE_APPROVED,
           module:      MODULE.LEAVE,
@@ -393,6 +397,8 @@ export default async function leaveRequestsRoutes(fastify: FastifyInstance) {
             approved_by:   req.userId,
             self_approved: result.value.selfApproved ?? false,
             backdated:     result.value.backdated ?? false,
+            policy_mismatch:         result.value.policyMismatch ?? false,
+            policy_mismatch_reasons: result.value.policyMismatchReasons ?? [],
           },
           correlation_id: req.correlationId ?? undefined,
         })

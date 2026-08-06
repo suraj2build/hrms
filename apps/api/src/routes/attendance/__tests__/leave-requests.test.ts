@@ -75,17 +75,27 @@ vi.mock('../../../lib/leave-engine.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../lib/leave-engine.js')>()
   return { ...actual, validateBalance: vi.fn().mockResolvedValue({ valid: true, currentBalance: 100 }) }
 })
+vi.mock('../../../lib/leave-policy-service.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../lib/leave-policy-service.js')>()
+  // Default: no resolvable policy rule — every existing test in this file
+  // predates PEND-94 and asserts nothing about policy_mismatch, so this
+  // must resolve to a no-op (policyMismatch stays false) unless a test
+  // overrides it.
+  return { ...actual, resolveEffectivePolicyRule: vi.fn().mockResolvedValue(null) }
+})
 
 import leaveRequestsRoutes from '../leave-requests.js'
 import { getLeaveRequest }  from '../../../lib/leave-request-service.js'
 import { getLockedMonths }  from '../../../lib/period-lock.js'
 import { isSelfApproval }   from '../../../lib/approval-guards.js'
 import { recomputeRange }   from '../../../lib/attendance-engine.js'
+import { resolveEffectivePolicyRule } from '../../../lib/leave-policy-service.js'
 
 const getLeaveRequestMock = getLeaveRequest as ReturnType<typeof vi.fn>
 const getLockedMonthsMock = getLockedMonths as ReturnType<typeof vi.fn>
 const isSelfApprovalMock  = isSelfApproval  as ReturnType<typeof vi.fn>
 const recomputeRangeMock  = recomputeRange  as ReturnType<typeof vi.fn>
+const resolveEffectivePolicyRuleMock = resolveEffectivePolicyRule as ReturnType<typeof vi.fn>
 
 // ── Fixtures ─────────────────────────────────────────────────────────────────
 
@@ -126,7 +136,7 @@ function okResult(row: ReturnType<typeof leaveRequestRow>) {
 // getLeaveRequest/getLockedMonths/isSelfApproval/validateBalance/recomputeRange
 // /fetchTenantTz are all mocked above at the module level.
 
-function buildMockSupabase() {
+function buildMockSupabase(opts: { priorApprovedLeaveToDate?: string | null } = {}) {
   const rpcMock = vi.fn()
   const supabase = {
     rpc: rpcMock,
@@ -145,6 +155,24 @@ function buildMockSupabase() {
         }
         return chain
       }
+      if (table === 'leave_requests') {
+        // PEND-94's min_gap_days check — the prior-most-recent-approved-leave
+        // lookup. Only reached when resolveEffectivePolicyRuleMock returns a
+        // rule with min_gap_days > 0; every other test never touches this.
+        const chain: any = {
+          select: () => chain,
+          eq:     () => chain,
+          neq:    () => chain,
+          lt:     () => chain,
+          order:  () => chain,
+          limit:  () => chain,
+          maybeSingle: () => Promise.resolve({
+            data: opts.priorApprovedLeaveToDate ? { to_date: opts.priorApprovedLeaveToDate } : null,
+            error: null,
+          }),
+        }
+        return chain
+      }
       throw new Error(`buildMockSupabase: unexpected table "${table}"`)
     },
   }
@@ -153,8 +181,8 @@ function buildMockSupabase() {
 
 // ── App builder ──────────────────────────────────────────────────────────────
 
-async function buildApp(): Promise<{ app: FastifyInstance; rpcMock: ReturnType<typeof vi.fn>; publishMock: ReturnType<typeof vi.fn> }> {
-  const { supabase, rpcMock } = buildMockSupabase()
+async function buildApp(opts: { priorApprovedLeaveToDate?: string | null } = {}): Promise<{ app: FastifyInstance; rpcMock: ReturnType<typeof vi.fn>; publishMock: ReturnType<typeof vi.fn> }> {
+  const { supabase, rpcMock } = buildMockSupabase(opts)
   const publishMock = vi.fn()
 
   const app = Fastify({ logger: false })
@@ -187,6 +215,7 @@ beforeEach(() => {
   getLockedMonthsMock.mockResolvedValue(new Set())
   isSelfApprovalMock.mockResolvedValue(false)
   recomputeRangeMock.mockResolvedValue(undefined)
+  resolveEffectivePolicyRuleMock.mockResolvedValue(null)
 })
 
 // ── Approve ──────────────────────────────────────────────────────────────────
@@ -306,6 +335,114 @@ describe('POST /leave-requests/:id/approve', () => {
         { year: 2099, days: 3 },
         { year: 2100, days: 2 },
       ],
+    }))
+  })
+})
+
+// ── PEND-94: policy_mismatch governance signal ────────────────────────────────
+// leave.policy-mismatch existed since Sprint 2 but nothing ever set
+// policy_mismatch on the published event, so the rule could never fire.
+// These assert the event payload the governance rule engine actually reads —
+// not the HTTP response, which is unaffected either way (advisory, non-blocking).
+
+describe('POST /leave-requests/:id/approve — PEND-94 policy_mismatch', () => {
+  it('no resolvable policy rule → policy_mismatch: false, no reasons', async () => {
+    const row = leaveRequestRow()
+    getLeaveRequestMock.mockResolvedValue(okResult(row))
+    resolveEffectivePolicyRuleMock.mockResolvedValue(null)
+    const { app, rpcMock, publishMock } = await buildApp()
+    rpcMock.mockResolvedValue({ data: { id: REQUEST_ID, status: 'APPROVED' }, error: null })
+
+    const res = await app.inject({ method: 'POST', url: `/leave-requests/${REQUEST_ID}/approve`, headers: HEADERS })
+
+    expect(res.statusCode).toBe(200)
+    expect(publishMock).toHaveBeenCalledWith(expect.objectContaining({
+      payload: expect.objectContaining({ policy_mismatch: false, policy_mismatch_reasons: [] }),
+    }))
+  })
+
+  it('span exceeds max_consecutive_days → policy_mismatch: true with a specific reason, approval still succeeds', async () => {
+    // Row spans Jun 10–12 (3 days); policy caps this leave type at 2.
+    const row = leaveRequestRow()
+    getLeaveRequestMock.mockResolvedValue(okResult(row))
+    resolveEffectivePolicyRuleMock.mockResolvedValue({ max_consecutive_days: 2, min_gap_days: 0 })
+    const { app, rpcMock, publishMock } = await buildApp()
+    rpcMock.mockResolvedValue({ data: { id: REQUEST_ID, status: 'APPROVED' }, error: null })
+
+    const res = await app.inject({ method: 'POST', url: `/leave-requests/${REQUEST_ID}/approve`, headers: HEADERS })
+
+    // Advisory only — never blocks the approval itself.
+    expect(res.statusCode).toBe(200)
+    expect(JSON.parse(res.body).data.status).toBe('APPROVED')
+    expect(publishMock).toHaveBeenCalledWith(expect.objectContaining({
+      payload: expect.objectContaining({
+        policy_mismatch: true,
+        policy_mismatch_reasons: [expect.stringContaining('3 consecutive days')],
+      }),
+    }))
+  })
+
+  it('span within max_consecutive_days → policy_mismatch: false', async () => {
+    const row = leaveRequestRow() // 3-day span
+    getLeaveRequestMock.mockResolvedValue(okResult(row))
+    resolveEffectivePolicyRuleMock.mockResolvedValue({ max_consecutive_days: 5, min_gap_days: 0 })
+    const { app, rpcMock, publishMock } = await buildApp()
+    rpcMock.mockResolvedValue({ data: { id: REQUEST_ID, status: 'APPROVED' }, error: null })
+
+    await app.inject({ method: 'POST', url: `/leave-requests/${REQUEST_ID}/approve`, headers: HEADERS })
+
+    expect(publishMock).toHaveBeenCalledWith(expect.objectContaining({
+      payload: expect.objectContaining({ policy_mismatch: false, policy_mismatch_reasons: [] }),
+    }))
+  })
+
+  it('gap since last approved leave of the same type is under min_gap_days → policy_mismatch: true', async () => {
+    // This request starts 2099-06-10; prior approved leave of the same type
+    // ended 2099-06-05 — a 4-day gap. Policy requires at least 7.
+    const row = leaveRequestRow()
+    getLeaveRequestMock.mockResolvedValue(okResult(row))
+    resolveEffectivePolicyRuleMock.mockResolvedValue({ max_consecutive_days: null, min_gap_days: 7 })
+    const { app, rpcMock, publishMock } = await buildApp({ priorApprovedLeaveToDate: '2099-06-05' })
+    rpcMock.mockResolvedValue({ data: { id: REQUEST_ID, status: 'APPROVED' }, error: null })
+
+    const res = await app.inject({ method: 'POST', url: `/leave-requests/${REQUEST_ID}/approve`, headers: HEADERS })
+
+    expect(res.statusCode).toBe(200)
+    expect(publishMock).toHaveBeenCalledWith(expect.objectContaining({
+      payload: expect.objectContaining({
+        policy_mismatch: true,
+        policy_mismatch_reasons: [expect.stringContaining('4 day(s)')],
+      }),
+    }))
+  })
+
+  it('gap since last approved leave of the same type satisfies min_gap_days → policy_mismatch: false', async () => {
+    const row = leaveRequestRow()
+    getLeaveRequestMock.mockResolvedValue(okResult(row))
+    resolveEffectivePolicyRuleMock.mockResolvedValue({ max_consecutive_days: null, min_gap_days: 3 })
+    const { app, rpcMock, publishMock } = await buildApp({ priorApprovedLeaveToDate: '2099-06-05' })
+    rpcMock.mockResolvedValue({ data: { id: REQUEST_ID, status: 'APPROVED' }, error: null })
+
+    await app.inject({ method: 'POST', url: `/leave-requests/${REQUEST_ID}/approve`, headers: HEADERS })
+
+    expect(publishMock).toHaveBeenCalledWith(expect.objectContaining({
+      payload: expect.objectContaining({ policy_mismatch: false, policy_mismatch_reasons: [] }),
+    }))
+  })
+
+  it('resolveEffectivePolicyRule throwing is non-fatal — approval succeeds, policy_mismatch defaults to false', async () => {
+    const row = leaveRequestRow()
+    getLeaveRequestMock.mockResolvedValue(okResult(row))
+    resolveEffectivePolicyRuleMock.mockRejectedValue(new Error('policy service boom'))
+    const { app, rpcMock, publishMock } = await buildApp()
+    rpcMock.mockResolvedValue({ data: { id: REQUEST_ID, status: 'APPROVED' }, error: null })
+
+    const res = await app.inject({ method: 'POST', url: `/leave-requests/${REQUEST_ID}/approve`, headers: HEADERS })
+
+    expect(res.statusCode).toBe(200)
+    expect(JSON.parse(res.body).data.status).toBe('APPROVED')
+    expect(publishMock).toHaveBeenCalledWith(expect.objectContaining({
+      payload: expect.objectContaining({ policy_mismatch: false, policy_mismatch_reasons: [] }),
     }))
   })
 })

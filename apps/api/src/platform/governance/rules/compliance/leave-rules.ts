@@ -26,6 +26,15 @@ governanceRuleRegistry.register({
     return event.payload?.policy_mismatch === true
   },
   reason(event) {
+    // PEND-94 (2026-08-06): policy_mismatch_reasons carries the specific
+    // violation(s) — max_consecutive_days / min_gap_days — computed in
+    // approval-service.ts. Older/replayed events predating this fix won't
+    // have it (replay_safe: true means past events must still evaluate
+    // cleanly), so fall back to the generic message rather than throwing.
+    const reasons = event.payload?.policy_mismatch_reasons
+    if (Array.isArray(reasons) && reasons.length > 0) {
+      return `Approved leave violates policy: ${reasons.join('; ')}.`
+    }
     const leaveType = (event.payload?.leave_type as string) ?? 'unknown'
     return `Leave approval for type "${leaveType}" contains a policy deviation — verify compliance before payroll.`
   },

@@ -38,6 +38,7 @@ import { isSelfApproval }                       from './approval-guards.js'
 import { gateApprove, gateReject }              from './approval-orchestrator.js'
 import { getLockedMonths, monthsInRange }       from './period-lock.js'
 import { splitByCalendarYear, type PerDayEntry } from './leave-duration-engine.js'
+import { resolveEffectivePolicyRule }           from './leave-policy-service.js'
 
 // ── Shared types ───────────────────────────────────────────────────────────────
 
@@ -168,7 +169,10 @@ export interface LeaveApprovalOpts {
 export async function approveLeaveRequest(
   supabase: SupabaseClient,
   opts:     LeaveApprovalOpts,
-): Promise<ApprovalResult<{ id: string; status: string; backdated?: boolean; selfApproved?: boolean }>> {
+): Promise<ApprovalResult<{
+  id: string; status: string; backdated?: boolean; selfApproved?: boolean
+  policyMismatch?: boolean; policyMismatchReasons?: string[]
+}>> {
   const { tenantId, requestId, ctx } = opts
 
   // ── 1. Fetch ────────────────────────────────────────────────────────────────
@@ -404,7 +408,72 @@ export async function approveLeaveRequest(
   // path's own self-approval check) would still surface here.
   const selfApproved = req.employee_id === ctx.approverId
 
-  return { ok: true, value: { ...approved, backdated, selfApproved } }
+  // PEND-94: leave.policy-mismatch — the rule existed since Sprint 2 but
+  // 'policy_mismatch' was never computed anywhere, so it could never fire.
+  // Definition (2026-08-06 product decision): a leave whose span exceeds the
+  // resolved policy rule's max_consecutive_days, or whose gap since the
+  // employee's last approved leave of the same type is under min_gap_days.
+  // Both fields already exist in leave_policies/the policy engine and are
+  // surfaced in the masters UI, but nothing checked them anywhere in the
+  // apply/approve path — this closes that gap. Advisory only (the rule's
+  // severity is 'warning'): never blocks the approval, only flags it for
+  // review, so tenants who've set these fields loosely aren't broken by a
+  // new hard gate they never expected.
+  const policyMismatchReasons: string[] = []
+  try {
+    const rule = await resolveEffectivePolicyRule(supabase, tenantId, req.employee_id, req.leave_type_id, req.from_date)
+
+    if (rule?.max_consecutive_days != null) {
+      const spanDays = expandDateRange(req.from_date, req.to_date).length
+      if (spanDays > rule.max_consecutive_days) {
+        policyMismatchReasons.push(
+          `spans ${spanDays} consecutive days, exceeding the policy's ${rule.max_consecutive_days}-day maximum for this leave type`,
+        )
+      }
+    }
+
+    if (rule?.min_gap_days && rule.min_gap_days > 0) {
+      const { data: priorLeave } = await supabase
+        .from('leave_requests')
+        .select('to_date')
+        .eq('tenant_id', tenantId)
+        .eq('employee_id', req.employee_id)
+        .eq('leave_type_id', req.leave_type_id)
+        .eq('status', 'APPROVED')
+        .neq('id', requestId)
+        .lt('to_date', req.from_date)
+        .order('to_date', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+
+      if (priorLeave?.to_date) {
+        // expandDateRange is inclusive of both endpoints; subtract 2 to get
+        // the count of days strictly between the two leave spans.
+        const gapDays = expandDateRange(priorLeave.to_date, req.from_date).length - 2
+        if (gapDays < rule.min_gap_days) {
+          policyMismatchReasons.push(
+            `only ${gapDays} day(s) since the employee's last approved leave of this type, below the policy's ${rule.min_gap_days}-day minimum gap`,
+          )
+        }
+      }
+    }
+  } catch (policyErr: unknown) {
+    // Non-fatal by design — a policy-resolution failure must never block an
+    // otherwise-valid approval that already passed the balance/eligibility
+    // gates above. Just skip the advisory check for this approval.
+    console.warn(JSON.stringify({
+      level:   'warn',
+      service: 'approval-service',
+      fn:      'approveLeaveRequest',
+      msg:     'PEND-94 policy_mismatch check failed — skipped, approval unaffected',
+      tenant_id: tenantId,
+      leave_request_id: requestId,
+      err: policyErr instanceof Error ? policyErr.message : String(policyErr),
+    }) + '\n')
+  }
+  const policyMismatch = policyMismatchReasons.length > 0
+
+  return { ok: true, value: { ...approved, backdated, selfApproved, policyMismatch, policyMismatchReasons } }
 }
 
 /**
