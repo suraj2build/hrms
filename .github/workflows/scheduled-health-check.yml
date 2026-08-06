@@ -1,0 +1,109 @@
+name: Scheduled health check
+
+# Runs the same checks CI already runs on every PR/push to main, but on a
+# timer — so drift that isn't caused by a code change in this repo (a
+# dependency bump, an out-of-band DB change, bit-rot in tests that mock an
+# API another PR quietly changed) still gets caught even during a quiet
+# week with no PRs open. Lightweight and additive: no new check logic,
+# just the existing CI suite run on a schedule instead of only on push.
+#
+# Cadence: weekly, Monday 03:00 UTC. Change the cron line below to adjust —
+# e.g. '0 3 * * *' for nightly. Also runnable on demand via the Actions tab
+# (workflow_dispatch).
+on:
+  schedule:
+    - cron: '0 3 * * 1'
+  workflow_dispatch:
+
+jobs:
+  health-check:
+    name: Weekly drift check
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write   # for the failure-notification step below
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: drift_check
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      PGHOST: localhost
+      PGPORT: '5432'
+      PGUSER: postgres
+      PGPASSWORD: postgres
+      PGDATABASE: drift_check
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
+      - name: Lint (incl. design-token colour check)
+        run: npm run lint
+      - name: API tests
+        run: npm run test --workspace=apps/api --if-present
+
+      - name: Schema drift (migrations ↔ code)
+        run: |
+          sudo apt-get update && sudo apt-get install -y postgresql-client
+          npm run db:check-drift
+      - name: Tenant isolation ratchet
+        run: node scripts/check-tenant-isolation.mjs --ratchet
+      - name: Manual-500 ratchet
+        run: node scripts/check-manual-500s.mjs
+      - name: console.error ratchet
+        run: node scripts/check-console-error.mjs
+      - name: Unbounded-query ratchet
+        run: node scripts/check-unbounded-queries.mjs --ratchet
+
+      # No PR exists for a scheduled run, so a red check here is otherwise
+      # easy to miss. File (or update) a single tracking issue instead of
+      # relying on someone noticing the Actions tab.
+      - name: File/update an issue on failure
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const label = 'scheduled-health-check-failure'
+            const title = 'Scheduled health check failed'
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`
+            const body = `The weekly scheduled health check failed.\n\nRun: ${runUrl}\n\nThis is the same suite CI runs on every PR (typecheck, lint, tests, schema drift, and the tenant-isolation / error-hygiene / unbounded-query ratchets) — a failure here means something drifted without going through a PR (e.g. a dependency bump, or an out-of-band change). See the run log for which step failed.`
+
+            const existing = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: label,
+            })
+
+            if (existing.data.length > 0) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existing.data[0].number,
+                body: `Still failing as of this run.\n\nRun: ${runUrl}`,
+              })
+            } else {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title,
+                body,
+                labels: [label],
+              })
+            }
