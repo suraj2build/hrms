@@ -124,6 +124,22 @@ export default defineConfig(({ mode }) => ({
       '/letters':         apiProxy(),
       '/notifications':   apiProxy(),
       '/users':           apiProxy(),
+      // Found missing during a local UAT run (2026-08) — each returned Vite's
+      // HTML SPA fallback instead of hitting the API, breaking these pages
+      // silently ("Unexpected token '<'... is not valid JSON") in local dev only.
+      '/assets':                    apiProxy(),   // assetsRoutes
+      '/separations':               apiProxy(),   // separationWorkflowRoutes
+      '/recognition':               apiProxy(),   // recognitionRoutes — ESS Rewards pillar
+      '/community':                 apiProxy(),   // communityRoutes — ESS Community feed
+      '/roster':                    apiProxy(),   // rosterContextRoutes
+      '/holidays':                  apiProxy(),   // rosterContextRoutes
+      '/roster-calendar':           apiProxy(),
+      '/roster-weekly-off-rules':   apiProxy(),
+      '/shift-segments':            apiProxy(),
+      '/roster-rotation-groups':    apiProxy(),
+      '/roster-rotation-members':   apiProxy(),
+      '/roster-holiday-groups':     apiProxy(),
+      '/roster-simulation':         apiProxy(),
       // ESS-specific API endpoints (avoid proxying the /ess/* frontend page routes)
       '/ess/workforce-notifications': apiProxy(),
       '/ess/operational-summary':     apiProxy(),
