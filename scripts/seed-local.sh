@@ -6,7 +6,17 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
-DB_URL=$(supabase status 2>/dev/null | grep "DB URL" | awk '{print $NF}')
+# Same fix as local-setup.sh: `supabase status`'s pretty-printed table
+# changed shape across CLI versions ("DB URL" row doesn't exist in newer
+# ones — it's a bare "URL" under a "Database" heading), so grepping it
+# breaks silently under `set -e` before the check below even runs.
+# `-o json` keeps a stable DB_URL field regardless of CLI version.
+DB_URL=$(supabase status -o json 2>/dev/null | node -e "
+  try {
+    let d=''; process.stdin.on('data',c=>d+=c);
+    process.stdin.on('end',()=>{ const v=JSON.parse(d).DB_URL; if (v) process.stdout.write(v) });
+  } catch {}
+")
 if [ -z "$DB_URL" ]; then
   echo "Error: Supabase is not running. Run 'supabase start' first."
   exit 1
