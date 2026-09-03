@@ -146,6 +146,61 @@ export default defineConfig(({ mode }) => ({
       '/ess/workload-balance':        apiProxy(),
       '/ess/schedule-fairness':       apiProxy(),
       '/ess/upcoming-payroll-impact': apiProxy(),
+      // Found missing during a live UAT run (2026-09) — GET /ess/home returned
+      // 200 text/html (Vite's SPA fallback) instead of the aggregated home
+      // payload, breaking the ESS Home "Experience Core" cards silently
+      // ("Unexpected token '<'... is not valid JSON") for every employee.
+      // No page-route collision at these five paths, so a plain proxy is safe:
+      '/ess/events':                  apiProxy(),
+      '/ess/signals':                 apiProxy(),
+      '/ess/activity':                apiProxy(),
+      '/ess/progress':                apiProxy(),
+      '/ess/reflection':              apiProxy(),
+      // These five DO collide with frontend page routes of the same path
+      // (/ess/home, /ess/timeline, /ess/identity, /ess/company, /ess/team are
+      // all React Router routes too) — same ambiguity as /manager above, same
+      // fix: bypass to the SPA shell for a real browser navigation, proxy
+      // through to the API for everything else (fetch/XHR).
+      '/ess/home':                    apiProxy({
+        bypass(req: { headers: Record<string, string | string[] | undefined> }) {
+          const accept = req.headers['accept'] ?? ''
+          if (typeof accept === 'string' && accept.includes('text/html')) {
+            return '/index.html'
+          }
+        },
+      }),
+      '/ess/timeline':                apiProxy({
+        bypass(req: { headers: Record<string, string | string[] | undefined> }) {
+          const accept = req.headers['accept'] ?? ''
+          if (typeof accept === 'string' && accept.includes('text/html')) {
+            return '/index.html'
+          }
+        },
+      }),
+      '/ess/identity':                apiProxy({
+        bypass(req: { headers: Record<string, string | string[] | undefined> }) {
+          const accept = req.headers['accept'] ?? ''
+          if (typeof accept === 'string' && accept.includes('text/html')) {
+            return '/index.html'
+          }
+        },
+      }),
+      '/ess/company':                 apiProxy({
+        bypass(req: { headers: Record<string, string | string[] | undefined> }) {
+          const accept = req.headers['accept'] ?? ''
+          if (typeof accept === 'string' && accept.includes('text/html')) {
+            return '/index.html'
+          }
+        },
+      }),
+      '/ess/team':                    apiProxy({
+        bypass(req: { headers: Record<string, string | string[] | undefined> }) {
+          const accept = req.headers['accept'] ?? ''
+          if (typeof accept === 'string' && accept.includes('text/html')) {
+            return '/index.html'
+          }
+        },
+      }),
       '/executive':       apiProxy(),   // Executive Intelligence Center
       '/system':          apiProxy(),
       '/workspace':       apiProxy(),
