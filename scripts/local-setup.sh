@@ -179,7 +179,8 @@ echo ""
 read -r -p "  Seed demo data? [y/N]: " SEED_CHOICE
 echo ""
 
-if [[ "${SEED_CHOICE,,}" == "y" ]]; then
+SEED_CHOICE_LOWER=$(echo "$SEED_CHOICE" | tr '[:upper:]' '[:lower:]')
+if [[ "$SEED_CHOICE_LOWER" == "y" ]]; then
   step "Seeding demo data"
 
   PGPASSWORD=postgres
