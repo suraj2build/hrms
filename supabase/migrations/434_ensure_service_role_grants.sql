@@ -24,10 +24,18 @@
 -- Supabase's own internal roles (supabase_auth_admin / supabase_storage_admin);
 -- the migration-running role may not be permitted to GRANT on tables it
 -- doesn't own there, and this repo's migrations never need to touch them.
+--
+-- No ALTER ROLE here: `service_role` is a Supabase-reserved role that even
+-- the local `postgres` user can't ALTER on some local CLI images
+-- ("only superusers can modify it") — confirmed live, and it rolled back
+-- this entire DO block (GRANTs included) the first time this ran with it
+-- included. BYPASSRLS is set at role *creation* time by the CLI's own
+-- bootstrap and isn't part of the bug being worked around here — only the
+-- table grants were missing (confirmed via \dp: service_role had the same
+-- Dxtm as anon/authenticated, no SELECT/INSERT/UPDATE/DELETE).
 DO $$
 BEGIN
   IF EXISTS (SELECT FROM pg_roles WHERE rolname = 'service_role') THEN
-    EXECUTE 'ALTER ROLE service_role BYPASSRLS';
     EXECUTE 'GRANT ALL ON ALL TABLES IN SCHEMA public TO service_role';
     EXECUTE 'GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO service_role';
     EXECUTE 'GRANT ALL ON ALL FUNCTIONS IN SCHEMA public TO service_role';
