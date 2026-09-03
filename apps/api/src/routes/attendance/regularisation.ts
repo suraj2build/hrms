@@ -14,7 +14,7 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { approveRegularisation, rejectRegularisation } from '../../lib/approval-service.js'
-import { recomputeRange } from '../../lib/attendance-engine.js'
+import { recomputeRange, fetchTenantTz, localToUtc } from '../../lib/attendance-engine.js'
 import { emitEvent } from '../../lib/event-emitter.js'
 import { eventBus } from '../../lib/event-bus.js'
 import { writeLedgerEntry, dateToMonth } from '../../lib/ledger-writer.js'
@@ -43,13 +43,37 @@ const REGULARIZATION_TYPES = [
   'check_in', 'check_out', 'both', 'absence', 'other',
 ] as const
 
+// The ESS form (MyAttendance.tsx) submits raw HTML <input type="datetime-local">
+// values — "YYYY-MM-DDTHH:mm", no seconds, no UTC offset — representing the
+// tenant's LOCAL wall-clock time the employee is correcting to. A stricter
+// `z.string().datetime({ offset: true })` (requires an explicit offset) used to
+// reject every one of those submissions with 400 "Invalid datetime", so no
+// regularisation request with times could ever be submitted through the ESS.
+// Accept either shape here; naive values are converted to UTC below using the
+// tenant's configured timezone, exactly like the AttendanceEngine already does.
+const naiveOrOffsetDatetimeRe = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?(\.\d+)?(Z|[+-]\d{2}:\d{2})?$/
+
 const submitSchema = z.object({
   date:                  z.string().regex(dateRe, 'date must be YYYY-MM-DD'),
   regularization_type:   z.enum(REGULARIZATION_TYPES).optional(),
-  requested_check_in:    z.string().datetime({ offset: true }).nullable().optional(),
-  requested_check_out:   z.string().datetime({ offset: true }).nullable().optional(),
+  requested_check_in:    z.string().regex(naiveOrOffsetDatetimeRe, 'Invalid datetime').nullable().optional(),
+  requested_check_out:   z.string().regex(naiveOrOffsetDatetimeRe, 'Invalid datetime').nullable().optional(),
   reason:                z.string().min(1, 'reason is required').max(500),
 })
+
+/**
+ * Normalize a submitted check-in/out value to a proper UTC ISO instant.
+ * Values already carrying an offset (Z or ±HH:MM) pass through untouched;
+ * naive "YYYY-MM-DDTHH:mm[:ss]" values are interpreted as tenant-local wall
+ * time (matching what the datetime-local input actually captured) and
+ * converted via the same localToUtc() the AttendanceEngine uses.
+ */
+function resolveRequestedTime(value: string | null | undefined, tz: string): string | null {
+  if (!value) return null
+  if (/(Z|[+-]\d{2}:\d{2})$/.test(value)) return value
+  const [datePart, timePart] = value.split('T')
+  return localToUtc(datePart!, timePart!, tz).toISOString()
+}
 
 export default async function regularisationRoute(fastify: FastifyInstance) {
   const auth        = { preHandler: [fastify.authenticate] }
@@ -84,13 +108,15 @@ export default async function regularisationRoute(fastify: FastifyInstance) {
 
     const { date, regularization_type, requested_check_in, requested_check_out, reason } = parsed.data
 
+    const tenantTz = await fetchTenantTz(fastify.supabase, req.tenantId)
+
     const result = await submitRegularisation(fastify.supabase, {
       tenantId:   req.tenantId,
       employeeId: profile.employee_id,
       date,
       regularization_type,
-      requested_check_in,
-      requested_check_out,
+      requested_check_in:  resolveRequestedTime(requested_check_in, tenantTz),
+      requested_check_out: resolveRequestedTime(requested_check_out, tenantTz),
       reason,
     })
 
