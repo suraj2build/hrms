@@ -208,6 +208,36 @@ export function applyStatutoryToSlip(
 
   const breakdown = [...kept, ...statLines]
 
+  // ── Detect configured-but-silently-dropped statutory components ───────────
+  // STATUTORY_CODE-matching deduction/employer_contribution lines are always
+  // stripped from `kept` above and replaced by the engines' own lines above —
+  // but if the engine determines the employee isn't applicable (e.g. no
+  // site/state resolved, so PT slabs can't be looked up), no replacement line
+  // is added either, and the deduction silently disappears with nothing on
+  // the payslip to say why. Warn exactly like the existing no-attendance
+  // warning so this can't slip past payroll review unnoticed — the same
+  // "never silently zero a statutory deduction" rule this codebase already
+  // enforces for TDS (see applyTdsToSlip) must hold for PF/ESI/PT/LWF too.
+  const droppedCategories = new Set<string>()
+  for (const c of comps) {
+    if (c.component_type === 'earning') continue
+    if (!STATUTORY_CODE.test(c.code)) continue
+    if (/^(TDS|INCOME_TAX)$/i.test(c.code)) continue // owned by applyTdsToSlip, not this function
+    if (/^(PF|EPF|PF_EMPLOYEE|PF_EMPLOYER|EPF_EDLI|EPF_ADMIN)$/i.test(c.code) && !epf) {
+      droppedCategories.add('Provident Fund')
+    } else if (/^(ESI|ESIC|ESI_EMPLOYEE|ESI_EMPLOYER)$/i.test(c.code) && !(esi && esi.isEligible)) {
+      droppedCategories.add('ESI')
+    } else if (/^(PT|PTAX|PROF_TAX|PROFESSIONAL_TAX)$/i.test(c.code) && !(ptax && ptax.ptaxAmount > 0)) {
+      droppedCategories.add('Professional Tax')
+    } else if (/^(LWF|LWF_EMPLOYEE|LWF_EMPLOYER)$/i.test(c.code) &&
+               !(lwf && lwf.isEligible && (lwf.employeeContribution > 0 || lwf.employerContribution > 0))) {
+      droppedCategories.add('LWF')
+    }
+  }
+  const statutoryDropWarning = droppedCategories.size > 0
+    ? `${[...droppedCategories].join(', ')} ${droppedCategories.size === 1 ? 'is' : 'are'} configured for this employee but could not be applied this run (unresolved statutory setup — check site/state/registration). Verify before finalizing.`
+    : undefined
+
   // ── Recompute totals (LOP preserved exactly) ───────────────────────────────
   const deductionBase = round2(
     breakdown.filter(c => c.component_type === 'deduction')
@@ -228,6 +258,7 @@ export function applyStatutoryToSlip(
       employer_contributions,
       net_pay,
       deduction_shortfall,
+      warning: [slip.warning, statutoryDropWarning].filter(Boolean).join(' ') || undefined,
     },
     trace: {
       epf: {
