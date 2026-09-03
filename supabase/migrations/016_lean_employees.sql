@@ -24,6 +24,14 @@ ALTER TABLE employees
 ALTER TABLE employees DROP COLUMN IF EXISTS department_id;
 ALTER TABLE employees DROP COLUMN IF EXISTS designation_id;
 ALTER TABLE employees DROP COLUMN IF EXISTS grade_id;
+
+-- employees_manager_team (007_rls_policies.sql) reads manager_id directly —
+-- drop it before the column, or a fresh `supabase db reset` fails with
+-- "cannot drop column manager_id ... other objects depend on it". manager_id
+-- itself is re-added by a later migration (job_history's own manager_id
+-- column is separate), so this policy would need re-creating there anyway
+-- once the column exists again — harmless to drop it here.
+DROP POLICY IF EXISTS employees_manager_team ON employees;
 ALTER TABLE employees DROP COLUMN IF EXISTS manager_id;
 ALTER TABLE employees DROP COLUMN IF EXISTS employment_type;
 ALTER TABLE employees DROP COLUMN IF EXISTS work_location;      -- TEXT version replaced by work_location_id FK
