@@ -140,6 +140,16 @@ export default defineConfig(({ mode }) => ({
       '/roster-rotation-members':   apiProxy(),
       '/roster-holiday-groups':     apiProxy(),
       '/roster-simulation':         apiProxy(),
+      '/mood':                      apiProxy(),   // moodRoutes — ESS Home mood check-in widget
+      '/surveys':                   apiProxy(),   // surveyRoutes — ESS survey nudge/take
+      '/absconding':                apiProxy(),   // abscondingRoutes — Absconding Case Management
+      '/policies':                  apiProxy(),   // policyRoutes — Policy KB + Acknowledgement
+      '/succession':                apiProxy(),   // successionRoutes — Succession Planning
+      '/talent':                    apiProxy(),   // talentRoutes — Internal Talent Marketplace
+      '/integrations':              apiProxy(),   // integrationsRoute — PAN/IFSC verify, accounting export, EnterpriseControlCenter status
+      '/uploads':                   apiProxy(),   // uploadSessionRoutes — resumable upload sessions
+      '/enterprise':                apiProxy(),   // enterprise/index — audit log/health (EnterpriseControlCenter, AuditTrail)
+      '/observability':             apiProxy(),   // observability/index — ObservabilityConsole
       // ESS-specific API endpoints (avoid proxying the /ess/* frontend page routes)
       '/ess/workforce-notifications': apiProxy(),
       '/ess/operational-summary':     apiProxy(),
