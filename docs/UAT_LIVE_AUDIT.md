@@ -8,14 +8,15 @@ Operator: Claude (autonomous), driving real Chromium via Playwright + direct API
 
 | Persona | Purpose | Status |
 |---|---|---|
-| A — Standard salaried | baseline PF/ESI/TDS/leave | pending |
-| B — Manager | approvals, team ESS | pending |
-| C — High salary | PF cap, no ESI, high TDS | pending |
-| D — Low salary / ESI | ESI eligibility | pending |
-| E — Mid-month joiner | proration | pending |
-| F — LOP employee | unpaid leave/absence | pending |
-| G — Arrear/revision | retro salary change | pending |
-| H — Separation | resignation → F&F | pending |
+| A — Standard salaried (Arjun Mehta, SK0001) | onboarding wizard, Standard CTC template, payroll inclusion | **created & tested** — UAT-001, 002, 005, 007 |
+| B — Standard salaried, PT-configured (Kavita Rao, SK0002) | second onboarding, CTC-declaration mismatch, PT statutory-drop P0 | **created & tested** — UAT-002, 003, 004, 007 |
+| C — High salary / PF cap, no ESI | PF ceiling behavior, high TDS slab | not created — time did not permit |
+| D — Low salary / ESI | ESI eligibility crossover | not created — time did not permit |
+| E — Mid-month joiner | proration | not created — time did not permit |
+| F — LOP employee | unpaid leave/absence math | not created — time did not permit; LOP correctness was instead verified via the **existing seeded roster** during UAT-014 (₹1,02,121.59 LOP correctly computed for 13 employees missing Sep-2026 attendance) |
+| G — Arrear/revision | retro salary change | not created — time did not permit; "Initiate Revision" dialog was opened (see Errors/notes from an earlier session phase) but a full arrear-through-payslip cycle was not completed |
+| H — Separation | resignation → F&F | not created — time did not permit |
+| Security test accounts (2× super_admin "checker"/"checker2", 1× plain employee "plainemp") | payroll dual-control maker-checker testing (UAT-014), RBAC boundary testing (UAT-015) | **created & used** — not full HR personas, purpose-built for these two areas |
 
 ## Findings Ledger
 
@@ -35,8 +36,42 @@ Operator: Claude (autonomous), driving real Chromium via Playwright + direct API
 | UAT-012 | Leave (ESS) | Employee applies for Casual Leave through the actual "Apply for Leave" form (dates, dynamic policy mapping, collision engine, reason) | Employee (ESS) | PASS | — | Selected Casual Leave, picked 22–23 Sep 2026 on the calendar, filled a reason. The live "Request Preview" panel correctly computed 2 days / 0 sandwich / 0 holiday before submit; `POST /leave-requests` → 201; request correctly appears in "My Leave Requests" as Pending with the exact dates/reason/type; verified in DB (`leave_requests` row, `computed_days = 2.0`, `status = PENDING`). Real policy engine (collision preview, sandwich-policy check, team-coverage check), not mock data. | — | — |
 | UAT-013 | ESS / Pay | "Payslips" quick action on ESS Home and left-nav Pay menu leads to a page that says the feature isn't built yet, even though a working, fully-populated "Pay Slips" tab already exists one click away under Pay & Compensation | Employee (ESS) | PARTIAL | P3 (navigation/paperless-journey gap, not a defect in either page) | `/ess/payslips` renders a generic "This feature is being built and will be available soon" stub. But `/ess/compensation` → **Pay Slips** tab is a real, working page (confirmed present via the "Overview / Salary / Pay Slips / Bonuses & Incentives / Benefits / Tax / History" tab strip on `My Compensation`, itself showing genuine computed data: CTC ₹54,00,000, net take-home ₹4,10,200/mo, correctly reconciling against the compensation-setup math already verified in UAT-002). The ESS Home "Payslip" quick-action button routes to the broken stub instead of the working tab, so an employee following the platform's own primary shortcut hits a dead end. | not fixed (flagged for report — a routing/IA fix, not a data or security issue; out of scope for a targeted UAT fix per "no speculative refactors") | — |
 | UAT-014 | Payroll | Finalize a real run through the 4-eyes maker-checker workflow, then verify immutability | HR Admin / super_admin | PASS (workflow + immutability) **with a serious P1 sub-finding** | — | Ran the full live finalize cycle for Sep-2026 (14 employees). **Confirmed working correctly, as designed**: (1) self-approval is blocked — the same user who proposed finalize gets 409 `AWAITING_DIFFERENT_CHECKER`; (2) the run's own preparer is *also* blocked from checking it, even as a different maker-checker "identity" — 409 `PREPARER_CANNOT_APPROVE`; (3) `force_finalize` correctly requires `super_admin` when dual control is on; (4) after two distinct super_admins completed the maker→checker cycle with a documented `override_reason` (Sep-2026's seed attendance data is genuinely incomplete for 13/14 employees), the run finalized successfully, `finalized_at` was set, and **LOP was still correctly computed and applied** (₹1,02,121.59) despite the override — the override affects the finalize *gate*, not the underlying LOP math; (5) **immutability confirmed at the correct layer**: re-running payroll for the now-finalized month → 409 `RUN_FINALIZED` (`apps/api/src/routes/payroll/runs.ts`, enforced by the `payroll_runs`/`payroll_slips` DB triggers from migration 263, whose own comments confirm the scope is deliberately limited to blocking the finalized→processing re-run and DELETE — not raw superuser SQL, which is expected and out of scope). — **But getting there exposed a real, reproducible P1**: every gate failure *after* a checker approves (attendance-not-locked, missing-attendance, open-blockers, validation-not-run — there are at least 4 such gates, all positioned in the code *after* the maker-checker block) **silently discards the completed four-eyes approval** and forces the entire proposer→approver cycle to restart from scratch with a fresh pair on the next attempt. Reproduced 3 times in a row: attempt 1 (blocked on attendance-lock) burned the maker/checker pair; attempt 2 (blocked on missing-attendance) burned a second pair; only the 3rd attempt, with every downstream gate pre-cleared, finally went through. With exactly the two admins this demo tenant actually had provisioned, this is a **hard operational deadlock**: the run's preparer can never check it (rule 2 above), so once that preparer's own maker-checker pairing is spent on a failed attempt, no combination of the tenant's two admins can ever approve again — a **third** distinct admin becomes mandatory, forever, for that run. A tenant that (very plausibly, especially early on) provisions only one or two HR admins can become permanently unable to finalize a payroll run this way. | **NOT FIXED** — root-caused precisely (the maker-checker block in `POST /payroll/runs/:id/finalize` runs *before* the attendance-lock, attendance-completeness, open-blockers, and validation-run gates, so a checker's approval is consumed even when the finalize itself doesn't complete) but the correct fix — reordering roughly 900 lines of a single mission-critical finalize handler so all business-validation gates run *before* the maker-checker step, verifying no gate reads a value the maker-checker block sets first — is a genuine refactor of a P0-adjacent code path, not a targeted patch, and hasn't been regression-tested to the bar this fix would need. Per the UAT charter's own instruction not to make broad speculative changes mid-audit, this is flagged for a dedicated follow-up fix with full test coverage rather than patched live. | Reproduced 3× live against the running API with 3 distinct super_admin/hr_admin test accounts provisioned for this purpose; confirmed via `maker_checker_log` rows (2 "approved" entries, each immediately followed by a fresh "pending" row on the next attempt) and the exact 403/409/422/423 sequence from the live API. Final successful finalize verified via `payroll_runs.status='finalized'`, `finalized_at` set, slip-sum-matches-run-total reconciliation, and the 409 immutability re-run test. |
+| UAT-015 | Security / Roles | A genuine plain `employee`-role account (no admin, no manager) attempts 6 HR/admin/owner-only API endpoints directly, plus 2 legitimately-own endpoints | Employee | PASS | — | Provisioned a real `employee`-role test account (not HR, not manager), obtained a real access token, called each endpoint directly with it. **All 6 admin-only endpoints correctly returned 403**: full employee directory (`/employees`), payroll runs, HR leave-approvals inbox, platform-owner routes (`/owner/tenants`), and another employee's payroll investigation record. The 2 endpoints scoped to the account's **own** data (own leave balance, own leave requests) correctly returned 200. Authorization is enforced server-side (not just hidden by frontend routing), which is the layer that actually matters for security. | — | — |
 
 ## Coverage
+
+| Domain | Passed | Failed | Partial | Not Tested |
+|---|---|---|---|---|
+| Environment / login | ✓ | | | |
+| Employee onboarding (Add Employee wizard) | ✓ | | | |
+| Compensation setup (Standard CTC template) | ✓ | | | |
+| Compensation — CTC declaration vs. component-sum validation | | ✓ (UAT-003, P2) | | |
+| Compensation — template row order vs dropdown order (UX) | | | ✓ (UAT-004, P3) | |
+| Compensation revision / arrears (full cycle through payslip) | | | | ✓ — dialog opened only, not completed |
+| Payroll run (draft, multi-employee) | ✓ (UAT-005) | | | |
+| Payroll Hub readiness display | | ✓ (UAT-006, P2 — display only, non-blocking) | | |
+| Statutory deductions — PF/ESI/PT/LWF silent-drop protection | ✓ (UAT-007, **P0 fixed**) | | | |
+| Statutory deductions — TDS deep UAT (declarations, regime comparison, Form 16 data) | | | | ✓ — not reached |
+| Leave — HR approve / reject via Approval Inbox | ✓ (UAT-008, 009) | | | |
+| Leave — ESS "Apply for Leave" (collision engine, sandwich policy) | ✓ (UAT-012) | | | |
+| Leave configuration (accrual, carry-forward, encashment rules) | | | | ✓ — not reached |
+| Attendance regularisation — ESS submission | | ✓→**fixed** (UAT-010, **P0**) | | |
+| Attendance regularisation — HR approval → attendance_daily recompute | ✓ (retested with UAT-010's fix) | | | |
+| Muster roll, shift/roster/holiday masters | | | | ✓ — not reached |
+| ESS Home ("Experience Core") + 4 other pillar pages | | ✓→**fixed** (UAT-011, P1 dev-only) | | |
+| ESS Payslip navigation | | | ✓ (UAT-013, P3) | |
+| ESS — remaining pages (Community, FlowDesk, Recognition, Rewards, WFH) | | | | ✓ — loaded without console errors during the sweep verification, but no transaction was completed on any of them |
+| Payroll finalize — maker-checker (4-eyes), immutability | ✓ (UAT-014) | ✓ (UAT-014 sub-finding, **P1**, root-caused not fixed) | | |
+| Payroll — bank/payment output, ledger/accounting | | | | ✓ — not reached |
+| Roles & security — API-level RBAC boundary (employee vs. HR/owner) | ✓ (UAT-015) | | | |
+| Roles & security — frontend direct-URL-access guard | | | | ✓ — API-level check done (UAT-015); browser-level direct-navigation-as-restricted-role not completed (would need a full login flow for a non-demo account) |
+| Manager experience (team dashboard, team-scoped approvals beyond the shared Approval Inbox) | | | | ✓ — not reached as a distinct manager login; HR admin's own Approval Inbox (which also serves manager-style approvals) was tested |
+| Employee personas C–H (high-salary/PF-cap, ESI, mid-month joiner, LOP, arrear, separation) | | | | ✓ — not created; see Test Personas table |
+| Separation / Full & Final settlement | | | | ✓ — not reached |
+| Reports, audit trail (beyond the `/admin/audit-trail` page-load check in UAT-011) | | | | ✓ — page loads; no report was actually generated/inspected |
+| Historical immutability / payroll replay | ✓ (UAT-014's re-run-blocked check) | | | ✓ — replay specifically (re-deriving a historical month's figures for comparison) not tested |
+| Responsive / mobile breakpoints | | | | ✓ — not reached |
+| Cross-module reconciliation (attendance→leave→payroll→ledger, full chain) | | | | ✓ — pairwise reconciliation done (leave↔balance, attendance↔payroll LOP, slip-sum↔run-total) but not a single end-to-end chain across all modules |
 
 | Domain | Passed | Failed | Partial | Not Tested |
 |---|---|---|---|---|
