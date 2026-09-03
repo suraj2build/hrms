@@ -176,3 +176,17 @@ Full before/fix/retest evidence for each: `docs/UAT_LIVE_AUDIT.md`.
 ---
 
 *Full findings ledger, evidence, and repro steps: `docs/UAT_LIVE_AUDIT.md`. Screenshots sent throughout this session cover the key live-tested flows.*
+
+---
+
+## Addendum — Session Continuation (same date)
+
+UAT continued past the point this report was first issued, closing several of the gaps §12 originally listed. New findings (all in `docs/UAT_LIVE_AUDIT.md`, UAT-016 through UAT-020):
+
+- **Persona C created** (Vikrant Kapoor, high salary, ₹32,000/mo Basic — deliberately above the statutory PF ceiling), onboarded and compensated end to end, closing part of the "personas C–H not created" gap.
+- **PF wage-ceiling capping and ESI eligibility/rounding verified directly against the production statutory-engine functions** (`computeEPF`, `computeESI` — imported and called, not reimplemented) at their exact legal boundaries: ₹15,000 PF ceiling and ₹21,000 ESI ceiling, including ESIC Regulation 40's round-up-to-next-rupee rule and the mid-period continuation exception. **All correct.**
+- **Leave Configuration tested**: none of the 4 seeded leave types had any accrual/carry-forward policy configured before this session; one was created and verified end-to-end (monthly accrual, carry-forward enabled) — closing the "leave configuration not reached" gap from §12.
+- **A large "432 open exceptions" dashboard counter was investigated and root-caused**: a 75% cache-vs-ledger drift on leave balances, traced precisely to a seed-data gap in this test environment (not a live application defect) — with direct proof the live approval code path correctly writes both the balance and the ledger.
+- **Attendance masters reviewed** (shifts, holidays, roster policies) — all load cleanly; one minor observation (a roster policy exists but isn't assigned to any site/employee, though attendance still correctly resolves week-offs through another path) flagged but not chased further.
+
+None of this changes the Executive Verdict in §1 — the one real release blocker (UAT-014, payroll finalize's approval-wasting gap) is unchanged, and TDS, separation/F&F, manager-role experience, and personas D–H remain untested. This addendum only narrows what §12 could honestly call untested.
