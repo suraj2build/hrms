@@ -227,10 +227,17 @@ export function applyStatutoryToSlip(
       droppedCategories.add('Provident Fund')
     } else if (/^(ESI|ESIC|ESI_EMPLOYEE|ESI_EMPLOYER)$/i.test(c.code) && !(esi && esi.isEligible)) {
       droppedCategories.add('ESI')
-    } else if (/^(PT|PTAX|PROF_TAX|PROFESSIONAL_TAX)$/i.test(c.code) && !(ptax && ptax.ptaxAmount > 0)) {
+    } else if (/^(PT|PTAX|PROF_TAX|PROFESSIONAL_TAX)$/i.test(c.code) && !(ptax && ptax.slabMatched)) {
+      // Use slabMatched, not ptaxAmount > 0 — a low-income employee can
+      // legitimately fall in a genuine ₹0 slab (e.g. KA's sub-₹25,000
+      // bracket). That's PT correctly resolved and correctly zero, not a
+      // silent drop; ptaxAmount > 0 falsely flagged that case as dropped
+      // (found via live payroll UAT — see docs/UAT_LIVE_AUDIT.md UAT-022).
       droppedCategories.add('Professional Tax')
-    } else if (/^(LWF|LWF_EMPLOYEE|LWF_EMPLOYER)$/i.test(c.code) &&
-               !(lwf && lwf.isEligible && (lwf.employeeContribution > 0 || lwf.employerContribution > 0))) {
+    } else if (/^(LWF|LWF_EMPLOYEE|LWF_EMPLOYER)$/i.test(c.code) && !(lwf && lwf.isEligible)) {
+      // Same fix for LWF: isEligible is the "resolved" signal; a genuinely
+      // eligible employee can still have a ₹0 contribution for their
+      // config/gender/state combination.
       droppedCategories.add('LWF')
     }
   }
