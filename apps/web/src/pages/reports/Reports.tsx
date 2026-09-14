@@ -25,7 +25,7 @@
  */
 
 import { useState, useCallback, useMemo, useEffect, useRef } from 'react'
-import { Link }                           from 'react-router-dom'
+import { Link, useSearchParams }          from 'react-router-dom'
 import { useQuery, keepPreviousData }      from '@tanstack/react-query'
 import { toast }                          from 'sonner'
 import {
@@ -2667,14 +2667,35 @@ function fmtMonthFull(m: string): string {
 
 // Tabs visible to managers (team-level, no salary/statutory/payroll data)
 const MANAGER_TABS = new Set(['headcount', 'attendance', 'muster', 'leave-register'])
+const ADMIN_ONLY_TABS = new Set(['salary', 'statutory', 'salary-sheet', 'comparison', 'payroll-register'])
+const ALL_TABS = new Set([...MANAGER_TABS, ...ADMIN_ONLY_TABS])
 
 export function Reports() {
   const { profile } = useAuthStore()
   const basePath = useBasePath()
+  const [searchParams, setSearchParams] = useSearchParams()
 
   const role    = profile?.role ?? ''
   const isAdmin = ['super_admin', 'hr_admin'].includes(role)
   const isMgr   = role === 'manager'
+
+  // Deep-link support: ReportingHub.tsx and the Reports catalog both link here
+  // with `?tab=<key>` (e.g. `?tab=statutory`). Fall back to 'headcount' for a
+  // missing/unknown tab, or for a tab the current role can't see (found via
+  // live UAT — see docs/UAT_LIVE_AUDIT.md UAT-025: every report link except
+  // "Headcount & Attrition" silently landed on the Headcount tab because this
+  // page never read the query param at all).
+  const requestedTab = searchParams.get('tab') ?? ''
+  const tabAllowed = ALL_TABS.has(requestedTab) && (isAdmin || !ADMIN_ONLY_TABS.has(requestedTab))
+  const activeTab = tabAllowed ? requestedTab : 'headcount'
+
+  const handleTabChange = (value: string) => {
+    setSearchParams(prev => {
+      const next = new URLSearchParams(prev)
+      next.set('tab', value)
+      return next
+    }, { replace: true })
+  }
 
   // Departments list — shared across all tabs
   const { data: deptData } = useQuery<{ data: Department[] }>({
@@ -2695,7 +2716,7 @@ export function Reports() {
     { icon: BookOpen,       label: 'Leave Register',              desc: 'Leave request log · employee summary pivot · .xlsx',       tab: 'leave-register'     },
     { icon: ArrowLeftRight, label: 'Att. vs Payroll Comparison',  desc: 'Cross-module reconciliation · mismatch detection · .xlsx', tab: 'comparison'         },
     { icon: CreditCard,     label: 'Payroll Register',            desc: 'Bank disbursement register · masked preview · full .xlsx', tab: 'payroll-register'   },
-  ]
+  ] as const
   const catalog = isAdmin ? ALL_CATALOG : ALL_CATALOG.filter(c => MANAGER_TABS.has(c.tab))
 
   // Neither admin nor manager — fully blocked
@@ -2721,19 +2742,27 @@ export function Reports() {
 
       {/* Report catalog strip — filtered by role */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-3 gap-2">
-        {catalog.map(({ icon: Icon, label, desc }) => (
-          <div key={label} className="rounded-lg border border-border bg-card px-3 py-2.5 flex items-start gap-2.5">
+        {catalog.map(({ icon: Icon, label, desc, tab }) => (
+          <button
+            key={label}
+            type="button"
+            onClick={() => handleTabChange(tab)}
+            className={cn(
+              'rounded-lg border bg-card px-3 py-2.5 flex items-start gap-2.5 text-left transition-colors hover:bg-muted/50',
+              activeTab === tab ? 'border-primary/50 ring-1 ring-primary/20' : 'border-border',
+            )}
+          >
             <Icon className="h-4 w-4 text-muted-foreground flex-shrink-0 mt-0.5" />
             <div className="min-w-0">
               <p className="text-xs font-semibold text-foreground leading-tight truncate">{label}</p>
               <p className="text-[10px] text-muted-foreground leading-snug mt-0.5">{desc}</p>
             </div>
-          </div>
+          </button>
         ))}
       </div>
 
       {/* Report tabs — filtered by role */}
-      <Tabs defaultValue="headcount" className="w-full">
+      <Tabs value={activeTab} onValueChange={handleTabChange} className="w-full">
         <TabsList className="h-9 gap-0.5 flex-wrap">
           <TabsTrigger value="headcount"     className="gap-1.5 text-xs h-7 px-3">
             <Users className="h-3.5 w-3.5" /> Headcount
