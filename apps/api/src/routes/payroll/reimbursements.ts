@@ -1090,7 +1090,13 @@ export default async function reimbursementsRoutes(fastify: FastifyInstance) {
   fastify.post('/:id/approve', { preHandler: [fastify.authenticate, requireHrAdmin] }, async (req: any, reply) => {
     const { id } = req.params as { id: string }
     const approveBodySchema = z.object({ approved_amount: z.number().optional().nullable() }).passthrough()
-    const approveBodyParsed = approveBodySchema.safeParse(req.body)
+    // Fresh audit finding (UAT-046): the real Approve button sends no body at
+    // all (a bare POST, per Reimbursements.tsx) — req.body then comes through
+    // as undefined, and z.object({...}).safeParse(undefined) fails with the
+    // generic "Required" message before ever looking at approved_amount,
+    // which IS optional. Every real approval via the UI 400'd. Default to {}
+    // so an omitted body (the common case) is treated as "no override".
+    const approveBodyParsed = approveBodySchema.safeParse(req.body ?? {})
     if (!approveBodyParsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: approveBodyParsed.error.issues[0]?.message ?? 'Invalid request body' })
 
     // Idempotency: the status guard below already blocks a genuine
