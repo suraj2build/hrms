@@ -47,8 +47,8 @@ interface CompOffRequest {
   approved_by:     string | null
   approved_at:     string | null
   created_at:      string
-  employees?:      { id: string; first_name: string; last_name: string; employee_code: string }
-  leave_types?:    { id: string; name: string }
+  employee?:       { id: string; name: string; employee_code: string }
+  leave_type?:     { id: string; name: string }
 }
 
 interface GenerateResult {
@@ -306,12 +306,12 @@ export function CompOff() {
                       <>
                         <tr key={req.id} className="border-b border-border/50 hover:bg-muted/20 transition-colors">
                           <td className="px-3 py-2.5">
-                            {req.employees ? (
+                            {req.employee ? (
                               <div>
                                 <span className="font-medium text-foreground">
-                                  {req.employees.first_name} {req.employees.last_name}
+                                  {req.employee.name}
                                 </span>
-                                <div className="text-[10px] text-muted-foreground">#{req.employees.employee_code}</div>
+                                <div className="text-[10px] text-muted-foreground">#{req.employee.employee_code}</div>
                               </div>
                             ) : (
                               <span className="text-muted-foreground text-xs">{(req.employee_id ?? '').slice(0, 8)}…</span>
@@ -325,7 +325,7 @@ export function CompOff() {
                           </td>
                           <td className="px-3 py-2.5 text-xs font-medium">{req.days_to_credit}d</td>
                           <td className="px-3 py-2.5 text-xs text-muted-foreground">
-                            {req.leave_types?.name ?? '—'}
+                            {req.leave_type?.name ?? '—'}
                           </td>
                           <td className="px-3 py-2.5">
                             <Badge variant={STATUS_VARIANT[req.status]} className="text-[10px] rounded-full">
