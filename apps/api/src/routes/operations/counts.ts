@@ -50,7 +50,7 @@ export default async function operationalCountsRoutes(fastify: FastifyInstance) 
           ? safeCount(fastify, 'attendance_anomalies', tenantId, q => q.eq('resolved', false).eq('employee_id', req.employeeId))
           : Promise.resolve(0),
       isHrAdmin
-        ? safeCount(fastify, 'payroll_run_blockers', tenantId, q => q.eq('resolved', false))
+        ? safeCount(fastify, 'payroll_run_blockers', tenantId, q => q.eq('status', 'open'))
         : Promise.resolve(0),
       safeCount(fastify, 'attendance_corrections',    tenantId, q => q.eq('status', 'pending')),
     ])
