@@ -253,7 +253,18 @@ async function loadStdConfig(
       cess_rate:          0.04,
     }
   }
-  return data as ItStandardConfig
+  // it_standard_config's numeric columns are DECIMAL — PostgREST serializes them as
+  // strings, so `data as ItStandardConfig` is a type assertion, not a real
+  // conversion: every downstream arithmetic use silently string-concatenated
+  // instead of adding, corrupting the whole TDS computation into NaN once real
+  // slip totals were assembled (fresh audit finding — surfaced only once TDS
+  // was enabled and a full old-regime, multi-declaration real employee ran).
+  return {
+    standard_deduction: Number(data.standard_deduction),
+    rebate_87a_limit:   Number(data.rebate_87a_limit),
+    rebate_87a_amount:  Number(data.rebate_87a_amount),
+    cess_rate:          Number(data.cess_rate),
+  }
 }
 
 /** Pre-fetch all tax table rows for a financial year in a single round-trip.

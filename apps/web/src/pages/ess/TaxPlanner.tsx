@@ -98,7 +98,7 @@ interface TaxPlan {
 interface PlanItem {
   id: string
   component_id: string
-  declared_amount: number
+  declared_amount: string // Postgres numeric serializes as text — always Number() before arithmetic
   component: TaxComponent
 }
 
@@ -278,15 +278,19 @@ function DeclarationCard({ title, icon, components, planItems, planId, onSaved }
       const init: Record<string, string> = {}
       components.forEach(c => {
         const existing = planItems.find(pi => pi.component_id === c.id)
-        init[c.id] = existing ? String(existing.declared_amount) : ''
+        init[c.id] = existing ? String(Number(existing.declared_amount)) : ''
       })
       setAmounts(init)
     }
   }, [open, components, planItems])
 
+  // declared_amount arrives as a string (Postgres numeric serializes as text
+  // to avoid float precision loss) — summing it unconverted string-concatenates
+  // instead of adding, so any card with more than one declared item showed
+  // "₹NaN" once Number() parsing failed on the concatenated result.
   const totalDeclared = components.reduce((sum, c) => {
     const item = planItems.find(pi => pi.component_id === c.id)
-    return sum + (item?.declared_amount ?? 0)
+    return sum + Number(item?.declared_amount ?? 0)
   }, 0)
 
   const maxLimit = components.length === 1 ? components[0].max_limit : null
@@ -296,7 +300,7 @@ function DeclarationCard({ title, icon, components, planItems, planId, onSaved }
       const items = Object.entries(amounts)
         .filter(([, v]) => v !== '' && Number(v) > 0)
         .map(([component_id, declared_amount]) => ({ component_id, declared_amount: Number(declared_amount) }))
-      await api.post(`/payroll/statutory/tds/plans/my/${planId}/items`, { items })
+      await api.post(`/payroll/statutory/tds/plans/my/${planId}/items`, items)
     },
     onSuccess: () => {
       toast.success('Declarations saved')
@@ -327,11 +331,11 @@ function DeclarationCard({ title, icon, components, planItems, planId, onSaved }
           <div className="mt-2 space-y-1">
             {components.slice(0, 3).map(c => {
               const item = planItems.find(pi => pi.component_id === c.id)
-              if (!item || item.declared_amount === 0) return null
+              if (!item || Number(item.declared_amount) === 0) return null
               return (
                 <div key={c.id} className="flex justify-between text-xs text-muted-foreground">
                   <span>{c.display_name}</span>
-                  <span className="tabular-nums">{inr(item.declared_amount)}</span>
+                  <span className="tabular-nums">{inr(Number(item.declared_amount))}</span>
                 </div>
               )
             })}
@@ -914,7 +918,7 @@ export function TaxPlanner() {
                         <DeclarationCard
                           title="Section 80C (Max ₹1.5L)"
                           icon={<IndianRupee className="h-4 w-4 text-primary" />}
-                          components={grouped.chapter_via.filter(c => c.section_code?.startsWith('80C'))}
+                          components={(grouped.chapter_via ?? []).filter(c => c.section_code?.startsWith('80C'))}
                           planItems={items}
                           planId={activePlanId}
                           onSaved={triggerRefresh}
@@ -927,7 +931,7 @@ export function TaxPlanner() {
                         <DeclarationCard
                           title="80D, 80E, 80G, 80TTA & Others"
                           icon={<FileText className="h-4 w-4 text-primary" />}
-                          components={grouped.chapter_via.filter(c => !c.section_code?.startsWith('80C'))}
+                          components={(grouped.chapter_via ?? []).filter(c => !c.section_code?.startsWith('80C'))}
                           planItems={items}
                           planId={activePlanId}
                           onSaved={triggerRefresh}
@@ -940,7 +944,7 @@ export function TaxPlanner() {
                         <DeclarationCard
                           title="HRA Exemption"
                           icon={<FileText className="h-4 w-4 text-warning" />}
-                          components={grouped.hra}
+                          components={grouped.hra ?? []}
                           planItems={items}
                           planId={activePlanId}
                           onSaved={triggerRefresh}
@@ -953,7 +957,7 @@ export function TaxPlanner() {
                         <DeclarationCard
                           title="Home Loan Interest u/s 24(b)"
                           icon={<FileText className="h-4 w-4 text-primary" />}
-                          components={grouped.house_property}
+                          components={grouped.house_property ?? []}
                           planItems={items}
                           planId={activePlanId}
                           onSaved={triggerRefresh}
@@ -966,7 +970,7 @@ export function TaxPlanner() {
                         <DeclarationCard
                           title="Previous Employer Income & TDS"
                           icon={<FileText className="h-4 w-4 text-warning" />}
-                          components={grouped.previous_employment}
+                          components={grouped.previous_employment ?? []}
                           planItems={items}
                           planId={activePlanId}
                           onSaved={triggerRefresh}
@@ -979,7 +983,7 @@ export function TaxPlanner() {
                         <DeclarationCard
                           title="Other Income"
                           icon={<FileText className="h-4 w-4 text-primary" />}
-                          components={grouped.other_income}
+                          components={grouped.other_income ?? []}
                           planItems={items}
                           planId={activePlanId}
                           onSaved={triggerRefresh}
@@ -987,7 +991,7 @@ export function TaxPlanner() {
                         <DeclarationCard
                           title="TDS / TCS Credits"
                           icon={<Calculator className="h-4 w-4 text-primary" />}
-                          components={grouped.tds_tcs}
+                          components={grouped.tds_tcs ?? []}
                           planItems={items}
                           planId={activePlanId}
                           onSaved={triggerRefresh}

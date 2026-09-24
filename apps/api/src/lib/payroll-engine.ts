@@ -663,11 +663,16 @@ export async function fetchAttendanceSummary(
     // Sum fractions so a half-day counts as 0.5, not 1.0.
     // null day_fraction = legacy/unprocessed row (attendance engine never ran for that date).
     // Treat null as 1.0 (full present day) to avoid phantom LOP on unprocessed records.
-    payable_days:   round2(daily.reduce((s, r) => s + (r.day_fraction ?? 1.0), 0)),
+    // day_fraction is DECIMAL(3,1) — PostgREST serializes it as a string, so it must be
+    // Number()-coerced before the `+=` or the second row onward string-concatenates the
+    // running sum instead of adding to it, and round2() of the resulting garbage string
+    // is NaN (fresh audit finding — this failed every real dry/live run once an employee
+    // had 2+ attendance_daily rows for the month).
+    payable_days:   round2(daily.reduce((s, r) => s + Number(r.day_fraction ?? 1.0), 0)),
     // LOP = working days not covered by payable time.
     // Absent = 1.0 LOP, half_day = 0.5 LOP, unpaid leave = 1.0 LOP.
     // null day_fraction → treated as 1.0 present → 0.0 LOP (safe default).
-    lop_days:       round2(daily.reduce((s, r) => s + Math.max(0, 1.0 - (r.day_fraction ?? 1.0)), 0)),
+    lop_days:       round2(daily.reduce((s, r) => s + Math.max(0, 1.0 - Number(r.day_fraction ?? 1.0)), 0)),
     present_days:   daily.filter(r => r.status === 'present' || r.status === 'late').length,
     late_days:      daily.filter(r => r.status === 'late').length,
     overtime_hours: round2(daily.reduce((s, r) => s + (r.overtime_minutes ?? 0), 0) / 60),
@@ -750,8 +755,14 @@ export async function fetchActiveCompensation(
     component_type:      cc.salary_components?.component_type ?? 'earning',
     calc_type:           cc.calculation_type,
     value:               cc.value,
-    monthly_amount:      cc.computed_monthly ?? 0,
-    annual_amount:       cc.computed_annual  ?? 0,
+    // computed_monthly/computed_annual are NUMERIC(14,2) — PostgREST serializes them
+    // as strings. Uncoerced, gross_pay's `earnings.reduce((s, c) => s + c.monthly_amount)`
+    // string-concatenates once there are 2+ earning components (Basic + HRA + ...,
+    // i.e. virtually every real employee), and round2() of the resulting garbage
+    // string is NaN (fresh audit finding — every real live/dry-run payroll computation
+    // hit this; only seed-inserted payroll_slips rows looked correct).
+    monthly_amount:      Number(cc.computed_monthly ?? 0),
+    annual_amount:       Number(cc.computed_annual  ?? 0),
     sequence:            cc.sequence ?? 0,
     is_pf_applicable:    !!cc.salary_components?.is_pf_applicable,
     affects_pf:          !!cc.salary_components?.affects_pf,

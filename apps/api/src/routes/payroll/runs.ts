@@ -226,13 +226,21 @@ async function applyTdsForRun(
     financialYear: fy,
     deductions: {
       section80C:             get('80C'),
-      section80CCD1B:         get('NPS'),
+      // Fresh audit finding (UAT — TDS deep scenarios): these two keys never
+      // matched the real `section` value tax_declarations rows are actually
+      // written with ('80CCD' and '24B', mirroring tax_declaration_components.
+      // section_code — see tds-plans.ts's submit handler). A real, HR-approved
+      // NPS (80CCD) or home-loan-interest (24(b)) declaration was silently
+      // excluded from every real payslip's TDS calculation, for every
+      // employee, always — understating their take-home tax deduction
+      // entitlement with no error anywhere in the pipeline.
+      section80CCD1B:         get('80CCD'),
       section80D:             get('80D'),
       section80E:             get('80E'),
       section80G:             get('80G'),
       section80TTA:           get('80TTA'),
       hraExemption:           get('HRA'),
-      homeLoanInterest:       get('home_loan_interest'),
+      homeLoanInterest:       get('24B'),
       otherDeductions:        get('other'),
       professionalTax:        get('professional_tax'),
       previousEmployerTDS,
@@ -580,7 +588,12 @@ async function fetchAdvanceLoanDeductions(
         results.push({
           type:        'advance_recovery',
           schedule_id: row.id,
-          amount:      row.scheduled_amount,
+          // scheduled_amount is NUMERIC — PostgREST serializes it as a string. Left
+          // uncoerced, it sits in component_breakdown as a string; that's invisible
+          // until applyTdsToSlip() re-sums the whole breakdown from scratch, where it
+          // string-concatenates with the other lines and produces NaN total_deductions
+          // (fresh audit finding — only surfaced once TDS was actually enabled).
+          amount:      Number(row.scheduled_amount),
           label:       'Salary Advance Recovery',
         })
       }
@@ -606,7 +619,8 @@ async function fetchAdvanceLoanDeductions(
         results.push({
           type:        'loan_emi',
           schedule_id: row.id,
-          amount:      row.emi_amount,
+          // emi_amount is NUMERIC — same string-serialization issue as scheduled_amount above.
+          amount:      Number(row.emi_amount),
           label:       `${typeCap} Loan EMI #${row.installment_number}`,
         })
       }

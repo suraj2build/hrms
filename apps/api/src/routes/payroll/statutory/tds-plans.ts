@@ -124,13 +124,19 @@ function buildComputationInput(
     financialYear,
     deductions: {
       section80C:              get('80C'),
-      section80CCD1B:          get('80CCD1B'),
+      // Fresh audit finding (UAT — TDS deep scenarios): these two keys never
+      // matched the real tax_declaration_components master data's actual
+      // section_code values ('80CCD' and '24B'), so a real NPS or home-loan-
+      // interest declaration was silently excluded from every tax
+      // computation — always 0, with no error, even though the amount was
+      // correctly saved and visible in the UI.
+      section80CCD1B:          get('80CCD'),
       section80D:              get('80D'),
       section80E:              get('80E'),
       section80G:              get('80G'),
       section80TTA:            get('80TTA'),
       hraExemption:            get('HRA'),
-      homeLoanInterest:        get('home_loan_interest'),
+      homeLoanInterest:        get('24B'),
       otherDeductions:         get('other_deductions'),
       professionalTax:         get('professional_tax'),
       previousEmployerTDS:     get('previous_employer_tds'),
@@ -464,7 +470,7 @@ export default async function tdsPlansRoute(fastify: FastifyInstance) {
     const { data, error } = await fastify.supabase
       .from('tax_declaration_plan_items')
       .select(`
-        id, plan_id, declared_amount, remarks, metadata,
+        id, plan_id, component_id, declared_amount, remarks, metadata,
         tax_declaration_components (
           id, section_code, sub_section, display_name, description,
           parent_group, regime_eligibility, declaration_type, max_limit,

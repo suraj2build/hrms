@@ -1293,7 +1293,15 @@ ${section('Part D — Loss from House Property (Home Loan Interest)', hlDecls,
       .eq('financial_year', financial_year)
       .eq('status', 'approved')
 
-    const totalDeductions = ((declarations ?? []) as any[]).reduce((sum: number, d: any) => sum + (d.approved_amount ?? 0), 0)
+    // approved_amount is a Postgres numeric — serializes as a string, so summing
+    // it unconverted string-concatenates once there's more than one declaration
+    // (e.g. "150000.00" + "50000.00" -> "150000.0050000.00"), producing NaN once
+    // Math.max() below tries to coerce it — which JSON-serializes to null and
+    // violates tds_monthly_projections.total_deductions_projected's NOT NULL
+    // constraint. Every real employee with more than one approved declaration
+    // hit this; a single declaration happened to still parse via Number()
+    // coercion of a legitimately-numeric string, masking the bug until now.
+    const totalDeductions = ((declarations ?? []) as any[]).reduce((sum: number, d: any) => sum + Number(d.approved_amount ?? 0), 0)
 
     // Fresh audit finding: currentMonth used to be the server's own UTC
     // month, not the tenant's IST month — the same class of bug already
