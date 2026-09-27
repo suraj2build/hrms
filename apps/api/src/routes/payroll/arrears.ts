@@ -331,7 +331,10 @@ export default async function arrearsRoutes(fastify: FastifyInstance) {
 
     const records = (revs ?? [])
       .flatMap((r: any) => {
-        const beforeMonthly = r.before_ctc_monthly ?? 0
+        // before_ctc_monthly is NUMERIC — coerce or this comparison is always
+        // number !== string, so a genuinely no-change revision (e.g. designation-only)
+        // never gets skipped and gets billed zero-amount arrear records every month (G13 sweep).
+        const beforeMonthly = Number(r.before_ctc_monthly ?? 0)
         const newMonthly    = Math.round(((r.new_ctc_annual ?? 0) / 12) * 100) / 100
         if (newMonthly === beforeMonthly) return []
         return periodMonths.map((period_month) => ({

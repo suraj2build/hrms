@@ -230,7 +230,8 @@ export default async function tdsPlansRoute(fastify: FastifyInstance) {
           .gte('month', `${fy.split('-')[0]}-04`)
           .lte('month', `${parseInt(fy.split('-')[0]) + 1}-03`)
 
-        const alreadyDeducted = ((slips as any[]) ?? []).reduce((s: number, r: any) => s + (r.tds_deducted ?? 0), 0)
+        // tds_deducted is DECIMAL — coerce or a FY with 2+ finalized slips corrupts this into NaN (G13 sweep).
+    const alreadyDeducted = ((slips as any[]) ?? []).reduce((s: number, r: any) => s + Number(r.tds_deducted ?? 0), 0)
 
         const inputData = buildComputationInput(
           grossAnnual,
@@ -622,7 +623,8 @@ export default async function tdsPlansRoute(fastify: FastifyInstance) {
       .gte('month', `${fy.split('-')[0]}-04`)
       .lte('month', `${parseInt(fy.split('-')[0]) + 1}-03`)
 
-    const alreadyDeducted = ((slips as any[]) ?? []).reduce((s: number, r: any) => s + (r.tds_deducted ?? 0), 0)
+    // tds_deducted is DECIMAL — coerce or a FY with 2+ finalized slips corrupts this into NaN (G13 sweep).
+    const alreadyDeducted = ((slips as any[]) ?? []).reduce((s: number, r: any) => s + Number(r.tds_deducted ?? 0), 0)
 
     const todayStr = await tenantTodayStr(fastify, req.tenantId)
     const inputData = buildComputationInput(
@@ -744,7 +746,8 @@ export default async function tdsPlansRoute(fastify: FastifyInstance) {
       .gte('month', `${fy.split('-')[0]}-04`)
       .lte('month', `${parseInt(fy.split('-')[0]) + 1}-03`)
 
-    const alreadyDeducted = ((slips as any[]) ?? []).reduce((s: number, r: any) => s + (r.tds_deducted ?? 0), 0)
+    // tds_deducted is DECIMAL — coerce or a FY with 2+ finalized slips corrupts this into NaN (G13 sweep).
+    const alreadyDeducted = ((slips as any[]) ?? []).reduce((s: number, r: any) => s + Number(r.tds_deducted ?? 0), 0)
 
     const todayStr = await tenantTodayStr(fastify, req.tenantId)
     const inputData = buildComputationInput(

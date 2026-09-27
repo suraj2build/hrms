@@ -330,11 +330,16 @@ export default async function loansRoutes(fastify: FastifyInstance) {
     if (updateErr) return serverError(req, reply, updateErr, ErrorCode.UPDATE_FAILED, 'Failed to disburse loan')
     if (!updatedLoan?.length) return reply.code(409).send({ error: 'ALREADY_DISBURSED', message: 'This loan was already disbursed by another request' })
 
-    // Generate amortization schedule
-    const principal = loanData.principal_amount as number
-    const annualRate = loanData.interest_rate_pct as number
+    // Generate amortization schedule. principal_amount/interest_rate_pct/emi_amount
+    // are DECIMAL — PostgREST serializes them as strings, so `as number` is a type
+    // assertion, not a real conversion. With tenure_months=1, `outstanding` (seeded
+    // from `principal`) is still that raw string on the first (and only, isLast)
+    // iteration, and `interestPaid + principalPaid` string-concatenates into a
+    // garbage EMI or NaN, corrupting/failing the loan_schedules insert (G13 sweep).
+    const principal = Number(loanData.principal_amount)
+    const annualRate = Number(loanData.interest_rate_pct)
     const tenure = loanData.tenure_months as number
-    const emi = loanData.emi_amount as number
+    const emi = Number(loanData.emi_amount)
     const monthlyRate = annualRate / 100 / 12
 
     const [fyStart, fyMonStr] = parsed.data.first_emi_month.split('-').map(Number)

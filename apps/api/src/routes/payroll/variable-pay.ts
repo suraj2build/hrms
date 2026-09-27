@@ -289,7 +289,9 @@ export default async function variablePayRoutes(fastify: FastifyInstance) {
       // have these payouts.
       return serverError(req, reply, err, ErrorCode.QUERY_FAILED, 'Payouts created but failed to refresh batch totals')
     }
-    const totalAmount = allPayouts.reduce((sum, p) => sum + p.amount, 0)
+    // variable_payouts.amount is DECIMAL — coerce or a batch with 2+ payouts corrupts
+    // the total into NaN, which then violates total_amount's NOT NULL (G13 sweep).
+    const totalAmount = allPayouts.reduce((sum, p) => sum + Number(p.amount ?? 0), 0)
     const employeeCount = new Set(allPayouts.map(p => p.employee_id)).size
 
     const { error: batchUpdateErr } = await fastify.supabase

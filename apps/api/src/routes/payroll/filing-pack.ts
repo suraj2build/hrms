@@ -26,7 +26,9 @@ import { toCSV } from '../../lib/csv-utils.js'
 // ── Shared helpers ────────────────────────────────────────────────────────────
 
 function r2(n: number) { return Math.round(n * 100) / 100 }
-function sum(arr: any[], key: string) { return r2(arr.reduce((s, r) => s + (r[key] ?? 0), 0)) }
+// Summed columns here are DECIMAL — PostgREST serializes them as strings; coerce or
+// 2+ rows corrupt the total into NaN/garbage (G13 sweep).
+function sum(arr: any[], key: string) { return r2(arr.reduce((s, r) => s + Number(r[key] ?? 0), 0)) }
 
 function setCsvHeaders(reply: any, filename: string) {
   reply.header('Content-Type', 'text/csv; charset=utf-8')
@@ -118,9 +120,11 @@ async function build24QDataset(supabase: any, tenantId: string, quarter: string,
     for (const p of (panRows ?? []) as any[]) if (p.pan_number) panMap.set(p.employee_id, p.pan_number)
   }
 
+  // gross_pay/tds_deducted are NUMERIC — coerce or 2+ slips corrupt the running totals
+  // below into garbage/NaN (G13 sweep).
   const monthly = months.map(m => {
     const ms = slips.filter(s => s.month === m)
-    return { month: m, tds_amount: r2(ms.reduce((s, r) => s + (r.tds_deducted ?? 0), 0)), employee_count: ms.length }
+    return { month: m, tds_amount: r2(ms.reduce((s, r) => s + Number(r.tds_deducted ?? 0), 0)), employee_count: ms.length }
   }).filter(r => r.employee_count > 0)
 
   const dmap = new Map<string, any>()
@@ -131,8 +135,8 @@ async function build24QDataset(supabase: any, tenantId: string, quarter: string,
       dmap.set(eid, { employee_code: emp.employee_code ?? '', employee_name: `${emp.first_name ?? ''} ${emp.last_name ?? ''}`.trim(), pan: panMap.get(eid) ?? '', gross_salary: 0, tds_deducted: 0, months: new Set<string>() })
     }
     const d = dmap.get(eid)
-    d.gross_salary = r2(d.gross_salary + (s.gross_pay ?? 0))
-    d.tds_deducted = r2(d.tds_deducted + (s.tds_deducted ?? 0))
+    d.gross_salary = r2(d.gross_salary + Number(s.gross_pay ?? 0))
+    d.tds_deducted = r2(d.tds_deducted + Number(s.tds_deducted ?? 0))
     d.months.add(s.month)
   }
   const deductees = [...dmap.values()].map(d => ({
@@ -791,7 +795,7 @@ export default async function filingPackRoutes(fastify: FastifyInstance) {
 
     const ptaxByState: Record<string, number> = {}
     for (const r of ptaxRows) {
-      ptaxByState[r.state_code] = r2((ptaxByState[r.state_code] ?? 0) + (r.ptax_amount ?? 0))
+      ptaxByState[r.state_code] = r2((ptaxByState[r.state_code] ?? 0) + Number(r.ptax_amount ?? 0))
     }
 
     // Admin charges = 0.50% of aggregate PF wages (EPFO standard rate),
@@ -833,12 +837,12 @@ export default async function filingPackRoutes(fastify: FastifyInstance) {
           registration_number: ptaxRegMap.get(state) ?? null,
           amount,
         })),
-        total_remittance: r2(ptaxRows.reduce((s, r) => s + (r.ptax_amount ?? 0), 0)),
+        total_remittance: r2(ptaxRows.reduce((s, r) => s + Number(r.ptax_amount ?? 0), 0)),
         employee_count:   ptaxRows.length,
         challan_type:     'PT Challan',
       },
       tds: {
-        total_deducted: r2(tdsRows.reduce((s, r) => s + (r.tds_deducted ?? 0), 0)),
+        total_deducted: r2(tdsRows.reduce((s, r) => s + Number(r.tds_deducted ?? 0), 0)),
         employee_count: tdsRows.filter((r: any) => (r.tds_deducted ?? 0) > 0).length,
         challan_type:   'ITNS 281',
         section:        '192A',
@@ -850,8 +854,8 @@ export default async function filingPackRoutes(fastify: FastifyInstance) {
         sum(epfRows, 'employer_pf')           + sum(epfRows, 'employer_eps') +
         sum(epfRows, 'edli_contribution')      + epfAdminCharges +
         sum(esiRows, 'total_contribution')    +
-        r2(ptaxRows.reduce((s: number, r: any) => s + (r.ptax_amount ?? 0), 0)) +
-        r2(tdsRows.reduce((s: number, r: any) => s + (r.tds_deducted ?? 0), 0))
+        r2(ptaxRows.reduce((s: number, r: any) => s + Number(r.ptax_amount ?? 0), 0)) +
+        r2(tdsRows.reduce((s: number, r: any) => s + Number(r.tds_deducted ?? 0), 0))
       ),
     }
 

@@ -231,8 +231,10 @@ async function buildAttendanceSnapshot(
 
   const daily = (rows ?? []) as AttendanceSnapshotRow[]
 
-  const payable_days   = round2(daily.reduce((s, r) => s + (r.day_fraction ?? 1.0), 0))
-  const lop_days       = round2(daily.reduce((s, r) => s + Math.max(0, 1.0 - (r.day_fraction ?? 1.0)), 0))
+  // day_fraction is DECIMAL(3,1) — PostgREST serializes it as a string; Number()-coerce
+  // before summing or the 2nd+ row string-concatenates instead of adding (G13 sweep).
+  const payable_days   = round2(daily.reduce((s, r) => s + Number(r.day_fraction ?? 1.0), 0))
+  const lop_days       = round2(daily.reduce((s, r) => s + Math.max(0, 1.0 - Number(r.day_fraction ?? 1.0)), 0))
   const present_days   = daily.filter(r => r.status === 'present' || r.status === 'late').length
   const late_days      = daily.filter(r => r.status === 'late').length
   const overtime_hours = round2(daily.reduce((s, r) => s + (r.overtime_minutes ?? 0), 0) / 60)
@@ -276,17 +278,21 @@ async function buildCompensationSnapshot(
     name:                c.salary_components?.name ?? '',
     component_type:      c.salary_components?.component_type ?? 'earning',
     calc_type:           c.salary_components?.calc_type ?? 'fixed',
-    value:               c.value ?? 0,
-    monthly_amount:      c.monthly_amount ?? 0,
-    annual_amount:       c.annual_amount ?? 0,
+    // value/monthly_amount/annual_amount are NUMERIC — PostgREST serializes them as
+    // strings. This snapshot is immutable JSONB, and its own type declares `number`,
+    // so convert at write time or every future reader inherits corrupted arithmetic
+    // (G13 sweep).
+    value:               Number(c.value ?? 0),
+    monthly_amount:      Number(c.monthly_amount ?? 0),
+    annual_amount:       Number(c.annual_amount ?? 0),
     sequence:            c.sequence ?? 0,
   })).sort((a: any, b: any) => a.sequence - b.sequence)
 
   const blob = {
     compensation_id:  (comp as any).id,
     effective_from:   (comp as any).effective_from,
-    ctc_annual:       (comp as any).ctc_annual,
-    ctc_monthly:      (comp as any).ctc_monthly,
+    ctc_annual:       Number((comp as any).ctc_annual),
+    ctc_monthly:      Number((comp as any).ctc_monthly),
     salary_structure: (comp as any).salary_structure_id ?? null,
     components,
   }
@@ -399,10 +405,12 @@ async function buildStatutorySnapshot(
 
       if (slabErr) throw new Error(`buildStatutorySnapshot: failed to fetch PTax slabs: ${slabErr.message}`)
 
+      // monthly_income_from/to/ptax are DECIMAL — coerce before they reach the immutable
+      // snapshot, same reasoning as the compensation snapshot above (G13 sweep).
       ptaxSlabs = ((slabRows ?? []) as any[]).map(r => ({
-        from:   r.monthly_income_from,
-        to:     r.monthly_income_to ?? null,
-        amount: r.monthly_ptax,
+        from:   Number(r.monthly_income_from),
+        to:     r.monthly_income_to != null ? Number(r.monthly_income_to) : null,
+        amount: Number(r.monthly_ptax),
       }))
     }
   }
@@ -438,9 +446,9 @@ async function buildStatutorySnapshot(
         declaration_category: d.declaration_category,
         section:              d.section,
         description:          d.description,
-        approved_amount:      d.approved_amount ?? 0,
+        approved_amount:      Number(d.approved_amount ?? 0),
       }))
-      totalApproved = (latestSnap as any).total_approved ?? 0
+      totalApproved = Number((latestSnap as any).total_approved ?? 0)
     } else {
       // Fallback: live approved declarations (not recommended for finalized payroll)
       const { data: liveDels, error: liveDelsErr } = await supabase
@@ -458,25 +466,28 @@ async function buildStatutorySnapshot(
         declaration_category: d.declaration_category,
         section:              d.section,
         description:          d.description,
-        approved_amount:      d.approved_amount ?? 0,
+        approved_amount:      Number(d.approved_amount ?? 0),
       }))
       totalApproved = approvedDecls.reduce((s, d) => s + d.approved_amount, 0)
     }
   }
 
+  // All *_pct/wage_ceiling/default_rate fields below are DECIMAL — coerce before they
+  // enter this immutable snapshot; employer_rate_pct additionally sums two of them,
+  // which string-concatenates if left uncoerced (G13 sweep).
   const blob = {
     pf: {
       enabled:            settings?.pf_enabled             ?? false,
-      employee_rate_pct:  epfConfig?.employee_contribution_pct ?? 12,
-      employer_rate_pct:  (epfConfig?.employer_pf_pct ?? 3.67) + (epfConfig?.employer_eps_pct ?? 8.33),
-      wage_ceiling:       epfConfig?.wage_ceiling              ?? 15000,
+      employee_rate_pct:  Number(epfConfig?.employee_contribution_pct ?? 12),
+      employer_rate_pct:  Number(epfConfig?.employer_pf_pct ?? 3.67) + Number(epfConfig?.employer_eps_pct ?? 8.33),
+      wage_ceiling:       Number(epfConfig?.wage_ceiling              ?? 15000),
       contribution_basis: epfConfig?.is_wage_ceiling_applicable ? 'capped' : 'actual',
     },
     esi: {
       enabled:            settings?.esi_enabled             ?? false,
-      employee_rate_pct:  esiConfig?.employee_contribution_pct  ?? 0.75,
-      employer_rate_pct:  esiConfig?.employer_contribution_pct  ?? 3.25,
-      wage_ceiling:       esiConfig?.wage_ceiling               ?? 21000,
+      employee_rate_pct:  Number(esiConfig?.employee_contribution_pct  ?? 0.75),
+      employer_rate_pct:  Number(esiConfig?.employer_contribution_pct  ?? 3.25),
+      wage_ceiling:       Number(esiConfig?.wage_ceiling               ?? 21000),
     },
     pt: {
       enabled: settings?.pt_enabled ?? false,
@@ -485,7 +496,7 @@ async function buildStatutorySnapshot(
     },
     tds: {
       enabled:                     settings?.tds_enabled        ?? false,
-      default_rate:                settings?.tds_default_rate   ?? 0,
+      default_rate:                Number(settings?.tds_default_rate ?? 0),
       regime:                      settings?.tds_default_regime ?? 'new',
       total_approved_declarations:  totalApproved,
       approved_declarations:        approvedDecls,
@@ -890,19 +901,22 @@ export async function replayPayrollRun(
       tenantId,
       employeeId: empSnap.employee_id,
       month:      (manifest as any).month,
+      // Number()-coerce defensively here too: this snapshot may have been PERSISTED
+      // before the G13 sweep fixed buildCompensationSnapshot's writer, so a historical
+      // row's JSONB can still hold string values forever (immutable, never rewritten).
       compensation: {
         id:          compSnap.compensation_id,
-        ctc_monthly: compSnap.ctc_monthly,
-        ctc_annual:  compSnap.ctc_annual,
+        ctc_monthly: Number(compSnap.ctc_monthly),
+        ctc_annual:  Number(compSnap.ctc_annual),
         components:  compSnap.components.map((c: any) => ({
           salary_component_id: c.salary_component_id,
           name:                c.name,
           code:                c.code,
           component_type:      c.component_type as 'earning' | 'deduction' | 'employer_contribution',
           calc_type:           c.calc_type,
-          value:               c.value,
-          monthly_amount:      c.monthly_amount,
-          annual_amount:       c.annual_amount,
+          value:               Number(c.value ?? 0),
+          monthly_amount:      Number(c.monthly_amount ?? 0),
+          annual_amount:       Number(c.annual_amount ?? 0),
           sequence:            c.sequence,
         })),
       },
@@ -920,7 +934,7 @@ export async function replayPayrollRun(
       // created before migration 170 added the total_working_days column.
       total_working_days: empSnap.total_working_days > 0
         ? empSnap.total_working_days
-        : (empSnap.payable_days + empSnap.lop_days) || 26,
+        : (Number(empSnap.payable_days ?? 0) + Number(empSnap.lop_days ?? 0)) || 26,
     }
 
     const replayed   = computePayrollSlip(slipInput)
