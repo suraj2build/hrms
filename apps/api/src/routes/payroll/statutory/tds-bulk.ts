@@ -490,11 +490,13 @@ export default async function tdsBulkRoutes(fastify: FastifyInstance) {
       if (data) slips.push(...data)
     }
 
-    // Build map: employee_id -> sum actual TDS
+    // Build map: employee_id -> sum actual TDS. tds_deducted is DECIMAL — coerce or an
+    // employee with 2+ slips in the FY corrupts this into NaN, failing the
+    // tax_projection_reconciliation.actual_tax NOT NULL upsert (G13 sweep).
     const actualTdsMap = new Map<string, number>()
     for (const slip of slips as any[]) {
       const prev = actualTdsMap.get(slip.employee_id) ?? 0
-      actualTdsMap.set(slip.employee_id, prev + (slip.tds_deducted ?? 0))
+      actualTdsMap.set(slip.employee_id, prev + Number(slip.tds_deducted ?? 0))
     }
 
     const now = new Date().toISOString()
@@ -626,8 +628,9 @@ export default async function tdsBulkRoutes(fastify: FastifyInstance) {
 
     const declList = (declarations ?? []) as any[]
 
+    // declared_amount is DECIMAL — coerce or 2+ declarations corrupt this into NaN (G13 sweep).
     const totalDeclaredAmount = declList.reduce(
-      (sum: number, d: any) => sum + (d.declared_amount ?? 0), 0
+      (sum: number, d: any) => sum + Number(d.declared_amount ?? 0), 0
     )
 
     // Check lock statuses
@@ -690,11 +693,13 @@ export default async function tdsBulkRoutes(fastify: FastifyInstance) {
       .eq('projection_month', currentMonth)
       .maybeSingle()
 
-    const monthlyTdsRecovery: number = (projRow as any)?.tds_this_month ?? 0
+    const monthlyTdsRecovery: number = Number((projRow as any)?.tds_this_month ?? 0)
 
-    // Potential tax saving (rough: sum of approved amounts * marginal rate 30%)
+    // Potential tax saving (rough: sum of approved amounts * marginal rate 30%).
+    // approved_amount/declared_amount are DECIMAL — coerce or 2+ declarations corrupt
+    // this into NaN, silently zeroing out potential_tax_saving (G13 sweep).
     const totalApprovedAmount = declList.reduce(
-      (sum: number, d: any) => sum + (d.approved_amount ?? d.declared_amount ?? 0), 0
+      (sum: number, d: any) => sum + Number(d.approved_amount ?? d.declared_amount ?? 0), 0
     )
     const potentialTaxSaving = Math.round(totalApprovedAmount * 0.3)
 

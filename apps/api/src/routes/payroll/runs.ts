@@ -120,11 +120,14 @@ async function resyncRunTotals(supabase: any, tenantId: string, runId: string): 
       .range(from, to),
   )
 
+  // gross_pay/total_deductions/net_pay/lop_amount are NUMERIC — PostgREST serializes
+  // them as strings; Number()-coerce or a run with 2+ slips corrupts every total into
+  // NaN, which then fails payroll_runs' NOT NULL total_* columns (G13 sweep).
   const totals = {
-    total_gross:      round2(slips.reduce((s: number, r: any) => s + (r.gross_pay        ?? 0), 0)),
-    total_deductions: round2(slips.reduce((s: number, r: any) => s + (r.total_deductions ?? 0), 0)),
-    total_net:        round2(slips.reduce((s: number, r: any) => s + (r.net_pay          ?? 0), 0)),
-    total_lop_amount: round2(slips.reduce((s: number, r: any) => s + (r.lop_amount       ?? 0), 0)),
+    total_gross:      round2(slips.reduce((s: number, r: any) => s + Number(r.gross_pay        ?? 0), 0)),
+    total_deductions: round2(slips.reduce((s: number, r: any) => s + Number(r.total_deductions ?? 0), 0)),
+    total_net:        round2(slips.reduce((s: number, r: any) => s + Number(r.net_pay          ?? 0), 0)),
+    total_lop_amount: round2(slips.reduce((s: number, r: any) => s + Number(r.lop_amount       ?? 0), 0)),
     employee_count:   slips.length,
   }
 
@@ -3124,8 +3127,9 @@ export default async function payrollRunsRoutes(fastify: FastifyInstance) {
       return reply.code(422).send({ error: 'EXPORT_TOO_LARGE', message: 'This payroll run exceeds the variance report limit of 10,000 rows. Please contact support for a bulk export.' })
     }
 
-    const totalCurrGross = r2(currentSlips.reduce((s: number, r: any) => s + r.gross_pay, 0))
-    const totalCurrNet   = r2(currentSlips.reduce((s: number, r: any) => s + r.net_pay,   0))
+    // gross_pay/net_pay are NUMERIC — coerce or 2+ slips corrupt these totals into NaN (G13 sweep).
+    const totalCurrGross = r2(currentSlips.reduce((s: number, r: any) => s + Number(r.gross_pay ?? 0), 0))
+    const totalCurrNet   = r2(currentSlips.reduce((s: number, r: any) => s + Number(r.net_pay   ?? 0), 0))
 
     // No previous run — return current totals with no comparison
     if (!prevRun) {
@@ -3208,8 +3212,8 @@ export default async function payrollRunsRoutes(fastify: FastifyInstance) {
     // Largest absolute net-pay movers first
     employees.sort((a, b) => Math.abs(b.diff.net_pay) - Math.abs(a.diff.net_pay))
 
-    const totalPrevGross = r2(prevSlips.reduce((s: number, r: any) => s + r.gross_pay, 0))
-    const totalPrevNet   = r2(prevSlips.reduce((s: number, r: any) => s + r.net_pay,   0))
+    const totalPrevGross = r2(prevSlips.reduce((s: number, r: any) => s + Number(r.gross_pay ?? 0), 0))
+    const totalPrevNet   = r2(prevSlips.reduce((s: number, r: any) => s + Number(r.net_pay   ?? 0), 0))
     const grossChange    = r2(totalCurrGross - totalPrevGross)
     const netChange      = r2(totalCurrNet   - totalPrevNet)
 

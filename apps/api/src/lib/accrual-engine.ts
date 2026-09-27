@@ -154,10 +154,19 @@ export async function runMonthlyAccrual(
     const ledInserts: Record<string, unknown>[] = []
     const alUpserts:  Record<string, unknown>[] = []
 
+    // days_per_period is DECIMAL(5,2) — PostgREST serializes it as a string. Number()
+    // it here: proratedDays()'s full-month branch (`joining <= periodStart`) returns
+    // its `daysPerPeriod` argument UNCHANGED, so for any employee who joined before
+    // this period (i.e. most employees, every month) `days` stayed a raw string.
+    // `currentBalance + days` then string-concatenated, and `.toFixed()` on the
+    // resulting string threw a TypeError — crashing this loop for the whole rule,
+    // before any employee's credit was written (confirmed by direct reproduction
+    // with this table's real seed values; G13 sweep).
     for (const emp of employees as Array<{ id: string; joining_date: string }>) {
+      const daysPerPeriod = Number(rule.days_per_period)
       const days = rule.prorate_on_joining
-        ? proratedDays(rule.days_per_period, emp.joining_date, periodYear, periodMonth)
-        : rule.days_per_period
+        ? proratedDays(daysPerPeriod, emp.joining_date, periodYear, periodMonth)
+        : daysPerPeriod
 
       if (days <= 0) continue
 

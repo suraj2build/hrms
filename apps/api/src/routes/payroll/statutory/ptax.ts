@@ -497,8 +497,10 @@ export default async function ptaxRoutes(fastify: FastifyInstance) {
       .eq('month', month)
       .eq('status', 'finalized')
 
+    // gross_pay is NUMERIC — coerce here so slab lookups/comparisons downstream get a
+    // real number, not a string (G13 sweep).
     const slipGrossMap = new Map<string, number>(
-      ((slipRows ?? []) as any[]).map(r => [r.employee_id, r.gross_pay ?? 0]),
+      ((slipRows ?? []) as any[]).map(r => [r.employee_id, Number(r.gross_pay ?? 0)]),
     )
 
     // Fallback: gross from active compensation components (earning type only)
@@ -524,10 +526,13 @@ export default async function ptaxRoutes(fastify: FastifyInstance) {
           .in('compensation_id', (compRows as any[]).map(c => c.id))
           .eq('salary_components.component_type', 'earning')
 
+        // computed_monthly is NUMERIC — coerce or an employee with 2+ earning
+        // components corrupts their fallback gross into NaN, failing
+        // ptax_contributions.gross_salary's NOT NULL constraint (G13 sweep).
         for (const row of (compCompRows ?? []) as any[]) {
           const empId = compIdToEmpId.get(row.compensation_id)
           if (empId) {
-            fallbackGrossMap.set(empId, (fallbackGrossMap.get(empId) ?? 0) + (row.computed_monthly ?? 0))
+            fallbackGrossMap.set(empId, (fallbackGrossMap.get(empId) ?? 0) + Number(row.computed_monthly ?? 0))
           }
         }
       }

@@ -239,19 +239,21 @@ export default async function compensationRevisionsRoutes(fastify: FastifyInstan
     // Falls back to CTC/12 gross (null net) when no component data exists yet.
     const prevEarnings   = (prevComponents ?? []).filter((c: any) => c.salary_components?.component_type === 'earning')
     const prevDeductions = (prevComponents ?? []).filter((c: any) => c.salary_components?.component_type === 'deduction')
-    const prevGrossMonthly  = prevEarnings.reduce((s: number, c: any) => s + (c.computed_monthly ?? 0), 0)
-    const prevDeductMonthly = prevDeductions.reduce((s: number, c: any) => s + (c.computed_monthly ?? 0), 0)
+    // computed_monthly is NUMERIC — coerce or 2+ components corrupt these sums into
+    // NaN, writing a broken compensation_snapshots row on approval (G13 sweep).
+    const prevGrossMonthly  = prevEarnings.reduce((s: number, c: any) => s + Number(c.computed_monthly ?? 0), 0)
+    const prevDeductMonthly = prevDeductions.reduce((s: number, c: any) => s + Number(c.computed_monthly ?? 0), 0)
     const prevNetMonthly    = Math.max(0, prevGrossMonthly - prevDeductMonthly)
 
     // Scale components proportionally for the after-snapshot
     const previousCtcAnnual = Number((currentComp as any)?.ctc_annual ?? rev.before_ctc_annual ?? 0)
     const scale = previousCtcAnnual > 0 ? Number(rev.new_ctc_annual) / previousCtcAnnual : 1
     const newGrossMonthly  = prevEarnings.reduce((s: number, c: any) => {
-      const m = c.calculation_type === 'fixed' ? (c.computed_monthly ?? 0) : (c.computed_monthly ?? 0) * scale
+      const m = c.calculation_type === 'fixed' ? Number(c.computed_monthly ?? 0) : Number(c.computed_monthly ?? 0) * scale
       return s + m
     }, 0)
     const newDeductMonthly = prevDeductions.reduce((s: number, c: any) => {
-      const m = c.calculation_type === 'fixed' ? (c.computed_monthly ?? 0) : (c.computed_monthly ?? 0) * scale
+      const m = c.calculation_type === 'fixed' ? Number(c.computed_monthly ?? 0) : Number(c.computed_monthly ?? 0) * scale
       return s + m
     }, 0)
     const newNetMonthly = Math.max(0, newGrossMonthly - newDeductMonthly)

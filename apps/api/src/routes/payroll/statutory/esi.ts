@@ -308,10 +308,15 @@ export default async function esiRoutes(fastify: FastifyInstance) {
     // Non-fatal: fall back to statutory defaults below if the config row can't be read.
     if (configErr) req.log.warn({ err: configErr, tenant: req.tenantId }, 'ESI config fetch failed — using statutory defaults')
 
+    // employee_contribution_pct/employer_contribution_pct/wage_ceiling are DECIMAL —
+    // uncoerced, wageCeiling below is compared against gross wages with `<=`, which
+    // does a silent ALPHABETICAL string comparison instead of numeric — no error, no
+    // NaN, just wrong eligibility (e.g. "9500.00" > "21000.00" alphabetically, wrongly
+    // marking a low earner ineligible) (G13 sweep).
     const config: ESIConfig = configRow ? {
-      employeeContributionPct: configRow.employee_contribution_pct ?? 0.75,
-      employerContributionPct: configRow.employer_contribution_pct ?? 3.25,
-      wageCeiling:             configRow.wage_ceiling              ?? 21000,
+      employeeContributionPct: Number(configRow.employee_contribution_pct ?? 0.75),
+      employerContributionPct: Number(configRow.employer_contribution_pct ?? 3.25),
+      wageCeiling:             Number(configRow.wage_ceiling              ?? 21000),
     } : {
       employeeContributionPct: 0.75,
       employerContributionPct: 3.25,
@@ -402,8 +407,10 @@ export default async function esiRoutes(fastify: FastifyInstance) {
       .eq('month', month)
       .eq('status', 'finalized')
 
+    // gross_pay is NUMERIC — coerce here or the eligibility check below silently
+    // string-compares against wageCeiling instead of comparing numerically (G13 sweep).
     const slipGrossMap = new Map<string, number>(
-      ((slipRows ?? []) as any[]).map(r => [r.employee_id, r.gross_pay ?? 0]),
+      ((slipRows ?? []) as any[]).map(r => [r.employee_id, Number(r.gross_pay ?? 0)]),
     )
 
     // Actual ESI lines off the finalized slip — the deposit. Used to override the
@@ -444,10 +451,13 @@ export default async function esiRoutes(fastify: FastifyInstance) {
           .in('compensation_id', (compRows as any[]).map((c: any) => c.id))
           .eq('salary_components.component_type', 'earning')
 
+        // computed_monthly is NUMERIC — coerce or an employee with 2+ earning
+        // components corrupts their fallback gross into NaN/a wrong string
+        // comparison against wageCeiling (G13 sweep).
         for (const row of (compCompRows ?? []) as any[]) {
           const empId = compIdToEmpId.get(row.compensation_id)
           if (empId) {
-            fallbackGrossMap.set(empId, (fallbackGrossMap.get(empId) ?? 0) + (row.computed_monthly ?? 0))
+            fallbackGrossMap.set(empId, (fallbackGrossMap.get(empId) ?? 0) + Number(row.computed_monthly ?? 0))
           }
         }
       }

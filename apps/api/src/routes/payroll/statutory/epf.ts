@@ -398,10 +398,13 @@ export default async function epfRoutes(fastify: FastifyInstance) {
           .in('compensation_id', activeCompIds)
           .eq('salary_components.is_pf_applicable', true)
 
+        // computed_monthly is NUMERIC — coerce or an employee with 2+ PF-applicable
+        // components (e.g. Basic + DA) corrupts pf_wages into NaN, failing its
+        // NOT NULL constraint on the EPF upsert (G13 sweep).
         for (const row of (pfCompRows ?? []) as Array<{ compensation_id: string; computed_monthly: number }>) {
           const empId = empIdByCompId.get(row.compensation_id)
           if (empId) {
-            pfBaseMap.set(empId, (pfBaseMap.get(empId) ?? 0) + (row.computed_monthly ?? 0))
+            pfBaseMap.set(empId, (pfBaseMap.get(empId) ?? 0) + Number(row.computed_monthly ?? 0))
           }
         }
       }
