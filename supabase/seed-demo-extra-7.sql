@@ -147,9 +147,22 @@ insert into esi_config (id, tenant_id, employee_contribution_pct, employer_contr
 -- P-Tax slabs for Karnataka (HQ state). frequency / deduction_month use the
 -- migration defaults (NOT NULL DEFAULT 'monthly' / null) so are omitted.
 -- monthly_income_to = NULL means the open-ended top slab ("and above").
+--
+-- financial_year format: MUST be "YYYY-YY" (e.g. "2025-26"), matching
+-- monthToFY() in apps/api/src/lib/statutory/statutory-governance.ts and the
+-- format already used correctly by it_tax_slabs ("2024-25", "2025-26"). A
+-- previous "YYYY-YYYY" value here ("2025-2026") never matched that query,
+-- silently zeroing ptaxSlabs for every employee/month and leaving PT
+-- permanently unresolvable — found via live payroll UAT (see
+-- docs/UAT_LIVE_AUDIT.md UAT-022). Both the current and next FY are seeded
+-- so payroll for the demo tenant's "current" month resolves without
+-- requiring a manual annual slab-rollover step (Karnataka's PT slab
+-- structure is unchanged across FY2025-26/FY2026-27).
 insert into ptax_slabs (id, tenant_id, state_code, financial_year, gender, monthly_income_from, monthly_income_to, monthly_ptax, annual_ptax, is_active) values
- ('c7520000-0000-0000-0000-000000000001','d0000000-0000-0000-0000-000000000001','KA','2025-2026','all',     0.00, 24999.99,   0.00,    0.00, true),
- ('c7520000-0000-0000-0000-000000000002','d0000000-0000-0000-0000-000000000001','KA','2025-2026','all', 25000.00,     null, 200.00, 2400.00, true);
+ ('c7520000-0000-0000-0000-000000000001','d0000000-0000-0000-0000-000000000001','KA','2025-26','all',     0.00, 24999.99,   0.00,    0.00, true),
+ ('c7520000-0000-0000-0000-000000000002','d0000000-0000-0000-0000-000000000001','KA','2025-26','all', 25000.00,     null, 200.00, 2400.00, true),
+ ('c7520000-0000-0000-0000-000000000003','d0000000-0000-0000-0000-000000000001','KA','2026-27','all',     0.00, 24999.99,   0.00,    0.00, true),
+ ('c7520000-0000-0000-0000-000000000004','d0000000-0000-0000-0000-000000000001','KA','2026-27','all', 25000.00,     null, 200.00, 2400.00, true);
 
 -- P-Tax state enablement (Settings → Statutory → P-Tax states).
 insert into ptax_state_settings (id, tenant_id, state_code, enabled, updated_by, registration_number, registration_date) values

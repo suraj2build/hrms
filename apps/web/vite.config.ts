@@ -124,12 +124,93 @@ export default defineConfig(({ mode }) => ({
       '/letters':         apiProxy(),
       '/notifications':   apiProxy(),
       '/users':           apiProxy(),
+      // Found missing during a local UAT run (2026-08) — each returned Vite's
+      // HTML SPA fallback instead of hitting the API, breaking these pages
+      // silently ("Unexpected token '<'... is not valid JSON") in local dev only.
+      '/assets':                    apiProxy(),   // assetsRoutes
+      '/separations':               apiProxy(),   // separationWorkflowRoutes
+      '/recognition':               apiProxy(),   // recognitionRoutes — ESS Rewards pillar
+      '/community':                 apiProxy(),   // communityRoutes — ESS Community feed
+      '/roster':                    apiProxy(),   // rosterContextRoutes
+      '/holidays':                  apiProxy(),   // rosterContextRoutes
+      '/roster-calendar':           apiProxy(),
+      '/roster-weekly-off-rules':   apiProxy(),
+      '/shift-segments':            apiProxy(),
+      '/roster-rotation-groups':    apiProxy(),
+      '/roster-rotation-members':   apiProxy(),
+      '/roster-holiday-groups':     apiProxy(),
+      '/roster-simulation':         apiProxy(),
+      '/mood':                      apiProxy(),   // moodRoutes — ESS Home mood check-in widget
+      '/surveys':                   apiProxy(),   // surveyRoutes — ESS survey nudge/take
+      '/absconding':                apiProxy(),   // abscondingRoutes — Absconding Case Management
+      '/policies':                  apiProxy(),   // policyRoutes — Policy KB + Acknowledgement
+      '/succession':                apiProxy(),   // successionRoutes — Succession Planning
+      '/talent':                    apiProxy(),   // talentRoutes — Internal Talent Marketplace
+      '/integrations':              apiProxy(),   // integrationsRoute — PAN/IFSC verify, accounting export, EnterpriseControlCenter status
+      '/uploads':                   apiProxy(),   // uploadSessionRoutes — resumable upload sessions
+      '/enterprise':                apiProxy(),   // enterprise/index — audit log/health (EnterpriseControlCenter, AuditTrail)
+      '/observability':             apiProxy(),   // observability/index — ObservabilityConsole
       // ESS-specific API endpoints (avoid proxying the /ess/* frontend page routes)
       '/ess/workforce-notifications': apiProxy(),
       '/ess/operational-summary':     apiProxy(),
       '/ess/workload-balance':        apiProxy(),
       '/ess/schedule-fairness':       apiProxy(),
       '/ess/upcoming-payroll-impact': apiProxy(),
+      // Found missing during a live UAT run (2026-09) — GET /ess/home returned
+      // 200 text/html (Vite's SPA fallback) instead of the aggregated home
+      // payload, breaking the ESS Home "Experience Core" cards silently
+      // ("Unexpected token '<'... is not valid JSON") for every employee.
+      // No page-route collision at these five paths, so a plain proxy is safe:
+      '/ess/events':                  apiProxy(),
+      '/ess/signals':                 apiProxy(),
+      '/ess/activity':                apiProxy(),
+      '/ess/progress':                apiProxy(),
+      '/ess/reflection':              apiProxy(),
+      // These five DO collide with frontend page routes of the same path
+      // (/ess/home, /ess/timeline, /ess/identity, /ess/company, /ess/team are
+      // all React Router routes too) — same ambiguity as /manager above, same
+      // fix: bypass to the SPA shell for a real browser navigation, proxy
+      // through to the API for everything else (fetch/XHR).
+      '/ess/home':                    apiProxy({
+        bypass(req: { headers: Record<string, string | string[] | undefined> }) {
+          const accept = req.headers['accept'] ?? ''
+          if (typeof accept === 'string' && accept.includes('text/html')) {
+            return '/index.html'
+          }
+        },
+      }),
+      '/ess/timeline':                apiProxy({
+        bypass(req: { headers: Record<string, string | string[] | undefined> }) {
+          const accept = req.headers['accept'] ?? ''
+          if (typeof accept === 'string' && accept.includes('text/html')) {
+            return '/index.html'
+          }
+        },
+      }),
+      '/ess/identity':                apiProxy({
+        bypass(req: { headers: Record<string, string | string[] | undefined> }) {
+          const accept = req.headers['accept'] ?? ''
+          if (typeof accept === 'string' && accept.includes('text/html')) {
+            return '/index.html'
+          }
+        },
+      }),
+      '/ess/company':                 apiProxy({
+        bypass(req: { headers: Record<string, string | string[] | undefined> }) {
+          const accept = req.headers['accept'] ?? ''
+          if (typeof accept === 'string' && accept.includes('text/html')) {
+            return '/index.html'
+          }
+        },
+      }),
+      '/ess/team':                    apiProxy({
+        bypass(req: { headers: Record<string, string | string[] | undefined> }) {
+          const accept = req.headers['accept'] ?? ''
+          if (typeof accept === 'string' && accept.includes('text/html')) {
+            return '/index.html'
+          }
+        },
+      }),
       '/executive':       apiProxy(),   // Executive Intelligence Center
       '/system':          apiProxy(),
       '/workspace':       apiProxy(),

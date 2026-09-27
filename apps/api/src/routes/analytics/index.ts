@@ -16,38 +16,42 @@ export default async function analyticsRoutes(fastify: FastifyInstance) {
     const todayLocal = getLocalDate(new Date().toISOString(), tz)
     const monthStart = `${todayLocal.slice(0, 7)}-01T00:00:00.000Z`
 
-    // deptRows/typeRows are paginated — a plain row-returning .select() (no
+    // department_id/employment_type moved off `employees` onto `job_history`
+    // (the current-assignment row, is_current = true) back in migration 016 —
+    // querying them straight off `employees` 500s with "column ... does not
+    // exist". jobRows is paginated — a plain row-returning .select() (no
     // count:exact/head:true) truncates at PostgREST's 1,000-row ceiling for a
     // large tenant, understating the department/employment-type breakdowns.
-    const [totalRes, activeRes, joinersRes, separationsRes, deptRows, typeRows] = await Promise.all([
+    const [totalRes, activeRes, joinersRes, separationsRes, jobRows] = await Promise.all([
       fastify.supabase.from('employees').select('id', { count: 'exact', head: true }).eq('tenant_id', tid),
       fastify.supabase.from('employees').select('id', { count: 'exact', head: true }).eq('tenant_id', tid).eq('status', 'active'),
       fastify.supabase.from('employees').select('id', { count: 'exact', head: true }).eq('tenant_id', tid).gte('joining_date', monthStart),
       fastify.supabase.from('employees').select('id', { count: 'exact', head: true }).eq('tenant_id', tid).eq('status', 'separated').gte('updated_at', monthStart),
       fetchAllRows((from, to) =>
-        fastify.supabase.from('employees').select('departments:department_id(name)').eq('tenant_id', tid).eq('status', 'active').range(from, to),
-      ),
-      fetchAllRows((from, to) =>
-        fastify.supabase.from('employees').select('employment_type').eq('tenant_id', tid).eq('status', 'active').range(from, to),
+        fastify.supabase
+          .from('employees')
+          .select('job_history!job_history_employee_id_fkey(employment_type, departments(name))')
+          .eq('tenant_id', tid)
+          .eq('status', 'active')
+          .eq('job_history.is_current', true)
+          .range(from, to),
       ),
     ])
 
-    // Aggregate department breakdown
+    // Aggregate department + employment-type breakdowns off the current job_history row
     const deptCounts: Record<string, number> = {}
-    for (const emp of deptRows) {
-      const name = (emp.departments as unknown as { name: string } | null)?.name ?? 'Unassigned'
-      deptCounts[name] = (deptCounts[name] ?? 0) + 1
+    const typeCounts: Record<string, number> = {}
+    for (const emp of jobRows) {
+      const jh = Array.isArray(emp.job_history) ? emp.job_history[0] : emp.job_history
+      const deptName = (jh?.departments as unknown as { name: string } | null)?.name ?? 'Unassigned'
+      deptCounts[deptName] = (deptCounts[deptName] ?? 0) + 1
+      const empType = (jh as unknown as { employment_type: string } | null)?.employment_type ?? 'unknown'
+      typeCounts[empType] = (typeCounts[empType] ?? 0) + 1
     }
     const department_breakdown = Object.entries(deptCounts)
       .map(([name, count]) => ({ name, count }))
       .sort((a, b) => b.count - a.count)
       .slice(0, 8)
-
-    // Aggregate employment type breakdown
-    const typeCounts: Record<string, number> = {}
-    for (const emp of typeRows) {
-      typeCounts[emp.employment_type] = (typeCounts[emp.employment_type] ?? 0) + 1
-    }
     const employment_type_breakdown = Object.entries(typeCounts).map(([type, count]) => ({ type, count }))
 
     return reply.send({

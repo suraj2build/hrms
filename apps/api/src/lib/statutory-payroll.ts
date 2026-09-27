@@ -35,8 +35,21 @@ import type { PayrollSlipResult, PayrollComponentSnapshot } from './payroll-engi
  *  guard, applyStatutoryToSlip() silently overwrites the custom component's
  *  line with the statutory engine's own line on every payroll run, with no
  *  error anywhere. Keep this list and the guard in sync; they must never
- *  drift into two different reserved-word sets. */
-export const STATUTORY_CODE = /^(PF|EPF|PF_EMPLOYEE|PF_EMPLOYER|EPF_EDLI|EPF_ADMIN|ESI|ESIC|ESI_EMPLOYEE|ESI_EMPLOYER|PT|PTAX|PROF_TAX|PROFESSIONAL_TAX|TDS|INCOME_TAX|LWF|LWF_EMPLOYEE|LWF_EMPLOYER)$/i
+ *  drift into two different reserved-word sets.
+ *
+ *  Includes the _EE/_ER employee/employer shorthand (PF_EE/PF_ER, ESI_EE/
+ *  ESI_ER) alongside the fully-spelled-out _EMPLOYEE/_EMPLOYER forms — found
+ *  via live UAT (see docs/UAT_LIVE_AUDIT.md): a tenant whose compensation
+ *  setup used PF_EE/PF_ER (common real-world Indian-payroll shorthand, not an
+ *  unreasonable choice) never had that manual PF line recognized as
+ *  statutory. Two compounding effects: the manual line was never stripped and
+ *  replaced by computeEPF()'s ceiling-aware calculation (so the wage-ceiling
+ *  cap silently never applied to it), and — because comps.filter() below
+ *  never saw it as a statutory code either — the "silently dropped" warning
+ *  built for exactly this failure mode (see the dropped-category detection
+ *  further down) never fired, so this passed every prior payroll run with no
+ *  signal at all. */
+export const STATUTORY_CODE = /^(PF|EPF|PF_EMPLOYEE|PF_EMPLOYER|PF_EE|PF_ER|EPF_EDLI|EPF_ADMIN|ESI|ESIC|ESI_EMPLOYEE|ESI_EMPLOYER|ESI_EE|ESI_ER|PT|PTAX|PROF_TAX|PROFESSIONAL_TAX|TDS|INCOME_TAX|LWF|LWF_EMPLOYEE|LWF_EMPLOYER|LWF_EE|LWF_ER)$/i
 
 export interface StatutoryTrace {
   epf:  { applied: boolean; pfWages: number; employee: number; employer: number; reason?: string }
@@ -208,6 +221,43 @@ export function applyStatutoryToSlip(
 
   const breakdown = [...kept, ...statLines]
 
+  // ── Detect configured-but-silently-dropped statutory components ───────────
+  // STATUTORY_CODE-matching deduction/employer_contribution lines are always
+  // stripped from `kept` above and replaced by the engines' own lines above —
+  // but if the engine determines the employee isn't applicable (e.g. no
+  // site/state resolved, so PT slabs can't be looked up), no replacement line
+  // is added either, and the deduction silently disappears with nothing on
+  // the payslip to say why. Warn exactly like the existing no-attendance
+  // warning so this can't slip past payroll review unnoticed — the same
+  // "never silently zero a statutory deduction" rule this codebase already
+  // enforces for TDS (see applyTdsToSlip) must hold for PF/ESI/PT/LWF too.
+  const droppedCategories = new Set<string>()
+  for (const c of comps) {
+    if (c.component_type === 'earning') continue
+    if (!STATUTORY_CODE.test(c.code)) continue
+    if (/^(TDS|INCOME_TAX)$/i.test(c.code)) continue // owned by applyTdsToSlip, not this function
+    if (/^(PF|EPF|PF_EMPLOYEE|PF_EMPLOYER|PF_EE|PF_ER|EPF_EDLI|EPF_ADMIN)$/i.test(c.code) && !epf) {
+      droppedCategories.add('Provident Fund')
+    } else if (/^(ESI|ESIC|ESI_EMPLOYEE|ESI_EMPLOYER|ESI_EE|ESI_ER)$/i.test(c.code) && !(esi && esi.isEligible)) {
+      droppedCategories.add('ESI')
+    } else if (/^(PT|PTAX|PROF_TAX|PROFESSIONAL_TAX)$/i.test(c.code) && !(ptax && ptax.slabMatched)) {
+      // Use slabMatched, not ptaxAmount > 0 — a low-income employee can
+      // legitimately fall in a genuine ₹0 slab (e.g. KA's sub-₹25,000
+      // bracket). That's PT correctly resolved and correctly zero, not a
+      // silent drop; ptaxAmount > 0 falsely flagged that case as dropped
+      // (found via live payroll UAT — see docs/UAT_LIVE_AUDIT.md UAT-022).
+      droppedCategories.add('Professional Tax')
+    } else if (/^(LWF|LWF_EMPLOYEE|LWF_EMPLOYER|LWF_EE|LWF_ER)$/i.test(c.code) && !(lwf && lwf.isEligible)) {
+      // Same fix for LWF: isEligible is the "resolved" signal; a genuinely
+      // eligible employee can still have a ₹0 contribution for their
+      // config/gender/state combination.
+      droppedCategories.add('LWF')
+    }
+  }
+  const statutoryDropWarning = droppedCategories.size > 0
+    ? `${[...droppedCategories].join(', ')} ${droppedCategories.size === 1 ? 'is' : 'are'} configured for this employee but could not be applied this run (unresolved statutory setup — check site/state/registration). Verify before finalizing.`
+    : undefined
+
   // ── Recompute totals (LOP preserved exactly) ───────────────────────────────
   const deductionBase = round2(
     breakdown.filter(c => c.component_type === 'deduction')
@@ -228,6 +278,7 @@ export function applyStatutoryToSlip(
       employer_contributions,
       net_pay,
       deduction_shortfall,
+      warning: [slip.warning, statutoryDropWarning].filter(Boolean).join(' ') || undefined,
     },
     trace: {
       epf: {

@@ -43,35 +43,24 @@ import {
 
 interface CompRevision {
   id:                   string
-  employee_id:          string
   revision_type:        'increment' | 'promotion' | 'revision' | 'correction' | 'restructure' | 'retro'
   status:               'pending' | 'approved' | 'rejected' | 'withdrawn'
   effective_date:       string
+  reason:               string
   before_ctc_annual:    number | null
-  before_ctc_monthly:   number | null
-  before_structure_name: string | null
   new_ctc_annual:       number
   delta_amount:         number | null
   delta_pct:            number | null
-  notes:                string | null
-  rejection_reason:     string | null
   retro_months:         number | null
-  payroll_impact_preview: Record<string, unknown> | null
   requested_by_name:    string | null
   approved_by_name:     string | null
-  created_at:           string
-  approved_at:          string | null
-  employees?: {
-    first_name: string
-    last_name:  string
-    employee_code: string
-  }
-}
-
-interface PreviewData {
-  monthly_delta:   number
-  affected_months: string[]
-  retro_total:     number
+  submitted_at:         string
+  decided_at:           string | null
+  employee: {
+    id:   string
+    name: string
+    code: string
+  } | null
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -110,6 +99,7 @@ function SubmitRevisionForm({ onSuccess, onCancel }: SubmitFormProps) {
     revision_type:  'increment' as string,
     effective_date: '',
     new_ctc_annual: '',
+    reason:         '',
     notes:          '',
     retro_months:   '',
   })
@@ -122,8 +112,8 @@ function SubmitRevisionForm({ onSuccess, onCancel }: SubmitFormProps) {
   })
 
   function handleSubmit() {
-    if (!form.employee_id || !form.effective_date || !form.new_ctc_annual) {
-      setError('Employee ID, effective date and new CTC are required.')
+    if (!form.employee_id || !form.effective_date || !form.new_ctc_annual || !form.reason.trim()) {
+      setError('Employee, effective date, new CTC and reason are required.')
       return
     }
     submitMut.mutate({
@@ -131,6 +121,7 @@ function SubmitRevisionForm({ onSuccess, onCancel }: SubmitFormProps) {
       revision_type:  form.revision_type,
       effective_date: form.effective_date,
       new_ctc_annual: parseFloat(form.new_ctc_annual),
+      reason:         form.reason.trim(),
       notes:          form.notes || undefined,
       retro_months:   form.retro_months ? parseInt(form.retro_months) : undefined,
     })
@@ -176,6 +167,12 @@ function SubmitRevisionForm({ onSuccess, onCancel }: SubmitFormProps) {
           <Input className={inputCls} type="number" min={0} max={24} placeholder="0"
             value={form.retro_months}
             onChange={e => setForm(p => ({ ...p, retro_months: e.target.value }))} />
+        </div>
+        <div>
+          <label className={labelCls}>Reason *</label>
+          <Input className={inputCls} placeholder="e.g. Annual increment"
+            value={form.reason}
+            onChange={e => setForm(p => ({ ...p, reason: e.target.value }))} />
         </div>
         <div>
           <label className={labelCls}>Notes</label>
@@ -225,11 +222,7 @@ function RevisionRow({
 }) {
   const [expanded, setExpanded] = useState(false)
 
-  const empName = rev.employees
-    ? `${rev.employees.first_name} ${rev.employees.last_name} (${rev.employees.employee_code})`
-    : rev.employee_id.slice(0, 8) + '…'
-
-  const preview = rev.payroll_impact_preview as PreviewData | null
+  const empName = rev.employee ? `${rev.employee.name} (${rev.employee.code})` : 'Unknown employee'
 
   return (
     <div className="border border-border rounded-lg overflow-hidden">
@@ -262,7 +255,7 @@ function RevisionRow({
           </div>
         </div>
         <div className="text-xs text-muted-foreground tabular-nums flex-shrink-0">
-          {fmtDate(rev.created_at)}
+          {fmtDate(rev.submitted_at)}
         </div>
         {expanded
           ? <ChevronUp className="h-4 w-4 text-muted-foreground flex-shrink-0" />
@@ -280,8 +273,7 @@ function RevisionRow({
               { label: 'Retro Months', value: rev.retro_months != null ? `${rev.retro_months} mo` : '—' },
               { label: 'Requested By', value: rev.requested_by_name ?? '—' },
               { label: 'Approved By',  value: rev.approved_by_name ?? '—' },
-              { label: 'Approved At',  value: rev.approved_at ? fmtDate(rev.approved_at) : '—' },
-              { label: 'Before Structure', value: rev.before_structure_name ?? '—' },
+              { label: 'Decided At',   value: rev.decided_at ? fmtDate(rev.decided_at) : '—' },
             ].map(({ label, value }) => (
               <div key={label} className="bg-muted/40 rounded-md p-2">
                 <p className="text-[10px] text-muted-foreground">{label}</p>
@@ -290,32 +282,9 @@ function RevisionRow({
             ))}
           </div>
 
-          {preview && (
-            <div className="rounded-md bg-info/10 border border-info/20 px-3 py-2">
-              <p className="text-xs font-semibold text-info mb-1.5">Payroll Impact Preview</p>
-              <div className="flex gap-6 text-xs text-foreground">
-                <span>Monthly delta: <strong className="text-success">{fmt(preview.monthly_delta)}</strong></span>
-                {preview.retro_total > 0 && (
-                  <span>Retro total: <strong className="text-warning">{fmt(preview.retro_total)}</strong></span>
-                )}
-                {preview.affected_months?.length > 0 && (
-                  <span>Periods: <strong>{preview.affected_months.length}</strong></span>
-                )}
-              </div>
-            </div>
-          )}
-
-          {rev.notes && (
-            <div className="text-xs text-muted-foreground bg-muted/30 rounded-md px-3 py-2">
-              <span className="font-medium text-foreground">Notes: </span>{rev.notes}
-            </div>
-          )}
-
-          {rev.rejection_reason && (
-            <div className="text-xs text-destructive bg-destructive/10 rounded-md px-3 py-2 border border-destructive/20">
-              <span className="font-medium">Rejection reason: </span>{rev.rejection_reason}
-            </div>
-          )}
+          <div className="text-xs text-muted-foreground bg-muted/30 rounded-md px-3 py-2">
+            <span className="font-medium text-foreground">Reason: </span>{rev.reason}
+          </div>
 
           {/* Actions */}
           {rev.status === 'pending' && (

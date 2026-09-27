@@ -81,22 +81,34 @@ ok "Supabase is running"
 # ── 4. Read credentials from running stack ────────────────────────────────────
 step "Reading local credentials"
 
-# Capture status output once
-STATUS_OUTPUT=$(supabase status 2>/dev/null)
+# `supabase status`'s human-readable table has changed shape across CLI
+# versions (older: "anon key"/"service_role key"/"API URL"/"DB URL" rows;
+# newer: "Publishable"/"Secret" — a different, non-JWT key format — under an
+# "Authentication Keys" heading, no JWT secret row printed at all). Grepping
+# that table broke silently (empty vars, no error) the moment someone's CLI
+# updated. `-o json` keeps stable legacy field names (ANON_KEY,
+# SERVICE_ROLE_KEY, JWT_SECRET, API_URL, DB_URL) regardless of CLI version —
+# parse that instead.
+STATUS_JSON=$(supabase status -o json 2>/dev/null) || fail "Could not read 'supabase status -o json'. Run 'supabase status' manually and check it's running."
 
-parse_val() {
-  echo "$STATUS_OUTPUT" | grep -i "$1" | head -1 | awk '{print $NF}'
+parse_json() {
+  node -e "
+    try {
+      const v = JSON.parse(process.argv[1])['$1'];
+      if (v) process.stdout.write(v);
+    } catch {}
+  " "$STATUS_JSON"
 }
 
-LOCAL_API_URL=$(parse_val "API URL")
-LOCAL_ANON_KEY=$(parse_val "anon key")
-LOCAL_SERVICE_KEY=$(parse_val "service_role key")
-LOCAL_JWT_SECRET=$(parse_val "JWT secret")
-LOCAL_DB_URL=$(parse_val "DB URL")
+LOCAL_API_URL=$(parse_json "API_URL")
+LOCAL_ANON_KEY=$(parse_json "ANON_KEY")
+LOCAL_SERVICE_KEY=$(parse_json "SERVICE_ROLE_KEY")
+LOCAL_JWT_SECRET=$(parse_json "JWT_SECRET")
+LOCAL_DB_URL=$(parse_json "DB_URL")
 
 # Validate we got something
 if [ -z "$LOCAL_API_URL" ] || [ -z "$LOCAL_SERVICE_KEY" ]; then
-  fail "Could not parse Supabase credentials. Run 'supabase status' manually and check output."
+  fail "Could not parse Supabase credentials from 'supabase status -o json'. Run it manually and check the output has API_URL / SERVICE_ROLE_KEY fields."
 fi
 
 ok "API URL:           $LOCAL_API_URL"
@@ -167,7 +179,8 @@ echo ""
 read -r -p "  Seed demo data? [y/N]: " SEED_CHOICE
 echo ""
 
-if [[ "${SEED_CHOICE,,}" == "y" ]]; then
+SEED_CHOICE_LOWER=$(echo "$SEED_CHOICE" | tr '[:upper:]' '[:lower:]')
+if [[ "$SEED_CHOICE_LOWER" == "y" ]]; then
   step "Seeding demo data"
 
   PGPASSWORD=postgres

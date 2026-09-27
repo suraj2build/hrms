@@ -74,22 +74,26 @@ async function resolveEmployeeVars(
   tenantId: string,
   employeeId: string,
 ): Promise<Record<string, string>> {
-  // Fetch employee + current compensation in parallel. The canonical personal /
-  // statutory fields (gender, PAN, UAN, ESI, dob, address) live on the employees
-  // table itself (004_employees.sql); designation/department are FK lookups
-  // embedded by name. Avoid columns/tables that do not exist or the whole
-  // PostgREST select fails and the letter renders with no data.
+  // Fetch employee + current compensation in parallel. gender/dob/PAN/UAN/ESI/
+  // address/designation/department all moved OFF employees onto dedicated
+  // tables in 016_lean_employees.sql / 012_employee_extended.sql — the lean
+  // employees table now holds only identity + status. Pull them via their
+  // real homes: job_history (current row) for employment_type/dept/designation,
+  // employee_personal_info for dob/gender, employee_bank_statutory for
+  // PAN/UAN/ESI, employee_addresses for the mailing address.
   const [empRes, compRes] = await Promise.all([
     supabase
       .from('employees')
       .select(`
-        id, employee_code, first_name, last_name,
-        joining_date, dob, employment_type, gender,
-        pan_number, uan_number, esi_number, address,
-        designations(name), departments(name)
+        id, employee_code, first_name, last_name, joining_date,
+        job_history!job_history_employee_id_fkey(employment_type, is_current, designations(name), departments(name)),
+        employee_personal_info(dob, gender),
+        employee_bank_statutory(pan_number, uan_number, esi_number),
+        employee_addresses(address_type, line1, line2, city, state, pincode)
       `)
       .eq('id', employeeId)
       .eq('tenant_id', tenantId)
+      .eq('job_history.is_current', true)
       .single(),
     supabase
       .from('employee_compensations')
@@ -117,9 +121,18 @@ async function resolveEmployeeVars(
     ? Math.floor((today.getTime() - doj.getTime()) / (1000 * 60 * 60 * 24 * 365.25))
     : null
 
-  const addr  = emp.address ?? {}
-  const dept  = flat(emp.departments) as any
-  const desig = flat(emp.designations) as any
+  const jh    = flat(emp.job_history) as any
+  const dept  = flat(jh?.departments) as any
+  const desig = flat(jh?.designations) as any
+  const personal = flat(emp.employee_personal_info) as any
+  const statutory = flat(emp.employee_bank_statutory) as any
+  // employee_addresses is 1:N (current/permanent/correspondence) — prefer
+  // 'current', fall back to 'permanent', then whatever's there.
+  const addresses = (Array.isArray(emp.employee_addresses) ? emp.employee_addresses : emp.employee_addresses ? [emp.employee_addresses] : []) as any[]
+  const addr = addresses.find(a => a.address_type === 'current')
+    ?? addresses.find(a => a.address_type === 'permanent')
+    ?? addresses[0]
+    ?? {}
 
   const monthlyCtc = comp?.ctc_monthly != null ? Number(comp.ctc_monthly) : null
   const annualCtc  = comp?.ctc_annual  != null ? Number(comp.ctc_annual)  : null
@@ -135,20 +148,20 @@ async function resolveEmployeeVars(
     last_name:           emp.last_name  ?? '',
     designation:         desig?.name ?? '',
     department:          dept?.name ?? '',
-    employment_type:     emp.employment_type ?? '',
+    employment_type:     jh?.employment_type ?? '',
     date_of_joining:     fmt(emp.joining_date),
-    date_of_birth:       fmt(emp.dob),
+    date_of_birth:       fmt(personal?.dob),
     years_of_service:    yearsOfService !== null ? String(yearsOfService) : '',
-    gender:              emp.gender ?? '',
-    pan_number:          emp.pan_number ?? '',
-    pf_number:           emp.uan_number ?? '',
-    esi_number:          emp.esi_number ?? '',
+    gender:              personal?.gender ?? '',
+    pan_number:          statutory?.pan_number ?? '',
+    pf_number:           statutory?.uan_number ?? '',
+    esi_number:          statutory?.esi_number ?? '',
 
-    // Address (employees.address JSONB — tolerate either key style)
-    address_line1:       addr?.address_line1 ?? addr?.line1 ?? '',
-    city:                addr?.city ?? '',
-    state:               addr?.state ?? '',
-    pincode:             addr?.pincode ?? addr?.pin ?? '',
+    // Address (employee_addresses — 'current' address preferred, see above)
+    address_line1:       addr.line1 ?? '',
+    city:                addr.city ?? '',
+    state:               addr.state ?? '',
+    pincode:             addr.pincode ?? '',
 
     // Compensation (CTC-based; gross ≈ monthly CTC). Annual/monthly exposed too.
     gross_salary:        monthlyCtc != null ? `₹${monthlyCtc.toLocaleString('en-IN')}` : '',

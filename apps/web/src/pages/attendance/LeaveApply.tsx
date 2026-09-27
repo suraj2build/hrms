@@ -655,12 +655,20 @@ export function LeaveApply({ mode = 'page', onSuccess, onClose }: LeaveApplyProp
   const collision = collisionData?.data ?? null
 
   // ── Queries — Backend duration preview (non-hourly) ─────────────────────────
+  // Gate on effectiveToDate, not the raw toDate — toDate is legitimately empty
+  // for a single-day (including every half-day) application, where
+  // effectiveToDate already falls back to fromDate. Gating on the raw field
+  // meant the preview query never ran for any single-day request: the REQUEST
+  // PREVIEW panel stuck at "0 days" (no balance projection, no collision
+  // warnings) even though the backend went on to compute the real day count
+  // correctly on submit — found via live UAT (half-day Casual Leave request,
+  // see docs/UAT_LIVE_AUDIT.md).
   const durationEnabled =
     !!employeeId &&
     !!leaveTypeId &&
     !!fromDate &&
-    !!toDate &&
-    fromDate <= toDate &&
+    !!effectiveToDate &&
+    fromDate <= effectiveToDate &&
     startSession !== 'hourly'
 
   const { data: durationData, isFetching: durationFetching } = useQuery<{ data: DurationResult }>({
@@ -947,7 +955,7 @@ export function LeaveApply({ mode = 'page', onSuccess, onClose }: LeaveApplyProp
         hours_requested: startSession === 'hourly' ? hoursRequested : undefined,
         reason:          reason.trim(),
       }, { headers: { 'Idempotency-Key': idempotencyKey.current } }),
-    onSuccess: (_res) => {
+    onSuccess: (res) => {
       idempotencyKey.current = crypto.randomUUID()
       const sessionLabel: Record<LeaveSession, string> = {
         full_day:    'full day',
@@ -955,8 +963,15 @@ export function LeaveApply({ mode = 'page', onSuccess, onClose }: LeaveApplyProp
         second_half: 'second half (PM)',
         hourly:      `${hoursRequested}h`,
       }
+      // Use the server's own computed_days, not the frontend's computedDays —
+      // for a single-day/half-day request the preview query (durationEnabled)
+      // can legitimately still be settling when this fires, and this is the
+      // confirmation message the user actually reads, so it must reflect what
+      // was really recorded rather than a stale "0 day(s)" (see the
+      // durationEnabled fix above and docs/UAT_LIVE_AUDIT.md).
+      const confirmedDays = res.data.computed_days ?? computedDays
       toast.success('Leave request submitted', {
-        description: `${computedDays} day(s) (${sessionLabel[startSession]}) from ${fromDate}${effectiveToDate && effectiveToDate !== fromDate ? ` to ${effectiveToDate}` : ''} — pending approval.`,
+        description: `${confirmedDays} day(s) (${sessionLabel[startSession]}) from ${fromDate}${effectiveToDate && effectiveToDate !== fromDate ? ` to ${effectiveToDate}` : ''} — pending approval.`,
       })
       qc.invalidateQueries({ queryKey: ['my-leave-requests'] })
       qc.invalidateQueries({ queryKey: ['ess-leave-history'] })

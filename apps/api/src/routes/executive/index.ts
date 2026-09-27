@@ -342,12 +342,17 @@ export default async function executiveRoutes(fastify: FastifyInstance) {
       // match the SSOT "employed" headcount convention (datasets/headcount.ts:
       // activeCount + onNoticeCount) — active-only undercounts employees
       // currently serving notice.
+      // employment_type moved off `employees` onto job_history's current-
+      // assignment row (is_current = true) back in 016_lean_employees.sql —
+      // querying it straight off employees 500s with "column ... does not
+      // exist".
       fetchAllRows((from, to2) =>
         fastify.supabase
           .from('employees')
-          .select('id, employment_type, gender')
+          .select('id, employee_personal_info(gender), job_history!job_history_employee_id_fkey(employment_type, is_current)')
           .eq('tenant_id', req.tenantId)
           .in('status', ['active', 'on_notice'])
+          .eq('job_history.is_current', true)
           .range(from, to2),
       ),
 
@@ -451,8 +456,10 @@ export default async function executiveRoutes(fastify: FastifyInstance) {
     const typeMap = new Map<string, number>()
     const genderMap = new Map<string, number>()
     for (const e of employees) {
-      const t = (e as any).employment_type ?? 'unspecified'
-      const g = (e as any).gender ?? 'unspecified'
+      const jh = Array.isArray((e as any).job_history) ? (e as any).job_history[0] : (e as any).job_history
+      const personal = Array.isArray((e as any).employee_personal_info) ? (e as any).employee_personal_info[0] : (e as any).employee_personal_info
+      const t = jh?.employment_type ?? 'unspecified'
+      const g = personal?.gender ?? 'unspecified'
       typeMap.set(t, (typeMap.get(t) ?? 0) + 1)
       genderMap.set(g, (genderMap.get(g) ?? 0) + 1)
     }
@@ -631,11 +638,16 @@ export default async function executiveRoutes(fastify: FastifyInstance) {
       // All active employees with joining date and type. Includes 'on_notice'
       // to match the SSOT "employed" headcount convention (datasets/headcount.ts:
       // activeCount + onNoticeCount).
+      // employment_type moved off `employees` onto job_history's current-
+      // assignment row (is_current = true) back in 016_lean_employees.sql —
+      // querying it straight off employees 500s with "column ... does not
+      // exist".
       fetchAllRows((from, to) =>
         fastify.supabase
           .from('employees')
-          .select('id, joining_date, employment_type, status, gender, employee_separation!employee_separation_employee_id_fkey(last_working_date)')
+          .select('id, joining_date, status, employee_personal_info(gender), employee_separation!employee_separation_employee_id_fkey(last_working_date), job_history!job_history_employee_id_fkey(employment_type, is_current)')
           .eq('tenant_id', req.tenantId)
+          .eq('job_history.is_current', true)
           .in('status', ['active', 'on_notice', 'separated'])
           .range(from, to),
       ),
@@ -672,7 +684,12 @@ export default async function executiveRoutes(fastify: FastifyInstance) {
       ),
     ])
 
-    const _flattenSep = (e: any) => ({ ...e, separation_date: (e.employee_separation ?? [])[0]?.last_working_date ?? null })
+    const _flattenSep = (e: any) => ({
+      ...e,
+      separation_date: (e.employee_separation ?? [])[0]?.last_working_date ?? null,
+      employment_type: (Array.isArray(e.job_history) ? e.job_history[0] : e.job_history)?.employment_type ?? null,
+      gender: (Array.isArray(e.employee_personal_info) ? e.employee_personal_info[0] : e.employee_personal_info)?.gender ?? null,
+    })
     const allEmp    = empRows.map(_flattenSep)
     const active    = allEmp.filter((e: any) => e.status === 'active' || e.status === 'on_notice')
     const separated = separationRows.map(_flattenSep)

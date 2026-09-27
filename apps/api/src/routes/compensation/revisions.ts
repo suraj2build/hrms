@@ -255,7 +255,7 @@ export default async function compensationRevisionsRoute(fastify: FastifyInstanc
     // Fetch current active compensation for before snapshot
     const { data: currentComp } = await fastify.supabase
       .from('employee_compensations')
-      .select('id, ctc_annual, ctc_monthly, salary_structures(name)')
+      .select('id, ctc_annual, ctc_monthly, salary_structure_id, salary_structures(name)')
       .eq('employee_id', d.employee_id)
       .eq('tenant_id', req.tenantId)
       .eq('is_active', true)
@@ -264,6 +264,15 @@ export default async function compensationRevisionsRoute(fastify: FastifyInstanc
     const beforeCtc   = currentComp ? Number(currentComp.ctc_annual)   : null
     const beforeMonthly = currentComp ? Number(currentComp.ctc_monthly) : null
     const beforeStructureName = (currentComp as any)?.salary_structures?.name ?? null
+
+    // The revision form only asks for a new CTC figure, not a new salary
+    // structure — the overwhelming majority of revisions (increments,
+    // corrections) keep the employee on their existing structure. Default to
+    // it here so /approve's own new_salary_structure_id requirement (needed
+    // to create the resulting employee_compensations row) can actually be
+    // satisfied without a UI field most callers would never touch. An
+    // explicit new_salary_structure_id (a genuine structure change) still wins.
+    const resolvedStructureId = d.new_salary_structure_id ?? (currentComp as any)?.salary_structure_id ?? null
 
     // Compute delta
     const newCtc      = d.new_ctc_annual ?? null
@@ -284,7 +293,7 @@ export default async function compensationRevisionsRoute(fastify: FastifyInstanc
         before_ctc_annual:       beforeCtc,
         before_ctc_monthly:      beforeMonthly,
         before_structure_name:   beforeStructureName,
-        new_salary_structure_id: d.new_salary_structure_id ?? null,
+        new_salary_structure_id: resolvedStructureId,
         new_ctc_annual:          newCtc,
         component_overrides:     d.component_overrides ?? null,
         delta_amount:            deltaAmount,

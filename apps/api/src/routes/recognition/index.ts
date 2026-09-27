@@ -824,16 +824,33 @@ export default async function recognitionRoutes(fastify: FastifyInstance) {
   // ── ESS: view recent award winners ────────────────────────────────────────
 
   fastify.get('/recognition/awards/winners', { preHandler: fastify.authenticate }, async (req: any, reply) => {
+    // designation_id/department_id moved off employees onto job_history's
+    // current-assignment row in 016_lean_employees.sql — go through it, then
+    // reshape back to the original { designation: {name}, department: {name} }
+    // response contract so nothing downstream needs to change.
     const { data, error } = await fastify.supabase
       .from('award_rounds')
       .select(`id, period_label, declared_at,
         formal_awards!award_rounds_award_id_fkey(id, name, award_type),
-        employees!award_rounds_winner_employee_id_fkey(id, first_name, last_name, employee_code, designation:designations(name), department:departments!department_id(name))`)
+        employees!award_rounds_winner_employee_id_fkey(id, first_name, last_name, employee_code, job_history!job_history_employee_id_fkey(is_current, designations(name), departments(name)))`)
       .eq('tenant_id', req.tenantId).eq('status', 'closed')
       .not('winner_employee_id', 'is', null)
+      .eq('employees.job_history.is_current', true)
       .order('declared_at', { ascending: false }).limit(20)
     if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch award winners')
-    return reply.send({ data: data ?? [] })
+    const shaped = (data ?? []).map((row: any) => {
+      const emp = row.employees
+      const jh  = Array.isArray(emp?.job_history) ? emp.job_history[0] : emp?.job_history
+      return {
+        ...row,
+        employees: emp ? {
+          id: emp.id, first_name: emp.first_name, last_name: emp.last_name, employee_code: emp.employee_code,
+          designation: jh?.designations ?? null,
+          department:  jh?.departments  ?? null,
+        } : null,
+      }
+    })
+    return reply.send({ data: shaped })
   })
 
   // ── Long Service Alerts (admin) ───────────────────────────────────────────
@@ -850,14 +867,26 @@ export default async function recognitionRoutes(fastify: FastifyInstance) {
       const lastDay = new Date(targetYear, today.getMonth() + 1, 0).getDate()
       const from = `${targetYear}-${monthStr}-01`
       const to   = `${targetYear}-${monthStr}-${String(lastDay).padStart(2, '0')}`
+      // designation_id/department_id moved off employees onto job_history's
+      // current-assignment row in 016_lean_employees.sql.
       const { data } = await fastify.supabase
         .from('employees')
-        .select('id, first_name, last_name, employee_code, designation:designations(name), department:departments!department_id(name), joining_date')
+        .select('id, first_name, last_name, employee_code, joining_date, job_history!job_history_employee_id_fkey(is_current, designations(name), departments(name))')
         .eq('tenant_id', req.tenantId)
         .gte('joining_date', from)
         .lte('joining_date', to)
         .not('status', 'eq', 'terminated')
-      ;(data ?? []).forEach((e: any) => alerts.push({ ...e, milestone_years: years }))
+        .eq('job_history.is_current', true)
+      ;(data ?? []).forEach((e: any) => {
+        const jh = Array.isArray(e.job_history) ? e.job_history[0] : e.job_history
+        alerts.push({
+          id: e.id, first_name: e.first_name, last_name: e.last_name, employee_code: e.employee_code,
+          joining_date: e.joining_date,
+          designation: jh?.designations ?? null,
+          department:  jh?.departments  ?? null,
+          milestone_years: years,
+        })
+      })
     }
     return reply.send({ data: alerts })
   })

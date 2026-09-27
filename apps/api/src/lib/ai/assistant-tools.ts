@@ -754,16 +754,21 @@ async function listDepartments(ctx: ToolCtx): Promise<string> {
   const list = (depts ?? []) as Array<{ id: string; name: string }>
   if (list.length === 0) return 'No departments are configured.'
 
-  // Active headcount per department from employees.department_id.
+  // Active headcount per department — department_id moved off employees onto
+  // job_history's current-assignment row in 016_lean_employees.sql.
   const emps = await fetchAllRows<any>((from, to) =>
     ctx.supabase
-      .from('employees').select('department_id')
+      .from('employees').select('job_history!job_history_employee_id_fkey(department_id, is_current)')
       .eq('tenant_id', ctx.caller.tenantId).eq('status', 'active')
+      .eq('job_history.is_current', true)
       .order('id')
       .range(from, to) as any,
   )
   const counts = new Map<string, number>()
-  for (const e of emps) if (e.department_id) counts.set(e.department_id, (counts.get(e.department_id) ?? 0) + 1)
+  for (const e of emps) {
+    const jh = Array.isArray(e.job_history) ? e.job_history[0] : e.job_history
+    if (jh?.department_id) counts.set(jh.department_id, (counts.get(jh.department_id) ?? 0) + 1)
+  }
 
   const parts = list
     .map(d => ({ name: d.name, n: counts.get(d.id) ?? 0 }))

@@ -293,6 +293,25 @@ export default async function compOffRoute(fastify: FastifyInstance) {
       })
     }
 
+    // A request with no leave_type_id cannot be credited — the balance-credit
+    // block below is itself gated on `co.leave_type_id`, so approving one
+    // silently marked the request 'approved' with `days_credited` in the
+    // response while writing no ledger row and crediting nothing at all: a
+    // false-positive success with no warning to HR (found via live UAT — see
+    // docs/UAT_LIVE_AUDIT.md UAT-033). This is the common case, not an edge
+    // case: generateCompOffRequests() is called from the automatic attendance
+    // recompute pipeline (attendance-engine.ts) without a leave_type_id — only
+    // the manual POST /attendance/comp-off/generate flow supplies one. Refuse
+    // outright rather than silently approve-with-no-credit; HR must first
+    // regenerate/assign a leave type for this request (e.g. via the manual
+    // generate flow) before it can be approved.
+    if (!(co as any).leave_type_id) {
+      return reply.code(409).send({
+        error:   'NO_LEAVE_TYPE_CONFIGURED',
+        message: 'This comp-off request has no leave type to credit — it cannot be approved as-is. Regenerate it via a leave-type-specific comp-off generation before approving.',
+      })
+    }
+
     // Multi-level gate (engages only when a comp-off chain is configured). An
     // intermediate approval advances a level and returns without crediting balance.
     try {

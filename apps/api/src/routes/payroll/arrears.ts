@@ -284,37 +284,69 @@ export default async function arrearsRoutes(fastify: FastifyInstance) {
     const [toYear, toMonth] = (batch as any).to_period.split('-').map(Number)
     const toLastDay = new Date(toYear, toMonth, 0).getDate()
     const to = `${(batch as any).to_period}-${String(toLastDay).padStart(2, '0')}`
+    // Fresh audit finding (UAT-045): this query had no status filter, so a
+    // withdrawn or rejected revision — never actually applied to the
+    // employee's pay — was pulled in just like an approved one. Besides being
+    // financially wrong (arrears for a change that never happened), a
+    // withdrawn/rejected revision sharing the same employee + effective_date
+    // as a real approved one (the normal case: submit, get withdrawn or
+    // rejected, resubmit and get approved) produced two records for the same
+    // (batch, employee, period_month, component) and violated that unique
+    // constraint outright. Only an approved revision represents a real
+    // compensation change.
     const { data: revs, error: revErr } = await fastify.supabase
       .from('compensation_revisions')
       .select('employee_id, before_ctc_monthly, new_ctc_annual, effective_date, retro_months')
       .eq('tenant_id', req.tenantId)
+      .eq('status', 'approved')
       .gte('effective_date', from)
       .lte('effective_date', to)
     if (revErr) return serverError(req, reply, revErr, ErrorCode.QUERY_FAILED, 'Failed to fetch compensation revisions')
 
+    // Fresh audit finding (UAT-045): arrear_records.arrear_amount is a
+    // GENERATED ALWAYS column (new_amount - old_amount) — Postgres rejects any
+    // INSERT that supplies it explicitly. This endpoint previously tried to
+    // write one aggregated record per employee with arrear_amount = monthlyDelta
+    // × retro_months, which both violated the generated-column constraint (a
+    // 500 on every call, confirmed live — this endpoint had never successfully
+    // inserted a row) and didn't match the schema's one-row-per-month design
+    // (see the batch's own period_month column). Now emits one record per
+    // affected month in [from_period, to_period], each with that month's own
+    // old/new monthly CTC — the DB computes each row's own arrear_amount, and
+    // the batch total (records.length rows summed) equals the same
+    // monthlyDelta × months the old code tried to precompute in one row.
+    //
     // compensation_revisions stores the new CTC annually (new_ctc_annual); the
     // monthly figure is derived as /12. before_ctc_monthly is stored directly.
+    const periodMonths: string[] = []
+    {
+      let [y, m] = (batch as any).from_period.split('-').map(Number)
+      const [toY, toM] = (batch as any).to_period.split('-').map(Number)
+      while (y < toY || (y === toY && m <= toM)) {
+        periodMonths.push(`${y}-${String(m).padStart(2, '0')}`)
+        m += 1
+        if (m > 12) { m = 1; y += 1 }
+      }
+    }
+
     const records = (revs ?? [])
-      .map((r: any) => {
+      .flatMap((r: any) => {
         const beforeMonthly = r.before_ctc_monthly ?? 0
         const newMonthly    = Math.round(((r.new_ctc_annual ?? 0) / 12) * 100) / 100
-        const months        = Math.max(1, r.retro_months ?? 1)
-        const monthlyDelta  = newMonthly - beforeMonthly
-        return {
+        if (newMonthly === beforeMonthly) return []
+        return periodMonths.map((period_month) => ({
           batch_id:          id,
           tenant_id:         req.tenantId,
           employee_id:       r.employee_id,
-          period_month:      (batch as any).from_period,
+          period_month,
           component_code:    'CTC',
           component_name:    'Monthly CTC',
           old_amount:        beforeMonthly,
           new_amount:        newMonthly,
-          arrear_amount:     Math.round(monthlyDelta * months * 100) / 100,
           is_taxable:        true,
-          calculation_notes: `Auto: retroactive comp revision × ${months} month(s)`,
-        }
+          calculation_notes: `Auto: retroactive comp revision for ${period_month}`,
+        }))
       })
-      .filter((rec: any) => rec.new_amount !== rec.old_amount)
 
     // Recompute: clear prior records for the batch, insert fresh
     const { error: delErr } = await fastify.supabase.from('arrear_records').delete().eq('tenant_id', req.tenantId).eq('batch_id', id)
@@ -324,7 +356,7 @@ export default async function arrearsRoutes(fastify: FastifyInstance) {
       if (insErr) return serverError(req, reply, insErr, ErrorCode.INSERT_FAILED, 'Failed to create arrear records')
     }
 
-    const total = records.reduce((s, r) => s + Math.abs(r.arrear_amount), 0)
+    const total = records.reduce((s, r) => s + Math.abs(r.new_amount - r.old_amount), 0)
     const { error: statusErr } = await fastify.supabase.from('arrear_batches').update({
       status:              'calculated',
       employee_count:      new Set(records.map(r => r.employee_id)).size,

@@ -282,7 +282,10 @@ export function evaluateRule(rule: WeeklyOffRule, date: Date): boolean {
  * computeWeeklyOffStatus — apply all active rules for a roster on a date.
  *
  * Rules are evaluated in descending priority order; first match wins.
- * Falls back to legacyDays (roster.pattern_json.weekly_off_days) if no rules defined.
+ * Falls back to legacyDays (roster.pattern_json.weekly_off_days) only when the
+ * roster has NO rules at all. If rules exist but none matched this date, the
+ * date is a working day — the legacy array is never consulted as a per-date
+ * tiebreaker, since it can't express which specific Saturdays a rule covers.
  */
 export function computeWeeklyOffStatus(
   date:        Date,
@@ -308,13 +311,23 @@ export function computeWeeklyOffStatus(
     }
   }
 
-  // No advanced rule matched — fall back to legacy array
-  const isOff = legacyDays.includes(date.getDay())
-  return {
-    is_weekly_off:              isOff,
-    rule_type:                  isOff ? 'FIXED_WEEKLY_OFF' : undefined,
-    is_alternate_saturday_off:  false,
+  // No rules exist for this roster at all — fall back to the legacy array.
+  // If rules DO exist but simply didn't match this date (e.g. an
+  // ALT_SATURDAY_OFF rule only fires on the 2nd/4th Saturday), the roster's
+  // rule-based configuration is authoritative and this date is a working
+  // day — falling through to legacyDays here previously caused every
+  // Saturday to resolve as weekly_off regardless of the rule, because
+  // rosters saved via the matrix editor also persist a flattened/unioned
+  // pattern_json.weekly_off_days (e.g. [0,6]) alongside their rules.
+  if (rules.length === 0) {
+    const isOff = legacyDays.includes(date.getDay())
+    return {
+      is_weekly_off:              isOff,
+      rule_type:                  isOff ? 'FIXED_WEEKLY_OFF' : undefined,
+      is_alternate_saturday_off:  false,
+    }
   }
+  return { is_weekly_off: false, rule_type: undefined, is_alternate_saturday_off: false }
 }
 
 /**
