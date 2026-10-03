@@ -62,8 +62,20 @@ except ValueError:
   fi
 }
 
-# curl wrapper that fails loudly on a non-2xx response instead of treating
-# the response body as valid JSON to parse.
+# curl wrapper that fails the SCRIPT (not just a soft counter) on a non-2xx
+# response, instead of treating the response body as valid JSON to parse.
+#
+# Every call site below is a plain top-level assignment — e.g.
+# `ESI_RESP=$(http POST ...)` — never `local x=$(http ...)`. That distinction
+# matters: under `set -e`, a plain `VAR=$(cmd)` assignment DOES abort the
+# script when `cmd` returns nonzero, but `local VAR=$(cmd)` famously does
+# NOT (bash reports the exit status of the `local` builtin itself, not the
+# substitution). Returning 1 here only reliably fails the script because
+# nothing below assigns through `local`. (An earlier version of this script
+# incremented a FAIL_COUNT global from inside here and `return 0`-ed — the
+# increment was silently lost because this function's body runs in the
+# subshell `$(...)` forks for command substitution, and `return 0` meant a
+# failed request was never distinguishable from a successful empty one.)
 http() {
   local method="$1" url="$2" data="${3:-}"
   local resp status body
@@ -74,14 +86,13 @@ http() {
   fi
   status=$(echo "$resp" | tail -1)
   body=$(echo "$resp" | sed '$d')
+  echo "$body"
   if [ "$status" -lt 200 ] || [ "$status" -ge 300 ]; then
     echo "  ✗ HTTP $status from $method $url" >&2
     echo "    body: $body" >&2
-    FAIL_COUNT=$((FAIL_COUNT + 1))
-    echo "{}"
-    return 0
+    return 1
   fi
-  echo "$body"
+  return 0
 }
 
 # ── fixture IDs (generated, not hardcoded, so repeated runs never collide) ──
@@ -94,33 +105,48 @@ RUN_ID_B=$(psqlc -c "SELECT gen_random_uuid();")   # a second run, so the two le
 LEDGER_A=$(psqlc -c "SELECT gen_random_uuid();")
 LEDGER_B=$(psqlc -c "SELECT gen_random_uuid();")
 TEST_EMAIL="g13-recon-$(date +%s)@cognixhr.app"
+USER_ID=""   # set once signup below succeeds; pre-declared so `set -u` doesn't choke in cleanup() if the script fails before signup runs
 
 cleanup() {
   local exit_code=$?
   echo
   echo "=== cleanup ==="
-  # fn_block_finalized_payroll_run_mutation blocks DELETE on a finalized run
-  # (a real production safeguard) — step the fixture runs off 'finalized'
-  # first so the tenant cascade-delete below can actually remove them.
+  # fn_block_finalized_payroll_run_mutation blocks DELETE on a finalized run.
+  # This is an intentional production safeguard, not something to work
+  # around quietly — step the fixture runs off 'finalized' first so the
+  # tenant cascade-delete below can actually remove them.
   psqlc -c "UPDATE payroll_runs SET status = 'draft' WHERE tenant_id = '$TENANT_ID';" > /dev/null 2>&1 || true
-  # log_employee_changes() (AFTER DELETE trigger on employees) inserts into
-  # audit_logs with tenant_id = OLD.tenant_id, and audit_logs_tenant_id_fkey
-  # is NOT deferrable — if employees are removed via the tenant's own
-  # ON DELETE CASCADE, that insert can run after the parent tenant row is
-  # already gone and fails the whole DELETE. Remove employees explicitly
-  # first, while the tenant row (and the FK it satisfies) still exists.
+  # Observed behavior, not yet root-caused: deleting the tenant directly
+  # (relying on ON DELETE CASCADE to remove employees) trips
+  # log_employee_changes()'s AFTER DELETE trigger, which inserts into
+  # audit_logs with tenant_id = OLD.tenant_id; audit_logs_tenant_id_fkey is
+  # NOT deferrable, and the insert can run after the parent tenant row is
+  # already gone, failing the whole DELETE. Deleting employees explicitly
+  # first (tenant row, and the FK it satisfies, still present) avoids it.
+  # Whether this is a real gap in how tenant offboarding deletes employees
+  # in production, or specific to this fixture shape, hasn't been
+  # investigated — flagging it here rather than asserting a verdict.
   psqlc -c "DELETE FROM employees WHERE tenant_id = '$TENANT_ID';" > /dev/null 2>&1 || true
   psqlc -c "DELETE FROM tenants WHERE id = '$TENANT_ID';" > /dev/null 2>&1 || true
   psqlc -c "DELETE FROM auth.identities WHERE provider_id IN (SELECT id::text FROM auth.users WHERE email = '$TEST_EMAIL');" > /dev/null 2>&1 || true
   psqlc -c "DELETE FROM auth.users WHERE email = '$TEST_EMAIL';" > /dev/null 2>&1 || true
 
-  local leftover
-  leftover=$(psqlc -c "SELECT count(*) FROM tenants WHERE id = '$TENANT_ID';")
-  if [ "$leftover" != "0" ]; then
-    echo "  ✗ cleanup FAILED: tenant $TENANT_ID still present after cleanup" >&2
+  local tenant_left users_left identities_left
+  tenant_left=$(psqlc -c "SELECT count(*) FROM tenants WHERE id = '$TENANT_ID';")
+  users_left=$(psqlc -c "SELECT count(*) FROM auth.users WHERE email = '$TEST_EMAIL';")
+  # identities are keyed by provider_id = the auth.users id (see
+  # findOrCreateUser() in the gateway) — if signup never completed, USER_ID
+  # is still "" and there's nothing to have left behind.
+  if [ -n "$USER_ID" ]; then
+    identities_left=$(psqlc -c "SELECT count(*) FROM auth.identities WHERE provider_id = '$USER_ID';")
+  else
+    identities_left=0
+  fi
+  if [ "$tenant_left" != "0" ] || [ "$users_left" != "0" ] || [ "$identities_left" != "0" ]; then
+    echo "  ✗ cleanup FAILED: tenant_left=$tenant_left users_left=$users_left identities_left=$identities_left" >&2
     exit 1
   fi
-  echo "tenant $TENANT_ID and test user $TEST_EMAIL removed (cascade covers slips/runs/ledgers/contributions)."
+  echo "tenant $TENANT_ID, auth user $USER_ID ($TEST_EMAIL) and its identity row all confirmed removed (cascade covers slips/runs/ledgers/contributions)."
   exit "$exit_code"
 }
 trap cleanup EXIT
