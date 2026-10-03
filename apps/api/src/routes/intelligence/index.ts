@@ -1350,21 +1350,36 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
         employees = data ?? []
 
       } else if (filterType === 'missing_pan') {
-        interpreted_as = 'pan_number IS NULL'
+        interpreted_as = 'no PAN on file (employee_bank_statutory.pan_number IS NULL, including employees with no statutory row at all)'
         sources.push('employee_bank_statutory')
-        // Try employee_bank_statutory first, fall back to employees table
-        let empIds: string[] = []
-        try {
-          const { data: panRows } = await fastify.supabase
-            .from('employee_bank_statutory')
-            .select('employee_id')
+        // "Missing PAN" has two distinct shapes, and a query against
+        // employee_bank_statutory alone only ever finds the first:
+        //   1. a statutory row exists but pan_number IS NULL
+        //   2. no statutory row exists at all (the common case for an employee
+        //      who hasn't completed the statutory-details step yet)
+        // Fetch every active employee id and every statutory row's PAN status
+        // (both paginated — a .limit() here would silently under-count on a
+        // tenant with more than the cap, the exact class of bug G13 fixed
+        // elsewhere), then take the set difference. Errors propagate to the
+        // route's outer catch (-> serverError) instead of being swallowed into
+        // a false "nobody is missing a PAN".
+        const activeEmployeeIds = (await fetchAllRows<{ id: string }>((from, to) =>
+          fastify.supabase
+            .from('employees')
+            .select('id')
             .eq('tenant_id', tenantId)
-            .is('pan_number', null)
-            .limit(200)
-          empIds = (panRows ?? []).map((r: any) => r.employee_id)
-        } catch (_) {
-          // table may not exist, skip
-        }
+            .eq('status', 'active')
+            .range(from, to),
+        )).map(r => r.id)
+        const statutoryRows = await fetchAllRows<{ employee_id: string; pan_number: string | null }>((from, to) =>
+          fastify.supabase
+            .from('employee_bank_statutory')
+            .select('employee_id, pan_number')
+            .eq('tenant_id', tenantId)
+            .range(from, to),
+        )
+        const hasPan = new Set(statutoryRows.filter(r => r.pan_number).map(r => r.employee_id))
+        const empIds = activeEmployeeIds.filter(id => !hasPan.has(id))
         if (empIds.length > 0) {
           const { data } = await fastify.supabase
             .from('employees')
@@ -1377,9 +1392,7 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
         // No `employees.pan_number` fallback here — that column was dropped by
         // migration 016 (ALTER TABLE employees DROP COLUMN IF EXISTS pan_number);
         // PAN now lives only on employee_bank_statutory (queried above) and the
-        // pre-onboarding draft tables. Zero matching IDs from the primary query
-        // means no employee is missing a PAN, not that this fallback should run
-        // a query against a column that no longer exists.
+        // pre-onboarding draft tables.
 
       } else if (filterType === 'on_notice') {
         interpreted_as = "status = 'on_notice'"
