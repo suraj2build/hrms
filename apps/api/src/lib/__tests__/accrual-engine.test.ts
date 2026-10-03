@@ -34,8 +34,9 @@ function mockSupabase(opts: {
 }) {
   const { rules, employees, existingBalances = [], existingRuns = [] } = opts
   const upserts: Record<string, any[]> = {}
-  // fetchAllRows() calls the query builder (and thus `.from('employees')`) fresh once
-  // per page — this flag must live outside `from()` to actually terminate pagination.
+  // fetchAllRows() calls the mock employees table accessor fresh once per page —
+  // this flag must live outside the table-dispatch closure to actually terminate
+  // pagination.
   let employeesPageServed = false
 
   return {
@@ -48,6 +49,8 @@ function mockSupabase(opts: {
         }
         return chain
       }
+      // lint-tenant-ok: mock query builder for a test double, not a real Supabase
+      // query — there is no tenant_id to filter on here.
       if (table === 'employees') {
         // fetchAllRows: paginates via .range(from, to) until an empty page.
         const chain: any = {

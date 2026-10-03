@@ -1373,18 +1373,13 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
             .in('id', empIds.slice(0, 50))
             .limit(50)
           employees = data ?? []
-        } else {
-          // try pan on employees table directly
-          try {
-            const { data } = await fastify.supabase
-              .from('employees')
-              .select('id, first_name, last_name, employee_code, status, joining_date')
-              .eq('tenant_id', tenantId)
-              .is('pan_number', null)
-              .limit(50)
-            employees = data ?? []
-          } catch (_) { employees = [] }
         }
+        // No `employees.pan_number` fallback here — that column was dropped by
+        // migration 016 (ALTER TABLE employees DROP COLUMN IF EXISTS pan_number);
+        // PAN now lives only on employee_bank_statutory (queried above) and the
+        // pre-onboarding draft tables. Zero matching IDs from the primary query
+        // means no employee is missing a PAN, not that this fallback should run
+        // a query against a column that no longer exists.
 
       } else if (filterType === 'on_notice') {
         interpreted_as = "status = 'on_notice'"
