@@ -33,6 +33,7 @@ async function buildApp(opts: {
   activeEmployees: Array<{ id: string }>
   statutoryRows: Array<{ employee_id: string; pan_number: string | null }>
   statutoryThrows?: boolean
+  detailLookupThrows?: boolean
 }) {
   const app = Fastify({ logger: false })
   app.decorateRequest('tenantId', '')
@@ -64,6 +65,12 @@ async function buildApp(opts: {
             return Promise.resolve({ data: rows, error: null })
           },
           then: (resolve: (v: unknown) => void) => {
+            // filterIds set => this is the final per-employee detail lookup
+            // (.in('id', empIds).limit(50)), not the fetchAllRows scan.
+            if (filterIds && opts.detailLookupThrows) {
+              resolve({ data: null, error: new Error('db unavailable') })
+              return
+            }
             const rows = filterIds ? opts.activeEmployees.filter(e => filterIds!.includes(e.id)) : opts.activeEmployees
             resolve({ data: rows, error: null })
           },
@@ -162,6 +169,29 @@ describe("POST /intelligence/search — 'missing PAN'", () => {
     // Previously this failure was swallowed (try/catch -> empIds=[]), returning
     // 200 with an empty "no one is missing a PAN" result. It must now surface
     // as a failure, not a false negative.
+    expect(res.statusCode).toBe(500)
+  })
+
+  it('a failure in the final per-employee detail lookup also propagates as a 500', async () => {
+    const app = await buildApp({
+      activeEmployees: [{ id: 'emp-no-row' }],
+      statutoryRows: [],
+      detailLookupThrows: true,
+    })
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/search',
+      payload: { query: 'employees without PAN' },
+      headers: { authorization: 'Bearer test-token' },
+    })
+
+    // The two fetchAllRows scans succeed and correctly identify emp-no-row as
+    // missing a PAN; only the subsequent .in('id', empIds).limit(50) detail
+    // lookup fails. That query previously read only `data` (ignoring `error`),
+    // which would have resolved `employees = data ?? []` to `[]` and returned
+    // 200 with an empty result — the exact same silent-false-negative shape
+    // as the two scans above, just one query later.
     expect(res.statusCode).toBe(500)
   })
 })

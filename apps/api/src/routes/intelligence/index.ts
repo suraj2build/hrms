@@ -1381,12 +1381,13 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
         const hasPan = new Set(statutoryRows.filter(r => r.pan_number).map(r => r.employee_id))
         const empIds = activeEmployeeIds.filter(id => !hasPan.has(id))
         if (empIds.length > 0) {
-          const { data } = await fastify.supabase
+          const { data, error } = await fastify.supabase
             .from('employees')
             .select('id, first_name, last_name, employee_code, status, joining_date')
             .eq('tenant_id', tenantId)
             .in('id', empIds.slice(0, 50))
             .limit(50)
+          if (error) throw error
           employees = data ?? []
         }
         // No `employees.pan_number` fallback here — that column was dropped by
