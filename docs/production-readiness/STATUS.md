@@ -184,19 +184,51 @@ migration), causing an infinite loop / test timeout; fixed by passing
 `attendance_daily`. Full suite re-run clean after: `tsc --noEmit` exit 0,
 `vitest run` 40 files / 331 tests pass.
 
-**Not started** (remaining confirmed defects, see `FINDINGS.csv` `status=OPEN`):
-- **28** (not 35 — see reconciliation above) other
-  `check-unbounded-queries.mjs` confirmed defects, grouped by theme in
-  `master-register.md`'s section A3 (enrichment-lookup-reuses-id-list ×15,
-  genuinely-unbounded-scan ×7, caller-controlled-range ×3, recursive-subtree
-  ×1, unchunked-sibling ×2, fails-closed-array ×3, narrow-occurrence ×1 —
-  see FINDINGS.csv for the exact rows).
+**All 28 remaining `check-unbounded-queries.mjs` CONFIRMED_DEFECT rows closed
+this round** (grouped by theme in `master-register.md`'s section A3:
+enrichment-lookup-reuses-id-list ×15, genuinely-unbounded-scan ×7,
+caller-controlled-range ×3, recursive-subtree ×1, unchunked-sibling ×2,
+fails-closed-array ×3, narrow-occurrence ×1). Re-read each one's current
+code before touching anything, same discipline as the earlier 6-row
+reconciliation:
+- **24 fixed**: migrated to `fetchAllRows()` (genuinely unbounded tenant-wide
+  scans — `assistant-tools.ts`, `intelligence-scanner.ts` ×2, `anomalies.ts`,
+  `comp-off.ts`, `confidence.ts`, `executive/index.ts`, `recognition/index.ts`)
+  or chunked by 100 (`.in()` lookups against a caller-controlled or
+  tenant-wide id list — `absconding-engine.ts`, `import-engine/validator.ts`
+  ×2, `org-context.ts`, `shift-resolution-engine.ts`, `health-index.ts`,
+  `leave.ts` ×2, `overtime.ts`, `wo-credit.ts`, `work-sessions.ts`,
+  `compensation/revisions.ts`, `leave-policy-assignments.ts`, `surveys/index.ts`
+  ×2 — two of these are fails-closed validation checks, same pattern as
+  `arrears.ts`/`variable-pay.ts` earlier in this engagement).
+- **1 reconciled** (`UNB-096`, `team-payroll-cost.ts`): already fixed in a
+  prior round, register was stale — same documentation-lag pattern as the
+  6 rows reconciled earlier.
+- **3 reclassified `FALSE_POSITIVE`, not force-fixed**: `UNB-010` and
+  `UNB-042` are both scoped by `.eq('employee_id', ...)` plus a bounded date
+  range (never the full table — result count is bounded by the date range,
+  not tenant headcount); `UNB-044` is an intentional `.limit(50)` on a
+  "missing punches today" dashboard widget, exactly the exception CLAUDE.md's
+  own universal pagination rule carves out ("`.limit()` is only acceptable
+  for intentionally bounded queries... where truncation is the desired
+  behaviour"). Each has a concrete code citation in `FINDINGS.csv`, not a
+  bare reclassification — this corrects what looks like a genuine
+  inconsistency in the original classification pass (the evidence column
+  was empty for these rows, unlike their immediate FALSE_POSITIVE neighbors
+  in the same files which share the same empty-evidence pattern).
 
-**Fixed this round, not "not started":**
-- The 3 tenant-isolation confirmed defects (`payroll_validation_rules` in
-  `runs.ts`) and `ADD-003` (the `validation-rules.ts` admin feature, broken
-  for every tenant) — both closed by the same change, see "Tenant vs.
-  global ownership" below for the decision and its real-stack proof.
+Full verification after all 24 fixes: `tsc --noEmit` clean, `vitest run` 40
+files / 331 tests pass — zero regressions from this batch, no dedicated new
+test per site (covered by the already-tested `fetchAllRows()`/chunk-by-100
+pattern itself, consistent with how every other mechanical pagination fix
+in this engagement was handled).
+
+**Result: zero open CONFIRMED_DEFECT rows remain in either
+`check-unbounded-queries.mjs` or `check-tenant-isolation.mjs`'s findings**
+(the tenant-isolation 3 were closed by the `payroll_validation_rules`
+change above). `ADD-004` (checker fingerprint instability) remains
+correctly open — its migration is prepared and tested, not yet defaulted,
+per the standing sign-off requirement.
 
 ### Phase 3 — Repair release checks: PARTIAL
 - `check-schema-drift.mjs`: **ran successfully** — `sudo -u postgres node

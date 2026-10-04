@@ -410,6 +410,58 @@ Cleanup confirmed (tenant, profiles, auth users all removed). Full API
 suite re-run after this change: `tsc --noEmit` clean, `vitest run` 40 files
 / 331 tests pass (330 → 331: the new §6c keyset-consistency test).
 
+## 6e. Remaining 28 `check-unbounded-queries.mjs` defects — closed
+
+Re-read each of the 28 remaining CONFIRMED_DEFECT rows' current code before
+touching anything — the same discipline that caught 6 already-fixed rows
+earlier in this pass.
+
+**24 fixed** — migrated to `fetchAllRows()` (tenant-wide scans with no
+employee filter: `assistant-tools.ts` payroll cost, `intelligence-scanner.ts`
+mood check-ins ×2, `anomalies.ts` active-headcount, `comp-off.ts` qualifying
+days, `confidence.ts` confidence issues, `executive/index.ts` leave-liability
+compensation, `recognition/index.ts` work-anniversary alerts) or chunked by
+100 (`.in()` lookups against a caller-controlled or tenant-wide id list —
+13 more files, two of them fails-closed validation checks in
+`surveys/index.ts`, same pattern as `arrears.ts`/`variable-pay.ts`).
+
+**1 reconciled** (`UNB-096`, `team-payroll-cost.ts`): already fixed in a
+prior round — register was stale, same documentation-lag pattern as the 6
+rows caught earlier.
+
+**3 reclassified `FALSE_POSITIVE`, not force-fixed** (each with a concrete
+code citation in `FINDINGS.csv`, not a bare reclassification):
+
+```
+UNB-010  attendance-engine.ts:1319 — .eq('employee_id', employee_id).in('date', dates)
+         single employee, bounded date list. Count bounded by dates.length, never headcount.
+UNB-042  confidence.ts:88          — .eq('employee_id', employeeId).gte('date', from)
+         single employee, date range. Count bounded by the range (~366/year max).
+UNB-044  context.ts:70             — .limit(50) on a "missing punches today" widget.
+         Exactly CLAUDE.md's own stated exception: a capped top-N list where
+         truncation is the intended UX, not a correctness risk.
+```
+
+These three looked like genuine classification inconsistencies in the
+original batch pass, not deliberate judgment calls — their `evidence`
+column was empty, same as their immediate FALSE_POSITIVE neighbors in the
+same files (e.g. `attendance-engine.ts:1203`/`1381`), with no documented
+reasoning distinguishing why these specific rows were marked
+CONFIRMED_DEFECT instead.
+
+Verification: `tsc --noEmit` clean, `vitest run` 40 files / 331 tests pass
+— zero regressions from all 24 fixes, no new per-site test (the
+`fetchAllRows()`/chunk-by-100 pattern itself is already tested; this
+matches how every other mechanical pagination fix in this engagement was
+handled). Re-ran `g13-reconciliation-check.sh` (21/21),
+`finalized-slip-value-lockdown-check.sh` (5/5) and
+`validation-rules-tenant-override-check.sh` (13/13) against the real stack
+after this batch — all still pass, confirming no regression in the
+financial/validation-rules paths this round's earlier commits added.
+
+**Result: zero open CONFIRMED_DEFECT rows remain in either checker's
+findings** (tenant-isolation's 3 were already closed by §6d above).
+
 ## 7. Real-stack validation — Postgres + PostgREST-shim gateway + real API
 
 Earlier in this pass, `check-schema-drift.mjs` and any real-DB script were
