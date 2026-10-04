@@ -119,11 +119,15 @@ export async function computeFnfSettlement(
   }
 
   // 4. Salary basis — last finalized payroll slip (gross + BASIC component)
+  // G03: this previously had no status filter, so a draft slip (unreviewed,
+  // possibly mid-correction) could outrank an older finalized slip by month
+  // and get used as the gratuity/notice-pay basis instead.
   const { data: lastSlip, error: slipErr } = await supabase
     .from('payroll_slips')
     .select('gross_pay, component_breakdown')
     .eq('tenant_id', tenantId)
     .eq('employee_id', employeeId)
+    .eq('status', 'finalized')
     .order('month', { ascending: false })
     .limit(1)
     .maybeSingle()
