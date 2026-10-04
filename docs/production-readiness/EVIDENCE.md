@@ -342,6 +342,44 @@ from-scratch reimplementation of PostgREST's wire behavior (NUMERIC-as-
 string, MAX_ROWS=1000, Content-Range headers), not the genuine Supabase
 service. The 2,000+ employee real-staging gate in STATUS.md remains open.
 
+## 7b. Concurrency + retry/idempotency — local, not staging-dependent
+
+Per the explicit instruction that local business-flow, concurrency, and
+retry testing doesn't need to wait for staging access: added
+`scripts/concurrency-retry-check.sh`, run against the same real stack
+(Postgres + gateway + API). Fires the identical ESI compute request twice
+CONCURRENTLY for the same tenant+month (50 employees), then a third time
+serially, and checks the real database state after each — not just the two
+HTTP responses.
+
+```
+=== 1. Two concurrent compute requests === HTTP 200 / HTTP 200 ✓
+=== 2. Post-concurrency database state ===
+  persisted row count = 50 (not 100) ✓
+  employees with >1 esi_contributions row for the month = 0 ✓
+  sum(employee_contribution) = 3562.50 (correct) ✓
+=== 3. Serial retry (idempotency) ===
+  retry computed_count = 50 ✓
+  persisted row count after retry = 50 (unchanged) ✓
+  sum(employee_contribution) unchanged after retry ✓
+=== RESULT: 7 passed, 0 failed ===
+```
+
+Both concurrent requests completed with `HTTP 200`, and the upsert
+(`onConflict: 'tenant_id,employee_id,contribution_month'`) correctly
+resolved the race with no duplicate rows and the correct total — not
+asserted from reasoning about the code, but from the actual row count and
+per-employee duplicate check after a real race against real Postgres. The
+serial retry confirms idempotency: re-running compute for an unchanged month
+does not change the persisted row count or total.
+
+**Scope, stated plainly:** this is one endpoint (ESI compute) at a small
+scale (50 employees) with no fault injection — it demonstrates that the
+upsert-based retry/concurrency design works under contention on local
+Postgres, not that every endpoint in the system is safe under concurrency,
+and not backup/restore or mid-failure recovery (those remain genuinely
+untested — see STATUS.md Phase 5).
+
 ## 8. Exact finding → fix mapping (tenant-isolation, 307-row register)
 
 **0 of the 307 tenant-isolation findings were fixed this pass.** The 3

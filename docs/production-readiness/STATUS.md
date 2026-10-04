@@ -6,15 +6,19 @@ sign-off. Nothing here should be read as GO.
 ## Source of truth (as of this commit)
 
 - **Branch:** `fix/g13-numeric-coercion-sweep`
-- **HEAD:** `dfafd4bad2e5323a0b536041df63bc71783d48ab`
+- **HEAD:** `d763dad33a88e3f99ebf6318005807c03300ffcd` as of the commit before
+  this one (this doc's own commit is necessarily one ahead of the HEAD it
+  describes — run `git log --oneline main..HEAD` for the true current count
+  rather than trusting this number to stay in sync across further commits)
 - **Remote:** `origin` = `https://github.com/suraj2build/hrms` — this branch has
   **0 commits pushed**; `origin/fix/g13-numeric-coercion-sweep` does not exist yet.
 - **Working tree:** clean (no uncommitted changes) as of this commit.
-- **Unpushed commits:** 17, measured as `git log --oneline main..HEAD` (the
-  correct base — this branch's divergence point from local `main`). The 9
-  most recent, from this remediation pass — `f3e4ca4`, `f1fc6d4`, `699e7c9`,
-  `c20669d`, `c782c36`, `0bbeb3a`, `88c60b5`, `dfafd4b`, plus this commit —
-  are the ones with evidence in EVIDENCE.md.
+- **Unpushed commits:** 19 as of `d763dad3`, measured as
+  `git log --oneline main..HEAD` (this branch's divergence point from local
+  `main`). The 10 most recent, from this remediation pass — `f3e4ca4`,
+  `f1fc6d4`, `699e7c9`, `c20669d`, `c782c36`, `0bbeb3a`, `88c60b5`,
+  `dfafd4b`, `009fd42`, `d763dad`, plus this commit — are the ones with
+  evidence in EVIDENCE.md.
 - **Push status:** paused per standing instruction — GitHub App access for
   this session has repeatedly 403'd ("Claude doesn't have GitHub access to
   suraj2build/hrms for your organization"). Do not retry until the user
@@ -212,11 +216,24 @@ chains). Found ONLY by running against a real HTTP transport at scale;
 caught by no unit test before this pass, now covered by both a mutation-
 verified real-stack run and a dedicated vitest regression test.
 
-### Phase 5 — Enterprise qualification: BLOCKED, not started
-End-to-end UAT (admin/HR/manager/employee), concurrency/retry/failure-recovery
-testing, and backup/restore drills all require a running staging environment
-this sandbox does not have. **Not attempted — reporting this honestly as
-blocked, not claiming it passed.**
+### Phase 5 — Enterprise qualification: PARTIAL
+
+**Done, local, not staging-dependent:** `scripts/concurrency-retry-check.sh`
+(new this pass) fires two concurrent ESI-compute requests at the same
+tenant+month against real Postgres, then a serial retry, and checks the
+actual database state (not just the HTTP responses) after each: **7/7
+assertions pass** — no duplicate rows from the race, correct totals, and a
+retry is a true no-op (same row count, same sum). See EVIDENCE.md §7b.
+
+**Still not attempted, reported as blocked rather than claimed passing:**
+- End-to-end UAT across admin/HR/manager/employee roles as actual user
+  journeys (the concurrency check above drives one endpoint, not a journey).
+- Concurrency/retry testing on any endpoint besides ESI compute.
+- Fault injection / mid-failure recovery (what happens if the process dies
+  mid-chunk-loop, mid-upsert, etc.) — genuinely untested.
+- Backup/restore drills — need an actual backup/restore mechanism and
+  procedure to exercise, which is a staging/production-infrastructure
+  concern, not something this sandbox's throwaway Postgres can stand in for.
 
 ## Tenant vs. global ownership — the one decision this pass deliberately did NOT make
 
