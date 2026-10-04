@@ -101,6 +101,52 @@ $ npx vitest run                                        # 38 files / 325 tests p
 `--stable-key`. That is a one-time migration a human needs to authorize —
 see STATUS.md.
 
+## 3b. Exception-preserving baseline migration — prepared and tested
+
+`node scripts/migrate-baseline-to-stable-keys.mjs` output against this repo
+(trimmed; full output reproducible by re-running it):
+
+```
+=== unbounded-queries-baseline.json ===
+  original baseline: 267 findings
+  ✓ resolved exact (same line):    3
+  ⚠ resolved nearest (line drift):  113
+  ✗ unresolved (no current match):  151 — needs manual reconciliation
+  ⚠ 3 duplicate-query collision(s)
+  → wrote scripts/unbounded-queries-baseline.stable-key.json
+
+=== tenant-isolation-baseline.json ===
+  original baseline: 314 findings
+  ✓ resolved exact (same line):    11
+  ⚠ resolved nearest (line drift):  231
+  ✗ unresolved (no current match):  72 — needs manual reconciliation
+  ⚠ 8 duplicate-query collision(s)
+  → wrote scripts/tenant-isolation-baseline.stable-key.json
+```
+
+Internal-consistency check (every original entry accounted for exactly
+once, mapped or unresolved, nothing dropped or double-counted):
+
+```
+$ node -e '... mapped.length + unresolved.length === original_count ...'
+unbounded-queries-baseline.stable-key.json  original_count=267 mapped=116 unresolved=151 sum=267 matches=true
+tenant-isolation-baseline.stable-key.json   original_count=314 mapped=242 unresolved=72  sum=314 matches=true
+```
+
+Duplicate-collision example (two baseline entries that would silently
+collapse into one if keyed by snippet+table+file alone — reported instead
+of merged):
+
+```
+apps/api/src/lib/whatsapp-provider.ts::whatsapp_outbox::↵ .update({ status: 'sent', ... })↵ .eq('id', outboxId) ...
+  <- apps/api/src/lib/whatsapp-provider.ts:96:whatsapp_outbox  (nearest, Δline=7)
+  <- apps/api/src/lib/whatsapp-provider.ts:165:whatsapp_outbox (nearest, Δline=14)
+```
+
+See STATUS.md Phase 3 for why a historical-commit-reproduction approach was
+tried first and abandoned (the baseline's line numbers are stale relative
+to every commit in this repo's history, not just HEAD).
+
 ## 4. Mutation testing — every new regression test, reverted and restored
 
 For each test below: the pre-fix file (commit `2c05101`, this branch's state
@@ -256,6 +302,113 @@ not the genuine service. 2,200 clears the "2,000+" figure quoted in the
 remediation instruction, but the instruction's actual ask — a genuine
 Supabase/PostgREST **staging** project — remains unavailable in this sandbox
 and is reported as blocked, not satisfied by this substitute.
+
+## 6c. Keyset pagination is NOT a snapshot — correction, gap closed, tested
+
+A review correctly pushed back on §6's framing: keyset pagination prevents a
+multi-page read from skipping or duplicating a ROW under concurrent
+insert/delete, but it is **not** a consistent point-in-time snapshot. If a
+row already returned on an earlier page has a financial column changed by a
+concurrent UPDATE before a later page is read, the aggregate total mixes a
+stale pre-update value for that row with current values for everything
+else — a different failure mode, and keyset pagination alone does not
+prevent it. `supabase-paginate.ts`'s doc comment previously implied
+"snapshot-safe" by association; corrected to state the limitation
+explicitly and point at the real guarantee.
+
+**Proven generically** (mock-level, deterministic): new vitest suite
+"`fetchAllRowsByKeyset() is NOT a consistent snapshot`" in
+`supabase-paginate.test.ts`. A 250-row table, batch size 100; after page 1,
+row 0's `amount` is updated from 100 to 500 before page 3 is requested.
+
+```
+sumFromPagination = 250 * 100         // every page read before the mutation settles on the stale value
+trueCurrentSum    = 249 * 100 + 500   // the table's real current total
+expect(sumFromPagination).not.toBe(trueCurrentSum)   // ✓ passes — proves the gap
+```
+
+**Closed, for the specific reads this engagement migrated to keyset**
+(ESI/EPF/PTax wage base, TDS actual-TDS, statutory-recon's 4 payable sums —
+all filtered to `payroll_slips.status = 'finalized'`), not by a pagination
+technique but by a DB-enforced immutability guarantee: new migration
+`438_payroll_slip_finalized_value_lockdown.sql` adds a trigger that rejects
+any `UPDATE` changing a financial column on a slip while its own `status`
+stays `'finalized'` on both sides of the write. Before this migration that
+immutability was only an application convention — verified first, not
+assumed: the one `UPDATE` call site on `payroll_slips` in `runs.ts` (the
+stale-attendance recompute) is gated `.eq('status', 'draft')`, and the
+finalize step itself only flips `status` (never touches another column) —
+so no current code path violates it, but nothing in the DB stopped a future
+one from doing so.
+
+Real-stack proof, mutation-tested (not just argued):
+`scripts/finalized-slip-value-lockdown-check.sh` against real Postgres —
+
+```
+=== 1. Legitimate: finalize the slip (draft -> finalized) === ✓
+=== 2. BLOCKED: direct UPDATE of gross_pay on a finalized slip ===
+  ✓ UPDATE correctly rejected: ERROR:  PAYROLL_FINALIZED: slip ... is finalized — financial columns cannot be updated in place
+  ✓ gross_pay unchanged after the blocked UPDATE = 50000.00
+=== 3. BLOCKED: UPDATE of component_breakdown (jsonb) === ✓
+=== 4. Legitimate: rollback path (run -> draft, then DELETE slip) still works === ✓
+=== RESULT: 5 passed, 0 failed ===
+```
+
+Mutation test: dropped the trigger, re-ran the same script —
+
+```
+=== 2. BLOCKED: direct UPDATE of a financial column on a finalized slip ===
+  ✗ UPDATE was NOT rejected (expected PAYROLL_FINALIZED exception):
+  ✗ gross_pay unchanged after the blocked UPDATE: expected '50000.00', got '999999.00'
+=== RESULT: 2 passed, 3 failed ===
+```
+
+— confirmed RED without the fix, restored the trigger, reconfirmed GREEN
+(5/5). This closes the value-mutation gap for exactly the rows these
+queries read; it does not make an in-flight DRAFT read consistent, and it
+is specific to this schema/table, not a general property of
+`fetchAllRowsByKeyset()` itself (which remains, correctly, not a snapshot).
+
+## 6d. Tenant vs. global ownership for payroll_validation_rules — decided and built
+
+Decision (product, this session): global defaults with explicit tenant
+override by rule `code`, never a field-by-field merge. Implementation:
+migration `439_payroll_validation_rules_tenant_override.sql` (replaces
+`UNIQUE(code)` with `UNIQUE NULLS NOT DISTINCT (tenant_id, code)`; seeds the
+previously-missing `UNKNOWN_FAILURE` global default) +
+`apps/api/src/lib/payroll-validation-rules.ts` (`fetchResolvedValidationRules`,
+`upsertTenantValidationRuleOverride`), wired into all 3 unscoped reads in
+`runs.ts` and into a rewritten `GET`/`PATCH /payroll/validation-rules`
+(route param changed `/:id` → `/:code`; `PayrollValidation.tsx` updated to
+match, plus an "is_override" badge).
+
+Real-stack proof, not unit tests alone — `scripts/validation-rules-tenant-override-check.sh`
+against real Postgres + the real API, a real `super_admin` and a real
+`hr_admin`:
+
+```
+=== 1. GET returns platform defaults, none overridden ===
+  ✓ GET returns at least 12 resolved rules (11 original + seeded UNKNOWN_FAILURE) = yes
+  ✓ UNKNOWN_FAILURE is present = UNKNOWN_FAILURE
+  ✓ no rule is tagged is_override before any PATCH = 0
+=== 2. hr_admin PATCH is rejected (403) === ✓
+=== 3. super_admin PATCH creates a TENANT override, not a global edit ===
+  ✓ PATCH response is tagged is_override=true = true
+  ✓ global COMP_MISSING row severity UNTOUCHED (still critical) = critical
+  ✓ global COMP_MISSING row enabled UNTOUCHED (still true) = t
+  ✓ exactly one tenant override row now exists for COMP_MISSING = 1
+=== 4. GET after PATCH shows the override, not the global default ===
+  ✓ exactly one COMP_MISSING row in the resolved list = 1
+  ✓ resolved COMP_MISSING.enabled reflects the override (false) = false
+  ✓ resolved COMP_MISSING.severity reflects the override (warning) = warning
+  ✓ resolved COMP_MISSING.is_override = true = true
+=== 5. PATCH for a nonexistent code 404s === ✓
+=== RESULT: 13 passed, 0 failed ===
+```
+
+Cleanup confirmed (tenant, profiles, auth users all removed). Full API
+suite re-run after this change: `tsc --noEmit` clean, `vitest run` 40 files
+/ 331 tests pass (330 → 331: the new §6c keyset-consistency test).
 
 ## 7. Real-stack validation — Postgres + PostgREST-shim gateway + real API
 
