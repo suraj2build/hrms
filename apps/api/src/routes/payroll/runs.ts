@@ -2584,15 +2584,6 @@ export default async function payrollRunsRoutes(fastify: FastifyInstance) {
       return conflictError(reply, 'RUN_FROZEN', freezeRecheck.reason ?? `Payroll for ${run.month} was frozen while finalization was in progress. No slips were finalized.`)
     }
 
-    // G04: commit the maker-checker approval/auto-approval now — every gate
-    // above has passed and we are about to actually finalize, so the audit
-    // trail written here matches reality for the first time (see the
-    // "PI-1 maker-checker / four-eyes finalize" comment above).
-    const { error: mcCommitError } = await commitMakerCheckerApproval()
-    if (mcCommitError) {
-      return serverError(req, reply, mcCommitError, ErrorCode.UPDATE_FAILED, 'Failed to record four-eyes finalize approval')
-    }
-
     // Step 1: Finalize draft slips
     const { error: slipFinalizeErr } = await fastify.supabase
       .from('payroll_slips')
@@ -2854,6 +2845,38 @@ export default async function payrollRunsRoutes(fastify: FastifyInstance) {
       // caller honestly instead of returning 200 for a state change this
       // request didn't actually make.
       return conflictError(reply, 'RUN_STATE_CHANGED', 'This payroll run was frozen or finalized by another request while this finalize was in progress. Refresh and check its current status before retrying.')
+    }
+
+    // G04: commit the maker-checker approval/auto-approval NOW — only here,
+    // after Step 1 AND Step 2 have both durably succeeded (the atomic
+    // .select('id') check above confirms THIS request actually won the
+    // finalize), is the audit trail guaranteed to match reality. Committing
+    // any earlier (even "right before Step 1", a bug a prior round of this
+    // same fix left in place) would again let a Step 1/Step 2 failure leave
+    // maker_checker_log claiming "approved" for a finalize that didn't
+    // durably happen — exactly the defect G04 was supposed to close.
+    //
+    // A failure HERE is the mirror-image case: finalize has ALREADY
+    // genuinely succeeded (slips + run are finalized), so this must never
+    // fail the response — the caller needs to be told finalize succeeded,
+    // not that it failed because an audit-log write lagged. There is also
+    // no retry path that would re-run this: a second finalize call hits the
+    // ALREADY_FINALIZED guard at the top of this handler and never reaches
+    // here again. So this failure is logged forensically (like the
+    // snapshot/statutory-compute failures below) rather than surfaced as an
+    // error, and is non-fatal by design, not by omission.
+    {
+      const { error: mcCommitError } = await commitMakerCheckerApproval()
+      if (mcCommitError) {
+        req.log.error({ err: mcCommitError, run_id: id }, 'payroll finalize: four-eyes approval commit failed AFTER the run was durably finalized (non-fatal — finalize still succeeded; the maker_checker_log row for this finalize may be missing or still pending)')
+        await logRunEvent(fastify.supabase, req.log, {
+          tenant_id:  tenantId,
+          run_id:     id,
+          event_type: 'maker_checker_commit_failed',
+          payload:    { stage: 'finalize_post_seal' },
+          error_details: { message: String((mcCommitError as any)?.message ?? mcCommitError) },
+        })
+      }
     }
 
     // ── Auto-compute statutory contributions (EPF / ESI / PTax) ──────────────
