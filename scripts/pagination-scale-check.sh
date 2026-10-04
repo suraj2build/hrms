@@ -1,21 +1,27 @@
 #!/usr/bin/env bash
 # Real-database pagination scale check — proves the A1 statutory wage-base
-# fetchAllRows() fix against an ACTUAL max-rows=1000 cap, not a vitest mock.
+# fetchAllRows()/fetchAllRowsByKeyset() fixes against an ACTUAL max-rows=1000
+# cap, not a vitest mock. Covers ESI, EPF, and PTax compute — all three share
+# the identical payroll_slips-wage-base-plus-fallback pattern this cluster
+# fixed.
 #
 # Drives the REAL Fastify API against a REAL Postgres, through the same
 # PostgREST-compatible gateway as g13-reconciliation-check.sh (which also
 # enforces MAX_ROWS=1000 — see /tmp/supabase-gateway.mjs — faithfully
 # reproducing the exact silent-truncation behavior this whole remediation
-# pass exists to fix). Seeds 1,200 employees (> the 1,000-row cap) with
-# finalized payroll slips, computes ESI contributions for real, and verifies
-# — via independent SQL aggregates, not just the API's own response — that
-# all 1,200 are present and correct, not silently truncated to 1,000.
+# pass exists to fix). Seeds 2,200 employees (> the 1,000-row cap, and past
+# the originally-tested 1,200) with finalized payroll slips, computes ESI +
+# EPF + PTax contributions for real, and verifies — via independent SQL
+# aggregates, not just the API's own response — that all 2,200 are present
+# and correct, not silently truncated to 1,000.
 #
 # KNOWN LIMITATION: same as g13-reconciliation-check.sh — this is a local
 # Postgres + a from-scratch gateway reimplementation of PostgREST's
 # NUMERIC-as-string and max-rows behavior, not a real Supabase/PostgREST
 # project. It proves the fix against that faithfully-reproduced behavior; it
-# does not substitute for the real-staging 2,000+ employee validation gate.
+# does not substitute for the real-staging 2,000+ employee validation gate,
+# which needs a genuine Supabase/PostgREST project this sandbox has no access
+# to.
 #
 # Requirements: psql, curl, jq, python3 on PATH. Needs a running Postgres,
 # gateway (GATEWAY_URL), and API (API_URL) — see g13-reconciliation-check.sh
@@ -33,7 +39,8 @@ set -euo pipefail
 API_URL="${API_URL:-http://localhost:2001}"
 GATEWAY_URL="${GATEWAY_URL:-http://localhost:9000}"
 MONTH="2026-12"
-N_EMPLOYEES=1200   # > PostgREST's max-rows=1000 — the exact cap this fix targets
+FY="2026-27"
+N_EMPLOYEES=2200   # > PostgREST's max-rows=1000, and past the originally-tested 1,200
 PASS_COUNT=0
 FAIL_COUNT=0
 
@@ -139,11 +146,19 @@ VALUES ('$RUN_ID', '$TENANT_ID', '$MONTH', 'finalized', $N_EMPLOYEES, now());
 INSERT INTO esi_config (tenant_id, employee_contribution_pct, employer_contribution_pct, wage_ceiling, effective_from)
 VALUES ('$TENANT_ID', 0.75, 3.25, 21000.00, '2026-01-01');
 
--- Bulk-generate $N_EMPLOYEES employees, each with exactly one finalized slip
--- at gross 9500 (under the 21000 ceiling) and an explicit ESI_EMPLOYEE /
--- ESI_EMPLOYER line in component_breakdown — the slip IS the source of
--- truth per esi.ts, so every employee's persisted contribution must equal
--- these exact figures, not a recomputed or (if truncated) a zero/default.
+INSERT INTO epf_config (tenant_id, employee_contribution_pct, employer_pf_pct, employer_eps_pct, wage_ceiling, is_wage_ceiling_applicable, effective_from)
+VALUES ('$TENANT_ID', 12.00, 3.67, 8.33, 15000.00, true, '2026-01-01');
+
+INSERT INTO ptax_slabs (tenant_id, financial_year, state_code, monthly_income_from, monthly_income_to, monthly_ptax, frequency, is_active)
+VALUES ('$TENANT_ID', '$FY', 'KA', 0, NULL, 200.00, 'monthly', true);
+
+-- Bulk-generate \$N_EMPLOYEES employees, each with exactly one finalized
+-- slip at gross 9500 (under the ESI 21000 ceiling) and explicit ESI_EMPLOYEE/
+-- ESI_EMPLOYER/PF_EMPLOYEE/PF_EMPLOYER lines in component_breakdown — the
+-- slip IS the source of truth per esi.ts/epf.ts, so every employee's
+-- persisted contribution must equal these exact figures, not a recomputed
+-- or (if truncated) a zero/default. A manual ptax_state_config override
+-- (KA) means PTax doesn't need a site/site_id round-trip.
 WITH gen AS (
   SELECT gen_random_uuid() AS id, i FROM generate_series(1, $N_EMPLOYEES) AS i
 ),
@@ -152,10 +167,16 @@ ins_emp AS (
   SELECT id, '$TENANT_ID', 'SCALE-' || i, 'Scale', 'Employee' || i, 'scale-emp-' || i || '@example.test', '2025-01-01', 'active'
   FROM gen
   RETURNING id
+),
+ins_slips AS (
+  INSERT INTO payroll_slips (tenant_id, run_id, employee_id, month, gross_pay, status, tds_deducted, component_breakdown)
+  SELECT '$TENANT_ID', '$RUN_ID', gen.id, '$MONTH', 9500.00, 'finalized', 0.00,
+    '[{\"code\":\"ESI_EMPLOYEE\",\"monthly_amount\":71.25},{\"code\":\"ESI_EMPLOYER\",\"monthly_amount\":308.75},{\"code\":\"PF_EMPLOYEE\",\"monthly_amount\":1140.00},{\"code\":\"PF_EMPLOYER\",\"monthly_amount\":1140.00},{\"component_type\":\"earning\",\"is_pf_applicable\":true,\"code\":\"BASIC\",\"monthly_amount\":9500}]'::jsonb
+  FROM gen
+  RETURNING 1
 )
-INSERT INTO payroll_slips (tenant_id, run_id, employee_id, month, gross_pay, status, tds_deducted, component_breakdown)
-SELECT '$TENANT_ID', '$RUN_ID', gen.id, '$MONTH', 9500.00, 'finalized', 0.00,
-  '[{\"code\":\"ESI_EMPLOYEE\",\"monthly_amount\":71.25},{\"code\":\"ESI_EMPLOYER\",\"monthly_amount\":308.75}]'::jsonb
+INSERT INTO ptax_state_config (tenant_id, employee_id, state_code, effective_from)
+SELECT '$TENANT_ID', gen.id, 'KA', '2025-01-01'
 FROM gen;
 "
 ACTUAL_EMP_COUNT=$(psqlc -c "SELECT count(*) FROM employees WHERE tenant_id = '$TENANT_ID';")
@@ -183,6 +204,47 @@ assert_eq "employees with esi_wages=0 (the pre-fix truncation signature)" "$ZERO
 
 DISTINCT_WAGE_VALUES=$(psqlc -c "SELECT count(DISTINCT esi_wages) FROM esi_contributions WHERE tenant_id = '$TENANT_ID';")
 assert_eq "distinct esi_wages value (every employee has the same real 9500, not a mix of real + fallback-zero)" "$DISTINCT_WAGE_VALUES" "1"
+
+echo
+echo "=== 3. EPF compute against $N_EMPLOYEES employees (same payroll_slips keyset read as ESI) ==="
+EPF_RESP=$(http POST "$API_URL/payroll/statutory/epf/contributions/compute" "{\"month\":\"$MONTH\"}")
+echo "  compute response: $EPF_RESP"
+EPF_COMPUTED_COUNT=$(echo "$EPF_RESP" | jq -r '.computed_count')
+assert_eq "EPF computed_count (API response)" "$EPF_COMPUTED_COUNT" "$N_EMPLOYEES"
+
+echo
+echo "=== 4. EPF independent SQL read-back ==="
+EPF_PERSISTED_COUNT=$(psqlc -c "SELECT count(*) FROM epf_contributions WHERE tenant_id = '$TENANT_ID';")
+assert_eq "persisted epf_contributions row count" "$EPF_PERSISTED_COUNT" "$N_EMPLOYEES"
+
+EPF_EMP_SUM=$(psqlc -c "SELECT sum(employee_contribution) FROM epf_contributions WHERE tenant_id = '$TENANT_ID';")
+EPF_EXPECTED_EMP_SUM=$(python3 -c "print(1140.00 * $N_EMPLOYEES)")
+assert_eq "sum(epf employee_contribution) across all $N_EMPLOYEES rows" "$EPF_EMP_SUM" "$EPF_EXPECTED_EMP_SUM"
+
+EPF_ZERO_WAGE_COUNT=$(psqlc -c "SELECT count(*) FROM epf_contributions WHERE tenant_id = '$TENANT_ID' AND pf_wages = 0;")
+assert_eq "employees with pf_wages=0 (the pre-fix truncation signature)" "$EPF_ZERO_WAGE_COUNT" "0"
+
+EPF_DISTINCT_WAGES=$(psqlc -c "SELECT count(DISTINCT pf_wages) FROM epf_contributions WHERE tenant_id = '$TENANT_ID';")
+assert_eq "distinct pf_wages value (no silent fallback-to-ceiling mixed in)" "$EPF_DISTINCT_WAGES" "1"
+
+echo
+echo "=== 5. PTax compute against $N_EMPLOYEES employees (same payroll_slips keyset read) ==="
+PTAX_RESP=$(http POST "$API_URL/payroll/statutory/ptax/contributions/compute" "{\"month\":\"$MONTH\",\"financial_year\":\"$FY\"}")
+echo "  compute response: $PTAX_RESP"
+PTAX_COMPUTED_COUNT=$(echo "$PTAX_RESP" | jq -r '.computed_count')
+assert_eq "PTax computed_count (API response)" "$PTAX_COMPUTED_COUNT" "$N_EMPLOYEES"
+
+echo
+echo "=== 6. PTax independent SQL read-back ==="
+PTAX_PERSISTED_COUNT=$(psqlc -c "SELECT count(*) FROM ptax_contributions WHERE tenant_id = '$TENANT_ID';")
+assert_eq "persisted ptax_contributions row count" "$PTAX_PERSISTED_COUNT" "$N_EMPLOYEES"
+
+PTAX_AMOUNT_SUM=$(psqlc -c "SELECT sum(ptax_amount) FROM ptax_contributions WHERE tenant_id = '$TENANT_ID';")
+PTAX_EXPECTED_SUM=$(python3 -c "print(200.00 * $N_EMPLOYEES)")
+assert_eq "sum(ptax_amount) across all $N_EMPLOYEES rows" "$PTAX_AMOUNT_SUM" "$PTAX_EXPECTED_SUM"
+
+PTAX_ZERO_GROSS_COUNT=$(psqlc -c "SELECT count(*) FROM ptax_contributions WHERE tenant_id = '$TENANT_ID' AND gross_salary = 0;")
+assert_eq "employees with gross_salary=0 (the pre-fix truncation signature)" "$PTAX_ZERO_GROSS_COUNT" "0"
 
 echo
 echo "=== RESULT: $PASS_COUNT passed, $FAIL_COUNT failed ==="

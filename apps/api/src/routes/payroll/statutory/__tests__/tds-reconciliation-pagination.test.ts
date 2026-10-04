@@ -19,6 +19,7 @@
 import { describe, it, expect } from 'vitest'
 import Fastify, { type FastifyRequest } from 'fastify'
 import tdsBulkRoutes from '../tds-bulk.js'
+import { makeMockTable } from '../../../../lib/__tests__/test-helpers/postgrest-mock.js'
 
 const TENANT_ID = 'tenant-tds-recon-001'
 const PAGE_CAP = 50
@@ -26,34 +27,12 @@ const PAGE_CAP = 50
 function uuid(i: number): string {
   return `00000000-0000-4000-8000-${String(i).padStart(12, '0')}`
 }
+function slipUuid(i: number): string {
+  return `00000000-0000-4000-8001-${String(i).padStart(12, '0')}`
+}
 
-/** Minimal PostgREST-shaped query-builder mock with a hard per-page cap,
- *  applied both to a direct await (simulating an unpaginated query being
- *  silently capped) and to explicit .range(from, to) calls. */
 function makeTable(rows: any[], pageCap = Infinity) {
-  function build(filtered: any[]) {
-    const api: any = {
-      select() { return api },
-      eq(col: string, val: any) { return build(filtered.filter(r => r[col] === val)) },
-      in(col: string, vals: any[]) {
-        const set = new Set(vals)
-        return build(filtered.filter(r => set.has(r[col])))
-      },
-      gte(col: string, val: any) { return build(filtered.filter(r => r[col] >= val)) },
-      lte(col: string, val: any) { return build(filtered.filter(r => r[col] <= val)) },
-      order() { return api },
-      range(from: number, to: number) {
-        const size = Math.min(to - from + 1, pageCap)
-        return Promise.resolve({ data: filtered.slice(from, from + size), error: null })
-      },
-      upsert(_rows: any[], _opts: any) { return Promise.resolve({ data: null, error: null }) },
-      then(resolve: any, reject: any) {
-        return Promise.resolve({ data: filtered.slice(0, pageCap), error: null }).then(resolve, reject)
-      },
-    }
-    return api
-  }
-  return build(rows)
+  return makeMockTable(rows, { pageCap })
 }
 
 async function buildApp(opts: { employees: Array<{ id: string }>; snapshots: any[]; slips: any[] }) {
@@ -97,8 +76,8 @@ describe('POST /payroll/statutory/tds/reconciliation/compute — pagination past
       employee_id: e.id, total_approved: 10000, created_at: '2025-06-01T00:00:00Z',
       tenant_id: TENANT_ID, financial_year: financialYear,
     }))
-    const slips = employees.map(e => ({
-      employee_id: e.id, tds_deducted: '5000.00', month: '2025-06', tenant_id: TENANT_ID,
+    const slips = employees.map((e, i) => ({
+      id: slipUuid(i), employee_id: e.id, tds_deducted: '5000.00', month: '2025-06', tenant_id: TENANT_ID,
     }))
 
     const app = await buildApp({ employees, snapshots, slips })
@@ -127,7 +106,7 @@ describe('POST /payroll/statutory/tds/reconciliation/compute — pagination past
       employee_id: e.id, total_approved: 1000, created_at: '2025-06-01T00:00:00Z',
       tenant_id: TENANT_ID, financial_year: financialYear,
     }))
-    const slips = employees.map(e => ({ employee_id: e.id, tds_deducted: '1000.00', month: '2025-06', tenant_id: TENANT_ID }))
+    const slips = employees.map((e, i) => ({ id: slipUuid(i), employee_id: e.id, tds_deducted: '1000.00', month: '2025-06', tenant_id: TENANT_ID }))
 
     const app = await buildApp({ employees, snapshots, slips })
 

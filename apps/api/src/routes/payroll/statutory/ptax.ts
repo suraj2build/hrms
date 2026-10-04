@@ -9,7 +9,7 @@ import { computePTax } from '../../../lib/statutory/ptax-engine.js'
 import type { PTaxSlab } from '../../../lib/statutory/ptax-engine.js'
 import { logAction } from '../../../lib/audit-service.js'
 import { HR_ADMIN_ROLES } from '../../../lib/rbac.js'
-import { fetchAllRows } from '../../../lib/supabase-paginate.js'
+import { fetchAllRows, fetchAllRowsByKeyset } from '../../../lib/supabase-paginate.js'
 import { serverError, ErrorCode } from '../../../lib/api-errors.js'
 
 export default async function ptaxRoutes(fastify: FastifyInstance) {
@@ -458,13 +458,29 @@ export default async function ptaxRoutes(fastify: FastifyInstance) {
     // Priority: ptax_state_config (manual) > lwf_state_config (shared work state)
     //           > sites.state_code (auto). An employee works in one state, so the
     //           LWF state assignment also drives PT when PT's own isn't set.
-    const [{ data: stateConfigs }, { data: lwfStateConfigs }] = await Promise.all([
-      fastify.supabase.from('ptax_state_config')
-        .select('employee_id, state_code').eq('tenant_id', req.tenantId)
-        .order('effective_from', { ascending: false }),
-      fastify.supabase.from('lwf_state_config')
-        .select('employee_id, state_code').eq('tenant_id', req.tenantId)
-        .order('effective_from', { ascending: false }),
+    //
+    // fetchAllRows() on both: neither table is deduplicated to "latest row
+    // per employee" at the query level (the code below picks the first seen
+    // per employee during iteration instead), so a plain, unpaginated read
+    // is at least one row per employee and can be more for anyone with a
+    // state-reassignment history. Found by actually running this endpoint
+    // against 2,200 real employees (scripts/pagination-scale-check.sh):
+    // 1,200 of them — everyone past the 1,000-row cap — came back with
+    // state=null ("skipped_no_state"), silently excluding them from PTax
+    // entirely with no error.
+    const [stateConfigs, lwfStateConfigs] = await Promise.all([
+      fetchAllRows<{ employee_id: string; state_code: string }>((from, to) =>
+        fastify.supabase.from('ptax_state_config')
+          .select('employee_id, state_code').eq('tenant_id', req.tenantId)
+          .order('effective_from', { ascending: false })
+          .order('id', { ascending: true })
+          .range(from, to)),
+      fetchAllRows<{ employee_id: string; state_code: string }>((from, to) =>
+        fastify.supabase.from('lwf_state_config')
+          .select('employee_id, state_code').eq('tenant_id', req.tenantId)
+          .order('effective_from', { ascending: false })
+          .order('id', { ascending: true })
+          .range(from, to)),
     ])
 
     // Map employee_id → most recent manual state override (PT first, else LWF)
@@ -492,19 +508,25 @@ export default async function ptaxRoutes(fastify: FastifyInstance) {
     // Gross = gross_pay from payroll_slips where status = finalized for this month.
     // For employees without a finalized slip, fall back to sum of all earning
     // components from their active compensation (pro-rated estimate).
-    // fetchAllRows() — this is the authoritative PTax gross-wage source
-    // (slipGrossMap); at ≥1,001 finalized slips in the month a plain query
-    // would silently push the overflow onto the compensation fallback below.
-    const slipRows = await fetchAllRows((from, to) =>
-      fastify.supabase
+    // fetchAllRowsByKeyset() — this is the authoritative PTax gross-wage
+    // source (slipGrossMap); at ≥1,001 finalized slips in the month a plain
+    // query would silently push the overflow onto the compensation fallback
+    // below. Keyset, not offset: a concurrent finalize can insert a new slip
+    // anywhere in the random-UUID key space while this read is paging,
+    // which offset/.range() pagination would silently skip or duplicate
+    // even with a deterministic .order('id') — see supabase-paginate.test.ts.
+    const slipRows = await fetchAllRowsByKeyset((afterId, limit) => {
+      let q = fastify.supabase
         .from('payroll_slips')
-        .select('employee_id, gross_pay')
+        .select('id, employee_id, gross_pay')
         .eq('tenant_id', req.tenantId)
         .eq('month', month)
         .eq('status', 'finalized')
-        .order('id')
-        .range(from, to),
-    )
+        .order('id', { ascending: true })
+        .limit(limit)
+      if (afterId) q = q.gt('id', afterId)
+      return q
+    })
 
     // gross_pay is NUMERIC — coerce here so slab lookups/comparisons downstream get a
     // real number, not a string (G13 sweep).
@@ -517,19 +539,24 @@ export default async function ptaxRoutes(fastify: FastifyInstance) {
     const empsMissingSlip = empList.filter(e => !slipGrossMap.has(e.id)).map(e => e.id)
 
     if (empsMissingSlip.length > 0) {
-      // fetchAllRows() — empsMissingSlip can be most of a large tenant
-      // mid-cycle; a plain query would silently drop fallback wages for
-      // employees past the 1,000-row cutoff.
-      const compRows = await fetchAllRows((from, to) =>
-        fastify.supabase
-          .from('employee_compensations')
-          .select('id, employee_id')
-          .eq('tenant_id', req.tenantId)
-          .eq('is_active', true)
-          .in('employee_id', empsMissingSlip)
-          .order('id')
-          .range(from, to),
-      )
+      // Chunked AND fetchAllRows-paginated — same request-size fix as the
+      // identical pattern in esi.ts/epf.ts, found by actually running
+      // against 2,200 real employees (scripts/pagination-scale-check.sh).
+      const compRows: Array<{ id: string; employee_id: string }> = []
+      for (let i = 0; i < empsMissingSlip.length; i += 100) {
+        const chunkIds = empsMissingSlip.slice(i, i + 100)
+        const chunkRows = await fetchAllRows<{ id: string; employee_id: string }>((from, to) =>
+          fastify.supabase
+            .from('employee_compensations')
+            .select('id, employee_id')
+            .eq('tenant_id', req.tenantId)
+            .eq('is_active', true)
+            .in('employee_id', chunkIds)
+            .order('id')
+            .range(from, to),
+        )
+        compRows.push(...chunkRows)
+      }
 
       const compIdToEmpId = new Map<string, string>(
         compRows.map((c: any) => [c.id, c.employee_id]),

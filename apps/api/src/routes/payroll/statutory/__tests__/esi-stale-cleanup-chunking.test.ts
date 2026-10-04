@@ -32,26 +32,35 @@ function empUuid(i: number): string {
 
 function makeTable(rows: any[], opts: { inLimit?: number } = {}) {
   const inLimit = opts.inLimit ?? Infinity
-  function build(filtered: any[]) {
+  type State = { filtered: any[]; limitN: number | null }
+  function build(state: State) {
     const api: any = {
       select() { return api },
-      eq(col: string, val: any) { return build(filtered.filter(r => r[col] === val)) },
+      eq(col: string, val: any) { return build({ ...state, filtered: state.filtered.filter(r => r[col] === val) }) },
       in(col: string, vals: any[]) {
         if (vals.length > inLimit) {
           throw new Error(`simulated request-line overflow: .in('${col}', [${vals.length} ids])`)
         }
         const set = new Set(vals)
-        return build(filtered.filter(r => set.has(r[col])))
+        return build({ ...state, filtered: state.filtered.filter(r => set.has(r[col])) })
       },
+      gt(col: string, val: any) { return build({ ...state, filtered: state.filtered.filter(r => r[col] > val) }) },
       not() { return api },
       is() { return api },
       or() { return api },
       lte() { return api },
       gte() { return api },
-      order() { return api },
-      limit() { return api },
-      maybeSingle() { return Promise.resolve({ data: filtered[0] ?? null, error: null }) },
-      single() { return Promise.resolve({ data: filtered[0] ?? null, error: null }) },
+      order(col: string, o: { ascending?: boolean } = {}) {
+        const asc = o.ascending !== false
+        const sorted = [...state.filtered].sort((a, b) => {
+          if (a[col] === b[col]) return 0
+          return (a[col] < b[col] ? -1 : 1) * (asc ? 1 : -1)
+        })
+        return build({ ...state, filtered: sorted })
+      },
+      limit(n: number) { return build({ ...state, limitN: n }) },
+      maybeSingle() { return Promise.resolve({ data: state.filtered[0] ?? null, error: null }) },
+      single() { return Promise.resolve({ data: state.filtered[0] ?? null, error: null }) },
       upsert: (rows: any[]) => { upsertSpyTarget?.(rows); return Promise.resolve({ error: null }) },
       delete() {
         return {
@@ -69,15 +78,16 @@ function makeTable(rows: any[], opts: { inLimit?: number } = {}) {
         }
       },
       range(from: number, to: number) {
-        return Promise.resolve({ data: filtered.slice(from, to + 1), error: null })
+        return Promise.resolve({ data: state.filtered.slice(from, to + 1), error: null })
       },
       then(resolve: any, reject: any) {
-        return Promise.resolve({ data: filtered, error: null }).then(resolve, reject)
+        const cap = state.limitN ?? Infinity
+        return Promise.resolve({ data: state.filtered.slice(0, cap), error: null }).then(resolve, reject)
       },
     }
     return api
   }
-  return build(rows)
+  return build({ filtered: rows, limitN: null })
 }
 let upsertSpyTarget: ((rows: any[]) => void) | undefined
 let deleteSpyTarget: ((ids: string[]) => void) | undefined
@@ -127,12 +137,13 @@ describe('POST /payroll/statutory/esi/contributions/compute — chunked stale-ro
     // still be cleaned up.
     const staleIds = Array.from({ length: STALE_COUNT }, (_, i) => empUuid(1000 + i))
 
-    const slips = keepEmps.map(e => ({
+    const slips = keepEmps.map((e, i) => ({
+      id: `slip-${String(i).padStart(6, '0')}`,
       employee_id: e.id, tenant_id: TENANT_ID, month: MONTH, status: 'finalized', gross_pay: '9500.00', component_breakdown: [],
     }))
     const existingContributions = [
-      ...keepEmps.map(e => ({ employee_id: e.id, tenant_id: TENANT_ID, contribution_month: MONTH })),
-      ...staleIds.map(id => ({ employee_id: id, tenant_id: TENANT_ID, contribution_month: MONTH })),
+      ...keepEmps.map((e, i) => ({ id: `contrib-keep-${String(i).padStart(6, '0')}`, employee_id: e.id, tenant_id: TENANT_ID, contribution_month: MONTH })),
+      ...staleIds.map((id, i) => ({ id: `contrib-stale-${String(i).padStart(6, '0')}`, employee_id: id, tenant_id: TENANT_ID, contribution_month: MONTH })),
     ]
 
     const { app, deleteSpy } = await buildApp({ employees: keepEmps, slips, existingContributions })

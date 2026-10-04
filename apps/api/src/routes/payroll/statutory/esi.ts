@@ -9,7 +9,7 @@ import { computeESI } from '../../../lib/statutory/esi-engine.js'
 import type { ESIConfig } from '../../../lib/statutory/esi-engine.js'
 import { logAction } from '../../../lib/audit-service.js'
 import { HR_ADMIN_ROLES } from '../../../lib/rbac.js'
-import { fetchAllRows } from '../../../lib/supabase-paginate.js'
+import { fetchAllRows, fetchAllRowsByKeyset } from '../../../lib/supabase-paginate.js'
 import { serverError, ErrorCode } from '../../../lib/api-errors.js'
 
 export default async function esiRoutes(fastify: FastifyInstance) {
@@ -402,20 +402,26 @@ export default async function esiRoutes(fastify: FastifyInstance) {
     // This is the statutory-correct figure — NOT stale reference data from
     // esi_eligibility_timeline.gross_wages (which reflects salary at enrollment
     // time and becomes stale when the employee gets a salary revision).
-    // fetchAllRows() — this is the authoritative ESI wage source (slipGrossMap,
-    // used in the eligibility comparison below); at ≥1,001 finalized slips in
-    // the month a plain query would silently push the overflow onto the
-    // compensation-fallback path instead.
-    const slipRows = await fetchAllRows((from, to) =>
-      fastify.supabase
+    // fetchAllRowsByKeyset() — this is the authoritative ESI wage source
+    // (slipGrossMap, used in the eligibility comparison below); at ≥1,001
+    // finalized slips in the month a plain query would silently push the
+    // overflow onto the compensation-fallback path instead. Keyset, not
+    // offset: a concurrent finalize can insert a new slip anywhere in the
+    // random-UUID key space while this read is paging, which offset/.range()
+    // pagination would silently skip or duplicate even with a deterministic
+    // .order('id') — see supabase-paginate.test.ts.
+    const slipRows = await fetchAllRowsByKeyset((afterId, limit) => {
+      let q = fastify.supabase
         .from('payroll_slips')
-        .select('employee_id, gross_pay, component_breakdown')
+        .select('id, employee_id, gross_pay, component_breakdown')
         .eq('tenant_id', req.tenantId)
         .eq('month', month)
         .eq('status', 'finalized')
-        .order('id')
-        .range(from, to),
-    )
+        .order('id', { ascending: true })
+        .limit(limit)
+      if (afterId) q = q.gt('id', afterId)
+      return q
+    })
 
     // gross_pay is NUMERIC — coerce here or the eligibility check below silently
     // string-compares against wageCeiling instead of comparing numerically (G13 sweep).
@@ -443,19 +449,28 @@ export default async function esiRoutes(fastify: FastifyInstance) {
     const fallbackGrossMap = new Map<string, number>()
 
     if (empsMissingSlip.length > 0) {
-      // fetchAllRows() — empsMissingSlip can be most of a large tenant mid-cycle
-      // (anyone without a finalized slip yet); a plain query would silently
-      // drop fallback wages for employees past the 1,000-row cutoff.
-      const compRows = await fetchAllRows((from, to) =>
-        fastify.supabase
-          .from('employee_compensations')
-          .select('id, employee_id')
-          .eq('tenant_id', req.tenantId)
-          .eq('is_active', true)
-          .in('employee_id', empsMissingSlip)
-          .order('id')
-          .range(from, to),
-      )
+      // Chunked AND fetchAllRows-paginated: empsMissingSlip can be most of a
+      // large tenant mid-cycle (anyone without a finalized slip yet) — a
+      // single unchunked .in() over that list is a request-size failure,
+      // found by actually running epf.ts's identical pattern against 2,200
+      // real employees (scripts/pagination-scale-check.sh); a plain,
+      // unpaginated query would ALSO silently drop fallback wages for
+      // employees past the 1,000-row cutoff.
+      const compRows: Array<{ id: string; employee_id: string }> = []
+      for (let i = 0; i < empsMissingSlip.length; i += 100) {
+        const chunkIds = empsMissingSlip.slice(i, i + 100)
+        const chunkRows = await fetchAllRows<{ id: string; employee_id: string }>((from, to) =>
+          fastify.supabase
+            .from('employee_compensations')
+            .select('id, employee_id')
+            .eq('tenant_id', req.tenantId)
+            .eq('is_active', true)
+            .in('employee_id', chunkIds)
+            .order('id')
+            .range(from, to),
+        )
+        compRows.push(...chunkRows)
+      }
 
       const compIdToEmpId = new Map<string, string>(
         compRows.map((c: any) => [c.id, c.employee_id]),

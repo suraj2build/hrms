@@ -11,7 +11,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
-import { fetchAllRows } from '../../lib/supabase-paginate.js'
+import { fetchAllRows, fetchAllRowsByKeyset } from '../../lib/supabase-paginate.js'
 import { logAction } from '../../lib/audit-service.js'
 import { serverError, notFound, validationError, conflictError, ErrorCode } from '../../lib/api-errors.js'
 
@@ -71,39 +71,31 @@ export default async function payrollStatutoryReconRoutes(fastify: FastifyInstan
       }
     }
 
-    // PAYABLE (from actual filing tables for this month) — fetchAllRows() on
-    // all four: a plain query would silently truncate at ≥1,001 contribution
-    // rows for the month, corrupting this variance check's "payable" side for
-    // a large tenant with no error signal.
-    // .order('id'): without a deterministic sort, PostgREST's OFFSET/LIMIT
-    // paging (what .range() compiles to) is not guaranteed stable across the
-    // separate page requests fetchAllRows issues — a concurrent insert/update
-    // between pages can shift row positions and skip or duplicate a row.
+    // PAYABLE (from actual filing tables for this month) — fetchAllRowsByKeyset()
+    // on all four: a plain query would silently truncate at ≥1,001
+    // contribution rows for the month, corrupting this variance check's
+    // "payable" side for a large tenant with no error signal. Keyset, not
+    // offset: this feeds the actual persisted "payable" total compared
+    // against the computed side for a real variance flag, and a concurrent
+    // finalize inserting a contribution row anywhere in the random-UUID key
+    // space mid-page would silently skip or duplicate a row under
+    // offset/.range() pagination even with a deterministic .order('id') —
+    // see supabase-paginate.test.ts.
+    const keysetPage = (table: string, monthCol: string, select: string) =>
+      (afterId: string | null, limit: number) => {
+        let q = fastify.supabase.from(table)
+          .select(`id, ${select}`)
+          .eq('tenant_id', tenantId).eq(monthCol, reconMonth)
+          .order('id', { ascending: true })
+          .limit(limit)
+        if (afterId) q = q.gt('id', afterId)
+        return q
+      }
     const [epfRows, esiRows, ptaxRows, tdsRows] = await Promise.all([
-      fetchAllRows<any>((from, to) =>
-        fastify.supabase.from('epf_contributions')
-          .select('employee_contribution, total_employer_contribution, voluntary_pf')
-          .eq('tenant_id', tenantId).eq('contribution_month', reconMonth)
-          .order('id')
-          .range(from, to)),
-      fetchAllRows<any>((from, to) =>
-        fastify.supabase.from('esi_contributions')
-          .select('total_contribution')
-          .eq('tenant_id', tenantId).eq('contribution_month', reconMonth)
-          .order('id')
-          .range(from, to)),
-      fetchAllRows<any>((from, to) =>
-        fastify.supabase.from('ptax_contributions')
-          .select('ptax_amount')
-          .eq('tenant_id', tenantId).eq('contribution_month', reconMonth)
-          .order('id')
-          .range(from, to)),
-      fetchAllRows<any>((from, to) =>
-        fastify.supabase.from('tds_monthly_projections')
-          .select('tds_this_month')
-          .eq('tenant_id', tenantId).eq('projection_month', reconMonth)
-          .order('id')
-          .range(from, to)),
+      fetchAllRowsByKeyset<any>(keysetPage('epf_contributions', 'contribution_month', 'employee_contribution, total_employer_contribution, voluntary_pf')),
+      fetchAllRowsByKeyset<any>(keysetPage('esi_contributions', 'contribution_month', 'total_contribution')),
+      fetchAllRowsByKeyset<any>(keysetPage('ptax_contributions', 'contribution_month', 'ptax_amount')),
+      fetchAllRowsByKeyset<any>(keysetPage('tds_monthly_projections', 'projection_month', 'tds_this_month')),
     ])
 
     const sum = (rows: any[] | null | undefined, fn: (r: any) => number) =>

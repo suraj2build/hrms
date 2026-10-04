@@ -40,7 +40,7 @@ let upsertSpyTarget: ((rows: any[]) => void) | undefined
 
 async function buildApp(opts: {
   wageCeilingAsString: string
-  slips: Array<{ employee_id: string; gross_pay: string; component_breakdown: any[] }>
+  slips: Array<{ id: string; employee_id: string; gross_pay: string; component_breakdown: any[] }>
   employees: Array<{ id: string; employee_code: string }>
 }) {
   const upsertSpy = vi.fn()
@@ -83,7 +83,33 @@ async function buildApp(opts: {
       }
       if (table === 'employee_statutory_overrides') return { select: () => genericChain({ data: [], error: null }) }
       if (table === 'esi_eligibility_timeline')     return { select: () => genericChain({ data: [], error: null }) }
-      if (table === 'payroll_slips')                return { select: () => genericChain({ data: opts.slips, error: null }, { paged: true }) }
+      // payroll_slips is read via fetchAllRowsByKeyset() in esi.ts (keyset,
+      // not offset — see supabase-paginate.ts), so it needs .gt('id', ...)
+      // and a real .limit(), deferred to resolution time so it doesn't
+      // matter whether production code chains .gt() before or after
+      // .limit() (real supabase-js doesn't care either — see
+      // test-helpers/postgrest-mock.ts for the same pattern). Requires every
+      // slip fixture to carry a unique, orderable `id`.
+      if (table === 'payroll_slips') {
+        return {
+          select: () => {
+            let afterId: string | null = null
+            let limitN = Infinity
+            const page: any = {
+              eq: () => page,
+              order: () => page,
+              gt: (_col: string, val: string) => { afterId = val; return page },
+              limit: (n: number) => { limitN = n; return page },
+              then: (resolve: any, reject: any) => {
+                const sorted = [...opts.slips].sort((a: any, b: any) => (a.id < b.id ? -1 : 1))
+                const filtered = afterId ? sorted.filter((r: any) => r.id > afterId!) : sorted
+                return Promise.resolve({ data: filtered.slice(0, limitN), error: null }).then(resolve, reject)
+              },
+            }
+            return page
+          },
+        }
+      }
       if (table === 'esi_contributions') {
         return {
           select: () => genericChain({ data: [], error: null }, { paged: true }),
@@ -106,8 +132,8 @@ describe('POST /payroll/statutory/esi/contributions/compute — DB-string wage_c
     const { app, upsertSpy } = await buildApp({
       wageCeilingAsString: '21000.00',
       slips: [
-        { employee_id: 'emp-low',  gross_pay: '9500.00',  component_breakdown: [] },   // eligible: 9500 <= 21000
-        { employee_id: 'emp-high', gross_pay: '150000.00', component_breakdown: [] },  // ineligible: 150000 > 21000
+        { id: 'slip-1', employee_id: 'emp-low',  gross_pay: '9500.00',  component_breakdown: [] },   // eligible: 9500 <= 21000
+        { id: 'slip-2', employee_id: 'emp-high', gross_pay: '150000.00', component_breakdown: [] },  // ineligible: 150000 > 21000
       ],
       employees: [
         { id: 'emp-low',  employee_code: 'E1' },
@@ -142,7 +168,7 @@ describe('POST /payroll/statutory/esi/contributions/compute — DB-string wage_c
   it('a genuinely low earner just under the ceiling is not dropped by string comparison', async () => {
     const { app, upsertSpy } = await buildApp({
       wageCeilingAsString: '21000.00',
-      slips: [{ employee_id: 'emp-1', gross_pay: '20999.00', component_breakdown: [] }],
+      slips: [{ id: 'slip-1', employee_id: 'emp-1', gross_pay: '20999.00', component_breakdown: [] }],
       employees: [{ id: 'emp-1', employee_code: 'E1' }],
     })
 
@@ -162,7 +188,7 @@ describe('POST /payroll/statutory/esi/contributions/compute — DB-string wage_c
   it('an employee exactly at the ceiling is still eligible (<=, not <)', async () => {
     const { app, upsertSpy } = await buildApp({
       wageCeilingAsString: '21000.00',
-      slips: [{ employee_id: 'emp-1', gross_pay: '21000.00', component_breakdown: [] }],
+      slips: [{ id: 'slip-1', employee_id: 'emp-1', gross_pay: '21000.00', component_breakdown: [] }],
       employees: [{ id: 'emp-1', employee_code: 'E1' }],
     })
 

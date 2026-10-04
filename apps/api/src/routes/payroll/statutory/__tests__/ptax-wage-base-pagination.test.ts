@@ -15,10 +15,12 @@
 import { describe, it, expect, vi } from 'vitest'
 import Fastify, { type FastifyRequest } from 'fastify'
 import ptaxRoutes from '../ptax.js'
+import { makeMockTable, setMockUpsertSpy } from '../../../../lib/__tests__/test-helpers/postgrest-mock.js'
 
 const TENANT_ID = 'tenant-ptax-wage-base-001'
 const MONTH = '2026-06'
 const ROW_PAGE_CAP = 50
+const makeTable = makeMockTable
 
 function empUuid(i: number): string {
   return `00000000-0000-4000-e000-${String(i).padStart(12, '0')}`
@@ -26,41 +28,9 @@ function empUuid(i: number): string {
 function compUuid(i: number): string {
   return `00000000-0000-4000-e001-${String(i).padStart(12, '0')}`
 }
-
-function makeTable(rows: any[], pageCap = Infinity) {
-  const resolve = (r: any, col: string) => col.split('.').reduce((o, k) => o?.[k], r)
-  function build(filtered: any[]) {
-    const api: any = {
-      select() { return api },
-      eq(col: string, val: any) { return build(filtered.filter(r => resolve(r, col) === val)) },
-      in(col: string, vals: any[]) {
-        const set = new Set(vals)
-        return build(filtered.filter(r => set.has(r[col])))
-      },
-      lte() { return api },
-      gte() { return api },
-      not() { return api },
-      is() { return api },
-      or() { return api },
-      order() { return api },
-      limit() { return api },
-      maybeSingle() { return Promise.resolve({ data: filtered[0] ?? null, error: null }) },
-      single() { return Promise.resolve({ data: filtered[0] ?? null, error: null }) },
-      upsert: (rows: any[]) => { upsertSpyTarget?.(rows); return Promise.resolve({ error: null }) },
-      delete() { return { eq: () => ({ eq: () => ({ not: () => Promise.resolve({ error: null }) }) }) } },
-      range(from: number, to: number) {
-        const size = Math.min(to - from + 1, pageCap)
-        return Promise.resolve({ data: filtered.slice(from, from + size), error: null })
-      },
-      then(resolve: any, reject: any) {
-        return Promise.resolve({ data: filtered.slice(0, pageCap), error: null }).then(resolve, reject)
-      },
-    }
-    return api
-  }
-  return build(rows)
+function slipUuid(i: number): string {
+  return `00000000-0000-4000-e002-${String(i).padStart(12, '0')}`
 }
-let upsertSpyTarget: ((rows: any[]) => void) | undefined
 
 async function buildApp(opts: {
   employees: any[]
@@ -70,7 +40,7 @@ async function buildApp(opts: {
   stateConfig: any[]
 }) {
   const upsertSpy = vi.fn()
-  upsertSpyTarget = upsertSpy
+  setMockUpsertSpy(upsertSpy)
 
   const app = Fastify({ logger: false })
   app.decorateRequest('tenantId', '')
@@ -90,9 +60,9 @@ async function buildApp(opts: {
       if (table === 'ptax_state_config') return makeTable(opts.stateConfig)
       if (table === 'lwf_state_config')  return makeTable([])
       if (table === 'employee_statutory_overrides') return makeTable([])
-      if (table === 'payroll_slips')     return makeTable(opts.slips, ROW_PAGE_CAP)
-      if (table === 'employee_compensations')           return makeTable(opts.compensations, ROW_PAGE_CAP)
-      if (table === 'employee_compensation_components')  return makeTable(opts.components, ROW_PAGE_CAP)
+      if (table === 'payroll_slips')     return makeTable(opts.slips, { pageCap: ROW_PAGE_CAP })
+      if (table === 'employee_compensations')           return makeTable(opts.compensations, { pageCap: ROW_PAGE_CAP })
+      if (table === 'employee_compensation_components')  return makeTable(opts.components, { pageCap: ROW_PAGE_CAP })
       if (table === 'ptax_slabs') {
         return makeTable([{
           tenant_id: TENANT_ID, financial_year: '2026-27', is_active: true, state_code: 'KA',
@@ -119,8 +89,8 @@ describe('POST /payroll/statutory/ptax/contributions/compute — wage-base pagin
     const employees = Array.from({ length: N }, (_, i) => ({ id: empUuid(i), employee_code: `E${i}`, tenant_id: TENANT_ID, status: 'active', site_id: null }))
     const stateConfig = employees.map(e => ({ employee_id: e.id, state_code: 'KA', tenant_id: TENANT_ID, effective_from: '2020-01-01' }))
 
-    const slips = employees.slice(0, SLIP_COUNT).map(e => ({
-      employee_id: e.id, tenant_id: TENANT_ID, month: MONTH, status: 'finalized', gross_pay: '9500.00',
+    const slips = employees.slice(0, SLIP_COUNT).map((e, i) => ({
+      id: slipUuid(i), employee_id: e.id, tenant_id: TENANT_ID, month: MONTH, status: 'finalized', gross_pay: '9500.00',
     }))
 
     const fallbackEmps = employees.slice(SLIP_COUNT)

@@ -21,7 +21,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { HR_ADMIN_ROLES } from '../../../lib/rbac.js'
-import { fetchAllRows } from '../../../lib/supabase-paginate.js'
+import { fetchAllRows, fetchAllRowsByKeyset } from '../../../lib/supabase-paginate.js'
 import { fetchTenantTz } from '../../../lib/attendance-engine.js'
 import { getLocalDate } from '../../../lib/org-context.js'
 import { serverError, ErrorCode } from '../../../lib/api-errors.js'
@@ -497,24 +497,31 @@ export default async function tdsBulkRoutes(fastify: FastifyInstance) {
 
     // Same cap risk as the snapshots fetch above: a 100-employee chunk times
     // up to 12 monthly slips in the FY can exceed 1000 rows, so each chunk is
-    // paginated with fetchAllRows rather than taken as a single page.
+    // paginated rather than taken as a single page. Keyset, not offset: this
+    // feeds the actual-TDS sum compared against the projection for a real
+    // variance flag, and a concurrent finalize inserting a slip into the
+    // random-UUID key space mid-page would silently skip or duplicate a row
+    // under offset/.range() pagination even with a deterministic
+    // .order('id') — see supabase-paginate.test.ts.
     let slips: any[]
     try {
       slips = []
       for (let i = 0; i < empIds.length; i += 100) {
         const chunkIds = empIds.slice(i, i + 100)
-        const chunkRows = await fetchAllRows((from, to) =>
-          fastify.supabase
+        const chunkRows = await fetchAllRowsByKeyset((afterId, limit) => {
+          let q = fastify.supabase
             .from('payroll_slips')
-            .select('employee_id, tds_deducted')
+            .select('id, employee_id, tds_deducted')
             .in('employee_id', chunkIds)
             .eq('tenant_id', req.tenantId)
             // payroll_slips has no pay_date; its `month` is 'YYYY-MM' — scope to the FY months
             .gte('month', fyStart.slice(0, 7))
             .lte('month', fyEnd.slice(0, 7))
-            .order('id')
-            .range(from, to),
-        )
+            .order('id', { ascending: true })
+            .limit(limit)
+          if (afterId) q = q.gt('id', afterId)
+          return q
+        })
         slips.push(...chunkRows)
       }
     } catch (err) {
