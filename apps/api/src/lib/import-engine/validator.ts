@@ -1266,6 +1266,7 @@ export async function validateImportRows(
     for (let i = 0; i < empIds.length; i += 100) {
       const chunkIds = empIds.slice(i, i + 100)
       const { data: bankRows, error: bankErr } = await supabase
+        // lint-query-ok: chunked to 100 ids/request, <=100 rows per query, well under the 1,000-row cap
         .from('employee_bank_statutory')
         .select('employee_id')
         .eq('tenant_id', tenantId)
@@ -1303,6 +1304,7 @@ export async function validateImportRows(
     for (let i = 0; i < siteCodesInBatch.length; i += 100) {
       const chunkCodes = siteCodesInBatch.slice(i, i + 100)
       const { data: siteRows, error: siteErr } = await supabase
+        // lint-query-ok: chunked to 100 codes/request, <=100 rows per query, well under the 1,000-row cap
         .from('sites')
         .select('id, code')
         .eq('tenant_id', tenantId)

@@ -146,6 +146,7 @@ export default async function attendanceAnomaliesRoute(fastify: FastifyInstance)
     for (let i = 0; i < affectedEmpIds.length; i += 100) {
       const chunkIds = affectedEmpIds.slice(i, i + 100)
       const { data, error: empDeptErr } = await fastify.supabase
+        // lint-query-ok: chunkIds is a slice of 100 ids (loop above) — result is bounded to <=100 rows, well under the 1,000-row cap
         .from('employees')
         .select('id, job_history!job_history_employee_id_fkey(department_id, department_name, is_current)')
         .eq('tenant_id', req.tenantId)

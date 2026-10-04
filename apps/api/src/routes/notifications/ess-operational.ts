@@ -315,6 +315,7 @@ export default async function essOperationalRoutes(fastify: FastifyInstance) {
     // d. Incomplete punches: no check_out in last 7 days
     const sevenDaysAgo = daysAgo(7, todayStr)
     const { data: incompleteSessions, error: incompleteErr } = await fastify.supabase
+      // lint-query-ok: single employee, 7-day window — at most a handful of rows, nowhere near the 1,000-row cap
       .from('attendance_logs')
       .select('check_in, check_out, created_at')
       .eq('employee_id', employeeId)

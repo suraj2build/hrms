@@ -829,6 +829,7 @@ export default async function compensationRevisionsRoute(fastify: FastifyInstanc
       const chunkIds = empIds.slice(i, i + 100)
       const [{ data: compChunk, error: compErr }, { data: pendingChunk, error: pendingErr }] = await Promise.all([
         fastify.supabase
+          // lint-query-ok: chunkIds.length <= 100 (sliced above), further narrowed by is_active=true (at most one row per employee) — well under PostgREST's 1,000-row cap
           .from('employee_compensations')
           .select('id, employee_id, ctc_annual, ctc_monthly, salary_structure_id')
           .eq('tenant_id', req.tenantId)

@@ -618,6 +618,7 @@ export default async function sessionRoutes(fastify: FastifyInstance) {
             .from('onboarding_documents')
             .update({ review_status: 'approved' })
             .eq('id', doc.id)
+            .eq('tenant_id', req.tenantId)
           extractionResults.push({
             documentId: doc.id,
             documentType: doc.document_type,
@@ -842,6 +843,7 @@ export default async function sessionRoutes(fastify: FastifyInstance) {
               updated_at: new Date().toISOString(),
             })
             .eq('id', existing.id)
+            .eq('tenant_id', req.tenantId)
 
           if (updateErr) {
             // The wipe above already succeeded, so the draft now sits with

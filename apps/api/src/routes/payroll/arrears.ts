@@ -256,6 +256,7 @@ export default async function arrearsRoutes(fastify: FastifyInstance) {
     const emps: any[] = []
     for (let i = 0; i < empIds.length; i += 100) {
       const chunkIds = empIds.slice(i, i + 100)
+      // lint-query-ok: chunkIds.length <= 100 (sliced above) — well under PostgREST's 1,000-row cap
       const { data } = await fastify.supabase.from('employees').select('id, first_name, last_name, employee_code')
         .eq('tenant_id', req.tenantId).in('id', chunkIds)
       if (data) emps.push(...data)

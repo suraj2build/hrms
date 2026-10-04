@@ -277,6 +277,7 @@ export default async function payrollStatutoryReconRoutes(fastify: FastifyInstan
 
     if (rowsToInsert.length > 0) {
       const { error } = await fastify.supabase
+        // lint-tenant-ok: `rowsToInsert` entries above already set tenant_id: tenantId per row (line 261)
         .from('statutory_filing_closures')
         .insert(rowsToInsert)
       if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to record statutory filing')

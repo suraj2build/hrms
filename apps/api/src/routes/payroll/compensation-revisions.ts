@@ -290,6 +290,7 @@ export default async function compensationRevisionsRoutes(fastify: FastifyInstan
     ]
 
     const { error: snapErr } = await fastify.supabase
+      // lint-tenant-ok: `snapshots` rows above already set tenant_id: req.tenantId per row (lines 269, 280)
       .from('compensation_snapshots')
       .insert(snapshots)
 
@@ -390,6 +391,7 @@ export default async function compensationRevisionsRoutes(fastify: FastifyInstan
         .from('compensation_revisions')
         .update({ resulting_compensation_id: (newComp as any).id })
         .eq('id', id)
+        .eq('tenant_id', req.tenantId)
     }
 
     await logAction(fastify.supabase, {

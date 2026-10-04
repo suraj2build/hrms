@@ -1166,7 +1166,7 @@ export async function importSalaryUpload(
           .from('employee_compensation_components')
           .insert(compRows.map(r => ({ ...r, compensation_id: newCompId })))
         if (ccErr) {
-          supabase.from('employee_compensations').delete().eq('id', newCompId).then(() => {}, () => {})
+          supabase.from('employee_compensations').delete().eq('id', newCompId).eq('tenant_id', tenantId).then(() => {}, () => {})
           throw new Error(ccErr.message)
         }
       }
@@ -1190,7 +1190,7 @@ export async function importSalaryUpload(
         .select('id')
 
       if (closeErr) {
-        supabase.from('employee_compensations').delete().eq('id', newCompId).then(() => {}, () => {})
+        supabase.from('employee_compensations').delete().eq('id', newCompId).eq('tenant_id', tenantId).then(() => {}, () => {})
         throw new Error(`Failed to close previous compensation: ${closeErr.message}`)
       }
 
@@ -1199,6 +1199,7 @@ export async function importSalaryUpload(
         .from('employee_compensations')
         .update({ is_active: true })
         .eq('id', newCompId)
+        .eq('tenant_id', tenantId)
 
       if (activateErr) {
         throw new Error(`Failed to activate new compensation: ${activateErr.message}`)

@@ -128,6 +128,7 @@ export default async function leavePolicyAssignmentsRoutes(fastify: FastifyInsta
           for (let i = 0; i < empIds.length; i += 100) {
             const chunkIds = empIds.slice(i, i + 100)
             const { data, error } = await fastify.supabase
+              // lint-query-ok: chunked to 100 ids/request, <=100 rows per query, well under the 1,000-row cap
               .from('employees')
               .select('id, first_name, last_name, employee_code')
               .in('id', chunkIds)
@@ -149,12 +150,14 @@ export default async function leavePolicyAssignmentsRoutes(fastify: FastifyInsta
           .in('id', locIds)
           .eq('tenant_id', req.tenantId)
           .then(r => { if (r.error) throw r.error; return r.data ?? [] }) : [],
-        siteIds.length ? fastify.supabase
-          .from('sites')
-          .select('id, name, location')
-          .in('id', siteIds)
-          .eq('tenant_id', req.tenantId)
-          .then(r => { if (r.error) throw r.error; return r.data ?? [] }) : [],
+        siteIds.length ? fetchAllRows((from, to) =>
+          fastify.supabase
+            .from('sites')
+            .select('id, name, location')
+            .in('id', siteIds)
+            .eq('tenant_id', req.tenantId)
+            .range(from, to),
+        ) : [],
       ])
     } catch (error) {
       return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to resolve scope labels for leave policy assignments')

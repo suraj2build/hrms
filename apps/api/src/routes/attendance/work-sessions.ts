@@ -67,6 +67,7 @@ async function attachEmployeeLabels(
   for (let i = 0; i < empIds.length; i += 100) {
     const chunkIds = empIds.slice(i, i + 100)
     const { data, error } = await supabase
+      // lint-query-ok: chunkIds is a slice of 100 ids (loop above) — result is bounded to <=100 rows, well under the 1,000-row cap
       .from('employees')
       .select('id, first_name, last_name, employee_code')
       .in('id', chunkIds)

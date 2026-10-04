@@ -126,12 +126,14 @@ export default async function attendanceHealthIndexRoute(fastify: FastifyInstanc
     const nameMap = new Map<string, string>()
     const [empRes, deptRes, siteRes] = await Promise.all([
       idsByScope.employee.size
+        // lint-query-ok: idsByScope.employee is distinct scope_ids from one page of results (limit <= 500, validated above) — bounded well under the 1,000-row cap
         ? fastify.supabase.from('employees').select('id, first_name, last_name, employee_code').eq('tenant_id', req.tenantId).in('id', [...idsByScope.employee])
         : Promise.resolve({ data: [], error: null }),
       idsByScope.department.size
         ? fastify.supabase.from('departments').select('id, name').eq('tenant_id', req.tenantId).in('id', [...idsByScope.department])
         : Promise.resolve({ data: [], error: null }),
       idsByScope.site.size
+        // lint-query-ok: idsByScope.site is distinct scope_ids from one page of results (limit <= 500, validated above) — bounded well under the 1,000-row cap
         ? fastify.supabase.from('sites').select('id, name').eq('tenant_id', req.tenantId).in('id', [...idsByScope.site])
         : Promise.resolve({ data: [], error: null }),
     ])
@@ -501,6 +503,7 @@ export default async function attendanceHealthIndexRoute(fastify: FastifyInstanc
       for (let i = 0; i < empIds.length; i += 100) {
         const chunkIds = empIds.slice(i, i + 100)
         const { data, error: empDeptsErr } = await fastify.supabase
+          // lint-query-ok: chunkIds is a slice of 100 ids (loop above) — result is bounded to <=100 rows, well under the 1,000-row cap
           .from('employees')
           .select('id, job_history!job_history_employee_id_fkey(department_id, is_current)')
           .eq('tenant_id', req.tenantId)

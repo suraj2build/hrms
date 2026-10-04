@@ -267,6 +267,7 @@ export default async function payrollPayoutBatchesRoutes(fastify: FastifyInstanc
       }),
     )
 
+    // lint-tenant-ok: `obligations` rows built by buildPayoutObligations() already set tenant_id: tenantId per row
     const { error: iErr } = await fastify.supabase.from('payroll_payout_reconciliation').insert(obligations)
     if (iErr) return serverError(req, reply, iErr, ErrorCode.INSERT_FAILED, 'Failed to create payout obligations')
 

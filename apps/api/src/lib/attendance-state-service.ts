@@ -146,6 +146,7 @@ async function transitionAttendanceState(
   // this correctly reports the race as lost rather than double-applying.
   if (currentState === 'raw') {
     const { data: inserted, error: insertErr } = await supabase
+      // lint-tenant-ok: payload already carries tenant_id (built above as { tenant_id: tenantId, ... }) and onConflict is keyed on tenant_id — upsert is tenant-scoped even though the literal isn't inline in this query chain
       .from('attendance_processing_states')
       .upsert(payload, { onConflict: 'tenant_id,employee_id,work_date', ignoreDuplicates: true })
       .select('id')

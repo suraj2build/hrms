@@ -324,6 +324,7 @@ export async function resolveShiftBatch(
       for (let i = 0; i < siteIds.length; i += 100) {
         const chunkIds = siteIds.slice(i, i + 100)
         const { data, error: siteRowsErr } = await supabase
+          // lint-query-ok: chunkIds is a slice of 100 ids (loop above) — result is bounded to <=100 rows, well under the 1,000-row cap
           .from('sites')
           .select('id, default_shift_id')
           .eq('tenant_id', tenantId)

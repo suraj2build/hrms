@@ -390,6 +390,7 @@ export async function processCarryForward(
         )
       }
 
+      // lint-tenant-ok: cfLedInserts rows already carry tenant_id (pushed with tenant_id: tenantId above) — insert payload is tenant-scoped even though the literal isn't inline in this query chain
       const { error: cfLedErr } = await supabase.from('leave_balance_ledger').insert(cfLedInserts)
       if (cfLedErr) {
         console.warn(
@@ -399,6 +400,7 @@ export async function processCarryForward(
       }
 
       const { error: cfAlErr } = await supabase
+        // lint-tenant-ok: cfAlUpserts rows already carry tenant_id (pushed with tenant_id: tenantId above) — upsert payload is tenant-scoped even though the literal isn't inline in this query chain
         .from('leave_accrual_ledger')
         .upsert(cfAlUpserts, { onConflict: 'tenant_id,employee_id,leave_type_id,year,accrual_type,accrued_on', ignoreDuplicates: true })
       if (cfAlErr) {

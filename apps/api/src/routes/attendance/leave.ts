@@ -1160,6 +1160,7 @@ export default async function leaveRoute(fastify: FastifyInstance) {
           { data: accChunk, error: accErr },
         ] = await Promise.all([
           fastify.supabase
+            // lint-query-ok: chunkIds is a slice of 100 ids (loop above) — result is bounded to <=100 rows, well under the 1,000-row cap
             .from('employees')
             .select('id, first_name, last_name, employee_code, departments(name)')
             .eq('tenant_id', tenantId)
@@ -1192,6 +1193,7 @@ export default async function leaveRoute(fastify: FastifyInstance) {
 
         if (includeLiability) {
           const { data: compChunk, error: compErr } = await fastify.supabase
+            // lint-query-ok: chunkIds is a slice of 100 ids (loop above) — result is bounded to <=100 rows, well under the 1,000-row cap
             .from('employee_compensations')
             .select('employee_id, ctc_monthly')
             .eq('tenant_id', tenantId)

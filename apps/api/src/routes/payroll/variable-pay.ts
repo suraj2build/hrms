@@ -245,6 +245,7 @@ export default async function variablePayRoutes(fastify: FastifyInstance) {
     for (let i = 0; i < payoutEmployeeIds.length; i += 100) {
       const chunkIds = payoutEmployeeIds.slice(i, i + 100)
       const { data, error: empErr } = await fastify.supabase
+        // lint-query-ok: chunkIds.length <= 100 (sliced above) — well under PostgREST's 1,000-row cap
         .from('employees')
         .select('id')
         .eq('tenant_id', req.tenantId)
@@ -267,6 +268,7 @@ export default async function variablePayRoutes(fastify: FastifyInstance) {
     }))
 
     const { data: insertedPayouts, error: payErr } = await fastify.supabase
+      // lint-tenant-ok: `payoutRows` above already sets tenant_id: req.tenantId per row (line 264)
       .from('variable_payouts')
       .insert(payoutRows)
       .select()

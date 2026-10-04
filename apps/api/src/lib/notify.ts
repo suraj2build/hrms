@@ -118,6 +118,7 @@ export async function notifyHrAdmins(
       metadata:     opts.metadata    ?? {},
     }))
 
+    // lint-tenant-ok: `rows` (built above) already stamps tenant_id: opts.tenantId on every row — not visible to the scanner through the variable indirection
     const { error } = await supabase.from('inbox_items').insert(rows)
     if (error) {
       console.warn('[notify] notifyHrAdmins insert failed', {

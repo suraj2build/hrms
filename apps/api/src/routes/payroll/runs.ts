@@ -189,6 +189,7 @@ async function applyTdsForRun(
 
   // Prior FY slips → YTD gross (for projection) and YTD TDS (for true-up).
   const { data: prior } = await supabase
+    // lint-query-ok: one employee, one FY window — at most 12 monthly slips, far under the 1,000-row cap
     .from('payroll_slips')
     .select('gross_pay, tds_deducted')
     .eq('tenant_id', tenantId).eq('employee_id', employeeId)
@@ -791,6 +792,7 @@ async function executePayrollRun(
     supabase.from('payroll_runs')
       .update({ last_heartbeat_at: new Date().toISOString(), processed_employee_count: processed })
       .eq('id', runId)
+      .eq('tenant_id', tenantId)
       .then(({ error: hbErr }: { error: any }) => {
         if (hbErr) log.warn({ err: hbErr, run_id: runId }, 'payroll: heartbeat write failed')
       })
@@ -904,6 +906,7 @@ async function executePayrollRun(
               reason:        `LOP days (${computed.result.lop_days}) exceed total working days (${computed.result.total_working_days}) — verify attendance data`,
             }],
           })
+          // lint-tenant-ok: buildPayrollBlockers() sets tenant_id: tenantId on every row (payroll-blocker-engine.ts)
           const { error: lopBlockerErr } = await supabase.from('payroll_run_blockers').insert(lopBlockerRows)
           if (lopBlockerErr) log.warn({ err: lopBlockerErr, run_id: runId, employee_id: emp.id }, 'payroll: LOP_EXCESSIVE blocker insert failed (non-fatal — slip was still created)')
         }
@@ -1041,6 +1044,7 @@ async function executePayrollRun(
       const dbRules = await fetchResolvedValidationRules(supabase, tenantId, { enabledOnly: true })
       const blockerRows = buildPayrollBlockers({ tenantId, runId, failedEmployees, dbRules })
       if (blockerRows.length > 0) {
+        // lint-tenant-ok: buildPayrollBlockers() sets tenant_id: tenantId on every row (payroll-blocker-engine.ts)
         const { error: blockerErr } = await supabase.from('payroll_run_blockers').insert(blockerRows)
         if (blockerErr) {
           log.warn({ err: blockerErr, run_id: runId, blocker_count: blockerRows.length }, 'payroll: blocker insert failed')
@@ -1088,6 +1092,7 @@ export default async function payrollRunsRoutes(fastify: FastifyInstance) {
       await fastify.supabase.from('payroll_runs')
         .update({ status: 'failed', error_message: `Payroll job handler crashed: ${handlerErr.message}` })
         .eq('id', runId)
+        .eq('tenant_id', tenantId)
     }
   })
 
@@ -1632,6 +1637,7 @@ export default async function payrollRunsRoutes(fastify: FastifyInstance) {
         .from('payroll_runs')
         .update({ status: 'failed', error_message: `Failed to enqueue job: ${enqErr.message}` })
         .eq('id', runId)
+        .eq('tenant_id', tenantId)
       return serverError(req, reply, enqErr, 'ENQUEUE_FAILED', 'Failed to queue payroll run — please retry')
     }
 
@@ -2241,6 +2247,7 @@ export default async function payrollRunsRoutes(fastify: FastifyInstance) {
           .from('payroll_slips')
           .select('employee_id')
           .eq('run_id', id)
+          .eq('tenant_id', tenantId)
           .eq('status', 'draft')
           .range(from, to),
       )
@@ -2282,6 +2289,7 @@ export default async function payrollRunsRoutes(fastify: FastifyInstance) {
             for (let i = 0; i < missingIds.length; i += 100) {
               const chunkIds = missingIds.slice(i, i + 100)
               const { data } = await fastify.supabase
+                // lint-query-ok: chunkIds.length <= 100 (sliced above) — well under PostgREST's 1,000-row cap
                 .from('employees')
                 .select('id, first_name, last_name, employee_code')
                 .in('id', chunkIds)
@@ -2382,6 +2390,7 @@ export default async function payrollRunsRoutes(fastify: FastifyInstance) {
             resolved_at:     new Date().toISOString(),
             resolution_note: `force_finalize override: ${override_reason ?? '(no reason provided)'}`,
           })
+          .eq('tenant_id', tenantId)
           .in('id', openBlockers!.map((b: any) => b.id))
         if (overrideBlockerErr) {
           req.log.error(
@@ -2527,23 +2536,25 @@ export default async function payrollRunsRoutes(fastify: FastifyInstance) {
               }, run.month as string)
 
               // 3. Update the existing draft slip in place
+              const freshSlipUpdate = {
+                payable_days:          freshSlip.payable_days,
+                lop_days:              freshSlip.lop_days,
+                overtime_hours:        freshSlip.overtime_hours,
+                gross_pay:             freshSlip.gross_pay,
+                lop_amount:            freshSlip.lop_amount,
+                total_deductions:      freshSlip.total_deductions,
+                net_pay:               freshSlip.net_pay,
+                employer_contributions:freshSlip.employer_contributions,
+                component_breakdown:   freshSlip.component_breakdown,
+                tds_deducted:          round2fn((freshSlip.component_breakdown ?? [])
+                  .filter((c: any) => /^TDS$/i.test(c.code))
+                  .reduce((s: number, c: any) => s + (Number(c.monthly_amount) || 0), 0)),
+              }
               await fastify.supabase
                 .from('payroll_slips')
-                .update({
-                  payable_days:          freshSlip.payable_days,
-                  lop_days:              freshSlip.lop_days,
-                  overtime_hours:        freshSlip.overtime_hours,
-                  gross_pay:             freshSlip.gross_pay,
-                  lop_amount:            freshSlip.lop_amount,
-                  total_deductions:      freshSlip.total_deductions,
-                  net_pay:               freshSlip.net_pay,
-                  employer_contributions:freshSlip.employer_contributions,
-                  component_breakdown:   freshSlip.component_breakdown,
-                  tds_deducted:          round2fn((freshSlip.component_breakdown ?? [])
-                    .filter((c: any) => /^TDS$/i.test(c.code))
-                    .reduce((s: number, c: any) => s + (Number(c.monthly_amount) || 0), 0)),
-                })
+                .update(freshSlipUpdate)
                 .eq('run_id', id)
+                .eq('tenant_id', tenantId)
                 .eq('employee_id', employeeId)
                 .eq('status', 'draft')
 
@@ -2615,6 +2626,7 @@ export default async function payrollRunsRoutes(fastify: FastifyInstance) {
       .from('payroll_slips')
       .update({ status: 'finalized' })
       .eq('run_id', id)
+      .eq('tenant_id', tenantId)
       .eq('status', 'draft')
 
     if (slipFinalizeErr) {
@@ -2645,6 +2657,7 @@ export default async function payrollRunsRoutes(fastify: FastifyInstance) {
           .from('payroll_slips')
           .select('employee_id')
           .eq('run_id', id)
+          .eq('tenant_id', req.tenantId)
           .eq('status', 'finalized')
           .range(from, to),
       )
@@ -3179,6 +3192,7 @@ export default async function payrollRunsRoutes(fastify: FastifyInstance) {
     const CODE_CHUNK = 500
     for (let i = 0; i < codes.length; i += CODE_CHUNK) {
       const { data } = await fastify.supabase
+        // lint-query-ok: chunked at CODE_CHUNK (500) per request — under PostgREST's 1,000-row cap
         .from('employees')
         .select('employee_code, first_name, last_name')
         .eq('tenant_id', req.tenantId)
@@ -3546,6 +3560,7 @@ export default async function payrollRunsRoutes(fastify: FastifyInstance) {
     for (let i = 0; i < retryEmpIds.length; i += 100) {
       const chunkIds = retryEmpIds.slice(i, i + 100)
       const { data } = await fastify.supabase
+        // lint-query-ok: chunkIds.length <= 100 (sliced above) — well under PostgREST's 1,000-row cap
         .from('employees')
         .select('id, first_name, last_name, employee_code')
         .eq('tenant_id', tenantId)
@@ -3610,8 +3625,9 @@ export default async function payrollRunsRoutes(fastify: FastifyInstance) {
 
         // Delete existing slip (if re-inserted from a previous partial retry)
         await fastify.supabase.from('payroll_slips').delete()
-          .eq('run_id', id).eq('employee_id', emp.id)
+          .eq('run_id', id).eq('tenant_id', tenantId).eq('employee_id', emp.id)
 
+        // lint-tenant-ok: slipRow built by buildSlipRow(tenantId, ...) above already sets tenant_id
         const { error: insertErr } = await fastify.supabase.from('payroll_slips').insert(slipRow)
         if (insertErr) {
           failedRetry.push({
@@ -3630,6 +3646,7 @@ export default async function payrollRunsRoutes(fastify: FastifyInstance) {
           .from('payroll_run_blockers')
           .update({ status: 'resolved', resolved_by: req.userId, resolved_at: new Date().toISOString(), resolution_note: 'Auto-resolved by retry' })
           .eq('run_id', id)
+          .eq('tenant_id', tenantId)
           .eq('employee_id', emp.id)
           .eq('status', 'open')
 

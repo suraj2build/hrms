@@ -656,6 +656,7 @@ async function fetchPunches(
   }
 
   const { data, error: punchErr } = await supabase
+    // lint-query-ok: scoped to a single employee_id over a single-day (or single-shift) punch window — cannot plausibly exceed the 1,000-row cap
     .from('attendance_punch_logs')
     .select('id, punched_at, direction, source')
     .eq('tenant_id', tenantId)
@@ -1394,6 +1395,7 @@ export async function recomputeRange(
 
   if (dbRows.length > 0) {
     const { error } = await supabase
+      // lint-tenant-ok: dbRows come from computeDay(), whose returned row always carries tenant_id — upsert payload is tenant-scoped even though the literal isn't inline in this query chain
       .from('attendance_daily')
       .upsert(dbRows, { onConflict: 'tenant_id,employee_id,date' })
 

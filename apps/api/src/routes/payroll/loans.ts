@@ -376,6 +376,7 @@ export default async function loansRoutes(fastify: FastifyInstance) {
 
     if (schedules.length > 0) {
       const { error: schedErr } = await fastify.supabase
+        // lint-tenant-ok: `schedules` rows above already set tenant_id: req.tenantId per row (line 364)
         .from('loan_schedules')
         .insert(schedules)
 
