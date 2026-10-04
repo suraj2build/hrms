@@ -61,16 +61,23 @@ async function attachEmployeeLabels(
   if (list.length === 0) return list
   const empIds = [...new Set(list.map((r) => r.employee_id as string).filter(Boolean))]
   if (empIds.length === 0) return list
-  const { data: empRows, error } = await supabase
-    .from('employees')
-    .select('id, first_name, last_name, employee_code')
-    .in('id', empIds)
-    .eq('tenant_id', tenantId)
-  // A discarded error here previously rendered every row's employee_name/code
-  // as null — indistinguishable from "no employee data" — instead of
-  // surfacing the failure; throw so the caller's existing try/catch reports
-  // a real 500 (both current call sites already wrap this in a try/catch).
-  if (error) throw new Error(`attachEmployeeLabels: failed to fetch employees: ${error.message}`)
+  // Chunked: this is a shared helper with no guarantee callers pass a
+  // bounded id list — can exceed a single .in() URL's safe size at scale.
+  const empRows: any[] = []
+  for (let i = 0; i < empIds.length; i += 100) {
+    const chunkIds = empIds.slice(i, i + 100)
+    const { data, error } = await supabase
+      .from('employees')
+      .select('id, first_name, last_name, employee_code')
+      .in('id', chunkIds)
+      .eq('tenant_id', tenantId)
+    // A discarded error here previously rendered every row's employee_name/code
+    // as null — indistinguishable from "no employee data" — instead of
+    // surfacing the failure; throw so the caller's existing try/catch reports
+    // a real 500 (both current call sites already wrap this in a try/catch).
+    if (error) throw new Error(`attachEmployeeLabels: failed to fetch employees: ${error.message}`)
+    if (data) empRows.push(...data)
+  }
   const map = new Map<string, { name: string; code: string | null }>()
   for (const e of (empRows ?? []) as Array<{ id: string; first_name: string; last_name: string; employee_code: string | null }>) {
     map.set(e.id, { name: `${e.first_name ?? ''} ${e.last_name ?? ''}`.trim(), code: e.employee_code ?? null })

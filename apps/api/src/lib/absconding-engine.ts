@@ -900,13 +900,21 @@ export async function scanAndEscalate(
     // used tenant-wide for headcount (executive/index.ts et al.).
     let candidateIds = rawCandidateIds
     if (rawCandidateIds.length) {
-      const { data: activeEmps } = await supabase
-        .from('employees')
-        .select('id')
-        .eq('tenant_id', tenantId)
-        .in('id', rawCandidateIds)
-        .in('status', ['active', 'on_notice'])
-      const activeIds = new Set(((activeEmps ?? []) as { id: string }[]).map(e => e.id))
+      // Chunked: rawCandidateIds is every employee with an unauthorized-absence
+      // window in the lookback period, tenant-wide — can exceed a single
+      // .in() URL's safe size for a large tenant.
+      const activeEmps: { id: string }[] = []
+      for (let i = 0; i < rawCandidateIds.length; i += 100) {
+        const chunkIds = rawCandidateIds.slice(i, i + 100)
+        const { data } = await supabase
+          .from('employees')
+          .select('id')
+          .eq('tenant_id', tenantId)
+          .in('id', chunkIds)
+          .in('status', ['active', 'on_notice'])
+        if (data) activeEmps.push(...data)
+      }
+      const activeIds = new Set(activeEmps.map(e => e.id))
       candidateIds = rawCandidateIds.filter(id => activeIds.has(id))
     }
 

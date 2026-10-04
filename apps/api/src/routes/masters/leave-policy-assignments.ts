@@ -115,12 +115,22 @@ export default async function leavePolicyAssignmentsRoutes(fastify: FastifyInsta
 
     // Batch fetch names
     const [emps, depts, locs, sites] = await Promise.all([
-      empIds.length ? fastify.supabase
-        .from('employees')
-        .select('id, first_name, last_name, employee_code')
-        .in('id', empIds)
-        .eq('tenant_id', req.tenantId)
-        .then(r => r.data ?? []) : [],
+      // Chunked: empIds is every employee with a direct assignment row,
+      // tenant-wide — can exceed a single .in() URL's safe size.
+      (async () => {
+        if (!empIds.length) return []
+        const out: any[] = []
+        for (let i = 0; i < empIds.length; i += 100) {
+          const chunkIds = empIds.slice(i, i + 100)
+          const { data } = await fastify.supabase
+            .from('employees')
+            .select('id, first_name, last_name, employee_code')
+            .in('id', chunkIds)
+            .eq('tenant_id', req.tenantId)
+          if (data) out.push(...data)
+        }
+        return out
+      })(),
       deptIds.length ? fastify.supabase
         .from('departments')
         .select('id, name')

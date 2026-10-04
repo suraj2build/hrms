@@ -319,16 +319,22 @@ export async function resolveShiftBatch(
   if (needSiteDefault.length) {
     const siteIds = [...new Set(needSiteDefault.map(id => siteIdMap.get(id)).filter(Boolean))] as string[]
     if (siteIds.length) {
-      const { data: siteRows, error: siteRowsErr } = await supabase
-        .from('sites')
-        .select('id, default_shift_id')
-        .eq('tenant_id', tenantId)
-        .in('id', siteIds)
-        .not('default_shift_id', 'is', null)
-      if (siteRowsErr) throw new Error(`resolveShiftBatch: sites query failed: ${siteRowsErr.message}`)
+      // Chunked defensively — same rationale as org-context.ts's sites lookup.
+      const siteRows: any[] = []
+      for (let i = 0; i < siteIds.length; i += 100) {
+        const chunkIds = siteIds.slice(i, i + 100)
+        const { data, error: siteRowsErr } = await supabase
+          .from('sites')
+          .select('id, default_shift_id')
+          .eq('tenant_id', tenantId)
+          .in('id', chunkIds)
+          .not('default_shift_id', 'is', null)
+        if (siteRowsErr) throw new Error(`resolveShiftBatch: sites query failed: ${siteRowsErr.message}`)
+        if (data) siteRows.push(...data)
+      }
 
       const siteShiftMap = new Map<string, string>(
-        (siteRows ?? []).filter((s: any) => s.default_shift_id).map((s: any) => [s.id, s.default_shift_id])
+        siteRows.filter((s: any) => s.default_shift_id).map((s: any) => [s.id, s.default_shift_id])
       )
       for (const empId of needSiteDefault) {
         const siteId = siteIdMap.get(empId)

@@ -495,11 +495,18 @@ export default async function attendanceHealthIndexRoute(fastify: FastifyInstanc
         return reply.send({ computed: 0, period_month })
       }
 
-      const { data: empDepts } = await fastify.supabase
-        .from('employees')
-        .select('id, job_history!job_history_employee_id_fkey(department_id, is_current)')
-        .eq('tenant_id', req.tenantId)
-        .in('id', empIds)
+      // Chunked: empIds is the tenant's full set of scored employees for the
+      // period — can exceed a single .in() URL's safe size at scale.
+      const empDepts: any[] = []
+      for (let i = 0; i < empIds.length; i += 100) {
+        const chunkIds = empIds.slice(i, i + 100)
+        const { data } = await fastify.supabase
+          .from('employees')
+          .select('id, job_history!job_history_employee_id_fkey(department_id, is_current)')
+          .eq('tenant_id', req.tenantId)
+          .in('id', chunkIds)
+        if (data) empDepts.push(...data)
+      }
 
       const deptScoreMap: Map<string, number[]> = new Map()
       const empDeptLookup: Map<string, string> = new Map()

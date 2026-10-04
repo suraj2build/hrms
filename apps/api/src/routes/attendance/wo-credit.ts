@@ -204,10 +204,17 @@ export default async function woCreditRoutes(fastify: FastifyInstance) {
     const empIds = [...new Set(rows.map(r => r.employee_id))]
     const nameMap = new Map<string, string>()
     if (empIds.length) {
-      const { data: emps } = await fastify.supabase
-        .from('employees').select('id, first_name, last_name, employee_code')
-        .eq('tenant_id', req.tenantId).in('id', empIds)
-      for (const e of (emps ?? []) as any[]) {
+      // Chunked: empIds is every employee in this WO-credit review batch,
+      // tenant-wide — can exceed a single .in() URL's safe size.
+      const emps: any[] = []
+      for (let i = 0; i < empIds.length; i += 100) {
+        const chunkIds = empIds.slice(i, i + 100)
+        const { data } = await fastify.supabase
+          .from('employees').select('id, first_name, last_name, employee_code')
+          .eq('tenant_id', req.tenantId).in('id', chunkIds)
+        if (data) emps.push(...data)
+      }
+      for (const e of emps as any[]) {
         nameMap.set(e.id, `${e.first_name ?? ''} ${e.last_name ?? ''}`.trim() || e.employee_code)
       }
     }

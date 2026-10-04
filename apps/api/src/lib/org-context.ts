@@ -354,12 +354,21 @@ export async function resolveEmployeeOrgContextBatch(
   }>()
 
   if (uniqueSiteIds.length > 0) {
-    const { data: siteRows } = await supabase
-      .from('sites')
-      .select('id, timezone, default_roster_id, default_rotation_policy_id, default_shift_id, holiday_group_id')
-      .eq('tenant_id', tenantId)
-      .in('id', uniqueSiteIds)
-    for (const s of (siteRows ?? []) as {
+    // Chunked defensively — sites is a HIGH_CARDINALITY_TABLES entry in
+    // check-unbounded-queries.mjs even though a tenant's physical/virtual
+    // site count is normally small; chunking costs nothing and removes the
+    // ambiguity rather than relying on that normally holding.
+    const siteRows: any[] = []
+    for (let i = 0; i < uniqueSiteIds.length; i += 100) {
+      const chunkIds = uniqueSiteIds.slice(i, i + 100)
+      const { data } = await supabase
+        .from('sites')
+        .select('id, timezone, default_roster_id, default_rotation_policy_id, default_shift_id, holiday_group_id')
+        .eq('tenant_id', tenantId)
+        .in('id', chunkIds)
+      if (data) siteRows.push(...data)
+    }
+    for (const s of siteRows as {
       id:                           string
       timezone:                     string
       default_roster_id:            string | null

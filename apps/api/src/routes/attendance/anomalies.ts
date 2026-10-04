@@ -139,18 +139,24 @@ export default async function attendanceAnomaliesRoute(fastify: FastifyInstance)
     // ── Fetch department info for all affected employees in one query ─────────────
     const affectedEmpIds = [...new Set((anomalies).map((r: any) => r.employee_id).filter(Boolean))]
 
-    const { data: empDeptRows, error: empDeptErr } = affectedEmpIds.length > 0
-      ? await fastify.supabase
-          .from('employees')
-          .select('id, job_history!job_history_employee_id_fkey(department_id, department_name, is_current)')
-          .eq('tenant_id', req.tenantId)
-          .in('id', affectedEmpIds)
-      : { data: [], error: null }
-    if (empDeptErr) return serverError(req, reply, empDeptErr, ErrorCode.QUERY_FAILED, 'Failed to resolve employee departments')
+    // Chunked: affectedEmpIds is every employee with an anomaly in the
+    // requested period, tenant-wide — can exceed a single .in() URL's safe
+    // size for a large tenant with a bad month.
+    const empDeptRows: any[] = []
+    for (let i = 0; i < affectedEmpIds.length; i += 100) {
+      const chunkIds = affectedEmpIds.slice(i, i + 100)
+      const { data, error: empDeptErr } = await fastify.supabase
+        .from('employees')
+        .select('id, job_history!job_history_employee_id_fkey(department_id, department_name, is_current)')
+        .eq('tenant_id', req.tenantId)
+        .in('id', chunkIds)
+      if (empDeptErr) return serverError(req, reply, empDeptErr, ErrorCode.QUERY_FAILED, 'Failed to resolve employee departments')
+      if (data) empDeptRows.push(...data)
+    }
 
     // Build employee → dept lookup (department lives on job_history)
     const empDeptMap: Record<string, { department_id: string; department_name: string }> = {}
-    for (const e of (empDeptRows ?? []) as any[]) {
+    for (const e of empDeptRows as any[]) {
       const jh = (e.job_history ?? []).find((j: any) => j.is_current) ?? (e.job_history ?? [])[0] ?? null
       empDeptMap[e.id] = {
         department_id:   jh?.department_id ?? '__none__',
@@ -159,16 +165,26 @@ export default async function attendanceAnomaliesRoute(fastify: FastifyInstance)
     }
 
     // ── Fetch active employee counts per department (for rate calculation) ────────
-    const { data: empCounts, error: empCountsErr } = await fastify.supabase
-      .from('employees')
-      .select('job_history!job_history_employee_id_fkey(department_id, department_name, is_current)')
-      .eq('tenant_id', req.tenantId)
-      .eq('status', 'active')
-    if (empCountsErr) return serverError(req, reply, empCountsErr, ErrorCode.QUERY_FAILED, 'Failed to fetch active employee counts')
+    // fetchAllRows(): tenant-wide active-headcount scan, no further filter —
+    // a plain query would silently under-report for a tenant >1,000 active employees.
+    let empCounts: any[]
+    try {
+      empCounts = await fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('employees')
+          .select('id, job_history!job_history_employee_id_fkey(department_id, department_name, is_current)')
+          .eq('tenant_id', req.tenantId)
+          .eq('status', 'active')
+          .order('id')
+          .range(from, to),
+      )
+    } catch (empCountsErr) {
+      return serverError(req, reply, empCountsErr, ErrorCode.QUERY_FAILED, 'Failed to fetch active employee counts')
+    }
 
     // Build dept employee count map
     const deptEmpCount: Record<string, { name: string; count: number }> = {}
-    for (const emp of (empCounts ?? []) as any[]) {
+    for (const emp of empCounts as any[]) {
       const jh = (emp.job_history ?? []).find((j: any) => j.is_current) ?? (emp.job_history ?? [])[0] ?? null
       const deptId   = jh?.department_id ?? '__none__'
       const deptName = jh?.department_name ?? 'Unassigned'

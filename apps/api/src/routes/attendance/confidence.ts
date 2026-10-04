@@ -201,24 +201,34 @@ export default async function attendanceConfidenceRoute(fastify: FastifyInstance
     const level = parsed.data.level
     const { from, to } = monthDateRange(month)
 
-    let query = fastify.supabase
-      .from('attendance_daily')
-      .select(`
-        employee_id, date, confidence_score, confidence_level,
-        employees!inner(id, first_name, last_name, employee_code)
-      `)
-      .eq('tenant_id', req.tenantId)
-      .gte('date', from)
-      .lte('date', to)
-      .order('date', { ascending: true })
+    // fetchAllRows(): tenant-wide, month-range, no employee filter — a plain
+    // query would silently under-report confidence issues for a tenant with
+    // >1,000 qualifying rows in the month. .order('date').order('id') keeps
+    // the existing chronological ordering as primary and adds a stable
+    // tie-breaker so .range() pagination is deterministic across pages.
+    let data: any[]
+    try {
+      data = await fetchAllRows((from_, to_) => {
+        let query = fastify.supabase
+          .from('attendance_daily')
+          .select(`
+            employee_id, date, confidence_score, confidence_level,
+            employees!inner(id, first_name, last_name, employee_code)
+          `)
+          .eq('tenant_id', req.tenantId)
+          .gte('date', from)
+          .lte('date', to)
+          .order('date', { ascending: true })
+          .order('id', { ascending: true })
+          .range(from_, to_)
 
-    query = level === 'all'
-      ? query.in('confidence_level', ['low', 'critical'])
-      : query.eq('confidence_level', level)
+        query = level === 'all'
+          ? query.in('confidence_level', ['low', 'critical'])
+          : query.eq('confidence_level', level)
 
-    const { data, error } = await query
-
-    if (error) {
+        return query
+      })
+    } catch (error) {
       return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch confidence issues')
     }
 
@@ -231,7 +241,7 @@ export default async function attendanceConfidenceRoute(fastify: FastifyInstance
       scores:        number[]
     }>()
 
-    for (const row of (data ?? []) as Array<Record<string, any>>) {
+    for (const row of data as Array<Record<string, any>>) {
       const emp = Array.isArray(row.employees) ? row.employees[0] : row.employees
       if (!emp) continue
 

@@ -820,24 +820,33 @@ export default async function compensationRevisionsRoute(fastify: FastifyInstanc
 
     const empIds = cohort.map((e: any) => e.id)
 
-    // Current active compensation + existing pending revisions, in two batched reads.
-    const [{ data: comps }, { data: pendings }] = await Promise.all([
-      fastify.supabase
-        .from('employee_compensations')
-        .select('id, employee_id, ctc_annual, ctc_monthly, salary_structure_id')
-        .eq('tenant_id', req.tenantId)
-        .eq('is_active', true)
-        .in('employee_id', empIds),
-      fastify.supabase
-        .from('compensation_revisions')
-        .select('employee_id')
-        .eq('tenant_id', req.tenantId)
-        .eq('status', 'pending')
-        .in('employee_id', empIds),
-    ])
+    // Current active compensation + existing pending revisions, chunked:
+    // cohort can be the tenant's full headcount for a bulk revision cycle —
+    // can exceed a single .in() URL's safe size.
+    const comps: any[] = []
+    const pendings: any[] = []
+    for (let i = 0; i < empIds.length; i += 100) {
+      const chunkIds = empIds.slice(i, i + 100)
+      const [{ data: compChunk }, { data: pendingChunk }] = await Promise.all([
+        fastify.supabase
+          .from('employee_compensations')
+          .select('id, employee_id, ctc_annual, ctc_monthly, salary_structure_id')
+          .eq('tenant_id', req.tenantId)
+          .eq('is_active', true)
+          .in('employee_id', chunkIds),
+        fastify.supabase
+          .from('compensation_revisions')
+          .select('employee_id')
+          .eq('tenant_id', req.tenantId)
+          .eq('status', 'pending')
+          .in('employee_id', chunkIds),
+      ])
+      if (compChunk) comps.push(...compChunk)
+      if (pendingChunk) pendings.push(...pendingChunk)
+    }
 
-    const compByEmp    = new Map((comps ?? []).map((c: any) => [c.employee_id, c]))
-    const pendingByEmp = new Set((pendings ?? []).map((p: any) => p.employee_id))
+    const compByEmp    = new Map(comps.map((c: any) => [c.employee_id, c]))
+    const pendingByEmp = new Set(pendings.map((p: any) => p.employee_id))
     const empById      = new Map(cohort.map((e: any) => [e.id, e]))
 
     const rowsToInsert: any[] = []

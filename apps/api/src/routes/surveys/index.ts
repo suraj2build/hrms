@@ -801,13 +801,22 @@ export default async function surveyRoutes(fastify: FastifyInstance) {
     // could be created referencing another tenant's employee under this
     // tenant_id, corrupting completion stats and potentially exposing survey
     // content to a foreign employee.
+    // Chunked: empIds is caller-supplied with no upper bound, and this
+    // check FAILS CLOSED (any id not found in the response is rejected) —
+    // an unchunked, response-capped call would incorrectly reject real
+    // employees past the cap, not just silently under-report.
     const uniqueEmpIds = [...new Set(empIds)]
-    const { data: validEmps } = await supabase
-      .from('employees')
-      .select('id')
-      .eq('tenant_id', tenantId)
-      .in('id', uniqueEmpIds)
-    if ((validEmps?.length ?? 0) !== uniqueEmpIds.length) {
+    const validEmps: any[] = []
+    for (let i = 0; i < uniqueEmpIds.length; i += 100) {
+      const chunkIds = uniqueEmpIds.slice(i, i + 100)
+      const { data } = await supabase
+        .from('employees')
+        .select('id')
+        .eq('tenant_id', tenantId)
+        .in('id', chunkIds)
+      if (data) validEmps.push(...data)
+    }
+    if (validEmps.length !== uniqueEmpIds.length) {
       return reply.status(400).send({ error: 'INVALID_EMPLOYEES', message: 'One or more employees were not found in your organisation' })
     }
 
@@ -849,13 +858,20 @@ export default async function surveyRoutes(fastify: FastifyInstance) {
     // caller-supplied — verify every id belongs to this tenant, matching the
     // same check on /admin/trigger-lifecycle above and
     // /my/360/:roundId/nominate below.
+    // Chunked: employee_ids is caller-supplied with no upper bound, and this
+    // check FAILS CLOSED (same rationale as /admin/trigger-lifecycle above).
     const uniqueEmpIds = [...new Set(employee_ids)]
-    const { data: validEmps } = await supabase
-      .from('employees')
-      .select('id')
-      .eq('tenant_id', tenantId)
-      .in('id', uniqueEmpIds)
-    if ((validEmps?.length ?? 0) !== uniqueEmpIds.length) {
+    const validEmps: any[] = []
+    for (let i = 0; i < uniqueEmpIds.length; i += 100) {
+      const chunkIds = uniqueEmpIds.slice(i, i + 100)
+      const { data } = await supabase
+        .from('employees')
+        .select('id')
+        .eq('tenant_id', tenantId)
+        .in('id', chunkIds)
+      if (data) validEmps.push(...data)
+    }
+    if (validEmps.length !== uniqueEmpIds.length) {
       return reply.status(400).send({ error: 'INVALID_EMPLOYEES', message: 'One or more employees were not found in your organisation' })
     }
 
