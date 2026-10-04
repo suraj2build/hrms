@@ -6,14 +6,15 @@ sign-off. Nothing here should be read as GO.
 ## Source of truth (as of this commit)
 
 - **Branch:** `fix/g13-numeric-coercion-sweep`
-- **HEAD:** `c782c36a2590aa21af7619262b606ea7172361b9`
+- **HEAD:** `88c60b5bdb03027673ec2d764a211b7881d3acd3`
 - **Remote:** `origin` = `https://github.com/suraj2build/hrms` — this branch has
   **0 commits pushed**; `origin/fix/g13-numeric-coercion-sweep` does not exist yet.
 - **Working tree:** clean (no uncommitted changes) as of this commit.
-- **Unpushed commits:** 11 (full list via `git log --oneline` on this branch;
-  the 5 most recent, from this remediation pass — `f3e4ca4`, `f1fc6d4`,
-  `699e7c9`, `c20669d`, `c782c36` — are the ones with evidence in
-  EVIDENCE.md).
+- **Unpushed commits:** 15, measured as `git log --oneline main..HEAD` (the
+  correct base — this branch's divergence point from local `main`, not an
+  arbitrary earlier point in this conversation). The 7 most recent, from this
+  remediation pass — `f3e4ca4`, `f1fc6d4`, `699e7c9`, `c20669d`, `c782c36`,
+  `0bbeb3a`, `88c60b5` — are the ones with evidence in EVIDENCE.md.
 - **Push status:** paused per standing instruction — GitHub App access for
   this session has repeatedly 403'd ("Claude doesn't have GitHub access to
   suraj2build/hrms for your organization"). Do not retry until the user
@@ -94,9 +95,13 @@ Fixed this pass (local commits, not pushed):
   tenant) — also blocked on the same ownership decision.
 
 ### Phase 3 — Repair release checks: PARTIAL
-- `check-schema-drift.mjs`: **could not be run this pass** — Postgres is not
-  running in this container (`role "root" does not exist`; an environment
-  reset, not a code issue). Last known-good run was in an earlier session.
+- `check-schema-drift.mjs`: **ran successfully** — `sudo -u postgres node
+  scripts/db/check-schema-drift.mjs` → `✓ No schema drift: every referenced
+  column exists.` (478 tables). The earlier "could not be run — Postgres not
+  running" note in an prior version of this document was wrong: Postgres
+  was simply never started this pass (`service postgresql start`) and the
+  script needs to run as the `postgres` OS user (peer auth), not `root`.
+  Corrected here rather than left standing.
 - `check-tenant-isolation.mjs --ratchet` / `check-unbounded-queries.mjs --ratchet`:
   both **already exit 1 at clean HEAD**, before any change in this pass —
   verified via `git stash`. Root cause identified and reproduced exactly (see
@@ -118,23 +123,57 @@ Fixed this pass (local commits, not pushed):
 - Baselines: untouched, confirmed above (including after the checker
   refactor — `git diff --stat` on both baseline JSON files is empty).
 
-### Phase 4 — Prove correctness: PARTIAL
-- Regression tests: 7 new tests added this pass, all mutation-verified (see
-  EVIDENCE.md). Full suite: 38 files / 325 tests pass, `tsc --noEmit` clean.
-- `check-schema-drift.mjs`: blocked, see Phase 3.
+### Phase 4 — Prove correctness: SUBSTANTIAL PROGRESS, one gate still genuinely blocked
+- Regression tests: 9 new tests added this pass (7 pagination + 1 stale-
+  cleanup-chunking unit test + the 24Q/ECR/readiness set), all
+  mutation-verified (see EVIDENCE.md). Full suite: 39 files / 326 tests pass,
+  `tsc --noEmit` clean.
+- `check-schema-drift.mjs`: ran, clean (see Phase 3 — corrected from an
+  earlier wrong "blocked" note).
 - Release checks (`--ratchet`): both exit 1 for the pre-existing fingerprint
-  reason above, not for a new regression introduced this pass (verified: the
-  unbounded-queries finding count dropped 153→141 across this pass's fixes;
-  no new table/file this pass introduced a finding that wasn't already a
-  line-shifted pre-existing one — spot-checked, not exhaustively re-verified
-  for every one of the ~140 "new" entries).
-- **Real Postgres read-back reconciliation**: `scripts/g13-reconciliation-check.sh`
-  exists (committed in an earlier commit on this branch, self-cleaning,
-  assertion-driven) but has not been re-run this pass — Postgres is not up in
-  this container right now (see above).
-- **Real Supabase/PostgREST staging validation at 2,000+ employees**: **BLOCKED,
-  not passed.** This sandbox has no staging Supabase/PostgREST access. This
-  is reported as a blocker, not silently skipped or assumed-fine.
+  reason (section 2 of EVIDENCE.md), not for a new regression introduced
+  this pass (verified: the unbounded-queries finding count dropped 153→141
+  across this pass's fixes; no new table/file this pass introduced a finding
+  that wasn't already a line-shifted pre-existing one — spot-checked, not
+  exhaustively re-verified for every one of the ~140 "new" entries).
+- **Real Postgres read-back reconciliation**: Postgres, the PostgREST-shim
+  gateway, and the real API were all brought up in this container this pass.
+  `scripts/g13-reconciliation-check.sh` re-run: **21/21 assertions pass,
+  cleanup confirmed.**
+- **Real-scale pagination validation — ran, not blocked, but not real
+  Supabase**: `scripts/pagination-scale-check.sh` (new this pass) seeds
+  1,200 employees + finalized slips in real Postgres and drives the real ESI
+  compute endpoint through the gateway, which enforces the same
+  `MAX_ROWS=1000` real PostgREST does. **This run found a real, previously
+  undetected bug** (below) that no vitest mock surfaced, fixed it, and
+  re-ran clean: 6/6 assertions, independent SQL read-back confirms all 1,200
+  rows correct. This is genuinely stronger evidence than mocks — but it is
+  **still not real Supabase/PostgREST**: the gateway is a from-scratch
+  reimplementation (see its own header comment), not the genuine article,
+  and this was done for ESI only, not EPF/PTax/filing-pack/the 35 remaining
+  open defects, and not at 2,000+ scale (1,200 was enough to exceed the
+  1,000-row cap and did not need to go further).
+- **Real Supabase/PostgREST staging validation at 2,000+ employees**: **still
+  BLOCKED, not passed.** This sandbox has no staging Supabase/PostgREST
+  access — that gap is unchanged by the local-Postgres work above, which is
+  a meaningfully stronger proxy, not a substitute. Reported as a blocker,
+  not silently skipped or assumed-fine.
+
+**New finding from the real-scale run — `ADD-005` (see FINDINGS.csv):**
+`esi.ts` and `ptax.ts`'s stale-contribution-row cleanup built a single
+`.not('employee_id', 'in', (id1,id2,...))` with every kept employee id for
+the month encoded into one URL query parameter. At 1,200 employees that's a
+~44,000-character filter value — the request died before reaching the
+gateway at all (empty error, nothing in the gateway's own log), and the
+whole compute call 500'd. **Fixed** (commit `88c60b5`): compute the actual
+stale ids (existing rows minus kept, fetched with `fetchAllRows`) and delete
+them in `.in()`-chunks of 100. This is a genuinely new class of defect this
+pass's earlier work had not covered — a request-size failure on a DELETE's
+exclusion filter, not a response-truncation risk on a SELECT, and not
+something either static checker scans for (neither looks at `.delete()`
+chains). Found ONLY by running against a real HTTP transport at scale;
+caught by no unit test before this pass, now covered by both a mutation-
+verified real-stack run and a dedicated vitest regression test.
 
 ### Phase 5 — Enterprise qualification: BLOCKED, not started
 End-to-end UAT (admin/HR/manager/employee), concurrency/retry/failure-recovery

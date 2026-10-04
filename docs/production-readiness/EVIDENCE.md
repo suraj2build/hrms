@@ -1,6 +1,6 @@
 # Evidence log — this remediation pass
 
-HEAD at time of writing: `c782c36a2590aa21af7619262b606ea7172361b9`
+HEAD at time of writing: `88c60b5bdb03027673ec2d764a211b7881d3acd3`
 (branch `fix/g13-numeric-coercion-sweep`, local-only, not pushed)
 
 This is raw evidence for the claims in `STATUS.md`. Each section is something
@@ -117,6 +117,8 @@ run and its failure recorded, then the fixed file was restored via
 | `esi-wage-base-pagination.test.ts` | `esi_wages` 0 (expected 9500/9000) | PASS (1/1) |
 | `epf-wage-base-pagination.test.ts` | `pf_wages` **15000** (the `config.wageCeiling` fallback — a silently plausible-looking wrong number, not an obvious zero) (expected 9500/9000) | PASS (1/1) |
 | `ptax-wage-base-pagination.test.ts` | `gross_salary` 0 (expected 9500/9000) | PASS (1/1) |
+| `esi-stale-cleanup-chunking.test.ts` | (new fix, pre-fix code throws before the test's assertions — see §7's real-stack run for the actual pre-fix failure mode) | PASS (1/1) |
+| `scripts/pagination-scale-check.sh` (real stack, not vitest) | HTTP 500 `DELETE_FAILED` against 1,200 real employees — see §7 | PASS (6/6) |
 
 Each row above is the actual `AssertionError` message from the real
 pre-fix run, not a prediction.
@@ -161,7 +163,92 @@ additional defects (covering 5 call sites) found and fixed outside the
 register's scope. 35 register-listed CONFIRMED_DEFECT rows remain open — see
 `FINDINGS.csv` for the exact list (`status=OPEN`).
 
-## 6. Exact finding → fix mapping (tenant-isolation, 307-row register)
+## 7. Real-stack validation — Postgres + PostgREST-shim gateway + real API
+
+Earlier in this pass, `check-schema-drift.mjs` and any real-DB script were
+reported as "blocked — Postgres not running." That was imprecise: Postgres
+was simply never started, and needs `postgres` OS-user peer auth, not root.
+Corrected by actually bringing the stack up:
+
+```
+$ service postgresql start
+$ sudo -u postgres psql -c "ALTER USER postgres WITH PASSWORD 'postgres';"
+$ node /tmp/supabase-gateway.mjs &          # PostgREST-shim, MAX_ROWS=1000 enforced
+$ cd apps/api && npx tsx watch --env-file=.env src/index.ts &
+$ curl http://localhost:2001/health          # {"status":"ok",...}
+```
+
+**Schema drift**, re-run clean:
+```
+$ sudo -u postgres node scripts/db/check-schema-drift.mjs
+Applying migrations…
+Introspecting schema…
+  478 tables
+Auditing apps/api/src + seed script against schema…
+✓ No schema drift: every referenced column exists.
+```
+
+**g13-reconciliation-check.sh**, re-run clean:
+```
+$ PGHOST=127.0.0.1 PGUSER=postgres PGPASSWORD=postgres PGDATABASE=hrms \
+  API_URL=http://localhost:2001 GATEWAY_URL=http://localhost:9000 \
+  ./scripts/g13-reconciliation-check.sh
+...
+=== RESULT: 21 passed, 0 failed ===
+=== cleanup ===
+tenant ..., auth user ... and its identity row all confirmed removed.
+```
+
+**New: scripts/pagination-scale-check.sh** — 1,200 employees (> the 1,000-row
+cap), real ESI compute, independent SQL read-back. First run (before the
+fix below existed) failed with a genuinely new bug:
+
+```
+=== 1. ESI compute against 1200 employees (> the 1,000-row cap) ===
+  ✗ HTTP 500 from POST http://localhost:2001/payroll/statutory/esi/contributions/compute
+    body: {"error":"DELETE_FAILED","message":"Failed to clean up stale ESI contributions","requestId":"req-6"}
+```
+
+Root cause: `esi.ts`'s stale-contribution cleanup
+(`.not('employee_id','in', (id1,...,id1200))`) encodes every kept id into
+one URL query parameter — ~44,000 characters at 1,200 employees. The
+gateway's own log shows nothing for this request at all; it died before
+reaching the server. This is `ADD-005` in FINDINGS.csv — fixed in commit
+`88c60b5` (chunk the exclusion into `.in()` calls of 100), which also fixed
+the identical pattern in `ptax.ts`. Re-run after the fix:
+
+```
+=== 0. Fixtures: 1200 employees + finalized slips ===
+  ✓ fixture employee count = 1200
+
+=== 1. ESI compute against 1200 employees (> the 1,000-row cap) ===
+  compute response: {"computed_count":1200,...,"wages_from_slip":1200,"wages_fallback":0,"month":"2026-12"}
+  ✓ computed_count (API response) = 1200
+
+=== 2. Independent SQL read-back (not just the API's own claim) ===
+  ✓ persisted esi_contributions row count = 1200
+  ✓ sum(employee_contribution) across all 1200 rows = 85500.00
+  ✓ employees with esi_wages=0 (the pre-fix truncation signature) = 0
+  ✓ distinct esi_wages value (every employee has the same real 9500, not a mix of real + fallback-zero) = 1
+
+=== RESULT: 6 passed, 0 failed ===
+=== cleanup ===
+tenant ..., 1200 employees, auth user ... and its identity row all confirmed removed.
+```
+
+Mutation-tested the same way as the vitest tests: the pre-fix `esi.ts` was
+restored (as the committed state at `0bbeb3a`, before `88c60b5`), the script
+re-run, confirmed the same `DELETE_FAILED` 500, then the fix was restored
+and the script re-run clean a second time to confirm.
+
+**Caveat, stated plainly:** this is real Postgres and a real HTTP transport,
+which is why it caught a bug mocks could not. It is still not real
+Supabase/PostgREST — `/tmp/supabase-gateway.mjs` is an explicitly-labeled
+from-scratch reimplementation of PostgREST's wire behavior (NUMERIC-as-
+string, MAX_ROWS=1000, Content-Range headers), not the genuine Supabase
+service. The 2,000+ employee real-staging gate in STATUS.md remains open.
+
+## 8. Exact finding → fix mapping (tenant-isolation, 307-row register)
 
 **0 of the 307 tenant-isolation findings were fixed this pass.** The 3
 `CONFIRMED_DEFECT` rows (`payroll/runs.ts:1007,3273,3440`,
