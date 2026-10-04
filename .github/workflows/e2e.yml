@@ -1,6 +1,7 @@
 name: E2E Tests — Full Lifecycle
 
 on:
+  pull_request:              # G09: must gate merges — financial-figure mismatches (e.g. 05-payroll.spec.ts) now fail the job, not just warn
   workflow_dispatch:         # manual trigger from GitHub Actions UI
   schedule:
     - cron: '0 3 * * 1'    # every Monday 03:00 UTC (overnight, won't interrupt work)
