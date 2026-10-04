@@ -586,11 +586,17 @@ implementation and its real-stack proof.
    (real Postgres + the hand-built PostgREST-shim gateway) is real
    evidence, but it is not the same claim as proof against genuine
    Supabase/PostgREST at scale, which remains item 4 above.
-8. Still open from the standing instruction, not done this round:
-   - A coverage-mapping table tying each of the 24 individually-fixed
-     unbounded-query findings (UNB-ids) to its specific supporting
-     test/evidence, rather than one blanket claim from
-     `attendance-survey-truncation-check.sh`.
+8. ~~A coverage-mapping table tying each of the individually-fixed
+   unbounded-query findings (UNB-ids) to its specific supporting
+   test/evidence, rather than one blanket claim from
+   `attendance-survey-truncation-check.sh`~~ — **done**: `EVIDENCE.md` §10
+   maps all 47 `FIXED` `UNB-*` rows individually into dedicated-test (11),
+   real-stack-script (3, one of which — `UNB-150` — corrects an earlier
+   "no dedicated test" mislabel), self-documented-uncovered (1), and
+   generic-suite-only (32, honestly flagged as not individually verified)
+   buckets. `FINDINGS.csv`'s `UNB-149`/`UNB-150` rows were corrected to
+   credit the real coverage found.
+9. Still open from the standing instruction, not done this round:
    - The COMPLETE reconciliation of all 223 baseline-migration
      "unresolved" entries (item 5 above is still only a 12-entry sample) —
      including tracing the 29 entries attributable to `payroll/index.ts`'s

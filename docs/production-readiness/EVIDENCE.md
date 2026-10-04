@@ -962,3 +962,89 @@ and by cross-checking the restart log's timestamp against the edited file's
 run in this round that looked anomalously unchanged should be treated as
 possibly stale; the final RED→GREEN pairs recorded above were all taken
 after this was caught and corrected.
+
+## 10. Coverage mapping — every FIXED `UNB-*` finding, individually, not a blanket claim
+
+Per the explicit instruction: "the attendance/survey script validates
+selected workflows, not all 24 fixes. Keep evidence mapped to individual
+findings." §6e's "24 fixed... no new per-site test... this matches how
+every other mechanical pagination fix was handled" was true as written but
+easy to over-read as "the attendance/survey script covers this batch" — it
+doesn't, except for the two findings (`UNB-042`, `UNB-044`) it was written
+for. This section maps **all 47** `FIXED` `UNB-*` rows in `FINDINGS.csv`
+individually, not just the 24-ish batch, and corrects two rows whose
+blanket "no dedicated per-site test" label undersold real coverage that
+exists elsewhere.
+
+**Category A — dedicated per-site test (named, exercises this exact
+file:line's endpoint):**
+
+| UNB-id | File:Line | Test |
+|---|---|---|
+| UNB-112 | `filing-pack.ts:114` | `filing-pack-24q-pagination.test.ts` |
+| UNB-113 | `filing-pack.ts:265` | `filing-pack-readiness-pagination.test.ts` |
+| UNB-114 | `filing-pack.ts:290` | `filing-pack-readiness-pagination.test.ts` |
+| UNB-115 | `filing-pack.ts:302` | `filing-pack-readiness-pagination.test.ts` |
+| UNB-128 | `statutory/epf.ts:382` | `epf-wage-base-pagination.test.ts` |
+| UNB-129 | `statutory/epf.ts:423` | `epf-wage-base-pagination.test.ts` |
+| UNB-131 | `statutory/esi.ts:404` | `esi-wage-base-pagination.test.ts` |
+| UNB-132 | `statutory/esi.ts:437` | `esi-wage-base-pagination.test.ts` |
+| UNB-134 | `statutory/ptax.ts:494` | `ptax-wage-base-pagination.test.ts` |
+| UNB-135 | `statutory/ptax.ts:512` | `ptax-wage-base-pagination.test.ts` |
+| UNB-137 | `statutory/tds-bulk.ts:483` | `tds-reconciliation-pagination.test.ts` |
+| UNB-149 | `surveys/index.ts:806` (`/admin/trigger-lifecycle`) | `trigger-lifecycle-ownership-chunking.test.ts` (3 cases: 150 ids/2 chunks, foreign-tenant id in 2nd chunk rejected, chunk-query error surfaced as 500) — **correction**: `FINDINGS.csv`'s "no dedicated per-site test" label for this row is wrong; this test targets `POST /admin/trigger-lifecycle` directly. |
+
+**Category B — real-stack script coverage (named step, real Postgres + real
+API, not a mock):**
+
+| UNB-id | File:Line | Script : step |
+|---|---|---|
+| UNB-042 | `attendance/confidence.ts:88` | `attendance-survey-truncation-check.sh` §1 — 1,200-row single-employee fixture, asserts `total_days=1200`/`critical_days=120` (not the 1,000-row cap); mutation-tested RED (1000/100) → GREEN |
+| UNB-044 | `attendance/context.ts:70` | `attendance-survey-truncation-check.sh` §2 — 60-employee missing-punches fixture, asserts `count=60` (true total) ≠ `employees.length=50` (capped display) |
+| UNB-150 | `surveys/index.ts:854` (`/admin/:id/360/setup`) | `attendance-survey-truncation-check.sh` §3 — 105 ids (104 real + 1 foreign at position 105, past the first 100-id chunk boundary), asserts `POST /admin/:id/360/setup` still rejects `INVALID_EMPLOYEES` — **correction**: `FINDINGS.csv` doesn't currently credit this row with the script at all; it does cover it. |
+
+**Category C — self-documented as NOT covered (already honest in
+`FINDINGS.csv`, no correction needed):**
+
+| UNB-id | File:Line | Why |
+|---|---|---|
+| UNB-127 | `statutory-recon.ts:76` | `FINDINGS.csv`'s own note: "sum-correctness only, not yet covered." Confirmed: `g13-reconciliation-check.sh` exercises ESI/EPF/PTax wage-base and filing-pack challan endpoints, but never calls `GET /payroll/statutory-reconciliation` (the endpoint this line belongs to) — the self-assessment is accurate, not a gap this pass closes. |
+
+**Category D — generic suite only (`tsc --noEmit` + `vitest run`, 41
+files/334 tests, plus the shared `fetchAllRows()`/chunk-by-100 helper's own
+tests in `supabase-paginate.test.ts`) — no test exercises this specific
+file:line's endpoint:**
+
+```
+UNB-003  absconding-engine.ts:904        UNB-006  assistant-tools.ts:786
+UNB-010  attendance-engine.ts:1319       UNB-022  import-engine/validator.ts:1265
+UNB-023  import-engine/validator.ts:1298 UNB-024  intelligence-scanner.ts:625
+UNB-026  intelligence-scanner.ts:899     UNB-030  org-context.ts:358
+UNB-036  shift-resolution-engine.ts:323  UNB-038  attendance/anomalies.ts:144
+UNB-039  attendance/anomalies.ts:163     UNB-041  attendance/comp-off.ts:141
+UNB-043  attendance/confidence.ts:205    UNB-047  attendance/health-index.ts:499
+UNB-053  attendance/leave.ts:1147        UNB-054  attendance/leave.ts:1171
+UNB-061  attendance/overtime.ts:345      UNB-063  attendance/wo-credit.ts:208
+UNB-064  attendance/work-sessions.ts:65  UNB-068  compensation/revisions.ts:826
+UNB-083  executive/index.ts:1037         UNB-096  manager/team-payroll-cost.ts:127
+UNB-097  masters/leave-policy-assignments.ts:119
+UNB-105  payroll/arrears.ts:157          UNB-106  payroll/arrears.ts:243
+UNB-119  payroll/ops-dashboard.ts:490    UNB-121  payroll/runs.ts:2228
+UNB-122  payroll/runs.ts:2367            UNB-124  payroll/runs.ts:3421
+UNB-142  payroll/variable-pay.ts:242     UNB-146  recognition/index.ts:873
+```
+(32 rows.) These are mechanical conversions (unbounded tenant-wide scan →
+`fetchAllRows()`, or an unbounded `.in()` lookup → chunk-by-100) using a
+pattern already proven correct by the tests in Category A, but **that does
+not substitute for per-site verification**: a copy-paste error in any one
+of these 32 call sites (wrong column name, wrong tenant filter, an
+off-by-one in the chunk loop) would not be caught by any test in this
+repository today. This is the honest state of coverage, not a blanket
+"tested" claim.
+
+**Net correction to §6e/6f's framing:** 11 rows have a dedicated unit test,
+3 have real-stack-script coverage (one of which, UNB-150, was previously
+uncredited), 1 is self-documented as genuinely uncovered, and 32 rely
+entirely on the generic suite plus the shared pattern's own tests. A human
+deciding whether to treat "all 47 UNB fixes" as release-ready should weigh
+those 32 differently from the 15 with direct evidence.
