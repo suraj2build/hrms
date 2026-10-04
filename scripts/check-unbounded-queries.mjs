@@ -40,10 +40,12 @@
  *   node scripts/check-unbounded-queries.mjs --save-baseline  # record current state
  *   node scripts/check-unbounded-queries.mjs --ratchet        # CI: fail only on NEW
  *   node scripts/check-unbounded-queries.mjs --summary        # one-line summary only
- *   node scripts/check-unbounded-queries.mjs --stable-key     # key findings by a
- *     line-number-independent fingerprint instead of file:line:table (see
- *     scripts/lib/finding-fingerprint.mjs) — opt-in only; not wired into the
- *     default --ratchet/--save-baseline path, which is unchanged.
+ *   node scripts/check-unbounded-queries.mjs --legacy-line-key # key findings
+ *     by the old file:line:table scheme instead of the stable fingerprint
+ *     (see scripts/lib/finding-fingerprint.mjs). Stable-key is now the
+ *     DEFAULT (G08) — unbounded-queries-baseline.json was migrated to that
+ *     format; the old scheme is kept only for debugging/comparison and no
+ *     longer matches the live baseline's format.
  *
  * Suppression:
  *   Add a // lint-query-ok: <reason> comment on the line immediately before the
@@ -69,11 +71,11 @@ const argSet       = new Set(process.argv.slice(2))
 const saveBaseline = argSet.has('--save-baseline')
 const ratchet      = argSet.has('--ratchet')
 const summaryOnly  = argSet.has('--summary')
-// Opt-in only — see scripts/lib/finding-fingerprint.mjs. Combining this with
-// --ratchet/--save-baseline against the EXISTING line-keyed baseline will
-// look like "everything is new": the two key schemes are not interchangeable
-// without a deliberate, explicit baseline migration.
-const useStableKey = argSet.has('--stable-key')
+// G08: stable-key is now the default — unbounded-queries-baseline.json was
+// migrated to this format (see apply-stable-key-baseline-migration.mjs).
+// --legacy-line-key opts back into the old file:line:table scheme, which no
+// longer matches the live baseline's format and is kept only for debugging.
+const useStableKey = !argSet.has('--legacy-line-key')
 
 const allFindings = SCAN_DIRS.flatMap(dir => walkTs(dir)).flatMap(f => checkFile(f, ROOT))
 

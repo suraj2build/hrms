@@ -41,11 +41,23 @@ export const DOCUMENTED_EXCEPTIONS = new Map([
 const WINDOW_CHARS = 800
 
 // ── File walker ───────────────────────────────────────────────────────────────
+// Test files use mocked supabase clients (see e.g.
+// routes/intelligence/__tests__/search-missing-pan.test.ts,
+// routes/surveys/__tests__/trigger-lifecycle-ownership-chunking.test.ts) —
+// a `.from('table')` call in a mock's own implementation is not a real
+// PostgREST query and cannot leak cross-tenant data. Scanning them is a
+// category error that produces permanent false positives.
+function isTestFile(name) {
+  return name.endsWith('.test.ts') || name.endsWith('.spec.ts')
+}
+
 export function* walkTs(dir) {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     const full = join(dir, entry.name)
-    if (entry.isDirectory()) yield* walkTs(full)
-    else if (entry.name.endsWith('.ts')) yield full
+    if (entry.isDirectory()) {
+      if (entry.name === '__tests__') continue
+      yield* walkTs(full)
+    } else if (entry.name.endsWith('.ts') && !isTestFile(entry.name)) yield full
   }
 }
 

@@ -16,10 +16,12 @@
  *   node scripts/check-tenant-isolation.mjs --summary   # summary line only
  *   node scripts/check-tenant-isolation.mjs --save-baseline   # record current state
  *   node scripts/check-tenant-isolation.mjs --ratchet   # fail only on NEW violations
- *   node scripts/check-tenant-isolation.mjs --stable-key # key violations by a
- *     line-number-independent fingerprint instead of file:line:table (see
- *     scripts/lib/finding-fingerprint.mjs) — opt-in only; not wired into the
- *     default --ratchet/--save-baseline path, which is unchanged.
+ *   node scripts/check-tenant-isolation.mjs --legacy-line-key # key violations
+ *     by the old file:line:table scheme instead of the stable fingerprint
+ *     (see scripts/lib/finding-fingerprint.mjs). Stable-key is now the
+ *     DEFAULT (G08) — tenant-isolation-baseline.json was migrated to that
+ *     format; the old scheme is kept only for debugging/comparison and no
+ *     longer matches the live baseline's format.
  *
  * Ratchet workflow (recommended for CI on brownfield codebases):
  *   1. Run --save-baseline once to capture the current state.
@@ -58,11 +60,11 @@ const args        = new Set(process.argv.slice(2))
 const summaryOnly = args.has('--summary')
 const saveBaseline= args.has('--save-baseline')
 const ratchet      = args.has('--ratchet')
-// Opt-in only — see scripts/lib/finding-fingerprint.mjs. Combining this with
-// --ratchet/--save-baseline against the EXISTING line-keyed baseline will
-// look like "everything is new": the two key schemes are not interchangeable
-// without a deliberate, explicit baseline migration.
-const useStableKey = args.has('--stable-key')
+// G08: stable-key is now the default — tenant-isolation-baseline.json was
+// migrated to this format (see apply-stable-key-baseline-migration.mjs).
+// --legacy-line-key opts back into the old file:line:table scheme, which no
+// longer matches the live baseline's format and is kept only for debugging.
+const useStableKey = !args.has('--legacy-line-key')
 
 const allViolations = []
 for (const dir of [ROUTES_DIR, LIBS_DIR]) {

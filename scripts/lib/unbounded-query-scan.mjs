@@ -66,12 +66,25 @@ const WINDOW_CHARS = 1200
 // Chars to scan BEFORE .from() to detect fetchAllRows() wrapper call.
 const LOOKBACK_CHARS = 300
 
+// Test files use mocked supabase clients (see e.g.
+// routes/intelligence/__tests__/search-missing-pan.test.ts,
+// routes/surveys/__tests__/trigger-lifecycle-ownership-chunking.test.ts) —
+// a `.from('table')` call in a mock's own implementation is not a real
+// PostgREST query and cannot silently truncate or leak cross-tenant data.
+// Scanning them is a category error that produces permanent false
+// positives in both the unbounded-query and tenant-isolation registers.
+function isTestFile(name) {
+  return name.endsWith('.test.ts') || name.endsWith('.spec.ts')
+}
+
 export function walkTs(dir, out = []) {
   if (!fs.existsSync(dir)) return out
   for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
     const full = path.join(dir, e.name)
-    if (e.isDirectory()) walkTs(full, out)
-    else if (e.name.endsWith('.ts')) out.push(full)
+    if (e.isDirectory()) {
+      if (e.name === '__tests__') continue
+      walkTs(full, out)
+    } else if (e.name.endsWith('.ts') && !isTestFile(e.name)) out.push(full)
   }
   return out
 }
