@@ -570,7 +570,7 @@ export default async function separationWorkflowRoutes(fastify: FastifyInstance)
 
     const { data: ff, error: fetchErr } = await fastify.supabase
       .from('separation_ff_summary')
-      .select('id, status')
+      .select('id, status, computed_at, salary_basis_gross, salary_basis_basic')
       .eq('employee_id', req.params.id)
       .eq('tenant_id', req.tenantId)
       .maybeSingle()
@@ -581,6 +581,37 @@ export default async function separationWorkflowRoutes(fastify: FastifyInstance)
       return reply.code(404).send({ error: 'NOT_FOUND', message: 'F&F record not found' })
     if (ff.status === 'approved' || ff.status === 'paid')
       return reply.code(409).send({ error: 'INVALID_STATE', message: `Cannot approve: current status is '${ff.status}'` })
+
+    // G03: approval must not lock in a STALE calculation. If this record was
+    // last computed via POST /compute (computed_at is set — a pure manual
+    // entry via POST /separation-ff, never computed, has computed_at=null
+    // and is HR's own responsibility, not something to "recompute"),
+    // re-run the SAME computation now and compare its salary basis against
+    // what's stored. A correction to a finalized slip, a later finalized
+    // run, or a gratuity-config change between compute and approve would
+    // otherwise approve a card the employee/HR never actually reviewed the
+    // current numbers for — the exact "approving stale F&F calculations"
+    // gap the original audit finding described, which filtering the salary-
+    // basis query for status='finalized' alone does not close by itself.
+    if (ff.computed_at) {
+      const fresh = await computeFnfSettlement(fastify.supabase, req.tenantId, req.params.id)
+      if ('error' in fresh) {
+        return reply.code(409).send({ error: 'RECOMPUTE_FAILED', message: `Cannot verify this settlement is still current: ${fresh.error}. Resolve the issue and recompute before approving.` })
+      }
+      const basisChanged =
+        Math.abs(Number(fresh.salary_basis_gross) - Number(ff.salary_basis_gross ?? 0)) > 0.01 ||
+        Math.abs(Number(fresh.salary_basis_basic) - Number(ff.salary_basis_basic ?? 0)) > 0.01
+      if (basisChanged) {
+        return reply.code(409).send({
+          error:   'STALE_CALCULATION',
+          message: 'The settlement inputs have changed since this was last computed (e.g. a corrected or newly finalized payroll slip). Recompute via POST /separation-ff/compute and review the updated figures before approving.',
+          stored_salary_basis_gross: ff.salary_basis_gross,
+          stored_salary_basis_basic: ff.salary_basis_basic,
+          current_salary_basis_gross: fresh.salary_basis_gross,
+          current_salary_basis_basic: fresh.salary_basis_basic,
+        })
+      }
+    }
 
     // Fold the 'draft' precondition into the WHERE clause — the earlier
     // SELECT is a separate query, so two concurrent approve requests could
