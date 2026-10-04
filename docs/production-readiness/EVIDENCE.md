@@ -992,6 +992,229 @@ run in this round that looked anomalously unchanged should be treated as
 possibly stale; the final RED→GREEN pairs recorded above were all taken
 after this was caught and corrected.
 
+## 9b. Correction round — G02/G03/G04/G06 first passes were insufficient; closed properly
+
+A review of §9 above correctly rejected all four of G02/G03/G04/G06 as
+reported there: each first pass fixed only the half of the finding that was
+easiest to reach, and left the half that actually mattered — blocking
+behaviour, stale-calculation invalidation, exact commit ordering under
+failure, and the frontend consumer — either unfixed or untested. This
+section documents what changed in response. §9 above is left unmodified as
+the historical record of the first pass; this section is the current,
+correct state and supersedes it wherever the two disagree.
+
+### G02 — correction: a visible warning is not a release blocker
+
+The §9 fix left `LOP_EXCESSIVE` as `severity:'warning'`/`blocking:false` —
+finalize could proceed regardless of how impossible the LOP count was. That
+is not what a P0 release blocker requires. Fixed in
+`payroll-blocker-engine.ts`:
+
+```ts
+LOP_EXCESSIVE: {
+  code: 'LOP_EXCESSIVE',
+  name: 'Excessive LOP Days',
+  description: 'LOP days exceed total working days for the period.',
+  severity: 'critical',
+  blocking: true,
+  stage: 'slip_validation',
+  remediation_route: '/admin/attendance/muster-roll',
+},
+```
+
+This routes it through `runs.ts`'s existing Open-blockers gate, which now
+rejects finalize with `422 OPEN_BLOCKERS` by default. The escape hatch is
+the pre-existing `force_finalize` + `override_reason` mechanism
+(super_admin-gated, dual-control — the maker cannot be the one who
+overrides). Using it now persists onto the specific blocker row, not just a
+log line:
+
+```ts
+const { error: overrideBlockerErr } = await fastify.supabase
+  .from('payroll_run_blockers')
+  .update({
+    status:          'ignored',
+    resolved_by:     req.userId,
+    resolved_at:     new Date().toISOString(),
+    resolution_note: `force_finalize override: ${override_reason ?? '(no reason provided)'}`,
+  })
+  .in('id', openBlockers!.map((b: any) => b.id))
+```
+
+`scripts/g02-lop-exceeds-working-days-check.sh` was rewritten to drive this
+through the real endpoint with two distinct `super_admin` identities (maker
+and checker), pre-clearing the attendance-lock and validation-run gates so
+the test isolates `LOP_EXCESSIVE` specifically:
+
+```
+maker call: HTTP 202 — PENDING_CHECKER
+checker call (no override): HTTP 422 — OPEN_BLOCKERS
+✓ checker's unprivileged attempt is REJECTED — run stays draft, maker_checker_log stays pending
+checker call (force_finalize + override_reason): HTTP 200 — finalized
+✓ payroll_run_blockers row: status=ignored, resolved_by=<checker>, resolution_note contains the override reason
+RESULT: 19 passed, 0 failed
+```
+
+Mutation test (reverting `blocking:true`→`false`): the checker's
+unprivileged call now wrongly returns 200 instead of 422 — RED; restored:
+19/19 green.
+
+### G03 — correction: proving staleness invalidation, not just the salary source
+
+The §9 fix stopped `fnf-settlement-engine.ts` from reading a draft slip
+instead of a finalized one, but did nothing about a settlement that was
+already computed and is pending approval when a LATER change (a correction,
+or a slip that gets finalized afterward) invalidates the numbers it was
+computed from. `separation-workflow.ts`'s `PATCH /approve` now re-runs
+`computeFnfSettlement()` when the record has a `computed_at` (nothing to
+recompute for a pure manual entry) and compares the fresh salary basis
+against what's stored:
+
+```ts
+if (ff.computed_at) {
+  const fresh = await computeFnfSettlement(fastify.supabase, req.tenantId, req.params.id)
+  if ('error' in fresh) {
+    return reply.code(409).send({ error: 'RECOMPUTE_FAILED', message: `Cannot verify this settlement is still current: ${fresh.error}. Resolve the issue and recompute before approving.` })
+  }
+  const basisChanged =
+    Math.abs(Number(fresh.salary_basis_gross) - Number(ff.salary_basis_gross ?? 0)) > 0.01 ||
+    Math.abs(Number(fresh.salary_basis_basic) - Number(ff.salary_basis_basic ?? 0)) > 0.01
+  if (basisChanged) {
+    return reply.code(409).send({
+      error: 'STALE_CALCULATION',
+      message: 'The settlement inputs have changed since this was last computed (e.g. a corrected or newly finalized payroll slip). Recompute via POST /separation-ff/compute and review the updated figures before approving.',
+      stored_salary_basis_gross: ff.salary_basis_gross,
+      stored_salary_basis_basic: ff.salary_basis_basic,
+      current_salary_basis_gross: fresh.salary_basis_gross,
+      current_salary_basis_basic: fresh.salary_basis_basic,
+    })
+  }
+}
+```
+
+`scripts/g03-fnf-settlement-last-finalized-slip-check.sh` was extended:
+after the original compute (picks up the finalized slip, gross=50000), the
+previously-draft slip is finalized with divergent numbers (gross=99999),
+then:
+
+```
+PATCH /approve (before recompute): HTTP 409 — STALE_CALCULATION
+  stored_salary_basis_gross=50000.00 current_salary_basis_gross=99999.00
+✓ approval is rejected; F&F record stays 'draft', not falsely approved
+POST /compute (recompute): picks up 99999
+PATCH /approve (after recompute): HTTP 200 — status=approved
+RESULT: 9 passed, 0 failed
+```
+
+Mutation test (reverting the staleness block): the first `PATCH /approve`
+call wrongly returns 200 against the stale 50000 basis instead of 409 — RED;
+restored: 9/9 green.
+
+### G04 — correction: the commit was still one failure point too early
+
+The §9 fix moved the maker-checker commit from "before all the finalize
+gates" to "immediately before Step 1" — which closed the original gap but
+left the *same class* of bug one layer deeper: a failure in Step 1 itself,
+or in Step 2 (the atomic `payroll_runs` status seal,
+`.in('status',['draft','partial_failed'])` + row-count check), could still
+leave `maker_checker_log` claiming "approved" for a finalize that did not
+durably happen. The commit is now deferred until immediately AFTER Step 2's
+success check — the only point at which finalize is guaranteed to have
+actually gone through — in `runs.ts`:
+
+```ts
+// G04: commit the maker-checker approval/auto-approval NOW — only here,
+// after Step 1 AND Step 2 have both durably succeeded.
+{
+  const { error: mcCommitError } = await commitMakerCheckerApproval()
+  if (mcCommitError) {
+    req.log.error({ err: mcCommitError, run_id: id }, 'payroll finalize: four-eyes approval commit failed AFTER the run was durably finalized (non-fatal)')
+    await logRunEvent(fastify.supabase, req.log, {
+      tenant_id: tenantId, run_id: id, event_type: 'maker_checker_commit_failed',
+      payload: { stage: 'finalize_post_seal' },
+      error_details: { message: String((mcCommitError as any)?.message ?? mcCommitError) },
+    })
+  }
+}
+```
+
+placed right after the `RUN_STATE_CHANGED` conflict-check that follows
+Step 2's atomic update, and before the statutory-contributions step. A
+failure there is forensic-logged only — finalize has already genuinely
+succeeded by then, and `ALREADY_FINALIZED` blocks re-entry, so there is no
+retry path for the commit itself to fail into.
+
+`scripts/g04-maker-checker-approval-ordering-check.sh` gained two new
+sections, exactly matching the review's demand to test "downstream failure,
+retry, and concurrency, not just passing preliminary gates":
+
+- **§6 (downstream failure + retry):** every finalize gate pre-cleared, then
+  `payroll_runs.status` is flipped to `'processing'` by direct SQL between
+  the maker's proposal and the checker's call — a value that passes the
+  top-of-handler checks but fails Step 2's `draft`/`partial_failed` filter:
+  ```
+  checker approve while run is mid-flight (status=processing): HTTP 409 — RUN_STATE_CHANGED
+  ✓ maker_checker_log is STILL pending — the downstream Step 2 failure did not commit a false approval
+  checker retry after the run is restored to draft: HTTP 200 — finalized
+  ✓ ONLY on the successful retry does maker_checker_log flip to approved
+  ```
+- **§7 (concurrency):** two simultaneous `curl` calls to the same
+  checker-approve endpoint on the same run:
+  ```
+  concurrent call A: HTTP 200 — finalized
+  concurrent call B: HTTP 409 — RUN_STATE_CHANGED
+  ✓ exactly one of the two concurrent approve calls won (200)
+  ✓ run ends up finalized exactly once
+  ✓ exactly one maker_checker_log row exists for this run, and it is 'approved' — not duplicated by the race
+  ```
+- Full result: `RESULT: 22 passed, 0 failed`.
+
+Mutation test against the exact prior-round code the review flagged
+(commit call restored to immediately before "Step 1: Finalize draft
+slips"): §6 and §7 both go RED — the mid-flight failure and the losing
+concurrent call both leave `maker_checker_log` already flipped to approved
+even though Step 2 rejected them; restored: 22/22 green.
+
+### G06 — correction: a backend fix nobody could actually reach
+
+The §9 fix made `/reports/statutory` require a `month` param and read the
+real contribution tables, but its only real consumer —
+`apps/web/.../Reports.tsx`'s `StatutoryReport` tab — had no month state at
+all, so every request from the actual UI would have 400'd. Wired in
+`usePayrollMonthState()` (the same anchor-based hook five other tabs on the
+same page already use; backed by `GET /datasets/payroll-cost/anchor`, "the
+latest month that actually has finalized payroll slips" — directly
+answering "does it reconcile to the intended finalized payroll period"):
+
+```tsx
+function StatutoryReport({ departments, basePath }: { departments: Department[]; basePath: string }) {
+  const [month, setMonth] = usePayrollMonthState()
+  ...
+  <FilterField label="Contribution month">
+    <Input type="month" value={month} onChange={e => setMonth(e.target.value)} className="h-8 text-xs w-36" />
+  </FilterField>
+```
+
+Verified in a real browser (Playwright against the pre-installed chromium
+binary, not a `tsc`/lint pass): signed up a fresh `hr_admin` through the
+real signup flow, logged in through the real login form, navigated to the
+tab, and confirmed against seeded real contribution rows (deliberately
+divergent from the old CTC formula) that the month input defaults correctly
+and the rendered PF/ESI figures are the real ones — ESI shown as applicable
+at a CTC level the old formula would have excluded, visible proof the real
+backend contract is actually wired into the page a user would load, not
+just a passing type-check.
+
+### Net effect
+
+All four corrections were verified the same way as every other fix in this
+engagement: reproduce the exact gap the review named against the real
+stack, write/extend a script that proves it, confirm RED on the
+pre-correction code, confirm GREEN after. None of the four are now reported
+as closed solely on the strength of the §9 narration above — §9's own
+evidence only ever covered half of each finding, which is exactly what the
+review caught.
+
 ## 10. Coverage mapping — every FIXED `UNB-*` finding, individually, not a blanket claim
 
 Per the explicit instruction: "the attendance/survey script validates
