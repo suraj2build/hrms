@@ -888,10 +888,12 @@ async function executePayrollRun(
         // with zero callers anywhere in the repo — dead code — so no
         // visible, actionable signal reached HR through the Resolution
         // Center that this employee's figures rest on bad attendance data.
-        // Insert a non-blocking LOP_EXCESSIVE blocker (does not exclude
-        // this employee from the run or affect finalize eligibility — same
-        // severity/blocking the rule already carries) so it surfaces
-        // exactly like every other data-quality blocker.
+        // Insert a LOP_EXCESSIVE blocker (does not exclude this employee
+        // from the run — the draft slip above is still created — but DOES
+        // block finalization by default, same severity/blocking the rule
+        // definition carries; see "G02" in payroll-blocker-engine.ts). HR
+        // must resolve the attendance data or explicitly override via
+        // force_finalize + override_reason to finalize past it.
         if (computed.result.lop_days > computed.result.total_working_days) {
           const lopBlockerRows = buildPayrollBlockers({
             tenantId, runId,
@@ -2363,6 +2365,30 @@ export default async function payrollRunsRoutes(fastify: FastifyInstance) {
           { run_id: id, month: run.month, overridden_by: req.userId, override_reason: override_reason ?? '(none)', blocker_count: openBlockers!.length },
           'payroll finalization override: proceeding despite open blockers',
         )
+        // Persist the override onto the blocker rows themselves (not just a
+        // structured log line) — "ignored" plus who/when/why, reusing
+        // payroll_run_blockers' own resolved_by/resolved_at/resolution_note
+        // columns. This is the durable, queryable record of the "explicitly
+        // approved business rule" force_finalize is meant to represent (see
+        // "G02" above); a log line alone isn't enough to answer "who signed
+        // off on finalizing this run with excessive LOP/other blockers open"
+        // after the fact. Non-fatal: never block finalization over this
+        // write failing — the structured log above already captures it.
+        const { error: overrideBlockerErr } = await fastify.supabase
+          .from('payroll_run_blockers')
+          .update({
+            status:          'ignored',
+            resolved_by:     req.userId,
+            resolved_at:     new Date().toISOString(),
+            resolution_note: `force_finalize override: ${override_reason ?? '(no reason provided)'}`,
+          })
+          .in('id', openBlockers!.map((b: any) => b.id))
+        if (overrideBlockerErr) {
+          req.log.error(
+            { err: overrideBlockerErr, run_id: id },
+            'payroll finalization override: failed to persist the override onto the blocker rows (non-fatal — the structured log above still records it)',
+          )
+        }
       }
     }
 

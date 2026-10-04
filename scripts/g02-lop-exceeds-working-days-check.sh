@@ -19,10 +19,19 @@
 #      computePayrollSlip's existing safety net (finalizeDeductionsAndNet)
 #      correctly caps total_deductions at gross_pay and floors net_pay at 0
 #      — NOT corrupted, NOT negative, NOT NaN.
-#   3. Confirms the NEW fix: a non-blocking LOP_EXCESSIVE payroll_run_blocker
-#      is now created for this employee (previously nothing — the only
-#      check for this condition was dead code with zero callers), without
-#      excluding them from the run or blocking retry/finalize eligibility.
+#   3. Confirms the NEW fix: a LOP_EXCESSIVE payroll_run_blocker is now
+#      created for this employee (previously nothing — the only check for
+#      this condition was dead code with zero callers), without excluding
+#      them from the run (the draft slip is still created) — but DOES now
+#      BLOCK finalization of the run through the real finalize endpoint,
+#      per the later correction that a visible-but-non-blocking warning
+#      does not satisfy this release blocker: excessive LOP is a data-
+#      integrity red flag, not a legitimate pay outcome, so it must either
+#      block or be overridden through an explicit, audited business
+#      decision — not pass silently. force_finalize + override_reason is
+#      that explicit decision; using it now persists the override onto the
+#      specific blocker row (status='ignored', resolved_by, resolved_at,
+#      resolution_note), not just a log line.
 #
 # Two MORE real bugs found and fixed while building this real-endpoint
 # reproduction (not assumed — each confirmed by running into it, then
@@ -106,12 +115,17 @@ TENANT_ID=$(psqlc -c "SELECT gen_random_uuid();")
 EMP_ID=$(psqlc -c "SELECT gen_random_uuid();")
 COMP_ID=$(psqlc -c "SELECT gen_random_uuid();")
 BASIC_COMPONENT_ID=$(psqlc -c "SELECT gen_random_uuid();")
-HR_EMAIL="g02-lop-$(date +%s)@cognixhr.app"
+TS=$(date +%s)
+HR_EMAIL="g02-lop-$TS@cognixhr.app"
+CHECKER_EMAIL="g02-checker-$TS@cognixhr.app"
 
 cleanup() {
   local exit_code=$?
   echo
   echo "=== cleanup ==="
+  psqlc -c "DELETE FROM maker_checker_log WHERE tenant_id = '$TENANT_ID';" > /dev/null 2>&1 || true
+  psqlc -c "DELETE FROM payroll_validation_runs WHERE tenant_id = '$TENANT_ID';" > /dev/null 2>&1 || true
+  psqlc -c "DELETE FROM attendance_period_locks WHERE tenant_id = '$TENANT_ID';" > /dev/null 2>&1 || true
   psqlc -c "UPDATE payroll_runs SET status = 'draft' WHERE tenant_id = '$TENANT_ID';" > /dev/null 2>&1 || true
   psqlc -c "DELETE FROM payroll_run_blockers WHERE tenant_id = '$TENANT_ID';" > /dev/null 2>&1 || true
   psqlc -c "DELETE FROM payroll_slips WHERE tenant_id = '$TENANT_ID';" > /dev/null 2>&1 || true
@@ -122,17 +136,34 @@ cleanup() {
   psqlc -c "DELETE FROM attendance_daily WHERE tenant_id = '$TENANT_ID';" > /dev/null 2>&1 || true
   psqlc -c "DELETE FROM profiles WHERE tenant_id = '$TENANT_ID';" > /dev/null 2>&1 || true
   psqlc -c "DELETE FROM employees WHERE tenant_id = '$TENANT_ID';" > /dev/null 2>&1 || true
-  psqlc -c "DELETE FROM tenants WHERE id = '$TENANT_ID';" > /dev/null 2>&1 || true
-  psqlc -c "DELETE FROM auth.identities WHERE provider_id IN (SELECT id::text FROM auth.users WHERE email = '$HR_EMAIL');" > /dev/null 2>&1 || true
-  psqlc -c "DELETE FROM auth.users WHERE email = '$HR_EMAIL';" > /dev/null 2>&1 || true
-  local left
+  psqlc -c "DELETE FROM auth.identities WHERE provider_id IN (SELECT id::text FROM auth.users WHERE email IN ('$HR_EMAIL', '$CHECKER_EMAIL'));" > /dev/null 2>&1 || true
+  psqlc -c "DELETE FROM auth.users WHERE email IN ('$HR_EMAIL', '$CHECKER_EMAIL');" > /dev/null 2>&1 || true
+
+  # Section 7 drives a genuine finalize success through force_finalize,
+  # which calls fastify.eventPublisher and writes an immutable
+  # platform_events row (trg_platform_events_no_delete blocks ANY delete of
+  # it, even one cascading from DELETE FROM tenants) — the same by-design
+  # append-only audit log already documented for G04. Accept it as the
+  # expected terminal state when every other functional table is empty.
+  local tenant_del_err
+  tenant_del_err=$(psqlc -c "DELETE FROM tenants WHERE id = '$TENANT_ID';" 2>&1 1>/dev/null)
+  local left profiles_left emp_left
   left=$(psqlc -c "SELECT count(*) FROM tenants WHERE id = '$TENANT_ID';")
-  if [ "$left" != "0" ]; then
-    echo "  ✗ cleanup FAILED: tenant_left=$left" >&2
-    exit 1
+  if [ "$left" = "0" ]; then
+    echo "tenant $TENANT_ID confirmed removed."
+    exit "$exit_code"
   fi
-  echo "tenant $TENANT_ID confirmed removed."
-  exit "$exit_code"
+  profiles_left=$(psqlc -c "SELECT count(*) FROM profiles WHERE tenant_id = '$TENANT_ID';")
+  emp_left=$(psqlc -c "SELECT count(*) FROM employees WHERE tenant_id = '$TENANT_ID';")
+  if echo "$tenant_del_err" | grep -q "platform_events is append-only" && \
+     [ "$profiles_left" = "0" ] && [ "$emp_left" = "0" ]; then
+    echo "tenant $TENANT_ID: all functional data removed; the tenant stub and its"
+    echo "  immutable platform_events audit row remain by design (append-only log —"
+    echo "  not a test defect)."
+    exit "$exit_code"
+  fi
+  echo "  ✗ cleanup FAILED: tenant_left=$left (profiles=$profiles_left employees=$emp_left) — $tenant_del_err" >&2
+  exit 1
 }
 trap cleanup EXIT
 
@@ -159,21 +190,35 @@ VALUES ('$TENANT_ID', '$COMP_ID', '$BASIC_COMPONENT_ID', 'fixed', 30000.00, 3000
 INSERT INTO attendance_daily (tenant_id, employee_id, date, status, day_fraction, is_payable)
 SELECT '$TENANT_ID', '$EMP_ID', d::date, 'absent', 0, false
 FROM generate_series('${MONTH}-01'::date, (date_trunc('month', '${MONTH}-01'::date) + interval '1 month' - interval '1 day')::date, interval '1 day') AS d;
+
+-- Pre-clear the attendance-closure gate so section 7's finalize attempts
+-- are isolated to the open-blockers (LOP_EXCESSIVE) gate under test, not
+-- an unrelated gate.
+INSERT INTO attendance_period_locks (tenant_id, period_month, state, locked_at)
+VALUES ('$TENANT_ID', '$MONTH', 'LOCKED', now());
 "
 SEEDED_DAYS=$(psqlc -c "SELECT count(*) FROM attendance_daily WHERE tenant_id = '$TENANT_ID';")
 echo "fixtures created under tenant $TENANT_ID — seeded $SEEDED_DAYS absent days for $MONTH"
 
 HR_RESP=$(curl -sS -X POST "$GATEWAY_URL/auth/v1/signup" -H 'content-type: application/json' \
-  -d "{\"email\":\"$HR_EMAIL\",\"password\":\"G02-Lop-$(date +%s)!\"}")
+  -d "{\"email\":\"$HR_EMAIL\",\"password\":\"G02-Lop-$TS!\"}")
 HR_TOKEN=$(echo "$HR_RESP" | jq -r '.access_token')
 HR_USER_ID=$(echo "$HR_RESP" | jq -r '.user.id')
-if [ "$HR_TOKEN" = "null" ] || [ -z "$HR_TOKEN" ]; then
-  echo "✗ signup failed: $HR_RESP" >&2
+CHECKER_RESP=$(curl -sS -X POST "$GATEWAY_URL/auth/v1/signup" -H 'content-type: application/json' \
+  -d "{\"email\":\"$CHECKER_EMAIL\",\"password\":\"G02-Checker-$TS!\"}")
+CHECKER_TOKEN=$(echo "$CHECKER_RESP" | jq -r '.access_token')
+CHECKER_USER_ID=$(echo "$CHECKER_RESP" | jq -r '.user.id')
+if [ "$HR_TOKEN" = "null" ] || [ -z "$HR_TOKEN" ] || [ "$CHECKER_TOKEN" = "null" ] || [ -z "$CHECKER_TOKEN" ]; then
+  echo "✗ signup failed: hr=$HR_RESP checker=$CHECKER_RESP" >&2
   exit 1
 fi
+# super_admin on both: section 7 drives finalize's maker-checker dance
+# (maker=HR, checker=CHECKER, distinct identities) and force_finalize
+# requires super_admin when dual control is enabled (the default).
 psqlc -c "
 INSERT INTO profiles (id, tenant_id, role, full_name, is_active, email)
-VALUES ('$HR_USER_ID', '$TENANT_ID', 'hr_admin', 'G02 Lop Hr', true, '$HR_EMAIL');
+VALUES ('$HR_USER_ID', '$TENANT_ID', 'super_admin', 'G02 Lop Hr', true, '$HR_EMAIL'),
+       ('$CHECKER_USER_ID', '$TENANT_ID', 'super_admin', 'G02 Lop Checker', true, '$CHECKER_EMAIL');
 "
 
 echo
@@ -200,6 +245,13 @@ for i in $(seq 1 30); do
 done
 echo "  final run status: $RUN_STATUS"
 
+# Pre-clear the validation-run gate too, isolating section 7's finalize
+# attempts to the open-blockers (LOP_EXCESSIVE) gate under test.
+psqlc -c "
+INSERT INTO payroll_validation_runs (tenant_id, payroll_run_id, validation_month, status, is_payroll_blocked, error_count, completed_at)
+VALUES ('$TENANT_ID', '$RUN_ID', '$MONTH', 'completed', false, 0, now());
+"
+
 echo
 echo "=== 2. Reproduced via the real endpoint: lop_days really does exceed total_working_days ==="
 SLIP_ROW=$(psqlc -c "SELECT lop_days || '|' || total_working_days || '|' || gross_pay || '|' || total_deductions || '|' || net_pay || '|' || employer_contributions || '|' || coalesce(warning,'') FROM payroll_slips WHERE tenant_id = '$TENANT_ID' AND employee_id = '$EMP_ID';")
@@ -224,10 +276,11 @@ assert_true "net_pay is a real finite number, not NaN/corrupted" "$NET_IS_NUMBER
 assert_eq "employer_contributions wage base is floored at 0 (not the negative value reproduced pre-fix)" "$EMPLOYER_CONTRIB" "0.00"
 
 echo
-echo "=== 4. NEW fix: a non-blocking LOP_EXCESSIVE blocker is now created and visible ==="
+echo "=== 4. NEW fix: a BLOCKING LOP_EXCESSIVE blocker is now created and visible ==="
 BLOCKER_ROW=$(psqlc -c "SELECT rule_code || '|' || severity || '|' || blocking || '|' || status FROM payroll_run_blockers WHERE tenant_id = '$TENANT_ID' AND employee_id = '$EMP_ID' AND rule_code = 'LOP_EXCESSIVE';")
 assert_eq "payroll_run_blockers has a LOP_EXCESSIVE row for this employee" "$(echo "$BLOCKER_ROW" | cut -d'|' -f1)" "LOP_EXCESSIVE"
-assert_eq "blocker is non-blocking (blocking=false, matches the existing rule definition)" "$(echo "$BLOCKER_ROW" | cut -d'|' -f3)" "false"
+assert_eq "blocker is critical severity" "$(echo "$BLOCKER_ROW" | cut -d'|' -f2)" "critical"
+assert_eq "blocker DOES block finalization by default (blocking=true) — a visible warning alone is not enough for a release blocker" "$(echo "$BLOCKER_ROW" | cut -d'|' -f3)" "true"
 assert_eq "blocker status is open (visible for HR to act on)" "$(echo "$BLOCKER_ROW" | cut -d'|' -f4)" "open"
 
 echo
@@ -236,20 +289,53 @@ SLIP_EXISTS=$(psqlc -c "SELECT count(*) FROM payroll_slips WHERE tenant_id = '$T
 assert_eq "a slip was created for this employee (warn, not exclude)" "$SLIP_EXISTS" "1"
 
 echo
-echo "=== 6. The open LOP_EXCESSIVE blocker is non-blocking: run still reaches a finalize-eligible state ==="
-# blocking=false rules must not stop finalize — HR is warned, not locked out.
-# The real gate finalize applies (runs.ts's "Open-blockers gate", ~line 2325)
-# rejects with 422 OPEN_BLOCKERS ONLY when a row matches
-# status='open' AND blocking=true for this run_id. We query that exact
-# predicate directly rather than driving the HTTP /finalize endpoint, which
-# would also hit unrelated gates (attendance-period-lock 423, dual-control
-# maker/checker 403) that have nothing to do with G02 and would make a
-# pass/fail here about those gates instead of about the LOP_EXCESSIVE
-# blocker's blocking=false classification.
-RUN_STATUS_FINAL=$(psqlc -c "SELECT status FROM payroll_runs WHERE id = '$RUN_ID';")
-assert_true "payroll run reached a terminal, non-failed status ('$RUN_STATUS_FINAL')" "$(python3 -c "print('true' if '$RUN_STATUS_FINAL' not in ('queued','processing','failed') else 'false')")"
-OPEN_BLOCKING_COUNT=$(psqlc -c "SELECT count(*) FROM payroll_run_blockers WHERE tenant_id = '$TENANT_ID' AND run_id = '$RUN_ID' AND status = 'open' AND blocking = true;")
-assert_eq "no OPEN blocking=true blockers remain for this run — finalize's Open-blockers gate would NOT reject it (LOP_EXCESSIVE is warning-only)" "$OPEN_BLOCKING_COUNT" "0"
+echo "=== 6. Maker proposes finalize (dual control is on by default) ==="
+MAKER_RESP=$(curl -sS -w '\n%{http_code}' -X POST "$API_URL/payroll/runs/$RUN_ID/finalize" \
+  -H "authorization: Bearer $HR_TOKEN" -H 'content-type: application/json' -d '{}')
+assert_eq "maker proposal returns 202 PENDING_CHECKER" "$(echo "$MAKER_RESP" | tail -1)" "202"
+
+echo
+echo "=== 7. BLOCKING, for real: the checker's finalize attempt is REJECTED by the open-blockers gate ==="
+# Every OTHER gate (attendance-closure, attendance-completeness, validation-
+# run, maker-checker identity) is pre-cleared by the fixtures above, so a
+# rejection here is specifically and only the LOP_EXCESSIVE blocker's
+# blocking=true classification doing its job — not some unrelated gate.
+NO_OVERRIDE_RESP=$(curl -sS -w '\n%{http_code}' -X POST "$API_URL/payroll/runs/$RUN_ID/finalize" \
+  -H "authorization: Bearer $CHECKER_TOKEN" -H 'content-type: application/json' -d '{}')
+NO_OVERRIDE_STATUS=$(echo "$NO_OVERRIDE_RESP" | tail -1)
+NO_OVERRIDE_BODY=$(echo "$NO_OVERRIDE_RESP" | sed '$d')
+echo "  checker's finalize attempt (no override): HTTP $NO_OVERRIDE_STATUS — $NO_OVERRIDE_BODY"
+assert_eq "finalize is REJECTED (422 OPEN_BLOCKERS) — excessive LOP blocks finalization, it does not just warn" "$NO_OVERRIDE_STATUS" "422"
+
+RUN_STATUS_BLOCKED=$(psqlc -c "SELECT status FROM payroll_runs WHERE id = '$RUN_ID';")
+assert_eq "the run is still draft — finalize genuinely did not happen" "$RUN_STATUS_BLOCKED" "draft"
+MC_STATUS_BLOCKED=$(psqlc -c "SELECT status FROM maker_checker_log WHERE tenant_id = '$TENANT_ID' AND entity_id = '$RUN_ID' AND action = 'finalize';")
+assert_eq "maker_checker_log is still pending — no false approval was committed for the rejected attempt" "$MC_STATUS_BLOCKED" "pending"
+
+echo
+echo "=== 8. The explicit, audited override: force_finalize + override_reason ==="
+OVERRIDE_REASON="G02 UAT: HR verified the muster roll and accepts this employee's LOP for $MONTH"
+OVERRIDE_RESP=$(curl -sS -w '\n%{http_code}' -X POST "$API_URL/payroll/runs/$RUN_ID/finalize" \
+  -H "authorization: Bearer $CHECKER_TOKEN" -H 'content-type: application/json' \
+  -d "{\"force_finalize\":true,\"override_reason\":\"$OVERRIDE_REASON\"}")
+OVERRIDE_STATUS=$(echo "$OVERRIDE_RESP" | tail -1)
+OVERRIDE_BODY=$(echo "$OVERRIDE_RESP" | sed '$d')
+echo "  checker's finalize attempt (force_finalize + override_reason): HTTP $OVERRIDE_STATUS — $OVERRIDE_BODY"
+assert_eq "the explicit override now succeeds (200)" "$OVERRIDE_STATUS" "200"
+
+RUN_STATUS_OVERRIDDEN=$(psqlc -c "SELECT status FROM payroll_runs WHERE id = '$RUN_ID';")
+assert_eq "the run is now genuinely finalized" "$RUN_STATUS_OVERRIDDEN" "finalized"
+
+echo
+echo "=== 9. The override is PERSISTED onto the blocker row — not just a log line ==="
+OVERRIDE_BLOCKER_ROW=$(psqlc -c "SELECT status || '|' || coalesce(resolved_by::text,'') || '|' || coalesce(resolution_note,'') FROM payroll_run_blockers WHERE tenant_id = '$TENANT_ID' AND employee_id = '$EMP_ID' AND rule_code = 'LOP_EXCESSIVE';")
+assert_eq "blocker status flips to 'ignored' (explicitly overridden, not silently resolved)" "$(echo "$OVERRIDE_BLOCKER_ROW" | cut -d'|' -f1)" "ignored"
+assert_eq "resolved_by records the checker who actually made the override decision" "$(echo "$OVERRIDE_BLOCKER_ROW" | cut -d'|' -f2)" "$CHECKER_USER_ID"
+RESOLUTION_NOTE=$(echo "$OVERRIDE_BLOCKER_ROW" | cut -d'|' -f3-)
+case "$RESOLUTION_NOTE" in
+  *"$OVERRIDE_REASON"*) assert_true "resolution_note contains the human-entered override reason" "true" ;;
+  *) assert_true "resolution_note contains the human-entered override reason (got: $RESOLUTION_NOTE)" "false" ;;
+esac
 
 echo
 echo "=== RESULT: $PASS_COUNT passed, $FAIL_COUNT failed ==="

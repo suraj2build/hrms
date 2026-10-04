@@ -272,12 +272,23 @@ const DEFAULT_RULES: Record<string, Omit<ValidationRuleInput, 'enabled'>> = {
     stage: 'slip_validation',
     remediation_route: '/admin/payroll/salary-components',
   },
+  // G02 (release blocker, not just a visible warning): an employee whose
+  // lop_days exceeds total_working_days for the period is a data-integrity
+  // red flag (a miscounted/misconfigured attendance calendar, not a
+  // legitimate pay outcome) — it must block finalization by default, the
+  // same way MISSING_ATTENDANCE_DATA and OPEN_BLOCKERS already do elsewhere
+  // in this handler, not merely warn. The existing force_finalize +
+  // override_reason mechanism is the "explicitly approved business rule"
+  // escape hatch: it requires a human-entered reason, is restricted to
+  // super_admin when dual control is enabled, and persists to this exact
+  // row (status='ignored', resolved_by, resolved_at, resolution_note) when
+  // used — see the "Open-blockers gate" override handling in runs.ts.
   LOP_EXCESSIVE: {
     code: 'LOP_EXCESSIVE',
     name: 'Excessive LOP Days',
     description: 'LOP days exceed total working days for the period.',
-    severity: 'warning',
-    blocking: false,
+    severity: 'critical',
+    blocking: true,
     stage: 'slip_validation',
     remediation_route: '/admin/attendance/muster-roll',
   },
