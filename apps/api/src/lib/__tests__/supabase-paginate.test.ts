@@ -48,6 +48,9 @@ class LiveTable<T extends { id: string }> {
   deleteAt(index: number) {
     this.rows.splice(index, 1)
   }
+  updateAt(index: number, patch: Partial<T>) {
+    this.rows[index] = { ...this.rows[index], ...patch }
+  }
 }
 
 describe('fetchAllRows() (OFFSET-based) is vulnerable to concurrent writes mid-pagination', () => {
@@ -166,5 +169,48 @@ describe('fetchAllRowsByKeyset() is immune to the same concurrent writes', () =>
     // from the live table afterwards cannot retroactively un-read it, and
     // (unlike offset pagination) does not shift anything else out of view.
     expect(rows.length).toBe(250)
+  })
+})
+
+describe('fetchAllRowsByKeyset() is NOT a consistent snapshot — it is immune to row skip/duplicate, not to value mutation', () => {
+  it('sums a stale pre-update value for a row read before a concurrent UPDATE changes it', async () => {
+    // This is the gap a reviewer correctly called out: keyset pagination
+    // fixes WHICH rows come back (no skip/duplicate), but each page is read
+    // at a different wall-clock moment. If a row returned on an earlier page
+    // has a financial column changed by a concurrent UPDATE before a later
+    // page is requested, the aggregate total mixes a pre-update value for
+    // that row with post-update values for everything else — a different
+    // failure mode from skip/duplicate, and keyset pagination alone does
+    // NOT prevent it. It must never be described as snapshot-safe.
+    const BATCH = 100
+    const initial = Array.from({ length: 250 }, (_, i) => ({ id: makeId(i * 10), amount: 100 }))
+    const table = new LiveTable(initial)
+
+    let callCount = 0
+    const rows = await fetchAllRowsByKeyset<{ id: string; amount: number }>((afterId, limit) => {
+      callCount++
+      // Row 0 (read on page 1) is financially corrected from 100 -> 500
+      // AFTER page 1 was already returned but BEFORE page 3 is requested —
+      // the live table's true current total reflects 500 for this row, but
+      // the already-returned page 1 snapshot still holds 100.
+      if (callCount === 2) {
+        table.updateAt(0, { amount: 500 })
+      }
+      return Promise.resolve({ data: table.keysetRead(afterId, limit), error: null })
+    }, BATCH)
+
+    const sumFromPagination = rows.reduce((s, r) => s + r.amount, 0)
+    const trueCurrentSum = table.rows.reduce((s, r) => s + r.amount, 0)
+    // The paginated result is stale for the mutated row and does NOT equal
+    // the table's true current total — proof that keyset pagination alone
+    // gives no snapshot guarantee for financial aggregates. A real snapshot
+    // requires either a single-transaction read (e.g. one RPC) or, as used
+    // for the finalized-slip wage-base reads this migrated (see migration
+    // 438_payroll_slip_finalized_value_lockdown.sql), making the rows
+    // genuinely immutable once included in the filtered set so there is
+    // nothing left to mutate underneath the read.
+    expect(sumFromPagination).not.toBe(trueCurrentSum)
+    expect(sumFromPagination).toBe(250 * 100) // every page read before the sum settles on the stale value
+    expect(trueCurrentSum).toBe(249 * 100 + 500)
   })
 })

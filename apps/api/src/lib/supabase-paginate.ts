@@ -92,11 +92,31 @@ export async function fetchAllRows<T>(
  * skip/duplicate offset pagination risks on EVERY row, not just ones at the
  * exact moment of insertion.
  *
+ * IMPORTANT — this is NOT a consistent snapshot. It only guarantees that the
+ * SET of rows returned has no skip or duplicate. It makes no guarantee about
+ * the VALUES in those rows: if a financial column on an already-read row is
+ * changed by a concurrent UPDATE before a later page is requested, the
+ * aggregate total mixes a stale pre-update value for that row with current
+ * values for everything else — proven in
+ * apps/api/src/lib/__tests__/supabase-paginate.test.ts
+ * ("is NOT a consistent snapshot" suite). Never describe a read built on
+ * this function as snapshot-safe on that basis alone.
+ *
  * Use this instead of fetchAllRows() wherever the read feeds a persisted
- * financial total (statutory wage bases, reconciliation sums) and the
- * source table can plausibly be written to while the read is in flight —
- * not just read-only dashboards. Requires the table to have a unique,
- * orderable `id` column (true for every table in this schema).
+ * financial total (statutory wage bases, reconciliation sums) AND the
+ * source rows are independently made immutable for the lifetime of the
+ * read — e.g. filtered to payroll_slips.status = 'finalized', where
+ * migration 438_payroll_slip_finalized_value_lockdown.sql makes a
+ * DB-enforced guarantee that a finalized slip's financial columns cannot be
+ * updated in place (only the pre-existing skip/duplicate risk needed
+ * fixing, because the value-mutation risk is independently closed at the
+ * DB level for that filtered set). Where no such immutability guarantee
+ * exists, keyset pagination alone is not a sufficient consistency strategy
+ * for a financial total — use a single-transaction read (one RPC) instead,
+ * or treat the result as approximate and reconcile afterward.
+ *
+ * Requires the table to have a unique, orderable `id` column (true for
+ * every table in this schema).
  *
  * @param queryFn    A function that accepts (afterId, limit) and returns the
  *                   query with `.order('id', { ascending: true }).limit(limit)`
