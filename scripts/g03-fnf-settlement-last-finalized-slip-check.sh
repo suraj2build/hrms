@@ -73,6 +73,17 @@ except ValueError:
   fi
 }
 
+assert_true() {
+  local label="$1" cond="$2"
+  if [ "$cond" = "true" ]; then
+    echo "  ✓ $label"
+    PASS_COUNT=$((PASS_COUNT + 1))
+  else
+    echo "  ✗ $label (got: $cond)"
+    FAIL_COUNT=$((FAIL_COUNT + 1))
+  fi
+}
+
 TENANT_ID=$(psqlc -c "SELECT gen_random_uuid();")
 EMP_ID=$(psqlc -c "SELECT gen_random_uuid();")
 RUN_OLD_ID=$(psqlc -c "SELECT gen_random_uuid();")
@@ -178,8 +189,8 @@ STALE_APPROVE_STATUS=$(echo "$STALE_APPROVE_RESP" | tail -1)
 STALE_APPROVE_BODY=$(echo "$STALE_APPROVE_RESP" | sed '$d')
 echo "  approve attempt (inputs changed since compute): HTTP $STALE_APPROVE_STATUS — $STALE_APPROVE_BODY"
 assert_eq "approval is REJECTED (409 STALE_CALCULATION) — inputs changed since the last compute" "$STALE_APPROVE_STATUS" "409"
-assert_eq "error body names the stale stored gross (50000)" "$(echo "$STALE_APPROVE_BODY" | jq -r '.stored_salary_basis_gross')" "50000.00"
-assert_eq "error body names the current gross it would recompute to (99999)" "$(echo "$STALE_APPROVE_BODY" | jq -r '.current_salary_basis_gross')" "99999"
+assert_eq "error body names the stale stored gross (50000)" "$(echo "$STALE_APPROVE_BODY" | jq -r '.changed_fields.salary_basis_gross.stored')" "50000"
+assert_eq "error body names the current gross it would recompute to (99999)" "$(echo "$STALE_APPROVE_BODY" | jq -r '.changed_fields.salary_basis_gross.current')" "99999"
 
 FF_STATUS_AFTER_STALE=$(psqlc -c "SELECT status FROM separation_ff_summary WHERE employee_id = '$EMP_ID';")
 assert_eq "the F&F record is still 'draft' — the stale approval genuinely did not happen" "$FF_STATUS_AFTER_STALE" "draft"
@@ -199,6 +210,58 @@ assert_eq "approval now succeeds (200) — the stored basis matches what compute
 
 FF_STATUS_FINAL=$(psqlc -c "SELECT status FROM separation_ff_summary WHERE employee_id = '$EMP_ID';")
 assert_eq "the F&F record is genuinely approved" "$FF_STATUS_FINAL" "approved"
+
+echo
+echo "=== 6. STALENESS BEYOND SALARY BASIS: a gratuity_config change (not a slip change) must also be caught ==="
+echo "    (second employee, same tenant, to isolate from the salary-basis scenario above)"
+EMP_ID_2=$(psqlc -c "SELECT gen_random_uuid();")
+# Reuse RUN_OLD_ID (already 'finalized', month 2026-06) — payroll_runs has a
+# UNIQUE(tenant_id, month) constraint (one run covers every employee for that
+# month), so a second employee's slip for the same month belongs on the same
+# run, not a new one.
+psqlc -c "
+INSERT INTO employees (id, tenant_id, employee_code, first_name, last_name, email, joining_date, status)
+VALUES ('$EMP_ID_2', '$TENANT_ID', 'G03-2', 'Gratuity', 'Employee', 'g03-fnf-emp2@example.test', '2015-01-01', 'active');
+
+INSERT INTO employee_separation (tenant_id, employee_id, separation_type, initiated_by, last_working_date, notice_waived)
+VALUES ('$TENANT_ID', '$EMP_ID_2', 'resignation', 'employee', '2026-07-31', true);
+
+INSERT INTO payroll_slips (tenant_id, run_id, employee_id, month, gross_pay, component_breakdown, status)
+VALUES ('$TENANT_ID', '$RUN_OLD_ID', '$EMP_ID_2', '2026-06', 50000.00,
+  '[{\"code\":\"BASIC\",\"monthly_amount\":25000}]'::jsonb, 'finalized');
+"
+G6_COMPUTE_RESP=$(curl -sS -X POST "$API_URL/employees/$EMP_ID_2/separation-ff/compute" \
+  -H "authorization: Bearer $HR_TOKEN" -H 'content-type: application/json' -d '{}')
+G6_GRATUITY_BEFORE=$(echo "$G6_COMPUTE_RESP" | jq -r '.breakdown.gratuity_amount // empty')
+echo "  compute (before gratuity_config exists — statutory default 15/26): gratuity_amount=$G6_GRATUITY_BEFORE"
+
+# Introduce a tenant gratuity_config AFTER compute — same salary basis (still
+# the same finalized slip, gross=50000/BASIC=25000), but a different rate
+# changes gratuity_amount without touching either salary_basis field at all.
+# This is exactly the "every material calculation input" gap: comparing only
+# salary_basis_gross/basic would miss this entirely.
+psqlc -c "
+INSERT INTO gratuity_config (tenant_id, enabled, rate_numerator, rate_denominator, min_years, max_amount, basis)
+VALUES ('$TENANT_ID', true, 30, 26, 5, 2000000, 'basic')
+ON CONFLICT (tenant_id) DO UPDATE SET rate_numerator = 30;
+"
+G6_STALE_APPROVE_RESP=$(curl -sS -w '\n%{http_code}' -X PATCH "$API_URL/employees/$EMP_ID_2/separation-ff/approve" \
+  -H "authorization: Bearer $HR_TOKEN" -H 'content-type: application/json' -d '{}')
+G6_STALE_APPROVE_STATUS=$(echo "$G6_STALE_APPROVE_RESP" | tail -1)
+G6_STALE_APPROVE_BODY=$(echo "$G6_STALE_APPROVE_RESP" | sed '$d')
+echo "  approve attempt (gratuity_config changed, salary basis unchanged): HTTP $G6_STALE_APPROVE_STATUS — $G6_STALE_APPROVE_BODY"
+assert_eq "approval is REJECTED (409) for a gratuity-only change — salary basis alone would have missed this" "$G6_STALE_APPROVE_STATUS" "409"
+assert_true "error body's changed_fields names gratuity_amount specifically (not salary_basis)" \
+  "$(echo "$G6_STALE_APPROVE_BODY" | jq -r 'has("changed_fields") and (.changed_fields | has("gratuity_amount")) and (.changed_fields | has("salary_basis_gross") | not)')"
+
+G6_RECOMPUTE_RESP=$(curl -sS -X POST "$API_URL/employees/$EMP_ID_2/separation-ff/compute" \
+  -H "authorization: Bearer $HR_TOKEN" -H 'content-type: application/json' -d '{}')
+G6_GRATUITY_AFTER=$(echo "$G6_RECOMPUTE_RESP" | jq -r '.breakdown.gratuity_amount // empty')
+echo "  recompute picks up the new rate: gratuity_amount=$G6_GRATUITY_AFTER (was $G6_GRATUITY_BEFORE)"
+
+G6_FRESH_APPROVE_STATUS=$(curl -sS -o /dev/null -w '%{http_code}' -X PATCH "$API_URL/employees/$EMP_ID_2/separation-ff/approve" \
+  -H "authorization: Bearer $HR_TOKEN" -H 'content-type: application/json' -d '{}')
+assert_eq "approval now succeeds (200) after recomputing to the current gratuity rate" "$G6_FRESH_APPROVE_STATUS" "200"
 
 echo
 echo "=== RESULT: $PASS_COUNT passed, $FAIL_COUNT failed ==="
