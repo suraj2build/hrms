@@ -442,13 +442,19 @@ export default async function ptaxRoutes(fastify: FastifyInstance) {
     }
 
     // Resolve site state_code separately to avoid the FK-embed failure.
+    // Chunked: a retail-chain tenant can have 1,000+ sites (site_type/region/
+    // zone are first-class dimensions elsewhere in this codebase), so a
+    // single unchunked .in() risks PostgREST's silent 1,000-row cap.
     const siteIds = [...new Set(empList.map(e => e.site_id).filter(Boolean))] as string[]
     const siteStateMap = new Map<string, string>()
-    if (siteIds.length > 0) {
+    const SITE_CHUNK = 100
+    for (let i = 0; i < siteIds.length; i += SITE_CHUNK) {
       const { data: siteRows } = await fastify.supabase
+        // lint-query-ok: chunked to SITE_CHUNK (100) ids per request above
         .from('sites')
         .select('id, state_code')
-        .in('id', siteIds)
+        .in('id', siteIds.slice(i, i + SITE_CHUNK))
+        .eq('tenant_id', req.tenantId)
       for (const s of (siteRows ?? []) as any[]) {
         if (s.state_code) siteStateMap.set(s.id, s.state_code)
       }
@@ -518,7 +524,7 @@ export default async function ptaxRoutes(fastify: FastifyInstance) {
     const slipRows = await fetchAllRowsByKeyset((afterId, limit) => {
       let q = fastify.supabase
         .from('payroll_slips')
-        .select('id, employee_id, gross_pay')
+        .select('id, employee_id, gross_pay, component_breakdown')
         .eq('tenant_id', req.tenantId)
         .eq('month', month)
         .eq('status', 'finalized')
@@ -533,6 +539,26 @@ export default async function ptaxRoutes(fastify: FastifyInstance) {
     const slipGrossMap = new Map<string, number>(
       (slipRows as any[]).map(r => [r.employee_id, Number(r.gross_pay ?? 0)]),
     )
+
+    // Financial-chain reconciliation: unlike EPF/ESI just above (which both
+    // take their employee-deduction amount straight from the finalized
+    // slip's PF_EMPLOYEE/ESI_EMPLOYEE line — "slip is source of truth", so
+    // the filing table can never diverge from the actual payslip), PTax here
+    // only reused the slip's GROSS WAGES and then RECOMPUTED ptax_amount
+    // fresh against whatever ptax_slabs/ptax_state_settings are configured
+    // right now. If a tenant edits its PT slabs (or disables a state) any
+    // time between finalizing payroll and running this compute step — two
+    // separate actions, not atomic — the ptax_contributions row used for
+    // filing/deposit would show a DIFFERENT amount than what the employee's
+    // actual payslip deducted and net_pay reflects, exactly the "deposit
+    // doesn't match the filing" class of bug EPF/ESI were already fixed
+    // against. Mirror that fix: take the slip's own PTAX line when present.
+    const slipPtaxMap = new Map<string, number>()
+    for (const r of slipRows as any[]) {
+      const breakdown = Array.isArray(r.component_breakdown) ? r.component_breakdown : []
+      const ptaxLine = breakdown.find((c: any) => String(c?.code ?? '').toUpperCase() === 'PTAX')
+      if (ptaxLine) slipPtaxMap.set(r.employee_id, Number(ptaxLine.monthly_amount ?? 0))
+    }
 
     // Fallback: gross from active compensation components (earning type only)
     let fallbackGrossMap = new Map<string, number>()
@@ -677,7 +703,14 @@ export default async function ptaxRoutes(fastify: FastifyInstance) {
 
       const result = computePTax(grossSalary, slabs, calendarMonth, stateCode)
       if (!sampleTrace) sampleTrace = result.traceSteps   // capture first computed employee's trace
-      if (result.ptaxAmount === 0) computedZero++
+
+      // Slip is the source of truth, same as EPF/ESI above: when a
+      // finalized slip actually has a PTAX line, file exactly that amount
+      // — never a freshly-recomputed figure that can drift from it if
+      // slabs/state settings changed after finalize.
+      const slipPtax = slipPtaxMap.get(emp.id)
+      const ptaxAmount = slipPtax !== undefined ? slipPtax : result.ptaxAmount
+      if (ptaxAmount === 0) computedZero++
 
       contributions.push({
         tenant_id:          req.tenantId,
@@ -687,7 +720,7 @@ export default async function ptaxRoutes(fastify: FastifyInstance) {
         state_code:         stateCode,
         financial_year,
         gross_salary:       grossSalary,
-        ptax_amount:        result.ptaxAmount,
+        ptax_amount:        ptaxAmount,
       })
     }
 

@@ -1508,3 +1508,77 @@ confirmed to be a general property of `fastify.eventPublisher.publish()`
 itself (not specific to payroll), affecting hard-delete-tenant for any
 tenant that has exercised ANY event-publishing code path. Flagged for a
 human decision, not fixed here.
+
+## 13. Full financial-chain reconciliation — leave → payroll → TDS/EPF/ESI/PTax → arrears/advances/reimbursements → encashment → F&F → accounting → filing
+
+Traced the actual code path each stage of this chain takes, rather than
+assuming consistency, specifically looking for the G06 failure mode
+recurring elsewhere: a reporting/filing surface computing its own figure
+independently instead of reading what payroll actually deducted.
+
+**EPF (`routes/payroll/statutory/epf.ts`) and ESI (`esi.ts`) were already
+hardened against this** (a prior round, "PF-base unify (H3)", predates this
+session): both explicitly read the finalized slip's own `PF_EMPLOYEE`/
+`ESI_EMPLOYEE` component-breakdown line when a finalized slip exists for
+the month, and use that figure verbatim for the `epf_contributions`/
+`esi_contributions` row used for filing/deposit — recomputing only as a
+fallback when no slip exists yet. Their own comments are explicit:
+"SLIP IS THE SOURCE OF TRUTH... so the filing tables aggregate exactly what
+was paid (the deposit), instead of recomputing — guaranteeing the EPF page
+and the reconciliation never drift."
+
+**TDS** is computed once, directly onto the slip, via `applyTdsToSlip()` at
+slip-build time (no separate later "compute" step to drift from); filing
+(`filing-pack.ts`) sums `payroll_slips.tds_deducted` directly — also
+slip-sourced, no separate recomputation path.
+
+**PTax (`ptax.ts`) did NOT have this guard — a real bug, found and fixed
+this session.** `POST /payroll/statutory/ptax/contributions/compute` reused
+the slip's gross wages but then recomputed `ptax_amount` fresh against
+whatever `ptax_slabs`/`ptax_state_settings` are configured *at compute
+time* — a separate, later admin action from payroll finalize, not atomic
+with it. If a tenant edits its PT slabs (or disables a state) any time
+between finalizing a month's payroll and running this compute step, the
+`ptax_contributions` row used for the actual government filing and bank
+deposit would show a different amount than what the employee's real
+payslip deducted and net_pay reflects — the deposit and the filing would
+not match the payslip. Fixed by mirroring EPF/ESI: a `slipPtaxMap` is built
+from the finalized slip's own `PTAX` component line, and used verbatim
+when present, falling back to a fresh `computePTax()` only when no slip
+exists yet (`apps/api/src/routes/payroll/statutory/ptax.ts`).
+
+`scripts/ptax-filing-slip-reconciliation-check.sh`: seeds a finalized slip
+with `PTAX=200` (as if finalized under an older, lower slab), then
+reconfigures `ptax_slabs` to `500` (simulating a tenant editing PT config
+afterward), and asserts the real `POST /contributions/compute` endpoint
+still files `200` — the slip's actual deduction — not `500`:
+
+```
+✓ finalized slip's PTAX line is 200 (what was actually deducted from this employee) = 200
+✓ ptax_contributions (what gets FILED/deposited) = 200, matching the slip — NOT 500 = 200.00
+RESULT: 2 passed, 0 failed
+```
+
+Mutation test (reverting the `slipPtaxMap` override): the same fixture now
+files `500` instead of `200` — 1/2 red, reproducing exactly the deposit-
+vs-payslip divergence described above; restored: 2/2 green.
+
+**Arrears, advances, reimbursements, leave encashment, F&F**: these are
+already covered by this engagement's existing fixes/tests — arrears
+pagination (§6e), G01's leave-accrual-ledger fix (`g01-*.sh`), G03's F&F
+staleness check now spanning every material F&F input including leave
+encashment and gratuity (§9b). No additional slip-vs-source-of-truth gap
+was found in these paths during this trace; the accounting ledger
+(`payroll-accounting-engine.ts`) builds its GL entries directly from each
+employee's `payroll_employee_snapshots` row (captured off the finalized
+slip at finalize time via `buildPayrollRunSnapshot`), not from an
+independent recomputation, so it inherits the same "slip is source of
+truth" property by construction.
+
+**Independent of this trace**, completing the G08 stable-fingerprint
+migration (§ STATUS.md) surfaced 96 real unbounded-query/tenant-isolation
+findings across this same payroll/attendance/leave/import/webhook
+surface that the previous, line-drift-broken ratchet was blind to; those
+are being triaged and fixed file-by-file as part of the same "run every
+required release check without weakening enforcement" effort — see the
+commit history on this branch for the itemized TP/FP breakdown per file.

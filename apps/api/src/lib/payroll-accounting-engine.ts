@@ -643,8 +643,10 @@ export async function buildPayrollFinancialLedger(
   const EMP_META_CHUNK = 100
   for (let i = 0; i < empIds.length; i += EMP_META_CHUNK) {
     const { data: metaChunk } = await supabase
+      // lint-query-ok: chunked to EMP_META_CHUNK (100) ids per request via .slice() above — bounded well under the 1,000-row cap
       .from('employees')
       .select('id, job_history!job_history_employee_id_fkey(department_id, department_name, is_current)')
+      .eq('tenant_id', tenantId)
       .in('id', empIds.slice(i, i + EMP_META_CHUNK))
     if (metaChunk) empMeta.push(...metaChunk)
   }
