@@ -762,16 +762,45 @@ then restored and re-confirmed GREEN.
 
 ### G01 — `leave_accrual_ledger.policy_rule_id` missing column
 
-- **Migration 440** (`440_leave_accrual_ledger_policy_rule_id.sql`) adds the
-  column `monthlyAccrualJob()`'s insert paths always wrote.
-- **A second, independently-discovered bug in the same code path**: migration
-  163's `uidx_lal_cycle_key` was a PARTIAL unique index
-  (`WHERE cycle_key IS NOT NULL`) — Postgres cannot match a partial index to
-  an `ON CONFLICT(cycle_key)` target with no `WHERE` clause, so every
-  cycle_key-based upsert across `leave-jobs.ts`/`leave-ledger-service.ts` was
-  broken independent of the missing column. **Migration 441**
-  (`441_leave_accrual_ledger_cycle_key_full_unique.sql`) replaces it with a
-  full unique index.
+**The actual patches, not a paraphrase** (both committed, applied to the
+live schema, and exercised by the real-stack script below — reproduced
+here verbatim rather than described, per the explicit request for patches
+and row-level evidence over narration):
+
+`supabase/migrations/440_leave_accrual_ledger_policy_rule_id.sql`:
+```sql
+ALTER TABLE leave_accrual_ledger
+  ADD COLUMN IF NOT EXISTS policy_rule_id UUID REFERENCES leave_policy_rules(id) ON DELETE SET NULL;
+
+CREATE INDEX IF NOT EXISTS idx_leave_accrual_ledger_policy_rule_id
+  ON leave_accrual_ledger (policy_rule_id)
+  WHERE policy_rule_id IS NOT NULL;
+```
+Closes the missing column `leave-jobs.ts`'s four insert paths always wrote.
+Migration 163 added a same-named column to a *different* table
+(`leave_policy_snapshots`) — confirmed by reading 163's own `CREATE TABLE`
+statement — `leave_accrual_ledger` itself never received it.
+
+`supabase/migrations/441_leave_accrual_ledger_cycle_key_full_unique.sql`:
+```sql
+DROP INDEX IF EXISTS uidx_lal_cycle_key;
+
+CREATE UNIQUE INDEX IF NOT EXISTS uidx_lal_cycle_key
+  ON leave_accrual_ledger (cycle_key);
+```
+**A second, independently-discovered bug in the same code path**, found
+while building the real-stack reproduction below: migration 163's
+`uidx_lal_cycle_key` was a PARTIAL unique index
+(`WHERE cycle_key IS NOT NULL`) — Postgres cannot match a partial index to
+an `ON CONFLICT(cycle_key)` target with no `WHERE` clause (PostgREST's
+generated upsert has no such clause), so every cycle_key-based upsert
+across `leave-jobs.ts`'s monthly/yearly accrual (L497, L849) and
+`leave-ledger-service.ts`'s `writeAccrualEntry()` (L504) was broken
+independent of the missing column — the exact "reports success while
+crediting nobody" failure mode, via an independent root cause. A full
+(non-partial) index has identical semantics for NULL rows (standard
+Postgres unique-index behavior already treats every NULL as distinct) and
+fixes ON CONFLICT inference for the non-null rows that matter.
 - `scripts/g01-leave-accrual-ledger-check.sh` invokes the real
   `monthlyAccrualJob()` (not a unit test — the actual function the scheduler
   calls) against a real tenant/employee/policy fixture:
@@ -1056,6 +1085,17 @@ extend it before treating the rest as closed. This section is that
 extension, done completely, not sampled: all 151 `unresolved` entries in
 `unbounded-queries-baseline.stable-key.json` plus all 72 in
 `tenant-isolation-baseline.stable-key.json` (151+72 = 223), individually.
+
+**Row-level evidence, not narration**:
+`docs/production-readiness/baseline-reconciliation-223-rows.csv` — all 223
+entries, one row each, with `automated_classification` (what
+`scripts/reconcile-baselines.py` found), `final_classification` (`FIXED` or
+`MOVED_AND_FIXED`), `verification_method` (`automated-regex-match` for 163,
+`manual-code-read` for the 60 the script couldn't resolve), and for every
+one of those 60 a `manual_note` citing exactly what the cited line turned
+out to be and where the real, fixed query actually lives. This is the file
+to open to check any individual entry's basis — the prose below is a
+summary of it, not a substitute for it.
 
 **Method** (`scripts/reconcile-baselines.py`, committed): file:line:table
 keys drift as files are edited (already documented as ADD-004's own

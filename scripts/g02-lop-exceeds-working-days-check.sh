@@ -157,9 +157,13 @@ cleanup() {
   emp_left=$(psqlc -c "SELECT count(*) FROM employees WHERE tenant_id = '$TENANT_ID';")
   if echo "$tenant_del_err" | grep -q "platform_events is append-only" && \
      [ "$profiles_left" = "0" ] && [ "$emp_left" = "0" ]; then
-    echo "tenant $TENANT_ID: all functional data removed; the tenant stub and its"
-    echo "  immutable platform_events audit row remain by design (append-only log —"
-    echo "  not a test defect)."
+    echo "⚠ CLEANUP INCOMPLETE — TEST RESIDUE RETAINED (not a full removal, not a test defect):"
+    echo "  tenant row $TENANT_ID and its immutable platform_events audit row remain"
+    echo "  in the database. Every functional/PII-bearing table (profiles, employees,"
+    echo "  and everything else this script created) is confirmed empty — only the"
+    echo "  tenant stub + its append-only audit trail survive, because"
+    echo "  trg_platform_events_no_delete rejects any delete of that log, including"
+    echo "  one cascading from DELETE FROM tenants."
     exit "$exit_code"
   fi
   echo "  ✗ cleanup FAILED: tenant_left=$left (profiles=$profiles_left employees=$emp_left) — $tenant_del_err" >&2

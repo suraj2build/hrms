@@ -132,10 +132,15 @@ cleanup() {
   mc_left=$(psqlc -c "SELECT count(*) FROM maker_checker_log WHERE tenant_id = '$TENANT_ID';")
   if echo "$tenant_del_err" | grep -q "platform_events is append-only" && \
      [ "$profiles_left" = "0" ] && [ "$runs_left" = "0" ] && [ "$mc_left" = "0" ]; then
-    echo "tenant $TENANT_ID: all functional data removed; the tenant stub and its"
-    echo "  immutable platform_events audit row remain by design (append-only log —"
-    echo "  not a test defect; same reason production never hard-deletes a tenant"
-    echo "  that has ever actually finalized a payroll run)."
+    echo "⚠ CLEANUP INCOMPLETE — TEST RESIDUE RETAINED (not a full removal, not a test defect):"
+    echo "  tenant row $TENANT_ID and its immutable platform_events audit row remain"
+    echo "  in the database. Every functional/PII-bearing table (profiles, payroll"
+    echo "  runs, maker_checker_log, and everything else this script created) is"
+    echo "  confirmed empty — only the tenant stub + its append-only audit trail"
+    echo "  survive, because trg_platform_events_no_delete rejects any delete of"
+    echo "  that log, including one cascading from DELETE FROM tenants. Same reason"
+    echo "  production itself can never hard-delete a tenant that has ever actually"
+    echo "  finalized a payroll run."
     exit "$exit_code"
   fi
   echo "  ✗ cleanup FAILED: tenant_left=$left (profiles=$profiles_left runs=$runs_left maker_checker_log=$mc_left) — $tenant_del_err" >&2
