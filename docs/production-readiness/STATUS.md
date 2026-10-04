@@ -611,9 +611,20 @@ implementation and its real-stack proof.
    a reconciliation report against them, not an edit to them. Whether to
    now regenerate the live baselines given this result is left to a human
    — not decided here.
-10. Still open from the standing instruction, not done this round:
-    - Cross-role UAT beyond the single ESS-payslip-isolation journey (item
-      6 above).
-    - G10 (infrastructure evidence) and G12 (product-scope decision) remain
-      explicitly blocked, per the standing instruction that neither should
-      stop the independent work above.
+10. ~~Cross-role UAT beyond the single ESS-payslip-isolation journey~~ —
+    **done**: `scripts/cross-role-leave-approval-uat.sh` (new), 4 distinct
+    real identities (Employee A, her manager, an unrelated manager, hr_admin)
+    exercising the leave-request manager-approval workflow end to end,
+    including an authorization boundary the payslip journey never touches —
+    an unrelated manager's approval attempt is rejected 403 FORBIDDEN, only
+    the employee's real manager can approve, the employee's own balance
+    reflects the deduction, and hr_admin retains full visibility regardless
+    of the manager chain. 7/7 against the real stack; see `EVIDENCE.md` §12.
+11. Still open — not infrastructure/scope-blocked, just not reached this
+    round: further journeys Phase 5's full admin/HR/manager/employee matrix
+    still calls for (e.g. attendance regularisation approval, expense/
+    reimbursement approval, compensation revision approval — the same
+    manager-authorization-boundary pattern proven here, applied to each).
+    G10 (infrastructure evidence) and G12 (product-scope decision) remain
+    explicitly blocked, per the standing instruction that neither should
+    stop the independent work above.

@@ -1190,3 +1190,58 @@ one by one, and every single one came back fixed/not-a-defect — a 60/60
 result, not a sample — which is the strongest evidence yet in this
 engagement that the frozen baselines are comprehensively stale rather than
 hiding any remaining real defect.
+
+## 12. Second cross-role UAT journey — leave-request manager approval, 4 real identities
+
+Extends §6i's single ESS-payslip-isolation journey with a different
+workflow and a different authorization boundary: the payslip journey
+proves tenant/role data isolation (an employee sees only their own slip);
+this one proves the manager-scoping boundary on an approval action (a
+manager can only approve their OWN direct reports' requests), which
+nothing else in this engagement's real-stack scripts exercises.
+
+`scripts/cross-role-leave-approval-uat.sh`: 4 distinct real auth
+identities (Employee A, her actual manager M, an unrelated Manager N,
+hr_admin) against real Postgres + the real API:
+
+```
+=== 1. Employee A submits a leave request through the REAL POST /leave-requests endpoint ===
+  ✓ leave request submitted (201) = 201
+
+=== 2. Manager N (NOT Employee A's manager) tries to approve — must be rejected ===
+  Manager N's attempt: HTTP 403 — {"error":"FORBIDDEN","message":"Only the employee's
+    direct manager or an HR admin may approve this request"}
+  ✓ an unrelated manager is rejected (403 FORBIDDEN) = 403
+  ✓ request is still PENDING after the rejected attempt = PENDING
+
+=== 3. Employee A's REAL manager M approves — must succeed ===
+  ✓ Employee A's real manager succeeds (200) = 200
+  ✓ response reports status=APPROVED = APPROVED
+
+=== 4. Employee A's own balance (her own token) reflects the deduction ===
+  ✓ Employee A's CRL Earned Leave balance is 9.0 (10.0 - 1 day approved) = 9.0
+
+=== 5. hr_admin sees the approved request in the tenant-wide list ===
+  ✓ hr_admin sees the request, status=APPROVED = APPROVED
+
+RESULT: 7 passed, 0 failed
+```
+
+This proves, through real HTTP calls (not mocks, not direct DB writes to
+the workflow tables themselves — only fixtures are seeded directly), that
+`validateApprover()` (`apps/api/src/lib/approval-service.ts`) correctly
+enforces `employees.manager_id` scoping: Manager N's token is a perfectly
+valid, authenticated `manager`-role session in the SAME tenant, and is
+still rejected because N is not THIS employee's manager — the authorization
+check is per-relationship, not per-role.
+
+**Incidental discovery, same shape as G04's, not fixed (out of scope):**
+leave approval also publishes through `fastify.eventPublisher` (
+`EventType.LEAVE_REQUESTED`/`LEAVE_APPROVED`), which writes an immutable
+`platform_events` row — so a tenant that has ever had a leave request
+submitted or approved also cannot be hard-deleted afterward, for the exact
+same reason already flagged for payroll finalize in §9/G04. This is now
+confirmed to be a general property of `fastify.eventPublisher.publish()`
+itself (not specific to payroll), affecting hard-delete-tenant for any
+tenant that has exercised ANY event-publishing code path. Flagged for a
+human decision, not fixed here.
