@@ -163,6 +163,100 @@ additional defects (covering 5 call sites) found and fixed outside the
 register's scope. 35 register-listed CONFIRMED_DEFECT rows remain open — see
 `FINDINGS.csv` for the exact list (`status=OPEN`).
 
+## 6. Keyset pagination + 3,4,5. real-stack scale extended to 2,200 (ESI+EPF+PTax)
+
+Reviewer correction: a deterministic `.order('id')` resolves *ambiguous*
+ordering between identical requests, but offset/.range() pagination can
+still skip or duplicate rows when the underlying table is written to WHILE
+pagination is in flight — a concurrent finalize inserting/deleting a row
+anywhere at or before the current page boundary shifts every row after it,
+regardless of how stable the sort key is, since `id` is a random UUID that
+can land inside an already-read page.
+
+**Proof, not just a design argument** —
+`apps/api/src/lib/__tests__/supabase-paginate.test.ts` simulates a live,
+mutating table and asserts the actual behavior:
+```
+✓ fetchAllRows() duplicates a row when a new row is inserted into an
+  already-read page (asserted: makeId(990) appears twice, makeId(5) is
+  silently missing — a real duplicate AND a real omission in the SAME run,
+  not a prediction)
+✓ fetchAllRows() skips a row when an already-read row is deleted mid-
+  pagination (asserted: makeId(1000) is silently missing)
+✓ fetchAllRowsByKeyset() is unaffected by the identical insert (250→251
+  rows, zero duplicates, the late insert correctly excluded rather than
+  silently duplicating a DIFFERENT row)
+✓ fetchAllRowsByKeyset() is unaffected by the identical delete
+```
+All 4 pass. `fetchAllRowsByKeyset()` (new in `supabase-paginate.ts`) pages by
+value (`WHERE id > lastSeenId`) instead of position, migrated into the
+financial-critical reads: `epf.ts`/`esi.ts`/`ptax.ts`'s authoritative
+`payroll_slips` wage base, `tds-bulk.ts`'s actual-TDS sum, and
+`statutory-recon.ts`'s four "payable" reconciliation sums.
+`tds_declaration_snapshots` (business-ordered by `created_at`, which doesn't
+compose with a single-column keyset cursor) and `filing-pack.ts`'s
+readiness/24Q/ECR reporting reads stay on `fetchAllRows()` — a scoping
+decision stated plainly, not an oversight.
+
+**Real-stack scale run extended to 2,200 employees (past the originally
+tested 1,200, clearing the 2,000+ bar) and to EPF and PTax, not just ESI** —
+`scripts/pagination-scale-check.sh`. Running it at this scale surfaced
+**three more real, previously undetected bugs**, each found only by driving
+the real HTTP/Postgres stack, fixed, and re-verified:
+
+1. **`epf.ts`'s `employee_compensations` lookup ran for every active
+   employee** (not gated behind "missing slip" the way `esi.ts`/`ptax.ts`'s
+   equivalent is), with a single unchunked `.in()` over the full 2,200-id
+   headcount. First run: `HTTP 500`, `err: ""` (empty — the request died
+   before producing a usable error, same shape as the `esi.ts` stale-cleanup
+   bug from the previous commit). Fixed: chunked by 100.
+2. **`esi.ts`/`ptax.ts`'s own "missing slip" compensation lookup had the
+   identical unchunked-`.in()` bug** — invisible in the original 1,200-scale
+   test because every employee there had a slip, so `empsMissingSlip` was
+   empty; worth re-checking once the `epf.ts` sibling turned up broken.
+   Fixed: chunked by 100.
+3. **`ptax.ts`'s `ptax_state_config`/`lwf_state_config` state-resolution
+   reads were completely unpaginated.** At 2,200 employees:
+   ```
+   "computed_count":1000,"skipped_no_state":1200,"total_active":2200
+   ```
+   1,200 employees — everyone past the 1,000-row cap — came back with
+   `state: null` and were silently excluded from PTax entirely, with no
+   error. Fixed: wrapped both reads in `fetchAllRows()`.
+
+Mutation-tested #3 directly against the real stack (restored the pre-fix
+`ptax.ts` from commit `88c60b5`, re-ran the scale script, got the identical
+`skipped_no_state: 1200` failure back, restored the fix, re-ran clean).
+#1 and #2 were fixed together with #3 and verified via the same full
+15/15-assertion clean run below, but not separately mutation-tested in
+isolation under this scale script (that would need a fixture where some
+employees lack a slip, which this script's current fixture doesn't exercise
+— `wages_fallback: 0` in every run below confirms the fallback path, including
+its own chunking, was not what was exercised here; it's covered instead by
+the `epf-/esi-/ptax-wage-base-pagination.test.ts` vitest mutation tests).
+
+Final clean run, all three statutory engines, 2,200 employees:
+```
+=== 1. ESI compute === computed_count: 2200 ✓
+=== 2. Independent SQL read-back === persisted count 2200, sum(employee_contribution) 156750.00,
+       zero-wage count 0, distinct-wage-value 1 — all ✓
+=== 3. EPF compute === computed_count: 2200 ✓
+=== 4. EPF independent SQL read-back === persisted count 2200, sum 2508000.00, zero-wage 0, distinct 1 — all ✓
+=== 5. PTax compute === computed_count: 2200 ✓
+=== 6. PTax independent SQL read-back === persisted count 2200, sum(ptax_amount) 440000.00, zero-gross 0 — all ✓
+=== RESULT: 15 passed, 0 failed ===
+```
+`g13-reconciliation-check.sh` re-run clean (21/21) immediately after, to
+confirm no regression from this round's changes. Full vitest suite: 40 files
+/ 330 tests pass; `tsc --noEmit` clean.
+
+**Still not real Supabase/PostgREST** — same caveat as before, stated again
+rather than left to go stale: the gateway is a from-scratch reimplementation,
+not the genuine service. 2,200 clears the "2,000+" figure quoted in the
+remediation instruction, but the instruction's actual ask — a genuine
+Supabase/PostgREST **staging** project — remains unavailable in this sandbox
+and is reported as blocked, not satisfied by this substitute.
+
 ## 7. Real-stack validation — Postgres + PostgREST-shim gateway + real API
 
 Earlier in this pass, `check-schema-drift.mjs` and any real-DB script were

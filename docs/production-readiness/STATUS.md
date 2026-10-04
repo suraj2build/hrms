@@ -6,15 +6,15 @@ sign-off. Nothing here should be read as GO.
 ## Source of truth (as of this commit)
 
 - **Branch:** `fix/g13-numeric-coercion-sweep`
-- **HEAD:** `88c60b5bdb03027673ec2d764a211b7881d3acd3`
+- **HEAD:** `dfafd4bad2e5323a0b536041df63bc71783d48ab`
 - **Remote:** `origin` = `https://github.com/suraj2build/hrms` — this branch has
   **0 commits pushed**; `origin/fix/g13-numeric-coercion-sweep` does not exist yet.
 - **Working tree:** clean (no uncommitted changes) as of this commit.
-- **Unpushed commits:** 15, measured as `git log --oneline main..HEAD` (the
-  correct base — this branch's divergence point from local `main`, not an
-  arbitrary earlier point in this conversation). The 7 most recent, from this
-  remediation pass — `f3e4ca4`, `f1fc6d4`, `699e7c9`, `c20669d`, `c782c36`,
-  `0bbeb3a`, `88c60b5` — are the ones with evidence in EVIDENCE.md.
+- **Unpushed commits:** 17, measured as `git log --oneline main..HEAD` (the
+  correct base — this branch's divergence point from local `main`). The 9
+  most recent, from this remediation pass — `f3e4ca4`, `f1fc6d4`, `699e7c9`,
+  `c20669d`, `c782c36`, `0bbeb3a`, `88c60b5`, `dfafd4b`, plus this commit —
+  are the ones with evidence in EVIDENCE.md.
 - **Push status:** paused per standing instruction — GitHub App access for
   this session has repeatedly 403'd ("Claude doesn't have GitHub access to
   suraj2build/hrms for your organization"). Do not retry until the user
@@ -26,14 +26,30 @@ sign-off. Nothing here should be read as GO.
   `git diff --stat` on both, zero changes, no `--save-baseline` ever run this
   session.
 
-## What "G01–G13" means here (read this before trusting any G-numbered row)
+## What "G01–G06" (corrected from "G01–G12") means here
 
-The instruction to "commit the complete finding register: original G01–G13"
-assumes a document with that numbering exists. It does not, in this repo, as
-a committed artifact: `grep -rl "G01\|G13\|RC-G5"` across every `.md` file in
-the repository returns **nothing**. "G13" (numeric coercion) and "G05-adjacent
-/ RC-G5-01" (unbounded queries) are labels that came from this conversation's
-own prior-session history, not from a file anyone else can open.
+An earlier version of this document (and the instruction to recover
+"G01–G12") was itself imprecise. Recovered via GitHub rather than a repo file
+search: **PR #29's own body** states *"G01–G06 and the overall NO-GO verdict
+from the audit are unaffected and unchanged by this PR"*
+(https://github.com/suraj2build/hrms/pull/29), and a PR comment from the same
+prior session repeats the same range in the same framing — both independent
+of this session's own memory, found by querying GitHub directly. **The real
+range is G01–G06, not G01–G12** — G07–G12 have no textual basis anywhere in
+this repo, its full git history (`git log --all`, every branch), or its
+GitHub issues/PRs/comments. They do not appear to have ever existed; treat
+any earlier reference to "G01–G12" (including in this document's own prior
+revision) as a transcription error, now corrected.
+
+What's still genuinely unrecovered: the **content** of G01–G06 — what each
+one actually describes. Both GitHub references treat them as already-shared
+context from a prior conversation, never a committed document; no file in
+this repo, on any branch, or in any PR/issue/comment defines them.
+`grep -rl "G01\|G13\|RC-G5"` across every `.md` file in the repository
+returns nothing. "G13" (numeric coercion, real, fixed, detailed below) and
+"RC-G5-01" (unbounded queries, the literal constant name inside
+`check-unbounded-queries.mjs`) are the only G-labels with actual committed
+substance behind them.
 
 The repository's own committed audit, `SYSCERT_AUDIT_2026-08-02.md`, uses a
 **different** scheme entirely — C1–C9 (critical) plus High/Medium/Low — and
@@ -41,16 +57,15 @@ was not re-verified this session. Some of its items are thematically close to
 this session's work (its **C6**, "statutory compliance GET/export endpoints
 unpaginated," is the same failure class as this session's entire A1/A2
 pagination fix; its **C8**, unbatched leave-accrual loops, is unrelated). No
-mapping between "G01–G12" and "C1–C9" has been verified — `FINDINGS.csv`
-marks G01–G12 as `OUT_OF_SCOPE_THIS_SESSION` / `NOT_RE_VERIFIED` rather than
-asserting a correspondence that hasn't been checked. G13 itself (numeric
-coercion) is real, fixed in prior commits on this branch, and detailed in
-`FINDINGS.csv`.
+mapping between G01–G06 and C1–C9 has been verified — `FINDINGS.csv` marks
+G01–G06 as `OUT_OF_SCOPE_THIS_SESSION` / `NOT_RE_VERIFIED` rather than
+asserting a correspondence that hasn't been checked.
 
 **Action needed from a human:** point this session (or the next one) at
-whatever document actually defines G01–G12, or confirm there isn't one and
-C1–C9 is the real list. Until then, "all G01–G13 findings closed" cannot be
-asserted and this document does not assert it.
+whatever document actually defines G01–G06, or confirm there isn't one and
+either C1–C9 is the real list or the NO-GO verdict's G01–G06 basis was always
+conversational/oral rather than a document. Until then, "all G01–G06 findings
+closed" cannot be asserted and this document does not assert it.
 
 ## Phase status
 
@@ -80,6 +95,24 @@ Fixed this pass (local commits, not pushed):
 - 7 new regression tests, **all mutation-verified** (reverted to the pre-fix
   code, confirmed RED, restored, confirmed GREEN again) — see EVIDENCE.md for
   the exact before/after numbers.
+- **Keyset pagination for financial-critical reads**: a deterministic
+  `.order('id')` resolves ambiguous ordering between identical requests, but
+  does not prevent offset pagination from skipping/duplicating a row when
+  the table is written to WHILE pagination is in flight (a concurrent
+  finalize can insert/delete at any point in the random-UUID key space,
+  including inside an already-read page). Added `fetchAllRowsByKeyset()`,
+  proved its correctness property against a real simulated concurrent
+  mutation (not just argued it), and migrated it into the actual
+  financial-critical reads (epf/esi/ptax.ts's wage base, tds-bulk.ts's
+  actual-TDS sum, statutory-recon.ts's 4 payable sums). See EVIDENCE.md §6.
+- **3 more real bugs found and fixed via real-stack scale testing at 2,200
+  employees** (not mocks): epf.ts's and esi.ts/ptax.ts's
+  `employee_compensations` fallback lookups were unchunked against the full
+  headcount (`ADD-006`, `ADD-007`); ptax.ts's state-resolution reads
+  (`ptax_state_config`/`lwf_state_config`) were completely unpaginated and
+  silently dropped 1,200 of 2,200 employees from PTax entirely (`ADD-008`).
+  All three fixed, re-verified at scale; the state-resolution one
+  mutation-tested directly against the real stack. See EVIDENCE.md §6.
 
 **Not started** (remaining confirmed defects, see `FINDINGS.csv` `status=OPEN`):
 - 35 other `check-unbounded-queries.mjs` confirmed defects, grouped by theme
@@ -124,10 +157,10 @@ Fixed this pass (local commits, not pushed):
   refactor — `git diff --stat` on both baseline JSON files is empty).
 
 ### Phase 4 — Prove correctness: SUBSTANTIAL PROGRESS, one gate still genuinely blocked
-- Regression tests: 9 new tests added this pass (7 pagination + 1 stale-
-  cleanup-chunking unit test + the 24Q/ECR/readiness set), all
-  mutation-verified (see EVIDENCE.md). Full suite: 39 files / 326 tests pass,
-  `tsc --noEmit` clean.
+- Regression tests: 11 new test files added this pass (7 pagination + 1
+  stale-cleanup-chunking unit test + the 24Q/ECR/readiness set + the keyset-
+  vs-offset concurrent-write proof), all mutation-verified (see
+  EVIDENCE.md). Full suite: 40 files / 330 tests pass, `tsc --noEmit` clean.
 - `check-schema-drift.mjs`: ran, clean (see Phase 3 — corrected from an
   earlier wrong "blocked" note).
 - Release checks (`--ratchet`): both exit 1 for the pre-existing fingerprint
@@ -138,26 +171,30 @@ Fixed this pass (local commits, not pushed):
   exhaustively re-verified for every one of the ~140 "new" entries).
 - **Real Postgres read-back reconciliation**: Postgres, the PostgREST-shim
   gateway, and the real API were all brought up in this container this pass.
-  `scripts/g13-reconciliation-check.sh` re-run: **21/21 assertions pass,
-  cleanup confirmed.**
-- **Real-scale pagination validation — ran, not blocked, but not real
-  Supabase**: `scripts/pagination-scale-check.sh` (new this pass) seeds
-  1,200 employees + finalized slips in real Postgres and drives the real ESI
-  compute endpoint through the gateway, which enforces the same
-  `MAX_ROWS=1000` real PostgREST does. **This run found a real, previously
-  undetected bug** (below) that no vitest mock surfaced, fixed it, and
-  re-ran clean: 6/6 assertions, independent SQL read-back confirms all 1,200
-  rows correct. This is genuinely stronger evidence than mocks — but it is
-  **still not real Supabase/PostgREST**: the gateway is a from-scratch
-  reimplementation (see its own header comment), not the genuine article,
-  and this was done for ESI only, not EPF/PTax/filing-pack/the 35 remaining
-  open defects, and not at 2,000+ scale (1,200 was enough to exceed the
-  1,000-row cap and did not need to go further).
+  `scripts/g13-reconciliation-check.sh` re-run twice (once per round of
+  fixes): **21/21 assertions pass both times, cleanup confirmed.**
+- **Real-scale pagination validation — ran, not blocked, extended to 2,200
+  employees and to EPF+PTax, still not real Supabase**:
+  `scripts/pagination-scale-check.sh` (new this pass, then extended) seeds
+  2,200 employees + finalized slips in real Postgres and drives the real
+  ESI, EPF, and PTax compute endpoints through the gateway, which enforces
+  the same `MAX_ROWS=1000` real PostgREST does. **This found FOUR real,
+  previously undetected bugs across two rounds** (the esi.ts/ptax.ts
+  stale-cleanup DELETE, plus three more at the 2,200-employee scale — see
+  EVIDENCE.md §6-7) that no vitest mock surfaced; all four fixed and
+  re-verified: **15/15 assertions pass, independent SQL read-back confirms
+  all 2,200 rows correct for all three statutory engines.** This is
+  genuinely stronger evidence than mocks, and real bugs were found by it —
+  but it is **still not real Supabase/PostgREST**: the gateway is a
+  from-scratch reimplementation (see its own header comment), not the
+  genuine article, and filing-pack.ts / the 35 remaining open defects were
+  not exercised at this scale.
 - **Real Supabase/PostgREST staging validation at 2,000+ employees**: **still
   BLOCKED, not passed.** This sandbox has no staging Supabase/PostgREST
   access — that gap is unchanged by the local-Postgres work above, which is
-  a meaningfully stronger proxy, not a substitute. Reported as a blocker,
-  not silently skipped or assumed-fine.
+  a meaningfully stronger proxy, not a substitute, and 2,200 is a different
+  (lower) bar than a genuine Supabase project. Reported as a blocker, not
+  silently skipped or assumed-fine.
 
 **New finding from the real-scale run — `ADD-005` (see FINDINGS.csv):**
 `esi.ts` and `ptax.ts`'s stale-contribution-row cleanup built a single
