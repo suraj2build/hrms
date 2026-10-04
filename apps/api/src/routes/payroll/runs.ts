@@ -2223,12 +2223,20 @@ export default async function payrollRunsRoutes(fastify: FastifyInstance) {
 
         if (missingIds.length > 0) {
           if (!force_finalize) {
-            // Enrich with names for a human-readable error response
-            const { data: empRows } = await fastify.supabase
-              .from('employees')
-              .select('id, first_name, last_name, employee_code')
-              .in('id', missingIds)
-              .eq('tenant_id', tenantId)
+            // Enrich with names for a human-readable error response.
+            // Chunked: missingIds can be the tenant's full draft-run
+            // headcount — a single .in() over thousands of UUIDs risks the
+            // request-line limit.
+            const empRows: any[] = []
+            for (let i = 0; i < missingIds.length; i += 100) {
+              const chunkIds = missingIds.slice(i, i + 100)
+              const { data } = await fastify.supabase
+                .from('employees')
+                .select('id, first_name, last_name, employee_code')
+                .in('id', chunkIds)
+                .eq('tenant_id', tenantId)
+              if (data) empRows.push(...data)
+            }
 
             return reply.code(422).send({
               error:   'MISSING_ATTENDANCE_DATA',
@@ -2236,7 +2244,7 @@ export default async function payrollRunsRoutes(fastify: FastifyInstance) {
                        'These employees will receive full pay (0 LOP assumed). ' +
                        'Verify punch records, then either process attendance or pass force_finalize=true with an override_reason.',
               missing_attendance_count:     missingIds.length,
-              missing_attendance_employees: (empRows ?? []).map((e: any) => ({
+              missing_attendance_employees: empRows.map((e: any) => ({
                 employee_id:   e.id,
                 employee_name: `${e.first_name} ${e.last_name}`,
                 employee_code: e.employee_code,
@@ -3416,14 +3424,21 @@ export default async function payrollRunsRoutes(fastify: FastifyInstance) {
       return reply.send({ message: 'No open blockers found — nothing to retry', retried_count: 0 })
     }
 
-    // Fetch employee records for the retry set
-    const { data: employees } = await fastify.supabase
-      .from('employees')
-      .select('id, first_name, last_name, employee_code')
-      .eq('tenant_id', tenantId)
-      .in('id', retryEmpIds)
+    // Fetch employee records for the retry set. Chunked: retryEmpIds can be
+    // every employee who blocked in a large payroll run — a single .in()
+    // over thousands of UUIDs risks the request-line limit.
+    const employees: any[] = []
+    for (let i = 0; i < retryEmpIds.length; i += 100) {
+      const chunkIds = retryEmpIds.slice(i, i + 100)
+      const { data } = await fastify.supabase
+        .from('employees')
+        .select('id, first_name, last_name, employee_code')
+        .eq('tenant_id', tenantId)
+        .in('id', chunkIds)
+      if (data) employees.push(...data)
+    }
 
-    const empList = (employees ?? []) as Array<{ id: string; first_name: string; last_name: string; employee_code: string }>
+    const empList = employees as Array<{ id: string; first_name: string; last_name: string; employee_code: string }>
 
     // Working days context
     const [runYear, runMon] = (run.month as string).split('-').map(Number)

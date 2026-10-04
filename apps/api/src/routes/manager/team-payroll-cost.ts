@@ -123,14 +123,22 @@ export default async function managerTeamPayrollCostRoute(fastify: FastifyInstan
       .maybeSingle()
     if (priorRunError) return serverError(req, reply, priorRunError, ErrorCode.QUERY_FAILED, 'Failed to fetch team payroll cost')
     if (priorRun) {
-      const { data: priorSlips, error: priorSlipsError } = await fastify.supabase
-        .from('payroll_slips')
-        .select('employee_id, net_pay')
-        .eq('tenant_id', req.tenantId)
-        .eq('run_id', (priorRun as any).id)
-        .in('employee_id', employeeIds)
-      if (priorSlipsError) return serverError(req, reply, priorSlipsError, ErrorCode.QUERY_FAILED, 'Failed to fetch team payroll cost')
-      for (const s of (priorSlips ?? []) as any[]) priorNet.set(s.employee_id, Number(s.net_pay ?? 0))
+      // Chunked: employeeIds is either the tenant's full active headcount
+      // (HR admin) or a manager's full recursive org subtree
+      // (getDirectReportIds() calls the recursive get_all_subordinates()
+      // RPC, up to 10 levels deep — a senior manager's subtree can
+      // realistically exceed what a single .in() URL can safely carry).
+      for (let i = 0; i < employeeIds.length; i += 100) {
+        const chunkIds = employeeIds.slice(i, i + 100)
+        const { data: priorSlips, error: priorSlipsError } = await fastify.supabase
+          .from('payroll_slips')
+          .select('employee_id, net_pay')
+          .eq('tenant_id', req.tenantId)
+          .eq('run_id', (priorRun as any).id)
+          .in('employee_id', chunkIds)
+        if (priorSlipsError) return serverError(req, reply, priorSlipsError, ErrorCode.QUERY_FAILED, 'Failed to fetch team payroll cost')
+        for (const s of (priorSlips ?? []) as any[]) priorNet.set(s.employee_id, Number(s.net_pay ?? 0))
+      }
     }
 
     const data = (rows ?? []).map((r: any) => {
