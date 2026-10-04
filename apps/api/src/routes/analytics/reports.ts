@@ -18,7 +18,9 @@
 import type { FastifyInstance } from 'fastify'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { fetchAllRows }  from '../../lib/supabase-paginate.js'
-import { serverError, ErrorCode } from '../../lib/api-errors.js'
+import { serverError, validationError, ErrorCode } from '../../lib/api-errors.js'
+
+const monthRe = /^\d{4}-\d{2}$/
 import { fetchTenantTz } from '../../lib/attendance-engine.js'
 import { getLocalDate } from '../../lib/org-context.js'
 
@@ -438,6 +440,12 @@ export default async function reportsRoutes(fastify: FastifyInstance) {
   // India-specific: PF, ESI, PT, LWF
   //
   // Query params:
+  //   month           TEXT    REQUIRED, YYYY-MM — the contribution month to
+  //                           report. PF/ESI amounts come from the real,
+  //                           already-computed epf_contributions/
+  //                           esi_contributions rows for this month (see
+  //                           "G06" below), not an estimate, so a month with
+  //                           no payroll run yet has no figures to show.
   //   department_id   UUID    filter by department
   //   employment_type TEXT    filter by employment type
   //   scheme          TEXT    pf | esi | pt | lwf  (filter to one scheme)
@@ -445,6 +453,11 @@ export default async function reportsRoutes(fastify: FastifyInstance) {
   fastify.get('/reports/statutory', auth, async (req, reply) => {
     const tid = req.tenantId
     const q   = req.query as Record<string, string>
+
+    if (!q.month || !monthRe.test(q.month)) {
+      return validationError(reply, ErrorCode.VALIDATION_ERROR, 'month is required and must be YYYY-MM')
+    }
+    const month = q.month
 
     // Employee bank + statutory details
     let statutory: any[]
@@ -463,6 +476,45 @@ export default async function reportsRoutes(fastify: FastifyInstance) {
     } catch (statErr) {
       return serverError(req, reply, statErr, ErrorCode.QUERY_FAILED, 'Failed to fetch statutory report data')
     }
+
+    // G06: PF/ESI figures for this report MUST come from the real contribution
+    // amounts the statutory engine already computed and persisted for `month`
+    // (epf_contributions / esi_contributions — the same tables filing-pack.ts
+    // reads for actual EPFO/ESIC filing), not a formula approximation off
+    // employee_compensations.ctc_monthly. The previous "~50% of CTC as basic,
+    // capped at 15,000, times 12%" guess could diverge arbitrarily from the
+    // employee's real PF wage base (arrears, LOP, voluntary PF, mid-month
+    // joiners, statutory caps/overrides) — this report feeds actual compliance
+    // decisions, so it must show what was actually computed and filed, not an
+    // estimate of it.
+    let epfContribs: any[]
+    let esiContribs: any[]
+    try {
+      ;[epfContribs, esiContribs] = await Promise.all([
+        fetchAllRows((from, to) =>
+          fastify.supabase
+            .from('epf_contributions')
+            .select('employee_id, pf_wages, employee_contribution, employer_pf, employer_eps, edli_contribution, total_employer_contribution, voluntary_pf, is_capped')
+            .eq('tenant_id', tid)
+            .eq('contribution_month', month)
+            .range(from, to),
+        ),
+        fetchAllRows((from, to) =>
+          fastify.supabase
+            .from('esi_contributions')
+            .select('employee_id, esi_wages, employee_contribution, employer_contribution, is_eligible')
+            .eq('tenant_id', tid)
+            .eq('contribution_month', month)
+            .range(from, to),
+        ),
+      ])
+    } catch (contribErr) {
+      return serverError(req, reply, contribErr, ErrorCode.QUERY_FAILED, 'Failed to fetch statutory contribution data')
+    }
+    const epfMap: Record<string, any> = {}
+    for (const c of epfContribs) epfMap[c.employee_id] = c
+    const esiMap: Record<string, any> = {}
+    for (const c of esiContribs) esiMap[c.employee_id] = c
 
     // Active compensations for gross/CTC
     const statComps = await fetchAllRows((from, to) =>
@@ -523,15 +575,18 @@ export default async function reportsRoutes(fastify: FastifyInstance) {
       const stat = statMap[emp.id] ?? {}
       const comp = compMap[emp.id]  ?? { ctc_monthly: 0, ctc_annual: 0 }
 
-      // PF: 12% of basic (approx 50% of CTC monthly as basic estimate) — capped at ₹15,000 basic
-      const approxBasicMonthly = Math.min(comp.ctc_monthly * 0.5, 15000)
-      const pf_employee = stat.uan ? Math.round(approxBasicMonthly * 0.12) : null
-      const pf_employer = stat.uan ? Math.round(approxBasicMonthly * 0.12) : null
+      // PF/ESI: the REAL computed-and-persisted contribution for `month`
+      // (see "G06" above) — null when no row exists (no payroll run has
+      // computed this employee's contribution for this month yet), never a
+      // formula guess.
+      const epf = epfMap[emp.id]
+      const esi = esiMap[emp.id]
+      const pf_employee = epf ? Number(epf.employee_contribution) : null
+      const pf_employer = epf ? Number(epf.total_employer_contribution) : null
 
-      // ESI: applicable if gross ≤ ₹21,000/month; employee 0.75%, employer 3.25%
-      const esiApplicable = stat.esi_number && comp.ctc_monthly <= 21000
-      const esi_employee = esiApplicable ? Math.round(comp.ctc_monthly * 0.0075) : null
-      const esi_employer = esiApplicable ? Math.round(comp.ctc_monthly * 0.0325) : null
+      const esiApplicable = esi ? !!esi.is_eligible : false
+      const esi_employee  = esi ? Number(esi.employee_contribution) : null
+      const esi_employer  = esi ? Number(esi.employer_contribution) : null
 
       const row = {
         employee_code:    info.code,
