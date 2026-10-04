@@ -86,6 +86,7 @@ async function buildApp(opts: {
       if (table === 'payroll_slips')                return { select: () => genericChain({ data: opts.slips, error: null }, { paged: true }) }
       if (table === 'esi_contributions') {
         return {
+          select: () => genericChain({ data: [], error: null }, { paged: true }),
           delete: () => genericChain({ error: null }),
           upsert: (rows: any[]) => { upsertSpy(rows); return Promise.resolve({ error: null }) },
         }

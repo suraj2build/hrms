@@ -667,16 +667,40 @@ export default async function ptaxRoutes(fastify: FastifyInstance) {
     // Remove stale rows for employees no longer in this month's deductible set
     // (e.g. dropped below the slab / state disabled since the last compute), so a
     // re-finalize cannot leave a phantom PT liability on the filing.
+    //
+    // Same fix as esi.ts's identical pattern: a single .not('employee_id',
+    // 'in', `(${allKeepIds.join(',')})`) encodes every kept id into one URL
+    // query parameter, which breaks before it reaches the server at
+    // enterprise headcount (found by running this endpoint for real against
+    // 1,200 employees — scripts/pagination-scale-check.sh). Fixed by finding
+    // the actual stale ids and deleting them in bounded .in()-chunks.
     {
-      const keepIds = contributions.map((c: any) => c.employee_id)
-      let delQ = fastify.supabase
-        .from('ptax_contributions')
-        .delete()
-        .eq('tenant_id', req.tenantId)
-        .eq('contribution_month', month)
-      if (keepIds.length > 0) delQ = delQ.not('employee_id', 'in', `(${keepIds.join(',')})`)
-      const { error: delErr } = await delQ
-      if (delErr) return serverError(req, reply, delErr, ErrorCode.DELETE_FAILED, 'Failed to clean up stale P-Tax contributions')
+      const keepSet = new Set(contributions.map((c: any) => c.employee_id))
+      let existingRows: Array<{ employee_id: string }>
+      try {
+        existingRows = await fetchAllRows((from, to) =>
+          fastify.supabase
+            .from('ptax_contributions')
+            .select('employee_id')
+            .eq('tenant_id', req.tenantId)
+            .eq('contribution_month', month)
+            .order('id')
+            .range(from, to),
+        )
+      } catch (existErr) {
+        return serverError(req, reply, existErr, ErrorCode.QUERY_FAILED, 'Failed to read existing P-Tax contributions for cleanup')
+      }
+      const staleIds = existingRows.map(r => r.employee_id).filter(id => !keepSet.has(id))
+      for (let i = 0; i < staleIds.length; i += 100) {
+        const chunk = staleIds.slice(i, i + 100)
+        const { error: delErr } = await fastify.supabase
+          .from('ptax_contributions')
+          .delete()
+          .eq('tenant_id', req.tenantId)
+          .eq('contribution_month', month)
+          .in('employee_id', chunk)
+        if (delErr) return serverError(req, reply, delErr, ErrorCode.DELETE_FAILED, 'Failed to clean up stale P-Tax contributions')
+      }
     }
 
     if (contributions.length > 0) {

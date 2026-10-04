@@ -559,16 +559,43 @@ export default async function esiRoutes(fastify: FastifyInstance) {
     // (e.g. crossed the ESI ceiling / became exempt since the last compute).
     // Without this, a re-finalize upserts only the still-eligible rows and leaves
     // the dropped employee's old contribution behind → the challan over-remits.
+    //
+    // A single .not('employee_id', 'in', `(${allKeepIds.join(',')})`) encodes
+    // every kept id into one URL query parameter — found by running this
+    // endpoint for real against 1,200 employees (scripts/pagination-scale-check.sh):
+    // the ~44,000-character filter value broke the request before it ever
+    // reached the gateway (empty error, nothing in the gateway's own log).
+    // Fixed by finding the actual stale ids (existing rows minus the kept
+    // set, both fetched with fetchAllRows to avoid the same 1,000-row cap
+    // this whole cluster exists to fix) and deleting them in bounded
+    // .in()-chunks of 100 instead of excluding a single huge list.
     {
-      const keepIds = contributions.map((c: any) => c.employee_id)
-      let delQ = fastify.supabase
-        .from('esi_contributions')
-        .delete()
-        .eq('tenant_id', req.tenantId)
-        .eq('contribution_month', month)
-      if (keepIds.length > 0) delQ = delQ.not('employee_id', 'in', `(${keepIds.join(',')})`)
-      const { error: delErr } = await delQ
-      if (delErr) return serverError(req, reply, delErr, ErrorCode.DELETE_FAILED, 'Failed to clean up stale ESI contributions')
+      const keepSet = new Set(contributions.map((c: any) => c.employee_id))
+      let existingRows: Array<{ employee_id: string }>
+      try {
+        existingRows = await fetchAllRows((from, to) =>
+          fastify.supabase
+            .from('esi_contributions')
+            .select('employee_id')
+            .eq('tenant_id', req.tenantId)
+            .eq('contribution_month', month)
+            .order('id')
+            .range(from, to),
+        )
+      } catch (existErr) {
+        return serverError(req, reply, existErr, ErrorCode.QUERY_FAILED, 'Failed to read existing ESI contributions for cleanup')
+      }
+      const staleIds = existingRows.map(r => r.employee_id).filter(id => !keepSet.has(id))
+      for (let i = 0; i < staleIds.length; i += 100) {
+        const chunk = staleIds.slice(i, i + 100)
+        const { error: delErr } = await fastify.supabase
+          .from('esi_contributions')
+          .delete()
+          .eq('tenant_id', req.tenantId)
+          .eq('contribution_month', month)
+          .in('employee_id', chunk)
+        if (delErr) return serverError(req, reply, delErr, ErrorCode.DELETE_FAILED, 'Failed to clean up stale ESI contributions')
+      }
     }
 
     if (contributions.length > 0) {
