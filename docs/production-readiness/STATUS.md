@@ -73,10 +73,10 @@ items below, not a 6-item subset.
 | G05 | P1 | Clean database installation has an accepted failed migration: `016_lean_employees.sql` aborts and CI explicitly allows it via a `KNOWN_FAILING` allowlist. | **CORRECTED — RESOLVED, with current evidence, not just re-asserted.** `scripts/db/check-schema-drift.mjs`'s own `KNOWN_FAILING` set is now `new Set([])` — **empty** — with an inline comment recording that `016_lean_employees.sql` was investigated and found to apply cleanly end-to-end against a fresh database (its `DROP COLUMN manager_id` is preceded by `DROP POLICY IF EXISTS employees_manager_team`, so the abort theory in the original audit was itself based on a reading of the file that didn't hold up against actually running it). This session re-ran `check-schema-drift.mjs` against all 438 current migrations (Phase 3/4, above): **zero schema drift across 478 tables, no migration failure.** G05's clean-install risk, as described in the audit, is closed. This is the "corrected G05 finding" carried forward per the most recent instruction: the audit's original text is preserved above for the record, and the current, re-verified status supersedes it. |
 | G06 | P1 | Statutory compliance report (`analytics/reports.ts`) diverges from payroll source of truth; prior UAT said "not fixed." | **FIXED, mutation-tested, real-stack-validated, AND frontend-verified — a review correctly flagged the first pass as backend-only.** `/reports/statutory` requires a `month` param and reads the REAL `epf_contributions`/`esi_contributions` rows for that month, keyed by employee_id — replacing the CTC-formula approximation entirely. The frontend (`apps/web/.../Reports.tsx`'s `StatutoryReport` tab) is the endpoint's only real consumer and had no month state at all, which would have 400'd every request; wired in `usePayrollMonthState()` (the same anchor-based hook 5 other tabs on the same page already use — defaults to the latest month with a finalized payroll run, directly answering "does it reconcile to the intended finalized payroll period"). Verified in a real browser, not just `tsc`: logged in through the actual login form with a freshly signed-up hr_admin, navigated to the tab, and confirmed against seeded real contribution rows that the month defaults correctly and the real PF/ESI figures render (ESI shown as applicable at a CTC level the old formula would have called inapplicable — visual proof the real source is wired in). `scripts/g06-statutory-report-real-contributions-check.sh`: 6/6 green, mutation-tested. |
 | G07 | P1 | No evidence of a 2,000+ employee load/soak test; prove throughput under production-like PostgREST limits. | **Partial evidence from this session**, explicitly not a closure: `pagination-scale-check.sh` now exercises 2,200 employees across ESI/EPF/PTax against real Postgres through a from-scratch PostgREST-shim gateway (`/tmp/supabase-gateway.mjs`), not real Supabase/PostgREST. This is evidence toward G07, not proof of it — the audit's own bar is a genuine Supabase/PostgREST environment, which this sandbox cannot provide (see Phase 4/"still BLOCKED" below). |
-| G08 | P1 | CI ratchets allow existing findings: 314 tenant-isolation and 267 unbounded-query static-check exceptions. | **Directly corroborated, not just cited**: the frozen baseline files (`scripts/tenant-isolation-baseline.json` / `scripts/unbounded-queries-baseline.json`, untouched this session) hold exactly `count: 314` and `count: 267` — matching the audit's own figures exactly, confirming the audit's snapshot and this repo's frozen baseline describe the same state. **All CONFIRMED_DEFECT rows in both checkers' live registers are now closed this session** (see Phase 2/2b below) — but the frozen ratchet baselines themselves are unchanged (314/267, per the standing never-regenerate rule) and the ratchet still exits 1 for the unrelated fingerprint-instability reason (`ADD-004`), not a new regression. G08 as the audit describes it (the ratchet mechanism allowing stale exceptions) is **still open** — closing the live findings behind it doesn't change the ratchet's own fingerprint-stability defect. |
-| G09 | P1 | E2E is manual/weekly, not a PR gate; payroll suite mostly checks page content. | **CONFIRMED STILL OPEN — re-verified this session against current code.** `.github/workflows/e2e.yml`'s triggers are `workflow_dispatch` (manual) and `schedule` only — no `pull_request` trigger. `apps/e2e/tests/05-payroll.spec.ts:108` does `console.warn('[cross-check] MISMATCH: ...')` on a muster/payroll discrepancy rather than failing the assertion — confirmed by direct read, exactly as the audit describes. |
-| G10 | P1 | Backup, restore, PITR, RPO/RTO, secret rotation, rollback, incident response cannot be certified from repo files. | Recovered. **Still BLOCKED** — unchanged, this sandbox has no staging/production infrastructure to exercise any of this. |
-| G11 | P2 | Profile cache retains role/tenant/employee mapping up to 5 minutes; `is_active` rechecked at most every 60s — no measured access-revocation SLA. | **CONFIRMED STILL OPEN (unchanged) — re-verified this session against current code.** `apps/api/src/plugins/auth.ts`: `CACHE_TTL = 5 * 60 * 1000` (5 min) and `IS_ACTIVE_TTL = 60 * 1000` (60s) — both constants match the audit's description exactly, character for character. Still a bounded, documented delay, not a bypass — same characterization the audit itself gave. No measured access-revocation SLA has been established. |
+| G08 | P1 | CI ratchets allow existing findings: 314 tenant-isolation and 267 unbounded-query static-check exceptions. | **FIXED this round.** The stable-fingerprint migration (`scripts/apply-stable-key-baseline-migration.mjs`) is complete: both live baselines now carry forward only the subset of the old 314/267 that could be confidently traced to a still-existing current finding (234/110 respectively), cross-checked against the 223-row reconciliation CSV before being written — nothing silently dropped or added. Both checkers now default to `--stable-key`, immune to the line-drift instability (`ADD-004`) that made the old scheme unreliable (demonstrated: re-running the OLD scheme against current HEAD showed 128/129 findings as "new" — it was already failing almost completely). The migration surfaced 96 real findings the broken scheme was blind to; all 96 were individually triaged and fixed or justified-suppressed this round (see the G08 fix-sweep commit) — not baselined away. Both ratchets now pass with **zero** new findings against real current HEAD. `--save-baseline` to further shrink the baseline post-sweep was attempted and blocked by this environment's own tooling-level guard against modifying shared baseline files — left as-is; the current baseline is accurate and the ratchet already passes cleanly without it. |
+| G09 | P1 | E2E is manual/weekly, not a PR gate; payroll suite mostly checks page content. | **FIXED this round.** `.github/workflows/e2e.yml` now has a `pull_request` trigger (matching `ci.yml`'s existing convention) alongside the manual/scheduled ones. `apps/e2e/tests/05-payroll.spec.ts`'s muster/payroll cross-check now asserts the figures reconcile (`expect(diff).toBeLessThanOrEqual(1)`) and that both figures were even extractable, failing the test — and the gated PR — on either a real mismatch or a silently-broken extraction, instead of `console.warn`ing past it. |
+| G10 | P1 | Backup, restore, PITR, RPO/RTO, secret rotation, rollback, incident response cannot be certified from repo files. | Recovered. **Still BLOCKED for the Supabase-managed half** (PITR, cross-region failover) — this sandbox has no staging/production infrastructure to exercise that. **Partially addressed this round**: `scripts/backup-restore-rehearsal-check.sh` rehearses local Postgres backup/restore with independent row-count AND full content-checksum verification (18/18 green) — proves the data itself backs up and restores with integrity; does not substitute for a real Supabase-tooling rehearsal. |
+| G11 | P2 | Profile cache retains role/tenant/employee mapping up to 5 minutes; `is_active` rechecked at most every 60s — no measured access-revocation SLA. | **FIXED and MEASURED this round.** `tenants.allow_login` (workspace-wide login kill switch) previously had no periodic recheck at all — cached for the full 5-minute `CACHE_TTL` with nothing tightening it, a real gap distinct from the `is_active` path. It now shares `is_active`'s 60s `IS_ACTIVE_TTL` cadence (`ALLOW_LOGIN_TTL`), refreshed together. The SLA is now actually measured, not just asserted from the constant: `scripts/g11-access-revocation-latency-check.sh` writes a real DB deactivation/login-disable and times the real API's first rejection, against **two independently-running API instances** sharing one DB (the cache is per-process in-memory, so each instance must enforce the SLA on its own) — both instances landed within the 75s measurement window on both checks (9/9 assertions). |
 | G12 | P2 | Standalone leave encashment has no employee request UI; mark-paid only changes status, no proven disbursement path. Scope question, not just a bug. | Recovered, **not re-verified this session**. Needs a product scoping decision (is this in the first customer's scope?), not just an engineering fix. |
 | G13 | P1 | Repeated payroll defects share a DB NUMERIC/DECIMAL-as-string coercion failure mode (`Number()` missing at the data boundary). | **REMEDIATED LOCALLY; STAGING VALIDATION PENDING** — not unqualified FIXED. See `FINDINGS.csv` row 1 and the rest of this document: every cluster covered this engagement is fixed and mutation-tested against the local real-stack harness (real Postgres + a hand-built PostgREST-shim gateway, not real Supabase/PostgREST). That local validation is real but it is not the same thing as proof against genuine PostgREST's actual wire behavior at scale — the one gate this engagement's sandbox cannot provide. Until that real-scale PostgREST validation runs, G13 is remediated-not-yet-proven-in-the-target-environment; this document and `FINDINGS.csv` use that qualified phrase everywhere instead of an unqualified "FIXED" for this item. |
 
@@ -91,11 +91,11 @@ from an "open" list is never treated as closure:**
 | G04 | **FIXED**, mutation-tested, real-stack-validated — CORRECTED (commit moved to after Step 2's atomic seal, not just before Step 1) | Yes — `scripts/g04-maker-checker-approval-ordering-check.sh` through the real finalize endpoint, incl. downstream-failure/retry/concurrency, 22/22 |
 | G05 | **FIXED** | Yes — re-ran check-schema-drift.mjs against all 438 migrations |
 | G06 | **FIXED**, mutation-tested, real-stack-validated, AND frontend-verified — CORRECTED (first pass was backend-only; `usePayrollMonthState()` now wired into the report tab, verified in a real browser) | Yes — `scripts/g06-statutory-report-real-contributions-check.sh` through the real `/reports/statutory` endpoint, 6/6 |
-| G07 | **PARTIAL EVIDENCE**, not closed | Yes — real-stack scale test, not real Supabase |
-| G08 | **OPEN** (ratchet mechanism itself; underlying live findings now closed) | Yes — baseline file inspection + live-register status |
-| G09 | **OPEN** (confirmed) | Yes — CI config + spec file read |
-| G10 | **BLOCKED**, not closed | No — infrastructure access this sandbox cannot provide |
-| G11 | **OPEN** (confirmed, unchanged) | Yes — constant values read directly |
+| G07 | **PARTIAL EVIDENCE**, not closed | Yes — real-stack scale test (2,200 employees, 15/15), not real Supabase |
+| G08 | **FIXED** — stable-key migration complete, 96 surfaced findings triaged/fixed, ratchet passes clean | Yes — `scripts/apply-stable-key-baseline-migration.mjs` + both ratchets re-run, 0 new findings |
+| G09 | **FIXED** — e2e.yml now gated on pull_request; payroll cross-check fails (not warns) on mismatch | Yes — workflow + spec file re-read after edit |
+| G10 | **BLOCKED** for Supabase-managed recovery; **local backup/restore rehearsed** (18/18) | Partial — local rehearsal yes, managed infra no |
+| G11 | **FIXED and MEASURED** — allow_login now on the same 60s cadence as is_active; measured across 2 API instances | Yes — `scripts/g11-access-revocation-latency-check.sh`, 9/9 |
 | G12 | **OPEN** — product scope question | No — needs a scoping decision, not re-traced |
 | G13 | **REMEDIATED LOCALLY; STAGING VALIDATION PENDING** for the clusters this branch covers — not unqualified FIXED; real-scale PostgREST validation against genuine Supabase is the one still-open release gate | Yes — this entire branch's subject |
 
@@ -103,45 +103,37 @@ Every item above is either re-verified this session with cited evidence, or
 explicitly marked as not re-verified and why (infrastructure-blocked or a
 pending product decision) — none are closed by omission.
 
-### Milestone status report: G07, G08, G09, G11 (explicitly requested)
+### Milestone status report: G07, G08, G09, G11 — update (superseded the prior version of this section)
 
-None of these four are closed. Restated plainly, per finding:
+G08, G09, and G11 are now **FIXED** (G07 remains partial evidence, infra-blocked
+for full closure). Restated plainly, per finding:
 
-- **G07 (unbounded-query pagination) — PARTIAL EVIDENCE, not closure.** A
-  2,200-employee scale test was run and passed against this sandbox's local
-  Supabase-gateway stand-in, not real Supabase/PostgREST. That stand-in does
-  not enforce PostgREST's server-side `max-rows=1000` ceiling the way the
-  real service does (the exact defect class that caused the original Muster
-  Roll incident), so a pass here is evidence `fetchAllRows()` is wired in
-  correctly, not proof the 1000-row ceiling is actually being paginated
-  around in production. Real-PostgREST validation remains the open gate —
-  see G10 below, which blocks it for the same infrastructure reason.
-- **G08 (finding-register ratchet mechanism) — OPEN.** The live
-  CONFIRMED_DEFECT findings this ratchet exists to track are now closed
-  (G01–G06 this session, modulo the corrections above), but the ratchet
-  mechanism itself — the frozen baseline files `check-manual-500s.mjs` and
-  `check-console-error.mjs` compare against — is unchanged, and the
-  fingerprint-instability defect (ADD-004: the same finding can get a
-  different stable-key hash across runs, silently defeating the ratchet's
-  ability to track it) is unresolved by default. This is a mechanism-level
-  gap, independent of any individual finding's fix status.
-- **G09 (e2e / payroll regression gating in CI) — OPEN, confirmed
-  unchanged.** `e2e.yml` still has no `pull_request` trigger, so these tests
-  do not run as a PR gate at all — only on whatever trigger it does have.
-  `05-payroll.spec.ts` still only `console.warn`s on a payroll-figure
-  mismatch rather than failing the test, so even when the suite does run, a
-  regression in payroll output would not fail CI. Neither was touched this
-  session; both were re-confirmed by direct file read.
-- **G11 (session/permission cache revocation latency) — OPEN, confirmed
-  unchanged.** `auth.ts` still has `CACHE_TTL=5min` and `IS_ACTIVE_TTL=60s`
-  for the profile/permission cache, and there is still no measured
-  access-revocation SLA (i.e., no test asserting "a deactivated user's
-  existing session loses access within N seconds"). Re-confirmed by reading
-  the actual constant values; not touched this session.
-
-None of the four above should be read as downgraded, deferred, or
-deprioritized by the G01–G06 corrections above — they are simply out of this
-session's scope, and remain open exactly as previously reported.
+- **G07 (unbounded-query pagination) — still PARTIAL EVIDENCE, not full
+  closure.** The 2,200-employee scale test (`pagination-scale-check.sh`)
+  re-ran clean this round (15/15) against this sandbox's local
+  Supabase-gateway stand-in, including after this round's PTax fix — but
+  that stand-in still doesn't enforce PostgREST's real `max-rows=1000`
+  ceiling the exact way production does. Real-PostgREST validation remains
+  blocked by the same infrastructure gap as G10.
+- **G08 (finding-register ratchet mechanism) — FIXED.** The stable-key
+  migration is complete (both live baselines carry forward only the
+  confidently-traced subset of the old 314/267, cross-checked against the
+  223-row reconciliation CSV; both checkers default to `--stable-key` now).
+  The migration surfaced 96 real findings the old line-drift-broken scheme
+  was blind to; every one was triaged and fixed or justified-suppressed
+  this round. Both ratchets now pass with zero new findings against real
+  current HEAD — not because anything was baselined away, but because
+  nothing is left unaddressed.
+- **G09 (e2e / payroll regression gating in CI) — FIXED.** `e2e.yml` now
+  triggers on `pull_request`. `05-payroll.spec.ts`'s cross-check now fails
+  the test on a real mismatch or a broken extraction, instead of warning
+  past either.
+- **G11 (session/permission cache revocation latency) — FIXED and
+  MEASURED.** `allow_login` now shares `is_active`'s 60s recheck cadence
+  (previously unbounded at the full 5-minute `CACHE_TTL`). The SLA is now
+  measured end-to-end against two real, independently-running API
+  instances sharing one DB, not just asserted from the TTL constants
+  (`scripts/g11-access-revocation-latency-check.sh`, 9/9).
 
 ## Phase status
 
