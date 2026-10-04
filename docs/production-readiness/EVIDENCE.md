@@ -746,3 +746,219 @@ untested — see STATUS.md Phase 5).
 `payroll_validation_rules`) are deliberately left open pending the ownership
 decision in `STATUS.md` — not silently resolved, not silently left
 ambiguous either. No tenant filter was added to any of the three.
+
+## 9. G01, G02, G03, G04, G06 — fixed, mutation-tested, real-stack-validated
+
+Per the explicit later-round instruction ("the original financial blockers
+are still open... prioritize those now"), §6g's five re-verified-but-not-fixed
+findings (G02/G03/G04/G06, plus G01 traced earlier) were actually fixed and
+proven this round — not just traced. Each fix was found and proven by
+running the REAL code path (an HTTP endpoint, or an internally-scheduled job
+invoked directly when no HTTP route exists), not by inspection alone, and
+each has a dedicated `scripts/gNN-*.sh` real-stack reproduction script that
+was mutation-tested: run GREEN against the fix, the fix reverted via
+`git stash` to confirm RED against the exact failure the audit described,
+then restored and re-confirmed GREEN.
+
+### G01 — `leave_accrual_ledger.policy_rule_id` missing column
+
+- **Migration 440** (`440_leave_accrual_ledger_policy_rule_id.sql`) adds the
+  column `monthlyAccrualJob()`'s insert paths always wrote.
+- **A second, independently-discovered bug in the same code path**: migration
+  163's `uidx_lal_cycle_key` was a PARTIAL unique index
+  (`WHERE cycle_key IS NOT NULL`) — Postgres cannot match a partial index to
+  an `ON CONFLICT(cycle_key)` target with no `WHERE` clause, so every
+  cycle_key-based upsert across `leave-jobs.ts`/`leave-ledger-service.ts` was
+  broken independent of the missing column. **Migration 441**
+  (`441_leave_accrual_ledger_cycle_key_full_unique.sql`) replaces it with a
+  full unique index.
+- `scripts/g01-leave-accrual-ledger-check.sh` invokes the real
+  `monthlyAccrualJob()` (not a unit test — the actual function the scheduler
+  calls) against a real tenant/employee/policy fixture:
+  ```
+  job result: {"job_id":"unknown","job_type":"monthly_accrual","status":"completed",
+    "employees_processed":1,"total_days_credited":2,"skipped":0,"errors":[],"duration_ms":89}
+  ✓ employees_processed = 1 (the real eligible employee) = 1
+  ✓ total_days_credited = 2 (24 days/year / 12 months) = 2
+  ✓ leave_accrual_ledger has exactly one row crediting 2 days = 2.0
+  ✓ employee_leave_balance reflects the credited 2 days = 2.0
+  RESULT: 4 passed, 0 failed
+  ```
+  Mutation test (`--simulate-missing-column` drops the column, re-adds it
+  after): RED (`employees_processed: 0`) with the column dropped, GREEN
+  (4/4) restored.
+
+### G02 — impossible LOP (`lop_days > total_working_days`) had no live warning path
+
+- `buildPayrollSlipPreview()` (the function the audit's citation points to)
+  is confirmed dead code (zero callers repo-wide, §6g). The real finalize
+  path had NO equivalent check. `runs.ts` now raises a non-blocking
+  `LOP_EXCESSIVE` `payroll_run_blocker` for the affected employee using the
+  existing (previously unreachable) blocker mechanism, without excluding
+  them from the run or affecting finalize eligibility.
+- **Two more real bugs found and fixed while reproducing this through the
+  real `POST /payroll/runs` endpoint** (found by running into them, not
+  assumed):
+  - `statutory-payroll.ts`'s `grossWages`/`payableFraction`/`pfWages` (wage
+    base feeding EPF/ESI/PTax/LWF) were computed as `gross_pay - lop_amount`
+    with no floor at 0 — once `lop_amount` exceeds `gross_pay` (this exact
+    scenario), the wage base goes negative, producing a genuinely negative
+    `employer_contributions` that failed slip validation and crashed the
+    whole run for that employee. Fixed with `Math.max(0, ...)` at both
+    wage-base computations.
+  - `payroll-blocker-engine.ts`'s `LOP_EXCESSIVE` classification pattern
+    (`/lop_days.*exceed/i`) required a literal underscore and never matched
+    the actual human-readable message text ("LOP days (X) exceed..."), so
+    the new blocker fell through to the critical/blocking `PAYROLL_NAN`
+    fallback instead of the intended warning/non-blocking rule. Fixed the
+    pattern to match both phrasings.
+- A **test-infrastructure-only** bug was also found and fixed (not a product
+  defect, not committed to the repo): `/tmp/supabase-gateway.mjs` (this
+  sandbox's local PostgREST stand-in) mishandled RPC calls to
+  scalar-JSON-returning Postgres functions, which broke
+  `get_active_employees_for_payroll` and revealed that `POST /payroll/runs`
+  — the main per-employee payroll engine — had never actually been exercised
+  end to end through the real HTTP API by any script in this entire
+  engagement before this one.
+- `scripts/g02-lop-exceeds-working-days-check.sh` seeds "absent" attendance
+  for every calendar day of a month (weekends included), drives the real
+  `POST /payroll/runs`, polls to completion, and reconciles the persisted
+  slip plus the new blocker's row and classification:
+  ```
+  persisted slip: lop_days=30.00 total_working_days=22 gross_pay=30000.00
+    total_deductions=30000.00 net_pay=0.00 employer_contributions=0.00
+  ✓ lop_days (30.00) > total_working_days (22) — reproduced via the real endpoint
+  ✓ total_deductions is capped at gross_pay = 30000.00
+  ✓ net_pay is floored at 0 = 0.00
+  ✓ employer_contributions wage base is floored at 0 = 0.00
+  ✓ payroll_run_blockers has a LOP_EXCESSIVE row, blocking=false, status=open
+  ✓ a slip was created for this employee (warn, not exclude) = 1
+  ✓ no OPEN blocking=true blockers remain — finalize's Open-blockers gate would NOT reject it
+  RESULT: 11 passed, 0 failed
+  ```
+  Mutation test (all three fixes reverted together via `git stash`): RED —
+  the run fails outright (`final run status: failed`), 10/11 assertions red,
+  exactly reproducing the negative-wage-base crash. Restored: 11/11 green.
+
+### G03 — F&F salary basis could read a draft slip instead of the finalized one
+
+- `fnf-settlement-engine.ts`'s salary-basis query selected the most recent
+  `payroll_slips` row by month with **no status filter**, despite the
+  adjacent comment saying "last **finalized** payroll slip" — a newer DRAFT
+  slip could outrank an older FINALIZED slip purely by month. Fixed by
+  adding `.eq('status', 'finalized')`.
+- `scripts/g03-fnf-settlement-last-finalized-slip-check.sh` seeds an older
+  finalized slip (gross=50000, BASIC=25000) and a newer draft slip
+  (gross=99999, BASIC=77777) for the same employee, then drives the real
+  `POST /employees/:id/separation-ff/compute`:
+  ```
+  ✓ salary_basis_gross reflects the finalized slip (50000), not the newer draft (99999) = 50000
+  ✓ salary_basis_basic reflects the finalized slip's BASIC (25000), not the newer draft's (77777) = 25000
+  RESULT: 2 passed, 0 failed
+  ```
+  Mutation test: reverting the `.eq('status','finalized')` filter reproduces
+  the draft slip winning (`salary_basis_gross=99999`, 0/2 red); restored:
+  2/2 green.
+
+### G04 — maker-checker approval was committed before gates that could still reject finalize
+
+- `runs.ts` wrote the maker-checker approval/auto-approval row to
+  `maker_checker_log` BEFORE the attendance-closure, attendance-completeness,
+  open-blockers, validation-run, and staleness-recompute gates — any of
+  which (plus the freeze-recheck immediately before the real mutation) can
+  still reject the finalize request, leaving a log row claiming "approved"
+  for a finalize that never happened, with no rollback. Fixed by splitting
+  the block: validation (reject fast for `AWAITING_DIFFERENT_CHECKER` /
+  `PREPARER_CANNOT_APPROVE`) stays early since those are true regardless of
+  later gates; the actual commit is deferred into a closure
+  (`commitMakerCheckerApproval`) invoked only immediately before Step 1 (the
+  real slip/run mutation), once every other gate has passed. No rollback is
+  needed because the row is never written until finalize is genuinely about
+  to succeed.
+- `scripts/g04-maker-checker-approval-ordering-check.sh` drives the real
+  endpoint through the exact failure mode: a maker proposes finalize on a
+  run whose month's attendance isn't locked; a distinct checker's approval
+  attempt is rejected by the attendance-closure gate (423); the script then
+  clears the remaining gates and has the same checker retry, which
+  genuinely succeeds:
+  ```
+  maker call: HTTP 202 — PENDING_CHECKER
+  ✓ maker_checker_log is 'pending' after the proposal
+  checker call (attendance open): HTTP 423 — ATTENDANCE_NOT_LOCKED
+  ✓ maker_checker_log is STILL 'pending' (not falsely flipped to approved)
+  ✓ checker_id is still unset (no approval was committed)
+  ✓ the run itself is still 'draft'
+  checker retry (attendance locked, validation cleared): HTTP 200
+  ✓ the run is now genuinely finalized
+  ✓ ONLY NOW does maker_checker_log flip to 'approved'
+  ✓ checker_id correctly records the checker who actually caused the finalize to succeed
+  RESULT: 10 passed, 0 failed
+  ```
+  Mutation test: reverting the fix reproduces `maker_checker_log` flipping
+  to `approved` immediately after the maker's proposal, even though the
+  checker's call was then rejected by the attendance gate (5/10 red);
+  restored: 10/10 green.
+- **Incidental discovery, noted not fixed (out of scope):** a tenant that
+  reaches a genuine finalize success cannot be hard-deleted afterward —
+  `fastify.eventPublisher.publish(...)` in the finalize success path writes
+  an immutable `platform_events` row, and `trg_platform_events_no_delete`
+  blocks ANY delete of it, even one cascading from `DELETE FROM tenants` via
+  `platform_events_tenant_fk`'s `ON DELETE CASCADE`. This is a real,
+  by-design append-only audit log, not a test defect — but it means
+  hard-delete-tenant (`owner/index.ts`) is structurally unable to fully
+  remove any tenant that has ever finalized a payroll run. Flagged for a
+  human decision, not fixed here — out of scope for G04.
+
+### G06 — statutory compliance report used a CTC formula guess instead of real contributions
+
+- `/reports/statutory` computed PF as "~50% of CTC as basic (capped at
+  15,000) × 12%" and ESI as "0.75%/3.25% of CTC if ≤ 21,000" — a formula
+  approximation off `employee_compensations.ctc_monthly` — instead of
+  reading the REAL contribution amounts already computed and persisted in
+  `epf_contributions`/`esi_contributions` (the same tables `filing-pack.ts`
+  reads for actual EPFO/ESIC filing). Fixed by requiring a `month` query
+  param and reading those tables for that month, keyed by employee_id.
+- `scripts/g06-statutory-report-real-contributions-check.sh` seeds an
+  employee whose CTC (50,000) would produce PF=1800/1800 and "ESI not
+  applicable" under the old formula, plus a REAL contribution row for the
+  report month with deliberately different numbers (as if arrears/LOP/a
+  statutory override made the real computation diverge):
+  ```
+  ✓ pf_employee_monthly = REAL 2500 (NOT the formula's 1800) = 2500
+  ✓ pf_employer_monthly = REAL 1916 total employer (1300+541+75) (NOT the formula's 1800) = 1916
+  ✓ esi_applicable = true (REAL is_eligible, even though CTC is above the naive 21000 cutoff) = true
+  ✓ esi_employee_monthly = REAL 135 (the formula would have said ESI does not apply at all) = 135
+  ✓ esi_employer_monthly = REAL 585 (the formula would have said ESI does not apply at all) = 585
+  RESULT: 6 passed, 0 failed
+  ```
+  Mutation test: reverting the fix reproduces the exact formula numbers
+  (PF 1800/1800, ESI not applicable, 0/6 red); restored: 6/6 green.
+
+### Full regression sweep after all five fixes
+
+`cd apps/api && npx tsc --noEmit` clean and `npx vitest run` — 41 files /
+334 tests passing, unchanged — after each individual fix, and again after
+all five together. All nine real-stack scripts (the five `gNN-*.sh` scripts
+above, plus `g13-reconciliation-check.sh`,
+`finalized-slip-value-lockdown-check.sh`,
+`validation-rules-tenant-override-check.sh`,
+`attendance-survey-truncation-check.sh`, and
+`cross-role-ess-payslip-uat.sh`) were re-run against the same live stack
+after the last fix landed: **all nine green, zero regressions**
+(70 total assertions across the four pre-existing scripts, 33 across the
+five new ones).
+
+**One sandbox-specific gotcha surfaced and worth recording:** this
+environment's `tsx watch` file-watcher silently stopped picking up file
+changes partway through this round (confirmed by comparing a restart
+timestamp in its own log against the edited file's actual mtime) — several
+early mutation-test cycles were run against stale code without that being
+obvious from the outside (the health endpoint still returns 200 either
+way). Fixed by explicitly `pkill -f "tsx watch"` + relaunch (as two separate
+shell calls, never combined — combining has previously been found to
+silently fail the relaunch) before every subsequent mutation-test cycle,
+and by cross-checking the restart log's timestamp against the edited file's
+`stat` mtime before trusting a "confirmed RED/GREEN" result. Any earlier
+run in this round that looked anomalously unchanged should be treated as
+possibly stale; the final RED→GREEN pairs recorded above were all taken
+after this was caught and corrected.
