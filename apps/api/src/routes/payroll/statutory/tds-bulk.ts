@@ -450,17 +450,31 @@ export default async function tdsBulkRoutes(fastify: FastifyInstance) {
     // Fetch latest projected_tax from tds_declaration_snapshots per employee.
     // Chunked: empIds can now be the tenant's full headcount (the fetch above
     // is no longer silently capped), so a single .in() would exceed request-
-    // line limits at enterprise scale.
-    const snapshots: any[] = []
-    for (let i = 0; i < empIds.length; i += 100) {
-      const { data } = await fastify.supabase
-        .from('tds_declaration_snapshots')
-        .select('employee_id, total_approved, created_at')
-        .in('employee_id', empIds.slice(i, i + 100))
-        .eq('tenant_id', req.tenantId)
-        .eq('financial_year', financial_year)
-        .order('created_at', { ascending: false })
-      if (data) snapshots.push(...data)
+    // line limits at enterprise scale. Each chunk is ALSO paginated with
+    // fetchAllRows: the UNIQUE(tenant_id, employee_id, financial_year,
+    // payroll_run_id) constraint allows one snapshot per payroll run, so a
+    // 100-employee chunk on a monthly-payroll tenant can return up to ~1200
+    // rows in one FY — past PostgREST's 1000-row cap, which would silently
+    // drop some employees' latest snapshot (and default them to projected=0).
+    let snapshots: any[]
+    try {
+      snapshots = []
+      for (let i = 0; i < empIds.length; i += 100) {
+        const chunkIds = empIds.slice(i, i + 100)
+        const chunkRows = await fetchAllRows((from, to) =>
+          fastify.supabase
+            .from('tds_declaration_snapshots')
+            .select('employee_id, total_approved, created_at')
+            .in('employee_id', chunkIds)
+            .eq('tenant_id', req.tenantId)
+            .eq('financial_year', financial_year)
+            .order('created_at', { ascending: false })
+            .range(from, to),
+        )
+        snapshots.push(...chunkRows)
+      }
+    } catch (err) {
+      return serverError(req, reply, err, ErrorCode.QUERY_FAILED, 'Failed to fetch TDS declaration snapshots')
     }
 
     // Build map: employee_id -> latest snapshot
@@ -477,17 +491,29 @@ export default async function tdsBulkRoutes(fastify: FastifyInstance) {
     const fyStart = `${fyStartYear}-04-01`
     const fyEnd   = `${fyStartYear + 1}-03-31`
 
-    const slips: any[] = []
-    for (let i = 0; i < empIds.length; i += 100) {
-      const { data } = await fastify.supabase
-        .from('payroll_slips')
-        .select('employee_id, tds_deducted')
-        .in('employee_id', empIds.slice(i, i + 100))
-        .eq('tenant_id', req.tenantId)
-        // payroll_slips has no pay_date; its `month` is 'YYYY-MM' — scope to the FY months
-        .gte('month', fyStart.slice(0, 7))
-        .lte('month', fyEnd.slice(0, 7))
-      if (data) slips.push(...data)
+    // Same cap risk as the snapshots fetch above: a 100-employee chunk times
+    // up to 12 monthly slips in the FY can exceed 1000 rows, so each chunk is
+    // paginated with fetchAllRows rather than taken as a single page.
+    let slips: any[]
+    try {
+      slips = []
+      for (let i = 0; i < empIds.length; i += 100) {
+        const chunkIds = empIds.slice(i, i + 100)
+        const chunkRows = await fetchAllRows((from, to) =>
+          fastify.supabase
+            .from('payroll_slips')
+            .select('employee_id, tds_deducted')
+            .in('employee_id', chunkIds)
+            .eq('tenant_id', req.tenantId)
+            // payroll_slips has no pay_date; its `month` is 'YYYY-MM' — scope to the FY months
+            .gte('month', fyStart.slice(0, 7))
+            .lte('month', fyEnd.slice(0, 7))
+            .range(from, to),
+        )
+        slips.push(...chunkRows)
+      }
+    } catch (err) {
+      return serverError(req, reply, err, ErrorCode.QUERY_FAILED, 'Failed to fetch payroll slips for TDS reconciliation')
     }
 
     // Build map: employee_id -> sum actual TDS. tds_deducted is DECIMAL — coerce or an

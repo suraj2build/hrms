@@ -81,7 +81,7 @@ async function buildApp(opts: {
       }
       if (table === 'employee_statutory_overrides') return { select: () => genericChain({ data: [], error: null }) }
       if (table === 'esi_eligibility_timeline')     return { select: () => genericChain({ data: [], error: null }) }
-      if (table === 'payroll_slips')                return { select: () => genericChain({ data: opts.slips, error: null }) }
+      if (table === 'payroll_slips')                return { select: () => genericChain({ data: opts.slips, error: null }, { paged: true }) }
       if (table === 'esi_contributions') {
         return {
           delete: () => genericChain({ error: null }),

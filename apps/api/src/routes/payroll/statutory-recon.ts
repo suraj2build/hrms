@@ -71,34 +71,45 @@ export default async function payrollStatutoryReconRoutes(fastify: FastifyInstan
       }
     }
 
-    // PAYABLE (from actual filing tables for this month)
+    // PAYABLE (from actual filing tables for this month) — fetchAllRows() on
+    // all four: a plain query would silently truncate at ≥1,001 contribution
+    // rows for the month, corrupting this variance check's "payable" side for
+    // a large tenant with no error signal.
     const [epfRows, esiRows, ptaxRows, tdsRows] = await Promise.all([
-      fastify.supabase.from('epf_contributions')
-        .select('employee_contribution, total_employer_contribution, voluntary_pf')
-        .eq('tenant_id', tenantId).eq('contribution_month', reconMonth),
-      fastify.supabase.from('esi_contributions')
-        .select('total_contribution')
-        .eq('tenant_id', tenantId).eq('contribution_month', reconMonth),
-      fastify.supabase.from('ptax_contributions')
-        .select('ptax_amount')
-        .eq('tenant_id', tenantId).eq('contribution_month', reconMonth),
-      fastify.supabase.from('tds_monthly_projections')
-        .select('tds_this_month')
-        .eq('tenant_id', tenantId).eq('projection_month', reconMonth),
+      fetchAllRows<any>((from, to) =>
+        fastify.supabase.from('epf_contributions')
+          .select('employee_contribution, total_employer_contribution, voluntary_pf')
+          .eq('tenant_id', tenantId).eq('contribution_month', reconMonth)
+          .range(from, to)),
+      fetchAllRows<any>((from, to) =>
+        fastify.supabase.from('esi_contributions')
+          .select('total_contribution')
+          .eq('tenant_id', tenantId).eq('contribution_month', reconMonth)
+          .range(from, to)),
+      fetchAllRows<any>((from, to) =>
+        fastify.supabase.from('ptax_contributions')
+          .select('ptax_amount')
+          .eq('tenant_id', tenantId).eq('contribution_month', reconMonth)
+          .range(from, to)),
+      fetchAllRows<any>((from, to) =>
+        fastify.supabase.from('tds_monthly_projections')
+          .select('tds_this_month')
+          .eq('tenant_id', tenantId).eq('projection_month', reconMonth)
+          .range(from, to)),
     ])
 
     const sum = (rows: any[] | null | undefined, fn: (r: any) => number) =>
       Math.round((rows ?? []).reduce((s, r) => s + fn(r), 0) * 100) / 100
 
-    recon.pf.payable  = sum(epfRows.data, r => Number(r.employee_contribution ?? 0) + Number(r.total_employer_contribution ?? 0) + Number(r.voluntary_pf ?? 0))
-    recon.esi.payable = sum(esiRows.data, r => Number(r.total_contribution ?? 0))
-    recon.pt.payable  = sum(ptaxRows.data, r => Number(r.ptax_amount ?? 0))
-    recon.tds.payable = sum(tdsRows.data, r => Number(r.tds_this_month ?? 0))
+    recon.pf.payable  = sum(epfRows, r => Number(r.employee_contribution ?? 0) + Number(r.total_employer_contribution ?? 0) + Number(r.voluntary_pf ?? 0))
+    recon.esi.payable = sum(esiRows, r => Number(r.total_contribution ?? 0))
+    recon.pt.payable  = sum(ptaxRows, r => Number(r.ptax_amount ?? 0))
+    recon.tds.payable = sum(tdsRows, r => Number(r.tds_this_month ?? 0))
 
-    recon.pf.filed  = (epfRows.data?.length  ?? 0) > 0
-    recon.esi.filed = (esiRows.data?.length  ?? 0) > 0
-    recon.pt.filed  = (ptaxRows.data?.length ?? 0) > 0
-    recon.tds.filed = (tdsRows.data?.length  ?? 0) > 0
+    recon.pf.filed  = epfRows.length  > 0
+    recon.esi.filed = esiRows.length  > 0
+    recon.pt.filed  = ptaxRows.length > 0
+    recon.tds.filed = tdsRows.length  > 0
 
     // NOTE: a head with NO filing rows must stay filed:false / payable:0 here —
     // do NOT fall back to treating the slip-aggregated amount as "payable", even

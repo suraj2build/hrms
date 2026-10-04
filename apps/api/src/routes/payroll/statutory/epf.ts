@@ -378,16 +378,24 @@ export default async function epfRoutes(fastify: FastifyInstance) {
     let wagesFallbackCount   = 0
 
     if (empList.length > 0) {
-      const { data: activeCompRows } = await fastify.supabase
-        .from('employee_compensations')
-        .select('id, employee_id')
-        .eq('tenant_id', req.tenantId)
-        .eq('is_active', true)
-        .in('employee_id', empList.map(e => e.id))
+      // fetchAllRows() — same reasoning as the employees fetch above: at
+      // ≥1,001 active employees with an active compensation row, a plain
+      // query here would silently drop the overflow onto the wageCeiling
+      // fallback below.
+      const empIds = empList.map(e => e.id)
+      const activeCompRows = await fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('employee_compensations')
+          .select('id, employee_id')
+          .eq('tenant_id', req.tenantId)
+          .eq('is_active', true)
+          .in('employee_id', empIds)
+          .range(from, to),
+      )
 
-      const activeCompIds    = (activeCompRows ?? []).map((c: any) => c.id)
+      const activeCompIds    = activeCompRows.map((c: any) => c.id)
       const empIdByCompId    = new Map<string, string>(
-        (activeCompRows ?? []).map((c: any) => [c.id, c.employee_id]),
+        activeCompRows.map((c: any) => [c.id, c.employee_id]),
       )
 
       // 2. PF-applicable components for those compensation records
@@ -419,15 +427,21 @@ export default async function epfRoutes(fastify: FastifyInstance) {
     // here: sum is_pf_applicable / affects_pf earnings from the slip's stored
     // component_breakdown. The master × linear-LOP path below is a FALLBACK only
     // for employees with no finalized slip.
-    const { data: lopSlipRows } = await fastify.supabase
-      .from('payroll_slips')
-      .select('employee_id, total_working_days, payable_days, component_breakdown')
-      .eq('tenant_id', req.tenantId)
-      .eq('month', month)
-      .eq('status', 'finalized')
+    // fetchAllRows() — this is the AUTHORITATIVE PF wage base (see comment
+    // above); at ≥1,001 finalized slips in the month a plain query would
+    // silently push the overflow onto the less-accurate fallback path.
+    const lopSlipRows = await fetchAllRows((from, to) =>
+      fastify.supabase
+        .from('payroll_slips')
+        .select('employee_id, total_working_days, payable_days, component_breakdown')
+        .eq('tenant_id', req.tenantId)
+        .eq('month', month)
+        .eq('status', 'finalized')
+        .range(from, to),
+    )
 
     const lopFractionMap = new Map<string, number>(
-      (lopSlipRows ?? []).map((r: any) => [
+      lopSlipRows.map((r: any) => [
         r.employee_id,
         r.total_working_days > 0 ? r.payable_days / r.total_working_days : 1.0,
       ]),
@@ -441,7 +455,7 @@ export default async function epfRoutes(fastify: FastifyInstance) {
     const slipPfWagesMap    = new Map<string, number>()
     const slipPfEmployeeMap = new Map<string, number>()   // PF_EMPLOYEE line
     const slipPfEmployerMap = new Map<string, number>()   // PF_EMPLOYER line (total employer)
-    for (const r of (lopSlipRows ?? []) as any[]) {
+    for (const r of lopSlipRows as any[]) {
       const breakdown = Array.isArray(r.component_breakdown) ? r.component_breakdown : []
       const pfWages = breakdown
         .filter((c: any) =>

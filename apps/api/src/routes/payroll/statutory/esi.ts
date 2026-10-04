@@ -400,24 +400,31 @@ export default async function esiRoutes(fastify: FastifyInstance) {
     // This is the statutory-correct figure — NOT stale reference data from
     // esi_eligibility_timeline.gross_wages (which reflects salary at enrollment
     // time and becomes stale when the employee gets a salary revision).
-    const { data: slipRows } = await fastify.supabase
-      .from('payroll_slips')
-      .select('employee_id, gross_pay, component_breakdown')
-      .eq('tenant_id', req.tenantId)
-      .eq('month', month)
-      .eq('status', 'finalized')
+    // fetchAllRows() — this is the authoritative ESI wage source (slipGrossMap,
+    // used in the eligibility comparison below); at ≥1,001 finalized slips in
+    // the month a plain query would silently push the overflow onto the
+    // compensation-fallback path instead.
+    const slipRows = await fetchAllRows((from, to) =>
+      fastify.supabase
+        .from('payroll_slips')
+        .select('employee_id, gross_pay, component_breakdown')
+        .eq('tenant_id', req.tenantId)
+        .eq('month', month)
+        .eq('status', 'finalized')
+        .range(from, to),
+    )
 
     // gross_pay is NUMERIC — coerce here or the eligibility check below silently
     // string-compares against wageCeiling instead of comparing numerically (G13 sweep).
     const slipGrossMap = new Map<string, number>(
-      ((slipRows ?? []) as any[]).map(r => [r.employee_id, Number(r.gross_pay ?? 0)]),
+      (slipRows as any[]).map(r => [r.employee_id, Number(r.gross_pay ?? 0)]),
     )
 
     // Actual ESI lines off the finalized slip — the deposit. Used to override the
     // recomputed amounts so the ESI page and the reconciliation never diverge.
     const slipEsiEmployeeMap = new Map<string, number>()
     const slipEsiEmployerMap = new Map<string, number>()
-    for (const r of (slipRows ?? []) as any[]) {
+    for (const r of slipRows as any[]) {
       const breakdown = Array.isArray(r.component_breakdown) ? r.component_breakdown : []
       for (const c of breakdown) {
         const code = String(c?.code ?? '').toUpperCase()
@@ -433,18 +440,24 @@ export default async function esiRoutes(fastify: FastifyInstance) {
     const fallbackGrossMap = new Map<string, number>()
 
     if (empsMissingSlip.length > 0) {
-      const { data: compRows } = await fastify.supabase
-        .from('employee_compensations')
-        .select('id, employee_id')
-        .eq('tenant_id', req.tenantId)
-        .eq('is_active', true)
-        .in('employee_id', empsMissingSlip)
-
-      const compIdToEmpId = new Map<string, string>(
-        ((compRows ?? []) as any[]).map((c: any) => [c.id, c.employee_id]),
+      // fetchAllRows() — empsMissingSlip can be most of a large tenant mid-cycle
+      // (anyone without a finalized slip yet); a plain query would silently
+      // drop fallback wages for employees past the 1,000-row cutoff.
+      const compRows = await fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('employee_compensations')
+          .select('id, employee_id')
+          .eq('tenant_id', req.tenantId)
+          .eq('is_active', true)
+          .in('employee_id', empsMissingSlip)
+          .range(from, to),
       )
 
-      if (compRows && compRows.length > 0) {
+      const compIdToEmpId = new Map<string, string>(
+        compRows.map((c: any) => [c.id, c.employee_id]),
+      )
+
+      if (compRows.length > 0) {
         const { data: compCompRows } = await fastify.supabase
           .from('employee_compensation_components')
           .select('compensation_id, computed_monthly, salary_components!inner(component_type)')

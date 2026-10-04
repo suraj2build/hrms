@@ -490,17 +490,23 @@ export default async function ptaxRoutes(fastify: FastifyInstance) {
     // Gross = gross_pay from payroll_slips where status = finalized for this month.
     // For employees without a finalized slip, fall back to sum of all earning
     // components from their active compensation (pro-rated estimate).
-    const { data: slipRows } = await fastify.supabase
-      .from('payroll_slips')
-      .select('employee_id, gross_pay')
-      .eq('tenant_id', req.tenantId)
-      .eq('month', month)
-      .eq('status', 'finalized')
+    // fetchAllRows() — this is the authoritative PTax gross-wage source
+    // (slipGrossMap); at ≥1,001 finalized slips in the month a plain query
+    // would silently push the overflow onto the compensation fallback below.
+    const slipRows = await fetchAllRows((from, to) =>
+      fastify.supabase
+        .from('payroll_slips')
+        .select('employee_id, gross_pay')
+        .eq('tenant_id', req.tenantId)
+        .eq('month', month)
+        .eq('status', 'finalized')
+        .range(from, to),
+    )
 
     // gross_pay is NUMERIC — coerce here so slab lookups/comparisons downstream get a
     // real number, not a string (G13 sweep).
     const slipGrossMap = new Map<string, number>(
-      ((slipRows ?? []) as any[]).map(r => [r.employee_id, Number(r.gross_pay ?? 0)]),
+      (slipRows as any[]).map(r => [r.employee_id, Number(r.gross_pay ?? 0)]),
     )
 
     // Fallback: gross from active compensation components (earning type only)
@@ -508,18 +514,24 @@ export default async function ptaxRoutes(fastify: FastifyInstance) {
     const empsMissingSlip = empList.filter(e => !slipGrossMap.has(e.id)).map(e => e.id)
 
     if (empsMissingSlip.length > 0) {
-      const { data: compRows } = await fastify.supabase
-        .from('employee_compensations')
-        .select('id, employee_id')
-        .eq('tenant_id', req.tenantId)
-        .eq('is_active', true)
-        .in('employee_id', empsMissingSlip)
-
-      const compIdToEmpId = new Map<string, string>(
-        ((compRows ?? []) as any[]).map((c: any) => [c.id, c.employee_id]),
+      // fetchAllRows() — empsMissingSlip can be most of a large tenant
+      // mid-cycle; a plain query would silently drop fallback wages for
+      // employees past the 1,000-row cutoff.
+      const compRows = await fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('employee_compensations')
+          .select('id, employee_id')
+          .eq('tenant_id', req.tenantId)
+          .eq('is_active', true)
+          .in('employee_id', empsMissingSlip)
+          .range(from, to),
       )
 
-      if (compRows && compRows.length > 0) {
+      const compIdToEmpId = new Map<string, string>(
+        compRows.map((c: any) => [c.id, c.employee_id]),
+      )
+
+      if (compRows.length > 0) {
         const { data: compCompRows } = await fastify.supabase
           .from('employee_compensation_components')
           .select('compensation_id, computed_monthly, salary_components!inner(component_type)')
