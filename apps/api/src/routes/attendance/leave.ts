@@ -1151,43 +1151,58 @@ export default async function leaveRoute(fastify: FastifyInstance) {
     const balances: any[] = []
     const accrualRows: any[] = []
     const compData: any[] | null = includeLiability ? [] : null
-    for (let i = 0; i < teamEmployeeIds.length; i += 100) {
-      const chunkIds = teamEmployeeIds.slice(i, i + 100)
-      const [{ data: empChunk }, { data: balChunk }, { data: accChunk }] = await Promise.all([
-        fastify.supabase
-          .from('employees')
-          .select('id, first_name, last_name, employee_code, departments(name)')
-          .eq('tenant_id', tenantId)
-          .in('id', chunkIds),
+    try {
+      for (let i = 0; i < teamEmployeeIds.length; i += 100) {
+        const chunkIds = teamEmployeeIds.slice(i, i + 100)
+        const [
+          { data: empChunk, error: empErr },
+          { data: balChunk, error: balErr },
+          { data: accChunk, error: accErr },
+        ] = await Promise.all([
+          fastify.supabase
+            .from('employees')
+            .select('id, first_name, last_name, employee_code, departments(name)')
+            .eq('tenant_id', tenantId)
+            .in('id', chunkIds),
 
-        fastify.supabase
-          .from('employee_leave_balance')
-          .select('employee_id, leave_type_id, balance, year, leave_types(id, name, is_paid)')
-          .eq('tenant_id', tenantId)
-          .in('employee_id', chunkIds)
-          .eq('year', year),
+          fastify.supabase
+            .from('employee_leave_balance')
+            .select('employee_id, leave_type_id, balance, year, leave_types(id, name, is_paid)')
+            .eq('tenant_id', tenantId)
+            .in('employee_id', chunkIds)
+            .eq('year', year),
 
-        fastify.supabase
-          .from('leave_accrual_ledger')
-          .select('employee_id, leave_type_id, days')
-          .eq('tenant_id', tenantId)
-          .in('employee_id', chunkIds)
-          .eq('year', year)
-          .gt('days', 0),
-      ])
-      if (empChunk) employees.push(...empChunk)
-      if (balChunk) balances.push(...balChunk)
-      if (accChunk) accrualRows.push(...accChunk)
+          fastify.supabase
+            .from('leave_accrual_ledger')
+            .select('employee_id, leave_type_id, days')
+            .eq('tenant_id', tenantId)
+            .in('employee_id', chunkIds)
+            .eq('year', year)
+            .gt('days', 0),
+        ])
+        // Surface rather than silently under-report this chunk of the
+        // team's balances/accrual/compensation — this feeds a leave
+        // liability and balance report, not just a display list.
+        if (empErr) throw empErr
+        if (balErr) throw balErr
+        if (accErr) throw accErr
+        if (empChunk) employees.push(...empChunk)
+        if (balChunk) balances.push(...balChunk)
+        if (accChunk) accrualRows.push(...accChunk)
 
-      if (includeLiability) {
-        const { data: compChunk } = await fastify.supabase
-          .from('employee_compensations')
-          .select('employee_id, ctc_monthly')
-          .eq('tenant_id', tenantId)
-          .eq('is_active', true)
-          .in('employee_id', chunkIds)
-        if (compChunk) compData!.push(...compChunk)
+        if (includeLiability) {
+          const { data: compChunk, error: compErr } = await fastify.supabase
+            .from('employee_compensations')
+            .select('employee_id, ctc_monthly')
+            .eq('tenant_id', tenantId)
+            .eq('is_active', true)
+            .in('employee_id', chunkIds)
+          if (compErr) throw compErr
+          if (compChunk) compData!.push(...compChunk)
+        }
       }
+    } catch (error) {
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch team leave balances')
     }
 
     // ctc_monthly lookup: employee_id → daily_rate (ctc_monthly / 26)

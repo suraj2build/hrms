@@ -827,7 +827,7 @@ export default async function compensationRevisionsRoute(fastify: FastifyInstanc
     const pendings: any[] = []
     for (let i = 0; i < empIds.length; i += 100) {
       const chunkIds = empIds.slice(i, i + 100)
-      const [{ data: compChunk }, { data: pendingChunk }] = await Promise.all([
+      const [{ data: compChunk, error: compErr }, { data: pendingChunk, error: pendingErr }] = await Promise.all([
         fastify.supabase
           .from('employee_compensations')
           .select('id, employee_id, ctc_annual, ctc_monthly, salary_structure_id')
@@ -841,6 +841,12 @@ export default async function compensationRevisionsRoute(fastify: FastifyInstanc
           .eq('status', 'pending')
           .in('employee_id', chunkIds),
       ])
+      // Surface rather than silently proceed with a partial comp/pending
+      // set — this feeds bulk-revision creation below, so a swallowed
+      // chunk failure could create a duplicate revision (missed pending
+      // check) or skip an employee's current compensation entirely.
+      if (compErr) return serverError(req, reply, compErr, ErrorCode.QUERY_FAILED, 'Failed to fetch current compensation for revision cohort')
+      if (pendingErr) return serverError(req, reply, pendingErr, ErrorCode.QUERY_FAILED, 'Failed to fetch pending revisions for revision cohort')
       if (compChunk) comps.push(...compChunk)
       if (pendingChunk) pendings.push(...pendingChunk)
     }

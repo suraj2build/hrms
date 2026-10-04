@@ -500,11 +500,15 @@ export default async function attendanceHealthIndexRoute(fastify: FastifyInstanc
       const empDepts: any[] = []
       for (let i = 0; i < empIds.length; i += 100) {
         const chunkIds = empIds.slice(i, i + 100)
-        const { data } = await fastify.supabase
+        const { data, error: empDeptsErr } = await fastify.supabase
           .from('employees')
           .select('id, job_history!job_history_employee_id_fkey(department_id, is_current)')
           .eq('tenant_id', req.tenantId)
           .in('id', chunkIds)
+        // Surface rather than silently proceed with a partial employee set —
+        // a swallowed chunk failure would silently under-report some
+        // employees from their department's health-index aggregation.
+        if (empDeptsErr) return serverError(req, reply, empDeptsErr, ErrorCode.QUERY_FAILED, 'Failed to resolve employee departments for health-index aggregation')
         if (data) empDepts.push(...data)
       }
 

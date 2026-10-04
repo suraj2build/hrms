@@ -906,12 +906,19 @@ export async function scanAndEscalate(
       const activeEmps: { id: string }[] = []
       for (let i = 0; i < rawCandidateIds.length; i += 100) {
         const chunkIds = rawCandidateIds.slice(i, i + 100)
-        const { data } = await supabase
+        const { data, error } = await supabase
           .from('employees')
           .select('id')
           .eq('tenant_id', tenantId)
           .in('id', chunkIds)
           .in('status', ['active', 'on_notice'])
+        // Surface the error rather than silently proceeding with a partial
+        // active-employee set: a swallowed chunk failure here would
+        // incorrectly filter real candidates out of candidateIds below,
+        // silently skipping absconding detection for them this cycle. The
+        // outer try/catch (end of this function) records this in
+        // result.errors rather than crashing the whole scan.
+        if (error) throw new Error(`absconding-engine: employees active-status lookup failed: ${error.message}`)
         if (data) activeEmps.push(...data)
       }
       const activeIds = new Set(activeEmps.map(e => e.id))

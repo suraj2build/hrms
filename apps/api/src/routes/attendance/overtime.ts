@@ -346,11 +346,14 @@ export default async function overtimeRoutes(fastify: FastifyInstance) {
     const emps: any[] = []
     for (let i = 0; i < empIds.length; i += 100) {
       const chunkIds = empIds.slice(i, i + 100)
-      const { data } = await fastify.supabase
+      const { data, error: empsErr } = await fastify.supabase
         .from('employees')
         .select('id, first_name, last_name, employee_code')
         .eq('tenant_id', req.tenantId)
         .in('id', chunkIds)
+      // Surface rather than silently drop this chunk's employees from the
+      // overtime report.
+      if (empsErr) return serverError(req, reply, empsErr, ErrorCode.QUERY_FAILED, 'Failed to resolve employee names for overtime report')
       if (data) emps.push(...data)
     }
     const empMap = new Map(emps.map((e: any) => [e.id, e]))

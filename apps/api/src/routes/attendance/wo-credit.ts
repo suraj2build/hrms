@@ -209,10 +209,13 @@ export default async function woCreditRoutes(fastify: FastifyInstance) {
       const emps: any[] = []
       for (let i = 0; i < empIds.length; i += 100) {
         const chunkIds = empIds.slice(i, i + 100)
-        const { data } = await fastify.supabase
+        const { data: empChunk, error: empsErr } = await fastify.supabase
           .from('employees').select('id, first_name, last_name, employee_code')
           .eq('tenant_id', req.tenantId).in('id', chunkIds)
-        if (data) emps.push(...data)
+        // Surface rather than silently drop this chunk's employees from the
+        // WO-credit review name enrichment.
+        if (empsErr) return serverError(req, reply, empsErr, ErrorCode.QUERY_FAILED, 'Failed to resolve employee names for WO credit review')
+        if (empChunk) emps.push(...empChunk)
       }
       for (const e of emps as any[]) {
         nameMap.set(e.id, `${e.first_name ?? ''} ${e.last_name ?? ''}`.trim() || e.employee_code)

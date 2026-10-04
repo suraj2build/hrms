@@ -84,20 +84,32 @@ export default async function attendanceConfidenceRoute(fastify: FastifyInstance
       return reply.code(404).send({ error: 'NOT_FOUND', message: 'Employee not found' })
     }
 
-    const { data, error } = await fastify.supabase
-      .from('attendance_daily')
-      .select('id, date, confidence_score, confidence_level, confidence_factors, status, work_hours')
-      .eq('tenant_id', req.tenantId)
-      .eq('employee_id', employeeId)
-      .gte('date', from)
-      .lte('date', to)
-      .order('date', { ascending: false })
-
-    if (error) {
+    // fetchAllRows(): from/to are caller-supplied with no maximum-span
+    // validation (only date-format checked) — a long-enough range makes
+    // this single-employee query return more than 1,000 calendar dates,
+    // which silently truncates the response AND the total_days/avg_score/
+    // critical_days/low_days stats derived from rows.length below. Single-
+    // employee scope bounds the SHAPE of the result (one row per date,
+    // enforced by attendance_daily's UNIQUE(tenant_id, employee_id, date))
+    // but not the COUNT, which depends on the caller-chosen date span.
+    let data: any[]
+    try {
+      data = await fetchAllRows((rangeFrom, rangeTo) =>
+        fastify.supabase
+          .from('attendance_daily')
+          .select('id, date, confidence_score, confidence_level, confidence_factors, status, work_hours')
+          .eq('tenant_id', req.tenantId)
+          .eq('employee_id', employeeId)
+          .gte('date', from)
+          .lte('date', to)
+          .order('date', { ascending: false })
+          .range(rangeFrom, rangeTo),
+      )
+    } catch (error) {
       return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch confidence history')
     }
 
-    const rows = (data ?? []) as Array<{
+    const rows = data as Array<{
       id: string
       date: string
       confidence_score: number | null

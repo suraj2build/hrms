@@ -809,11 +809,16 @@ export default async function surveyRoutes(fastify: FastifyInstance) {
     const validEmps: any[] = []
     for (let i = 0; i < uniqueEmpIds.length; i += 100) {
       const chunkIds = uniqueEmpIds.slice(i, i + 100)
-      const { data } = await supabase
+      const { data, error: validEmpsErr } = await supabase
         .from('employees')
         .select('id')
         .eq('tenant_id', tenantId)
         .in('id', chunkIds)
+      // Explicit, not just accidental: a chunk query error must not be
+      // treated as "those ids don't exist" and silently let through — fail
+      // the request outright rather than relying on the length mismatch
+      // below to coincidentally catch it.
+      if (validEmpsErr) return serverError(req, reply, validEmpsErr, ErrorCode.QUERY_FAILED, 'Failed to verify employee ownership')
       if (data) validEmps.push(...data)
     }
     if (validEmps.length !== uniqueEmpIds.length) {
@@ -864,11 +869,13 @@ export default async function surveyRoutes(fastify: FastifyInstance) {
     const validEmps: any[] = []
     for (let i = 0; i < uniqueEmpIds.length; i += 100) {
       const chunkIds = uniqueEmpIds.slice(i, i + 100)
-      const { data } = await supabase
+      const { data, error: validEmpsErr } = await supabase
         .from('employees')
         .select('id')
         .eq('tenant_id', tenantId)
         .in('id', chunkIds)
+      // Explicit, not just accidental — see /admin/trigger-lifecycle above.
+      if (validEmpsErr) return serverError(req, reply, validEmpsErr, ErrorCode.QUERY_FAILED, 'Failed to verify employee ownership')
       if (data) validEmps.push(...data)
     }
     if (validEmps.length !== uniqueEmpIds.length) {
