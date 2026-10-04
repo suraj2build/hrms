@@ -180,10 +180,17 @@ const RULE_CLASSIFICATIONS: RuleClassification[] = [
     ],
     ruleCode: 'NEGATIVE_NET',
   },
-  // Excessive LOP
+  // Excessive LOP. Matches both the snake_case field name and the
+  // human-readable "LOP days" phrasing runs.ts actually produces — found by
+  // wiring this rule into a live caller for the first time (closing audit
+  // finding G02): the original /lop_days.*exceed/i pattern requires a
+  // literal underscore and never matched real "LOP days (X) exceed..."
+  // text, silently falling through to the slip_validation stage fallback
+  // (PAYROLL_NAN, critical, blocking) instead of this rule (warning,
+  // non-blocking) — verified via a real payroll run, not assumed.
   {
     patterns: [
-      /lop_days.*exceed/i,
+      /lop[\s_]?days.*exceed/i,
       /excessive lop/i,
     ],
     ruleCode: 'LOP_EXCESSIVE',

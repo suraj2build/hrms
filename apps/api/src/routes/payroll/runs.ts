@@ -879,6 +879,33 @@ async function executePayrollRun(
         }
         if (!settled) { settled = true; succeededSlips.push(computed.result) }
 
+        // G01-audit finding G02: lop_days > total_working_days is an
+        // impossible attendance state (more loss-of-pay days than there
+        // were working days to lose). computePayrollSlip() already caps
+        // total_deductions at gross_pay and floors net_pay at 0 — that
+        // part is safe, not corrupted. But until now this condition was
+        // only ever checked inside buildPayrollSlipPreview(), a function
+        // with zero callers anywhere in the repo — dead code — so no
+        // visible, actionable signal reached HR through the Resolution
+        // Center that this employee's figures rest on bad attendance data.
+        // Insert a non-blocking LOP_EXCESSIVE blocker (does not exclude
+        // this employee from the run or affect finalize eligibility — same
+        // severity/blocking the rule already carries) so it surfaces
+        // exactly like every other data-quality blocker.
+        if (computed.result.lop_days > computed.result.total_working_days) {
+          const lopBlockerRows = buildPayrollBlockers({
+            tenantId, runId,
+            failedEmployees: [{
+              employee_id:   emp.id,
+              employee_code: emp.employee_code,
+              failure_stage: 'slip_validation',
+              reason:        `LOP days (${computed.result.lop_days}) exceed total working days (${computed.result.total_working_days}) — verify attendance data`,
+            }],
+          })
+          const { error: lopBlockerErr } = await supabase.from('payroll_run_blockers').insert(lopBlockerRows)
+          if (lopBlockerErr) log.warn({ err: lopBlockerErr, run_id: runId, employee_id: emp.id }, 'payroll: LOP_EXCESSIVE blocker insert failed (non-fatal — slip was still created)')
+        }
+
       } catch (unexpectedErr: any) {
         const reason = unexpectedErr?.message ?? 'Unexpected error during payroll computation'
         log.error({ ...empCtx, err: unexpectedErr, stage: 'unexpected' }, 'payroll: unexpected per-employee error')
