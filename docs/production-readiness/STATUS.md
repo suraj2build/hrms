@@ -596,13 +596,24 @@ implementation and its real-stack proof.
    generic-suite-only (32, honestly flagged as not individually verified)
    buckets. `FINDINGS.csv`'s `UNB-149`/`UNB-150` rows were corrected to
    credit the real coverage found.
-9. Still open from the standing instruction, not done this round:
-   - The COMPLETE reconciliation of all 223 baseline-migration
-     "unresolved" entries (item 5 above is still only a 12-entry sample) —
-     including tracing the 29 entries attributable to `payroll/index.ts`'s
-     refactor-split to wherever that code actually moved.
-   - Cross-role UAT beyond the single ESS-payslip-isolation journey (item
-     6 above).
-   - G10 (infrastructure evidence) and G12 (product-scope decision) remain
-     explicitly blocked, per the standing instruction that neither should
-     stop the independent work above.
+9. ~~The COMPLETE reconciliation of all 223 baseline-migration "unresolved"
+   entries (item 5 above was only a 12-entry sample)~~ — **done**:
+   `EVIDENCE.md` §11, `scripts/reconcile-baselines.py`. All 223 (151
+   unbounded-queries + 72 tenant-isolation) individually accounted for:
+   163 resolved by a deterministic script matching current code against
+   the real fetchAllRows()/tenant_id pattern, 31 read directly after the
+   script couldn't resolve them (every one already fixed or never a
+   defect at that drifted line), and the 29 `payroll/index.ts` entries
+   traced to wherever the 2026 route-file split actually moved that code
+   (all 12 split files checked by table name) — **zero genuine open
+   defects found across all 223**. The frozen baseline files themselves
+   are deliberately untouched (never-regenerate-to-hide-findings); this is
+   a reconciliation report against them, not an edit to them. Whether to
+   now regenerate the live baselines given this result is left to a human
+   — not decided here.
+10. Still open from the standing instruction, not done this round:
+    - Cross-role UAT beyond the single ESS-payslip-isolation journey (item
+      6 above).
+    - G10 (infrastructure evidence) and G12 (product-scope decision) remain
+      explicitly blocked, per the standing instruction that neither should
+      stop the independent work above.

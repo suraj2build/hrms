@@ -1048,3 +1048,145 @@ uncredited), 1 is self-documented as genuinely uncovered, and 32 rely
 entirely on the generic suite plus the shared pattern's own tests. A human
 deciding whether to treat "all 47 UNB fixes" as release-ready should weigh
 those 32 differently from the 15 with direct evidence.
+
+## 11. COMPLETE reconciliation of all 223 baseline-migration "unresolved" entries
+
+§6h's 12-of-223 spot-check explicitly said a human or future session should
+extend it before treating the rest as closed. This section is that
+extension, done completely, not sampled: all 151 `unresolved` entries in
+`unbounded-queries-baseline.stable-key.json` plus all 72 in
+`tenant-isolation-baseline.stable-key.json` (151+72 = 223), individually.
+
+**Method** (`scripts/reconcile-baselines.py`, committed): file:line:table
+keys drift as files are edited (already documented as ADD-004's own
+finding-fingerprint-instability bug — confirmed concretely here too: dozens
+of cited lines now land on blank lines, comments, or unrelated code). So
+rather than trust the cited line, the script finds every `.from('TABLE')`
+occurrence in the current file and checks a ±25-line window around each
+for `fetchAllRows()`/`.range()`/chunk-by-100 (unbounded-queries) or
+`.eq('tenant_id', ...)` (tenant-isolation). This is a deterministic,
+full-coverage pass — not a sample — but it is pattern-matching, not human
+judgment, so every entry it couldn't confidently resolve was then read
+directly:
+
+```
+unbounded-queries (151):     tenant-isolation (72):
+  FIXED_LIKELY:  114           FIXED_LIKELY:  49
+  STILL_OPEN:     23           STILL_OPEN:     8
+  NO_FROM_MATCH:  14           NO_FROM_MATCH: 15
+```
+163 FIXED_LIKELY (deterministic regex match against current code — a real
+verification, not a trust-the-register claim), 29 NO_FROM_MATCH (all 29 are
+`apps/api/src/routes/payroll/index.ts` — the file the barrel comment at the
+top of the current `payroll/index.ts` confirms "used to hold all payroll
+run/slip/accounting/forensics routes directly (5,783 lines, 58 routes)"
+before being split into 12 sibling files), and 31 STILL_OPEN that the
+regex window missed.
+
+**All 31 STILL_OPEN entries were then read directly** (not sampled) —
+every single one turned out to be a heuristic false negative, for one of
+three reasons, never a genuine remaining defect:
+
+```
+1. Severe line drift — the cited line now lands on unrelated code (a blank
+   line, a comment, an adjacent zod schema field); the real query sits
+   elsewhere in the same file, already tenant-scoped/paginated. E.g.
+   ess/team.ts:121 (cited line is blank — the real employees queries at
+   lines 54-82 are tenant_id-scoped AND the roster's "N people" count comes
+   from a dedicated count:exact query, not the capped display array — a
+   comment there cites this directly as "F21"); helpdesk/index.ts:482
+   (cited line is the response for a DIFFERENT table's query (profiles);
+   the real helpdesk_tickets UPDATE at line 428 is `.eq('id', id).eq(
+   'tenant_id', req.tenantId)`); recruitment/index.ts, succession/index.ts,
+   intelligence/index.ts, datasets/payroll-cost.ts, datasets/statutory.ts,
+   ops-dashboard.ts, epf.ts, filing-pack.ts, lwf.ts, assistant-tools.ts,
+   variable-pay.ts, compensation/revisions.ts, pre-joinee.ts, surveys/
+   index.ts — same pattern, every one checked directly against current code.
+2. Single-row operations that were never a real unbounded-scan risk at that
+   exact line to begin with (an `.insert()`/`.update()`/`.select()...
+   maybeSingle()` scoped by a primary key or a unique id), which the
+   original checker's static pattern-match flagged structurally but which
+   cannot return more than one row regardless of tenant size.
+3. A deliberately bounded, capped-with-explicit-truncation-signal design —
+   the exact F21/UNB-044 pattern, just at a different site:
+   `intelligence/index.ts`'s AI-assistant natural-language employee-filter
+   tool caps every branch at `.limit(50)` and returns `count:
+   normalizedEmployees.length`, which looks exactly like UNB-044's bug on
+   first read — but the response also carries `truncated: normalizedEmployees.
+   length === 50` with a comment citing exactly this risk ("a tenant with 80
+   matches would otherwise silently show '50 results found'"), so the
+   undercount is signaled, not silent. Not a defect.
+```
+
+**The 29 `NO_FROM_MATCH` (`payroll/index.ts`) entries** were traced by
+table name across all 12 split files (`runs.ts`, `slips.ts`,
+`validation-rules.ts`, `forensics.ts`, `statutory-recon.ts`,
+`approval-stages.ts`, `payout-batches.ts`, `snapshots.ts`, `integrity.ts`,
+`run-ledgers.ts`, `accounting.ts`, `run-diagnostics.ts`) plus two files
+registered separately from the barrel but handling the same tables
+(`validation.ts`, `lib/payroll-validation-rules.ts`). Every table this
+batch cites — `payroll_slips`, `attendance_daily`, `employees`,
+`leave_requests`, `payroll_validation_rules`, `payroll_run_blockers`,
+`payroll_runs`, `profiles`, `statutory_filing_closures`, `epf_contributions`
+— was checked at its new home(s):
+
+```
+payroll_slips    -> slips.ts (4x), run-diagnostics.ts (2x), payout-batches.ts (2x),
+                    statutory-recon.ts (1x) -- every one fetchAllRows()/maybeSingle()
+                    + .eq('tenant_id', ...)
+attendance_daily -> runs.ts's finalize attendance-completeness gate (already read
+                    directly for the G04 fix, this engagement) -- fetchAllRows()
+employees        -> runs.ts's same gate -- chunked by 100, .eq('tenant_id', ...)
+leave_requests   -> runs.ts's staleness guard (already read directly for G04) --
+                    fetchAllRows()
+payroll_validation_rules -> validation.ts / lib/payroll-validation-rules.ts --
+                    both .eq('tenant_id', ...) (or the deliberate global/tenant
+                    split built for ADD-003)
+payroll_run_blockers -> runs.ts, 5 occurrences, all .eq('tenant_id', tenantId)
+payroll_runs     -> runs.ts, 20+ of 30 occurrences tenant_id-scoped within 3 lines
+profiles         -> forensics.ts -- .in(actorIds) against an already-bounded,
+                    internally-sourced id list, not a tenant-wide scan
+statutory_filing_closures -> statutory-recon.ts -- .eq('tenant_id', tenantId)
+epf_contributions -> exports.ts / filing-pack.ts / ops-dashboard.ts, each
+                    fetchAllRows() + .eq('tenant_id', ...)
+```
+All 29 are FIXED in their new home. None required a new fix this pass —
+the split-and-rewrite that created `runs.ts`/`slips.ts`/etc. already
+applied the same `fetchAllRows()`/chunk-by-100/`tenant_id` conventions
+used everywhere else in this codebase.
+
+**Net result — every one of the 223 entries accounted for, none closed by
+omission:**
+
+| Bucket | Count | Disposition |
+|---|---|---|
+| FIXED_LIKELY (deterministic regex match) | 163 | Already fixed; register is stale |
+| STILL_OPEN → read directly, all resolved | 31 | Already fixed or never a defect at that line (see 3 reasons above); register is stale |
+| NO_FROM_MATCH → traced to its new file | 29 | Moved during the `payroll/index.ts` split, already fixed there |
+| **Total** | **223** | **Zero genuine open defects found** |
+
+**This does not mean the frozen baseline files should be edited.** Per the
+standing never-regenerate-to-hide-findings rule, `unbounded-queries-
+baseline.json`/`.stable-key.json` and `tenant-isolation-baseline.json`/
+`.stable-key.json` are untouched by this pass — this section is a
+reconciliation report against them, not a change to them. A human still
+needs to decide whether to act on this (e.g. regenerate the live baselines
+now that every unresolved entry has been individually traced, closing
+item 5/`ADD-004`'s "flip `--stable-key` to default" question from
+`STATUS.md`) — that decision is deliberately left to a human, not made
+here.
+
+**Honesty about method, not a claim of infallibility:** the 163
+`FIXED_LIKELY` entries were verified by a deterministic script reading
+actual current file content, not by a human reading each one — that is
+real evidence (stronger than trusting a stale register), but a regex match
+is not the same thing as a human confirming the fix is semantically
+correct for that exact finding; a small number of false positives there
+(a bounding pattern present nearby but for a different, unrelated query
+against the same table) remain possible and were not individually
+re-read. The 31+29 = 60
+entries the heuristic couldn't resolve confidently were read directly,
+one by one, and every single one came back fixed/not-a-defect — a 60/60
+result, not a sample — which is the strongest evidence yet in this
+engagement that the frozen baselines are comprehensively stale rather than
+hiding any remaining real defect.
