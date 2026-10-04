@@ -190,7 +190,10 @@ function buildBaseSupabase(opts: MockOpts) {
     attendance_daily: () => ({ select: () => genericChain({ data: [{ employee_id: EMP_ID, day_fraction: 1 }], error: null }, { paged: true }) }),
     payroll_run_blockers:    () => ({ select: () => genericChain({ data: [], error: null }) }),
     payroll_validation_runs: () => ({ select: () => genericChain({ data: null, error: null }) }),
-    leave_requests:          () => ({ select: () => genericChain({ data: opts.staleRows ?? [], error: null }) }),
+    // paged: true — leave_requests is now read via fetchAllRows() (see
+    // runs.ts's staleness guard); without this, range() ignores `from` and
+    // keeps returning the same non-empty page forever, hanging the test.
+    leave_requests:          () => ({ select: () => genericChain({ data: opts.staleRows ?? [], error: null }, { paged: true }) }),
     payroll_statutory_settings: () => ({ select: () => genericChain({ data: { tds_enabled: false, tds_default_regime: 'new' }, error: null }) }),
   }
 

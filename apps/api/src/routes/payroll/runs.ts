@@ -61,6 +61,7 @@ import {
   groupPayrollBlockers,
   computePayrollRunHealth,
 } from '../../lib/payroll-blocker-engine.js'
+import { fetchResolvedValidationRules } from '../../lib/payroll-validation-rules.js'
 import { recomputeRange } from '../../lib/attendance-engine.js'
 import { logAction } from '../../lib/audit-service.js'
 import { buildCompensationCoverageAudit } from '../../lib/payroll-compensation-coverage.js'
@@ -1003,11 +1004,13 @@ async function executePayrollRun(
 
   if (failedEmployees.length > 0) {
     try {
-      const { data: dbRules } = await supabase
-        .from('payroll_validation_rules')
-        .select('code, name, description, severity, blocking, enabled, stage, remediation_route')
-        .eq('enabled', true)
-      const blockerRows = buildPayrollBlockers({ tenantId, runId, failedEmployees, dbRules: dbRules ?? undefined })
+      // Global defaults + this tenant's own overrides, resolved by code —
+      // see payroll-validation-rules.ts. Previously read with no tenant
+      // scoping at all, which worked only because no tenant override has
+      // ever existed; now that overrides are possible (migration 439) this
+      // must resolve them explicitly rather than read both as one list.
+      const dbRules = await fetchResolvedValidationRules(supabase, tenantId, { enabledOnly: true })
+      const blockerRows = buildPayrollBlockers({ tenantId, runId, failedEmployees, dbRules })
       if (blockerRows.length > 0) {
         const { error: blockerErr } = await supabase.from('payroll_run_blockers').insert(blockerRows)
         if (blockerErr) {
@@ -2370,15 +2373,23 @@ export default async function payrollRunsRoutes(fastify: FastifyInstance) {
       const periodStart = `${run.month}-01`
       const periodEnd   = new Date(year, mon, 0).toISOString().slice(0, 10)
 
-      // Find employees with leave approved after the run snapshot
-      const { data: staleRows } = await fastify.supabase
-        .from('leave_requests')
-        .select('employee_id')
-        .eq('tenant_id', tenantId)
-        .eq('status', 'APPROVED')
-        .gte('updated_at', run.created_at)      // leave approved after run was created
-        .lte('from_date', periodEnd)
-        .gte('to_date', periodStart)
+      // Find employees with leave approved after the run snapshot.
+      // fetchAllRows(): genuinely unbounded (tenant + date-window scan, no
+      // per-employee cap) — a plain query would silently under-report the
+      // stale set for a tenant with >1,000 qualifying approvals, finalizing
+      // slips for employees whose attendance should have been recomputed.
+      const staleRows = await fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('leave_requests')
+          .select('employee_id')
+          .eq('tenant_id', tenantId)
+          .eq('status', 'APPROVED')
+          .gte('updated_at', run.created_at)      // leave approved after run was created
+          .lte('from_date', periodEnd)
+          .gte('to_date', periodStart)
+          .order('id')
+          .range(from, to),
+      )
 
       const staleEmployeeIds = [...new Set((staleRows ?? []).map((r: { employee_id: string }) => r.employee_id))]
 
@@ -3276,10 +3287,10 @@ export default async function payrollRunsRoutes(fastify: FastifyInstance) {
       return serverError(req, reply, blockerErr, ErrorCode.QUERY_FAILED, 'Failed to fetch blockers')
     }
 
-    // Fetch validation rules for enrichment
-    const { data: dbRules } = await fastify.supabase
-      .from('payroll_validation_rules')
-      .select('code, name, description, severity, blocking, enabled, stage, remediation_route')
+    // Fetch validation rules for enrichment: global defaults + this
+    // tenant's own overrides, resolved by code (see comment at the other
+    // two call sites of fetchResolvedValidationRules in this file).
+    const dbRules = await fetchResolvedValidationRules(fastify.supabase, tenantId)
 
     const flatBlockers = (blockerRows ?? []).map((b: any) => {
       const emp = b.employees ?? null
@@ -3450,11 +3461,9 @@ export default async function payrollRunsRoutes(fastify: FastifyInstance) {
       return serverError(req, reply, wdErr, 'WORKING_DAYS_FETCH_FAILED', 'Failed to count working days')
     }
 
-    // Fetch validation rules for blocker rebuild
-    const { data: dbRulesForRetry } = await fastify.supabase
-      .from('payroll_validation_rules')
-      .select('code, name, description, severity, blocking, enabled, stage, remediation_route')
-      .eq('enabled', true)
+    // Fetch validation rules for blocker rebuild: global defaults + this
+    // tenant's own overrides, resolved by code.
+    const dbRulesForRetry = await fetchResolvedValidationRules(fastify.supabase, tenantId, { enabledOnly: true })
 
     // Re-run each failed employee
     const succeededRetry: string[] = []
@@ -3533,7 +3542,7 @@ export default async function payrollRunsRoutes(fastify: FastifyInstance) {
     // Insert new blockers for newly failed employees
     if (failedRetry.length > 0) {
       try {
-        const newBlockerRows = buildPayrollBlockers({ tenantId, runId: id, failedEmployees: failedRetry, dbRules: dbRulesForRetry ?? undefined })
+        const newBlockerRows = buildPayrollBlockers({ tenantId, runId: id, failedEmployees: failedRetry, dbRules: dbRulesForRetry })
         if (newBlockerRows.length > 0) {
           await fastify.supabase.from('payroll_run_blockers').insert(newBlockerRows)
         }
