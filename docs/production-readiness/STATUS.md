@@ -67,27 +67,41 @@ items below, not a 6-item subset.
 | ID | Sev | Finding (from the original audit) | Status as of this commit |
 |---|---|---|---|
 | G01 | P0 | Leave accrual can report success while crediting nobody: all four `leave-jobs.ts` insert paths write `policy_rule_id`, but no migration ever added that column to `leave_accrual_ledger`. | **CONFIRMED STILL OPEN — re-verified this session against the real schema** (not just re-read from the audit). `SELECT column_name FROM information_schema.columns WHERE table_name='leave_accrual_ledger' AND column_name='policy_rule_id'` returns **zero rows** against a clean apply of all 438 current migrations. Traced the actual failure mode in `leave-jobs.ts:455-507`: the `leave_accrual_ledger` upsert fails (unknown column), the handler catches `ledErr`, logs it, pushes to an `errors` array, and returns `{ employees_processed: 0, total_days_credited: 0, ... }` — crediting is never attempted after a ledger-write failure. This matches the audit's described symptom. Not re-traced this session: whether the HTTP/job-run caller surfaces that `errors` array as a hard failure or masks it as "completed" (the audit's "misleading OK status" claim) — that part of the claim is carried forward as-is, not independently re-confirmed. **Out of scope to fix on this branch** (schema change + leave-engine code, unrelated to G13 numeric coercion) — flagging, not silently fixing. |
-| G02 | P0 | An impossible LOP count can reduce pay to zero and still produce a finalizable slip; payroll warns but does not block. | Recovered, **not re-verified this session**. `payroll-engine.ts:444` still only emits a warning string ("LOP days exceed total working days — verify attendance data"), not re-traced further for whether a hard block was added since 27 Sep. |
-| G03 | P0 | F&F approval does not require a fresh calculation; settlement engine selects the latest slip by month without a finalized-run condition. | Recovered, **not re-verified this session**. |
-| G04 | P1 | Payroll maker/checker approval occurs before attendance closure/other finalize gates; a failed later gate leaves the approval consumed. | Recovered, **not re-verified this session**. |
+| G02 | P0 | An impossible LOP count can reduce pay to zero and still produce a finalizable slip; payroll warns but does not block. | **CONFIRMED STILL OPEN — re-verified this session, and worse than described.** The `lop_days > total_working_days` check the audit cited (`payroll-engine.ts:442-444`) lives inside `buildPayrollSlipPreview()` — confirmed via repo-wide grep that this exported function has **zero callers anywhere in the codebase**, including tests. It is dead code: this warning is never produced by any path a user can reach. The actual persisted-slip path (`runs.ts` → `computePayrollSlip`) has no equivalent check anywhere — grepped for `lop_days.*total_working_days` repo-wide, the only hit is the one inside the dead function. So the audit's "warns but does not block" undersells the current state: for the real finalize path, there is no warning either, dead or alive. `LOP_EXCESSIVE`'s classification pattern (`payroll-blocker-engine.ts`, `blocking: false`) also depends on a `reason` string matching `/lop_days.*exceed/i`/`/excessive lop/i` — a string only the dead function produces — so that blocker rule is itself effectively unreachable from this condition in practice. |
+| G03 | P0 | F&F approval does not require a fresh calculation; settlement engine selects the latest slip by month without a finalized-run condition. | **CONFIRMED STILL OPEN — re-verified this session against current code.** `fnf-settlement-engine.ts:121-129`: the comment literally says "last **finalized** payroll slip," but the query itself (`.from('payroll_slips').select(...).eq('tenant_id',...).eq('employee_id',...).order('month',{ascending:false}).limit(1)`) has **no `.eq('status', 'finalized')` filter at all** — it takes whichever slip sorts last by month regardless of status, exactly as the audit described, comment notwithstanding. |
+| G04 | P1 | Payroll maker/checker approval occurs before attendance closure/other finalize gates; a failed later gate leaves the approval consumed. | **CONFIRMED STILL OPEN — re-verified this session against current code.** `runs.ts`: the four-eyes maker-checker approval is recorded to `maker_checker_log` (status flipped to approved, ~line 2125) at the TOP of the finalize handler — well before the attendance-staleness guard, the freeze-recheck gate, and the actual slip-finalize step that all run later (~line 2370+). If the freeze-recheck fails after that point, the handler returns a conflict error with no rollback of the already-approved `maker_checker_log` row — a fresh distinct maker/checker pair would be needed to retry, exactly as the audit describes. |
 | G05 | P1 | Clean database installation has an accepted failed migration: `016_lean_employees.sql` aborts and CI explicitly allows it via a `KNOWN_FAILING` allowlist. | **CORRECTED — RESOLVED, with current evidence, not just re-asserted.** `scripts/db/check-schema-drift.mjs`'s own `KNOWN_FAILING` set is now `new Set([])` — **empty** — with an inline comment recording that `016_lean_employees.sql` was investigated and found to apply cleanly end-to-end against a fresh database (its `DROP COLUMN manager_id` is preceded by `DROP POLICY IF EXISTS employees_manager_team`, so the abort theory in the original audit was itself based on a reading of the file that didn't hold up against actually running it). This session re-ran `check-schema-drift.mjs` against all 438 current migrations (Phase 3/4, above): **zero schema drift across 478 tables, no migration failure.** G05's clean-install risk, as described in the audit, is closed. This is the "corrected G05 finding" carried forward per the most recent instruction: the audit's original text is preserved above for the record, and the current, re-verified status supersedes it. |
-| G06 | P1 | Statutory compliance report (`analytics/reports.ts`) diverges from payroll source of truth; prior UAT said "not fixed." | Recovered, **not re-verified this session**. |
+| G06 | P1 | Statutory compliance report (`analytics/reports.ts`) diverges from payroll source of truth; prior UAT said "not fixed." | **CONFIRMED STILL OPEN — re-verified this session against current code.** `reports.ts` never reads `payroll_slips` at all (repo-grepped the file — zero matches). `pf_employee` and `esi_employee` (lines ~528/533) are computed as **formula approximations from compensation config** (`approxBasicMonthly * 0.12`, `comp.ctc_monthly * 0.0075`) — not the actual finalized deduction amounts, which can differ due to wage ceilings, pro-rating, arrears, or manual corrections. The PT section doesn't even carry a computed amount, only `pt_applicable`. This is a structural divergence risk by construction, exactly as the audit describes. |
 | G07 | P1 | No evidence of a 2,000+ employee load/soak test; prove throughput under production-like PostgREST limits. | **Partial evidence from this session**, explicitly not a closure: `pagination-scale-check.sh` now exercises 2,200 employees across ESI/EPF/PTax against real Postgres through a from-scratch PostgREST-shim gateway (`/tmp/supabase-gateway.mjs`), not real Supabase/PostgREST. This is evidence toward G07, not proof of it — the audit's own bar is a genuine Supabase/PostgREST environment, which this sandbox cannot provide (see Phase 4/"still BLOCKED" below). |
-| G08 | P1 | CI ratchets allow existing findings: 314 tenant-isolation and 267 unbounded-query static-check exceptions. | **Directly corroborated, not just cited**: the frozen baseline files (`scripts/tenant-isolation-baseline.json` / `scripts/unbounded-queries-baseline.json`, untouched this session) hold exactly `count: 314` and `count: 267` — matching the audit's own figures exactly, confirming the audit's snapshot and this repo's frozen baseline describe the same state. Live counts have since dropped (307 / 153, see Phase 1/EVIDENCE.md) through remediation in sessions before and during this engagement, but the frozen ratchet files were never regenerated to match (per the standing "never regenerate to hide findings" rule) — see Phase 3 for why the ratchet still exits 1 for an unrelated fingerprint-instability reason, not a new regression. |
-| G09 | P1 | E2E is manual/weekly, not a PR gate; payroll suite mostly checks page content. | Recovered, **not re-verified this session**. |
+| G08 | P1 | CI ratchets allow existing findings: 314 tenant-isolation and 267 unbounded-query static-check exceptions. | **Directly corroborated, not just cited**: the frozen baseline files (`scripts/tenant-isolation-baseline.json` / `scripts/unbounded-queries-baseline.json`, untouched this session) hold exactly `count: 314` and `count: 267` — matching the audit's own figures exactly, confirming the audit's snapshot and this repo's frozen baseline describe the same state. **All CONFIRMED_DEFECT rows in both checkers' live registers are now closed this session** (see Phase 2/2b below) — but the frozen ratchet baselines themselves are unchanged (314/267, per the standing never-regenerate rule) and the ratchet still exits 1 for the unrelated fingerprint-instability reason (`ADD-004`), not a new regression. G08 as the audit describes it (the ratchet mechanism allowing stale exceptions) is **still open** — closing the live findings behind it doesn't change the ratchet's own fingerprint-stability defect. |
+| G09 | P1 | E2E is manual/weekly, not a PR gate; payroll suite mostly checks page content. | **CONFIRMED STILL OPEN — re-verified this session against current code.** `.github/workflows/e2e.yml`'s triggers are `workflow_dispatch` (manual) and `schedule` only — no `pull_request` trigger. `apps/e2e/tests/05-payroll.spec.ts:108` does `console.warn('[cross-check] MISMATCH: ...')` on a muster/payroll discrepancy rather than failing the assertion — confirmed by direct read, exactly as the audit describes. |
 | G10 | P1 | Backup, restore, PITR, RPO/RTO, secret rotation, rollback, incident response cannot be certified from repo files. | Recovered. **Still BLOCKED** — unchanged, this sandbox has no staging/production infrastructure to exercise any of this. |
-| G11 | P2 | Profile cache retains role/tenant/employee mapping up to 5 minutes; `is_active` rechecked at most every 60s — no measured access-revocation SLA. | Recovered, **not re-verified this session**. |
+| G11 | P2 | Profile cache retains role/tenant/employee mapping up to 5 minutes; `is_active` rechecked at most every 60s — no measured access-revocation SLA. | **CONFIRMED STILL OPEN (unchanged) — re-verified this session against current code.** `apps/api/src/plugins/auth.ts`: `CACHE_TTL = 5 * 60 * 1000` (5 min) and `IS_ACTIVE_TTL = 60 * 1000` (60s) — both constants match the audit's description exactly, character for character. Still a bounded, documented delay, not a bypass — same characterization the audit itself gave. No measured access-revocation SLA has been established. |
 | G12 | P2 | Standalone leave encashment has no employee request UI; mark-paid only changes status, no proven disbursement path. Scope question, not just a bug. | Recovered, **not re-verified this session**. Needs a product scoping decision (is this in the first customer's scope?), not just an engineering fix. |
 | G13 | P1 | Repeated payroll defects share a DB NUMERIC/DECIMAL-as-string coercion failure mode (`Number()` missing at the data boundary). | **This is the subject of the entire branch.** See `FINDINGS.csv` row 1 and the rest of this document — fixed, mutation-tested, real-stack-validated for the clusters covered this engagement. Real-scale PostgREST validation (genuine Supabase, not the gateway) remains the one still-open release gate for G13 specifically, same as the rest of this document's "still BLOCKED" items. |
 
-**What remains genuinely unresolved:** G02, G03, G04, G06, G09, G11 are
-carried forward from the audit text verbatim and have **not** been
-re-verified against current code this session — they are restored to the
-register as real, open findings (not fabricated, not invalidated), but this
-pass did not re-check whether the underlying code still matches the audit's
-description. G10 and G12 are explicitly scope/infrastructure questions, not
-re-verified either. Only G01, G05, G07, G08, and G13 have current-session
-verification behind the status shown above.
+**Closure ledger — every one of the 13 accounted for explicitly, absence
+from an "open" list is never treated as closure:**
+
+| ID | Status | Re-verified this session? |
+|---|---|---|
+| G01 | **OPEN** (confirmed) | Yes — schema check + code trace |
+| G02 | **OPEN** (confirmed, worse than described — dead warning code) | Yes — repo-wide grep + call-site trace |
+| G03 | **OPEN** (confirmed) | Yes — direct code read |
+| G04 | **OPEN** (confirmed) | Yes — direct code read |
+| G05 | **FIXED** | Yes — re-ran check-schema-drift.mjs against all 438 migrations |
+| G06 | **OPEN** (confirmed) | Yes — direct code read |
+| G07 | **PARTIAL EVIDENCE**, not closed | Yes — real-stack scale test, not real Supabase |
+| G08 | **OPEN** (ratchet mechanism itself; underlying live findings now closed) | Yes — baseline file inspection + live-register status |
+| G09 | **OPEN** (confirmed) | Yes — CI config + spec file read |
+| G10 | **BLOCKED**, not closed | No — infrastructure access this sandbox cannot provide |
+| G11 | **OPEN** (confirmed, unchanged) | Yes — constant values read directly |
+| G12 | **OPEN** — product scope question | No — needs a scoping decision, not re-traced |
+| G13 | **FIXED** for the clusters this branch covers; real-scale PostgREST validation still the open release gate | Yes — this entire branch's subject |
+
+Every item above is either re-verified this session with cited evidence, or
+explicitly marked as not re-verified and why (infrastructure-blocked or a
+pending product decision) — none are closed by omission.
 
 ## Phase status
 
@@ -191,12 +205,13 @@ caller-controlled-range ×3, recursive-subtree ×1, unchunked-sibling ×2,
 fails-closed-array ×3, narrow-occurrence ×1). Re-read each one's current
 code before touching anything, same discipline as the earlier 6-row
 reconciliation:
-- **24 fixed**: migrated to `fetchAllRows()` (genuinely unbounded tenant-wide
+- **26 fixed**: migrated to `fetchAllRows()` (genuinely unbounded tenant-wide
   scans — `assistant-tools.ts`, `intelligence-scanner.ts` ×2, `anomalies.ts`,
-  `comp-off.ts`, `confidence.ts`, `executive/index.ts`, `recognition/index.ts`)
-  or chunked by 100 (`.in()` lookups against a caller-controlled or
-  tenant-wide id list — `absconding-engine.ts`, `import-engine/validator.ts`
-  ×2, `org-context.ts`, `shift-resolution-engine.ts`, `health-index.ts`,
+  `comp-off.ts`, `confidence.ts`, `executive/index.ts`, `recognition/index.ts`,
+  and `attendance-engine.ts`'s `recomputeRange()` — see correction below) or
+  chunked by 100 (`.in()` lookups against a caller-controlled or tenant-wide
+  id list — `absconding-engine.ts`, `import-engine/validator.ts` ×2,
+  `org-context.ts`, `shift-resolution-engine.ts`, `health-index.ts`,
   `leave.ts` ×2, `overtime.ts`, `wo-credit.ts`, `work-sessions.ts`,
   `compensation/revisions.ts`, `leave-policy-assignments.ts`, `surveys/index.ts`
   ×2 — two of these are fails-closed validation checks, same pattern as
@@ -204,24 +219,82 @@ reconciliation:
 - **1 reconciled** (`UNB-096`, `team-payroll-cost.ts`): already fixed in a
   prior round, register was stale — same documentation-lag pattern as the
   6 rows reconciled earlier.
-- **3 reclassified `FALSE_POSITIVE`, not force-fixed**: `UNB-010` and
-  `UNB-042` are both scoped by `.eq('employee_id', ...)` plus a bounded date
-  range (never the full table — result count is bounded by the date range,
-  not tenant headcount); `UNB-044` is an intentional `.limit(50)` on a
-  "missing punches today" dashboard widget, exactly the exception CLAUDE.md's
-  own universal pagination rule carves out ("`.limit()` is only acceptable
-  for intentionally bounded queries... where truncation is the desired
-  behaviour"). Each has a concrete code citation in `FINDINGS.csv`, not a
-  bare reclassification — this corrects what looks like a genuine
-  inconsistency in the original classification pass (the evidence column
-  was empty for these rows, unlike their immediate FALSE_POSITIVE neighbors
-  in the same files which share the same empty-evidence pattern).
+- **1 reclassified `FALSE_POSITIVE`, not force-fixed**: `UNB-044` — the
+  `.limit(50)` display cap on a "missing punches today" widget is legitimate
+  (CLAUDE.md's own stated exception). But fixing it uncovered a REAL bug
+  the original pass over this list missed: the endpoint returned
+  `count: employees.length` — a total DERIVED from the capped 50-row
+  result. Fixed to fetch the true total independently via
+  `count:'exact', head:true`. See correction below.
 
-Full verification after all 24 fixes: `tsc --noEmit` clean, `vitest run` 40
-files / 331 tests pass — zero regressions from this batch, no dedicated new
-test per site (covered by the already-tested `fetchAllRows()`/chunk-by-100
-pattern itself, consistent with how every other mechanical pagination fix
-in this engagement was handled).
+**Correction, from review, to this document's own earlier text in this
+round**: an earlier draft of this section reclassified `UNB-010`
+(`attendance-engine.ts` recompute) and `UNB-042` (`confidence.ts`) as
+`FALSE_POSITIVE` on the reasoning that single-employee scope bounds the
+result. **That reasoning was wrong and is retracted, not just softened**:
+employee scope bounds the SHAPE of the result (one row per date, enforced
+by `attendance_daily`'s `UNIQUE(tenant_id, employee_id, date)`), but not
+the COUNT — that depends on the date SPAN, and neither call site capped
+the span. Both `from_date`/`to_date` (recompute) and `from`/`to`
+(confidence) are caller-supplied with only date-FORMAT validation, no
+maximum-span check, at every call site (checked all 6+ for `recomputeRange`).
+A span over ~2.7 years produces >1,000 calendar dates. Both are now
+genuinely fixed with `fetchAllRows()`, not reclassified:
+- `attendance-engine.ts`'s `recomputeRange()`: an unbounded span would have
+  silently truncated the existing-rows map used for recompute-protection,
+  risking a silent overwrite of a protected date past the cap.
+- `confidence.ts`: an unbounded span would have silently truncated
+  `total_days`/`avg_score`/`critical_days`/`low_days` — stats computed from
+  `rows.length`.
+
+**Mutation-tested, not just argued** — reverted `confidence.ts` to the
+pre-fix query, re-seeded a real 1,200-row single-employee fixture, and
+reproduced the exact predicted failure:
+```
+total_days:    expected 1200, got 1000
+critical_days: expected 120,  got 100
+```
+Restored, reconfirmed correct. See `scripts/attendance-survey-truncation-check.sh`
+and EVIDENCE.md §6f.
+
+**New real-stack evidence for the review's three verification points** (not
+just `tsc`/`vitest` against the statutory scripts, which don't exercise
+attendance/surveys/recognition at all) —
+`scripts/attendance-survey-truncation-check.sh`, 7/7 assertions against
+real Postgres + the real API:
+1. A real 1,200-row single-employee `attendance_daily` fixture proves
+   `confidence.ts` no longer truncates at 1,000 (mutation-tested above).
+2. A real 60-employee "missing punches today" fixture proves `count: 60`
+   (true total) alongside a 50-row capped display list and
+   `truncated: true`.
+3. A real cross-tenant ownership check: 104 real employee ids + 1
+   foreign-tenant id placed at position 105 (past the first 100-id chunk
+   boundary) — `POST /surveys/admin/:id/360/setup` still rejects it with
+   `INVALID_EMPLOYEES`, proving the fails-closed check isn't blind to a
+   later chunk.
+
+**Query-error-path evidence, added this round, not present in the first
+pass**: every chunk loop and `fetchAllRows()` call added across all 26
+fixed call sites now explicitly checks and surfaces its error (via
+`serverError()` in route handlers, `throw` in lib functions with an
+existing safety net) instead of silently proceeding with a partial
+result — this was a real gap in the first pass, where most chunk loops
+discarded `error` entirely (matching a pre-existing, widespread convention
+in this codebase, not something newly introduced, but still worth closing
+for the code this round touched). New mock-level regression test,
+`surveys/__tests__/trigger-lifecycle-ownership-chunking.test.ts` (3 tests):
+proves (a) 150 valid ids across 2 chunks are all accepted, (b) a
+foreign-tenant id in the second chunk is still rejected, and (c) a chunk
+query that errors (not just "no match") surfaces as `500`, never silently
+treated as `INVALID_EMPLOYEES`.
+
+Full verification after all 26 fixes plus the error-handling hardening:
+`tsc --noEmit` clean, `vitest run` 41 files / 334 tests pass (40/331 → 41/334:
+the new surveys chunking test) — zero regressions. Real-stack scripts
+re-run clean after this round: `g13-reconciliation-check.sh` (21/21),
+`finalized-slip-value-lockdown-check.sh` (5/5),
+`validation-rules-tenant-override-check.sh` (13/13),
+`attendance-survey-truncation-check.sh` (7/7).
 
 **Result: zero open CONFIRMED_DEFECT rows remain in either
 `check-unbounded-queries.mjs` or `check-tenant-isolation.mjs`'s findings**
@@ -361,9 +434,22 @@ actual database state (not just the HTTP responses) after each: **7/7
 assertions pass** — no duplicate rows from the race, correct totals, and a
 retry is a true no-op (same row count, same sum). See EVIDENCE.md §7b.
 
+**First real cross-role UAT journey, this round**: `scripts/cross-role-ess-payslip-uat.sh`
+— real Postgres + real API + real auth gateway, **4 distinct authenticated
+identities** (1 hr_admin, 3 employees), not a single-role endpoint check:
+hr_admin finalizes a payroll run for 2 employees; each employee, logged in
+as themselves, calls `GET /payroll/my-slips` and sees exactly their own
+slip with their own figures — never a co-worker's; a third employee whose
+only slip is still in a draft (unfinalized) run sees zero slips via ESS.
+**7/7 assertions pass**, cleanup confirmed (had to extend the cleanup to
+step `payroll_runs` off `'finalized'` before deleting — migration 263's
+lockdown trigger blocks it otherwise, same fix pattern as this round's
+other new scripts). This is one journey, not the full admin/HR/manager/
+employee matrix — reported as a start, not completion.
+
 **Still not attempted, reported as blocked rather than claimed passing:**
-- End-to-end UAT across admin/HR/manager/employee roles as actual user
-  journeys (the concurrency check above drives one endpoint, not a journey).
+- The rest of the admin/HR/manager/employee journey matrix beyond the one
+  ESS payslip-isolation journey above.
 - Concurrency/retry testing on any endpoint besides ESI compute.
 - Fault injection / mid-failure recovery (what happens if the process dies
   mid-chunk-loop, mid-upsert, etc.) — genuinely untested.
@@ -457,20 +543,36 @@ implementation and its real-stack proof.
 
 ## What a human needs to do next
 
-1. ~~Point this session at the real G01–G12 source document~~ — **done this
-   session**: `COGNIXHR_PRODUCTION_READINESS_AUDIT_2026-09-27.md` recovered,
-   G01–G13 restored to the register above. What's still needed: G02, G03,
-   G04, G06, G09, G11 have not been re-verified against current code (only
-   G01/G05/G07/G08/G13 have); and G10/G12 need a product scoping decision,
-   not an engineering fix.
+1. ~~Point this session at the real G01–G12 source document~~ — **done**:
+   `COGNIXHR_PRODUCTION_READINESS_AUDIT_2026-09-27.md` recovered, G01–G13
+   restored with real text. ~~Re-verify G02/G03/G04/G06/G09/G11~~ — **done
+   this round**: all re-verified directly against current code (see the
+   closure ledger above) — all confirmed still open, G02 found worse than
+   originally described (the audit's cited warning path is dead code).
+   G10/G12 remain product-scope/infrastructure questions, not an
+   engineering re-verification.
 2. `payroll_validation_rules` / `UNKNOWN_FAILURE`: implemented this session
    per direction — global-default-with-tenant-override, resolved explicitly
    by rule code. See "Tenant vs. global ownership" below for what was built.
 3. Confirm GitHub push access is restored when ready to push.
 4. Provide (or provision) real staging Supabase/PostgREST access for the
    2,000+ employee validation gate — this cannot be done from this sandbox.
-5. Review `scripts/*-baseline.stable-key.json` (new this session — see
-   Phase 3): reconcile the 151 + 72 `unresolved` entries by hand (confirm
-   each is genuinely fixed/removed, or find where it moved to), resolve the
-   11 duplicate-query collisions, then decide whether to flip `--stable-key`
-   to default and replace the live baselines with the reconciled result.
+5. `scripts/*-baseline.stable-key.json`: a 12-entry spot-check across both
+   files' `unresolved` lists this round found **every single one already
+   fixed** in an earlier commit (chunked/paginated correctly — e.g.
+   `filing-pack.ts`, `forecast.ts`, `overtime.ts`, `lifecycle-expiry.ts`,
+   `context.ts`), same stale-register pattern found repeatedly throughout
+   this engagement — NOT evidence of silent breakage. This is a 12-of-223
+   sample, not a full audit — a human (or a future session) should extend
+   this spot-check or do the full manual pass before treating the other
+   ~211 as closed. One distinct sub-pattern: **29 of the 223** (`routes/payroll/index.ts`)
+   are attributable to that file being split into `runs.ts`/`validation-rules.ts`/etc.
+   in an earlier refactor (confirmed: it's now 57 lines, down from
+   presumably thousands) — these need tracing to whichever file the code
+   actually moved to, not a simple "still there or not" check in the
+   original file. Resolve the 11 duplicate-query collisions, then decide
+   whether to flip `--stable-key` to default and replace the live
+   baselines with the reconciled result.
+6. Extend `scripts/cross-role-ess-payslip-uat.sh` (new this round — one
+   ESS payslip-isolation journey) into the fuller admin/HR/manager/employee
+   journey matrix Phase 5 still calls for.

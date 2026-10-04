@@ -462,6 +462,160 @@ financial/validation-rules paths this round's earlier commits added.
 **Result: zero open CONFIRMED_DEFECT rows remain in either checker's
 findings** (tenant-isolation's 3 were already closed by §6d above).
 
+## 6f. Correction: UNB-010/UNB-042 were wrongly reclassified; UNB-044 had a real bug; query-error paths hardened
+
+A review correctly rejected §6e's reclassification of `UNB-010` and
+`UNB-042` as `FALSE_POSITIVE`. The reasoning ("single-employee scope
+bounds the result") was wrong: employee scope bounds the SHAPE (one row
+per date), not the COUNT, which depends on the date SPAN — and neither
+`attendance-engine.ts`'s `recomputeRange()` nor `confidence.ts`'s GET
+endpoint capped that span anywhere (checked all 6+ `recomputeRange` call
+sites). Both are now genuinely fixed with `fetchAllRows()`.
+
+Mutation-tested, not just argued — reverted `confidence.ts`, re-seeded a
+real 1,200-row single-employee fixture:
+```
+total_days:    expected 1200, got 1000
+critical_days: expected 120,  got 100
+```
+Restored, reconfirmed correct.
+
+`UNB-044`'s `.limit(50)` display cap was legitimate, but fixing it
+surfaced a real bug the first pass missed: the endpoint returned
+`count: employees.length` — a total DERIVED from the capped 50 rows. Fixed
+with an independent `count:'exact', head:true` query.
+
+**New real-stack script**, `scripts/attendance-survey-truncation-check.sh`,
+7/7 against real Postgres + the real API:
+```
+=== 1. UNB-042: 1,200-row single-employee fixture ===
+  ✓ total_days = 1200 (not the 1,000-row cap)
+  ✓ critical_days = 120
+=== 2. UNB-044: 60-employee missing-punches fixture ===
+  ✓ employees.length = 50 (capped display, intentional)
+  ✓ count = 60 (TRUE total, not the capped length)
+  ✓ truncated = true
+=== 3. Fails-closed ownership, 105 ids (104 real + 1 foreign at position 105) ===
+  ✓ POST /surveys/admin/:id/360/setup rejects INVALID_EMPLOYEES
+    (foreign id past the first 100-id chunk boundary is still caught)
+=== RESULT: 7 passed, 0 failed ===
+```
+
+**Query-error-path hardening**: the first pass's 26 fixes mostly discarded
+each chunk's `error` (matching a pre-existing, widespread convention in
+this codebase — not newly introduced, but worth closing for the code this
+round touched). Every chunk loop and `fetchAllRows()` call across all 26
+sites now explicitly checks and surfaces its error. New mock test,
+`surveys/__tests__/trigger-lifecycle-ownership-chunking.test.ts` (3 tests,
+using a scripted mock whose `.in()` call-index persists ACROSS repeated
+`.from('employees')` calls — the first draft of this mock reset the
+counter every call and silently never triggered the simulated error):
+```
+✓ accepts 150 valid ids spanning 2 chunks
+✓ rejects a foreign-tenant id placed in the SECOND chunk
+✓ surfaces a 500 when a later chunk's query itself errors
+  (not silently rejected as INVALID_EMPLOYEES)
+```
+
+Full re-verification after this round's corrections: `tsc --noEmit` clean,
+`vitest run` 41 files / 334 tests pass. Re-ran all 4 real-stack scripts
+from this session (`g13-reconciliation-check.sh` 21/21,
+`finalized-slip-value-lockdown-check.sh` 5/5,
+`validation-rules-tenant-override-check.sh` 13/13,
+`attendance-survey-truncation-check.sh` 7/7) — all still pass.
+
+## 6g. G02/G03/G04/G06/G09/G11 re-verified against current code
+
+Direct code citations, not re-assertions of the audit text:
+
+```
+G02  payroll-engine.ts: buildPayrollSlipPreview() — the function containing
+     the lop_days > total_working_days warning the audit cited — has ZERO
+     callers anywhere in the repo (grepped), including tests. Dead code.
+     The real finalize path (runs.ts -> computePayrollSlip) has no
+     equivalent check at all (grepped repo-wide for the same condition).
+     Worse than "warns but doesn't block": for the real path, no warning
+     either, dead or alive.
+
+G03  fnf-settlement-engine.ts:121-129 — comment says "last FINALIZED
+     payroll slip"; the query has no .eq('status','finalized') at all.
+     Confirmed by direct read.
+
+G04  runs.ts — four-eyes maker_checker_log approval is committed (~line
+     2125) before the attendance-staleness guard and freeze-recheck gate
+     that run later (~line 2370+); a failure there returns an error with
+     no rollback of the already-approved log row.
+
+G06  analytics/reports.ts — zero references to payroll_slips (grepped).
+     pf_employee/esi_employee are formula approximations from compensation
+     config (ctc_monthly * rate), not the actual finalized deduction.
+
+G09  .github/workflows/e2e.yml triggers: workflow_dispatch + schedule only,
+     no pull_request. 05-payroll.spec.ts:108 console.warn()s a muster/
+     payroll mismatch instead of failing the assertion.
+
+G11  apps/api/src/plugins/auth.ts: CACHE_TTL = 5*60*1000, IS_ACTIVE_TTL =
+     60*1000 — both match the audit's description exactly, unchanged.
+```
+
+All six: **confirmed still open**, G02 found to be a more severe gap than
+the audit's own text describes.
+
+## 6h. Baseline-migration spot-check (12 of 223 unresolved entries)
+
+Sampled 6 from each of `unbounded-queries-baseline.stable-key.json` and
+`tenant-isolation-baseline.stable-key.json`'s `unresolved` lists (seeded
+random sample, not cherry-picked) and read the current code at each:
+
+```
+filing-pack.ts:112 (employee_bank_statutory)   -> FIXED (chunked + fetchAllRows)
+forecast.ts:50 (employee_compensations)         -> FIXED (fetchAllRows)
+overtime.ts:302 (attendance_daily)              -> FIXED (fetchAllRows, now ~line 321)
+lwf.ts:251 (sites)                              -> present, not chunked — inconclusive,
+                                                    not the same occurrence verified
+lifecycle-expiry.ts:138 (employee_certifications) -> FIXED (fetchAllRows)
+context.ts:102 (payroll_slips)                  -> FIXED (fetchAllRows, x2)
+shift-resolution-engine.ts:295 (sites, tenant-isolation) -> FIXED this session (UNB-036)
+```
+
+5 of 7 checked cleanly confirmed already-fixed (same stale-register pattern
+found repeatedly this engagement); 1 inconclusive (different occurrence,
+not individually traced); the rest of the 12-sample and all other entries
+not yet checked. Separately: **29 of the 223** unresolved entries cite
+`apps/api/src/routes/payroll/index.ts`, now confirmed to be only 57 lines
+(down from a multi-thousand-line monolith per its own header comment,
+"split out of the former monolithic routes/payroll/index.ts") — these 29
+need tracing to wherever that code actually moved, not a simple
+present/absent check in the original file.
+
+**This is a 12-of-223 (5%) sample, explicitly not a full audit.** The
+pattern is strong and consistent with everything else found this
+engagement (stale registers, not silent breakage), but asserting all 223
+are closed on this sample size would repeat exactly the kind of
+unsupported closure claim this audit has corrected before.
+
+## 6i. First cross-role UAT journey — real Postgres, 4 distinct identities
+
+`scripts/cross-role-ess-payslip-uat.sh`: 1 hr_admin + 3 employees, each
+with their own real signed-up auth identity (not simulated roles on one
+token). hr_admin finalizes a 2-employee payroll run; each employee calls
+`GET /payroll/my-slips` with their own token:
+
+```
+=== 1. hr_admin sees the finalized run === ✓
+=== 2. Employee A sees exactly their own slip (gross_pay=60000), not B's === ✓✓✓
+=== 3. Employee B sees exactly their own slip (gross_pay=45000) === ✓✓
+=== 4. Employee C (draft-only slip) sees ZERO slips via ESS === ✓
+=== RESULT: 7 passed, 0 failed ===
+```
+
+Had to extend the cleanup trap to step `payroll_runs` off `'finalized'`
+before deleting — migration 263's lockdown trigger blocks a direct delete
+otherwise, the same fix already applied in `g13-reconciliation-check.sh`
+and `finalized-slip-value-lockdown-check.sh`. This is one journey (ESS
+payslip isolation across roles), not the full admin/HR/manager/employee
+matrix Phase 5 still calls for — reported as a start, not completion.
+
 ## 7. Real-stack validation — Postgres + PostgREST-shim gateway + real API
 
 Earlier in this pass, `check-schema-drift.mjs` and any real-DB script were
