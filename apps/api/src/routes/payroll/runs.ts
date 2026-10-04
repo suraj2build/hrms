@@ -2100,10 +2100,24 @@ export default async function payrollRunsRoutes(fastify: FastifyInstance) {
       }
     }
 
-    // ── PI-1 maker-checker / four-eyes finalize (finding C2) ───────────────────
+    // ── PI-1 maker-checker / four-eyes finalize (finding C2 / G04) ─────────────
     // The maker_checker_log was previously never written for finalize — the
     // "four-eyes" control was decorative. We now always record it. When dual
     // control is enabled, a DISTINCT checker must approve before the run seals.
+    //
+    // G04: the actual approval/auto-approval WRITE used to happen here, before
+    // the attendance-closure/completeness, open-blockers, validation-run, and
+    // staleness-recompute gates below — any of which can still reject the
+    // finalize. That left a maker_checker_log row claiming "approved" or
+    // "auto_approved" for a finalize that never actually happened, with
+    // nothing to roll it back. Fixed by only VALIDATING here (reject early
+    // when there's nothing to approve yet, or the wrong person is approving)
+    // and deferring the actual commit — commitMakerCheckerApproval() below —
+    // until immediately before Step 1, once every other gate has passed.
+    type McCommitResult = { error: unknown }
+    let commitMakerCheckerApproval: () => Promise<McCommitResult> = async () => {
+      return { error: null }
+    }
     {
       const dualControl = isPayrollDualControlEnabled()
       const { data: pending } = await fastify.supabase
@@ -2121,6 +2135,8 @@ export default async function payrollRunsRoutes(fastify: FastifyInstance) {
       if (dualControl) {
         if (!pending) {
           // Maker step — record the proposal and stop. A different user approves.
+          // This write only claims "a proposal was made", which is true
+          // regardless of the later gates, so it is safe to commit immediately.
           const { error: mcInsertError } = await fastify.supabase.from('maker_checker_log').insert({
             tenant_id: tenantId, entity_type: 'payroll_run', entity_id: id,
             action: 'finalize', maker_id: req.userId, status: 'pending',
@@ -2145,32 +2161,35 @@ export default async function payrollRunsRoutes(fastify: FastifyInstance) {
         if ((run as any).created_by && (run as any).created_by === req.userId && req.userRole !== 'super_admin') {
           return conflictError(reply, 'PREPARER_CANNOT_APPROVE', 'You prepared (ran) this payroll; a different authorised user must approve it.')
         }
-        // Checker step — approve the pending proposal, then proceed to finalize.
-        // When the preparer themselves approved via super_admin override, record that
-        // fact distinctly so an auditor can tell it from a clean four-eyes approval.
+        // Checker step — approve the pending proposal once we actually finalize.
+        // When the preparer themselves approved via super_admin override, record
+        // that fact distinctly so an auditor can tell it from a clean four-eyes
+        // approval.
         const preparerOverride = (run as any).created_by === req.userId
-        const { error: mcApproveError } = await fastify.supabase.from('maker_checker_log')
-          .update({
-            checker_id:   req.userId,
-            status:       'approved',
-            reviewed_at:  new Date().toISOString(),
-            ...(preparerOverride ? { checker_notes: 'PREPARER_SELF_APPROVED_OVERRIDE (super_admin)' } : {}),
-          })
-          .eq('id', (pending as any).id)
-        if (mcApproveError) {
-          return serverError(req, reply, mcApproveError, ErrorCode.UPDATE_FAILED, 'Failed to record four-eyes finalize approval')
+        const pendingId = (pending as any).id
+        commitMakerCheckerApproval = async () => {
+          const { error } = await fastify.supabase.from('maker_checker_log')
+            .update({
+              checker_id:   req.userId,
+              status:       'approved',
+              reviewed_at:  new Date().toISOString(),
+              ...(preparerOverride ? { checker_notes: 'PREPARER_SELF_APPROVED_OVERRIDE (super_admin)' } : {}),
+            })
+            .eq('id', pendingId)
+          return { error }
         }
       } else {
-        // Dual control off — record an auto-approved entry (real audit trail) and
-        // proceed exactly as before: single operator, immediate finalize.
-        const { error: mcAutoError } = await fastify.supabase.from('maker_checker_log').insert({
-          tenant_id: tenantId, entity_type: 'payroll_run', entity_id: id,
-          action: 'finalize', maker_id: req.userId, checker_id: req.userId,
-          status: 'auto_approved', reviewed_at: new Date().toISOString(),
-          maker_data: { month: run.month, force_finalize, override_reason: override_reason ?? null },
-        })
-        if (mcAutoError) {
-          return serverError(req, reply, mcAutoError, ErrorCode.INSERT_FAILED, 'Failed to record four-eyes finalize audit entry')
+        // Dual control off — record an auto-approved entry (real audit trail)
+        // once we actually finalize, and proceed exactly as before: single
+        // operator, immediate finalize.
+        commitMakerCheckerApproval = async () => {
+          const { error } = await fastify.supabase.from('maker_checker_log').insert({
+            tenant_id: tenantId, entity_type: 'payroll_run', entity_id: id,
+            action: 'finalize', maker_id: req.userId, checker_id: req.userId,
+            status: 'auto_approved', reviewed_at: new Date().toISOString(),
+            maker_data: { month: run.month, force_finalize, override_reason: override_reason ?? null },
+          })
+          return { error }
         }
       }
     }
@@ -2563,6 +2582,15 @@ export default async function payrollRunsRoutes(fastify: FastifyInstance) {
     }
     if (freezeRecheck.frozen) {
       return conflictError(reply, 'RUN_FROZEN', freezeRecheck.reason ?? `Payroll for ${run.month} was frozen while finalization was in progress. No slips were finalized.`)
+    }
+
+    // G04: commit the maker-checker approval/auto-approval now — every gate
+    // above has passed and we are about to actually finalize, so the audit
+    // trail written here matches reality for the first time (see the
+    // "PI-1 maker-checker / four-eyes finalize" comment above).
+    const { error: mcCommitError } = await commitMakerCheckerApproval()
+    if (mcCommitError) {
+      return serverError(req, reply, mcCommitError, ErrorCode.UPDATE_FAILED, 'Failed to record four-eyes finalize approval')
     }
 
     // Step 1: Finalize draft slips
