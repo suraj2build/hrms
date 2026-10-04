@@ -109,10 +109,16 @@ async function build24QDataset(supabase: any, tenantId: string, quarter: string,
 
   const empIds = [...new Set(slips.map(r => r.employee_id))]
   const panMap = new Map<string, string>()
-  if (empIds.length) {
+  // Chunked: empIds is the quarter's whole deductee set (can be the tenant's
+  // full headcount at enterprise scale) — a single .in() over thousands of
+  // UUIDs risks the request-line limit, and employee_bank_statutory's
+  // UNIQUE(tenant_id, employee_id) means a >1000-employee tenant would also
+  // hit PostgREST's response-row cap on an unchunked read.
+  for (let i = 0; i < empIds.length; i += 100) {
+    const chunkIds = empIds.slice(i, i + 100)
     const { data: panRows, error: panErr } = await supabase
       .from('employee_bank_statutory').select('employee_id, pan_number')
-      .eq('tenant_id', tenantId).in('employee_id', empIds)
+      .eq('tenant_id', tenantId).in('employee_id', chunkIds)
     // Thrown so the caller's route handler (via Fastify's global error
     // handler) 500s instead of silently defaulting every deductee's
     // pan_status to MISSING in the 24Q filing output.
@@ -261,52 +267,81 @@ export default async function filingPackRoutes(fastify: FastifyInstance) {
     const epfCount = epfContribs.count ?? 0
     let missingUan = 0
     if (epfCount > 0) {
-      const { data: epfEmpRows, error: epfEmpErr } = await fastify.supabase
-        .from('epf_contributions')
-        .select('employee_id')
-        .eq('tenant_id', req.tenantId)
-        .eq('contribution_month', month)
-      if (epfEmpErr) return serverError(req, reply, epfEmpErr, ErrorCode.QUERY_FAILED, 'Failed to fetch EPF contributors')
+      // epf_contributions is UNIQUE(tenant_id, employee_id, contribution_month) —
+      // exactly one row per employee for this month, but that's still one row
+      // per employee, so an enterprise tenant's full headcount can exceed
+      // PostgREST's 1000-row cap on an unpaginated read.
+      let epfEmpRows: any[]
+      try {
+        epfEmpRows = await fetchAllRows((from, to) =>
+          fastify.supabase
+            .from('epf_contributions')
+            .select('employee_id')
+            .eq('tenant_id', req.tenantId)
+            .eq('contribution_month', month)
+            .range(from, to),
+        )
+      } catch (epfEmpErr) {
+        return serverError(req, reply, epfEmpErr, ErrorCode.QUERY_FAILED, 'Failed to fetch EPF contributors')
+      }
 
-      const epfEmpIds = (epfEmpRows ?? []).map((r: any) => r.employee_id)
+      const epfEmpIds = epfEmpRows.map((r: any) => r.employee_id)
 
       if (epfEmpIds.length > 0) {
-        const { data: uanData, error: uanErr } = await fastify.supabase
-          .from('epf_eligibility_overrides')
-          .select('employee_id')
-          .eq('tenant_id', req.tenantId)
-          .in('employee_id', epfEmpIds)
-          .not('uan', 'is', null)
-          .is('effective_to', null)
-        if (uanErr) return serverError(req, reply, uanErr, ErrorCode.QUERY_FAILED, 'Failed to fetch UAN coverage')
-
-        const uanCovered = new Set((uanData ?? []).map((r: any) => r.employee_id))
+        // Chunked: epfEmpIds can be the tenant's full headcount — a single
+        // .in() over thousands of UUIDs risks the request-line limit.
+        const uanCovered = new Set<string>()
+        for (let i = 0; i < epfEmpIds.length; i += 100) {
+          const chunkIds = epfEmpIds.slice(i, i + 100)
+          const { data: uanData, error: uanErr } = await fastify.supabase
+            .from('epf_eligibility_overrides')
+            .select('employee_id')
+            .eq('tenant_id', req.tenantId)
+            .in('employee_id', chunkIds)
+            .not('uan', 'is', null)
+            .is('effective_to', null)
+          if (uanErr) return serverError(req, reply, uanErr, ErrorCode.QUERY_FAILED, 'Failed to fetch UAN coverage')
+          for (const r of (uanData ?? []) as any[]) uanCovered.add(r.employee_id)
+        }
         missingUan = epfEmpIds.filter(id => !uanCovered.has(id)).length
       }
     }
 
-    // PAN check: employees who had TDS deducted this month
-    const { data: tdsSlips, error: tdsSlipsErr } = await fastify.supabase
-      .from('payroll_slips')
-      .select('employee_id, tds_deducted')
-      .eq('tenant_id', req.tenantId)
-      .eq('month', month)
-      .eq('status', 'finalized')
-      .gt('tds_deducted', 0)
-    if (tdsSlipsErr) return serverError(req, reply, tdsSlipsErr, ErrorCode.QUERY_FAILED, 'Failed to fetch TDS slips')
+    // PAN check: employees who had TDS deducted this month. payroll_slips is
+    // one row per employee per run for this month, so the same >1000-employee
+    // tenant can exceed the response-row cap on an unpaginated read.
+    let tdsSlips: any[]
+    try {
+      tdsSlips = await fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('payroll_slips')
+          .select('employee_id, tds_deducted')
+          .eq('tenant_id', req.tenantId)
+          .eq('month', month)
+          .eq('status', 'finalized')
+          .gt('tds_deducted', 0)
+          .range(from, to),
+      )
+    } catch (tdsSlipsErr) {
+      return serverError(req, reply, tdsSlipsErr, ErrorCode.QUERY_FAILED, 'Failed to fetch TDS slips')
+    }
 
-    const tdsEmpIds = (tdsSlips ?? []).map((r: any) => r.employee_id)
+    const tdsEmpIds = tdsSlips.map((r: any) => r.employee_id)
     let missingPan = 0
     if (tdsEmpIds.length > 0) {
-      const { data: panData, error: panErr } = await fastify.supabase
-        .from('employee_bank_statutory')
-        .select('employee_id')
-        .eq('tenant_id', req.tenantId)
-        .in('employee_id', tdsEmpIds)
-        .not('pan_number', 'is', null)
-      if (panErr) return serverError(req, reply, panErr, ErrorCode.QUERY_FAILED, 'Failed to fetch PAN coverage')
-
-      const panCovered = new Set((panData ?? []).map((r: any) => r.employee_id))
+      // Chunked for the same request-line reason as the UAN check above.
+      const panCovered = new Set<string>()
+      for (let i = 0; i < tdsEmpIds.length; i += 100) {
+        const chunkIds = tdsEmpIds.slice(i, i + 100)
+        const { data: panData, error: panErr } = await fastify.supabase
+          .from('employee_bank_statutory')
+          .select('employee_id')
+          .eq('tenant_id', req.tenantId)
+          .in('employee_id', chunkIds)
+          .not('pan_number', 'is', null)
+        if (panErr) return serverError(req, reply, panErr, ErrorCode.QUERY_FAILED, 'Failed to fetch PAN coverage')
+        for (const r of (panData ?? []) as any[]) panCovered.add(r.employee_id)
+      }
       missingPan = tdsEmpIds.filter(id => !panCovered.has(id)).length
     }
 
@@ -433,15 +468,18 @@ export default async function filingPackRoutes(fastify: FastifyInstance) {
     const reg      = (regResult.data   as any) ?? {}
     const tenant   = (tenantResult.data as any) ?? {}
 
-    // Fetch UANs
+    // Fetch UANs. Chunked: empIds can be the tenant's full EPF-contributor
+    // headcount — a single .in() over thousands of UUIDs risks the
+    // request-line limit.
     const empIds = rows.map(r => r.employee_id)
     const uanMap = new Map<string, string>()
-    if (empIds.length > 0) {
+    for (let i = 0; i < empIds.length; i += 100) {
+      const chunkIds = empIds.slice(i, i + 100)
       const { data: uanRows, error: uanErr } = await fastify.supabase
         .from('epf_eligibility_overrides')
         .select('employee_id, uan')
         .eq('tenant_id', req.tenantId)
-        .in('employee_id', empIds)
+        .in('employee_id', chunkIds)
         .not('uan', 'is', null)
         .is('effective_to', null)
       if (uanErr) return serverError(req, reply, uanErr, ErrorCode.QUERY_FAILED, 'Failed to fetch EPF UANs')
