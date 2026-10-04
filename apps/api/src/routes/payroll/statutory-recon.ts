@@ -75,26 +75,34 @@ export default async function payrollStatutoryReconRoutes(fastify: FastifyInstan
     // all four: a plain query would silently truncate at ≥1,001 contribution
     // rows for the month, corrupting this variance check's "payable" side for
     // a large tenant with no error signal.
+    // .order('id'): without a deterministic sort, PostgREST's OFFSET/LIMIT
+    // paging (what .range() compiles to) is not guaranteed stable across the
+    // separate page requests fetchAllRows issues — a concurrent insert/update
+    // between pages can shift row positions and skip or duplicate a row.
     const [epfRows, esiRows, ptaxRows, tdsRows] = await Promise.all([
       fetchAllRows<any>((from, to) =>
         fastify.supabase.from('epf_contributions')
           .select('employee_contribution, total_employer_contribution, voluntary_pf')
           .eq('tenant_id', tenantId).eq('contribution_month', reconMonth)
+          .order('id')
           .range(from, to)),
       fetchAllRows<any>((from, to) =>
         fastify.supabase.from('esi_contributions')
           .select('total_contribution')
           .eq('tenant_id', tenantId).eq('contribution_month', reconMonth)
+          .order('id')
           .range(from, to)),
       fetchAllRows<any>((from, to) =>
         fastify.supabase.from('ptax_contributions')
           .select('ptax_amount')
           .eq('tenant_id', tenantId).eq('contribution_month', reconMonth)
+          .order('id')
           .range(from, to)),
       fetchAllRows<any>((from, to) =>
         fastify.supabase.from('tds_monthly_projections')
           .select('tds_this_month')
           .eq('tenant_id', tenantId).eq('projection_month', reconMonth)
+          .order('id')
           .range(from, to)),
     ])
 

@@ -21,7 +21,7 @@ const TENANT_ID = 'tenant-test-001'
 function genericChain(result: unknown) {
   const chain: any = {
     select: () => chain,
-    eq: () => chain, limit: () => chain,
+    eq: () => chain, limit: () => chain, order: () => chain,
     maybeSingle: () => Promise.resolve(result),
     range: (from: number) => Promise.resolve(from === 0 ? result : { data: [], error: null }),
   }

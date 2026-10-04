@@ -65,16 +65,18 @@ async function buildApp(opts: {
         return { select: () => genericChain({ data: { employee_contribution_pct: '0.75', employer_contribution_pct: '3.25', wage_ceiling: opts.wageCeilingAsString }, error: null }) }
       }
       if (table === 'employees') {
+        const page: any = {
+          order: () => page,
+          range: () => {
+            if (empPageServed) return Promise.resolve({ data: [], error: null })
+            empPageServed = true
+            return Promise.resolve({ data: opts.employees, error: null })
+          },
+        }
         return {
           select: () => ({
             eq: () => ({
-              eq: () => ({
-                range: () => {
-                  if (empPageServed) return Promise.resolve({ data: [], error: null })
-                  empPageServed = true
-                  return Promise.resolve({ data: opts.employees, error: null })
-                },
-              }),
+              eq: () => page,
             }),
           }),
         }

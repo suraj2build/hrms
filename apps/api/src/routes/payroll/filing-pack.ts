@@ -104,25 +104,38 @@ async function build24QDataset(supabase: any, tenantId: string, quarter: string,
       .eq('tenant_id', tenantId)
       .in('month', months)
       .eq('status', 'finalized')
+      .order('id')
       .range(from, to),
   ) as any[]
 
   const empIds = [...new Set(slips.map(r => r.employee_id))]
   const panMap = new Map<string, string>()
-  // Chunked: empIds is the quarter's whole deductee set (can be the tenant's
-  // full headcount at enterprise scale) — a single .in() over thousands of
-  // UUIDs risks the request-line limit, and employee_bank_statutory's
-  // UNIQUE(tenant_id, employee_id) means a >1000-employee tenant would also
-  // hit PostgREST's response-row cap on an unchunked read.
+  // Chunked AND fetchAllRows-paginated: empIds is the quarter's whole
+  // deductee set (can be the tenant's full headcount at enterprise scale) —
+  // a single .in() over thousands of UUIDs risks the request-line limit, and
+  // employee_bank_statutory's UNIQUE(tenant_id, employee_id) means a
+  // >1000-employee tenant would also hit PostgREST's response-row cap on an
+  // unchunked read. Per-chunk pagination is redundant given the 1-row/id
+  // multiplier (a 100-id chunk can never itself exceed 1000 rows) but keeps
+  // this consistent with every other fetchAllRows-protected read in this
+  // file and gives check-unbounded-queries.mjs a pattern it recognizes.
   for (let i = 0; i < empIds.length; i += 100) {
     const chunkIds = empIds.slice(i, i + 100)
-    const { data: panRows, error: panErr } = await supabase
-      .from('employee_bank_statutory').select('employee_id, pan_number')
-      .eq('tenant_id', tenantId).in('employee_id', chunkIds)
-    // Thrown so the caller's route handler (via Fastify's global error
-    // handler) 500s instead of silently defaulting every deductee's
-    // pan_status to MISSING in the 24Q filing output.
-    if (panErr) throw panErr
+    let panRows: any[]
+    try {
+      panRows = await fetchAllRows<any>((from, to) =>
+        supabase
+          .from('employee_bank_statutory').select('employee_id, pan_number')
+          .eq('tenant_id', tenantId).in('employee_id', chunkIds)
+          .order('id')
+          .range(from, to),
+      )
+    } catch (panErr) {
+      // Thrown so the caller's route handler (via Fastify's global error
+      // handler) 500s instead of silently defaulting every deductee's
+      // pan_status to MISSING in the 24Q filing output.
+      throw panErr
+    }
     for (const p of (panRows ?? []) as any[]) if (p.pan_number) panMap.set(p.employee_id, p.pan_number)
   }
 
@@ -279,6 +292,7 @@ export default async function filingPackRoutes(fastify: FastifyInstance) {
             .select('employee_id')
             .eq('tenant_id', req.tenantId)
             .eq('contribution_month', month)
+            .order('id')
             .range(from, to),
         )
       } catch (epfEmpErr) {
@@ -293,15 +307,23 @@ export default async function filingPackRoutes(fastify: FastifyInstance) {
         const uanCovered = new Set<string>()
         for (let i = 0; i < epfEmpIds.length; i += 100) {
           const chunkIds = epfEmpIds.slice(i, i + 100)
-          const { data: uanData, error: uanErr } = await fastify.supabase
-            .from('epf_eligibility_overrides')
-            .select('employee_id')
-            .eq('tenant_id', req.tenantId)
-            .in('employee_id', chunkIds)
-            .not('uan', 'is', null)
-            .is('effective_to', null)
-          if (uanErr) return serverError(req, reply, uanErr, ErrorCode.QUERY_FAILED, 'Failed to fetch UAN coverage')
-          for (const r of (uanData ?? []) as any[]) uanCovered.add(r.employee_id)
+          let uanData: any[]
+          try {
+            uanData = await fetchAllRows<any>((from, to) =>
+              fastify.supabase
+                .from('epf_eligibility_overrides')
+                .select('employee_id')
+                .eq('tenant_id', req.tenantId)
+                .in('employee_id', chunkIds)
+                .not('uan', 'is', null)
+                .is('effective_to', null)
+                .order('id')
+                .range(from, to),
+            )
+          } catch (uanErr) {
+            return serverError(req, reply, uanErr, ErrorCode.QUERY_FAILED, 'Failed to fetch UAN coverage')
+          }
+          for (const r of uanData) uanCovered.add(r.employee_id)
         }
         missingUan = epfEmpIds.filter(id => !uanCovered.has(id)).length
       }
@@ -320,6 +342,7 @@ export default async function filingPackRoutes(fastify: FastifyInstance) {
           .eq('month', month)
           .eq('status', 'finalized')
           .gt('tds_deducted', 0)
+          .order('id')
           .range(from, to),
       )
     } catch (tdsSlipsErr) {
@@ -333,14 +356,22 @@ export default async function filingPackRoutes(fastify: FastifyInstance) {
       const panCovered = new Set<string>()
       for (let i = 0; i < tdsEmpIds.length; i += 100) {
         const chunkIds = tdsEmpIds.slice(i, i + 100)
-        const { data: panData, error: panErr } = await fastify.supabase
-          .from('employee_bank_statutory')
-          .select('employee_id')
-          .eq('tenant_id', req.tenantId)
-          .in('employee_id', chunkIds)
-          .not('pan_number', 'is', null)
-        if (panErr) return serverError(req, reply, panErr, ErrorCode.QUERY_FAILED, 'Failed to fetch PAN coverage')
-        for (const r of (panData ?? []) as any[]) panCovered.add(r.employee_id)
+        let panData: any[]
+        try {
+          panData = await fetchAllRows<any>((from, to) =>
+            fastify.supabase
+              .from('employee_bank_statutory')
+              .select('employee_id')
+              .eq('tenant_id', req.tenantId)
+              .in('employee_id', chunkIds)
+              .not('pan_number', 'is', null)
+              .order('id')
+              .range(from, to),
+          )
+        } catch (panErr) {
+          return serverError(req, reply, panErr, ErrorCode.QUERY_FAILED, 'Failed to fetch PAN coverage')
+        }
+        for (const r of panData) panCovered.add(r.employee_id)
       }
       missingPan = tdsEmpIds.filter(id => !panCovered.has(id)).length
     }
@@ -456,6 +487,9 @@ export default async function filingPackRoutes(fastify: FastifyInstance) {
           .eq('tenant_id', req.tenantId)
           .eq('contribution_month', month)
           .order('employees(employee_code)', { ascending: true })
+          // Tiebreaker: employee_code collisions (or nulls) would otherwise
+          // leave .range() paging without a stable total order.
+          .order('id', { ascending: true })
           .range(from, to),
       )
     } catch (epfErr: any) {
@@ -475,15 +509,23 @@ export default async function filingPackRoutes(fastify: FastifyInstance) {
     const uanMap = new Map<string, string>()
     for (let i = 0; i < empIds.length; i += 100) {
       const chunkIds = empIds.slice(i, i + 100)
-      const { data: uanRows, error: uanErr } = await fastify.supabase
-        .from('epf_eligibility_overrides')
-        .select('employee_id, uan')
-        .eq('tenant_id', req.tenantId)
-        .in('employee_id', chunkIds)
-        .not('uan', 'is', null)
-        .is('effective_to', null)
-      if (uanErr) return serverError(req, reply, uanErr, ErrorCode.QUERY_FAILED, 'Failed to fetch EPF UANs')
-      for (const u of (uanRows ?? []) as any[]) uanMap.set(u.employee_id, u.uan)
+      let uanRows: any[]
+      try {
+        uanRows = await fetchAllRows<any>((from, to) =>
+          fastify.supabase
+            .from('epf_eligibility_overrides')
+            .select('employee_id, uan')
+            .eq('tenant_id', req.tenantId)
+            .in('employee_id', chunkIds)
+            .not('uan', 'is', null)
+            .is('effective_to', null)
+            .order('id')
+            .range(from, to),
+        )
+      } catch (uanErr) {
+        return serverError(req, reply, uanErr, ErrorCode.QUERY_FAILED, 'Failed to fetch EPF UANs')
+      }
+      for (const u of uanRows) uanMap.set(u.employee_id, u.uan)
     }
 
     // Aggregate totals for header
@@ -771,6 +813,7 @@ export default async function filingPackRoutes(fastify: FastifyInstance) {
             .select('employee_contribution, voluntary_pf, employer_pf, employer_eps, edli_contribution, pf_wages')
             .eq('tenant_id', req.tenantId)
             .eq('contribution_month', month)
+            .order('id')
             .range(from, to),
         ),
         fetchAllRows((from, to) =>
@@ -779,6 +822,7 @@ export default async function filingPackRoutes(fastify: FastifyInstance) {
             .select('employee_contribution, employer_contribution, total_contribution')
             .eq('tenant_id', req.tenantId)
             .eq('contribution_month', month)
+            .order('id')
             .range(from, to),
         ),
         fetchAllRows((from, to) =>
@@ -787,6 +831,7 @@ export default async function filingPackRoutes(fastify: FastifyInstance) {
             .select('ptax_amount, state_code')
             .eq('tenant_id', req.tenantId)
             .eq('contribution_month', month)
+            .order('id')
             .range(from, to),
         ),
         fetchAllRows((from, to) =>
@@ -796,6 +841,7 @@ export default async function filingPackRoutes(fastify: FastifyInstance) {
             .eq('tenant_id', req.tenantId)
             .eq('month', month)
             .eq('status', 'finalized')
+            .order('id')
             .range(from, to),
         ),
 

@@ -469,6 +469,10 @@ export default async function tdsBulkRoutes(fastify: FastifyInstance) {
             .eq('tenant_id', req.tenantId)
             .eq('financial_year', financial_year)
             .order('created_at', { ascending: false })
+            // Tiebreaker: snapshots created in the same batch share a
+            // created_at timestamp, which otherwise leaves .range() paging
+            // without a stable total order between page requests.
+            .order('id', { ascending: true })
             .range(from, to),
         )
         snapshots.push(...chunkRows)
@@ -508,6 +512,7 @@ export default async function tdsBulkRoutes(fastify: FastifyInstance) {
             // payroll_slips has no pay_date; its `month` is 'YYYY-MM' — scope to the FY months
             .gte('month', fyStart.slice(0, 7))
             .lte('month', fyEnd.slice(0, 7))
+            .order('id')
             .range(from, to),
         )
         slips.push(...chunkRows)

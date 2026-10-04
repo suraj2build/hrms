@@ -219,6 +219,10 @@ export default async function epfRoutes(fastify: FastifyInstance) {
           .select('*, employees(id, first_name, last_name, employee_code)')
           .eq('tenant_id', req.tenantId)
           .order('contribution_month', { ascending: false })
+          // Tiebreaker: contribution_month alone ties across every row in the
+          // same month, which leaves .range() paging (OFFSET/LIMIT under the
+          // hood) without a stable total order between page requests.
+          .order('id', { ascending: true })
         if (parsed.data.month) q = q.eq('contribution_month', parsed.data.month)
         if (parsed.data.employee_id) q = q.eq('employee_id', parsed.data.employee_id)
         return q.range(from, to)
@@ -309,6 +313,7 @@ export default async function epfRoutes(fastify: FastifyInstance) {
           .select('id, employee_code, first_name, last_name')
           .eq('tenant_id', req.tenantId)
           .eq('status', 'active')
+          .order('id')
           .range(from, to),
       )
     } catch (empErr) {
@@ -390,6 +395,7 @@ export default async function epfRoutes(fastify: FastifyInstance) {
           .eq('tenant_id', req.tenantId)
           .eq('is_active', true)
           .in('employee_id', empIds)
+          .order('id')
           .range(from, to),
       )
 
@@ -398,18 +404,34 @@ export default async function epfRoutes(fastify: FastifyInstance) {
         activeCompRows.map((c: any) => [c.id, c.employee_id]),
       )
 
-      // 2. PF-applicable components for those compensation records
+      // 2. PF-applicable components for those compensation records.
+      // Chunked AND fetchAllRows-paginated: activeCompIds can be the tenant's
+      // full active headcount (a request-size risk unchunked), and each
+      // compensation typically has several PF-applicable components (Basic,
+      // DA, ...) — unlike the 1-row-per-id tables elsewhere in this file, the
+      // row-per-id multiplier here is NOT 1, so even a 100-id chunk can
+      // return several hundred rows and a single unpaginated page per chunk
+      // risks the same silent truncation this whole cluster exists to fix.
       if (activeCompIds.length > 0) {
-        const { data: pfCompRows } = await fastify.supabase
-          .from('employee_compensation_components')
-          .select('compensation_id, computed_monthly, salary_components!inner(is_pf_applicable)')
-          .in('compensation_id', activeCompIds)
-          .eq('salary_components.is_pf_applicable', true)
+        const pfCompRows: Array<{ compensation_id: string; computed_monthly: number }> = []
+        for (let i = 0; i < activeCompIds.length; i += 100) {
+          const chunkIds = activeCompIds.slice(i, i + 100)
+          const chunkRows = await fetchAllRows<{ compensation_id: string; computed_monthly: number }>((from, to) =>
+            fastify.supabase
+              .from('employee_compensation_components')
+              .select('compensation_id, computed_monthly, salary_components!inner(is_pf_applicable)')
+              .in('compensation_id', chunkIds)
+              .eq('salary_components.is_pf_applicable', true)
+              .order('id')
+              .range(from, to),
+          )
+          pfCompRows.push(...chunkRows)
+        }
 
         // computed_monthly is NUMERIC — coerce or an employee with 2+ PF-applicable
         // components (e.g. Basic + DA) corrupts pf_wages into NaN, failing its
         // NOT NULL constraint on the EPF upsert (G13 sweep).
-        for (const row of (pfCompRows ?? []) as Array<{ compensation_id: string; computed_monthly: number }>) {
+        for (const row of pfCompRows) {
           const empId = empIdByCompId.get(row.compensation_id)
           if (empId) {
             pfBaseMap.set(empId, (pfBaseMap.get(empId) ?? 0) + Number(row.computed_monthly ?? 0))
@@ -437,6 +459,7 @@ export default async function epfRoutes(fastify: FastifyInstance) {
         .eq('tenant_id', req.tenantId)
         .eq('month', month)
         .eq('status', 'finalized')
+        .order('id')
         .range(from, to),
     )
 
@@ -739,6 +762,7 @@ export default async function epfRoutes(fastify: FastifyInstance) {
           .select('*, employees(employee_code, first_name, last_name)')
           .eq('tenant_id', req.tenantId)
           .eq('contribution_month', month)
+          .order('id')
           .range(from, to),
       )
     } catch (error) {

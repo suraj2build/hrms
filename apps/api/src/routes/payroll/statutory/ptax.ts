@@ -367,6 +367,7 @@ export default async function ptaxRoutes(fastify: FastifyInstance) {
           .from('ptax_contributions')
           .select('*')
           .eq('tenant_id', req.tenantId)
+          .order('id')
         if (parsed.data.month) q = q.eq('contribution_month', parsed.data.month)
         if (parsed.data.employee_id) q = q.eq('employee_id', parsed.data.employee_id)
         return q.range(from, to)
@@ -433,6 +434,7 @@ export default async function ptaxRoutes(fastify: FastifyInstance) {
           .select('id, employee_code, site_id')
           .eq('tenant_id', req.tenantId)
           .eq('status', 'active')
+          .order('id')
           .range(from, to),
       )
     } catch (empErr) {
@@ -500,6 +502,7 @@ export default async function ptaxRoutes(fastify: FastifyInstance) {
         .eq('tenant_id', req.tenantId)
         .eq('month', month)
         .eq('status', 'finalized')
+        .order('id')
         .range(from, to),
     )
 
@@ -524,6 +527,7 @@ export default async function ptaxRoutes(fastify: FastifyInstance) {
           .eq('tenant_id', req.tenantId)
           .eq('is_active', true)
           .in('employee_id', empsMissingSlip)
+          .order('id')
           .range(from, to),
       )
 
@@ -532,16 +536,30 @@ export default async function ptaxRoutes(fastify: FastifyInstance) {
       )
 
       if (compRows.length > 0) {
-        const { data: compCompRows } = await fastify.supabase
-          .from('employee_compensation_components')
-          .select('compensation_id, computed_monthly, salary_components!inner(component_type)')
-          .in('compensation_id', (compRows as any[]).map(c => c.id))
-          .eq('salary_components.component_type', 'earning')
+        // Chunked AND fetchAllRows-paginated — same reasoning as the
+        // identical pattern in epf.ts/esi.ts: the row-per-id multiplier here
+        // is NOT 1 (several earning components per compensation), so even a
+        // 100-id chunk can exceed a single unpaginated page.
+        const compIds = (compRows as any[]).map(c => c.id)
+        const compCompRows: any[] = []
+        for (let i = 0; i < compIds.length; i += 100) {
+          const chunkIds = compIds.slice(i, i + 100)
+          const chunkRows = await fetchAllRows<any>((from, to) =>
+            fastify.supabase
+              .from('employee_compensation_components')
+              .select('compensation_id, computed_monthly, salary_components!inner(component_type)')
+              .in('compensation_id', chunkIds)
+              .eq('salary_components.component_type', 'earning')
+              .order('id')
+              .range(from, to),
+          )
+          compCompRows.push(...chunkRows)
+        }
 
         // computed_monthly is NUMERIC — coerce or an employee with 2+ earning
         // components corrupts their fallback gross into NaN, failing
         // ptax_contributions.gross_salary's NOT NULL constraint (G13 sweep).
-        for (const row of (compCompRows ?? []) as any[]) {
+        for (const row of compCompRows) {
           const empId = compIdToEmpId.get(row.compensation_id)
           if (empId) {
             fallbackGrossMap.set(empId, (fallbackGrossMap.get(empId) ?? 0) + Number(row.computed_monthly ?? 0))
