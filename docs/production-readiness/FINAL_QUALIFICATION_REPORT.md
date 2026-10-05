@@ -1,9 +1,9 @@
 # CognixHR Production-Readiness — Final Qualification Report
 
 **Branch:** `fix/g13-numeric-coercion-sweep` (PR #29, `suraj2build/hrms`)
-**HEAD at report time:** `a6bed7c890f24b8cb78da39558ba7250b6d4f93e`
-**Ahead of `origin/main`:** 56 commits (0 behind)
-**Unpushed vs `origin/fix/g13-numeric-coercion-sweep`:** 54 commits
+**HEAD at report time:** `2ac092db61e5de350dc241ed0bf1d77b24291814`
+**Ahead of `origin/main`:** 58 commits (0 behind)
+**Unpushed vs `origin/fix/g13-numeric-coercion-sweep`:** 56 commits
 **PR #29 state:** open, **draft**, not merged, base `main` — unchanged this round
 **Push status:** paused per standing instruction pending explicit confirmation that GitHub App access is restored. All 54 commits exist only in this local checkout until that push happens — **this branch has never been pushed since before the correction-round commits began, and has never run through real CI at this HEAD.**
 
@@ -23,7 +23,12 @@ justified-suppressed" blurred two different things together. The real,
 register-backed split (`g08-sweep-findings-register.csv`, built from the
 actual commit diff, not from memory) is **39 true positives genuinely
 repaired** and **59 false positives justified and suppressed — not repairs,
-not counted toward anything "fixed."**
+not counted toward anything "fixed."** The exact mechanism for 96→98 (two
+specific lines whose fingerprint changed register when their *other*
+register's gap was fixed — `EVIDENCE.md`'s new subsection) and an
+independent spot-verification of 7 of the 59 suppressions against the
+actual code/migrations (zero overturned) are both now documented rather
+than asserted.
 
 ---
 
