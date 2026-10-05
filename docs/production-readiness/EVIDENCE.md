@@ -1590,3 +1590,63 @@ are the only ones counted as repaired defects). **59 are false positives**,
 each suppressed with a `// lint-query-ok:`/`// lint-tenant-ok:` comment
 recording why the query was already safe — these are justified exceptions,
 not repairs, and do not count toward anything "fixed."
+
+### Why 98, not 96 — exact mechanism, two specific lines
+
+The number quoted when the sweep was first reported was 96 (35
+unbounded-query + 61 tenant-isolation), taken from the ratchet's
+immediate post-migration output. The register has 98 because of two
+specific lines, not a counting error:
+
+- `apps/api/src/routes/payroll/statutory/ptax.ts:449` (table `sites`)
+- `apps/api/src/lib/payroll-accounting-engine.ts:646` (table `employees`)
+
+Both were in the original 61 tenant-isolation findings (confirmed in the
+saved pre-sweep ratchet output, `/tmp/tiso-ratchet2.out` at the time).
+Neither was in the original 35 unbounded-query findings — git history
+confirms only commit `c36a4853` ever touched either file; `32f12e32` (the
+agent-sweep commit) did not. Fixing their tenant-isolation gap meant
+rewriting the query (`.in('id', ...)` → chunked, with `.eq('tenant_id',
+...)` added) in the same edit, because the underlying `.in()` call was
+*also* genuinely unbounded by content — it just hadn't surfaced as such
+yet, because before the edit its snippet's stable-key fingerprint still
+matched an entry the migration had carried forward into the unbounded
+baseline as already-accepted. Rewriting the line changed that snippet,
+which changed its fingerprint under `stableFingerprint()` (expected: the
+fingerprint is the content), which made the unbounded baseline's old
+match stop applying — so on the very next `check-unbounded-queries.mjs
+--ratchet` run, these same two lines surfaced as 2 new unbounded findings,
+not because new code was added, but because fixing one register's
+problem on a line changed that line's identity in the other register too.
+Both were caught by re-running the ratchet after the sweep (not assigned
+to any agent) and fixed in the same edit that produced them, landing in
+`c36a4853`. 96 (initial) + 2 (fingerprint-collateral from fixing those
+same 2 lines' other register) = 98 total. Nothing was double-counted or
+silently dropped — both lines appear exactly once in the register, under
+`unbounded-query`, with `TRUE_POSITIVE_REPAIRED`.
+
+### Suppressions are reviewed exceptions, not "the checker stopped complaining"
+
+Per explicit instruction: a suppression passing the ratchet is not itself
+proof of safety — the proof is the stated reason, and that reason has to
+hold up under direct inspection, not just agent self-report. Independently
+spot-verified a sample of 7 of the 59 `FALSE_POSITIVE` rows, spanning
+every distinct justification category in the register, by reading the
+actual code or migration (not re-trusting the agent's or the checker's
+say-so):
+
+| Row | Category | Verified against | Result |
+|---|---|---|---|
+| `absconding-engine.ts:909` | chunked `.in()` slice | read the actual `for (...; i += 100) { chunkIds = rawCandidateIds.slice(i, i+100) }` loop | holds — genuinely bounded |
+| `muster-upload.ts:297` | write-only `.upsert()`, no `.select()` | read the call: `.upsert(chunk, { onConflict: ... })` with no trailing `.select()` | holds — no rows read back, scanner's write-op list just doesn't include `.upsert()` |
+| `accrual-engine.ts:390` | insert payload already tenant-scoped | traced `cfLedInserts.push({ tenant_id: tenantId, ... })` at line 330 | holds |
+| `variable-pay.ts:268` | insert payload already tenant-scoped | traced `payoutRows = ...map(p => ({ ..., tenant_id: req.tenantId, ... }))` at line 262 | holds |
+| `wo-credit-reconciler.ts:106` | no `tenant_id` column | read `supabase/migrations/253_wo_credit.sql`: `-- Ladder rows have no tenant_id; scope through the parent structure.` | holds — exact match to the suppression's claim |
+| `verification-retry-scanner.ts:52` | deliberate cross-tenant background scan | traced `due` (cross-tenant) → `verificationOrchestrator.verify({ tenant_id: row.tenant_id, ... })` — each call uses the ORIGINATING row's own tenant_id, never the second (unscoped) `employees` lookup's | holds — and confirms the adjacent unscoped `employees` batch lookup two lines later is also benign, since it's joined back strictly by globally-unique `employee_id`, never used to infer tenant |
+| `governance/intelligence.ts:35` / `masters/leave-policy-assignments.ts:150` (TRUE_POSITIVE, sanity-checked the fix itself) | `fetchAllRows()` wrap | confirmed the pre-existing `.eq('tenant_id', tenantId)` was carried through unchanged into the new `fetchAllRows()` call, not dropped during the rewrite | holds |
+
+Zero of the 7 were overturned. This is a sample, not an exhaustive
+re-review of all 59 — but every one of the 59 carries a specific,
+falsifiable reason in the register (not a generic "looks safe"), which is
+what makes that further review possible for anyone who wants to check
+more of them.
