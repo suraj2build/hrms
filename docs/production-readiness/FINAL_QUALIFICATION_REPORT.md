@@ -1,11 +1,11 @@
 # CognixHR Production-Readiness — Final Qualification Report
 
 **Branch:** `fix/g13-numeric-coercion-sweep` (PR #29, `suraj2build/hrms`)
-**HEAD at report time:** `0d7980142b2c297205ad78f340a5e4c9f37de0d5`
-**Ahead of `origin/main`:** 60 commits (0 behind)
+**HEAD at report time:** `c622a08ce2d946d14d08eaeb51ba458a63f500b8`
+**Ahead of `origin/main`:** 62 commits (0 behind)
 **Unpushed vs `origin/fix/g13-numeric-coercion-sweep`:** 0 commits — **pushed**
 **PR #29 state:** open, **draft**, not merged, base `main` — unchanged this round
-**Push status:** done. GitHub App access was explicitly confirmed restored; pushed `9ab87791..07a08d8d` then `07a08d8d..0d798014`. Real CI ran on `07a08d8d` (see §4, Gate 1) and will run again on this HEAD.
+**Push status:** done. Pushed `0d798014..4d8b006b` then `4d8b006b..c622a08c`. Real CI ran on `4d8b006b` (6 of 7 checks green, same E2E gap) and on `c622a08c` via manual dispatch (see §4, Gate 1 — this round fixed a correctness bug in the verifier itself and confirmed the current actual secrets state directly from the job log, not from an unverified claim).
 
 This report is the single source of truth for "what is actually true right
 now." Where it disagrees with an earlier narrative elsewhere in this
@@ -139,44 +139,89 @@ substantially complete does not close any of them; each needs its own
 distinct action, and none of them are optional caution.
 
 **Gate 1 — Push the commits and pass real CI on the exact release
-candidate.** Status: **partially done, one real finding, now addressed.**
-Pushed and ran real CI on `07a08d8d`: **5 of 6 checks passed** — Tenant
-isolation ratchet, Data correctness ratchet (RC-G5-01), Error hygiene
-ratchet, Schema drift, Typecheck & tests — directly validating this
-round's fixes against real infrastructure, not just this sandbox. **End-to-
-End Lifecycle Tests failed**, root-caused (not guessed) via the actual job
-log: `E2E_HR_EMAIL`/`E2E_HR_PASS` are unset. Checked workflow-run history
-before concluding anything: this is not a regression from this PR — every
-prior run of this workflow (9 of 9, `schedule`-triggered on `main`, back to
-2026-08-10) failed identically. It's been silently red for two months;
-this PR's own G09 fix (`pull_request` trigger) is what made it visible for
-the first time, which is the fix working as intended. Posted this
-root-cause analysis on the PR rather than guessing or burning a re-run on a
-deterministic, non-flaky failure.
+candidate.** Status: **partially done; the verifier itself had four real
+defects, caught by review before any secret had ever made it fire — all
+four now fixed and independently re-tested.**
 
-Beyond credentials, a further gap was correctly identified: pointing
-Playwright at a URL proves nothing about which CODE answers there. Fixed
-in `0d798014` — `e2e.yml` no longer silently falls back to a hardcoded URL
-(a missing `E2E_BASE_URL`/`E2E_API_URL` now fails the job immediately,
-by name); a new pre-flight step (`scripts/verify-staging-candidate.sh`)
-confirms the web app's `/version.json` and the API's `/health` both report
-this exact commit SHA — both endpoints had to be built first, since
-neither existed (`apps/web/scripts/write-build-info.mjs`, a `commitSha`
-field added to `/health`) — and, when `STAGING_PG*` secrets are set, that
-the staging DB has applied the latest migration this commit expects.
-Verified end-to-end against this sandbox's own stack before committing:
-all three checks pass on a matching fixture and fail with the intended
-specific message on a deliberately mismatched one (wrong SHA, absent
-SHA, stale/missing migrations table).
+Pushed and ran real CI on `4d8b006b`: **6 of 7 checks passed** — Schema
+drift, Data correctness ratchet (RC-G5-01), Tenant isolation ratchet,
+Typecheck & tests, Error hygiene ratchet, Vercel Preview Comments —
+directly validating this round's fixes against real infrastructure, not
+just this sandbox. **End-to-End Lifecycle Tests failed**, root-caused via
+the actual job log: all required secrets are unset. This is not a
+regression from this PR — every prior run of this workflow (9 of 9,
+`schedule`-triggered on `main`, back to 2026-08-10) failed identically;
+it's been silently red for two months, and this PR's own G09 fix
+(`pull_request` trigger) is what made it visible for the first time.
+
+The next review correctly identified that the candidate-verification
+infrastructure built in `0d798014` had not actually been exercised against
+real secrets yet, and found four concrete gaps in it before it could be
+trusted as qualification evidence. All four are fixed in `c622a08c`, with
+direct (not just reasoned-through) re-verification for each:
+
+1. **Wrong target commit.** `EXPECTED_SHA` was `github.sha`, which on a
+   `pull_request` run is GitHub's ephemeral `refs/pull/N/merge` commit —
+   confirmed concretely from this PR's own CI run (job `37339052239`):
+   `github.sha` there was `18362fd5...`, a merge commit that exists on no
+   branch Vercel/Railway ever deploy, while the PR's real head was
+   `4d8b006b`. Even a staging environment correctly deployed at the exact
+   candidate commit would have been reported as a mismatch. Fixed: use
+   `github.event.pull_request.head.sha` (falls back to `github.sha` for
+   `workflow_dispatch`/`schedule` runs on a real branch, where it IS the
+   deployed commit).
+2. **DB check was optional and latest-only.** Fixed: `STAGING_PG*` secrets
+   are now required (fails the job the same as a missing URL does, not a
+   silent skip), and the check now walks every file in
+   `supabase/migrations/` and reports exactly which are missing from
+   `supabase_migrations.schema_migrations`, not just whether the latest
+   one is present — a DB with migration 441 applied but missing 250 now
+   fails instead of passing.
+3. **Missing secrets don't prove staging doesn't exist — so that claim was
+   checked, not assumed.** Re-ran the workflow manually
+   (`workflow_dispatch`, run `37351301793`, on this HEAD `c622a08c`) to get
+   a direct answer instead of relying on an unverified statement either
+   way. The job log shows, byte for byte: **all nine required secrets are
+   currently empty** — `E2E_BASE_URL`, `E2E_API_URL`, `E2E_HR_EMAIL`,
+   `E2E_HR_PASS`, `STAGING_PGHOST`, `STAGING_PGPORT`, `STAGING_PGUSER`,
+   `STAGING_PGPASSWORD`, `STAGING_PGDATABASE` (`[ -z "" ]` evaluated true
+   for every one of them). If `E2E_BASE_URL` was set on this repository at
+   some point, it is not set now, as of 2026-10-05T17:49Z — this needs
+   reconciling with whoever expected it to already be configured, not
+   assumed either way from here.
+4. **The local DB-check test only proved the script's own SQL, not real
+   Supabase compatibility.** Re-tested against a table a real
+   `supabase db push --db-url` run actually populated (not a hand-built
+   fixture): confirmed `schema_migrations.version` is the exact
+   zero-padded numeric prefix and `.name` excludes it, tightened the query
+   from a `LIKE`-prefix match to exact equality on `version` (a prefix
+   match could wrongly treat "25" as satisfied by version "250"), and
+   confirmed both directions — a deleted mid-history row (441 present, 250
+   missing) correctly fails; full history correctly passes. (Applying all
+   437 migrations end-to-end via the real CLI was not possible in this
+   sandbox — most reference `auth.users`, which only exists under the full
+   Supabase stack, which needs Docker, which this sandbox's container
+   can't run — but that limitation is irrelevant to what was being
+   verified: the tracking table's real shape and the query's correctness
+   against it, both confirmed.)
+
+A fifth, independently raised gap — that matching web and API SHAs do not
+prove the web app actually calls the API that was checked — is also closed
+in `c622a08c`: `write-build-info.mjs` now records the build-time
+`VITE_API_URL` in `version.json`, and the verifier's new check 3 fails if
+that recorded value doesn't match the `API_URL` under test. Verified with
+a deliberate fixture: both SHAs matching while the web build points at a
+different API host correctly fails; a consistent fixture correctly passes.
 
 **Still blocked on an administrator**, not on anything further I can do
-unilaterally: adding `E2E_HR_EMAIL`/`E2E_HR_PASS`/`E2E_BASE_URL`/
-`E2E_API_URL` (and optionally `STAGING_PG*`) as real repository secrets
-requires GitHub repo-admin access my GitHub App permissions don't expose
-as a tool, and confirming what environment those URLs should actually
-point at (a dedicated staging deployment of this candidate, not a shared
-"alpha" environment that may not reflect this PR) is an infra decision,
-not a code one.
+unilaterally: adding the nine secrets above requires GitHub repo-admin
+access my GitHub App permissions don't expose as a tool, and confirming
+what environment those URLs should actually point at (a dedicated staging
+deployment of this exact candidate, with its migrations applied — not a
+shared "alpha" environment that may not reflect this PR) is an infra
+decision, not a code one. The verifier is now ready to actually validate
+that deployment the moment it exists; it has not been able to do so yet,
+because the secrets it needs have never been present when it ran.
 
 **Gate 2 — Validate against actual Supabase/PostgREST**: migrations, RLS,
 authentication, pagination, and financial reconciliation at 2,200+
@@ -243,24 +288,36 @@ drift) was found and fixed, not just asserted absent; UAT coverage
 broadened to a third, structurally different authorization path; local
 load, concurrency, and backup/restore are all green at the scale this
 sandbox can produce; **the branch is now actually pushed and has run real
-CI** — 5 of 6 checks pass on real infrastructure, and the one failure
+CI** — 6 of 7 checks pass on real infrastructure, and the one failure
 (E2E) was root-caused to a pre-existing, two-month-old credentials gap,
-not a regression, with the fail-clear + candidate-SHA-verification
-infrastructure now in place for whenever credentials are added. This is
-real, substantiated progress against Gate 1 specifically — it still does
-not satisfy Gates 2–4, and does not move the verdict.
+not a regression. The candidate-verification infrastructure built to gate
+E2E on the right deployment was itself found to have four real defects on
+review — a merge-SHA bug that would have falsely rejected a correctly
+deployed candidate, an optional/latest-only DB check, an unverified "no
+staging exists" claim, and a fixture that tested the script but not real
+Supabase — all four fixed and re-verified this round (§4, Gate 1), plus a
+fifth check added (web↔API wiring) that two independently-matching SHAs
+do not by themselves prove. A direct re-run (`workflow_dispatch`, not
+inference) confirms the actual current state: all nine required secrets
+are unset. This is real, substantiated progress against Gate 1
+specifically — the verifier is now trustworthy once a staging environment
+exists — but it still does not satisfy Gates 2–4, and does not move the
+verdict.
 
 **Recommended path, in order:** (1) an administrator adds
-`E2E_HR_EMAIL`/`E2E_HR_PASS`/`E2E_BASE_URL`/`E2E_API_URL` (and optionally
-`STAGING_PG*`) as real repository secrets, pointed at a dedicated staging
-deployment actually running this candidate's web+API+migrations — not a
-shared "alpha" environment; (2) re-run the E2E job and confirm all 6
-checks are green on this exact HEAD; (3) run this same real-stack script
-battery (or the equivalent) against a real staging Supabase project —
-Gate 2; (4) run representative concurrent-user load and exercise
-Supabase's managed backup/restore tooling — Gate 3; (5) get an explicit
-decision on Gate 4 and execute it. PR #29 stays unmerged throughout.
-NO-GO stands until all four gates pass, not until local work runs out.
+`E2E_BASE_URL`/`E2E_API_URL`/`E2E_HR_EMAIL`/`E2E_HR_PASS`/`STAGING_PGHOST`/
+`STAGING_PGPORT`/`STAGING_PGUSER`/`STAGING_PGPASSWORD`/`STAGING_PGDATABASE`
+as real repository secrets, pointed at a dedicated staging deployment
+actually running this exact candidate's web+API+migrations — not a shared
+"alpha" environment, and confirms the PR head SHA (not a merge SHA) is
+what's deployed; (2) re-run the E2E job and confirm all 7 checks are green
+on this exact HEAD, including the now-mandatory full-migration-history and
+web↔API wiring checks; (3) run this same real-stack script battery (or the
+equivalent) against a real staging Supabase project — Gate 2; (4) run
+representative concurrent-user load and exercise Supabase's managed
+backup/restore tooling — Gate 3; (5) get an explicit decision on Gate 4
+and execute it. PR #29 stays unmerged throughout. NO-GO stands until all
+four gates pass, not until local work runs out.
 
 ---
 
@@ -268,14 +325,23 @@ NO-GO stands until all four gates pass, not until local work runs out.
 
 Every claim in this report is backed by a script, a commit, or both:
 
-- Commits this round (newest first): `0d798014` (E2E candidate-SHA
-  verification + fail-clear fix), `2ac092db`, `a6bed7c8` (G08 accounting
-  correction), `ed8f2063`, `ffc4efb7`, `32f12e32`, `031f10f2`, `e2057ed1`,
-  `c36a4853`, `629cb456`, `295338ac`, `f914f4fd`, `55eeb9d4`, plus the
-  earlier correction-round commits `c315f76d` back through `1994b607`
-  (G02/G03/G04/G06 corrections, 223-row reconciliation). Pushed to
-  `origin/fix/g13-numeric-coercion-sweep` as `9ab87791..07a08d8d` then
-  `07a08d8d..0d798014`.
+- Commits this round (newest first): `c622a08c` (fixed the verifier's
+  merge-SHA bug, made the DB check mandatory + full-history, added the
+  web↔API wiring check, re-tested DB logic against a real
+  `supabase db push`-populated table), `0d798014` (E2E candidate-SHA
+  verification + fail-clear fix — first version, since corrected),
+  `2ac092db`, `a6bed7c8` (G08 accounting correction), `ed8f2063`,
+  `ffc4efb7`, `32f12e32`, `031f10f2`, `e2057ed1`, `c36a4853`, `629cb456`,
+  `295338ac`, `f914f4fd`, `55eeb9d4`, plus the earlier correction-round
+  commits `c315f76d` back through `1994b607` (G02/G03/G04/G06
+  corrections, 223-row reconciliation). Pushed to
+  `origin/fix/g13-numeric-coercion-sweep` as `9ab87791..07a08d8d`,
+  `07a08d8d..0d798014`, `0d798014..4d8b006b`, then `4d8b006b..c622a08c`.
+- CI run `37339052239` (job logs) — source of the merge-SHA discovery
+  (`github.sha` = `18362fd5...` ≠ PR head `4d8b006b`) and of the original
+  E2E secrets-missing finding. `workflow_dispatch` run `37351301793` on
+  `c622a08c` — source of the current verified secrets state (all nine
+  unset, confirmed directly from the job log, not inferred).
 - PR #29 comment (`issuecomment-5997073960`) — the E2E root-cause analysis
   posted after checking all 9 prior workflow runs, not asserted from the
   one failure alone.
