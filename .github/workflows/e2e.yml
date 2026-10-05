@@ -23,6 +23,45 @@ jobs:
           cache: 'npm'
           cache-dependency-path: apps/e2e/package.json
 
+      # Release-qualification gate: fail loudly and immediately if the
+      # candidate URLs/credentials this run needs aren't configured, rather
+      # than silently falling back to a hardcoded URL (the old behavior)
+      # and testing the wrong environment with no indication anything was
+      # wrong. E2E_API_URL is new — needed so the candidate-verification
+      # step below can check the API's deployed SHA independently of the
+      # web app's.
+      - name: Verify required secrets are configured
+        run: |
+          missing=()
+          [ -z "${{ secrets.E2E_BASE_URL }}" ] && missing+=("E2E_BASE_URL (staging web URL for this candidate)")
+          [ -z "${{ secrets.E2E_API_URL }}" ]  && missing+=("E2E_API_URL (staging API URL for this candidate)")
+          [ -z "${{ secrets.E2E_HR_EMAIL }}" ] && missing+=("E2E_HR_EMAIL")
+          [ -z "${{ secrets.E2E_HR_PASS }}" ]  && missing+=("E2E_HR_PASS")
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error::Missing required repository secrets — this run cannot qualify a candidate without them:"
+            for m in "${missing[@]}"; do echo "::error::  - $m"; done
+            echo "Add these under Settings → Secrets and variables → Actions. See apps/e2e/README.md."
+            exit 1
+          fi
+          echo "All required secrets are present."
+
+      # Confirm the staging environment these secrets point at is ACTUALLY
+      # running this exact commit (web + API SHA) before spending 30 minutes
+      # running Playwright against what might be a stale deployment. DB
+      # migration state is checked too when STAGING_PG* secrets are set
+      # (optional — the web/API SHA checks are the hard requirement).
+      - name: Verify staging candidate matches this commit
+        env:
+          WEB_URL:      ${{ secrets.E2E_BASE_URL }}
+          API_URL:      ${{ secrets.E2E_API_URL }}
+          EXPECTED_SHA: ${{ github.sha }}
+          PGHOST:       ${{ secrets.STAGING_PGHOST }}
+          PGPORT:       ${{ secrets.STAGING_PGPORT }}
+          PGUSER:       ${{ secrets.STAGING_PGUSER }}
+          PGPASSWORD:   ${{ secrets.STAGING_PGPASSWORD }}
+          PGDATABASE:   ${{ secrets.STAGING_PGDATABASE }}
+        run: ./scripts/verify-staging-candidate.sh
+
       - name: Install Playwright
         working-directory: apps/e2e
         run: npm ci
@@ -34,7 +73,7 @@ jobs:
       - name: Run E2E tests
         working-directory: apps/e2e
         env:
-          E2E_BASE_URL: ${{ secrets.E2E_BASE_URL || 'https://hrms-web-alpha.vercel.app' }}
+          E2E_BASE_URL: ${{ secrets.E2E_BASE_URL }}
           E2E_HR_EMAIL: ${{ secrets.E2E_HR_EMAIL }}
           E2E_HR_PASS:  ${{ secrets.E2E_HR_PASS }}
         run: npx playwright test

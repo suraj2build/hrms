@@ -42,18 +42,44 @@ npx playwright show-report
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `E2E_BASE_URL` | `https://hrms-web-alpha.vercel.app` | App URL to test against |
+| `E2E_BASE_URL` | _(must be set)_ | Staging web app URL to test against |
 | `E2E_HR_EMAIL` | `uatsuraj@gmail.com` | HR admin email |
 | `E2E_HR_PASS` | _(must be set)_ | HR admin password |
 
+`E2E_BASE_URL` has **no default/fallback** — a release-qualification run
+must know exactly what it's testing, so a missing URL fails the job
+immediately with a clear error rather than silently testing a hardcoded
+staging URL that may not reflect the candidate commit.
+
 ## GitHub Actions
 
-The workflow `.github/workflows/e2e.yml` runs automatically every Monday at 03:00 UTC, or on manual dispatch from the Actions tab.
+The workflow `.github/workflows/e2e.yml` runs on every pull request (gating
+G09's financial-figure cross-checks), every Monday at 03:00 UTC, and on
+manual dispatch from the Actions tab.
+
+Before Playwright runs, the workflow verifies the target staging
+environment is actually running the commit being qualified —
+`scripts/verify-staging-candidate.sh` checks the web app's `/version.json`
+and the API's `/health` both report the exact commit SHA this CI run is
+testing (`$GITHUB_SHA`), and — when the optional `STAGING_PG*` secrets
+below are set — that the staging database has applied the latest
+migration this commit expects. Any mismatch fails the job immediately,
+before spending 30 minutes running Playwright against what might be a
+stale deployment.
 
 Add these as GitHub repository secrets:
+
+**Required:**
 - `E2E_HR_EMAIL`
 - `E2E_HR_PASS`
-- `E2E_BASE_URL` (optional, defaults to staging)
+- `E2E_BASE_URL` — the staging web app's URL for this candidate (no default)
+- `E2E_API_URL` — the staging API's URL for this candidate (no default; used
+  only by the candidate-verification step, not by Playwright itself)
+
+**Optional** (enables the DB migration-state check; the web/API SHA checks
+run regardless):
+- `STAGING_PGHOST`, `STAGING_PGPORT`, `STAGING_PGUSER`, `STAGING_PGPASSWORD`,
+  `STAGING_PGDATABASE` — connection details for the staging Postgres
 
 After each run, download the `playwright-report` artifact for a full HTML report with screenshots.
 
