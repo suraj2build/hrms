@@ -1,17 +1,29 @@
 # CognixHR Production-Readiness — Final Qualification Report
 
 **Branch:** `fix/g13-numeric-coercion-sweep` (PR #29, `suraj2build/hrms`)
-**HEAD at report time:** `ed8f2063da33af6b0903717038eeeb97503cb96b`
-**Ahead of `origin/main`:** 54 commits (0 behind)
-**Unpushed vs `origin/fix/g13-numeric-coercion-sweep`:** 52 commits
+**HEAD at report time:** `a6bed7c890f24b8cb78da39558ba7250b6d4f93e`
+**Ahead of `origin/main`:** 56 commits (0 behind)
+**Unpushed vs `origin/fix/g13-numeric-coercion-sweep`:** 54 commits
 **PR #29 state:** open, **draft**, not merged, base `main` — unchanged this round
-**Push status:** paused per standing instruction pending explicit confirmation that GitHub App access is restored. All 52 commits exist only in this local checkout until that push happens.
+**Push status:** paused per standing instruction pending explicit confirmation that GitHub App access is restored. All 54 commits exist only in this local checkout until that push happens — **this branch has never been pushed since before the correction-round commits began, and has never run through real CI at this HEAD.**
 
 This report is the single source of truth for "what is actually true right
 now." Where it disagrees with an earlier narrative elsewhere in this
 directory, this document is newer and wins — but nothing here was produced
 by regenerating a baseline or deleting evidence; every claim below cites the
 script/commit that backs it.
+
+**Revision note:** the first version of this report said "one hard blocker
+left," which understated what's actually outstanding. This revision corrects
+that: §4 below lists four standing release gates, none of them satisfied yet,
+exactly as named in review feedback — not a single blocker with everything
+else downgraded to a footnote. It also corrects an accounting error from the
+first version: the G08 fix-sweep's "96 findings... fixed or
+justified-suppressed" blurred two different things together. The real,
+register-backed split (`g08-sweep-findings-register.csv`, built from the
+actual commit diff, not from memory) is **39 true positives genuinely
+repaired** and **59 false positives justified and suppressed — not repairs,
+not counted toward anything "fixed."**
 
 ---
 
@@ -29,7 +41,7 @@ load/recovery tests, and report G07–G09/G11 status. Completed in full:
 | G03 (F&F staleness) correction + extension | **FIXED** — now covers salary basis AND gratuity/leave-encashment/notice | `scripts/g03-fnf-settlement-last-finalized-slip-check.sh`, 12/12 |
 | G04 (maker-checker ordering) correction | **FIXED** — commit moved to after Step 2's atomic seal; downstream failure/retry/concurrency tested | `scripts/g04-maker-checker-approval-ordering-check.sh`, 22/22 |
 | G06 (statutory report) frontend wiring | **FIXED** — real browser verification | `scripts/g06-statutory-report-real-contributions-check.sh`, 6/6 |
-| G08 (ratchet mechanism) | **FIXED** — stable-key migration complete, 96 surfaced findings triaged | both ratchets, 0 new findings |
+| G08 (ratchet mechanism) | **FIXED** — stable-key migration complete; of 98 surfaced findings, 39 genuinely repaired + 59 justified-suppressed (not repairs) | both ratchets, 0 new findings; register: `g08-sweep-findings-register.csv` |
 | G09 (E2E not a PR gate) | **FIXED** | `e2e.yml` + `05-payroll.spec.ts` |
 | G11 (revocation latency) | **FIXED, measured** | `scripts/g11-access-revocation-latency-check.sh`, 9/9 |
 | Full financial-chain reconciliation | **Done** — one real bug found (PTax) and fixed | `scripts/ptax-filing-slip-reconciliation-check.sh`, 2/2 |
@@ -115,77 +127,98 @@ without actually killing a process.
 
 ---
 
-## 4. Unresolved blockers (genuine — infrastructure or business decisions, not left undone by omission)
+## 4. Four standing release gates — none satisfied yet
 
-1. **Real Supabase/PostgREST validation (G07, G10, and G13's remaining
-   gate).** Every local real-stack script in this engagement runs against
-   this sandbox's own Postgres plus a hand-built PostgREST-compatible
-   gateway (`/tmp/supabase-gateway.mjs`), not genuine managed Supabase. That
-   gateway faithfully reproduces the specific behaviors this engagement
-   cares about (max-rows=1000 ceiling, NUMERIC-as-string) but is not proof
-   of wire-identical behavior at enterprise scale on the real service. This
-   sandbox has no network path to a real Supabase project — it cannot be
-   closed from here under any amount of further local work.
-2. **Supabase-managed backup/restore/PITR/cross-region failover (rest of
-   G10).** The local rehearsal (§1) proves the data itself is
-   backup/restore-safe; it does not exercise Supabase's own operational
-   tooling, which needs a real project.
-3. **G12 (leave encashment scope)** — a product decision (is standalone
-   encashment in the first customer's scope at all?), not an engineering
-   task. Unchanged, not re-traced this round.
-4. **Baseline file resave (`--save-baseline --stable-key`)** — attempted
-   after the 96-finding sweep to shrink the live baseline further; blocked
-   by this environment's own tooling-level guard against modifying shared
-   baseline files. Not a problem for correctness (both ratchets already
-   pass clean without it) — flagging only because it was attempted and
-   explicitly refused, not silently skipped.
-5. **Git push** — 52 commits are local-only. Standing instruction: do not
-   retry push until the user explicitly confirms GitHub App access is
-   restored. Nothing in this round changes that instruction.
+These are explicit, named release gates. Local remediation being
+substantially complete does not close any of them; each needs its own
+distinct action, and none of them are optional caution.
 
-None of the above block any of the *other* work in this engagement — each
-was identified, attempted where attemptable, and reported, per the
-standing "complete every independent task, batch only genuine blockers"
-instruction.
+**Gate 1 — Push the 53+ commits and pass real CI on the exact release
+candidate.** Local green checks (§2) cannot substitute for this. Status:
+**not done.** This branch has never been pushed since before the
+correction-round commits began; the new `pull_request` trigger on
+`e2e.yml` (this round's own G09 fix) has never actually fired. Blocked on
+explicit confirmation that GitHub App access is restored — the standing
+instruction is to ask, not assume, and `push status` above is the current
+answer.
+
+**Gate 2 — Validate against actual Supabase/PostgREST**: migrations, RLS,
+authentication, pagination, and financial reconciliation at 2,200+
+employees. Status: **not done.** Every real-stack script in this entire
+engagement (§2's 169 assertions, the 2,200-employee pagination test, the
+PTax reconciliation fix) runs against this sandbox's own Postgres plus a
+hand-built PostgREST-compatible gateway (`/tmp/supabase-gateway.mjs`), not
+genuine managed Supabase. That gateway faithfully reproduces the specific
+behavior this engagement cares about (`max-rows=1000`, NUMERIC-as-string)
+but has never been checked against the real service's actual RLS
+enforcement, auth token validation, or wire behavior at scale. This
+sandbox has no network path to a real Supabase project — it cannot be
+closed by any amount of further local work, only by running this same
+battery (or the equivalent) against a real staging project.
+
+**Gate 3 — Production qualification**: representative concurrent-user
+load and managed backup/restore evidence. Status: **not done — distinct
+risk from what's covered.** This round's `pagination-scale-check.sh`
+(2,200 employees) and `concurrency-retry-check.sh` (2 concurrent requests)
+prove data-volume and narrow-concurrency correctness, not production-scale
+concurrent-user load (many simultaneous distinct users/sessions hitting
+the API together) or Supabase's own managed backup/restore/PITR tooling.
+`backup-restore-rehearsal-check.sh` proves the *data* survives a local
+`pg_dump`/`pg_restore` cycle with integrity (18/18, row+checksum verified)
+— it does not exercise Supabase's operational recovery path at all. Both
+need a real staging environment.
+
+**Gate 4 — Resolve G12 scope**: complete standalone leave encashment, or
+explicitly exclude and disable it for launch. Status: **not done — this
+is a decision only the product owner can make, not something to default
+on.** The two concrete paths:
+  - *Complete it*: build the missing employee-initiated request UI and a
+    proven disbursement path (currently "mark paid" only flips a status
+    column with no verified payment execution behind it) — a real feature
+    build, not a quick fix, and needs product requirements this report
+    cannot supply on its own.
+  - *Explicitly disable it*: feature-flag or remove the standalone
+    encashment entry points for this launch, with that exclusion stated
+    in release notes/scope docs, not left ambiguous.
+  Neither has been chosen yet. **I have not picked one unilaterally** — if
+  you want the "disable" path executed, that's a bounded engineering task
+  I can do on explicit instruction; the "complete it" path needs product
+  requirements first.
+
+None of the four gates are closed by this round's local work, and none of
+them can be closed by more local work of the same kind — each needs either
+external access (Gates 1–3) or an explicit decision (Gate 4).
 
 ---
 
 ## 5. GO / NO-GO recommendation
 
-**NO-GO for production launch, unchanged from the standing verdict — but
-on substantially narrower grounds than before this round.**
+**NO-GO for production launch. Unchanged verdict. All four gates in §4
+remain open — this is not "one hard blocker," it is four, and none of
+them are satisfied by anything in this report.**
 
-What changed: the financial-semantics gaps a review correctly identified
-as insufficient (G02/G03/G04 corrections) are now closed and mutation-
-tested; G08/G09/G11 are closed; a real financial-chain reconciliation bug
-(PTax filing drift) was found and fixed, not just asserted absent; UAT
-coverage broadened to a third, structurally different authorization path;
-local load, concurrency, and backup/restore are all green at the scale
-this sandbox can produce.
+What this round's local work actually changed: the financial-semantics
+gaps a review correctly identified as insufficient (G02/G03/G04
+corrections) are closed and mutation-tested; G08's ratchet mechanism is
+fixed with every surfaced finding individually accounted for (39 repaired,
+59 justified-suppressed — see §1 revision note); G09's CI gate and G11's
+revocation SLA are fixed and measured; a real financial-chain
+reconciliation bug (PTax filing drift) was found and fixed, not just
+asserted absent; UAT coverage broadened to a third, structurally different
+authorization path; local load, concurrency, and backup/restore are all
+green at the scale this sandbox can produce. This is real, substantiated
+progress — it is not staging qualification, and it does not move the
+verdict.
 
-What still stands between here and GO:
-
-- **No genuine Supabase/PostgREST validation has ever been run for this
-  entire engagement.** Every "real-stack" result in this report and its
-  predecessors is real Postgres + a hand-built gateway. The single most
-  important remaining gate is running this same battery of scripts (or
-  the equivalent) against an actual staging Supabase project at
-  realistic scale. This is not optional caution — the original Muster
-  Roll production incident this whole engagement traces back to was
-  exactly a real-PostgREST behavior (`max-rows=1000`) that a local mock
-  would not have caught, which is precisely why this caveat is repeated
-  on every relevant finding rather than quietly dropped.
-- **G10's Supabase-managed recovery tooling** has never been exercised at all.
-- **G12** needs a product scoping decision before it can be called done or explicitly out of scope.
-- **This branch has never been pushed or run through real CI** since the
-  51 commits before this report's final two were made — the new
-  `pull_request` trigger on `e2e.yml` has never actually fired.
-
-**Recommended path to GO:** get explicit confirmation to restore push
-access, push this branch, watch the resulting CI run (including the newly
-pull_request-gated E2E suite) to green, then run this same script battery
-once against a real staging Supabase project before considering the
-verdict anything other than NO-GO. PR #29 stays unmerged, as instructed.
+**Recommended path, in order:** (1) confirm GitHub App access is restored
+— explicitly, not inferred from this message; (2) push this branch; (3)
+watch the resulting CI run to green on this exact HEAD, including the
+newly-gated E2E suite; (4) run this same real-stack script battery (or the
+equivalent) against a real staging Supabase project — Gate 2; (5) run
+representative concurrent-user load and exercise Supabase's managed
+backup/restore tooling — Gate 3; (6) get an explicit decision on Gate 4 and
+execute it. PR #29 stays unmerged throughout. NO-GO stands until all four
+gates pass, not until local work runs out.
 
 ---
 
@@ -193,10 +226,11 @@ verdict anything other than NO-GO. PR #29 stays unmerged, as instructed.
 
 Every claim in this report is backed by a script, a commit, or both:
 
-- Commits this round (newest first): `ed8f2063`, `ffc4efb7`, `32f12e32`,
-  `031f10f2`, `e2057ed1`, `c36a4853`, `629cb456`, `295338ac`, `f914f4fd`,
-  `55eeb9d4`, plus the earlier correction-round commits `c315f76d` back
-  through `1994b607` (G02/G03/G04/G06 corrections, 223-row reconciliation).
+- Commits this round (newest first): `a6bed7c8` (G08 accounting
+  correction), `ed8f2063`, `ffc4efb7`, `32f12e32`, `031f10f2`, `e2057ed1`,
+  `c36a4853`, `629cb456`, `295338ac`, `f914f4fd`, `55eeb9d4`, plus the
+  earlier correction-round commits `c315f76d` back through `1994b607`
+  (G02/G03/G04/G06 corrections, 223-row reconciliation).
 - `docs/production-readiness/STATUS.md` — findings-table narrative, phase status.
 - `docs/production-readiness/EVIDENCE.md` — §9/§9b (G01-G06 corrections),
   §13 (financial-chain reconciliation), plus the original numbered sections
@@ -206,3 +240,11 @@ Every claim in this report is backed by a script, a commit, or both:
 - `docs/production-readiness/baseline-reconciliation-223-rows.csv` —
   row-level basis for the G08 stable-key migration's "nothing silently
   dropped or added" claim.
+- `docs/production-readiness/g08-sweep-findings-register.csv` — the
+  per-finding register this revision's correction is built on: 98 rows,
+  each with its file/line, register, TRUE_POSITIVE_REPAIRED/FALSE_POSITIVE
+  classification, and the exact justification text (for suppressions,
+  extracted verbatim from the `// lint-*-ok:` comment; for repairs, the
+  commit that made the real code change) — extracted programmatically
+  from the actual diff of commits `32f12e32`/`c36a4853`, not reconstructed
+  from memory or agent-reported prose.
