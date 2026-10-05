@@ -1,11 +1,11 @@
 # CognixHR Production-Readiness — Final Qualification Report
 
 **Branch:** `fix/g13-numeric-coercion-sweep` (PR #29, `suraj2build/hrms`)
-**HEAD at report time:** `2ac092db61e5de350dc241ed0bf1d77b24291814`
-**Ahead of `origin/main`:** 58 commits (0 behind)
-**Unpushed vs `origin/fix/g13-numeric-coercion-sweep`:** 56 commits
+**HEAD at report time:** `0d7980142b2c297205ad78f340a5e4c9f37de0d5`
+**Ahead of `origin/main`:** 60 commits (0 behind)
+**Unpushed vs `origin/fix/g13-numeric-coercion-sweep`:** 0 commits — **pushed**
 **PR #29 state:** open, **draft**, not merged, base `main` — unchanged this round
-**Push status:** paused per standing instruction pending explicit confirmation that GitHub App access is restored. All 54 commits exist only in this local checkout until that push happens — **this branch has never been pushed since before the correction-round commits began, and has never run through real CI at this HEAD.**
+**Push status:** done. GitHub App access was explicitly confirmed restored; pushed `9ab87791..07a08d8d` then `07a08d8d..0d798014`. Real CI ran on `07a08d8d` (see §4, Gate 1) and will run again on this HEAD.
 
 This report is the single source of truth for "what is actually true right
 now." Where it disagrees with an earlier narrative elsewhere in this
@@ -138,14 +138,45 @@ These are explicit, named release gates. Local remediation being
 substantially complete does not close any of them; each needs its own
 distinct action, and none of them are optional caution.
 
-**Gate 1 — Push the 53+ commits and pass real CI on the exact release
-candidate.** Local green checks (§2) cannot substitute for this. Status:
-**not done.** This branch has never been pushed since before the
-correction-round commits began; the new `pull_request` trigger on
-`e2e.yml` (this round's own G09 fix) has never actually fired. Blocked on
-explicit confirmation that GitHub App access is restored — the standing
-instruction is to ask, not assume, and `push status` above is the current
-answer.
+**Gate 1 — Push the commits and pass real CI on the exact release
+candidate.** Status: **partially done, one real finding, now addressed.**
+Pushed and ran real CI on `07a08d8d`: **5 of 6 checks passed** — Tenant
+isolation ratchet, Data correctness ratchet (RC-G5-01), Error hygiene
+ratchet, Schema drift, Typecheck & tests — directly validating this
+round's fixes against real infrastructure, not just this sandbox. **End-to-
+End Lifecycle Tests failed**, root-caused (not guessed) via the actual job
+log: `E2E_HR_EMAIL`/`E2E_HR_PASS` are unset. Checked workflow-run history
+before concluding anything: this is not a regression from this PR — every
+prior run of this workflow (9 of 9, `schedule`-triggered on `main`, back to
+2026-08-10) failed identically. It's been silently red for two months;
+this PR's own G09 fix (`pull_request` trigger) is what made it visible for
+the first time, which is the fix working as intended. Posted this
+root-cause analysis on the PR rather than guessing or burning a re-run on a
+deterministic, non-flaky failure.
+
+Beyond credentials, a further gap was correctly identified: pointing
+Playwright at a URL proves nothing about which CODE answers there. Fixed
+in `0d798014` — `e2e.yml` no longer silently falls back to a hardcoded URL
+(a missing `E2E_BASE_URL`/`E2E_API_URL` now fails the job immediately,
+by name); a new pre-flight step (`scripts/verify-staging-candidate.sh`)
+confirms the web app's `/version.json` and the API's `/health` both report
+this exact commit SHA — both endpoints had to be built first, since
+neither existed (`apps/web/scripts/write-build-info.mjs`, a `commitSha`
+field added to `/health`) — and, when `STAGING_PG*` secrets are set, that
+the staging DB has applied the latest migration this commit expects.
+Verified end-to-end against this sandbox's own stack before committing:
+all three checks pass on a matching fixture and fail with the intended
+specific message on a deliberately mismatched one (wrong SHA, absent
+SHA, stale/missing migrations table).
+
+**Still blocked on an administrator**, not on anything further I can do
+unilaterally: adding `E2E_HR_EMAIL`/`E2E_HR_PASS`/`E2E_BASE_URL`/
+`E2E_API_URL` (and optionally `STAGING_PG*`) as real repository secrets
+requires GitHub repo-admin access my GitHub App permissions don't expose
+as a tool, and confirming what environment those URLs should actually
+point at (a dedicated staging deployment of this candidate, not a shared
+"alpha" environment that may not reflect this PR) is an infra decision,
+not a code one.
 
 **Gate 2 — Validate against actual Supabase/PostgREST**: migrations, RLS,
 authentication, pagination, and financial reconciliation at 2,200+
@@ -200,30 +231,36 @@ external access (Gates 1–3) or an explicit decision (Gate 4).
 
 **NO-GO for production launch. Unchanged verdict. All four gates in §4
 remain open — this is not "one hard blocker," it is four, and none of
-them are satisfied by anything in this report.**
+them are fully satisfied yet.**
 
-What this round's local work actually changed: the financial-semantics
-gaps a review correctly identified as insufficient (G02/G03/G04
-corrections) are closed and mutation-tested; G08's ratchet mechanism is
-fixed with every surfaced finding individually accounted for (39 repaired,
-59 justified-suppressed — see §1 revision note); G09's CI gate and G11's
-revocation SLA are fixed and measured; a real financial-chain
-reconciliation bug (PTax filing drift) was found and fixed, not just
-asserted absent; UAT coverage broadened to a third, structurally different
-authorization path; local load, concurrency, and backup/restore are all
-green at the scale this sandbox can produce. This is real, substantiated
-progress — it is not staging qualification, and it does not move the
-verdict.
+What this round actually changed: the financial-semantics gaps a review
+correctly identified as insufficient (G02/G03/G04 corrections) are closed
+and mutation-tested; G08's ratchet mechanism is fixed with every surfaced
+finding individually accounted for (39 repaired, 59 justified-suppressed
+— see §1 revision note); G09's CI gate and G11's revocation SLA are fixed
+and measured; a real financial-chain reconciliation bug (PTax filing
+drift) was found and fixed, not just asserted absent; UAT coverage
+broadened to a third, structurally different authorization path; local
+load, concurrency, and backup/restore are all green at the scale this
+sandbox can produce; **the branch is now actually pushed and has run real
+CI** — 5 of 6 checks pass on real infrastructure, and the one failure
+(E2E) was root-caused to a pre-existing, two-month-old credentials gap,
+not a regression, with the fail-clear + candidate-SHA-verification
+infrastructure now in place for whenever credentials are added. This is
+real, substantiated progress against Gate 1 specifically — it still does
+not satisfy Gates 2–4, and does not move the verdict.
 
-**Recommended path, in order:** (1) confirm GitHub App access is restored
-— explicitly, not inferred from this message; (2) push this branch; (3)
-watch the resulting CI run to green on this exact HEAD, including the
-newly-gated E2E suite; (4) run this same real-stack script battery (or the
-equivalent) against a real staging Supabase project — Gate 2; (5) run
-representative concurrent-user load and exercise Supabase's managed
-backup/restore tooling — Gate 3; (6) get an explicit decision on Gate 4 and
-execute it. PR #29 stays unmerged throughout. NO-GO stands until all four
-gates pass, not until local work runs out.
+**Recommended path, in order:** (1) an administrator adds
+`E2E_HR_EMAIL`/`E2E_HR_PASS`/`E2E_BASE_URL`/`E2E_API_URL` (and optionally
+`STAGING_PG*`) as real repository secrets, pointed at a dedicated staging
+deployment actually running this candidate's web+API+migrations — not a
+shared "alpha" environment; (2) re-run the E2E job and confirm all 6
+checks are green on this exact HEAD; (3) run this same real-stack script
+battery (or the equivalent) against a real staging Supabase project —
+Gate 2; (4) run representative concurrent-user load and exercise
+Supabase's managed backup/restore tooling — Gate 3; (5) get an explicit
+decision on Gate 4 and execute it. PR #29 stays unmerged throughout.
+NO-GO stands until all four gates pass, not until local work runs out.
 
 ---
 
@@ -231,11 +268,17 @@ gates pass, not until local work runs out.
 
 Every claim in this report is backed by a script, a commit, or both:
 
-- Commits this round (newest first): `a6bed7c8` (G08 accounting
+- Commits this round (newest first): `0d798014` (E2E candidate-SHA
+  verification + fail-clear fix), `2ac092db`, `a6bed7c8` (G08 accounting
   correction), `ed8f2063`, `ffc4efb7`, `32f12e32`, `031f10f2`, `e2057ed1`,
   `c36a4853`, `629cb456`, `295338ac`, `f914f4fd`, `55eeb9d4`, plus the
   earlier correction-round commits `c315f76d` back through `1994b607`
-  (G02/G03/G04/G06 corrections, 223-row reconciliation).
+  (G02/G03/G04/G06 corrections, 223-row reconciliation). Pushed to
+  `origin/fix/g13-numeric-coercion-sweep` as `9ab87791..07a08d8d` then
+  `07a08d8d..0d798014`.
+- PR #29 comment (`issuecomment-5997073960`) — the E2E root-cause analysis
+  posted after checking all 9 prior workflow runs, not asserted from the
+  one failure alone.
 - `docs/production-readiness/STATUS.md` — findings-table narrative, phase status.
 - `docs/production-readiness/EVIDENCE.md` — §9/§9b (G01-G06 corrections),
   §13 (financial-chain reconciliation), plus the original numbered sections
