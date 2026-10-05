@@ -29,14 +29,21 @@ jobs:
       # and testing the wrong environment with no indication anything was
       # wrong. E2E_API_URL is new — needed so the candidate-verification
       # step below can check the API's deployed SHA independently of the
-      # web app's.
+      # web app's. STAGING_PG* are now required here too (not optional) —
+      # DB migration-state verification is not optional for release
+      # qualification (see scripts/verify-staging-candidate.sh header).
       - name: Verify required secrets are configured
         run: |
           missing=()
-          [ -z "${{ secrets.E2E_BASE_URL }}" ] && missing+=("E2E_BASE_URL (staging web URL for this candidate)")
-          [ -z "${{ secrets.E2E_API_URL }}" ]  && missing+=("E2E_API_URL (staging API URL for this candidate)")
-          [ -z "${{ secrets.E2E_HR_EMAIL }}" ] && missing+=("E2E_HR_EMAIL")
-          [ -z "${{ secrets.E2E_HR_PASS }}" ]  && missing+=("E2E_HR_PASS")
+          [ -z "${{ secrets.E2E_BASE_URL }}" ]     && missing+=("E2E_BASE_URL (staging web URL for this candidate)")
+          [ -z "${{ secrets.E2E_API_URL }}" ]      && missing+=("E2E_API_URL (staging API URL for this candidate)")
+          [ -z "${{ secrets.E2E_HR_EMAIL }}" ]     && missing+=("E2E_HR_EMAIL")
+          [ -z "${{ secrets.E2E_HR_PASS }}" ]      && missing+=("E2E_HR_PASS")
+          [ -z "${{ secrets.STAGING_PGHOST }}" ]     && missing+=("STAGING_PGHOST (required — DB migration-state check is not optional)")
+          [ -z "${{ secrets.STAGING_PGPORT }}" ]     && missing+=("STAGING_PGPORT")
+          [ -z "${{ secrets.STAGING_PGUSER }}" ]     && missing+=("STAGING_PGUSER")
+          [ -z "${{ secrets.STAGING_PGPASSWORD }}" ] && missing+=("STAGING_PGPASSWORD")
+          [ -z "${{ secrets.STAGING_PGDATABASE }}" ] && missing+=("STAGING_PGDATABASE")
           if [ ${#missing[@]} -gt 0 ]; then
             echo "::error::Missing required repository secrets — this run cannot qualify a candidate without them:"
             for m in "${missing[@]}"; do echo "::error::  - $m"; done
@@ -46,15 +53,22 @@ jobs:
           echo "All required secrets are present."
 
       # Confirm the staging environment these secrets point at is ACTUALLY
-      # running this exact commit (web + API SHA) before spending 30 minutes
-      # running Playwright against what might be a stale deployment. DB
-      # migration state is checked too when STAGING_PG* secrets are set
-      # (optional — the web/API SHA checks are the hard requirement).
+      # running this exact commit (web + API SHA, web wired to this API, and
+      # full DB migration history) before spending 30 minutes running
+      # Playwright against what might be a stale or mismatched deployment.
+      #
+      # EXPECTED_SHA: on a pull_request event, github.sha is GitHub's
+      # ephemeral refs/pull/N/merge commit, not the PR's actual head commit
+      # — Vercel/Railway deploy the head commit, so comparing against
+      # github.sha here would never match a correctly-deployed staging
+      # environment. Use the PR's real head SHA when this ran as a PR check;
+      # fall back to github.sha for workflow_dispatch/schedule runs on a
+      # real branch, where github.sha IS the deployed commit.
       - name: Verify staging candidate matches this commit
         env:
           WEB_URL:      ${{ secrets.E2E_BASE_URL }}
           API_URL:      ${{ secrets.E2E_API_URL }}
-          EXPECTED_SHA: ${{ github.sha }}
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
           PGHOST:       ${{ secrets.STAGING_PGHOST }}
           PGPORT:       ${{ secrets.STAGING_PGPORT }}
           PGUSER:       ${{ secrets.STAGING_PGUSER }}

@@ -59,13 +59,23 @@ manual dispatch from the Actions tab.
 
 Before Playwright runs, the workflow verifies the target staging
 environment is actually running the commit being qualified —
-`scripts/verify-staging-candidate.sh` checks the web app's `/version.json`
-and the API's `/health` both report the exact commit SHA this CI run is
-testing (`$GITHUB_SHA`), and — when the optional `STAGING_PG*` secrets
-below are set — that the staging database has applied the latest
-migration this commit expects. Any mismatch fails the job immediately,
-before spending 30 minutes running Playwright against what might be a
-stale deployment.
+`scripts/verify-staging-candidate.sh` checks that:
+1. the web app's `/version.json` reports the exact candidate commit SHA
+   (the PR's head SHA on a pull_request run — **not** `github.sha`, which
+   on pull_request events is GitHub's ephemeral merge-ref commit and will
+   never match a real deployment);
+2. the API's `/health` reports the same SHA;
+3. the web build was actually compiled to call that same API (its
+   build-time `VITE_API_URL`, recorded in `version.json`, must match the
+   API URL just checked) — matching SHAs on both sides does not by itself
+   prove the web app is wired to call the API that was checked;
+4. the staging database's `supabase_migrations.schema_migrations` has an
+   entry for **every** migration file in `supabase/migrations/`, not just
+   the latest — a staging DB can have the newest migration applied while
+   missing an earlier one this candidate's code still depends on.
+
+Any mismatch fails the job immediately, before spending 30 minutes running
+Playwright against what might be a stale or mismatched deployment.
 
 Add these as GitHub repository secrets:
 
@@ -75,11 +85,11 @@ Add these as GitHub repository secrets:
 - `E2E_BASE_URL` — the staging web app's URL for this candidate (no default)
 - `E2E_API_URL` — the staging API's URL for this candidate (no default; used
   only by the candidate-verification step, not by Playwright itself)
-
-**Optional** (enables the DB migration-state check; the web/API SHA checks
-run regardless):
 - `STAGING_PGHOST`, `STAGING_PGPORT`, `STAGING_PGUSER`, `STAGING_PGPASSWORD`,
-  `STAGING_PGDATABASE` — connection details for the staging Postgres
+  `STAGING_PGDATABASE` — connection details for the staging Postgres.
+  **Not optional** — DB migration-state verification is a hard requirement
+  for release qualification, not a nice-to-have; a missing credential here
+  fails the job the same as a missing URL does.
 
 After each run, download the `playwright-report` artifact for a full HTML report with screenshots.
 
