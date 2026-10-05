@@ -1576,9 +1576,17 @@ independent recomputation, so it inherits the same "slip is source of
 truth" property by construction.
 
 **Independent of this trace**, completing the G08 stable-fingerprint
-migration (§ STATUS.md) surfaced 96 real unbounded-query/tenant-isolation
+migration (§ STATUS.md) surfaced 98 real unbounded-query/tenant-isolation
 findings across this same payroll/attendance/leave/import/webhook
-surface that the previous, line-drift-broken ratchet was blind to; those
-are being triaged and fixed file-by-file as part of the same "run every
-required release check without weakening enforcement" effort — see the
-commit history on this branch for the itemized TP/FP breakdown per file.
+surface that the previous, line-drift-broken ratchet was blind to. All 98
+were triaged file-by-file; the per-finding classification (true positive
+vs. false positive) and, for every false positive, the specific recorded
+reason it's safe, is in
+`docs/production-readiness/g08-sweep-findings-register.csv` — extracted
+programmatically from the actual commit diff (`32f12e32`, `c36a4853`), not
+reconstructed from memory. **39 are true positives with a real code fix**
+(a `tenant_id` filter or `fetchAllRows()`/chunking actually added — these
+are the only ones counted as repaired defects). **59 are false positives**,
+each suppressed with a `// lint-query-ok:`/`// lint-tenant-ok:` comment
+recording why the query was already safe — these are justified exceptions,
+not repairs, and do not count toward anything "fixed."
