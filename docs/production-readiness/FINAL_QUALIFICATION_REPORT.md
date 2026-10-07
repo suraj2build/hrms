@@ -1,11 +1,26 @@
 # CognixHR Production-Readiness — Final Qualification Report
 
 **Branch:** `fix/g13-numeric-coercion-sweep` (PR #29, `suraj2build/hrms`)
-**HEAD at report time:** `fcf9f4fa`
+**Last CI-validated code SHA:** `2d8e0d70` — pushed and run through real CI
+(6 of 7 checks green; E2E blocked on staging secrets, as documented below).
+This is the actual tested artifact; it is deliberately recorded as a
+*separate* fact from this document's own commit, not embedded self-
+referentially (see note below).
 **Ahead of `origin/main`:** 65 commits (0 behind)
 **Unpushed vs `origin/fix/g13-numeric-coercion-sweep`:** 0 commits — **pushed**
 **PR #29 state:** open, **draft**, not merged, base `main` — unchanged this round
-**Push status:** done. Pushed `0d798014..4d8b006b`, `4d8b006b..c622a08c`, `c622a08c..f5e48e7b`, `f5e48e7b..15e582d0`, then `15e582d0..fcf9f4fa`. This round fixes two real defects direct testing found (a string-literal-unsafe normalizer, a wiring check that didn't verify the checked origin actually answered) and precisely rewords three claims a review correctly flagged as overstated (schema coverage, wiring scope, secrets availability) — see §4 addendum. It does not itself advance Gates 1–4, since there is still no staging environment to run any of this against.
+**Push status:** done. Pushed `0d798014..4d8b006b`, `4d8b006b..c622a08c`, `c622a08c..f5e48e7b`, `f5e48e7b..15e582d0`, then `15e582d0..2d8e0d70`. This round fixes two real defects direct testing found (a string-literal-unsafe normalizer, a wiring check that didn't verify the checked origin actually answered) and precisely rewords three claims a review correctly flagged as overstated (schema coverage, wiring scope, secrets availability) — see §4 addendum. It does not itself advance Gates 1–4, since there is still no staging environment to run any of this against.
+
+**Note on this document's own hash:** an earlier revision embedded this
+commit's own SHA inside itself, then amended that commit to fix a
+mistake — which changes the SHA again, invalidating the embedded value.
+This is a correction a review correctly caught. Fix: this document now
+records the *code* SHA it describes (`2d8e0d70`, above) as a fact
+established by a prior, separate, already-pushed commit — never the
+hash of whatever commit is currently editing this file. Anyone needing
+this document's own commit hash should read it from `git log -1 --
+docs/production-readiness/FINAL_QUALIFICATION_REPORT.md` rather than
+trust a value written inside the file.
 
 This report is the single source of truth for "what is actually true right
 now." Where it disagrees with an earlier narrative elsewhere in this
@@ -137,6 +152,19 @@ without actually killing a process.
 These are explicit, named release gates. Local remediation being
 substantially complete does not close any of them; each needs its own
 distinct action, and none of them are optional caution.
+
+**Two scope limits to carry into the actual staging run, stated plainly
+up front so they can't be missed in the detail below:**
+1. **Schema verification currently covers columns only.** Constraints
+   (CHECK/UNIQUE/FK), indexes, RLS policies, triggers, and functions are
+   NOT checked by anything in this report and still need validation
+   against the real staging database once it exists.
+2. **The dynamic wiring check is an unauthenticated startup signal, not
+   proof the application works.** It confirms the checked API origin
+   answers a request during page load. It does not log in, and it does
+   not prove the candidate web app successfully completes an authenticated
+   request against the candidate API — only the real Playwright E2E suite,
+   run against staging with real HR credentials, proves that.
 
 **Gate 1 — Push the commits and pass real CI on the exact release
 candidate.** Status: **partially done; the verifier itself had four real
@@ -443,7 +471,7 @@ four gates pass, not until local work runs out.
 
 Every claim in this report is backed by a script, a commit, or both:
 
-- Commits this round (newest first): `fcf9f4fa` (precise wording for the
+- Commits this round (newest first): `2d8e0d70` (precise wording for the
   schema/wiring/secrets claims; two real masking defects fixed in the
   migration-content normalizer, confirmed by direct test; dynamic wiring
   check rewritten to check responses and detect redirects, confirmed by
