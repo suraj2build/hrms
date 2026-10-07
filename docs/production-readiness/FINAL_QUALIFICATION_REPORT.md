@@ -1,11 +1,11 @@
 # CognixHR Production-Readiness — Final Qualification Report
 
 **Branch:** `fix/g13-numeric-coercion-sweep` (PR #29, `suraj2build/hrms`)
-**HEAD at report time:** `15e582d0`
-**Ahead of `origin/main`:** 64 commits (0 behind)
+**HEAD at report time:** `fcf9f4fa`
+**Ahead of `origin/main`:** 65 commits (0 behind)
 **Unpushed vs `origin/fix/g13-numeric-coercion-sweep`:** 0 commits — **pushed**
 **PR #29 state:** open, **draft**, not merged, base `main` — unchanged this round
-**Push status:** done. Pushed `0d798014..4d8b006b`, `4d8b006b..c622a08c`, `c622a08c..f5e48e7b`, then `f5e48e7b..15e582d0`. This round hardens the staging-candidate verifier further (§4, Gate 1) in response to review that correctly characterized the prior round as preparing qualification, not completing it — it does not itself advance Gates 1–4, since there is still no staging environment to run any of this against.
+**Push status:** done. Pushed `0d798014..4d8b006b`, `4d8b006b..c622a08c`, `c622a08c..f5e48e7b`, `f5e48e7b..15e582d0`, then `15e582d0..fcf9f4fa`. This round fixes two real defects direct testing found (a string-literal-unsafe normalizer, a wiring check that didn't verify the checked origin actually answered) and precisely rewords three claims a review correctly flagged as overstated (schema coverage, wiring scope, secrets availability) — see §4 addendum. It does not itself advance Gates 1–4, since there is still no staging environment to run any of this against.
 
 This report is the single source of truth for "what is actually true right
 now." Where it disagrees with an earlier narrative elsewhere in this
@@ -148,7 +148,9 @@ drift, Data correctness ratchet (RC-G5-01), Tenant isolation ratchet,
 Typecheck & tests, Error hygiene ratchet, Vercel Preview Comments —
 directly validating this round's fixes against real infrastructure, not
 just this sandbox. **End-to-End Lifecycle Tests failed**, root-caused via
-the actual job log: all required secrets are unset. This is not a
+the actual job log: all required secrets are unavailable to this job (see
+§4 addendum — this does not establish they are absent from every scope,
+or that no staging environment exists). This is not a
 regression from this PR — every prior run of this workflow (9 of 9,
 `schedule`-triggered on `main`, back to 2026-08-10) failed identically;
 it's been silently red for two months, and this PR's own G09 fix
@@ -181,14 +183,19 @@ direct (not just reasoned-through) re-verification for each:
    checked, not assumed.** Re-ran the workflow manually
    (`workflow_dispatch`, run `37351301793`, on this HEAD `c622a08c`) to get
    a direct answer instead of relying on an unverified statement either
-   way. The job log shows, byte for byte: **all nine required secrets are
-   currently empty** — `E2E_BASE_URL`, `E2E_API_URL`, `E2E_HR_EMAIL`,
-   `E2E_HR_PASS`, `STAGING_PGHOST`, `STAGING_PGPORT`, `STAGING_PGUSER`,
-   `STAGING_PGPASSWORD`, `STAGING_PGDATABASE` (`[ -z "" ]` evaluated true
-   for every one of them). If `E2E_BASE_URL` was set on this repository at
-   some point, it is not set now, as of 2026-10-05T17:49Z — this needs
-   reconciling with whoever expected it to already be configured, not
-   assumed either way from here.
+   way. The job log shows, byte for byte: **all nine required secrets
+   were unavailable to this job** — `E2E_BASE_URL`, `E2E_API_URL`,
+   `E2E_HR_EMAIL`, `E2E_HR_PASS`, `STAGING_PGHOST`, `STAGING_PGPORT`,
+   `STAGING_PGUSER`, `STAGING_PGPASSWORD`, `STAGING_PGDATABASE` (`[ -z "" ]`
+   evaluated true for every one of them, as seen by this specific job).
+   This is evidence of exactly that and no more: it does not establish
+   the secrets are absent from every GitHub scope (a GitHub
+   Environment-scoped secret would look identical to this job without an
+   `environment:` key — see the §4 addendum below), and it does not
+   establish that no staging environment exists at all. If
+   `E2E_BASE_URL` was expected to already be configured, that expectation
+   needs reconciling against this job's actual visibility, not assumed
+   either way from here.
 4. **The local DB-check test only proved the script's own SQL, not real
    Supabase compatibility.** Re-tested against a table a real
    `supabase db push --db-url` run actually populated (not a hand-built
@@ -239,16 +246,14 @@ remaining gaps in the verifier itself.** All three are fixed in `15e582d0`:
    or a stale cached bundle would all pass the SHA/metadata checks while
    the deployed page actually calls something else. Added
    `apps/e2e/verify-web-api-wiring.mjs`: loads the real page in a real
-   browser (Playwright, already available in the CI job) and asserts it
-   actually issues a request to the checked API's origin — behavior, not
-   a side-channel file. Verified against a fixture that genuinely calls
-   the checked API (passes) and one that calls a different host entirely,
-   standing in for a runtime override (fails, naming the origins actually
-   observed). Could not be pointed at the real live Vercel preview from
-   this sandbox — its egress proxy blocks arbitrary external hosts by
-   policy — so this is verified against a controlled fixture, not (yet)
-   the real deployed PR preview; it will run for real the next time this
-   workflow does, once secrets exist.
+   browser (Playwright, already available in the CI job) and checks the
+   actual network *responses* it receives, not just requests sent — see
+   §4 addendum below for why that distinction mattered and what it caught.
+   Could not be pointed at the real live Vercel preview from this sandbox
+   — its egress proxy blocks arbitrary external hosts by policy — so this
+   is verified against controlled fixtures, not (yet) the real deployed PR
+   preview; it will run for real the next time this workflow does, once
+   secrets exist.
 3. *A missing-secret result proves the secret was unavailable to that
    job, not that it is absent everywhere.* GitHub Environments scope
    secrets separately from repository secrets, and this job declares no
@@ -261,6 +266,63 @@ remaining gaps in the verifier itself.** All three are fixed in `15e582d0`:
    an explicit open question in `apps/e2e/README.md`, with the exact
    `environment:` line to add if an administrator confirms one applies.
 
+**§4 addendum — a further review correctly identified that three of the
+claims above were imprecisely worded, and this round's own output could
+still be overclaiming.** None of these change the verdict; this is a
+wording correction plus two real defects that direct testing (not
+inspection) turned up while checking those claims:
+
+- *"Resulting schema matches" overstated what check 6 proves.* It checks
+  column references only — it was never close to a full schema
+  comparison, and the report's and script's own language didn't say so.
+  Reworded throughout (`verify-staging-candidate.sh`, `apps/e2e/README.md`,
+  here) to state plainly that constraints (CHECK/UNIQUE/FK), indexes, RLS
+  policies, triggers, and function/procedure bodies are NOT checked by
+  this — a staging DB can pass column coverage while missing an RLS
+  policy the application's tenant isolation depends on.
+- *"Issued a request to the checked origin" was too weak a claim, and
+  testing proved it, not just arguably.* Built a fixture where the
+  checked API origin immediately 302-redirects every request to a
+  different host (with correct CORS headers, so the browser actually
+  follows it rather than blocking it outright) — the previous
+  request-only check reported a clean pass, because a request WAS sent
+  to the checked origin; it just never got an answer FROM it. Rewrote the
+  check to listen for *responses*, not requests, and to explicitly fail
+  (naming the redirect target) when the only responses from the checked
+  origin are redirects elsewhere. Re-verified all three cases on the
+  corrected check: genuine direct answer passes, wrong host fails, redirect-
+  away fails and names where it went. This is still, precisely, an
+  unauthenticated load-time signal — it does not log in, exercise an
+  authenticated request, or inspect response bodies; that remains the
+  Playwright suite's job in the very next step, and the report no longer
+  implies otherwise.
+- *The secrets claim needed the same precision the README already had.*
+  "All nine secrets are unset" is accurate only as "unavailable to the
+  job that reported it" — it was never evidence that no staging
+  environment exists, or that the secrets are absent from every GitHub
+  scope (an Environment-scoped secret would report the same way). Already
+  worded carefully in `apps/e2e/README.md`; tightened further there and
+  the language above now says "unavailable to this job," not "absent."
+- *Migration-content detection itself had two real masking defects,
+  confirmed by direct test, not assumed safe.* The normalizer treated
+  `--` and `;` as comment/separator characters even inside string
+  literals — constructed two concrete cases where this made genuinely
+  different content normalize equal (`'safe--value-A'` vs
+  `'safe--value-B'`; `'alpha;beta'` vs `'alpha beta'`), proving the
+  mask was real, not hypothetical. Rewrote `normalize()` as a proper
+  single-pass scanner that tracks single/double-quoted strings and
+  Postgres dollar-quoted blocks (`$$...$$`, `$tag$...$tag$`) and only
+  treats comments/semicolons as such outside them. Also confirmed
+  separately: a row with NULL or empty `statements` now fails with its
+  own distinct message ("no recorded statements to compare against")
+  rather than being folded into "edited since applied" or silently
+  passing — it was never a silent pass, but the message was imprecise
+  about why. Re-ran the full 437-migration real-content regression after
+  the rewrite (clean pass, real-edit detection, comment-only edit
+  correctly ignored) plus six targeted unit tests of the new normalizer,
+  including the two originally-masked cases and a real plpgsql function
+  body containing `$1`-style positional parameters — all pass.
+
 **Still blocked on an administrator and on infrastructure that doesn't
 exist yet** — not on anything further this kind of local work can close:
 provisioning the actual staging deployment, adding the real secrets (and
@@ -268,7 +330,8 @@ confirming whether any need an `environment:` scope), and then letting
 this now-six-check-plus-dynamic verifier run against it for the first
 time. No amount of additional local hardening substitutes for that one
 real run — the next correction this section needs is its result, not
-another gap found by inspection.
+another gap found by inspection. No further verifier changes are planned
+unless running it for real surfaces one.
 
 **Gate 2 — Validate against actual Supabase/PostgREST**: migrations, RLS,
 authentication, pagination, and financial reconciliation at 2,200+
@@ -345,11 +408,19 @@ staging exists" claim, and a fixture that tested the script but not real
 Supabase — all four fixed and re-verified this round (§4, Gate 1), plus a
 fifth check added (web↔API wiring) that two independently-matching SHAs
 do not by themselves prove. A direct re-run (`workflow_dispatch`, not
-inference) confirms the actual current state: all nine required secrets
-are unset. This is real, substantiated progress against Gate 1
-specifically — the verifier is now trustworthy once a staging environment
-exists — but it still does not satisfy Gates 2–4, and does not move the
-verdict.
+inference) confirms the actual state as seen by that job: all nine
+required secrets were unavailable to it (not proof they're absent from
+every scope, or that no staging environment exists — see §4 addendum). A
+further review then found the schema/wiring/secrets claims above still
+needed more precise wording, and that testing those claims directly
+turned up two more real defects (a string-literal-unsafe normalizer that
+could mask a genuine migration edit; a wiring check that passed on a
+request alone, missing a same-origin redirect to somewhere else) — both
+fixed and re-verified, detailed in the §4 addendum. This is real,
+substantiated progress against Gate 1 specifically — the verifier is now
+more trustworthy and more honestly scoped, pending a staging environment
+to actually run it against — but it still does not satisfy Gates 2–4,
+and does not move the verdict.
 
 **Recommended path, in order:** (1) an administrator adds
 `E2E_BASE_URL`/`E2E_API_URL`/`E2E_HR_EMAIL`/`E2E_HR_PASS`/`STAGING_PGHOST`/
@@ -372,7 +443,11 @@ four gates pass, not until local work runs out.
 
 Every claim in this report is backed by a script, a commit, or both:
 
-- Commits this round (newest first): `15e582d0` (migration content-drift +
+- Commits this round (newest first): `fcf9f4fa` (precise wording for the
+  schema/wiring/secrets claims; two real masking defects fixed in the
+  migration-content normalizer, confirmed by direct test; dynamic wiring
+  check rewritten to check responses and detect redirects, confirmed by
+  direct test), `15e582d0` (migration content-drift +
   resulting-schema checks against the real staging connection, dynamic
   browser-based web↔API wiring check, environment-secrets-scoping gap
   documented), `f5e48e7b` (Gate 1 report correction), `c622a08c` (fixed
@@ -392,7 +467,8 @@ Every claim in this report is backed by a script, a commit, or both:
   (`github.sha` = `18362fd5...` ≠ PR head `4d8b006b`) and of the original
   E2E secrets-missing finding. `workflow_dispatch` run `37351301793` on
   `c622a08c` — source of the current verified secrets state (all nine
-  unset, confirmed directly from the job log, not inferred).
+  unavailable to that job, confirmed directly from the job log, not
+  inferred — see §4 addendum for what this does and doesn't establish).
 - PR #29 comment (`issuecomment-5997073960`) — the E2E root-cause analysis
   posted after checking all 9 prior workflow runs, not asserted from the
   one failure alone.

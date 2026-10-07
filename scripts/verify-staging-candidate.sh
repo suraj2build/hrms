@@ -48,14 +48,22 @@
 #      recorded statements (confirmed empirically to hold the real applied
 #      SQL, via a real `supabase db push` run) against each file's current
 #      content, normalized so formatting-only diffs don't false-positive.
-#   6. Resulting schema: checks 4+5 together prove the migration FILES were
-#      applied as-is — not that the database's actual resulting shape is
-#      what the application code expects (e.g. a manual hotfix, a partial
-#      apply, or drift from something outside the migration history).
-#      Runs scripts/db/check-schema-drift.mjs --skip-apply directly against
-#      the staging connection: the same introspect-and-audit logic CI's
-#      "Schema drift" check already runs against a scratch DB, pointed at
-#      the real staging DB instead.
+#   6. Column coverage (NOT a full schema comparison): checks 4+5 together
+#      prove the migration FILES were applied as-is — not that every
+#      column the application code references actually exists on staging
+#      (e.g. a manual hotfix, a partial apply, or drift from something
+#      outside the migration history). Runs
+#      scripts/db/check-schema-drift.mjs --skip-apply directly against the
+#      staging connection: the same column-existence audit CI's "Schema
+#      drift" check already runs against a scratch DB, pointed at the real
+#      staging DB instead. Precisely scoped: this checks column references
+#      only. It does NOT verify constraints (CHECK/UNIQUE/FK), indexes, RLS
+#      policies, triggers, or function/procedure bodies — a staging DB
+#      could pass this check while missing a constraint, an index, or an
+#      RLS policy the application's correctness or security depends on.
+#      "The resulting schema matches" is true only in this narrow,
+#      column-existence sense; it is not a claim that the schema is
+#      equivalent in every respect.
 #
 # Confirmed against a real Supabase CLI run (`supabase db push --db-url`),
 # not a hand-built fixture: schema_migrations.version is the exact
@@ -209,17 +217,17 @@ else
 fi
 
 echo
-echo "--- 6. Resulting schema (does staging's actual shape match the code's expectations) ---"
+echo "--- 6. Column coverage (NOT a full schema comparison — see header) ---"
 if [ -z "${PGHOST:-}" ]; then
   echo "  (skipped — PGHOST not set and ALLOW_SKIP_DB_CHECK=true was explicitly passed; NOT valid for release qualification)"
 else
   SCHEMA_OUT=$(node "$(dirname "${BASH_SOURCE[0]}")/db/check-schema-drift.mjs" --skip-apply 2>&1)
   SCHEMA_EXIT=$?
   if [ "$SCHEMA_EXIT" -ne 0 ]; then
-    fail "staging DB's actual resulting schema does not match what the application code expects:"
+    fail "staging DB is missing a column the application code references (constraints/indexes/RLS/triggers/functions are a separate, unchecked question):"
     echo "$SCHEMA_OUT" | sed 's/^/    /' >&2
   else
-    pass "staging DB's resulting schema matches every column the application code references"
+    pass "staging DB has every column the application code references (column coverage only — constraints, indexes, RLS, triggers, and functions are NOT checked by this)"
   fi
 fi
 
@@ -228,4 +236,4 @@ if [ "$FAIL_COUNT" -gt 0 ]; then
   echo "=== RESULT: $FAIL_COUNT check(s) failed — this staging environment does NOT qualify as a valid test target for commit $EXPECTED_SHA ===" >&2
   exit 1
 fi
-echo "=== RESULT: staging environment verified as running candidate $EXPECTED_SHA (web/API SHA, build-time wiring, migration presence+content, resulting schema — dynamic wiring confirmed separately in CI) ==="
+echo "=== RESULT: staging environment verified as running candidate $EXPECTED_SHA (web/API SHA, build-time wiring, migration presence+content, column coverage — dynamic wiring confirmed separately in CI; none of this is a full schema comparison or an authenticated-request check) ==="

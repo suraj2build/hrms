@@ -9,8 +9,27 @@
  * with a different embedded value.
  *
  * This loads the real deployed page in a real browser and watches the
- * network requests it actually issues, so the result reflects runtime
- * behavior, not a side-channel file.
+ * actual network RESPONSES (not just requests sent) during initial load.
+ *
+ * Scope, precisely: this proves the page issues at least one request that
+ * the checked API origin itself answers directly (not via a redirect to
+ * somewhere else), during unauthenticated initial load. It does NOT drive
+ * an authenticated application flow, inspect response bodies for business
+ * correctness, or exercise every route the app calls — that is what the
+ * full Playwright E2E suite (using real HR credentials) does, in the very
+ * next step of this workflow. This check's only job is to catch a wiring
+ * mismatch cheaply, before paying for that full suite.
+ *
+ * Checking RESPONSES rather than just requests is deliberate, and was
+ * changed after testing exposed a real gap: a request-only check still
+ * reports success when the checked origin immediately 302-redirects
+ * everything to a different host — confirmed with a fixture server that
+ * does exactly that. The checked origin never actually answered; a
+ * platform rewrite or compromised/misconfigured redirect would pass
+ * silently under a request-only check. This checks the response: a
+ * redirect response (3xx) FROM the checked origin, whose Location header
+ * points somewhere else, is reported explicitly as a failure, distinct
+ * from "no request was ever sent there".
  *
  * Lives in apps/e2e/ (not scripts/) so it resolves @playwright/test from
  * this workspace's own install (`npm ci` here, which e2e.yml already runs
@@ -19,10 +38,12 @@
  * Usage: WEB_URL=https://... API_URL=https://... node verify-web-api-wiring.mjs
  *        (run with working-directory: apps/e2e, after Playwright browsers
  *        are installed)
- * Exit 0: at least one request during page load/initial interaction targeted
- *         API_URL's origin.
- * Exit 1: no such request was observed within the wait window, or WEB_URL
- *         failed to load. Either way, details are printed to stderr.
+ * Exit 0: the checked API origin itself returned a non-redirect response
+ *         (any status — even an error response proves that origin, not a
+ *         proxy/redirect target, actually answered) to at least one
+ *         request during page load.
+ * Exit 1: no request reached that origin, or every response from it was a
+ *         redirect elsewhere, or WEB_URL failed to load. Details on stderr.
  */
 import { chromium } from '@playwright/test'
 
@@ -44,15 +65,26 @@ try {
   process.exit(1)
 }
 
+const responsesFromApiOrigin = [] // { status, redirectLocation }
 const seenOrigins = new Set()
 const browser = await chromium.launch({ headless: true, executablePath: CHROMIUM_PATH })
 const page = await browser.newPage()
 
-page.on('request', (req) => {
+page.on('response', (res) => {
+  let origin
   try {
-    seenOrigins.add(new URL(req.url()).origin)
+    origin = new URL(res.url()).origin
   } catch {
-    // ignore unparsable request URLs (e.g. data:)
+    return // unparsable response URL (e.g. data:) -- not relevant here
+  }
+  seenOrigins.add(origin)
+  if (origin === apiOrigin) {
+    const status = res.status()
+    const isRedirect = status >= 300 && status < 400
+    responsesFromApiOrigin.push({
+      status,
+      redirectLocation: isRedirect ? res.headers()['location'] : null,
+    })
   }
 })
 
@@ -66,12 +98,22 @@ try {
 
 await browser.close()
 
-if (seenOrigins.has(apiOrigin)) {
-  console.log(`✓ web page at ${WEB_URL} issued a real request to the checked API origin (${apiOrigin})`)
+const directAnswer = responsesFromApiOrigin.find((r) => r.redirectLocation == null)
+if (directAnswer) {
+  console.log(`✓ web page at ${WEB_URL} issued a request that the checked API origin (${apiOrigin}) answered directly (HTTP ${directAnswer.status}, not a redirect)`)
   process.exit(0)
 }
 
-console.error(`✗ web page at ${WEB_URL} never issued a request to the checked API origin (${apiOrigin}) within ${WAIT_MS}ms`)
+const redirectsAway = responsesFromApiOrigin.filter((r) => r.redirectLocation != null)
+if (redirectsAway.length > 0) {
+  console.error(`✗ the checked API origin (${apiOrigin}) never answered directly — every response from it was a redirect elsewhere:`)
+  for (const r of redirectsAway) console.error(`    HTTP ${r.status} -> ${r.redirectLocation}`)
+  console.error('  A build-time VITE_API_URL record or a matching commitSha does not prove this on its own —')
+  console.error('  the client is talking to this origin, but something there is rerouting it, not actually serving the API.')
+  process.exit(1)
+}
+
+console.error(`✗ web page at ${WEB_URL} never received any response from the checked API origin (${apiOrigin}) within ${WAIT_MS}ms`)
 console.error(`  Origins actually observed: ${[...seenOrigins].join(', ') || '(none — page may have failed to load)'}`)
 if (loadError) console.error(`  Page load also reported an error: ${loadError}`)
 console.error('  This means the deployed client is not actually calling the API that was SHA/metadata-verified —')

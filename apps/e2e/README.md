@@ -78,22 +78,38 @@ environment is actually running the commit being qualified, in two steps:
    confirmed to be what `schema_migrations.statements` holds) has drifted
    from the current file — a migration edited after being applied would
    still show as "present" in check 4 while the staging schema reflects
-   the old content;
-6. the staging database's actual resulting schema — introspected directly,
-   not reconstructed — has every column `apps/api/src` references. This
-   is the same audit `scripts/db/check-schema-drift.mjs` already runs in
-   CI against a scratch DB, run here with `--skip-apply` against the real
-   staging connection instead.
+   the old content. A row with no recorded content at all (NULL/empty
+   `statements`) is treated as unverifiable and fails this check — it is
+   never silently counted as unchanged;
+6. **column coverage, not a full schema comparison**: the staging
+   database's actual columns — introspected directly, not reconstructed —
+   include every column `apps/api/src` references. This is the same
+   column-existence audit `scripts/db/check-schema-drift.mjs` already runs
+   in CI against a scratch DB, run here with `--skip-apply` against the
+   real staging connection instead. **This checks column references only.**
+   It does not verify constraints (CHECK/UNIQUE/FK), indexes, RLS
+   policies, triggers, or function/procedure bodies — a staging DB can
+   pass this check while missing a constraint, an index, or an RLS policy
+   the application depends on for correctness or tenant isolation.
 
 **`apps/e2e/verify-web-api-wiring.mjs`** (dynamic — needs a real browser,
 so it runs as its own step after Playwright's Chromium is installed):
-loads the actual deployed web page and watches the network requests it
-really issues, asserting at least one targets the checked API's origin.
-Checks 1–3 above only prove the build was *compiled* correctly; they
+loads the actual deployed web page and watches the real network
+*responses* it receives (not just requests it sends) during unauthenticated
+initial load, and passes only if the checked API origin itself answers at
+least one of them directly — a redirect response FROM that origin to
+somewhere else fails this check and is reported by name, not treated as a
+pass. Checks 1–3 above only prove the build was *compiled* correctly; they
 cannot catch a platform-level rewrite/redirect, a runtime config override
-fetched after page load, or a stale cached bundle serving an old build —
-this does, because it observes actual behavior instead of trusting
-build-time metadata.
+fetched after page load, a stale cached bundle serving an old build, or a
+CORS misconfiguration that silently breaks the real client — this does,
+because it observes actual behavior instead of trusting build-time
+metadata. **Precisely scoped:** this is an unauthenticated, load-time
+signal. It does not log in, does not exercise an authenticated application
+request, and does not inspect response bodies for business correctness —
+that is what the full Playwright suite below does, using real HR
+credentials, in the very next step. A pass here means "the wiring is
+plausible enough to be worth the 30 minutes," not "the application works."
 
 Any mismatch fails the job immediately, before spending 30 minutes running
 Playwright against what might be a stale or mismatched deployment.
@@ -112,8 +128,11 @@ Add these as GitHub repository secrets:
   for release qualification, not a nice-to-have; a missing credential here
   fails the job the same as a missing URL does.
 
-**A missing-secret failure in this job's log proves the secret was not
-visible to THIS job — not that it doesn't exist anywhere in the repo.**
+**A missing-secret failure in this job's log proves exactly one thing: the
+secret was not visible to THIS job, in this run.** It does not prove the
+secret is absent from every scope in the repo or organization, and it
+says nothing about whether a staging environment exists at all — only
+that whatever is or isn't configured, this specific job couldn't see it.
 GitHub Actions secrets can be scoped to a specific
 [Environment](https://docs.github.com/en/actions/deployment/targeting-different-environments/using-environments-for-deployment)
 (Settings → Environments), and a job only sees an environment's secrets
