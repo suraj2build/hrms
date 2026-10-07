@@ -82,6 +82,7 @@ export default async function managerTeamLeaveContextRoute(fastify: FastifyInsta
     let teammateIds: string[] = []
     if (emp.manager_id) {
       const { data: siblings, error: sibError } = await fastify.supabase
+        // lint-query-ok: bounded to one manager's direct-report cohort (span-of-control), not the employees table at large
         .from('employees')
         .select('id')
         .eq('tenant_id', tenantId)

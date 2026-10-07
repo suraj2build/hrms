@@ -440,6 +440,7 @@ export async function runMonthlyAccrual(
     // success; the original per-employee call never checked its own upsert's
     // error at all, which this fixes as part of the batching rewrite).
     const { error: balErr } = await supabase
+      // lint-tenant-ok: balUpserts rows already carry tenant_id (built with tenant_id: tenantId above) — upsert payload is tenant-scoped even though the literal isn't inline in this query chain
       .from('employee_leave_balance')
       .upsert(balUpserts, { onConflict: 'tenant_id,employee_id,leave_type_id,year' })
     if (balErr) {
@@ -693,6 +694,7 @@ export async function runCarryForward(
     if (!upserts.length) continue
 
     const { error: upErr } = await supabase
+      // lint-tenant-ok: upserts rows already carry tenant_id (pushed with tenant_id: tenantId above) — upsert payload is tenant-scoped even though the literal isn't inline in this query chain
       .from('employee_leave_balance')
       .upsert(upserts, { onConflict: 'tenant_id,employee_id,leave_type_id,year' })
 

@@ -208,7 +208,10 @@ export default async function payrollInvestigateRoute(fastify: FastifyInstance) 
       leave_days:         days.filter(d => d.status === 'leave').length,
       holiday_days:       days.filter(d => ['holiday', 'weekly_off', 'weekend'].includes(d.status ?? '')).length,
       half_days:          days.filter(d => d.status === 'half_day').length,
-      total_work_hours:   parseFloat(days.reduce((s, d) => s + (d.work_hours ?? 0), 0).toFixed(2)),
+      // work_hours is NUMERIC(5,2) — coerce or the very first row's string throws
+      // (a string has no .toFixed()), 500ing this endpoint for any employee with
+      // attendance data that month (G13 sweep).
+      total_work_hours:   parseFloat(days.reduce((s, d) => s + Number(d.work_hours ?? 0), 0).toFixed(2)),
       total_ot_hours:     parseFloat((days.reduce((s, d) => s + (d.overtime_minutes ?? 0), 0) / 60).toFixed(2)),
       total_late_minutes: days.reduce((s, d) => s + (d.late_minutes ?? 0), 0),
     }

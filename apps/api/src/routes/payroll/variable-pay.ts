@@ -236,15 +236,24 @@ export default async function variablePayRoutes(fastify: FastifyInstance) {
     }
 
     // Each payout's employee_id is caller-supplied — same tenant-ownership
-    // risk as template_id/batch_id above.
+    // risk as template_id/batch_id above. Chunked: the request schema has
+    // no upper bound on `payouts`, and this check FAILS CLOSED (any id not
+    // found in the response is rejected), so an unchunked, response-capped
+    // call would incorrectly reject real employees past the cap.
     const payoutEmployeeIds = [...new Set(parsed.data.payouts.map(p => p.employee_id))]
-    const { data: empRows, error: empErr } = await fastify.supabase
-      .from('employees')
-      .select('id')
-      .eq('tenant_id', req.tenantId)
-      .in('id', payoutEmployeeIds)
-    if (empErr) return serverError(req, reply, empErr, ErrorCode.QUERY_FAILED, 'Failed to verify employees')
-    const validPayoutEmployeeIds = new Set((empRows ?? []).map((e: any) => e.id))
+    const empRows: any[] = []
+    for (let i = 0; i < payoutEmployeeIds.length; i += 100) {
+      const chunkIds = payoutEmployeeIds.slice(i, i + 100)
+      const { data, error: empErr } = await fastify.supabase
+        // lint-query-ok: chunkIds.length <= 100 (sliced above) — well under PostgREST's 1,000-row cap
+        .from('employees')
+        .select('id')
+        .eq('tenant_id', req.tenantId)
+        .in('id', chunkIds)
+      if (empErr) return serverError(req, reply, empErr, ErrorCode.QUERY_FAILED, 'Failed to verify employees')
+      if (data) empRows.push(...data)
+    }
+    const validPayoutEmployeeIds = new Set(empRows.map((e: any) => e.id))
     const invalidPayoutEmployeeId = payoutEmployeeIds.find(eid => !validPayoutEmployeeIds.has(eid))
     if (invalidPayoutEmployeeId) {
       return reply.code(400).send({ error: 'VALIDATION_ERROR', message: `employee_id ${invalidPayoutEmployeeId} not found in your organisation` })
@@ -259,6 +268,7 @@ export default async function variablePayRoutes(fastify: FastifyInstance) {
     }))
 
     const { data: insertedPayouts, error: payErr } = await fastify.supabase
+      // lint-tenant-ok: `payoutRows` above already sets tenant_id: req.tenantId per row (line 264)
       .from('variable_payouts')
       .insert(payoutRows)
       .select()
@@ -289,7 +299,9 @@ export default async function variablePayRoutes(fastify: FastifyInstance) {
       // have these payouts.
       return serverError(req, reply, err, ErrorCode.QUERY_FAILED, 'Payouts created but failed to refresh batch totals')
     }
-    const totalAmount = allPayouts.reduce((sum, p) => sum + p.amount, 0)
+    // variable_payouts.amount is DECIMAL — coerce or a batch with 2+ payouts corrupts
+    // the total into NaN, which then violates total_amount's NOT NULL (G13 sweep).
+    const totalAmount = allPayouts.reduce((sum, p) => sum + Number(p.amount ?? 0), 0)
     const employeeCount = new Set(allPayouts.map(p => p.employee_id)).size
 
     const { error: batchUpdateErr } = await fastify.supabase

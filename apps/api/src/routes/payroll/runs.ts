@@ -61,6 +61,7 @@ import {
   groupPayrollBlockers,
   computePayrollRunHealth,
 } from '../../lib/payroll-blocker-engine.js'
+import { fetchResolvedValidationRules } from '../../lib/payroll-validation-rules.js'
 import { recomputeRange } from '../../lib/attendance-engine.js'
 import { logAction } from '../../lib/audit-service.js'
 import { buildCompensationCoverageAudit } from '../../lib/payroll-compensation-coverage.js'
@@ -120,11 +121,14 @@ async function resyncRunTotals(supabase: any, tenantId: string, runId: string): 
       .range(from, to),
   )
 
+  // gross_pay/total_deductions/net_pay/lop_amount are NUMERIC — PostgREST serializes
+  // them as strings; Number()-coerce or a run with 2+ slips corrupts every total into
+  // NaN, which then fails payroll_runs' NOT NULL total_* columns (G13 sweep).
   const totals = {
-    total_gross:      round2(slips.reduce((s: number, r: any) => s + (r.gross_pay        ?? 0), 0)),
-    total_deductions: round2(slips.reduce((s: number, r: any) => s + (r.total_deductions ?? 0), 0)),
-    total_net:        round2(slips.reduce((s: number, r: any) => s + (r.net_pay          ?? 0), 0)),
-    total_lop_amount: round2(slips.reduce((s: number, r: any) => s + (r.lop_amount       ?? 0), 0)),
+    total_gross:      round2(slips.reduce((s: number, r: any) => s + Number(r.gross_pay        ?? 0), 0)),
+    total_deductions: round2(slips.reduce((s: number, r: any) => s + Number(r.total_deductions ?? 0), 0)),
+    total_net:        round2(slips.reduce((s: number, r: any) => s + Number(r.net_pay          ?? 0), 0)),
+    total_lop_amount: round2(slips.reduce((s: number, r: any) => s + Number(r.lop_amount       ?? 0), 0)),
     employee_count:   slips.length,
   }
 
@@ -185,6 +189,7 @@ async function applyTdsForRun(
 
   // Prior FY slips → YTD gross (for projection) and YTD TDS (for true-up).
   const { data: prior } = await supabase
+    // lint-query-ok: one employee, one FY window — at most 12 monthly slips, far under the 1,000-row cap
     .from('payroll_slips')
     .select('gross_pay, tds_deducted')
     .eq('tenant_id', tenantId).eq('employee_id', employeeId)
@@ -787,6 +792,7 @@ async function executePayrollRun(
     supabase.from('payroll_runs')
       .update({ last_heartbeat_at: new Date().toISOString(), processed_employee_count: processed })
       .eq('id', runId)
+      .eq('tenant_id', tenantId)
       .then(({ error: hbErr }: { error: any }) => {
         if (hbErr) log.warn({ err: hbErr, run_id: runId }, 'payroll: heartbeat write failed')
       })
@@ -874,6 +880,36 @@ async function executePayrollRun(
           return
         }
         if (!settled) { settled = true; succeededSlips.push(computed.result) }
+
+        // G01-audit finding G02: lop_days > total_working_days is an
+        // impossible attendance state (more loss-of-pay days than there
+        // were working days to lose). computePayrollSlip() already caps
+        // total_deductions at gross_pay and floors net_pay at 0 — that
+        // part is safe, not corrupted. But until now this condition was
+        // only ever checked inside buildPayrollSlipPreview(), a function
+        // with zero callers anywhere in the repo — dead code — so no
+        // visible, actionable signal reached HR through the Resolution
+        // Center that this employee's figures rest on bad attendance data.
+        // Insert a LOP_EXCESSIVE blocker (does not exclude this employee
+        // from the run — the draft slip above is still created — but DOES
+        // block finalization by default, same severity/blocking the rule
+        // definition carries; see "G02" in payroll-blocker-engine.ts). HR
+        // must resolve the attendance data or explicitly override via
+        // force_finalize + override_reason to finalize past it.
+        if (computed.result.lop_days > computed.result.total_working_days) {
+          const lopBlockerRows = buildPayrollBlockers({
+            tenantId, runId,
+            failedEmployees: [{
+              employee_id:   emp.id,
+              employee_code: emp.employee_code,
+              failure_stage: 'slip_validation',
+              reason:        `LOP days (${computed.result.lop_days}) exceed total working days (${computed.result.total_working_days}) — verify attendance data`,
+            }],
+          })
+          // lint-tenant-ok: buildPayrollBlockers() sets tenant_id: tenantId on every row (payroll-blocker-engine.ts)
+          const { error: lopBlockerErr } = await supabase.from('payroll_run_blockers').insert(lopBlockerRows)
+          if (lopBlockerErr) log.warn({ err: lopBlockerErr, run_id: runId, employee_id: emp.id }, 'payroll: LOP_EXCESSIVE blocker insert failed (non-fatal — slip was still created)')
+        }
 
       } catch (unexpectedErr: any) {
         const reason = unexpectedErr?.message ?? 'Unexpected error during payroll computation'
@@ -1000,12 +1036,15 @@ async function executePayrollRun(
 
   if (failedEmployees.length > 0) {
     try {
-      const { data: dbRules } = await supabase
-        .from('payroll_validation_rules')
-        .select('code, name, description, severity, blocking, enabled, stage, remediation_route')
-        .eq('enabled', true)
-      const blockerRows = buildPayrollBlockers({ tenantId, runId, failedEmployees, dbRules: dbRules ?? undefined })
+      // Global defaults + this tenant's own overrides, resolved by code —
+      // see payroll-validation-rules.ts. Previously read with no tenant
+      // scoping at all, which worked only because no tenant override has
+      // ever existed; now that overrides are possible (migration 439) this
+      // must resolve them explicitly rather than read both as one list.
+      const dbRules = await fetchResolvedValidationRules(supabase, tenantId, { enabledOnly: true })
+      const blockerRows = buildPayrollBlockers({ tenantId, runId, failedEmployees, dbRules })
       if (blockerRows.length > 0) {
+        // lint-tenant-ok: buildPayrollBlockers() sets tenant_id: tenantId on every row (payroll-blocker-engine.ts)
         const { error: blockerErr } = await supabase.from('payroll_run_blockers').insert(blockerRows)
         if (blockerErr) {
           log.warn({ err: blockerErr, run_id: runId, blocker_count: blockerRows.length }, 'payroll: blocker insert failed')
@@ -1053,6 +1092,7 @@ export default async function payrollRunsRoutes(fastify: FastifyInstance) {
       await fastify.supabase.from('payroll_runs')
         .update({ status: 'failed', error_message: `Payroll job handler crashed: ${handlerErr.message}` })
         .eq('id', runId)
+        .eq('tenant_id', tenantId)
     }
   })
 
@@ -1597,6 +1637,7 @@ export default async function payrollRunsRoutes(fastify: FastifyInstance) {
         .from('payroll_runs')
         .update({ status: 'failed', error_message: `Failed to enqueue job: ${enqErr.message}` })
         .eq('id', runId)
+        .eq('tenant_id', tenantId)
       return serverError(req, reply, enqErr, 'ENQUEUE_FAILED', 'Failed to queue payroll run — please retry')
     }
 
@@ -2067,10 +2108,24 @@ export default async function payrollRunsRoutes(fastify: FastifyInstance) {
       }
     }
 
-    // ── PI-1 maker-checker / four-eyes finalize (finding C2) ───────────────────
+    // ── PI-1 maker-checker / four-eyes finalize (finding C2 / G04) ─────────────
     // The maker_checker_log was previously never written for finalize — the
     // "four-eyes" control was decorative. We now always record it. When dual
     // control is enabled, a DISTINCT checker must approve before the run seals.
+    //
+    // G04: the actual approval/auto-approval WRITE used to happen here, before
+    // the attendance-closure/completeness, open-blockers, validation-run, and
+    // staleness-recompute gates below — any of which can still reject the
+    // finalize. That left a maker_checker_log row claiming "approved" or
+    // "auto_approved" for a finalize that never actually happened, with
+    // nothing to roll it back. Fixed by only VALIDATING here (reject early
+    // when there's nothing to approve yet, or the wrong person is approving)
+    // and deferring the actual commit — commitMakerCheckerApproval() below —
+    // until immediately before Step 1, once every other gate has passed.
+    type McCommitResult = { error: unknown }
+    let commitMakerCheckerApproval: () => Promise<McCommitResult> = async () => {
+      return { error: null }
+    }
     {
       const dualControl = isPayrollDualControlEnabled()
       const { data: pending } = await fastify.supabase
@@ -2088,6 +2143,8 @@ export default async function payrollRunsRoutes(fastify: FastifyInstance) {
       if (dualControl) {
         if (!pending) {
           // Maker step — record the proposal and stop. A different user approves.
+          // This write only claims "a proposal was made", which is true
+          // regardless of the later gates, so it is safe to commit immediately.
           const { error: mcInsertError } = await fastify.supabase.from('maker_checker_log').insert({
             tenant_id: tenantId, entity_type: 'payroll_run', entity_id: id,
             action: 'finalize', maker_id: req.userId, status: 'pending',
@@ -2112,32 +2169,35 @@ export default async function payrollRunsRoutes(fastify: FastifyInstance) {
         if ((run as any).created_by && (run as any).created_by === req.userId && req.userRole !== 'super_admin') {
           return conflictError(reply, 'PREPARER_CANNOT_APPROVE', 'You prepared (ran) this payroll; a different authorised user must approve it.')
         }
-        // Checker step — approve the pending proposal, then proceed to finalize.
-        // When the preparer themselves approved via super_admin override, record that
-        // fact distinctly so an auditor can tell it from a clean four-eyes approval.
+        // Checker step — approve the pending proposal once we actually finalize.
+        // When the preparer themselves approved via super_admin override, record
+        // that fact distinctly so an auditor can tell it from a clean four-eyes
+        // approval.
         const preparerOverride = (run as any).created_by === req.userId
-        const { error: mcApproveError } = await fastify.supabase.from('maker_checker_log')
-          .update({
-            checker_id:   req.userId,
-            status:       'approved',
-            reviewed_at:  new Date().toISOString(),
-            ...(preparerOverride ? { checker_notes: 'PREPARER_SELF_APPROVED_OVERRIDE (super_admin)' } : {}),
-          })
-          .eq('id', (pending as any).id)
-        if (mcApproveError) {
-          return serverError(req, reply, mcApproveError, ErrorCode.UPDATE_FAILED, 'Failed to record four-eyes finalize approval')
+        const pendingId = (pending as any).id
+        commitMakerCheckerApproval = async () => {
+          const { error } = await fastify.supabase.from('maker_checker_log')
+            .update({
+              checker_id:   req.userId,
+              status:       'approved',
+              reviewed_at:  new Date().toISOString(),
+              ...(preparerOverride ? { checker_notes: 'PREPARER_SELF_APPROVED_OVERRIDE (super_admin)' } : {}),
+            })
+            .eq('id', pendingId)
+          return { error }
         }
       } else {
-        // Dual control off — record an auto-approved entry (real audit trail) and
-        // proceed exactly as before: single operator, immediate finalize.
-        const { error: mcAutoError } = await fastify.supabase.from('maker_checker_log').insert({
-          tenant_id: tenantId, entity_type: 'payroll_run', entity_id: id,
-          action: 'finalize', maker_id: req.userId, checker_id: req.userId,
-          status: 'auto_approved', reviewed_at: new Date().toISOString(),
-          maker_data: { month: run.month, force_finalize, override_reason: override_reason ?? null },
-        })
-        if (mcAutoError) {
-          return serverError(req, reply, mcAutoError, ErrorCode.INSERT_FAILED, 'Failed to record four-eyes finalize audit entry')
+        // Dual control off — record an auto-approved entry (real audit trail)
+        // once we actually finalize, and proceed exactly as before: single
+        // operator, immediate finalize.
+        commitMakerCheckerApproval = async () => {
+          const { error } = await fastify.supabase.from('maker_checker_log').insert({
+            tenant_id: tenantId, entity_type: 'payroll_run', entity_id: id,
+            action: 'finalize', maker_id: req.userId, checker_id: req.userId,
+            status: 'auto_approved', reviewed_at: new Date().toISOString(),
+            maker_data: { month: run.month, force_finalize, override_reason: override_reason ?? null },
+          })
+          return { error }
         }
       }
     }
@@ -2187,6 +2247,7 @@ export default async function payrollRunsRoutes(fastify: FastifyInstance) {
           .from('payroll_slips')
           .select('employee_id')
           .eq('run_id', id)
+          .eq('tenant_id', tenantId)
           .eq('status', 'draft')
           .range(from, to),
       )
@@ -2220,12 +2281,21 @@ export default async function payrollRunsRoutes(fastify: FastifyInstance) {
 
         if (missingIds.length > 0) {
           if (!force_finalize) {
-            // Enrich with names for a human-readable error response
-            const { data: empRows } = await fastify.supabase
-              .from('employees')
-              .select('id, first_name, last_name, employee_code')
-              .in('id', missingIds)
-              .eq('tenant_id', tenantId)
+            // Enrich with names for a human-readable error response.
+            // Chunked: missingIds can be the tenant's full draft-run
+            // headcount — a single .in() over thousands of UUIDs risks the
+            // request-line limit.
+            const empRows: any[] = []
+            for (let i = 0; i < missingIds.length; i += 100) {
+              const chunkIds = missingIds.slice(i, i + 100)
+              const { data } = await fastify.supabase
+                // lint-query-ok: chunkIds.length <= 100 (sliced above) — well under PostgREST's 1,000-row cap
+                .from('employees')
+                .select('id, first_name, last_name, employee_code')
+                .in('id', chunkIds)
+                .eq('tenant_id', tenantId)
+              if (data) empRows.push(...data)
+            }
 
             return reply.code(422).send({
               error:   'MISSING_ATTENDANCE_DATA',
@@ -2233,7 +2303,7 @@ export default async function payrollRunsRoutes(fastify: FastifyInstance) {
                        'These employees will receive full pay (0 LOP assumed). ' +
                        'Verify punch records, then either process attendance or pass force_finalize=true with an override_reason.',
               missing_attendance_count:     missingIds.length,
-              missing_attendance_employees: (empRows ?? []).map((e: any) => ({
+              missing_attendance_employees: empRows.map((e: any) => ({
                 employee_id:   e.id,
                 employee_name: `${e.first_name} ${e.last_name}`,
                 employee_code: e.employee_code,
@@ -2303,6 +2373,31 @@ export default async function payrollRunsRoutes(fastify: FastifyInstance) {
           { run_id: id, month: run.month, overridden_by: req.userId, override_reason: override_reason ?? '(none)', blocker_count: openBlockers!.length },
           'payroll finalization override: proceeding despite open blockers',
         )
+        // Persist the override onto the blocker rows themselves (not just a
+        // structured log line) — "ignored" plus who/when/why, reusing
+        // payroll_run_blockers' own resolved_by/resolved_at/resolution_note
+        // columns. This is the durable, queryable record of the "explicitly
+        // approved business rule" force_finalize is meant to represent (see
+        // "G02" above); a log line alone isn't enough to answer "who signed
+        // off on finalizing this run with excessive LOP/other blockers open"
+        // after the fact. Non-fatal: never block finalization over this
+        // write failing — the structured log above already captures it.
+        const { error: overrideBlockerErr } = await fastify.supabase
+          .from('payroll_run_blockers')
+          .update({
+            status:          'ignored',
+            resolved_by:     req.userId,
+            resolved_at:     new Date().toISOString(),
+            resolution_note: `force_finalize override: ${override_reason ?? '(no reason provided)'}`,
+          })
+          .eq('tenant_id', tenantId)
+          .in('id', openBlockers!.map((b: any) => b.id))
+        if (overrideBlockerErr) {
+          req.log.error(
+            { err: overrideBlockerErr, run_id: id },
+            'payroll finalization override: failed to persist the override onto the blocker rows (non-fatal — the structured log above still records it)',
+          )
+        }
       }
     }
 
@@ -2359,15 +2454,23 @@ export default async function payrollRunsRoutes(fastify: FastifyInstance) {
       const periodStart = `${run.month}-01`
       const periodEnd   = new Date(year, mon, 0).toISOString().slice(0, 10)
 
-      // Find employees with leave approved after the run snapshot
-      const { data: staleRows } = await fastify.supabase
-        .from('leave_requests')
-        .select('employee_id')
-        .eq('tenant_id', tenantId)
-        .eq('status', 'APPROVED')
-        .gte('updated_at', run.created_at)      // leave approved after run was created
-        .lte('from_date', periodEnd)
-        .gte('to_date', periodStart)
+      // Find employees with leave approved after the run snapshot.
+      // fetchAllRows(): genuinely unbounded (tenant + date-window scan, no
+      // per-employee cap) — a plain query would silently under-report the
+      // stale set for a tenant with >1,000 qualifying approvals, finalizing
+      // slips for employees whose attendance should have been recomputed.
+      const staleRows = await fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('leave_requests')
+          .select('employee_id')
+          .eq('tenant_id', tenantId)
+          .eq('status', 'APPROVED')
+          .gte('updated_at', run.created_at)      // leave approved after run was created
+          .lte('from_date', periodEnd)
+          .gte('to_date', periodStart)
+          .order('id')
+          .range(from, to),
+      )
 
       const staleEmployeeIds = [...new Set((staleRows ?? []).map((r: { employee_id: string }) => r.employee_id))]
 
@@ -2433,23 +2536,25 @@ export default async function payrollRunsRoutes(fastify: FastifyInstance) {
               }, run.month as string)
 
               // 3. Update the existing draft slip in place
+              const freshSlipUpdate = {
+                payable_days:          freshSlip.payable_days,
+                lop_days:              freshSlip.lop_days,
+                overtime_hours:        freshSlip.overtime_hours,
+                gross_pay:             freshSlip.gross_pay,
+                lop_amount:            freshSlip.lop_amount,
+                total_deductions:      freshSlip.total_deductions,
+                net_pay:               freshSlip.net_pay,
+                employer_contributions:freshSlip.employer_contributions,
+                component_breakdown:   freshSlip.component_breakdown,
+                tds_deducted:          round2fn((freshSlip.component_breakdown ?? [])
+                  .filter((c: any) => /^TDS$/i.test(c.code))
+                  .reduce((s: number, c: any) => s + (Number(c.monthly_amount) || 0), 0)),
+              }
               await fastify.supabase
                 .from('payroll_slips')
-                .update({
-                  payable_days:          freshSlip.payable_days,
-                  lop_days:              freshSlip.lop_days,
-                  overtime_hours:        freshSlip.overtime_hours,
-                  gross_pay:             freshSlip.gross_pay,
-                  lop_amount:            freshSlip.lop_amount,
-                  total_deductions:      freshSlip.total_deductions,
-                  net_pay:               freshSlip.net_pay,
-                  employer_contributions:freshSlip.employer_contributions,
-                  component_breakdown:   freshSlip.component_breakdown,
-                  tds_deducted:          round2fn((freshSlip.component_breakdown ?? [])
-                    .filter((c: any) => /^TDS$/i.test(c.code))
-                    .reduce((s: number, c: any) => s + (Number(c.monthly_amount) || 0), 0)),
-                })
+                .update(freshSlipUpdate)
                 .eq('run_id', id)
+                .eq('tenant_id', tenantId)
                 .eq('employee_id', employeeId)
                 .eq('status', 'draft')
 
@@ -2521,6 +2626,7 @@ export default async function payrollRunsRoutes(fastify: FastifyInstance) {
       .from('payroll_slips')
       .update({ status: 'finalized' })
       .eq('run_id', id)
+      .eq('tenant_id', tenantId)
       .eq('status', 'draft')
 
     if (slipFinalizeErr) {
@@ -2551,6 +2657,7 @@ export default async function payrollRunsRoutes(fastify: FastifyInstance) {
           .from('payroll_slips')
           .select('employee_id')
           .eq('run_id', id)
+          .eq('tenant_id', req.tenantId)
           .eq('status', 'finalized')
           .range(from, to),
       )
@@ -2777,6 +2884,38 @@ export default async function payrollRunsRoutes(fastify: FastifyInstance) {
       // caller honestly instead of returning 200 for a state change this
       // request didn't actually make.
       return conflictError(reply, 'RUN_STATE_CHANGED', 'This payroll run was frozen or finalized by another request while this finalize was in progress. Refresh and check its current status before retrying.')
+    }
+
+    // G04: commit the maker-checker approval/auto-approval NOW — only here,
+    // after Step 1 AND Step 2 have both durably succeeded (the atomic
+    // .select('id') check above confirms THIS request actually won the
+    // finalize), is the audit trail guaranteed to match reality. Committing
+    // any earlier (even "right before Step 1", a bug a prior round of this
+    // same fix left in place) would again let a Step 1/Step 2 failure leave
+    // maker_checker_log claiming "approved" for a finalize that didn't
+    // durably happen — exactly the defect G04 was supposed to close.
+    //
+    // A failure HERE is the mirror-image case: finalize has ALREADY
+    // genuinely succeeded (slips + run are finalized), so this must never
+    // fail the response — the caller needs to be told finalize succeeded,
+    // not that it failed because an audit-log write lagged. There is also
+    // no retry path that would re-run this: a second finalize call hits the
+    // ALREADY_FINALIZED guard at the top of this handler and never reaches
+    // here again. So this failure is logged forensically (like the
+    // snapshot/statutory-compute failures below) rather than surfaced as an
+    // error, and is non-fatal by design, not by omission.
+    {
+      const { error: mcCommitError } = await commitMakerCheckerApproval()
+      if (mcCommitError) {
+        req.log.error({ err: mcCommitError, run_id: id }, 'payroll finalize: four-eyes approval commit failed AFTER the run was durably finalized (non-fatal — finalize still succeeded; the maker_checker_log row for this finalize may be missing or still pending)')
+        await logRunEvent(fastify.supabase, req.log, {
+          tenant_id:  tenantId,
+          run_id:     id,
+          event_type: 'maker_checker_commit_failed',
+          payload:    { stage: 'finalize_post_seal' },
+          error_details: { message: String((mcCommitError as any)?.message ?? mcCommitError) },
+        })
+      }
     }
 
     // ── Auto-compute statutory contributions (EPF / ESI / PTax) ──────────────
@@ -3053,6 +3192,7 @@ export default async function payrollRunsRoutes(fastify: FastifyInstance) {
     const CODE_CHUNK = 500
     for (let i = 0; i < codes.length; i += CODE_CHUNK) {
       const { data } = await fastify.supabase
+        // lint-query-ok: chunked at CODE_CHUNK (500) per request — under PostgREST's 1,000-row cap
         .from('employees')
         .select('employee_code, first_name, last_name')
         .eq('tenant_id', req.tenantId)
@@ -3124,8 +3264,9 @@ export default async function payrollRunsRoutes(fastify: FastifyInstance) {
       return reply.code(422).send({ error: 'EXPORT_TOO_LARGE', message: 'This payroll run exceeds the variance report limit of 10,000 rows. Please contact support for a bulk export.' })
     }
 
-    const totalCurrGross = r2(currentSlips.reduce((s: number, r: any) => s + r.gross_pay, 0))
-    const totalCurrNet   = r2(currentSlips.reduce((s: number, r: any) => s + r.net_pay,   0))
+    // gross_pay/net_pay are NUMERIC — coerce or 2+ slips corrupt these totals into NaN (G13 sweep).
+    const totalCurrGross = r2(currentSlips.reduce((s: number, r: any) => s + Number(r.gross_pay ?? 0), 0))
+    const totalCurrNet   = r2(currentSlips.reduce((s: number, r: any) => s + Number(r.net_pay   ?? 0), 0))
 
     // No previous run — return current totals with no comparison
     if (!prevRun) {
@@ -3208,8 +3349,8 @@ export default async function payrollRunsRoutes(fastify: FastifyInstance) {
     // Largest absolute net-pay movers first
     employees.sort((a, b) => Math.abs(b.diff.net_pay) - Math.abs(a.diff.net_pay))
 
-    const totalPrevGross = r2(prevSlips.reduce((s: number, r: any) => s + r.gross_pay, 0))
-    const totalPrevNet   = r2(prevSlips.reduce((s: number, r: any) => s + r.net_pay,   0))
+    const totalPrevGross = r2(prevSlips.reduce((s: number, r: any) => s + Number(r.gross_pay ?? 0), 0))
+    const totalPrevNet   = r2(prevSlips.reduce((s: number, r: any) => s + Number(r.net_pay   ?? 0), 0))
     const grossChange    = r2(totalCurrGross - totalPrevGross)
     const netChange      = r2(totalCurrNet   - totalPrevNet)
 
@@ -3264,10 +3405,10 @@ export default async function payrollRunsRoutes(fastify: FastifyInstance) {
       return serverError(req, reply, blockerErr, ErrorCode.QUERY_FAILED, 'Failed to fetch blockers')
     }
 
-    // Fetch validation rules for enrichment
-    const { data: dbRules } = await fastify.supabase
-      .from('payroll_validation_rules')
-      .select('code, name, description, severity, blocking, enabled, stage, remediation_route')
+    // Fetch validation rules for enrichment: global defaults + this
+    // tenant's own overrides, resolved by code (see comment at the other
+    // two call sites of fetchResolvedValidationRules in this file).
+    const dbRules = await fetchResolvedValidationRules(fastify.supabase, tenantId)
 
     const flatBlockers = (blockerRows ?? []).map((b: any) => {
       const emp = b.employees ?? null
@@ -3412,14 +3553,22 @@ export default async function payrollRunsRoutes(fastify: FastifyInstance) {
       return reply.send({ message: 'No open blockers found — nothing to retry', retried_count: 0 })
     }
 
-    // Fetch employee records for the retry set
-    const { data: employees } = await fastify.supabase
-      .from('employees')
-      .select('id, first_name, last_name, employee_code')
-      .eq('tenant_id', tenantId)
-      .in('id', retryEmpIds)
+    // Fetch employee records for the retry set. Chunked: retryEmpIds can be
+    // every employee who blocked in a large payroll run — a single .in()
+    // over thousands of UUIDs risks the request-line limit.
+    const employees: any[] = []
+    for (let i = 0; i < retryEmpIds.length; i += 100) {
+      const chunkIds = retryEmpIds.slice(i, i + 100)
+      const { data } = await fastify.supabase
+        // lint-query-ok: chunkIds.length <= 100 (sliced above) — well under PostgREST's 1,000-row cap
+        .from('employees')
+        .select('id, first_name, last_name, employee_code')
+        .eq('tenant_id', tenantId)
+        .in('id', chunkIds)
+      if (data) employees.push(...data)
+    }
 
-    const empList = (employees ?? []) as Array<{ id: string; first_name: string; last_name: string; employee_code: string }>
+    const empList = employees as Array<{ id: string; first_name: string; last_name: string; employee_code: string }>
 
     // Working days context
     const [runYear, runMon] = (run.month as string).split('-').map(Number)
@@ -3431,11 +3580,9 @@ export default async function payrollRunsRoutes(fastify: FastifyInstance) {
       return serverError(req, reply, wdErr, 'WORKING_DAYS_FETCH_FAILED', 'Failed to count working days')
     }
 
-    // Fetch validation rules for blocker rebuild
-    const { data: dbRulesForRetry } = await fastify.supabase
-      .from('payroll_validation_rules')
-      .select('code, name, description, severity, blocking, enabled, stage, remediation_route')
-      .eq('enabled', true)
+    // Fetch validation rules for blocker rebuild: global defaults + this
+    // tenant's own overrides, resolved by code.
+    const dbRulesForRetry = await fetchResolvedValidationRules(fastify.supabase, tenantId, { enabledOnly: true })
 
     // Re-run each failed employee
     const succeededRetry: string[] = []
@@ -3478,8 +3625,9 @@ export default async function payrollRunsRoutes(fastify: FastifyInstance) {
 
         // Delete existing slip (if re-inserted from a previous partial retry)
         await fastify.supabase.from('payroll_slips').delete()
-          .eq('run_id', id).eq('employee_id', emp.id)
+          .eq('run_id', id).eq('tenant_id', tenantId).eq('employee_id', emp.id)
 
+        // lint-tenant-ok: slipRow built by buildSlipRow(tenantId, ...) above already sets tenant_id
         const { error: insertErr } = await fastify.supabase.from('payroll_slips').insert(slipRow)
         if (insertErr) {
           failedRetry.push({
@@ -3498,6 +3646,7 @@ export default async function payrollRunsRoutes(fastify: FastifyInstance) {
           .from('payroll_run_blockers')
           .update({ status: 'resolved', resolved_by: req.userId, resolved_at: new Date().toISOString(), resolution_note: 'Auto-resolved by retry' })
           .eq('run_id', id)
+          .eq('tenant_id', tenantId)
           .eq('employee_id', emp.id)
           .eq('status', 'open')
 
@@ -3514,7 +3663,7 @@ export default async function payrollRunsRoutes(fastify: FastifyInstance) {
     // Insert new blockers for newly failed employees
     if (failedRetry.length > 0) {
       try {
-        const newBlockerRows = buildPayrollBlockers({ tenantId, runId: id, failedEmployees: failedRetry, dbRules: dbRulesForRetry ?? undefined })
+        const newBlockerRows = buildPayrollBlockers({ tenantId, runId: id, failedEmployees: failedRetry, dbRules: dbRulesForRetry })
         if (newBlockerRows.length > 0) {
           await fastify.supabase.from('payroll_run_blockers').insert(newBlockerRows)
         }

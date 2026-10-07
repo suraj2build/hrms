@@ -52,6 +52,7 @@ interface EmployeeBankStatutory {
 export async function scan(supabase: SupabaseClient): Promise<void> {
   const degraded = await fetchAllRows<DegradedRow>((from, to) =>
     supabase
+      // lint-tenant-ok: deliberate cross-tenant background scan (polls every tenant's due retries on a schedule) — each row's own tenant_id is carried through and scoped correctly in the per-row orchestrator.verify() calls below
       .from('verification_records')
       .select('employee_id, tenant_id, verification_type, retry_count, updated_at')
       .eq('status', 'degraded')

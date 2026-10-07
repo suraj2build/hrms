@@ -445,7 +445,8 @@ export default async function tdsRoutes(fastify: FastifyInstance) {
     const hlDecls   = [...(grouped['home_loan_principal'] ?? []), ...(grouped['home_loan_interest'] ?? [])]
     const chap6Cats = ['80C','80D','80E','80G','80TTA','NPS','standard_deduction','professional_tax','other']
     const chap6Decls = chap6Cats.flatMap(c => grouped[c] ?? [])
-    const totalDeclared = declarations.reduce((s: number, d: any) => s + (d.declared_amount ?? 0), 0)
+    // declared_amount is DECIMAL — coerce or 2+ declarations print "₹NaN" on the Form 12BB (G13 sweep).
+    const totalDeclared = declarations.reduce((s: number, d: any) => s + Number(d.declared_amount ?? 0), 0)
 
     const rows = (items: any[]) => items.map((d: any) => `
       <tr>
@@ -1322,8 +1323,10 @@ ${section('Part D — Loss from House Property (Home Loan Interest)', hlDecls,
       .eq('financial_year', financial_year)
       .lt('projection_month', currentMonth)
 
+    // tds_this_month is DECIMAL NOT NULL — coerce or 2+ prior months corrupt this into
+    // NaN, which then fails the tds_this_month NOT NULL constraint on upsert (G13 sweep).
     const alreadyDeducted = ((existingProjections ?? []) as any[]).reduce(
-      (sum: number, p: any) => sum + (p.tds_this_month ?? 0), 0
+      (sum: number, p: any) => sum + Number(p.tds_this_month ?? 0), 0
     )
 
     // Build full FY month list: Apr → Mar
@@ -1425,9 +1428,12 @@ ${section('Part D — Loss from House Property (Home Loan Interest)', hlDecls,
 
     if (declErr) return serverError(req, reply, declErr, ErrorCode.QUERY_FAILED, 'Failed to fetch approved declarations')
 
+    // declared_amount/approved_amount are DECIMAL — coerce or 2+ approved declarations
+    // corrupt these totals into NaN, failing tds_declaration_snapshots' NOT NULL
+    // total_declared/total_approved columns (G13 sweep).
     const items = (approvedDecls ?? []) as any[]
-    const totalDeclared = items.reduce((sum: number, d: any) => sum + (d.declared_amount ?? 0), 0)
-    const totalApproved = items.reduce((sum: number, d: any) => sum + (d.approved_amount ?? 0), 0)
+    const totalDeclared = items.reduce((sum: number, d: any) => sum + Number(d.declared_amount ?? 0), 0)
+    const totalApproved = items.reduce((sum: number, d: any) => sum + Number(d.approved_amount ?? 0), 0)
 
     const { data: snapshot, error: snapErr } = await fastify.supabase
       .from('tds_declaration_snapshots')

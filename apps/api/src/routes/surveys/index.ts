@@ -801,13 +801,28 @@ export default async function surveyRoutes(fastify: FastifyInstance) {
     // could be created referencing another tenant's employee under this
     // tenant_id, corrupting completion stats and potentially exposing survey
     // content to a foreign employee.
+    // Chunked: empIds is caller-supplied with no upper bound, and this
+    // check FAILS CLOSED (any id not found in the response is rejected) —
+    // an unchunked, response-capped call would incorrectly reject real
+    // employees past the cap, not just silently under-report.
     const uniqueEmpIds = [...new Set(empIds)]
-    const { data: validEmps } = await supabase
-      .from('employees')
-      .select('id')
-      .eq('tenant_id', tenantId)
-      .in('id', uniqueEmpIds)
-    if ((validEmps?.length ?? 0) !== uniqueEmpIds.length) {
+    const validEmps: any[] = []
+    for (let i = 0; i < uniqueEmpIds.length; i += 100) {
+      const chunkIds = uniqueEmpIds.slice(i, i + 100)
+      const { data, error: validEmpsErr } = await supabase
+        // lint-query-ok: chunked to 100 ids/request, <=100 rows per query, well under the 1,000-row cap
+        .from('employees')
+        .select('id')
+        .eq('tenant_id', tenantId)
+        .in('id', chunkIds)
+      // Explicit, not just accidental: a chunk query error must not be
+      // treated as "those ids don't exist" and silently let through — fail
+      // the request outright rather than relying on the length mismatch
+      // below to coincidentally catch it.
+      if (validEmpsErr) return serverError(req, reply, validEmpsErr, ErrorCode.QUERY_FAILED, 'Failed to verify employee ownership')
+      if (data) validEmps.push(...data)
+    }
+    if (validEmps.length !== uniqueEmpIds.length) {
       return reply.status(400).send({ error: 'INVALID_EMPLOYEES', message: 'One or more employees were not found in your organisation' })
     }
 
@@ -849,13 +864,23 @@ export default async function surveyRoutes(fastify: FastifyInstance) {
     // caller-supplied — verify every id belongs to this tenant, matching the
     // same check on /admin/trigger-lifecycle above and
     // /my/360/:roundId/nominate below.
+    // Chunked: employee_ids is caller-supplied with no upper bound, and this
+    // check FAILS CLOSED (same rationale as /admin/trigger-lifecycle above).
     const uniqueEmpIds = [...new Set(employee_ids)]
-    const { data: validEmps } = await supabase
-      .from('employees')
-      .select('id')
-      .eq('tenant_id', tenantId)
-      .in('id', uniqueEmpIds)
-    if ((validEmps?.length ?? 0) !== uniqueEmpIds.length) {
+    const validEmps: any[] = []
+    for (let i = 0; i < uniqueEmpIds.length; i += 100) {
+      const chunkIds = uniqueEmpIds.slice(i, i + 100)
+      const { data, error: validEmpsErr } = await supabase
+        // lint-query-ok: chunked to 100 ids/request, <=100 rows per query, well under the 1,000-row cap
+        .from('employees')
+        .select('id')
+        .eq('tenant_id', tenantId)
+        .in('id', chunkIds)
+      // Explicit, not just accidental — see /admin/trigger-lifecycle above.
+      if (validEmpsErr) return serverError(req, reply, validEmpsErr, ErrorCode.QUERY_FAILED, 'Failed to verify employee ownership')
+      if (data) validEmps.push(...data)
+    }
+    if (validEmps.length !== uniqueEmpIds.length) {
       return reply.status(400).send({ error: 'INVALID_EMPLOYEES', message: 'One or more employees were not found in your organisation' })
     }
 
@@ -1016,13 +1041,24 @@ export default async function surveyRoutes(fastify: FastifyInstance) {
     // foreign tenant's employee_id, and the HR 360-report endpoint's
     // employees(first_name, last_name) join would then surface that
     // foreign tenant's employee name inside this tenant's report.
+    // Chunked: employee_ids is caller-supplied with no upper bound, and this
+    // check FAILS CLOSED (same rationale as /admin/trigger-lifecycle above) —
+    // an unchunked, response-capped call would incorrectly reject real peers
+    // past the cap, not just silently under-report.
     const uniquePeerIds = [...new Set(employee_ids)]
-    const { data: validPeers } = await supabase
-      .from('employees')
-      .select('id')
-      .eq('tenant_id', tenantId)
-      .in('id', uniquePeerIds)
-    if ((validPeers?.length ?? 0) !== uniquePeerIds.length) {
+    const validPeers: any[] = []
+    for (let i = 0; i < uniquePeerIds.length; i += 100) {
+      const chunkIds = uniquePeerIds.slice(i, i + 100)
+      const { data, error: validPeersErr } = await supabase
+        // lint-query-ok: chunked to 100 ids/request, <=100 rows per query, well under the 1,000-row cap
+        .from('employees')
+        .select('id')
+        .eq('tenant_id', tenantId)
+        .in('id', chunkIds)
+      if (validPeersErr) return serverError(req, reply, validPeersErr, ErrorCode.QUERY_FAILED, 'Failed to verify employee ownership')
+      if (data) validPeers.push(...data)
+    }
+    if (validPeers.length !== uniquePeerIds.length) {
       return reply.status(400).send({ error: 'INVALID_EMPLOYEES', message: 'One or more nominated peers were not found in your organisation' })
     }
 

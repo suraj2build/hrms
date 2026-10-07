@@ -493,6 +493,7 @@ async function processLegacyAccrualBatch(
   // for that employee entirely. A batch-wide ledger failure must not report
   // this whole batch as processed (no fabricated success).
   const { error: ledErr } = await supabase
+    // lint-tenant-ok: ledInserts rows already carry tenant_id (pushed with tenant_id: tenantId above) — upsert payload is tenant-scoped even though the literal isn't inline in this query chain
     .from('leave_accrual_ledger')
     .upsert(ledInserts, { onConflict: 'cycle_key', ignoreDuplicates: true })
   if (ledErr) {
@@ -514,6 +515,7 @@ async function processLegacyAccrualBatch(
   // the original creditEmployeeDays() call, which never checked its own
   // upsert's error and always let employees_processed++ proceed after it.
   const { error: balErr } = await supabase
+    // lint-tenant-ok: balUpserts rows already carry tenant_id (pushed with tenant_id: tenantId above) — upsert payload is tenant-scoped even though the literal isn't inline in this query chain
     .from('employee_leave_balance')
     .upsert(balUpserts, { onConflict: 'tenant_id,employee_id,leave_type_id,year' })
   if (balErr) {
@@ -801,6 +803,7 @@ export async function yearlyAccrualJob(
           updated_at:    yearlyNowIso,
         }))
 
+        // lint-tenant-ok: balInserts rows already carry tenant_id (mapped with tenant_id: tenantId above) — insert payload is tenant-scoped even though the literal isn't inline in this query chain
         const { error: balInsErr } = await supabase.from('employee_leave_balance').insert(balInserts)
         if (balInsErr) {
           // A missing accrual balance row silently manifests to the employee
@@ -1003,6 +1006,7 @@ export async function coExpiryJob(
         await supabase
           .from('leave_accrual_ledger')
           .update({ is_expired: true, expired_on: expiredAt })
+          .eq('tenant_id', tenantId)
           .in('id', group.ids)
 
         employees_processed++
@@ -1228,6 +1232,7 @@ export async function carryForwardJob(
       }
 
       const { error: balErr } = await supabase
+        // lint-tenant-ok: balUpserts rows already carry tenant_id (pushed with tenant_id: tenantId above) — upsert payload is tenant-scoped even though the literal isn't inline in this query chain
         .from('employee_leave_balance')
         .upsert(balUpserts, { onConflict: 'tenant_id,employee_id,leave_type_id,year' })
       if (balErr) {
@@ -1866,6 +1871,7 @@ export async function entitlementReleaseJob(
         await supabase
           .from('leave_accrual_ledger')
           .update({ consumption_eligible_from: null })
+          .eq('tenant_id', tenantId)
           .eq('id', row.id)
 
         employees_processed++

@@ -397,16 +397,19 @@ export function buildCostCenterAllocations(
     compensation_snapshot: { components: Array<{ code: string; component_type: string; monthly_amount: number }> } | null
   }>,
 ): CostAllocationRow[] {
+  // compensation_snapshot is persisted JSONB — a row written before the G13 sweep
+  // fixed its writer can still hold string monthly_amount values forever, so coerce
+  // defensively here too, not just at the writer.
   const totalCost = employeeSnapshots.reduce((s, e) => {
     const employerBurden = (e.compensation_snapshot?.components ?? [])
       .filter(c => c.component_type === 'employer_contribution')
-      .reduce((b, c) => b + c.monthly_amount, 0)
+      .reduce((b, c) => b + Number(c.monthly_amount ?? 0), 0)
     return s + e.gross_pay + employerBurden
   }, 0)
 
   return employeeSnapshots.map(e => {
     const comps         = e.compensation_snapshot?.components ?? []
-    const employerBurden = round2(comps.filter(c => c.component_type === 'employer_contribution').reduce((b, c) => b + c.monthly_amount, 0))
+    const employerBurden = round2(comps.filter(c => c.component_type === 'employer_contribution').reduce((b, c) => b + Number(c.monthly_amount ?? 0), 0))
     const statutoryBurden = round2(e.deductions)
     // Only report overtime_cost when an actual OT compensation component
     // exists — the previous fallback fabricated a flat ₹100/hour figure
@@ -415,7 +418,7 @@ export function buildCostCenterAllocations(
     // a fictitious number on the department cost breakdown whenever no OT
     // component was present.
     const otComp        = comps.find(c => c.code === 'OT' || c.code === 'OVERTIME')
-    const overtimeCost  = round2(otComp?.monthly_amount ?? 0)
+    const overtimeCost  = round2(Number(otComp?.monthly_amount ?? 0))
     const totalEmpCost  = round2(e.gross_pay + employerBurden)
 
     // e.deductions is the actual computed total_deductions for the month
@@ -429,7 +432,7 @@ export function buildCostCenterAllocations(
     // that as the subtrahend instead recovers an actual LOP estimate,
     // matching the same formula generateLedgerEntries already uses
     // correctly for GL journal entries elsewhere in this file.
-    const structureDeductions = round2(comps.filter(c => c.component_type === 'deduction').reduce((s, c) => s + c.monthly_amount, 0))
+    const structureDeductions = round2(comps.filter(c => c.component_type === 'deduction').reduce((s, c) => s + Number(c.monthly_amount ?? 0), 0))
     const lopRecovery = round2(Math.max(0, e.gross_pay - e.net_pay - structureDeductions))
 
     return {
@@ -640,8 +643,10 @@ export async function buildPayrollFinancialLedger(
   const EMP_META_CHUNK = 100
   for (let i = 0; i < empIds.length; i += EMP_META_CHUNK) {
     const { data: metaChunk } = await supabase
+      // lint-query-ok: chunked to EMP_META_CHUNK (100) ids per request via .slice() above — bounded well under the 1,000-row cap
       .from('employees')
       .select('id, job_history!job_history_employee_id_fkey(department_id, department_name, is_current)')
+      .eq('tenant_id', tenantId)
       .in('id', empIds.slice(i, i + EMP_META_CHUNK))
     if (metaChunk) empMeta.push(...metaChunk)
   }
@@ -701,7 +706,10 @@ export async function buildPayrollFinancialLedger(
     }>
 
     // Compute LOP amount: gross - net - statutory deductions
-    const statutoryDedTotal = comps.filter(c => c.component_type === 'deduction').reduce((s, c) => s + c.monthly_amount, 0)
+    // gross_pay/net_pay are NUMERIC on payroll_employee_snapshots (string over the
+    // wire); `-` auto-coerces so the subtraction itself is safe, but the deduction
+    // reduce below is not (G13 sweep).
+    const statutoryDedTotal = comps.filter(c => c.component_type === 'deduction').reduce((s, c) => s + Number(c.monthly_amount ?? 0), 0)
     const lopAmount = round2(Math.max(0, emp.gross_pay - emp.net_pay - statutoryDedTotal))
 
     const empEntries = generateLedgerEntries({
@@ -780,15 +788,19 @@ export async function buildPayrollFinancialLedger(
     .eq('id', ledgerId)
 
   // 12. Build and persist cost allocations
+  // gross_pay/net_pay/deductions are NUMERIC on payroll_employee_snapshots —
+  // PostgREST serializes them as strings; coerce at this DB-read boundary so
+  // buildCostCenterAllocations's own `number`-typed fields are actually numbers
+  // (G13 sweep).
   const allocInputs = (empSnaps as any[]).map(emp => {
     const meta = deptMap.get(emp.employee_id)
     return {
       employee_id:    emp.employee_id,
       department_id:  meta?.department_id ?? undefined,
       department_name: meta?.department_name ?? undefined,
-      gross_pay:      emp.gross_pay,
-      net_pay:        emp.net_pay,
-      deductions:     emp.deductions,
+      gross_pay:      Number(emp.gross_pay ?? 0),
+      net_pay:        Number(emp.net_pay ?? 0),
+      deductions:     Number(emp.deductions ?? 0),
       overtime_hours: emp.overtime_hours ?? 0,
       compensation_snapshot: emp.compensation_snapshot,
     }

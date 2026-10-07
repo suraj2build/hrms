@@ -16,13 +16,14 @@ declare module 'fastify' {
 }
 
 interface ProfileCacheEntry {
-  tenantId:          string
-  role:              string
-  employeeId:        string | null
-  isActive:          boolean
-  isActiveCheckedAt: number  // timestamp of last DB-fresh is_active check (ISSUE-023)
-  allowLogin:        boolean  // tenant.allow_login — false blocks all access for this workspace
-  expiresAt:         number
+  tenantId:            string
+  role:                string
+  employeeId:          string | null
+  isActive:            boolean
+  isActiveCheckedAt:   number  // timestamp of last DB-fresh is_active check (ISSUE-023)
+  allowLogin:          boolean  // tenant.allow_login — false blocks all access for this workspace
+  allowLoginCheckedAt: number  // timestamp of last DB-fresh allow_login check (G11)
+  expiresAt:           number
 }
 
 // Per-user profile cache (5-min TTL) — avoids DB hit on every request
@@ -30,7 +31,20 @@ const profileCache    = new Map<string, ProfileCacheEntry>()
 const CACHE_TTL       = 5 * 60 * 1000
 // Re-verify is_active from DB this often even on cache hits — bounds the window
 // during which a deactivated account can still make authenticated requests.
+// (G11) This is also the measured access-revocation SLA: on a deactivation
+// or a workspace login-disable, every API process — this cache is
+// per-process in-memory, so each instance enforces this independently —
+// must reject that user's next request within IS_ACTIVE_TTL of the DB
+// write, never the full CACHE_TTL. Verified end-to-end, across two
+// concurrently-running API instances sharing one DB, by
+// scripts/g11-access-revocation-latency-check.sh.
 const IS_ACTIVE_TTL   = 60 * 1000
+// G11: allow_login (tenant-wide login kill switch) used to be cached for the
+// full CACHE_TTL (5 min) with no recheck at all — a real revocation-latency
+// gap distinct from the per-user is_active path above. It now shares the
+// same IS_ACTIVE_TTL cadence and is refreshed together with is_active on the
+// same DB round-trip boundary below.
+const ALLOW_LOGIN_TTL = IS_ACTIVE_TTL
 
 /**
  * Per CLAUDE.md's tenant-licensing contract: a suspended/expired/cancelled
@@ -124,23 +138,30 @@ const authPlugin: FastifyPluginAsync = async (fastify) => {
       // Check cache first
       const cached = profileCache.get(userId)
       if (cached && cached.expiresAt > Date.now()) {
-        // allow_login is an operational setting — cached for the full CACHE_TTL (5 min).
-        // If an admin disables login for the workspace the effect lands within 5 minutes.
-        if (!cached.allowLogin) {
-          return reply.code(403).send({ error: 'TENANT_LOGIN_DISABLED', message: 'Login is not available for this workspace.' })
+        // Role/tenantId are stable for the full CACHE_TTL, but is_active and
+        // allow_login can each change at any moment (admin deactivates an
+        // account, or disables login for the whole workspace). Both are
+        // re-checked from DB together, every IS_ACTIVE_TTL / ALLOW_LOGIN_TTL
+        // (60 s — same value), so the revocation → block window is bounded
+        // to that, not the full 5-minute CACHE_TTL. (ISSUE-023, G11)
+        let isActive   = cached.isActive
+        let allowLogin = cached.allowLogin
+        const dueForRecheck = cached.isActiveCheckedAt + IS_ACTIVE_TTL < Date.now() ||
+          cached.allowLoginCheckedAt + ALLOW_LOGIN_TTL < Date.now()
+        if (dueForRecheck) {
+          const [{ data: freshProfile }, { data: freshTenantLogin }] = await Promise.all([
+            fastify.supabase.from('profiles').select('is_active').eq('id', userId).single(),
+            fastify.supabase.from('tenants').select('allow_login').eq('id', cached.tenantId).single(),
+          ])
+          isActive   = (freshProfile as any)?.is_active ?? false
+          // Fail closed on a query error, same as is_active — missing data
+          // must never be read as "login allowed".
+          allowLogin = (freshTenantLogin as any)?.allow_login ?? false
+          const now = Date.now()
+          profileCache.set(userId, { ...cached, isActive, isActiveCheckedAt: now, allowLogin, allowLoginCheckedAt: now })
         }
-        // Role/tenantId are stable for the full CACHE_TTL, but is_active can change
-        // at any moment (admin deactivates account). Re-check it from DB every
-        // IS_ACTIVE_TTL (60 s) so the deactivation → block window stays tight. (ISSUE-023)
-        let isActive = cached.isActive
-        if (cached.isActiveCheckedAt + IS_ACTIVE_TTL < Date.now()) {
-          const { data: freshProfile } = await fastify.supabase
-            .from('profiles')
-            .select('is_active')
-            .eq('id', userId)
-            .single()
-          isActive = (freshProfile as any)?.is_active ?? false
-          profileCache.set(userId, { ...cached, isActive, isActiveCheckedAt: Date.now() })
+        if (!allowLogin) {
+          return reply.code(403).send({ error: 'TENANT_LOGIN_DISABLED', message: 'Login is not available for this workspace.' })
         }
         if (!isActive) {
           return reply.code(401).send({ error: 'Unauthorized', message: 'Account is deactivated' })
@@ -228,13 +249,14 @@ const authPlugin: FastifyPluginAsync = async (fastify) => {
       }
 
       profileCache.set(userId, {
-        tenantId:          profile.tenant_id,
-        role:              profile.role,
-        employeeId:        (profile as any).employee_id ?? null,
-        isActive:          (profile as any).is_active ?? true,
-        isActiveCheckedAt: Date.now(),
-        allowLogin:        tenant.allow_login,
-        expiresAt:         Date.now() + CACHE_TTL,
+        tenantId:            profile.tenant_id,
+        role:                profile.role,
+        employeeId:          (profile as any).employee_id ?? null,
+        isActive:            (profile as any).is_active ?? true,
+        isActiveCheckedAt:   Date.now(),
+        allowLogin:          tenant.allow_login,
+        allowLoginCheckedAt: Date.now(),
+        expiresAt:           Date.now() + CACHE_TTL,
       })
 
       request.tenantId   = profile.tenant_id

@@ -120,7 +120,9 @@ export default async function payrollExportsRoutes(fastify: FastifyInstance) {
       employer_pf:           r.employer_pf,
       employer_eps:          r.employer_eps,
       edli_contribution:     r.edli_contribution,
-      total_employer:        ((r.employer_pf ?? 0) + (r.employer_eps ?? 0) + (r.edli_contribution ?? 0)),
+      // employer_pf/employer_eps/edli_contribution are DECIMAL — coerce before summing
+      // or the export prints a concatenated string instead of the total (G13 sweep).
+      total_employer:        (Number(r.employer_pf ?? 0) + Number(r.employer_eps ?? 0) + Number(r.edli_contribution ?? 0)),
       is_capped:             r.is_capped ? 'Y' : 'N',
     }))
     // Admin charges (0.5% of aggregate PF wages, EPFO standard rate) is a
@@ -484,11 +486,14 @@ export default async function payrollExportsRoutes(fastify: FastifyInstance) {
 
     const r2 = (n: number) => Math.round(n * 100) / 100
 
-    const sum = (arr: any[], key: string) => r2(arr.reduce((s, r) => s + (r[key] ?? 0), 0))
+    // All summed columns here (pf_wages, employee/employer_contribution, edli_contribution,
+    // ptax_amount, etc.) are DECIMAL — PostgREST serializes them as strings; coerce or 2+
+    // rows corrupt every challan total into NaN/garbage (G13 sweep).
+    const sum = (arr: any[], key: string) => r2(arr.reduce((s, r) => s + Number(r[key] ?? 0), 0))
 
     const ptaxByState: Record<string, number> = {}
     for (const r of ptaxRows) {
-      ptaxByState[r.state_code] = r2((ptaxByState[r.state_code] ?? 0) + (r.ptax_amount ?? 0))
+      ptaxByState[r.state_code] = r2((ptaxByState[r.state_code] ?? 0) + Number(r.ptax_amount ?? 0))
     }
 
     // Admin charges = 0.50% of aggregate PF wages (EPFO standard rate),
@@ -523,7 +528,7 @@ export default async function payrollExportsRoutes(fastify: FastifyInstance) {
         employee_count:        esiRows.length,
       },
       ptax: {
-        total_remittance: r2(ptaxRows.reduce((s, r) => s + (r.ptax_amount ?? 0), 0)),
+        total_remittance: r2(ptaxRows.reduce((s, r) => s + Number(r.ptax_amount ?? 0), 0)),
         by_state:         ptaxByState,
         employee_count:   ptaxRows.length,
       },
@@ -532,7 +537,7 @@ export default async function payrollExportsRoutes(fastify: FastifyInstance) {
         sum(epfRows, 'employer_pf')          + sum(epfRows, 'employer_eps') +
         sum(epfRows, 'edli_contribution')    + epfAdminCharges +
         sum(esiRows, 'total_contribution')   +
-        ptaxRows.reduce((s: number, r: any) => s + (r.ptax_amount ?? 0), 0)
+        ptaxRows.reduce((s: number, r: any) => s + Number(r.ptax_amount ?? 0), 0)
       ),
     }
 

@@ -387,6 +387,7 @@ export default async function compensationMasterRoutes(fastify: FastifyInstance)
           .from('employee_compensations')
           .delete()
           .eq('id', (newComp as any).id)
+          .eq('tenant_id', req.tenantId)
 
         if (rollbackErr) {
           req.log.error(

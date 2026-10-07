@@ -671,6 +671,7 @@ export default async function preJoineeRoutes(fastify: FastifyInstance) {
       data = upd.data; error = upd.error
     } else {
       const ins = await fastify.supabase
+        // lint-tenant-ok: `row` (defined above) already includes tenant_id: tenantId in its object literal — not visible to the scanner through the variable indirection
         .from('pre_joinee_invitations')
         .insert(row)
         .select()

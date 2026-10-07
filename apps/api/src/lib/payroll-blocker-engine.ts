@@ -180,10 +180,17 @@ const RULE_CLASSIFICATIONS: RuleClassification[] = [
     ],
     ruleCode: 'NEGATIVE_NET',
   },
-  // Excessive LOP
+  // Excessive LOP. Matches both the snake_case field name and the
+  // human-readable "LOP days" phrasing runs.ts actually produces — found by
+  // wiring this rule into a live caller for the first time (closing audit
+  // finding G02): the original /lop_days.*exceed/i pattern requires a
+  // literal underscore and never matched real "LOP days (X) exceed..."
+  // text, silently falling through to the slip_validation stage fallback
+  // (PAYROLL_NAN, critical, blocking) instead of this rule (warning,
+  // non-blocking) — verified via a real payroll run, not assumed.
   {
     patterns: [
-      /lop_days.*exceed/i,
+      /lop[\s_]?days.*exceed/i,
       /excessive lop/i,
     ],
     ruleCode: 'LOP_EXCESSIVE',
@@ -265,12 +272,23 @@ const DEFAULT_RULES: Record<string, Omit<ValidationRuleInput, 'enabled'>> = {
     stage: 'slip_validation',
     remediation_route: '/admin/payroll/salary-components',
   },
+  // G02 (release blocker, not just a visible warning): an employee whose
+  // lop_days exceeds total_working_days for the period is a data-integrity
+  // red flag (a miscounted/misconfigured attendance calendar, not a
+  // legitimate pay outcome) — it must block finalization by default, the
+  // same way MISSING_ATTENDANCE_DATA and OPEN_BLOCKERS already do elsewhere
+  // in this handler, not merely warn. The existing force_finalize +
+  // override_reason mechanism is the "explicitly approved business rule"
+  // escape hatch: it requires a human-entered reason, is restricted to
+  // super_admin when dual control is enabled, and persists to this exact
+  // row (status='ignored', resolved_by, resolved_at, resolution_note) when
+  // used — see the "Open-blockers gate" override handling in runs.ts.
   LOP_EXCESSIVE: {
     code: 'LOP_EXCESSIVE',
     name: 'Excessive LOP Days',
     description: 'LOP days exceed total working days for the period.',
-    severity: 'warning',
-    blocking: false,
+    severity: 'critical',
+    blocking: true,
     stage: 'slip_validation',
     remediation_route: '/admin/attendance/muster-roll',
   },

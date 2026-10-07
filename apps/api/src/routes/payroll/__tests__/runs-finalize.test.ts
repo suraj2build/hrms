@@ -188,9 +188,23 @@ function buildBaseSupabase(opts: MockOpts) {
       update: slipUpdateSpy,
     }),
     attendance_daily: () => ({ select: () => genericChain({ data: [{ employee_id: EMP_ID, day_fraction: 1 }], error: null }, { paged: true }) }),
+    // LOCKED — the attendance-closure gate (runs.ts, right before the
+    // maker-checker commit point) rejects with 423 ATTENDANCE_NOT_LOCKED
+    // when this reads as OPEN/missing; tests here need to reach past it to
+    // exercise the maker-checker commit, which now happens AFTER this gate.
+    attendance_period_locks: () => ({ select: () => genericChain({ data: { state: 'LOCKED' }, error: null }) }),
     payroll_run_blockers:    () => ({ select: () => genericChain({ data: [], error: null }) }),
-    payroll_validation_runs: () => ({ select: () => genericChain({ data: null, error: null }) }),
-    leave_requests:          () => ({ select: () => genericChain({ data: opts.staleRows ?? [], error: null }) }),
+    // A completed, non-blocking validation run — the validation-run gate
+    // (also now ahead of the deferred maker-checker commit point) rejects
+    // with 422 VALIDATION_NOT_CLEARED when no such run is found.
+    payroll_validation_runs: () => ({ select: () => genericChain({
+      data: { id: 'val-1', status: 'completed', is_payroll_blocked: false, error_count: 0, completed_at: '2099-06-01T00:00:00.000Z' },
+      error: null,
+    }) }),
+    // paged: true — leave_requests is now read via fetchAllRows() (see
+    // runs.ts's staleness guard); without this, range() ignores `from` and
+    // keeps returning the same non-empty page forever, hanging the test.
+    leave_requests:          () => ({ select: () => genericChain({ data: opts.staleRows ?? [], error: null }, { paged: true }) }),
     payroll_statutory_settings: () => ({ select: () => genericChain({ data: { tds_enabled: false, tds_default_regime: 'new' }, error: null }) }),
   }
 

@@ -106,6 +106,7 @@ async function flushIssues(
       ...iss,
     }))
     const { error } = await supabase
+      // lint-tenant-ok: chunk rows already carry tenant_id (spread with tenant_id: tenantId above) — insert payload is tenant-scoped even though the literal isn't inline in this query chain
       .from('attendance_reconciliation_issues')
       .insert(chunk)
     if (error) {

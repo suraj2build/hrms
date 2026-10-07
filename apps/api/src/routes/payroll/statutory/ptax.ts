@@ -9,7 +9,7 @@ import { computePTax } from '../../../lib/statutory/ptax-engine.js'
 import type { PTaxSlab } from '../../../lib/statutory/ptax-engine.js'
 import { logAction } from '../../../lib/audit-service.js'
 import { HR_ADMIN_ROLES } from '../../../lib/rbac.js'
-import { fetchAllRows } from '../../../lib/supabase-paginate.js'
+import { fetchAllRows, fetchAllRowsByKeyset } from '../../../lib/supabase-paginate.js'
 import { serverError, ErrorCode } from '../../../lib/api-errors.js'
 
 export default async function ptaxRoutes(fastify: FastifyInstance) {
@@ -367,6 +367,7 @@ export default async function ptaxRoutes(fastify: FastifyInstance) {
           .from('ptax_contributions')
           .select('*')
           .eq('tenant_id', req.tenantId)
+          .order('id')
         if (parsed.data.month) q = q.eq('contribution_month', parsed.data.month)
         if (parsed.data.employee_id) q = q.eq('employee_id', parsed.data.employee_id)
         return q.range(from, to)
@@ -433,6 +434,7 @@ export default async function ptaxRoutes(fastify: FastifyInstance) {
           .select('id, employee_code, site_id')
           .eq('tenant_id', req.tenantId)
           .eq('status', 'active')
+          .order('id')
           .range(from, to),
       )
     } catch (empErr) {
@@ -440,13 +442,19 @@ export default async function ptaxRoutes(fastify: FastifyInstance) {
     }
 
     // Resolve site state_code separately to avoid the FK-embed failure.
+    // Chunked: a retail-chain tenant can have 1,000+ sites (site_type/region/
+    // zone are first-class dimensions elsewhere in this codebase), so a
+    // single unchunked .in() risks PostgREST's silent 1,000-row cap.
     const siteIds = [...new Set(empList.map(e => e.site_id).filter(Boolean))] as string[]
     const siteStateMap = new Map<string, string>()
-    if (siteIds.length > 0) {
+    const SITE_CHUNK = 100
+    for (let i = 0; i < siteIds.length; i += SITE_CHUNK) {
       const { data: siteRows } = await fastify.supabase
+        // lint-query-ok: chunked to SITE_CHUNK (100) ids per request above
         .from('sites')
         .select('id, state_code')
-        .in('id', siteIds)
+        .in('id', siteIds.slice(i, i + SITE_CHUNK))
+        .eq('tenant_id', req.tenantId)
       for (const s of (siteRows ?? []) as any[]) {
         if (s.state_code) siteStateMap.set(s.id, s.state_code)
       }
@@ -456,13 +464,29 @@ export default async function ptaxRoutes(fastify: FastifyInstance) {
     // Priority: ptax_state_config (manual) > lwf_state_config (shared work state)
     //           > sites.state_code (auto). An employee works in one state, so the
     //           LWF state assignment also drives PT when PT's own isn't set.
-    const [{ data: stateConfigs }, { data: lwfStateConfigs }] = await Promise.all([
-      fastify.supabase.from('ptax_state_config')
-        .select('employee_id, state_code').eq('tenant_id', req.tenantId)
-        .order('effective_from', { ascending: false }),
-      fastify.supabase.from('lwf_state_config')
-        .select('employee_id, state_code').eq('tenant_id', req.tenantId)
-        .order('effective_from', { ascending: false }),
+    //
+    // fetchAllRows() on both: neither table is deduplicated to "latest row
+    // per employee" at the query level (the code below picks the first seen
+    // per employee during iteration instead), so a plain, unpaginated read
+    // is at least one row per employee and can be more for anyone with a
+    // state-reassignment history. Found by actually running this endpoint
+    // against 2,200 real employees (scripts/pagination-scale-check.sh):
+    // 1,200 of them — everyone past the 1,000-row cap — came back with
+    // state=null ("skipped_no_state"), silently excluding them from PTax
+    // entirely with no error.
+    const [stateConfigs, lwfStateConfigs] = await Promise.all([
+      fetchAllRows<{ employee_id: string; state_code: string }>((from, to) =>
+        fastify.supabase.from('ptax_state_config')
+          .select('employee_id, state_code').eq('tenant_id', req.tenantId)
+          .order('effective_from', { ascending: false })
+          .order('id', { ascending: true })
+          .range(from, to)),
+      fetchAllRows<{ employee_id: string; state_code: string }>((from, to) =>
+        fastify.supabase.from('lwf_state_config')
+          .select('employee_id, state_code').eq('tenant_id', req.tenantId)
+          .order('effective_from', { ascending: false })
+          .order('id', { ascending: true })
+          .range(from, to)),
     ])
 
     // Map employee_id → most recent manual state override (PT first, else LWF)
@@ -490,44 +514,108 @@ export default async function ptaxRoutes(fastify: FastifyInstance) {
     // Gross = gross_pay from payroll_slips where status = finalized for this month.
     // For employees without a finalized slip, fall back to sum of all earning
     // components from their active compensation (pro-rated estimate).
-    const { data: slipRows } = await fastify.supabase
-      .from('payroll_slips')
-      .select('employee_id, gross_pay')
-      .eq('tenant_id', req.tenantId)
-      .eq('month', month)
-      .eq('status', 'finalized')
+    // fetchAllRowsByKeyset() — this is the authoritative PTax gross-wage
+    // source (slipGrossMap); at ≥1,001 finalized slips in the month a plain
+    // query would silently push the overflow onto the compensation fallback
+    // below. Keyset, not offset: a concurrent finalize can insert a new slip
+    // anywhere in the random-UUID key space while this read is paging,
+    // which offset/.range() pagination would silently skip or duplicate
+    // even with a deterministic .order('id') — see supabase-paginate.test.ts.
+    const slipRows = await fetchAllRowsByKeyset((afterId, limit) => {
+      let q = fastify.supabase
+        .from('payroll_slips')
+        .select('id, employee_id, gross_pay, component_breakdown')
+        .eq('tenant_id', req.tenantId)
+        .eq('month', month)
+        .eq('status', 'finalized')
+        .order('id', { ascending: true })
+        .limit(limit)
+      if (afterId) q = q.gt('id', afterId)
+      return q
+    })
 
+    // gross_pay is NUMERIC — coerce here so slab lookups/comparisons downstream get a
+    // real number, not a string (G13 sweep).
     const slipGrossMap = new Map<string, number>(
-      ((slipRows ?? []) as any[]).map(r => [r.employee_id, r.gross_pay ?? 0]),
+      (slipRows as any[]).map(r => [r.employee_id, Number(r.gross_pay ?? 0)]),
     )
+
+    // Financial-chain reconciliation: unlike EPF/ESI just above (which both
+    // take their employee-deduction amount straight from the finalized
+    // slip's PF_EMPLOYEE/ESI_EMPLOYEE line — "slip is source of truth", so
+    // the filing table can never diverge from the actual payslip), PTax here
+    // only reused the slip's GROSS WAGES and then RECOMPUTED ptax_amount
+    // fresh against whatever ptax_slabs/ptax_state_settings are configured
+    // right now. If a tenant edits its PT slabs (or disables a state) any
+    // time between finalizing payroll and running this compute step — two
+    // separate actions, not atomic — the ptax_contributions row used for
+    // filing/deposit would show a DIFFERENT amount than what the employee's
+    // actual payslip deducted and net_pay reflects, exactly the "deposit
+    // doesn't match the filing" class of bug EPF/ESI were already fixed
+    // against. Mirror that fix: take the slip's own PTAX line when present.
+    const slipPtaxMap = new Map<string, number>()
+    for (const r of slipRows as any[]) {
+      const breakdown = Array.isArray(r.component_breakdown) ? r.component_breakdown : []
+      const ptaxLine = breakdown.find((c: any) => String(c?.code ?? '').toUpperCase() === 'PTAX')
+      if (ptaxLine) slipPtaxMap.set(r.employee_id, Number(ptaxLine.monthly_amount ?? 0))
+    }
 
     // Fallback: gross from active compensation components (earning type only)
     let fallbackGrossMap = new Map<string, number>()
     const empsMissingSlip = empList.filter(e => !slipGrossMap.has(e.id)).map(e => e.id)
 
     if (empsMissingSlip.length > 0) {
-      const { data: compRows } = await fastify.supabase
-        .from('employee_compensations')
-        .select('id, employee_id')
-        .eq('tenant_id', req.tenantId)
-        .eq('is_active', true)
-        .in('employee_id', empsMissingSlip)
+      // Chunked AND fetchAllRows-paginated — same request-size fix as the
+      // identical pattern in esi.ts/epf.ts, found by actually running
+      // against 2,200 real employees (scripts/pagination-scale-check.sh).
+      const compRows: Array<{ id: string; employee_id: string }> = []
+      for (let i = 0; i < empsMissingSlip.length; i += 100) {
+        const chunkIds = empsMissingSlip.slice(i, i + 100)
+        const chunkRows = await fetchAllRows<{ id: string; employee_id: string }>((from, to) =>
+          fastify.supabase
+            .from('employee_compensations')
+            .select('id, employee_id')
+            .eq('tenant_id', req.tenantId)
+            .eq('is_active', true)
+            .in('employee_id', chunkIds)
+            .order('id')
+            .range(from, to),
+        )
+        compRows.push(...chunkRows)
+      }
 
       const compIdToEmpId = new Map<string, string>(
-        ((compRows ?? []) as any[]).map((c: any) => [c.id, c.employee_id]),
+        compRows.map((c: any) => [c.id, c.employee_id]),
       )
 
-      if (compRows && compRows.length > 0) {
-        const { data: compCompRows } = await fastify.supabase
-          .from('employee_compensation_components')
-          .select('compensation_id, computed_monthly, salary_components!inner(component_type)')
-          .in('compensation_id', (compRows as any[]).map(c => c.id))
-          .eq('salary_components.component_type', 'earning')
+      if (compRows.length > 0) {
+        // Chunked AND fetchAllRows-paginated — same reasoning as the
+        // identical pattern in epf.ts/esi.ts: the row-per-id multiplier here
+        // is NOT 1 (several earning components per compensation), so even a
+        // 100-id chunk can exceed a single unpaginated page.
+        const compIds = (compRows as any[]).map(c => c.id)
+        const compCompRows: any[] = []
+        for (let i = 0; i < compIds.length; i += 100) {
+          const chunkIds = compIds.slice(i, i + 100)
+          const chunkRows = await fetchAllRows<any>((from, to) =>
+            fastify.supabase
+              .from('employee_compensation_components')
+              .select('compensation_id, computed_monthly, salary_components!inner(component_type)')
+              .in('compensation_id', chunkIds)
+              .eq('salary_components.component_type', 'earning')
+              .order('id')
+              .range(from, to),
+          )
+          compCompRows.push(...chunkRows)
+        }
 
-        for (const row of (compCompRows ?? []) as any[]) {
+        // computed_monthly is NUMERIC — coerce or an employee with 2+ earning
+        // components corrupts their fallback gross into NaN, failing
+        // ptax_contributions.gross_salary's NOT NULL constraint (G13 sweep).
+        for (const row of compCompRows) {
           const empId = compIdToEmpId.get(row.compensation_id)
           if (empId) {
-            fallbackGrossMap.set(empId, (fallbackGrossMap.get(empId) ?? 0) + (row.computed_monthly ?? 0))
+            fallbackGrossMap.set(empId, (fallbackGrossMap.get(empId) ?? 0) + Number(row.computed_monthly ?? 0))
           }
         }
       }
@@ -615,7 +703,14 @@ export default async function ptaxRoutes(fastify: FastifyInstance) {
 
       const result = computePTax(grossSalary, slabs, calendarMonth, stateCode)
       if (!sampleTrace) sampleTrace = result.traceSteps   // capture first computed employee's trace
-      if (result.ptaxAmount === 0) computedZero++
+
+      // Slip is the source of truth, same as EPF/ESI above: when a
+      // finalized slip actually has a PTAX line, file exactly that amount
+      // — never a freshly-recomputed figure that can drift from it if
+      // slabs/state settings changed after finalize.
+      const slipPtax = slipPtaxMap.get(emp.id)
+      const ptaxAmount = slipPtax !== undefined ? slipPtax : result.ptaxAmount
+      if (ptaxAmount === 0) computedZero++
 
       contributions.push({
         tenant_id:          req.tenantId,
@@ -625,23 +720,47 @@ export default async function ptaxRoutes(fastify: FastifyInstance) {
         state_code:         stateCode,
         financial_year,
         gross_salary:       grossSalary,
-        ptax_amount:        result.ptaxAmount,
+        ptax_amount:        ptaxAmount,
       })
     }
 
     // Remove stale rows for employees no longer in this month's deductible set
     // (e.g. dropped below the slab / state disabled since the last compute), so a
     // re-finalize cannot leave a phantom PT liability on the filing.
+    //
+    // Same fix as esi.ts's identical pattern: a single .not('employee_id',
+    // 'in', `(${allKeepIds.join(',')})`) encodes every kept id into one URL
+    // query parameter, which breaks before it reaches the server at
+    // enterprise headcount (found by running this endpoint for real against
+    // 1,200 employees — scripts/pagination-scale-check.sh). Fixed by finding
+    // the actual stale ids and deleting them in bounded .in()-chunks.
     {
-      const keepIds = contributions.map((c: any) => c.employee_id)
-      let delQ = fastify.supabase
-        .from('ptax_contributions')
-        .delete()
-        .eq('tenant_id', req.tenantId)
-        .eq('contribution_month', month)
-      if (keepIds.length > 0) delQ = delQ.not('employee_id', 'in', `(${keepIds.join(',')})`)
-      const { error: delErr } = await delQ
-      if (delErr) return serverError(req, reply, delErr, ErrorCode.DELETE_FAILED, 'Failed to clean up stale P-Tax contributions')
+      const keepSet = new Set(contributions.map((c: any) => c.employee_id))
+      let existingRows: Array<{ employee_id: string }>
+      try {
+        existingRows = await fetchAllRows((from, to) =>
+          fastify.supabase
+            .from('ptax_contributions')
+            .select('employee_id')
+            .eq('tenant_id', req.tenantId)
+            .eq('contribution_month', month)
+            .order('id')
+            .range(from, to),
+        )
+      } catch (existErr) {
+        return serverError(req, reply, existErr, ErrorCode.QUERY_FAILED, 'Failed to read existing P-Tax contributions for cleanup')
+      }
+      const staleIds = existingRows.map(r => r.employee_id).filter(id => !keepSet.has(id))
+      for (let i = 0; i < staleIds.length; i += 100) {
+        const chunk = staleIds.slice(i, i + 100)
+        const { error: delErr } = await fastify.supabase
+          .from('ptax_contributions')
+          .delete()
+          .eq('tenant_id', req.tenantId)
+          .eq('contribution_month', month)
+          .in('employee_id', chunk)
+        if (delErr) return serverError(req, reply, delErr, ErrorCode.DELETE_FAILED, 'Failed to clean up stale P-Tax contributions')
+      }
     }
 
     if (contributions.length > 0) {

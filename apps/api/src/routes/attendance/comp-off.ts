@@ -34,6 +34,7 @@ import { z }                    from 'zod'
 import { logAction }            from '../../lib/audit-service.js'
 import { generateCompOffRequests } from '../../lib/comp-off-service.js'
 import { resolveWoEmployees } from '../../lib/wo-credit-reconciler.js'
+import { fetchAllRows } from '../../lib/supabase-paginate.js'
 import {
   isHrAdmin, resolveCallerEmployeeId, getDirectReportIds, isDirectReport,
 } from '../../lib/manager-scope.js'
@@ -136,21 +137,28 @@ export default async function compOffRoute(fastify: FastifyInstance) {
       throw err
     }
 
-    // Fetch qualifying attendance_daily rows
-    let query = fastify.supabase
-      .from('attendance_daily')
-      .select('employee_id, date, worked_on_weekly_off, worked_on_holiday')
-      .eq('tenant_id', req.tenantId)
-      .gte('date', from_date)
-      .lte('date', to_date)
-      .or('worked_on_weekly_off.eq.true,worked_on_holiday.eq.true')
-
-    if (employee_id) {
-      query = query.eq('employee_id', employee_id)
-    }
-
-    const { data: qualifyingRaw, error: fetchErr } = await query
-    if (fetchErr) {
+    // Fetch qualifying attendance_daily rows. fetchAllRows(): when no
+    // employee_id is given this is a tenant-wide, date-range-only scan — a
+    // plain query would silently under-report qualifying days for a large
+    // tenant over a long range.
+    let qualifyingRaw: any[]
+    try {
+      qualifyingRaw = await fetchAllRows((from, to) => {
+        let query = fastify.supabase
+          .from('attendance_daily')
+          .select('employee_id, date, worked_on_weekly_off, worked_on_holiday')
+          .eq('tenant_id', req.tenantId)
+          .gte('date', from_date)
+          .lte('date', to_date)
+          .or('worked_on_weekly_off.eq.true,worked_on_holiday.eq.true')
+          .order('id')
+          .range(from, to)
+        if (employee_id) {
+          query = query.eq('employee_id', employee_id)
+        }
+        return query
+      })
+    } catch (fetchErr) {
       return serverError(req, reply, fetchErr, ErrorCode.QUERY_FAILED, 'Failed to fetch qualifying comp-off days')
     }
 

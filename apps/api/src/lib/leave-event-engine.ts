@@ -368,6 +368,7 @@ export async function expireStaleEventGrants(
     await supabase
       .from('leave_event_grants')
       .update({ status: 'expired' })
+      .eq('tenant_id', tenantId)
       .eq('id', grant.id)
 
     count++

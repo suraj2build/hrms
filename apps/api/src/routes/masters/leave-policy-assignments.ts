@@ -113,33 +113,55 @@ export default async function leavePolicyAssignmentsRoutes(fastify: FastifyInsta
       if (row.scope_type === 'site')          siteIds.push(row.scope_id)
     }
 
-    // Batch fetch names
-    const [emps, depts, locs, sites] = await Promise.all([
-      empIds.length ? fastify.supabase
-        .from('employees')
-        .select('id, first_name, last_name, employee_code')
-        .in('id', empIds)
-        .eq('tenant_id', req.tenantId)
-        .then(r => r.data ?? []) : [],
-      deptIds.length ? fastify.supabase
-        .from('departments')
-        .select('id, name')
-        .in('id', deptIds)
-        .eq('tenant_id', req.tenantId)
-        .then(r => r.data ?? []) : [],
-      locIds.length ? fastify.supabase
-        .from('work_locations')
-        .select('id, name, city')
-        .in('id', locIds)
-        .eq('tenant_id', req.tenantId)
-        .then(r => r.data ?? []) : [],
-      siteIds.length ? fastify.supabase
-        .from('sites')
-        .select('id, name, location')
-        .in('id', siteIds)
-        .eq('tenant_id', req.tenantId)
-        .then(r => r.data ?? []) : [],
-    ])
+    // Batch fetch names. Each lookup throws on error (including each
+    // chunk of the employees loop) instead of silently resolving to []
+    // and rendering those scope labels as blank/Unknown with no signal
+    // that the underlying query actually failed.
+    let emps: any[], depts: any[], locs: any[], sites: any[]
+    try {
+      ;[emps, depts, locs, sites] = await Promise.all([
+        // Chunked: empIds is every employee with a direct assignment row,
+        // tenant-wide — can exceed a single .in() URL's safe size.
+        (async () => {
+          if (!empIds.length) return []
+          const out: any[] = []
+          for (let i = 0; i < empIds.length; i += 100) {
+            const chunkIds = empIds.slice(i, i + 100)
+            const { data, error } = await fastify.supabase
+              // lint-query-ok: chunked to 100 ids/request, <=100 rows per query, well under the 1,000-row cap
+              .from('employees')
+              .select('id, first_name, last_name, employee_code')
+              .in('id', chunkIds)
+              .eq('tenant_id', req.tenantId)
+            if (error) throw error
+            if (data) out.push(...data)
+          }
+          return out
+        })(),
+        deptIds.length ? fastify.supabase
+          .from('departments')
+          .select('id, name')
+          .in('id', deptIds)
+          .eq('tenant_id', req.tenantId)
+          .then(r => { if (r.error) throw r.error; return r.data ?? [] }) : [],
+        locIds.length ? fastify.supabase
+          .from('work_locations')
+          .select('id, name, city')
+          .in('id', locIds)
+          .eq('tenant_id', req.tenantId)
+          .then(r => { if (r.error) throw r.error; return r.data ?? [] }) : [],
+        siteIds.length ? fetchAllRows((from, to) =>
+          fastify.supabase
+            .from('sites')
+            .select('id, name, location')
+            .in('id', siteIds)
+            .eq('tenant_id', req.tenantId)
+            .range(from, to),
+        ) : [],
+      ])
+    } catch (error) {
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to resolve scope labels for leave policy assignments')
+    }
 
     const empMap  = new Map((emps  as any[]).map(e => [e.id, e]))
     const deptMap = new Map((depts as any[]).map(d => [d.id, d]))

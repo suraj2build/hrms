@@ -261,6 +261,7 @@ export default async function importRoutes(fastify: FastifyInstance) {
         if (ageMs > STUCK_TIMEOUT_MS) {
           // Mark stale job as failed so it no longer blocks new imports
           await fastify.supabase
+            // lint-tenant-ok: activeJob.id came from the tenant-filtered query above (.eq('tenant_id', req.tenantId)), so this id already belongs to this tenant
             .from('import_jobs')
             .update({ status: 'failed', completed_at: new Date().toISOString() })
             .eq('id', (activeJob as any).id)

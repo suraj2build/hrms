@@ -3,10 +3,10 @@
  * Schema-drift guardrail.
  *
  * Why this exists: the HRMS API talks to a Supabase Postgres whose real shape is
- * the *partial* result of applying `supabase/migrations/*.sql` — some migrations
- * abort part-way (see KNOWN_FAILING below), so a naive "apply cleanly" rebuild
- * does NOT match production. This script reproduces production's state and then
- * checks that every column the API references actually exists.
+ * the result of applying `supabase/migrations/*.sql` in order (see KNOWN_FAILING
+ * below for any migration presently expected to abort part-way). This script
+ * reproduces that state and then checks that every column the API references
+ * actually exists.
  *
  * What it does:
  *   1. Applies every migration in order to the target Postgres, continue-on-error,
@@ -37,26 +37,19 @@ const SKIP_APPLY = process.argv.includes('--skip-apply')
 // Migrations known to abort part-way against a clean DB. They define production's
 // actual (partial) shape. A migration failing here is EXPECTED; anything else is
 // new breakage and fails the build. Keep this list short and documented.
-const KNOWN_FAILING = new Set([
-  // 016_lean_employees.sql: DROP COLUMN ... manager_id aborts here because
-  // migration 007's "employees_manager_team" RLS policy reads that column
-  // directly ("policy ... depends on column manager_id"). This is NOT a
-  // simple syntax bug to patch with CASCADE — completing this migration
-  // (SYSCERT_AUDIT_2026-08-02.md High #23 investigation) revealed that live
-  // API routes (apps/api/src/routes/analytics/index.ts,
-  // apps/api/src/routes/executive/index.ts,
-  // apps/api/src/routes/letters/index.ts,
-  // apps/api/src/routes/intelligence/index.ts) still read
-  // employees.employment_type/gender/pan_number/uan_number/esi_number/address
-  // — the exact columns this migration's later statements would drop.
-  // Production has almost certainly hit the same abort and never actually
-  // dropped these columns either, which is why that code still works.
-  // A real fix requires migrating those routes to the normalized tables
-  // (job_history, employee_personal_info, employee_bank_statutory,
-  // employee_addresses) FIRST, then completing this migration — a separate,
-  // larger, cross-cutting piece of work, not part of this fix.
-  '016_lean_employees.sql',
-])
+//
+// 016_lean_employees.sql was listed here previously on the theory that its
+// DROP COLUMN manager_id would abort against migration 007's
+// "employees_manager_team" RLS policy. That is not what the file does: it
+// already runs `DROP POLICY IF EXISTS employees_manager_team ON employees;`
+// immediately before dropping the column (see 016_lean_employees.sql itself).
+// Verified directly: applying 001–016 in order against a clean DB succeeds
+// end to end, and the resulting `employees` table has already lost
+// pan_number/uan_number/esi_number/address/gender/manager_id/etc — this
+// script's own column-reference audit (step 3) confirms zero drift across
+// all of apps/api/src against that same post-016 schema. Removed from
+// KNOWN_FAILING accordingly.
+const KNOWN_FAILING = new Set([])
 
 function psql(sql) {
   return execFileSync('psql', ['-v', 'ON_ERROR_STOP=1', '-tAqc', sql], {

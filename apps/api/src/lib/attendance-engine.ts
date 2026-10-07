@@ -57,6 +57,7 @@ import { resolveViaRotationPolicy }                    from './rotation-engine.j
 import { resolveShiftWithAttribution, toShiftMeta, type ResolvedShift } from './shift-resolution-engine.js'
 import { isShiftAttributionEnabled } from './attendance-flags.js'
 import { generateCompOffRequests }                     from './comp-off-service.js'
+import { fetchAllRows }                                 from './supabase-paginate.js'
 import { resolveLeaveDayFraction, type LeaveSession }    from './leave-engine.js'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -655,6 +656,7 @@ async function fetchPunches(
   }
 
   const { data, error: punchErr } = await supabase
+    // lint-query-ok: scoped to a single employee_id over a single-day (or single-shift) punch window — cannot plausibly exceed the 1,000-row cap
     .from('attendance_punch_logs')
     .select('id, punched_at, direction, source')
     .eq('tenant_id', tenantId)
@@ -1315,18 +1317,33 @@ export async function recomputeRange(
   // Batch-fetch existing {status, day_fraction, computed_source} for delta detection
   // and recompute-protection filtering. Also pull the prior shift attribution so a
   // shift change across a recompute can be recorded (AHI-3 / migration 261).
-  const { data: existing } = await supabase
-    .from('attendance_daily')
-    .select('employee_id, date, status, day_fraction, computed_source, expected_shift_id, shift_start_time, resolution_source')
-    .eq('tenant_id', tenant_id)
-    .eq('employee_id', employee_id)
-    .in('date', dates)
+  //
+  // fetchAllRows(), scoped by date range rather than .in('date', dates):
+  // this is single-employee, but nothing caps from_date/to_date (several
+  // callers — recompute.ts, upload.ts, approval-service.ts — pass through
+  // a caller-supplied range with no maximum-span validation). A range
+  // spanning more than ~2.7 years produces >1,000 calendar dates, which
+  // both risks the .in() URL-length limit and the PostgREST 1,000-row
+  // response cap — silently truncating beforeMap and making the
+  // recompute-protection check below blind to protected dates past the
+  // cap, which could let a recompute silently overwrite them.
+  const existing = await fetchAllRows((from, to) =>
+    supabase
+      .from('attendance_daily')
+      .select('employee_id, date, status, day_fraction, computed_source, expected_shift_id, shift_start_time, resolution_source')
+      .eq('tenant_id', tenant_id)
+      .eq('employee_id', employee_id)
+      .gte('date', from_date)
+      .lte('date', to_date)
+      .order('date')
+      .range(from, to),
+  )
 
   const beforeMap = new Map<string, {
     status: string; day_fraction: number; computed_source: string
     expected_shift_id: string | null; shift_start_time: string | null; resolution_source: string | null
   }>(
-    ((existing ?? []) as Array<any>)
+    (existing as Array<any>)
       .map((r) => [`${r.employee_id}:${r.date}`, {
         status:            r.status,
         day_fraction:      r.day_fraction,
@@ -1378,6 +1395,7 @@ export async function recomputeRange(
 
   if (dbRows.length > 0) {
     const { error } = await supabase
+      // lint-tenant-ok: dbRows come from computeDay(), whose returned row always carries tenant_id — upsert payload is tenant-scoped even though the literal isn't inline in this query chain
       .from('attendance_daily')
       .upsert(dbRows, { onConflict: 'tenant_id,employee_id,date' })
 
