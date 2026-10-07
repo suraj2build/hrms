@@ -1,11 +1,11 @@
 # CognixHR Production-Readiness — Final Qualification Report
 
 **Branch:** `fix/g13-numeric-coercion-sweep` (PR #29, `suraj2build/hrms`)
-**HEAD at report time:** `c622a08ce2d946d14d08eaeb51ba458a63f500b8`
-**Ahead of `origin/main`:** 62 commits (0 behind)
+**HEAD at report time:** `15e582d0`
+**Ahead of `origin/main`:** 64 commits (0 behind)
 **Unpushed vs `origin/fix/g13-numeric-coercion-sweep`:** 0 commits — **pushed**
 **PR #29 state:** open, **draft**, not merged, base `main` — unchanged this round
-**Push status:** done. Pushed `0d798014..4d8b006b` then `4d8b006b..c622a08c`. Real CI ran on `4d8b006b` (6 of 7 checks green, same E2E gap) and on `c622a08c` via manual dispatch (see §4, Gate 1 — this round fixed a correctness bug in the verifier itself and confirmed the current actual secrets state directly from the job log, not from an unverified claim).
+**Push status:** done. Pushed `0d798014..4d8b006b`, `4d8b006b..c622a08c`, `c622a08c..f5e48e7b`, then `f5e48e7b..15e582d0`. This round hardens the staging-candidate verifier further (§4, Gate 1) in response to review that correctly characterized the prior round as preparing qualification, not completing it — it does not itself advance Gates 1–4, since there is still no staging environment to run any of this against.
 
 This report is the single source of truth for "what is actually true right
 now." Where it disagrees with an earlier narrative elsewhere in this
@@ -213,15 +213,62 @@ that recorded value doesn't match the `API_URL` under test. Verified with
 a deliberate fixture: both SHAs matching while the web build points at a
 different API host correctly fails; a consistent fixture correctly passes.
 
-**Still blocked on an administrator**, not on anything further I can do
-unilaterally: adding the nine secrets above requires GitHub repo-admin
-access my GitHub App permissions don't expose as a tool, and confirming
-what environment those URLs should actually point at (a dedicated staging
-deployment of this exact candidate, with its migrations applied — not a
-shared "alpha" environment that may not reflect this PR) is an infra
-decision, not a code one. The verifier is now ready to actually validate
-that deployment the moment it exists; it has not been able to do so yet,
-because the secrets it needs have never been present when it ran.
+**A further review correctly characterized the previous round as
+preparing qualification, not completing it, and named three specific
+remaining gaps in the verifier itself.** All three are fixed in `15e582d0`:
+
+1. *Migration presence proves tracking entries exist, not that content or
+   resulting schema match.* Presence-only was always going to miss a
+   migration edited after being applied (file now says X, but the DB was
+   built from the old Y), and never actually tested whether the staging
+   DB's real shape — as opposed to a theoretical reconstruction — has
+   what the code needs. Added `scripts/db/check-migration-content-drift.mjs`
+   (compares `schema_migrations.statements` — confirmed by direct test to
+   hold the real applied SQL — against each file's current content) and
+   wired `check-schema-drift.mjs --skip-apply` into the verifier to
+   introspect the staging connection directly. Verified against the real
+   437-migration history: a one-line edit to an already-applied file is
+   caught, a comment-only edit is correctly ignored, and a temporarily
+   renamed column the API code depends on is caught and clears once
+   reverted. This testing also surfaced a real bug — the content query's
+   default 1MB exec buffer overflowed against the full migration corpus
+   (`ENOBUFS`) — fixed by raising it to 200MB; caught before it could ever
+   produce a false pass in CI.
+2. *Build metadata proves what the build script wrote, not what the
+   running client does.* A platform rewrite, a runtime config override,
+   or a stale cached bundle would all pass the SHA/metadata checks while
+   the deployed page actually calls something else. Added
+   `apps/e2e/verify-web-api-wiring.mjs`: loads the real page in a real
+   browser (Playwright, already available in the CI job) and asserts it
+   actually issues a request to the checked API's origin — behavior, not
+   a side-channel file. Verified against a fixture that genuinely calls
+   the checked API (passes) and one that calls a different host entirely,
+   standing in for a runtime override (fails, naming the origins actually
+   observed). Could not be pointed at the real live Vercel preview from
+   this sandbox — its egress proxy blocks arbitrary external hosts by
+   policy — so this is verified against a controlled fixture, not (yet)
+   the real deployed PR preview; it will run for real the next time this
+   workflow does, once secrets exist.
+3. *A missing-secret result proves the secret was unavailable to that
+   job, not that it is absent everywhere.* GitHub Environments scope
+   secrets separately from repository secrets, and this job declares no
+   `environment:` key — if any of the required secrets exist under an
+   Environment rather than as a plain repository secret, they would
+   report as missing regardless. Checked directly rather than assumed:
+   both `GET .../environments` and `GET .../actions/secrets` (names only,
+   values are never retrievable) return "not permitted through this
+   proxy" — a firm tool boundary, not a transient failure. Documented as
+   an explicit open question in `apps/e2e/README.md`, with the exact
+   `environment:` line to add if an administrator confirms one applies.
+
+**Still blocked on an administrator and on infrastructure that doesn't
+exist yet** — not on anything further this kind of local work can close:
+provisioning the actual staging deployment, adding the real secrets (and
+confirming whether any need an `environment:` scope), and then letting
+this now-six-check-plus-dynamic verifier run against it for the first
+time. No amount of additional local hardening substitutes for that one
+real run — the next correction this section needs is its result, not
+another gap found by inspection.
 
 **Gate 2 — Validate against actual Supabase/PostgREST**: migrations, RLS,
 authentication, pagination, and financial reconciliation at 2,200+
@@ -325,9 +372,12 @@ four gates pass, not until local work runs out.
 
 Every claim in this report is backed by a script, a commit, or both:
 
-- Commits this round (newest first): `c622a08c` (fixed the verifier's
-  merge-SHA bug, made the DB check mandatory + full-history, added the
-  web↔API wiring check, re-tested DB logic against a real
+- Commits this round (newest first): `15e582d0` (migration content-drift +
+  resulting-schema checks against the real staging connection, dynamic
+  browser-based web↔API wiring check, environment-secrets-scoping gap
+  documented), `f5e48e7b` (Gate 1 report correction), `c622a08c` (fixed
+  the verifier's merge-SHA bug, made the DB check mandatory + full-history,
+  added the static web↔API wiring check, re-tested DB logic against a real
   `supabase db push`-populated table), `0d798014` (E2E candidate-SHA
   verification + fail-clear fix — first version, since corrected),
   `2ac092db`, `a6bed7c8` (G08 accounting correction), `ed8f2063`,
@@ -336,7 +386,8 @@ Every claim in this report is backed by a script, a commit, or both:
   commits `c315f76d` back through `1994b607` (G02/G03/G04/G06
   corrections, 223-row reconciliation). Pushed to
   `origin/fix/g13-numeric-coercion-sweep` as `9ab87791..07a08d8d`,
-  `07a08d8d..0d798014`, `0d798014..4d8b006b`, then `4d8b006b..c622a08c`.
+  `07a08d8d..0d798014`, `0d798014..4d8b006b`, `4d8b006b..c622a08c`,
+  `c622a08c..f5e48e7b`, then `f5e48e7b..15e582d0`.
 - CI run `37339052239` (job logs) — source of the merge-SHA discovery
   (`github.sha` = `18362fd5...` ≠ PR head `4d8b006b`) and of the original
   E2E secrets-missing finding. `workflow_dispatch` run `37351301793` on
