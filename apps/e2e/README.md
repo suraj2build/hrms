@@ -58,21 +58,42 @@ G09's financial-figure cross-checks), every Monday at 03:00 UTC, and on
 manual dispatch from the Actions tab.
 
 Before Playwright runs, the workflow verifies the target staging
-environment is actually running the commit being qualified —
-`scripts/verify-staging-candidate.sh` checks that:
+environment is actually running the commit being qualified, in two steps:
+
+**`scripts/verify-staging-candidate.sh`** (static/metadata + DB checks):
 1. the web app's `/version.json` reports the exact candidate commit SHA
    (the PR's head SHA on a pull_request run — **not** `github.sha`, which
    on pull_request events is GitHub's ephemeral merge-ref commit and will
    never match a real deployment);
 2. the API's `/health` reports the same SHA;
-3. the web build was actually compiled to call that same API (its
-   build-time `VITE_API_URL`, recorded in `version.json`, must match the
-   API URL just checked) — matching SHAs on both sides does not by itself
-   prove the web app is wired to call the API that was checked;
+3. **(static)** the web build was compiled to call that same API (its
+   build-time `VITE_API_URL`, recorded in `version.json`) — this proves
+   what the build script *wrote*, not what the running client *does*; see
+   the dynamic check below for the behavioral confirmation;
 4. the staging database's `supabase_migrations.schema_migrations` has an
    entry for **every** migration file in `supabase/migrations/`, not just
    the latest — a staging DB can have the newest migration applied while
-   missing an earlier one this candidate's code still depends on.
+   missing an earlier one this candidate's code still depends on;
+5. none of those entries' recorded content (the actual applied SQL,
+   confirmed to be what `schema_migrations.statements` holds) has drifted
+   from the current file — a migration edited after being applied would
+   still show as "present" in check 4 while the staging schema reflects
+   the old content;
+6. the staging database's actual resulting schema — introspected directly,
+   not reconstructed — has every column `apps/api/src` references. This
+   is the same audit `scripts/db/check-schema-drift.mjs` already runs in
+   CI against a scratch DB, run here with `--skip-apply` against the real
+   staging connection instead.
+
+**`apps/e2e/verify-web-api-wiring.mjs`** (dynamic — needs a real browser,
+so it runs as its own step after Playwright's Chromium is installed):
+loads the actual deployed web page and watches the network requests it
+really issues, asserting at least one targets the checked API's origin.
+Checks 1–3 above only prove the build was *compiled* correctly; they
+cannot catch a platform-level rewrite/redirect, a runtime config override
+fetched after page load, or a stale cached bundle serving an old build —
+this does, because it observes actual behavior instead of trusting
+build-time metadata.
 
 Any mismatch fails the job immediately, before spending 30 minutes running
 Playwright against what might be a stale or mismatched deployment.
@@ -90,6 +111,24 @@ Add these as GitHub repository secrets:
   **Not optional** — DB migration-state verification is a hard requirement
   for release qualification, not a nice-to-have; a missing credential here
   fails the job the same as a missing URL does.
+
+**A missing-secret failure in this job's log proves the secret was not
+visible to THIS job — not that it doesn't exist anywhere in the repo.**
+GitHub Actions secrets can be scoped to a specific
+[Environment](https://docs.github.com/en/actions/deployment/targeting-different-environments/using-environments-for-deployment)
+(Settings → Environments), and a job only sees an environment's secrets
+if it declares `environment: <name>`. This workflow's job currently
+declares no `environment:` key, so if any of the secrets above were
+configured under an Environment rather than as a plain repository secret,
+this job would report them as missing regardless of whether they exist.
+Checking which is the case requires repo-admin access to Settings →
+Environments (or the `GET /repos/{owner}/{repo}/environments` /
+`GET /repos/{owner}/{repo}/actions/secrets` API, which lists secret names
+only, never values) — neither is reachable from an automated session here.
+**If an administrator confirms a relevant Environment exists, add
+`environment: <that name>` to the `e2e` job in `.github/workflows/e2e.yml`**
+so this workflow can see its secrets; otherwise this job is already
+checking the right (repository-level) scope.
 
 After each run, download the `playwright-report` artifact for a full HTML report with screenshots.
 

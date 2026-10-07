@@ -52,9 +52,21 @@ jobs:
           fi
           echo "All required secrets are present."
 
+      # Playwright needs to be installed before both the dynamic wiring
+      # check below and the real E2E suite later — moved ahead of candidate
+      # verification (it used to run after) so the dynamic check has a
+      # browser available.
+      - name: Install Playwright
+        working-directory: apps/e2e
+        run: npm ci
+
+      - name: Install Playwright browsers
+        working-directory: apps/e2e
+        run: npx playwright install --with-deps chromium
+
       # Confirm the staging environment these secrets point at is ACTUALLY
-      # running this exact commit (web + API SHA, web wired to this API, and
-      # full DB migration history) before spending 30 minutes running
+      # running this exact commit (web + API SHA, migration presence +
+      # content + resulting schema) before spending 30 minutes running
       # Playwright against what might be a stale or mismatched deployment.
       #
       # EXPECTED_SHA: on a pull_request event, github.sha is GitHub's
@@ -76,13 +88,18 @@ jobs:
           PGDATABASE:   ${{ secrets.STAGING_PGDATABASE }}
         run: ./scripts/verify-staging-candidate.sh
 
-      - name: Install Playwright
+      # The SHA/metadata checks above prove the web build was COMPILED with
+      # the right VITE_API_URL -- not that the deployed, running client
+      # actually calls it (a platform rewrite, a runtime config override,
+      # or a stale cached bundle would all slip past build-time metadata
+      # alone). This loads the real page in the real browser just installed
+      # and watches what it actually requests.
+      - name: Verify web build actually calls the checked API (dynamic)
         working-directory: apps/e2e
-        run: npm ci
-
-      - name: Install Playwright browsers
-        working-directory: apps/e2e
-        run: npx playwright install --with-deps chromium
+        env:
+          WEB_URL: ${{ secrets.E2E_BASE_URL }}
+          API_URL: ${{ secrets.E2E_API_URL }}
+        run: node verify-web-api-wiring.mjs
 
       - name: Run E2E tests
         working-directory: apps/e2e

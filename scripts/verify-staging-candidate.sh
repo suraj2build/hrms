@@ -30,23 +30,38 @@
 #      configured to call the API that was just checked. A web build that
 #      embeds a different, stale, or empty-string (dev-proxy) VITE_API_URL
 #      would pass checks 1+2 while E2E silently exercises the wrong API.
-#   4. DB migrations: every migration file under supabase/migrations/*.sql
-#      at this candidate commit must have a matching row in the staging
-#      database's supabase_migrations.schema_migrations — not just the
-#      latest file. Checking only the latest migration's presence does not
-#      prove the complete history matches: a staging DB could have the
-#      latest migration applied (e.g. hand-run out of order, or restored
-#      from a snapshot that skipped several) while missing earlier ones
-#      whose schema changes this candidate's code still depends on.
+#   4. DB migration presence: every migration file under
+#      supabase/migrations/*.sql at this candidate commit must have a
+#      matching row in the staging database's
+#      supabase_migrations.schema_migrations — not just the latest file.
+#      Checking only the latest migration's presence does not prove the
+#      complete history matches: a staging DB could have the latest
+#      migration applied (e.g. hand-run out of order, or restored from a
+#      snapshot that skipped several) while missing earlier ones whose
+#      schema changes this candidate's code still depends on.
+#   5. DB migration CONTENT: presence of a tracking row only proves
+#      something recorded as that filename was applied once — not that the
+#      file's current contents are what actually ran. A migration edited
+#      after being applied (scripts/db/check-migration-content-drift.mjs)
+#      would still show as "present" in check 4 while staging's actual
+#      schema reflects the OLD content. Compares schema_migrations'
+#      recorded statements (confirmed empirically to hold the real applied
+#      SQL, via a real `supabase db push` run) against each file's current
+#      content, normalized so formatting-only diffs don't false-positive.
+#   6. Resulting schema: checks 4+5 together prove the migration FILES were
+#      applied as-is — not that the database's actual resulting shape is
+#      what the application code expects (e.g. a manual hotfix, a partial
+#      apply, or drift from something outside the migration history).
+#      Runs scripts/db/check-schema-drift.mjs --skip-apply directly against
+#      the staging connection: the same introspect-and-audit logic CI's
+#      "Schema drift" check already runs against a scratch DB, pointed at
+#      the real staging DB instead.
 #
-# NOT YET VALIDATED against a real Supabase project: the local round-trip
-# test that exercised check 4 used a hand-created table matching the
-# documented supabase_migrations.schema_migrations shape (version, name
-# columns) — it proved this script's own SQL executes and branches
-# correctly, not that a real Supabase CLI-managed project records
-# migrations in exactly this shape. Confirm against an actual staging
-# Supabase project's schema_migrations table before treating a pass here
-# as real migration-compatibility evidence.
+# Confirmed against a real Supabase CLI run (`supabase db push --db-url`),
+# not a hand-built fixture: schema_migrations.version is the exact
+# zero-padded numeric prefix, .name excludes it, and .statements holds the
+# actual applied SQL text — checks 4 and 5 both rely on this and were
+# re-verified against that real table, not assumed from documentation.
 #
 # Usage:
 #   WEB_URL=https://<preview>.vercel.app \
@@ -125,7 +140,7 @@ if [ -n "$API_HEALTH_JSON" ]; then
 fi
 
 echo
-echo "--- 3. Web→API wiring ---"
+echo "--- 3. Web→API wiring (static — build-time metadata) ---"
 if [ -z "$WEB_VERSION_JSON" ]; then
   echo "  (skipped — web /version.json was not fetched; see check 1)"
 elif [ -z "$WEB_API_URL" ]; then
@@ -133,11 +148,11 @@ elif [ -z "$WEB_API_URL" ]; then
 elif [ "$WEB_API_URL" != "$API_URL" ] && [ "${WEB_API_URL%/}" != "${API_URL%/}" ]; then
   fail "web build was compiled with VITE_API_URL=$WEB_API_URL, NOT the API_URL being checked ($API_URL) — the web and API SHA checks above each passed independently, but this web deployment is not wired to call this API deployment"
 else
-  pass "web build is wired to call the checked API ($WEB_API_URL)"
+  pass "web build is wired to call the checked API ($WEB_API_URL) — build-time metadata only; see scripts/verify-web-api-wiring.mjs for the dynamic/runtime confirmation (a separate CI step, since it needs a real browser)"
 fi
 
 echo
-echo "--- 4. Database migration state (full history, not just latest) ---"
+echo "--- 4. Database migration presence (full history, not just latest) ---"
 if [ -z "${PGHOST:-}" ]; then
   echo "  (skipped — PGHOST not set and ALLOW_SKIP_DB_CHECK=true was explicitly passed; NOT valid for release qualification)"
 else
@@ -179,8 +194,38 @@ else
 fi
 
 echo
+echo "--- 5. Database migration content (edited-since-applied detection) ---"
+if [ -z "${PGHOST:-}" ]; then
+  echo "  (skipped — PGHOST not set and ALLOW_SKIP_DB_CHECK=true was explicitly passed; NOT valid for release qualification)"
+else
+  DRIFT_OUT=$(node "$(dirname "${BASH_SOURCE[0]}")/db/check-migration-content-drift.mjs" 2>&1)
+  DRIFT_EXIT=$?
+  if [ "$DRIFT_EXIT" -ne 0 ]; then
+    fail "migration content drift detected:"
+    echo "$DRIFT_OUT" | sed 's/^/    /' >&2
+  else
+    pass "$(echo "$DRIFT_OUT" | tail -1)"
+  fi
+fi
+
+echo
+echo "--- 6. Resulting schema (does staging's actual shape match the code's expectations) ---"
+if [ -z "${PGHOST:-}" ]; then
+  echo "  (skipped — PGHOST not set and ALLOW_SKIP_DB_CHECK=true was explicitly passed; NOT valid for release qualification)"
+else
+  SCHEMA_OUT=$(node "$(dirname "${BASH_SOURCE[0]}")/db/check-schema-drift.mjs" --skip-apply 2>&1)
+  SCHEMA_EXIT=$?
+  if [ "$SCHEMA_EXIT" -ne 0 ]; then
+    fail "staging DB's actual resulting schema does not match what the application code expects:"
+    echo "$SCHEMA_OUT" | sed 's/^/    /' >&2
+  else
+    pass "staging DB's resulting schema matches every column the application code references"
+  fi
+fi
+
+echo
 if [ "$FAIL_COUNT" -gt 0 ]; then
   echo "=== RESULT: $FAIL_COUNT check(s) failed — this staging environment does NOT qualify as a valid test target for commit $EXPECTED_SHA ===" >&2
   exit 1
 fi
-echo "=== RESULT: staging environment verified as running candidate $EXPECTED_SHA ==="
+echo "=== RESULT: staging environment verified as running candidate $EXPECTED_SHA (web/API SHA, build-time wiring, migration presence+content, resulting schema — dynamic wiring confirmed separately in CI) ==="
