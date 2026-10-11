@@ -1,5 +1,5 @@
 -- ============================================================
--- 440_public_recruitment_intake.sql
+-- 444_public_recruitment_intake.sql
 --
 -- The recruitment/ATS pipeline (requisition → candidate → application →
 -- offer → hire) is genuinely deep, but every candidate/application-creation

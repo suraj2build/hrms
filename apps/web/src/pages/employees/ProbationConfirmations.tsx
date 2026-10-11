@@ -2,7 +2,7 @@
  * ProbationConfirmations — /admin/employees/probation-confirmations
  *
  * HR admin decision queue for the Probation Confirmation workflow
- * (migration 439). A manager recommends confirm/extend with feedback via
+ * (migration 443). A manager recommends confirm/extend with feedback via
  * /manager/team/lifecycle/confirmation-recommend; this page is where HR
  * makes the actual decision — confirming sets job_history.confirmation_date,
  * extending records a new due date instead of silently re-using the stale

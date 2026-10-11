@@ -7,7 +7,7 @@
  * The manager side (recommend confirm/extend with feedback, which creates
  * the 'pending_hr' row this reads) lives in
  * routes/manager/team-lifecycle.ts — POST /manager/team/lifecycle/confirmation-recommend.
- * See migration 439_probation_confirmations.sql for the status lifecycle.
+ * See migration 443_probation_confirmations.sql for the status lifecycle.
  */
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'

@@ -119,7 +119,7 @@ export default async function managerTeamLifecycleRoute(fastify: FastifyInstance
         .filter(j => j.employment_type === 'probation' && !j.confirmation_date)
         .map(j => j.employee_id),
     )
-    // Open probation-confirmation cycles (migration 439) for this team's
+    // Open probation-confirmation cycles (migration 443) for this team's
     // probation employees — drives the "Recommended" badge (pending_hr) and
     // overrides the formula-derived due date once HR has extended probation:
     // that original date no longer reflects reality once extended.
@@ -307,7 +307,7 @@ export default async function managerTeamLifecycleRoute(fastify: FastifyInstance
   })
 
   // ── POST /manager/team/lifecycle/confirmation-recommend ───────────────────────
-  // Creates a probation_confirmations row (migration 439) carrying a
+  // Creates a probation_confirmations row (migration 443) carrying a
   // structured recommendation + feedback, instead of only firing a generic
   // inbox notification. HR still makes the actual decision via
   // PATCH /probation-confirmations/:id/decide.
@@ -362,7 +362,7 @@ export default async function managerTeamLifecycleRoute(fastify: FastifyInstance
     const name = `${(emp as any).first_name ?? ''} ${(emp as any).last_name ?? ''}`.trim() || (emp as any).employee_code
 
     // One open (pending_hr) cycle per employee at a time — enforced by the
-    // partial unique index in migration 439, this is just a friendly 409
+    // partial unique index in migration 443, this is just a friendly 409
     // instead of surfacing the raw constraint violation.
     const { data: existingRec, error: existingRecErr } = await fastify.supabase
       .from('probation_confirmations')

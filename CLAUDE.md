@@ -209,7 +209,7 @@ history and a focused test file:
    now queries `assets` (unreturned, assigned), `employee_loans`
    (outstanding_balance), and `advance_recovery_schedules` (pending) and
    feeds the amounts into `separation_ff_summary.asset_recovery_amount` /
-   `loan_recovery_amount` / `advance_recovery_amount` (migration 438); HR can
+   `loan_recovery_amount` / `advance_recovery_amount` (migration 442); HR can
    still override any of the three.
 2. **Raise leave on behalf** — DONE. `POST /leave-requests` accepts an
    optional `employee_id` override: HR admins may target any employee in
@@ -219,13 +219,13 @@ history and a focused test file:
    owner can also cancel their own pending request now, not only whoever
    filed it.
 3. **Probation Confirmation workflow** — DONE. New `probation_confirmations`
-   table (migration 439): manager recommends confirm/extend with feedback
+   table (migration 443): manager recommends confirm/extend with feedback
    (`POST /manager/team/lifecycle/confirmation-recommend`) → HR decides
    (`PATCH /probation-confirmations/:id/decide`), which sets
    `job_history.confirmation_date` on confirm or records a new due date on
    extend. New HR screen at `/admin/employees/probation-confirmations`.
 4. **Public recruitment intake** — DONE. `job_requisitions.is_public`
-   (migration 440, HR opt-in, separate from `status='open'`) plus
+   (migration 444, HR opt-in, separate from `status='open'`) plus
    unauthenticated `GET/POST /careers/:tenantSlug/*` routes
    (`public-careers.ts`) — tenant resolved fresh from `tenants.slug` on
    every request, same `isTenantBlocked()` check the authenticated

@@ -104,7 +104,7 @@ export function ManagerTeamLifecycle() {
   // Confirmation recommendation — the backend dedups against any still-open
   // (unactioned) recommendation for the same employee, so a repeat click can't
   // spam HR with duplicate inbox notifications. The actual decision now lives
-  // in probation_confirmations (migration 439); HR decides via
+  // in probation_confirmations (migration 443); HR decides via
   // PATCH /probation-confirmations/:id/decide, not through this inbox item.
   const recommendMut = useMutation({
     mutationFn: (body: { employee_id: string; recommendation: 'confirm' | 'extend'; feedback?: string }) =>
