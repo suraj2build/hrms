@@ -380,8 +380,10 @@ export default async function lwfRoutes(fastify: FastifyInstance) {
     } catch (fetchErr) {
       return serverError(req, reply, fetchErr, ErrorCode.QUERY_FAILED, 'Failed to fetch payroll slips/fallback compensation')
     }
+    // gross_pay is NUMERIC — coerce here so the wage-ceiling check downstream compares
+    // numerically instead of silently doing a string comparison (G13 sweep).
     const slipGrossMap = new Map<string, number>(
-      (slipRows as any[]).map(r => [r.employee_id, r.gross_pay ?? 0]),
+      (slipRows as any[]).map(r => [r.employee_id, Number(r.gross_pay ?? 0)]),
     )
     // Actual LWF lines from slip if already computed on the run
     const slipLwfEmpMap = new Map<string, number>()
@@ -396,10 +398,13 @@ export default async function lwfRoutes(fastify: FastifyInstance) {
       }
     }
 
+    // computed_monthly is NUMERIC — coerce or an employee with 2+ earning components
+    // corrupts their fallback gross into NaN, failing lwf_contributions.gross_salary's
+    // NOT NULL constraint and wrongly passing the wage-ceiling check (G13 sweep).
     const fallbackGrossMap = new Map<string, number>()
     for (const r of fallbackRows as any[]) {
       const empId = r.employee_compensations?.employee_id
-      if (empId) fallbackGrossMap.set(empId, (fallbackGrossMap.get(empId) ?? 0) + (r.computed_monthly ?? 0))
+      if (empId) fallbackGrossMap.set(empId, (fallbackGrossMap.get(empId) ?? 0) + Number(r.computed_monthly ?? 0))
     }
 
     const contributions: any[] = []

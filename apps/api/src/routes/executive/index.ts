@@ -1027,21 +1027,28 @@ export default async function executiveRoutes(fastify: FastifyInstance) {
     let leave_liability_days = 0
     try {
       const currentYear = new Date().getUTCFullYear()
-      const [encashRulesRes, compRes] = await Promise.all([
+      // employee_compensations: tenant-wide, no employee filter — fetchAllRows()
+      // since a plain query would silently under-report for a tenant with
+      // >1,000 active compensation records.
+      const [encashRulesRes, compRows] = await Promise.all([
         fastify.supabase
           .from('leave_accrual_rules')
           .select('leave_type_id, encashable')
           .eq('tenant_id', req.tenantId)
           .eq('encashable', true),
-        fastify.supabase
-          .from('employee_compensations')
-          .select('employee_id, ctc_monthly')
-          .eq('tenant_id', req.tenantId)
-          .eq('is_active', true),
+        fetchAllRows((from, to) =>
+          fastify.supabase
+            .from('employee_compensations')
+            .select('employee_id, ctc_monthly')
+            .eq('tenant_id', req.tenantId)
+            .eq('is_active', true)
+            .order('id')
+            .range(from, to),
+        ),
       ])
       const encashableTypeIds = (encashRulesRes.data ?? []).map((r: any) => r.leave_type_id).filter(Boolean)
       const dailyRateByEmp = new Map<string, number>()
-      for (const c of (compRes.data ?? []) as any[]) {
+      for (const c of compRows as any[]) {
         if (c.ctc_monthly) dailyRateByEmp.set(c.employee_id, Number(c.ctc_monthly) / 26)
       }
       if (encashableTypeIds.length > 0) {

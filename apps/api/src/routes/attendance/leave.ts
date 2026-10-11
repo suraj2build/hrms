@@ -1141,39 +1141,71 @@ export default async function leaveRoute(fastify: FastifyInstance) {
       return reply.send({ data: [] })
     }
 
-    // Bulk fetch leave balances + employee info + accrual totals for the team
-    const [{ data: employees }, { data: balances }, { data: accrualRows }] = await Promise.all([
-      fastify.supabase
-        .from('employees')
-        .select('id, first_name, last_name, employee_code, departments(name)')
-        .eq('tenant_id', tenantId)
-        .in('id', teamEmployeeIds),
+    // Bulk fetch leave balances + employee info + accrual totals for the
+    // team, chunked: teamEmployeeIds is a manager's full recursive org
+    // subtree (getDirectReportIds() -> get_all_subordinates(), up to 10
+    // levels deep) or the tenant's full headcount for HR admin — can exceed
+    // a single .in() URL's safe size. All four lookups share the same id
+    // list, so chunk once and reuse per chunk.
+    const employees: any[] = []
+    const balances: any[] = []
+    const accrualRows: any[] = []
+    const compData: any[] | null = includeLiability ? [] : null
+    try {
+      for (let i = 0; i < teamEmployeeIds.length; i += 100) {
+        const chunkIds = teamEmployeeIds.slice(i, i + 100)
+        const [
+          { data: empChunk, error: empErr },
+          { data: balChunk, error: balErr },
+          { data: accChunk, error: accErr },
+        ] = await Promise.all([
+          fastify.supabase
+            // lint-query-ok: chunkIds is a slice of 100 ids (loop above) — result is bounded to <=100 rows, well under the 1,000-row cap
+            .from('employees')
+            .select('id, first_name, last_name, employee_code, departments(name)')
+            .eq('tenant_id', tenantId)
+            .in('id', chunkIds),
 
-      fastify.supabase
-        .from('employee_leave_balance')
-        .select('employee_id, leave_type_id, balance, year, leave_types(id, name, is_paid)')
-        .eq('tenant_id', tenantId)
-        .in('employee_id', teamEmployeeIds)
-        .eq('year', year),
+          fastify.supabase
+            .from('employee_leave_balance')
+            .select('employee_id, leave_type_id, balance, year, leave_types(id, name, is_paid)')
+            .eq('tenant_id', tenantId)
+            .in('employee_id', chunkIds)
+            .eq('year', year),
 
-      fastify.supabase
-        .from('leave_accrual_ledger')
-        .select('employee_id, leave_type_id, days')
-        .eq('tenant_id', tenantId)
-        .in('employee_id', teamEmployeeIds)
-        .eq('year', year)
-        .gt('days', 0),
-    ])
+          fastify.supabase
+            .from('leave_accrual_ledger')
+            .select('employee_id, leave_type_id, days')
+            .eq('tenant_id', tenantId)
+            .in('employee_id', chunkIds)
+            .eq('year', year)
+            .gt('days', 0),
+        ])
+        // Surface rather than silently under-report this chunk of the
+        // team's balances/accrual/compensation — this feeds a leave
+        // liability and balance report, not just a display list.
+        if (empErr) throw empErr
+        if (balErr) throw balErr
+        if (accErr) throw accErr
+        if (empChunk) employees.push(...empChunk)
+        if (balChunk) balances.push(...balChunk)
+        if (accChunk) accrualRows.push(...accChunk)
 
-    // Optional: fetch compensation to compute leave liability value
-    const compData = includeLiability
-      ? (await fastify.supabase
-          .from('employee_compensations')
-          .select('employee_id, ctc_monthly')
-          .eq('tenant_id', tenantId)
-          .eq('is_active', true)
-          .in('employee_id', teamEmployeeIds)).data
-      : null
+        if (includeLiability) {
+          const { data: compChunk, error: compErr } = await fastify.supabase
+            // lint-query-ok: chunkIds is a slice of 100 ids (loop above) — result is bounded to <=100 rows, well under the 1,000-row cap
+            .from('employee_compensations')
+            .select('employee_id, ctc_monthly')
+            .eq('tenant_id', tenantId)
+            .eq('is_active', true)
+            .in('employee_id', chunkIds)
+          if (compErr) throw compErr
+          if (compChunk) compData!.push(...compChunk)
+        }
+      }
+    } catch (error) {
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch team leave balances')
+    }
 
     // ctc_monthly lookup: employee_id → daily_rate (ctc_monthly / 26)
     const dailyRateByEmp: Record<string, number> = {}

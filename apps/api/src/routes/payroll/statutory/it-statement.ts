@@ -182,13 +182,15 @@ async function buildITStatement(
       .filter((c: any) => c?.component_type === 'earning' && /hra|house\s*rent/i.test(`${c?.code ?? ''} ${c?.name ?? ''}`))
       .reduce((s: number, c: any) => s + (Number(c?.monthly_amount) || 0), 0)
 
-  const grossFromSlips = slips.reduce((s, r) => s + (r.gross_pay ?? 0), 0)
+  // gross_pay/tds_deducted are NUMERIC — coerce or 2+ slips corrupt every figure in
+  // this statement into a concatenated string / NaN (G13 sweep).
+  const grossFromSlips = slips.reduce((s, r) => s + Number(r.gross_pay ?? 0), 0)
   const hraFromSlips   = slips.reduce((s, r) => s + hraOf(r), 0)
-  const tdsYTD         = slips.reduce((s, r) => s + (r.tds_deducted ?? 0), 0)
+  const tdsYTD         = slips.reduce((s, r) => s + Number(r.tds_deducted ?? 0), 0)
 
   // Use last slip for monthly gross projection (or average)
   const lastSlip     = slips[slips.length - 1]
-  const monthlyGross = lastSlip?.gross_pay ?? (grossFromSlips / Math.max(slips.length, 1))
+  const monthlyGross = Number(lastSlip?.gross_pay ?? (grossFromSlips / Math.max(slips.length, 1)))
 
   // ── Build gross annual projection ─────────────────────────────────────────
   // For months with no payroll slip yet, project using last known monthly gross
@@ -202,14 +204,16 @@ async function buildITStatement(
   let projectedAnnualGross = 0
   for (const month of fyMonths) {
     const slip = slipMap[month]
-    projectedAnnualGross += slip ? (slip.gross_pay ?? 0) : monthlyGross
+    projectedAnnualGross += slip ? Number(slip.gross_pay ?? 0) : monthlyGross
   }
 
   // ── Map declarations to deduction categories ───────────────────────────────
+  // approved_amount/declared_amount are DECIMAL — coerce or 2+ declarations under the
+  // same section (e.g. two 80C entries) corrupt that section's total into NaN (G13 sweep).
   const approvedBySection: Record<string, number> = {}
   for (const decl of decls) {
     const key = decl.section ?? decl.declaration_category
-    approvedBySection[key] = (approvedBySection[key] ?? 0) + (decl.approved_amount ?? decl.declared_amount ?? 0)
+    approvedBySection[key] = (approvedBySection[key] ?? 0) + Number(decl.approved_amount ?? decl.declared_amount ?? 0)
   }
 
   const get = (key: string) => approvedBySection[key] ?? 0
@@ -251,8 +255,8 @@ async function buildITStatement(
     const year = monthNum >= 4 ? fyStart : fyEnd
     const key  = `${year}-${String(monthNum).padStart(2, '0')}`
     const slip = slipMap[key]
-    const gross = slip?.gross_pay ?? 0
-    const tds   = slip?.tds_deducted   ?? 0
+    const gross = Number(slip?.gross_pay ?? 0)
+    const tds   = Number(slip?.tds_deducted ?? 0)
     cumulativeTds += tds
     return {
       month:          `${MONTH_NAMES[monthNum - 1]} ${year}`,

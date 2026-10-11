@@ -869,15 +869,22 @@ export default async function recognitionRoutes(fastify: FastifyInstance) {
       const to   = `${targetYear}-${monthStr}-${String(lastDay).padStart(2, '0')}`
       // designation_id/department_id moved off employees onto job_history's
       // current-assignment row in 016_lean_employees.sql.
-      const { data } = await fastify.supabase
-        .from('employees')
-        .select('id, first_name, last_name, employee_code, joining_date, job_history!job_history_employee_id_fkey(is_current, designations(name), departments(name))')
-        .eq('tenant_id', req.tenantId)
-        .gte('joining_date', from)
-        .lte('joining_date', to)
-        .not('status', 'eq', 'terminated')
-        .eq('job_history.is_current', true)
-      ;(data ?? []).forEach((e: any) => {
+      // fetchAllRows(): tenant-wide scan over a month-wide joining_date
+      // window — a plain query would silently under-report for a tenant
+      // with an unusually large single-month hiring cohort.
+      const data = await fetchAllRows((from_, to_) =>
+        fastify.supabase
+          .from('employees')
+          .select('id, first_name, last_name, employee_code, joining_date, job_history!job_history_employee_id_fkey(is_current, designations(name), departments(name))')
+          .eq('tenant_id', req.tenantId)
+          .gte('joining_date', from)
+          .lte('joining_date', to)
+          .not('status', 'eq', 'terminated')
+          .eq('job_history.is_current', true)
+          .order('id')
+          .range(from_, to_),
+      )
+      data.forEach((e: any) => {
         const jh = Array.isArray(e.job_history) ? e.job_history[0] : e.job_history
         alerts.push({
           id: e.id, first_name: e.first_name, last_name: e.last_name, employee_code: e.employee_code,

@@ -106,6 +106,7 @@ export async function resolveWoEmployees(
   if (!structById.size) return []
 
   const { data: ladderRows } = await supabase
+    // lint-tenant-ok: wo_credit_ladder has no tenant_id column (migration 253 — scoped via parent wo_credit_structure.tenant_id by RLS); structById's keys were already filtered by .eq('tenant_id', tenantId) above, so this join-through-parent is tenant-scoped
     .from('wo_credit_ladder')
     .select('structure_id, present_days, wo_credit')
     .in('structure_id', [...structById.keys()])

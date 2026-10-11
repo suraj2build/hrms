@@ -782,14 +782,23 @@ async function getPayrollCost(ctx: ToolCtx, args: any): Promise<string> {
   const month = String(args?.month ?? '')
   if (!MONTH_RE.test(month)) return 'Please provide the month as YYYY-MM (e.g. 2026-04 for April 2026).'
 
-  const { data, error } = await ctx.supabase
-    .from('payroll_slips')
-    .select('gross_pay, net_pay, tds_deducted, status')
-    .eq('tenant_id', ctx.caller.tenantId)
-    .eq('month', month)
-  if (error) return 'Could not look up payroll cost right now.'
-
-  const slips = (data ?? []) as Array<{ gross_pay: number | null; net_pay: number | null; tds_deducted: number | null; status: string }>
+  // fetchAllRows(): tenant + month only, no employee filter — a plain query
+  // would silently under-report payroll cost for a tenant with >1,000 slips
+  // in the month.
+  let slips: Array<{ gross_pay: number | null; net_pay: number | null; tds_deducted: number | null; status: string }>
+  try {
+    slips = await fetchAllRows((from, to) =>
+      ctx.supabase
+        .from('payroll_slips')
+        .select('gross_pay, net_pay, tds_deducted, status')
+        .eq('tenant_id', ctx.caller.tenantId)
+        .eq('month', month)
+        .order('id')
+        .range(from, to),
+    )
+  } catch {
+    return 'Could not look up payroll cost right now.'
+  }
   if (slips.length === 0) return `No payroll has been processed for ${month} yet.`
 
   const gross = slips.reduce((s, r) => s + (Number(r.gross_pay) || 0), 0)

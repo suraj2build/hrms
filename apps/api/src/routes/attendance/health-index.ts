@@ -126,12 +126,14 @@ export default async function attendanceHealthIndexRoute(fastify: FastifyInstanc
     const nameMap = new Map<string, string>()
     const [empRes, deptRes, siteRes] = await Promise.all([
       idsByScope.employee.size
+        // lint-query-ok: idsByScope.employee is distinct scope_ids from one page of results (limit <= 500, validated above) — bounded well under the 1,000-row cap
         ? fastify.supabase.from('employees').select('id, first_name, last_name, employee_code').eq('tenant_id', req.tenantId).in('id', [...idsByScope.employee])
         : Promise.resolve({ data: [], error: null }),
       idsByScope.department.size
         ? fastify.supabase.from('departments').select('id, name').eq('tenant_id', req.tenantId).in('id', [...idsByScope.department])
         : Promise.resolve({ data: [], error: null }),
       idsByScope.site.size
+        // lint-query-ok: idsByScope.site is distinct scope_ids from one page of results (limit <= 500, validated above) — bounded well under the 1,000-row cap
         ? fastify.supabase.from('sites').select('id, name').eq('tenant_id', req.tenantId).in('id', [...idsByScope.site])
         : Promise.resolve({ data: [], error: null }),
     ])
@@ -495,11 +497,23 @@ export default async function attendanceHealthIndexRoute(fastify: FastifyInstanc
         return reply.send({ computed: 0, period_month })
       }
 
-      const { data: empDepts } = await fastify.supabase
-        .from('employees')
-        .select('id, job_history!job_history_employee_id_fkey(department_id, is_current)')
-        .eq('tenant_id', req.tenantId)
-        .in('id', empIds)
+      // Chunked: empIds is the tenant's full set of scored employees for the
+      // period — can exceed a single .in() URL's safe size at scale.
+      const empDepts: any[] = []
+      for (let i = 0; i < empIds.length; i += 100) {
+        const chunkIds = empIds.slice(i, i + 100)
+        const { data, error: empDeptsErr } = await fastify.supabase
+          // lint-query-ok: chunkIds is a slice of 100 ids (loop above) — result is bounded to <=100 rows, well under the 1,000-row cap
+          .from('employees')
+          .select('id, job_history!job_history_employee_id_fkey(department_id, is_current)')
+          .eq('tenant_id', req.tenantId)
+          .in('id', chunkIds)
+        // Surface rather than silently proceed with a partial employee set —
+        // a swallowed chunk failure would silently under-report some
+        // employees from their department's health-index aggregation.
+        if (empDeptsErr) return serverError(req, reply, empDeptsErr, ErrorCode.QUERY_FAILED, 'Failed to resolve employee departments for health-index aggregation')
+        if (data) empDepts.push(...data)
+      }
 
       const deptScoreMap: Map<string, number[]> = new Map()
       const empDeptLookup: Map<string, string> = new Map()

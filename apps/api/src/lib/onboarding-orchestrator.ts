@@ -382,6 +382,7 @@ async function dispatchTrustAdminInboxItem(opts: TrustAdminInboxOpts): Promise<v
       },
     }))
 
+    // lint-tenant-ok: `rows` (built above) already stamps tenant_id: opts.tenantId on every row — not visible to the scanner through the variable indirection
     const { error } = await opts.supabase.from('inbox_items').insert(rows)
     if (error) logWarn('trust_admin_inbox_insert_failed', opts.entityId, error)
   } catch (err) {

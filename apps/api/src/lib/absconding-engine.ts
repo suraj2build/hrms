@@ -108,6 +108,7 @@ async function getLeaveCoveredDates(
   toDate:     string,
 ): Promise<Set<string>> {
   const { data } = await supabase
+    // lint-query-ok: scoped to a single employee_id over the caller's lookback window (THRESHOLDS.termination+1 ≈ 22 days) — cannot plausibly exceed the 1,000-row cap
     .from('leave_requests')
     .select('from_date, to_date')
     .eq('tenant_id', tenantId)
@@ -143,6 +144,7 @@ async function getConsecutiveUaDays(
   todayStr: string,
 ): Promise<number> {
   const { data, error } = await supabase
+    // lint-query-ok: scoped to a single employee_id over the caller's lookback window (THRESHOLDS.termination+1 ≈ 22 days) — cannot plausibly exceed the 1,000-row cap
     .from('attendance_daily')
     .select('date, status')
     .eq('tenant_id', tenantId)
@@ -900,13 +902,29 @@ export async function scanAndEscalate(
     // used tenant-wide for headcount (executive/index.ts et al.).
     let candidateIds = rawCandidateIds
     if (rawCandidateIds.length) {
-      const { data: activeEmps } = await supabase
-        .from('employees')
-        .select('id')
-        .eq('tenant_id', tenantId)
-        .in('id', rawCandidateIds)
-        .in('status', ['active', 'on_notice'])
-      const activeIds = new Set(((activeEmps ?? []) as { id: string }[]).map(e => e.id))
+      // Chunked: rawCandidateIds is every employee with an unauthorized-absence
+      // window in the lookback period, tenant-wide — can exceed a single
+      // .in() URL's safe size for a large tenant.
+      const activeEmps: { id: string }[] = []
+      for (let i = 0; i < rawCandidateIds.length; i += 100) {
+        const chunkIds = rawCandidateIds.slice(i, i + 100)
+        const { data, error } = await supabase
+          // lint-query-ok: chunkIds is a slice of 100 ids (loop above) — result is bounded to <=100 rows, well under the 1,000-row cap
+          .from('employees')
+          .select('id')
+          .eq('tenant_id', tenantId)
+          .in('id', chunkIds)
+          .in('status', ['active', 'on_notice'])
+        // Surface the error rather than silently proceeding with a partial
+        // active-employee set: a swallowed chunk failure here would
+        // incorrectly filter real candidates out of candidateIds below,
+        // silently skipping absconding detection for them this cycle. The
+        // outer try/catch (end of this function) records this in
+        // result.errors rather than crashing the whole scan.
+        if (error) throw new Error(`absconding-engine: employees active-status lookup failed: ${error.message}`)
+        if (data) activeEmps.push(...data)
+      }
+      const activeIds = new Set(activeEmps.map(e => e.id))
       candidateIds = rawCandidateIds.filter(id => activeIds.has(id))
     }
 
@@ -954,12 +972,19 @@ export async function scanAndEscalate(
     // etc.) can be detected before this loop tries to escalate them further.
     const caseEmployeeIds = [...new Set((openCases ?? []).map((c: any) => c.employee_id as string))]
     const employeeStatusById = new Map<string, string>()
-    if (caseEmployeeIds.length) {
+    // Chunked: caseEmployeeIds is every employee with an open absconding case,
+    // tenant-wide — unlike the other employees lookups in this file, this one
+    // was not chunked, so a tenant with >1,000 simultaneously open cases would
+    // silently truncate at PostgREST's row cap and some employees would fall
+    // out of employeeStatusById, skipping the already-separated check below.
+    for (let i = 0; i < caseEmployeeIds.length; i += 100) {
+      const chunkIds = caseEmployeeIds.slice(i, i + 100)
       const { data: empRows } = await supabase
+        // lint-query-ok: chunkIds is a slice of 100 ids (loop above) — result is bounded to <=100 rows, well under the 1,000-row cap
         .from('employees')
         .select('id, status')
         .eq('tenant_id', tenantId)
-        .in('id', caseEmployeeIds)
+        .in('id', chunkIds)
       for (const e of (empRows ?? []) as { id: string; status: string }[]) employeeStatusById.set(e.id, e.status)
     }
 
@@ -989,6 +1014,7 @@ export async function scanAndEscalate(
         const { data: refreshed } = await supabase
           .from('absconding_cases')
           .select('ua_days_count')
+          .eq('tenant_id', tenantId)
           .eq('id', c.id)
           .single()
         const currentUaDays = (refreshed as { ua_days_count: number } | null)?.ua_days_count ?? c.ua_days_count

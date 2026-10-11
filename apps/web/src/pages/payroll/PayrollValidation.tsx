@@ -48,6 +48,8 @@ interface ValidationRule {
   blocking:            boolean
   stage:               string | null
   remediation_route:   string | null
+  /** true when this tenant has its own override for this rule; false = unmodified platform default */
+  is_override?:        boolean
 }
 
 /** Matches PayrollRun shape returned by GET /payroll/runs */
@@ -211,8 +213,10 @@ function ValidationRulesTab() {
   })
 
   const toggleMutation = useMutation({
-    mutationFn: ({ id, enabled }: { id: string; enabled: boolean }) =>
-      api.patch<{ data: unknown }>(`/payroll/validation-rules/${id}`, { enabled }).then(r => r.data),
+    // Writes THIS TENANT'S OWN override for the rule (identified by code) —
+    // never the platform default row. See validation-rules.ts.
+    mutationFn: ({ code, enabled }: { code: string; enabled: boolean }) =>
+      api.patch<{ data: unknown }>(`/payroll/validation-rules/${code}`, { enabled }).then(r => r.data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['validation-rules'] })
       toast.success('Rule updated')
@@ -377,7 +381,14 @@ function ValidationRulesTab() {
                 )}
               >
                 <td className="px-4 py-3 font-mono text-xs text-muted-foreground">{rule.code}</td>
-                <td className="px-4 py-3 font-medium text-foreground">{rule.name}</td>
+                <td className="px-4 py-3 font-medium text-foreground">
+                  {rule.name}
+                  {rule.is_override && (
+                    <span className="ml-2 rounded bg-muted px-1.5 py-0.5 text-[10px] font-normal text-muted-foreground align-middle">
+                      Customized
+                    </span>
+                  )}
+                </td>
                 <td className="px-4 py-3">
                   <div className="flex items-center gap-1.5">
                     <SeverityIcon severity={rule.severity} />
@@ -403,7 +414,7 @@ function ValidationRulesTab() {
                         toast.error('Only super admins can toggle rules')
                         return
                       }
-                      toggleMutation.mutate({ id: rule.id, enabled: !rule.enabled })
+                      toggleMutation.mutate({ code: rule.code, enabled: !rule.enabled })
                     }}
                     disabled={toggleMutation.isPending}
                     className="focus:outline-none"

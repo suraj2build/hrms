@@ -35,14 +35,20 @@ const ORG_CTX_ID_CHUNK = 100
 
 /** Runs `queryFn` once per chunk of `ids` and concatenates the results.
  *  Safe for per-employee dedup logic downstream: each employee's rows
- *  always land in a single chunk since chunking splits the input id list. */
+ *  always land in a single chunk since chunking splits the input id list.
+ *  Throws on a chunk's query error rather than silently continuing with a
+ *  partial result — org context (site/roster/timezone) feeds attendance
+ *  computation directly, so a swallowed chunk failure would silently
+ *  resolve some employees to the wrong (or no) site/roster for this run,
+ *  not just an incomplete display list. */
 async function fetchChunked<T>(
   ids: string[],
-  queryFn: (chunk: string[]) => PromiseLike<{ data: T[] | null }>,
+  queryFn: (chunk: string[]) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>,
 ): Promise<T[]> {
   const all: T[] = []
   for (let i = 0; i < ids.length; i += ORG_CTX_ID_CHUNK) {
-    const { data } = await queryFn(ids.slice(i, i + ORG_CTX_ID_CHUNK))
+    const { data, error } = await queryFn(ids.slice(i, i + ORG_CTX_ID_CHUNK))
+    if (error) throw new Error(`org-context: chunked query failed: ${error.message}`)
     if (data) all.push(...data)
   }
   return all
@@ -354,12 +360,19 @@ export async function resolveEmployeeOrgContextBatch(
   }>()
 
   if (uniqueSiteIds.length > 0) {
-    const { data: siteRows } = await supabase
-      .from('sites')
-      .select('id, timezone, default_roster_id, default_rotation_policy_id, default_shift_id, holiday_group_id')
-      .eq('tenant_id', tenantId)
-      .in('id', uniqueSiteIds)
-    for (const s of (siteRows ?? []) as {
+    // Chunked defensively via the same fetchChunked() used above for
+    // job_history — sites is a HIGH_CARDINALITY_TABLES entry in
+    // check-unbounded-queries.mjs even though a tenant's physical/virtual
+    // site count is normally small; chunking costs nothing and removes the
+    // ambiguity rather than relying on that normally holding.
+    const siteRows = await fetchChunked(uniqueSiteIds, (chunk) =>
+      supabase
+        .from('sites')
+        .select('id, timezone, default_roster_id, default_rotation_policy_id, default_shift_id, holiday_group_id')
+        .eq('tenant_id', tenantId)
+        .in('id', chunk),
+    )
+    for (const s of siteRows as {
       id:                           string
       timezone:                     string
       default_roster_id:            string | null

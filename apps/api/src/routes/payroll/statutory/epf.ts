@@ -9,7 +9,7 @@ import { computeEPF } from '../../../lib/statutory/epf-engine.js'
 import type { EPFConfig, EPFInput } from '../../../lib/statutory/epf-engine.js'
 import { logAction } from '../../../lib/audit-service.js'
 import { HR_ADMIN_ROLES } from '../../../lib/rbac.js'
-import { fetchAllRows } from '../../../lib/supabase-paginate.js'
+import { fetchAllRows, fetchAllRowsByKeyset } from '../../../lib/supabase-paginate.js'
 import { serverError, ErrorCode } from '../../../lib/api-errors.js'
 
 export default async function epfRoutes(fastify: FastifyInstance) {
@@ -219,6 +219,10 @@ export default async function epfRoutes(fastify: FastifyInstance) {
           .select('*, employees(id, first_name, last_name, employee_code)')
           .eq('tenant_id', req.tenantId)
           .order('contribution_month', { ascending: false })
+          // Tiebreaker: contribution_month alone ties across every row in the
+          // same month, which leaves .range() paging (OFFSET/LIMIT under the
+          // hood) without a stable total order between page requests.
+          .order('id', { ascending: true })
         if (parsed.data.month) q = q.eq('contribution_month', parsed.data.month)
         if (parsed.data.employee_id) q = q.eq('employee_id', parsed.data.employee_id)
         return q.range(from, to)
@@ -309,6 +313,7 @@ export default async function epfRoutes(fastify: FastifyInstance) {
           .select('id, employee_code, first_name, last_name')
           .eq('tenant_id', req.tenantId)
           .eq('status', 'active')
+          .order('id')
           .range(from, to),
       )
     } catch (empErr) {
@@ -378,30 +383,68 @@ export default async function epfRoutes(fastify: FastifyInstance) {
     let wagesFallbackCount   = 0
 
     if (empList.length > 0) {
-      const { data: activeCompRows } = await fastify.supabase
-        .from('employee_compensations')
-        .select('id, employee_id')
-        .eq('tenant_id', req.tenantId)
-        .eq('is_active', true)
-        .in('employee_id', empList.map(e => e.id))
+      // Chunked AND fetchAllRows-paginated: unlike esi.ts/ptax.ts's
+      // equivalent compensation lookup (gated behind "employees missing a
+      // slip"), this one runs for EVERY active employee regardless of slip
+      // status, so empIds is routinely the tenant's full headcount. A
+      // single unchunked .in() over that list is a request-size failure —
+      // found by actually running this endpoint against 2,200 real
+      // employees (scripts/pagination-scale-check.sh): the request died
+      // with no usable error, the same failure shape as the esi.ts/ptax.ts
+      // stale-cleanup bug fixed earlier in this cluster.
+      const empIds = empList.map(e => e.id)
+      const activeCompRows: Array<{ id: string; employee_id: string }> = []
+      for (let i = 0; i < empIds.length; i += 100) {
+        const chunkIds = empIds.slice(i, i + 100)
+        const chunkRows = await fetchAllRows<{ id: string; employee_id: string }>((from, to) =>
+          fastify.supabase
+            .from('employee_compensations')
+            .select('id, employee_id')
+            .eq('tenant_id', req.tenantId)
+            .eq('is_active', true)
+            .in('employee_id', chunkIds)
+            .order('id')
+            .range(from, to),
+        )
+        activeCompRows.push(...chunkRows)
+      }
 
-      const activeCompIds    = (activeCompRows ?? []).map((c: any) => c.id)
+      const activeCompIds    = activeCompRows.map((c: any) => c.id)
       const empIdByCompId    = new Map<string, string>(
-        (activeCompRows ?? []).map((c: any) => [c.id, c.employee_id]),
+        activeCompRows.map((c: any) => [c.id, c.employee_id]),
       )
 
-      // 2. PF-applicable components for those compensation records
+      // 2. PF-applicable components for those compensation records.
+      // Chunked AND fetchAllRows-paginated: activeCompIds can be the tenant's
+      // full active headcount (a request-size risk unchunked), and each
+      // compensation typically has several PF-applicable components (Basic,
+      // DA, ...) — unlike the 1-row-per-id tables elsewhere in this file, the
+      // row-per-id multiplier here is NOT 1, so even a 100-id chunk can
+      // return several hundred rows and a single unpaginated page per chunk
+      // risks the same silent truncation this whole cluster exists to fix.
       if (activeCompIds.length > 0) {
-        const { data: pfCompRows } = await fastify.supabase
-          .from('employee_compensation_components')
-          .select('compensation_id, computed_monthly, salary_components!inner(is_pf_applicable)')
-          .in('compensation_id', activeCompIds)
-          .eq('salary_components.is_pf_applicable', true)
+        const pfCompRows: Array<{ compensation_id: string; computed_monthly: number }> = []
+        for (let i = 0; i < activeCompIds.length; i += 100) {
+          const chunkIds = activeCompIds.slice(i, i + 100)
+          const chunkRows = await fetchAllRows<{ compensation_id: string; computed_monthly: number }>((from, to) =>
+            fastify.supabase
+              .from('employee_compensation_components')
+              .select('compensation_id, computed_monthly, salary_components!inner(is_pf_applicable)')
+              .in('compensation_id', chunkIds)
+              .eq('salary_components.is_pf_applicable', true)
+              .order('id')
+              .range(from, to),
+          )
+          pfCompRows.push(...chunkRows)
+        }
 
-        for (const row of (pfCompRows ?? []) as Array<{ compensation_id: string; computed_monthly: number }>) {
+        // computed_monthly is NUMERIC — coerce or an employee with 2+ PF-applicable
+        // components (e.g. Basic + DA) corrupts pf_wages into NaN, failing its
+        // NOT NULL constraint on the EPF upsert (G13 sweep).
+        for (const row of pfCompRows) {
           const empId = empIdByCompId.get(row.compensation_id)
           if (empId) {
-            pfBaseMap.set(empId, (pfBaseMap.get(empId) ?? 0) + (row.computed_monthly ?? 0))
+            pfBaseMap.set(empId, (pfBaseMap.get(empId) ?? 0) + Number(row.computed_monthly ?? 0))
           }
         }
       }
@@ -416,15 +459,29 @@ export default async function epfRoutes(fastify: FastifyInstance) {
     // here: sum is_pf_applicable / affects_pf earnings from the slip's stored
     // component_breakdown. The master × linear-LOP path below is a FALLBACK only
     // for employees with no finalized slip.
-    const { data: lopSlipRows } = await fastify.supabase
-      .from('payroll_slips')
-      .select('employee_id, total_working_days, payable_days, component_breakdown')
-      .eq('tenant_id', req.tenantId)
-      .eq('month', month)
-      .eq('status', 'finalized')
+    // fetchAllRowsByKeyset() — this is the AUTHORITATIVE PF wage base (see
+    // comment above); at ≥1,001 finalized slips in the month a plain query
+    // would silently push the overflow onto the less-accurate fallback
+    // path. Keyset, not offset: another finalize running concurrently can
+    // insert a new slip at any point in the random-UUID key space while
+    // this read is paging through several HTTP round trips, which would
+    // silently skip or duplicate a row under offset/.range() pagination
+    // even with a deterministic .order('id') — see supabase-paginate.test.ts.
+    const lopSlipRows = await fetchAllRowsByKeyset((afterId, limit) => {
+      let q = fastify.supabase
+        .from('payroll_slips')
+        .select('id, employee_id, total_working_days, payable_days, component_breakdown')
+        .eq('tenant_id', req.tenantId)
+        .eq('month', month)
+        .eq('status', 'finalized')
+        .order('id', { ascending: true })
+        .limit(limit)
+      if (afterId) q = q.gt('id', afterId)
+      return q
+    })
 
     const lopFractionMap = new Map<string, number>(
-      (lopSlipRows ?? []).map((r: any) => [
+      lopSlipRows.map((r: any) => [
         r.employee_id,
         r.total_working_days > 0 ? r.payable_days / r.total_working_days : 1.0,
       ]),
@@ -438,7 +495,7 @@ export default async function epfRoutes(fastify: FastifyInstance) {
     const slipPfWagesMap    = new Map<string, number>()
     const slipPfEmployeeMap = new Map<string, number>()   // PF_EMPLOYEE line
     const slipPfEmployerMap = new Map<string, number>()   // PF_EMPLOYER line (total employer)
-    for (const r of (lopSlipRows ?? []) as any[]) {
+    for (const r of lopSlipRows as any[]) {
       const breakdown = Array.isArray(r.component_breakdown) ? r.component_breakdown : []
       const pfWages = breakdown
         .filter((c: any) =>
@@ -722,6 +779,7 @@ export default async function epfRoutes(fastify: FastifyInstance) {
           .select('*, employees(employee_code, first_name, last_name)')
           .eq('tenant_id', req.tenantId)
           .eq('contribution_month', month)
+          .order('id')
           .range(from, to),
       )
     } catch (error) {

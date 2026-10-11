@@ -152,14 +152,25 @@ export default async function arrearsRoutes(fastify: FastifyInstance) {
     // service-role client that bypasses RLS, and employees(id) has no
     // tenant-compound FK, so verify every id belongs to this tenant before
     // writing (mirrors the batch_id check above).
+    // Chunked: the request schema has no upper bound on `records`, so
+    // recordEmployeeIds can be large enough to risk the request-line limit
+    // on a single .in() — and, since this check FAILS CLOSED (any id not
+    // found in the response is rejected as invalid), an unchunked call that
+    // got response-capped would incorrectly reject real employees past the
+    // cap, not just silently under-report.
     const recordEmployeeIds = [...new Set(parsed.data.records.map(r => r.employee_id))]
-    const { data: empRows, error: empErr } = await fastify.supabase
-      .from('employees')
-      .select('id')
-      .eq('tenant_id', req.tenantId)
-      .in('id', recordEmployeeIds)
-    if (empErr) return serverError(req, reply, empErr, ErrorCode.QUERY_FAILED, 'Failed to verify employees')
-    const validEmployeeIds = new Set((empRows ?? []).map((e: any) => e.id))
+    const empRows: any[] = []
+    for (let i = 0; i < recordEmployeeIds.length; i += 100) {
+      const chunkIds = recordEmployeeIds.slice(i, i + 100)
+      const { data, error: empErr } = await fastify.supabase
+        .from('employees')
+        .select('id')
+        .eq('tenant_id', req.tenantId)
+        .in('id', chunkIds)
+      if (empErr) return serverError(req, reply, empErr, ErrorCode.QUERY_FAILED, 'Failed to verify employees')
+      if (data) empRows.push(...data)
+    }
+    const validEmployeeIds = new Set(empRows.map((e: any) => e.id))
     const invalidEmployeeId = recordEmployeeIds.find(eid => !validEmployeeIds.has(eid))
     if (invalidEmployeeId) {
       return reply.code(400).send({ error: 'VALIDATION_ERROR', message: `employee_id ${invalidEmployeeId} not found in your organisation` })
@@ -238,12 +249,19 @@ export default async function arrearsRoutes(fastify: FastifyInstance) {
       return serverError(req, reply, err, ErrorCode.QUERY_FAILED, 'Failed to fetch arrear records')
     }
 
+    // Chunked: empIds is every distinct employee across the batch's full
+    // record set (already paginated above) — a single .in() over thousands
+    // of UUIDs risks the request-line limit.
     const empIds = [...new Set(records.map((r: any) => r.employee_id))]
-    const { data: emps } = empIds.length
-      ? await fastify.supabase.from('employees').select('id, first_name, last_name, employee_code')
-          .eq('tenant_id', req.tenantId).in('id', empIds)
-      : { data: [] as any[] }
-    const em = new Map((emps ?? []).map((e: any) => [e.id, e]))
+    const emps: any[] = []
+    for (let i = 0; i < empIds.length; i += 100) {
+      const chunkIds = empIds.slice(i, i + 100)
+      // lint-query-ok: chunkIds.length <= 100 (sliced above) — well under PostgREST's 1,000-row cap
+      const { data } = await fastify.supabase.from('employees').select('id, first_name, last_name, employee_code')
+        .eq('tenant_id', req.tenantId).in('id', chunkIds)
+      if (data) emps.push(...data)
+    }
+    const em = new Map(emps.map((e: any) => [e.id, e]))
 
     const data = records.map((r: any) => {
       const e = em.get(r.employee_id)
@@ -331,7 +349,10 @@ export default async function arrearsRoutes(fastify: FastifyInstance) {
 
     const records = (revs ?? [])
       .flatMap((r: any) => {
-        const beforeMonthly = r.before_ctc_monthly ?? 0
+        // before_ctc_monthly is NUMERIC — coerce or this comparison is always
+        // number !== string, so a genuinely no-change revision (e.g. designation-only)
+        // never gets skipped and gets billed zero-amount arrear records every month (G13 sweep).
+        const beforeMonthly = Number(r.before_ctc_monthly ?? 0)
         const newMonthly    = Math.round(((r.new_ctc_annual ?? 0) / 12) * 100) / 100
         if (newMonthly === beforeMonthly) return []
         return periodMonths.map((period_month) => ({

@@ -729,6 +729,7 @@ export default async function lettersRoutes(fastify: FastifyInstance) {
     const { data: chainStep } = await supabase
       .from('letter_approval_chains')
       .select('approver_role')
+      .eq('tenant_id', tenantId)
       .eq('template_id', letter.template_id)
       .eq('level', currentLevel)
       .maybeSingle()
@@ -807,6 +808,7 @@ export default async function lettersRoutes(fastify: FastifyInstance) {
     const { data: chainStep } = await supabase
       .from('letter_approval_chains')
       .select('approver_role')
+      .eq('tenant_id', tenantId)
       .eq('template_id', letter.template_id)
       .eq('level', letter.current_level ?? 1)
       .maybeSingle()

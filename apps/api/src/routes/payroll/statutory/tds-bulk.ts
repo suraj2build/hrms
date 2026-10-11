@@ -21,7 +21,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { HR_ADMIN_ROLES } from '../../../lib/rbac.js'
-import { fetchAllRows } from '../../../lib/supabase-paginate.js'
+import { fetchAllRows, fetchAllRowsByKeyset } from '../../../lib/supabase-paginate.js'
 import { fetchTenantTz } from '../../../lib/attendance-engine.js'
 import { getLocalDate } from '../../../lib/org-context.js'
 import { serverError, ErrorCode } from '../../../lib/api-errors.js'
@@ -450,17 +450,35 @@ export default async function tdsBulkRoutes(fastify: FastifyInstance) {
     // Fetch latest projected_tax from tds_declaration_snapshots per employee.
     // Chunked: empIds can now be the tenant's full headcount (the fetch above
     // is no longer silently capped), so a single .in() would exceed request-
-    // line limits at enterprise scale.
-    const snapshots: any[] = []
-    for (let i = 0; i < empIds.length; i += 100) {
-      const { data } = await fastify.supabase
-        .from('tds_declaration_snapshots')
-        .select('employee_id, total_approved, created_at')
-        .in('employee_id', empIds.slice(i, i + 100))
-        .eq('tenant_id', req.tenantId)
-        .eq('financial_year', financial_year)
-        .order('created_at', { ascending: false })
-      if (data) snapshots.push(...data)
+    // line limits at enterprise scale. Each chunk is ALSO paginated with
+    // fetchAllRows: the UNIQUE(tenant_id, employee_id, financial_year,
+    // payroll_run_id) constraint allows one snapshot per payroll run, so a
+    // 100-employee chunk on a monthly-payroll tenant can return up to ~1200
+    // rows in one FY — past PostgREST's 1000-row cap, which would silently
+    // drop some employees' latest snapshot (and default them to projected=0).
+    let snapshots: any[]
+    try {
+      snapshots = []
+      for (let i = 0; i < empIds.length; i += 100) {
+        const chunkIds = empIds.slice(i, i + 100)
+        const chunkRows = await fetchAllRows((from, to) =>
+          fastify.supabase
+            .from('tds_declaration_snapshots')
+            .select('employee_id, total_approved, created_at')
+            .in('employee_id', chunkIds)
+            .eq('tenant_id', req.tenantId)
+            .eq('financial_year', financial_year)
+            .order('created_at', { ascending: false })
+            // Tiebreaker: snapshots created in the same batch share a
+            // created_at timestamp, which otherwise leaves .range() paging
+            // without a stable total order between page requests.
+            .order('id', { ascending: true })
+            .range(from, to),
+        )
+        snapshots.push(...chunkRows)
+      }
+    } catch (err) {
+      return serverError(req, reply, err, ErrorCode.QUERY_FAILED, 'Failed to fetch TDS declaration snapshots')
     }
 
     // Build map: employee_id -> latest snapshot
@@ -477,24 +495,46 @@ export default async function tdsBulkRoutes(fastify: FastifyInstance) {
     const fyStart = `${fyStartYear}-04-01`
     const fyEnd   = `${fyStartYear + 1}-03-31`
 
-    const slips: any[] = []
-    for (let i = 0; i < empIds.length; i += 100) {
-      const { data } = await fastify.supabase
-        .from('payroll_slips')
-        .select('employee_id, tds_deducted')
-        .in('employee_id', empIds.slice(i, i + 100))
-        .eq('tenant_id', req.tenantId)
-        // payroll_slips has no pay_date; its `month` is 'YYYY-MM' — scope to the FY months
-        .gte('month', fyStart.slice(0, 7))
-        .lte('month', fyEnd.slice(0, 7))
-      if (data) slips.push(...data)
+    // Same cap risk as the snapshots fetch above: a 100-employee chunk times
+    // up to 12 monthly slips in the FY can exceed 1000 rows, so each chunk is
+    // paginated rather than taken as a single page. Keyset, not offset: this
+    // feeds the actual-TDS sum compared against the projection for a real
+    // variance flag, and a concurrent finalize inserting a slip into the
+    // random-UUID key space mid-page would silently skip or duplicate a row
+    // under offset/.range() pagination even with a deterministic
+    // .order('id') — see supabase-paginate.test.ts.
+    let slips: any[]
+    try {
+      slips = []
+      for (let i = 0; i < empIds.length; i += 100) {
+        const chunkIds = empIds.slice(i, i + 100)
+        const chunkRows = await fetchAllRowsByKeyset((afterId, limit) => {
+          let q = fastify.supabase
+            .from('payroll_slips')
+            .select('id, employee_id, tds_deducted')
+            .in('employee_id', chunkIds)
+            .eq('tenant_id', req.tenantId)
+            // payroll_slips has no pay_date; its `month` is 'YYYY-MM' — scope to the FY months
+            .gte('month', fyStart.slice(0, 7))
+            .lte('month', fyEnd.slice(0, 7))
+            .order('id', { ascending: true })
+            .limit(limit)
+          if (afterId) q = q.gt('id', afterId)
+          return q
+        })
+        slips.push(...chunkRows)
+      }
+    } catch (err) {
+      return serverError(req, reply, err, ErrorCode.QUERY_FAILED, 'Failed to fetch payroll slips for TDS reconciliation')
     }
 
-    // Build map: employee_id -> sum actual TDS
+    // Build map: employee_id -> sum actual TDS. tds_deducted is DECIMAL — coerce or an
+    // employee with 2+ slips in the FY corrupts this into NaN, failing the
+    // tax_projection_reconciliation.actual_tax NOT NULL upsert (G13 sweep).
     const actualTdsMap = new Map<string, number>()
     for (const slip of slips as any[]) {
       const prev = actualTdsMap.get(slip.employee_id) ?? 0
-      actualTdsMap.set(slip.employee_id, prev + (slip.tds_deducted ?? 0))
+      actualTdsMap.set(slip.employee_id, prev + Number(slip.tds_deducted ?? 0))
     }
 
     const now = new Date().toISOString()
@@ -626,8 +666,9 @@ export default async function tdsBulkRoutes(fastify: FastifyInstance) {
 
     const declList = (declarations ?? []) as any[]
 
+    // declared_amount is DECIMAL — coerce or 2+ declarations corrupt this into NaN (G13 sweep).
     const totalDeclaredAmount = declList.reduce(
-      (sum: number, d: any) => sum + (d.declared_amount ?? 0), 0
+      (sum: number, d: any) => sum + Number(d.declared_amount ?? 0), 0
     )
 
     // Check lock statuses
@@ -690,11 +731,13 @@ export default async function tdsBulkRoutes(fastify: FastifyInstance) {
       .eq('projection_month', currentMonth)
       .maybeSingle()
 
-    const monthlyTdsRecovery: number = (projRow as any)?.tds_this_month ?? 0
+    const monthlyTdsRecovery: number = Number((projRow as any)?.tds_this_month ?? 0)
 
-    // Potential tax saving (rough: sum of approved amounts * marginal rate 30%)
+    // Potential tax saving (rough: sum of approved amounts * marginal rate 30%).
+    // approved_amount/declared_amount are DECIMAL — coerce or 2+ declarations corrupt
+    // this into NaN, silently zeroing out potential_tax_saving (G13 sweep).
     const totalApprovedAmount = declList.reduce(
-      (sum: number, d: any) => sum + (d.approved_amount ?? d.declared_amount ?? 0), 0
+      (sum: number, d: any) => sum + Number(d.approved_amount ?? d.declared_amount ?? 0), 0
     )
     const potentialTaxSaving = Math.round(totalApprovedAmount * 0.3)
 

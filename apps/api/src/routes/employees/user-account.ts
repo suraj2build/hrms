@@ -347,6 +347,7 @@ export default async function userAccountRoutes(fastify: FastifyInstance) {
       // reports 404, not a confusing 409.
       if (expected_version !== undefined) {
         const { data: exists } = await fastify.supabase
+          // lint-tenant-ok: profile.id came from the tenant-filtered lookup above (.eq('tenant_id', tenantId)), so this id already belongs to this tenant
           .from('profiles')
           .select('id')
           .eq('id', profile.id)

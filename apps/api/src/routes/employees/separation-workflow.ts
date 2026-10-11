@@ -570,7 +570,7 @@ export default async function separationWorkflowRoutes(fastify: FastifyInstance)
 
     const { data: ff, error: fetchErr } = await fastify.supabase
       .from('separation_ff_summary')
-      .select('id, status')
+      .select('id, status, computed_at, salary_basis_gross, salary_basis_basic, gratuity_amount, leave_encashment_amount, notice_period_deduction')
       .eq('employee_id', req.params.id)
       .eq('tenant_id', req.tenantId)
       .maybeSingle()
@@ -581,6 +581,50 @@ export default async function separationWorkflowRoutes(fastify: FastifyInstance)
       return reply.code(404).send({ error: 'NOT_FOUND', message: 'F&F record not found' })
     if (ff.status === 'approved' || ff.status === 'paid')
       return reply.code(409).send({ error: 'INVALID_STATE', message: `Cannot approve: current status is '${ff.status}'` })
+
+    // G03: approval must not lock in a STALE calculation. If this record was
+    // last computed via POST /compute (computed_at is set — a pure manual
+    // entry via POST /separation-ff, never computed, has computed_at=null
+    // and is HR's own responsibility, not something to "recompute"),
+    // re-run the SAME computation now and compare EVERY material output
+    // against what's stored — not just the salary basis. computeFnfSettlement
+    // is a pure function of (separation dates/override/waiver, employment
+    // category, gratuity_config, the last finalized slip, leave policy +
+    // balance); comparing its full set of derived amounts is equivalent to
+    // comparing all of those inputs, without having to special-case each one.
+    // A correction to a finalized slip, a later finalized run, a leave-
+    // balance adjustment, a notice-date/override/waiver edit, or a gratuity-
+    // config change between compute and approve would otherwise approve a
+    // card the employee/HR never actually reviewed the current numbers for —
+    // the exact "approving stale F&F calculations" gap the original audit
+    // finding described, which filtering the salary-basis query for
+    // status='finalized' alone does not close by itself.
+    if (ff.computed_at) {
+      const fresh = await computeFnfSettlement(fastify.supabase, req.tenantId, req.params.id)
+      if ('error' in fresh) {
+        return reply.code(409).send({ error: 'RECOMPUTE_FAILED', message: `Cannot verify this settlement is still current: ${fresh.error}. Resolve the issue and recompute before approving.` })
+      }
+      const diff = (a: number | null | undefined, b: number | null | undefined) => Math.abs(Number(a ?? 0) - Number(b ?? 0)) > 0.01
+      const changedFields: Record<string, { stored: number; current: number }> = {}
+      if (diff(fresh.salary_basis_gross, ff.salary_basis_gross))
+        changedFields.salary_basis_gross = { stored: Number(ff.salary_basis_gross ?? 0), current: fresh.salary_basis_gross }
+      if (diff(fresh.salary_basis_basic, ff.salary_basis_basic))
+        changedFields.salary_basis_basic = { stored: Number(ff.salary_basis_basic ?? 0), current: fresh.salary_basis_basic }
+      if (diff(fresh.gratuity_amount, (ff as any).gratuity_amount))
+        changedFields.gratuity_amount = { stored: Number((ff as any).gratuity_amount ?? 0), current: fresh.gratuity_amount }
+      if (diff(fresh.leave_encashment_amount, (ff as any).leave_encashment_amount))
+        changedFields.leave_encashment_amount = { stored: Number((ff as any).leave_encashment_amount ?? 0), current: fresh.leave_encashment_amount }
+      if (diff(fresh.notice_period_deduction, (ff as any).notice_period_deduction))
+        changedFields.notice_period_deduction = { stored: Number((ff as any).notice_period_deduction ?? 0), current: fresh.notice_period_deduction }
+
+      if (Object.keys(changedFields).length > 0) {
+        return reply.code(409).send({
+          error:   'STALE_CALCULATION',
+          message: 'The settlement inputs have changed since this was last computed (e.g. a corrected or newly finalized payroll slip, a leave-balance adjustment, or a notice/gratuity change). Recompute via POST /separation-ff/compute and review the updated figures before approving.',
+          changed_fields: changedFields,
+        })
+      }
+    }
 
     // Fold the 'draft' precondition into the WHERE clause — the earlier
     // SELECT is a separate query, so two concurrent approve requests could

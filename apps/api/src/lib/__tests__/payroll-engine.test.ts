@@ -28,6 +28,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import {
   fetchAttendanceSummary,
+  fetchActiveCompensation,
   computePayrollSlip,
   applyAdvanceLoanRecovery,
   finalizeDeductionsAndNet,
@@ -322,5 +323,179 @@ describe('computePayrollSlip — LOP exceeding gross pay caps total_deductions (
     // The invariant: gross_pay - total_deductions = net_pay, always.
     expect(result.gross_pay - result.total_deductions).toBe(result.net_pay)
     expect(result.warning ?? '').toMatch(/exceed gross pay/i)
+  })
+})
+
+// ── Section 4: G13 sweep — NUMERIC-as-string coercion regressions ────────────
+//
+// attendance_daily.day_fraction is DECIMAL(3,1); PostgREST/Supabase serialize
+// NUMERIC/DECIMAL columns as JSON strings, not numbers. These tests exercise
+// fetchAttendanceSummary and fetchActiveCompensation with string-shaped rows
+// (as the real DB layer actually returns them) instead of the numeric-literal
+// rows Section 1 above uses, to guard the Number()-coercion fix.
+
+describe('fetchAttendanceSummary — DB-string day_fraction (G13 sweep)', () => {
+  it('2+ rows with string day_fraction sum correctly instead of string-concatenating', async () => {
+    // Before the fix: 0 + "1.0" + "1.0" -> "01.01.0" -> round2() -> NaN.
+    const rows = [
+      { status: 'present', is_payable: true, day_fraction: '1.0', overtime_minutes: 0 },
+      { status: 'present', is_payable: true, day_fraction: '1.0', overtime_minutes: 0 },
+      { status: 'half_day', is_payable: true, day_fraction: '0.5', overtime_minutes: 0 },
+    ]
+    const result = await fetchAttendanceSummary(mockSupabase(rows as any), TENANT, EMP, MONTH)
+
+    expect(result.payable_days).toBe(2.5)
+    expect(result.lop_days).toBe(0.5)
+    expect(Number.isNaN(result.payable_days)).toBe(false)
+    expect(Number.isNaN(result.lop_days)).toBe(false)
+  })
+
+  it('string "0.0" day_fraction (a genuine full LOP day) is NOT treated as missing/null', async () => {
+    // Regression guard: the fix must use `Number(x ?? 1.0)`, not `Number(x) || 1.0`,
+    // or a real 0 gets wrongly replaced with a full present day.
+    const rows = [
+      { status: 'absent', is_payable: false, day_fraction: '0.0', overtime_minutes: 0 },
+      { status: 'present', is_payable: true, day_fraction: '1.0', overtime_minutes: 0 },
+    ]
+    const result = await fetchAttendanceSummary(mockSupabase(rows as any), TENANT, EMP, MONTH)
+
+    expect(result.payable_days).toBe(1)   // not 2 — the "0.0" day must stay 0, not become 1.0
+    expect(result.lop_days).toBe(1)
+  })
+
+  it('fractional string day_fraction (e.g. "0.25") sums correctly', async () => {
+    const rows = [
+      { status: 'half_day', is_payable: true, day_fraction: '0.25', overtime_minutes: 0 },
+      { status: 'half_day', is_payable: true, day_fraction: '0.75', overtime_minutes: 0 },
+    ]
+    const result = await fetchAttendanceSummary(mockSupabase(rows as any), TENANT, EMP, MONTH)
+
+    expect(result.payable_days).toBe(1)
+    expect(result.lop_days).toBe(1)
+  })
+
+  it('null day_fraction among string rows still defaults to full present (1.0)', async () => {
+    const rows = [
+      { status: 'present', is_payable: true, day_fraction: null, overtime_minutes: 0 },
+      { status: 'present', is_payable: true, day_fraction: '1.0', overtime_minutes: 0 },
+    ]
+    const result = await fetchAttendanceSummary(mockSupabase(rows as any), TENANT, EMP, MONTH)
+
+    expect(result.payable_days).toBe(2)
+    expect(result.lop_days).toBe(0)
+  })
+})
+
+describe('fetchActiveCompensation — DB-string computed_monthly/computed_annual (G13 sweep)', () => {
+  /** Mock matching fetchActiveCompensation's two-query shape:
+   *  employee_compensations (.select().eq().eq().eq().lte().order().limit().maybeSingle())
+   *  employee_compensation_components (.select().eq().order() — thenable, no maybeSingle) */
+  function mockCompSupabase(
+    comp: { id: string; ctc_annual: string | number; ctc_monthly: string | number; effective_from: string } | null,
+    components: Array<{
+      salary_component_id: string
+      sequence: number
+      computed_monthly: string | number | null
+      computed_annual:  string | number | null
+      calculation_type: string
+      value: string | number
+      salary_components: { id: string; name: string; code: string; component_type: string }
+    }>,
+  ) {
+    return {
+      from(table: string) {
+        if (table === 'employee_compensations') {
+          const chain: any = {
+            select: () => chain,
+            eq:     () => chain,
+            lte:    () => chain,
+            order:  () => chain,
+            limit:  () => chain,
+            maybeSingle: () => Promise.resolve({ data: comp, error: null }),
+          }
+          return chain
+        }
+        // employee_compensation_components — resolved via await on the chain itself (thenable)
+        const chain: any = {
+          select: () => chain,
+          eq:     () => chain,
+          order:  () => Promise.resolve({ data: components, error: null }),
+        }
+        return chain
+      },
+    } as any
+  }
+
+  it('2+ components with string computed_monthly sum correctly (not string-concatenated)', async () => {
+    // Before the fix: monthly_amount stayed the raw string, and computePayrollSlip's
+    // `earnings.reduce((s, c) => s + c.monthly_amount, 0)` string-concatenated once
+    // there were 2+ earning components — i.e. virtually every real employee.
+    const result = await fetchActiveCompensation(
+      mockCompSupabase(
+        { id: 'comp-1', ctc_annual: '600000.00', ctc_monthly: '50000.00', effective_from: '2026-01-01' },
+        [
+          { salary_component_id: 'sc-1', sequence: 1, computed_monthly: '30000.00', computed_annual: '360000.00', calculation_type: 'fixed', value: '30000.0000', salary_components: { id: 'x', name: 'Basic', code: 'BASIC', component_type: 'earning' } },
+          { salary_component_id: 'sc-2', sequence: 2, computed_monthly: '20000.00', computed_annual: '240000.00', calculation_type: 'fixed', value: '20000.0000', salary_components: { id: 'y', name: 'HRA', code: 'HRA', component_type: 'earning' } },
+        ],
+      ),
+      TENANT, EMP,
+    )
+
+    expect(result).not.toBeNull()
+    expect(result!.ctc_monthly).toBe(50000)
+    expect(result!.ctc_annual).toBe(600000)
+    expect(result!.components[0].monthly_amount).toBe(30000)
+    expect(result!.components[1].monthly_amount).toBe(20000)
+    const grossPay = result!.components.reduce((s, c) => s + c.monthly_amount, 0)
+    expect(grossPay).toBe(50000)
+    expect(Number.isNaN(grossPay)).toBe(false)
+  })
+
+  it('string "0.00" computed_monthly is a real zero, not dropped or NaN', async () => {
+    const result = await fetchActiveCompensation(
+      mockCompSupabase(
+        { id: 'comp-2', ctc_annual: '360000.00', ctc_monthly: '30000.00', effective_from: '2026-01-01' },
+        [
+          { salary_component_id: 'sc-1', sequence: 1, computed_monthly: '30000.00', computed_annual: '360000.00', calculation_type: 'fixed', value: '30000.0000', salary_components: { id: 'x', name: 'Basic', code: 'BASIC', component_type: 'earning' } },
+          { salary_component_id: 'sc-2', sequence: 2, computed_monthly: '0.00', computed_annual: '0.00', calculation_type: 'fixed', value: '0.0000', salary_components: { id: 'z', name: 'Bonus', code: 'BONUS', component_type: 'earning' } },
+        ],
+      ),
+      TENANT, EMP,
+    )
+
+    expect(result!.components[1].monthly_amount).toBe(0)
+    const grossPay = result!.components.reduce((s, c) => s + c.monthly_amount, 0)
+    expect(grossPay).toBe(30000)
+  })
+
+  it('null computed_monthly/computed_annual default to 0, not null/NaN', async () => {
+    const result = await fetchActiveCompensation(
+      mockCompSupabase(
+        { id: 'comp-3', ctc_annual: '120000.00', ctc_monthly: '10000.00', effective_from: '2026-01-01' },
+        [
+          { salary_component_id: 'sc-1', sequence: 1, computed_monthly: null, computed_annual: null, calculation_type: 'fixed', value: '0', salary_components: { id: 'x', name: 'Allowance', code: 'ALLOW', component_type: 'earning' } },
+        ],
+      ),
+      TENANT, EMP,
+    )
+
+    expect(result!.components[0].monthly_amount).toBe(0)
+    expect(result!.components[0].annual_amount).toBe(0)
+    expect(Number.isNaN(result!.components[0].monthly_amount)).toBe(false)
+  })
+
+  it('fractional string computed_monthly (e.g. "1234.56") converts exactly', async () => {
+    const result = await fetchActiveCompensation(
+      mockCompSupabase(
+        { id: 'comp-4', ctc_annual: '14814.72', ctc_monthly: '1234.56', effective_from: '2026-01-01' },
+        [
+          { salary_component_id: 'sc-1', sequence: 1, computed_monthly: '1234.56', computed_annual: '14814.72', calculation_type: 'fixed', value: '1234.5600', salary_components: { id: 'x', name: 'Basic', code: 'BASIC', component_type: 'earning' } },
+        ],
+      ),
+      TENANT, EMP,
+    )
+
+    expect(result!.components[0].monthly_amount).toBe(1234.56)
+    expect(result!.ctc_monthly).toBe(1234.56)
   })
 })

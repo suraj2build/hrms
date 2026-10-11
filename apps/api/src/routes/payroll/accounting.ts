@@ -40,22 +40,24 @@ export default async function payrollAccountingRoutes(fastify: FastifyInstance) 
 
     const ledgers = (ledgersRes.data ?? []) as any[]
 
+    // total_credit/expected_amount/paid_amount are NUMERIC — coerce or 2+ rows corrupt
+    // these totals into a concatenated string / NaN (G13 sweep).
     const totalPayrollLiability = ledgers
       .filter(l => l.ledger_type === 'payroll' && l.ledger_status !== 'reversed')
-      .reduce((s, l) => s + (l.total_credit ?? 0), 0)
+      .reduce((s, l) => s + Number(l.total_credit ?? 0), 0)
 
     const pendingPayouts = payouts.filter(p => p.payment_status === 'pending' || p.payment_status === 'processing')
     const failedPayouts  = payouts.filter(p => p.payment_status === 'failed')
     const completedPayouts = payouts.filter(p => p.payment_status === 'paid')
 
-    const totalExpected  = payouts.reduce((s, p) => s + (p.expected_amount ?? 0), 0)
-    const totalPaid      = completedPayouts.reduce((s, p) => s + (p.paid_amount ?? 0), 0)
+    const totalExpected  = payouts.reduce((s, p) => s + Number(p.expected_amount ?? 0), 0)
+    const totalPaid      = completedPayouts.reduce((s, p) => s + Number(p.paid_amount ?? 0), 0)
     const imbalancedLedgers = ledgers.filter(l => l.ledger_status !== 'reversed' && Math.abs((l.total_debit ?? 0) - (l.total_credit ?? 0)) > 0.01)
 
     return reply.send({
       data: {
         total_payroll_liability:  totalPayrollLiability,
-        pending_payout_amount:    pendingPayouts.reduce((s, p) => s + p.expected_amount, 0),
+        pending_payout_amount:    pendingPayouts.reduce((s, p) => s + Number(p.expected_amount ?? 0), 0),
         failed_payout_count:      failedPayouts.length,
         payout_completion_pct:    totalExpected > 0 ? Math.round((totalPaid / totalExpected) * 100) : 0,
         imbalanced_ledger_count:  imbalancedLedgers.length,
@@ -84,20 +86,22 @@ export default async function payrollAccountingRoutes(fastify: FastifyInstance) 
       return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch GL account summary')
     }
 
-    // Aggregate by GL account
+    // Aggregate by GL account. debit_amount/credit_amount are NUMERIC — coerce or the
+    // accumulator (seeded from the first row) string-concatenates on every account
+    // with 2+ entries, which is effectively every account (G13 sweep).
     const glMap = new Map<string, { code: string; name: string; category: string; totalDebit: number; totalCredit: number }>()
     for (const row of data as any[]) {
       const existing = glMap.get(row.gl_account_code)
       if (existing) {
-        existing.totalDebit  += row.debit_amount  ?? 0
-        existing.totalCredit += row.credit_amount ?? 0
+        existing.totalDebit  += Number(row.debit_amount  ?? 0)
+        existing.totalCredit += Number(row.credit_amount ?? 0)
       } else {
         glMap.set(row.gl_account_code, {
           code:        row.gl_account_code,
           name:        row.gl_account_name,
           category:    row.entry_category,
-          totalDebit:  row.debit_amount  ?? 0,
-          totalCredit: row.credit_amount ?? 0,
+          totalDebit:  Number(row.debit_amount  ?? 0),
+          totalCredit: Number(row.credit_amount ?? 0),
         })
       }
     }

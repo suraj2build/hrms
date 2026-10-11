@@ -101,17 +101,26 @@ test.describe('05 — Payroll', () => {
 
     await page.screenshot({ path: 'screenshots/05f-payroll-for-crosscheck.png' })
 
-    if (musterPayable !== null && payrollPayableDays !== null) {
-      // They should match (allow tiny rounding: ±1 day across all employees)
-      const diff = Math.abs(musterPayable - payrollPayableDays)
-      if (diff > 1) {
-        console.warn(`[cross-check] MISMATCH: muster=${musterPayable}, payroll=${payrollPayableDays}, diff=${diff}`)
-      } else {
-        console.log(`[cross-check] MATCH: muster=${musterPayable}, payroll=${payrollPayableDays}`)
-      }
-    } else {
-      console.log('[cross-check] Could not extract both figures for comparison — check screenshots')
-    }
+    // This is the test's one real assertion: a financial figure shown in
+    // payroll must reconcile with the same figure in muster roll for the
+    // same month. Silently logging a mismatch (the prior behaviour) let a
+    // real reconciliation break ship without failing CI — this must fail
+    // the test, not just warn.
+    expect(
+      musterPayable,
+      `[cross-check] Could not extract muster payable days for ${PREV_MONTH} from page text — cross-check cannot run. Check screenshots/05e-muster-for-crosscheck.png.`,
+    ).not.toBeNull()
+    expect(
+      payrollPayableDays,
+      `[cross-check] Could not extract payroll payable days from page text — cross-check cannot run. Check screenshots/05f-payroll-for-crosscheck.png.`,
+    ).not.toBeNull()
+
+    const diff = Math.abs(musterPayable! - payrollPayableDays!)
+    console.log(`[cross-check] muster=${musterPayable}, payroll=${payrollPayableDays}, diff=${diff}`)
+    expect(
+      diff,
+      `[cross-check] MISMATCH: muster payable days (${musterPayable}) and payroll payable days (${payrollPayableDays}) diverge by ${diff} (> 1 day tolerance) for ${PREV_MONTH}.`,
+    ).toBeLessThanOrEqual(1)
   })
 
   test('payroll investigation tool loads', async ({ page }) => {

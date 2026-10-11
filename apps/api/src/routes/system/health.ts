@@ -11,6 +11,15 @@
 import type { FastifyInstance } from 'fastify'
 import { platformHealth }       from '../../lib/startup-health.js'
 
+// Full (untruncated) commit SHA of the running deployment — lets a release-
+// qualification check (e.g. CI's E2E gate) confirm the environment it's
+// about to test is actually running the candidate commit, not a stale
+// deployment. Railway sets RAILWAY_GIT_COMMIT_SHA; Vercel (if the API is
+// ever hosted there) sets VERCEL_GIT_COMMIT_SHA; GIT_COMMIT_SHA is a
+// manual fallback for other hosts.
+const DEPLOYED_COMMIT_SHA =
+  process.env.RAILWAY_GIT_COMMIT_SHA ?? process.env.VERCEL_GIT_COMMIT_SHA ?? process.env.GIT_COMMIT_SHA ?? null
+
 export default async function healthRoutes(fastify: FastifyInstance) {
 
   function livenessPayload() {
@@ -18,6 +27,7 @@ export default async function healthRoutes(fastify: FastifyInstance) {
       status:    platformHealth.status,
       startedAt: platformHealth.startedAt,
       uptime:    Math.floor(process.uptime()),
+      commitSha: DEPLOYED_COMMIT_SHA,
     }
   }
 

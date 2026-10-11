@@ -10,7 +10,9 @@ coverage/
 *.log 
 .vscode/ 
 .idea/ 
-.DS_Store 
+.DS_Store
+# Generated at build time by apps/web/scripts/write-build-info.mjs — never commit a stale SHA.
+apps/web/public/version.json
 
 # Source/dist archives must never be committed — they can smuggle in .env
 # files and node_modules past the rules above. Ignore all zips/archives.

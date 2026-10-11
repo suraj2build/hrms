@@ -1072,6 +1072,7 @@ export default async function workforceOptimizationRoute(fastify: FastifyInstanc
     for (let i = 0; i < balanceUpserts.length; i += BATCH) {
       const batch = balanceUpserts.slice(i, i + BATCH)
       const { error: upsertErr } = await fastify.supabase
+        // lint-tenant-ok: batch rows already carry tenant_id (balanceUpserts.push includes tenant_id: req.tenantId above) — upsert payload is tenant-scoped even though the literal isn't inline in this query chain
         .from('workforce_shift_balance')
         .upsert(batch, {
           onConflict: 'tenant_id,employee_id,period_start,period_end',

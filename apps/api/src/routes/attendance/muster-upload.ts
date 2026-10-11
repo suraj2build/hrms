@@ -297,6 +297,7 @@ export default async function musterUploadRoutes(fastify: FastifyInstance) {
       const chunk     = toUpsert.slice(i, i + UPSERT_CHUNK)
       const chunkMeta = toUpsertMeta.slice(i, i + UPSERT_CHUNK)
       const { error: upsertErr } = await fastify.supabase
+        // lint-query-ok: write-only .upsert() with no .select() — no rows are read back, so the 1,000-row read cap doesn't apply (scanner's write-op detection doesn't recognize .upsert(), only .insert()/.update()/.delete())
         .from('attendance_daily')
         .upsert(chunk, { onConflict: 'tenant_id,employee_id,date', ignoreDuplicates: false })
 

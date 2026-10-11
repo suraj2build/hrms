@@ -35,11 +35,14 @@ async function buildEmployeeNameMap(
   const nameMap: Record<string, { name: string; employee_code: string }> = {}
   if (employeeIds.length === 0) return nameMap
 
-  const { data: emps } = await fastify.supabase
-    .from('employees')
-    .select('id, first_name, last_name, employee_code')
-    .eq('tenant_id', tenantId)
-    .in('id', employeeIds)
+  const emps = await fetchAllRows((from, to) =>
+    fastify.supabase
+      .from('employees')
+      .select('id, first_name, last_name, employee_code')
+      .eq('tenant_id', tenantId)
+      .in('id', employeeIds)
+      .range(from, to),
+  )
   for (const e of (emps ?? []) as any[]) {
     nameMap[e.id] = {
       name:          [e.first_name, e.last_name].filter(Boolean).join(' ') || `Employee ${e.employee_code ?? ''}`,

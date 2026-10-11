@@ -1,6 +1,7 @@
 name: E2E Tests — Full Lifecycle
 
 on:
+  pull_request:              # G09: must gate merges — financial-figure mismatches (e.g. 05-payroll.spec.ts) now fail the job, not just warn
   workflow_dispatch:         # manual trigger from GitHub Actions UI
   schedule:
     - cron: '0 3 * * 1'    # every Monday 03:00 UTC (overnight, won't interrupt work)
@@ -22,6 +23,39 @@ jobs:
           cache: 'npm'
           cache-dependency-path: apps/e2e/package.json
 
+      # Release-qualification gate: fail loudly and immediately if the
+      # candidate URLs/credentials this run needs aren't configured, rather
+      # than silently falling back to a hardcoded URL (the old behavior)
+      # and testing the wrong environment with no indication anything was
+      # wrong. E2E_API_URL is new — needed so the candidate-verification
+      # step below can check the API's deployed SHA independently of the
+      # web app's. STAGING_PG* are now required here too (not optional) —
+      # DB migration-state verification is not optional for release
+      # qualification (see scripts/verify-staging-candidate.sh header).
+      - name: Verify required secrets are configured
+        run: |
+          missing=()
+          [ -z "${{ secrets.E2E_BASE_URL }}" ]     && missing+=("E2E_BASE_URL (staging web URL for this candidate)")
+          [ -z "${{ secrets.E2E_API_URL }}" ]      && missing+=("E2E_API_URL (staging API URL for this candidate)")
+          [ -z "${{ secrets.E2E_HR_EMAIL }}" ]     && missing+=("E2E_HR_EMAIL")
+          [ -z "${{ secrets.E2E_HR_PASS }}" ]      && missing+=("E2E_HR_PASS")
+          [ -z "${{ secrets.STAGING_PGHOST }}" ]     && missing+=("STAGING_PGHOST (required — DB migration-state check is not optional)")
+          [ -z "${{ secrets.STAGING_PGPORT }}" ]     && missing+=("STAGING_PGPORT")
+          [ -z "${{ secrets.STAGING_PGUSER }}" ]     && missing+=("STAGING_PGUSER")
+          [ -z "${{ secrets.STAGING_PGPASSWORD }}" ] && missing+=("STAGING_PGPASSWORD")
+          [ -z "${{ secrets.STAGING_PGDATABASE }}" ] && missing+=("STAGING_PGDATABASE")
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error::Missing required repository secrets — this run cannot qualify a candidate without them:"
+            for m in "${missing[@]}"; do echo "::error::  - $m"; done
+            echo "Add these under Settings → Secrets and variables → Actions. See apps/e2e/README.md."
+            exit 1
+          fi
+          echo "All required secrets are present."
+
+      # Playwright needs to be installed before both the dynamic wiring
+      # check below and the real E2E suite later — moved ahead of candidate
+      # verification (it used to run after) so the dynamic check has a
+      # browser available.
       - name: Install Playwright
         working-directory: apps/e2e
         run: npm ci
@@ -30,10 +64,47 @@ jobs:
         working-directory: apps/e2e
         run: npx playwright install --with-deps chromium
 
+      # Confirm the staging environment these secrets point at is ACTUALLY
+      # running this exact commit (web + API SHA, migration presence +
+      # content + resulting schema) before spending 30 minutes running
+      # Playwright against what might be a stale or mismatched deployment.
+      #
+      # EXPECTED_SHA: on a pull_request event, github.sha is GitHub's
+      # ephemeral refs/pull/N/merge commit, not the PR's actual head commit
+      # — Vercel/Railway deploy the head commit, so comparing against
+      # github.sha here would never match a correctly-deployed staging
+      # environment. Use the PR's real head SHA when this ran as a PR check;
+      # fall back to github.sha for workflow_dispatch/schedule runs on a
+      # real branch, where github.sha IS the deployed commit.
+      - name: Verify staging candidate matches this commit
+        env:
+          WEB_URL:      ${{ secrets.E2E_BASE_URL }}
+          API_URL:      ${{ secrets.E2E_API_URL }}
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          PGHOST:       ${{ secrets.STAGING_PGHOST }}
+          PGPORT:       ${{ secrets.STAGING_PGPORT }}
+          PGUSER:       ${{ secrets.STAGING_PGUSER }}
+          PGPASSWORD:   ${{ secrets.STAGING_PGPASSWORD }}
+          PGDATABASE:   ${{ secrets.STAGING_PGDATABASE }}
+        run: ./scripts/verify-staging-candidate.sh
+
+      # The SHA/metadata checks above prove the web build was COMPILED with
+      # the right VITE_API_URL -- not that the deployed, running client
+      # actually calls it (a platform rewrite, a runtime config override,
+      # or a stale cached bundle would all slip past build-time metadata
+      # alone). This loads the real page in the real browser just installed
+      # and watches what it actually requests.
+      - name: Verify web build actually calls the checked API (dynamic)
+        working-directory: apps/e2e
+        env:
+          WEB_URL: ${{ secrets.E2E_BASE_URL }}
+          API_URL: ${{ secrets.E2E_API_URL }}
+        run: node verify-web-api-wiring.mjs
+
       - name: Run E2E tests
         working-directory: apps/e2e
         env:
-          E2E_BASE_URL: ${{ secrets.E2E_BASE_URL || 'https://hrms-web-alpha.vercel.app' }}
+          E2E_BASE_URL: ${{ secrets.E2E_BASE_URL }}
           E2E_HR_EMAIL: ${{ secrets.E2E_HR_EMAIL }}
           E2E_HR_PASS:  ${{ secrets.E2E_HR_PASS }}
         run: npx playwright test
