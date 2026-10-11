@@ -194,3 +194,49 @@ Rules to avoid breaking this:
   resolves anywhere, should only ever show a landing page that links here,
   never a live app with its own DB credentials.
 
+---
+
+## Market-readiness build priorities (2026-10-11)
+
+Source: `citykart-vs-cognixhr-comparison.md` and
+`citykart-vs-cognixhr-deep-gap-analysis.md` (both on this branch, root of
+repo) — a code-grounded gap analysis against a competitor retail-chain HRMS.
+Approved build order, in progress:
+
+1. **F&F auto-pull asset/loan recovery** — `apps/api/src/lib/fnf-settlement-engine.ts`
+   doesn't query outstanding assets or loan balances; `other_deductions` is
+   manual. Wire it to the same data the separation/clearance flow already
+   has. Highest priority: direct money-leakage risk at scale.
+2. **Raise leave on behalf** — HR/manager currently cannot file a leave
+   request for an employee (`leave-requests.ts` / `leave.ts` resolve
+   `employee_id` strictly from the caller's own session). Add an
+   HR/manager-scoped override param + UI entry point. Blocks real retail/ops
+   usage where staff lack reliable ESS access.
+3. **Probation Confirmation workflow** — today it's a date field
+   (`job_history.confirmation_date`) plus a generic HR-inbox notification
+   (`team-lifecycle.ts: confirmation-recommend`). Needs an actual
+   confirm/extend decision, manager feedback capture, and a status lifecycle
+   (Pending/Extended/Closed), not just an overdue badge.
+4. **Public recruitment intake** — the ATS pipeline itself
+   (`apps/api/src/routes/recruitment/index.ts`) is deep and real, but every
+   candidate/application-creation route is `hrAdminAuth`-gated. No careers
+   page, no public apply form exists anywhere. Needs a public, unauthenticated
+   job-listing + apply flow that creates `candidates`/`applications` rows.
+
+**Admin-load philosophy, stated explicitly so it isn't re-litigated per
+feature:** don't add another manual queue for something that should mostly
+resolve itself. Concretely: `AttendanceAnomalies.tsx` is being de-emphasized
+(not removed — regularisation is already the real correction flow; raw
+anomalies are a detection signal, not a second place for an admin to triage
+work by hand) in favor of investing in auto-resolution/risk-scoring so fewer
+anomalies ever need a human. Apply the same lens to any new admin screen
+this build order produces: if a queue exists, it should default to "only
+what actually needs a human," not "everything, unfiltered" — the same
+principle already flagged for the HR Admin approval-queue scope gap in
+`citykart-vs-cognixhr-comparison.md` §2.7/§3.1.
+
+Deferred, needs an explicit product scope decision before building (same
+kind of call as G12/standalone-encashment): PMS (performance management) and
+Travel Desk have zero implementation — not started pending a decision on
+whether they're in scope for initial launch.
+
