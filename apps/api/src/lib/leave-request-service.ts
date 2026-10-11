@@ -640,7 +640,8 @@ export async function cancelLeaveRequest(
   supabase:   SupabaseClient,
   tenantId:   string,
   requestId:  string,
-  requestedBy: string,   // must match the original requested_by
+  requestedBy: string,   // must match the original requested_by...
+  ownerEmployeeId?: string | null,   // ...OR the caller is the leave's own employee (who may not be who filed it — see "raise on behalf")
 ): Promise<LeaveRequestResult<LeaveRequestRow>> {
   // Fetch and validate
   const existing = await getLeaveRequest(supabase, tenantId, requestId)
@@ -655,10 +656,11 @@ export async function cancelLeaveRequest(
     }
   }
 
-  if (req.requested_by !== requestedBy) {
+  const isOwner = !!ownerEmployeeId && req.employee_id === ownerEmployeeId
+  if (req.requested_by !== requestedBy && !isOwner) {
     return {
       ok:    false,
-      error: { type: 'VALIDATION_ERROR', message: 'Only the requester can cancel their own leave request' },
+      error: { type: 'VALIDATION_ERROR', message: 'Only the requester or the leave owner can cancel this leave request' },
     }
   }
 
