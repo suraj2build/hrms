@@ -346,7 +346,6 @@ export const DOMAINS: Domain[] = [
           { id: 'att-upload',     label: 'Punch Intake',         route: '/admin/attendance/upload-workspace', icon: Upload, keywords: ['upload attendance', 'import attendance', 'punch upload', 'biometric upload', 'swipe data', 'attendance import'] },
           { id: 'muster',         label: 'Muster Roll',          route: '/admin/attendance/muster',           icon: BookOpen,  keywords: ['daily attendance register', 'attendance report', 'present absent', 'muster'] },
           { id: 'muster-upload',  label: 'Muster Upload',        route: '/admin/attendance/muster-upload',    icon: FileUp,    keywords: ['upload muster', 'muster import', 'import muster data'] },
-          { id: 'anomalies',      label: 'Anomalies',            route: '/admin/attendance/anomalies',        icon: AlertTriangle, keywords: ['late', 'absent', 'missing punch', 'attendance issues', 'irregularities', 'half day'] },
           { id: 'regularisation', label: 'Approvals',            route: '/admin/attendance/regularisation',   icon: CheckSquare,   keywords: ['attendance approval', 'regularize', 'regularisation', 'correction request', 'approve attendance', 'WFH'] },
           { id: 'att-periods',    label: 'Periods (Lock/Close)', route: '/admin/attendance/periods',          icon: CalendarClock, keywords: ['attendance lock', 'period close', 'month end', 'lock attendance', 'period management'] },
         ],
@@ -362,6 +361,11 @@ export const DOMAINS: Domain[] = [
       {
         label: 'Analytics & Audit',
         items: [
+          // Moved out of Operations — regularisation (above) is the real
+          // correction flow; this is a read-only detection/monitoring view,
+          // auto-reconciled daily (see anomaly-reconciler.ts), not a second
+          // queue for an admin to triage by hand.
+          { id: 'anomalies',      label: 'Anomalies',            route: '/admin/attendance/anomalies',        icon: AlertTriangle, keywords: ['late', 'absent', 'missing punch', 'attendance issues', 'irregularities', 'half day'] },
           { id: 'att-exceptions', label: 'Exceptions',  route: '/admin/attendance/exceptions', icon: AlertTriangle, keywords: ['attendance exceptions', 'issues', 'discrepancies', 'flagged attendance', 'attendance problems'] },
           { id: 'att-forensics',  label: 'Timeline',    route: '/admin/attendance/forensics',  icon: Activity,      keywords: ['attendance history', 'employee timeline', 'audit trail', 'attendance log', 'deep dive', 'drill down'] },
           { id: 'who-is-in',      label: 'Who Is In',   route: '/admin/attendance/who-is-in',  icon: Users,         keywords: ['live attendance', 'real-time', 'present today', 'absent today', 'on time', 'check in', 'current status'] },

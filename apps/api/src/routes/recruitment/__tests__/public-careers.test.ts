@@ -57,7 +57,7 @@ function chainResolving(result: { data: unknown; error: unknown }) {
   return chain
 }
 
-beforeEach(() => vi.clearAllMocks())
+beforeEach(() => { vi.clearAllMocks() })
 
 describe('GET /careers/:tenantSlug/openings', () => {
   it('unknown tenant slug → 404 (no leak)', async () => {

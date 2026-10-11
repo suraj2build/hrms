@@ -55,6 +55,7 @@ const OPTIONAL_MODULES = [
   'onboarding',
   'absconding-scanner',
   'notice-overdue-scanner',
+  'anomaly-reconciler-scanner',
   'poll-scheduler',
   'verification-retry-scanner',
   'webhook-retry-scheduler',
