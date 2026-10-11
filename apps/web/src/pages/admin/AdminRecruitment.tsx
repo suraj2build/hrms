@@ -13,7 +13,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Briefcase, Plus, RefreshCw, Search,
   CheckCircle2, PauseCircle, XCircle, MoreHorizontal,
-  Users, CalendarClock, MapPin, Trash2, ExternalLink,
+  Users, CalendarClock, MapPin, Trash2, ExternalLink, Globe, Lock,
 } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -54,6 +54,7 @@ interface Requisition {
   employment_type: string
   openings:        number
   status:          'draft' | 'open' | 'on_hold' | 'filled' | 'cancelled'
+  is_public:       boolean
   target_date:     string | null
   applicant_count: number
   raised_by_profile: { id: string; full_name: string } | null
@@ -176,6 +177,18 @@ export function AdminRecruitment() {
       invalidate()
     } catch (e: unknown) {
       toast.error(errMsg(e, 'Action failed'))
+    }
+  }
+
+  async function togglePublic(r: Requisition) {
+    try {
+      const { message } = await api.patch<{ message: string }>(
+        `/recruitment/requisitions/${r.id}/public`, { is_public: !r.is_public },
+      )
+      toast.success(message)
+      invalidate()
+    } catch (e: unknown) {
+      toast.error(errMsg(e, 'Failed to update careers page listing'))
     }
   }
 
@@ -435,9 +448,16 @@ export function AdminRecruitment() {
                           : '—'}
                       </td>
                       <td className="py-2 px-3">
-                        <Badge variant="outline" className={cn('text-[10px]', meta.className)}>
-                          {meta.label}
-                        </Badge>
+                        <div className="flex items-center gap-1.5">
+                          <Badge variant="outline" className={cn('text-[10px]', meta.className)}>
+                            {meta.label}
+                          </Badge>
+                          {r.is_public && (
+                            <Badge variant="secondary" className="text-[10px] gap-1">
+                              <Globe className="h-2.5 w-2.5" /> Public
+                            </Badge>
+                          )}
+                        </div>
                       </td>
                       <td className="py-2 px-2">
                         <DropdownMenu>
@@ -460,6 +480,13 @@ export function AdminRecruitment() {
                             <DropdownMenuItem onClick={() => setPostingsReq(r)}>
                               <ExternalLink className="h-3.5 w-3.5 mr-2" />Job-board postings
                             </DropdownMenuItem>
+                            {r.status === 'open' && (
+                              <DropdownMenuItem onClick={() => togglePublic(r)}>
+                                {r.is_public
+                                  ? <><Lock className="h-3.5 w-3.5 mr-2" />Remove from careers page</>
+                                  : <><Globe className="h-3.5 w-3.5 mr-2" />List on careers page</>}
+                              </DropdownMenuItem>
+                            )}
                             {canApprove && (
                               <DropdownMenuItem
                                 className="text-success"

@@ -30,6 +30,10 @@ export interface FnfBreakdown {
   notice_shortfall_days:   number
   salary_basis_basic:      number
   salary_basis_gross:      number
+  asset_recovery_amount:    number
+  asset_recovery_count:     number
+  loan_recovery_amount:     number
+  advance_recovery_amount:  number
   // preserved/passed-through (manual)
   last_payroll_amount:     number
   other_additions:         number
@@ -223,6 +227,64 @@ export async function computeFnfSettlement(
   if ((sep as any).notice_waived) shortfallDays = 0
   const noticeDeduction = round2(shortfallDays * (gross / 30))
 
+  // 8. Outstanding asset recovery — unreturned assets still assigned to this
+  // employee, at purchase cost. Mirrors the same check the clearance flow's
+  // IT-department block already runs, but surfaces the amount here too.
+  const { data: assets, error: assetsErr } = await supabase
+    .from('assets')
+    .select('purchase_cost')
+    .eq('tenant_id', tenantId)
+    .eq('assigned_to', employeeId)
+    .eq('status', 'assigned')
+  // A query error must not fall through as "no outstanding assets" — that
+  // would silently drop a real recovery amount from the settlement.
+  if (assetsErr) return { error: `Failed to fetch outstanding assets: ${assetsErr.message}` }
+  const assetRecoveryCount = ((assets ?? []) as any[]).length
+  const assetRecovery = round2(
+    ((assets ?? []) as any[]).reduce((s, a) => s + Number(a.purchase_cost ?? 0), 0),
+  )
+
+  // 9. Outstanding loan recovery — active/disbursed employee loans' remaining
+  // balance.
+  const { data: loans, error: loansErr } = await supabase
+    .from('employee_loans')
+    .select('outstanding_balance')
+    .eq('tenant_id', tenantId)
+    .eq('employee_id', employeeId)
+    .in('status', ['disbursed', 'active'])
+  // Same reasoning as above: a query error here must not silently read as
+  // "no outstanding loans" for a departing employee.
+  if (loansErr) return { error: `Failed to fetch outstanding loans: ${loansErr.message}` }
+  const loanRecovery = round2(
+    ((loans ?? []) as any[]).reduce((s, l) => s + Number(l.outstanding_balance ?? 0), 0),
+  )
+
+  // 10. Advance salary recovery — scheduled-but-not-yet-recovered instalments
+  // against advances still being recovered.
+  const { data: advances, error: advancesErr } = await supabase
+    .from('advance_salary_requests')
+    .select('id')
+    .eq('tenant_id', tenantId)
+    .eq('employee_id', employeeId)
+    .in('status', ['disbursed', 'recovering'])
+  if (advancesErr) return { error: `Failed to fetch advance salary requests: ${advancesErr.message}` }
+  const advanceIds = ((advances ?? []) as any[]).map(a => a.id)
+  let advanceRecovery = 0
+  if (advanceIds.length > 0) {
+    const { data: schedules, error: schedulesErr } = await supabase
+      .from('advance_recovery_schedules')
+      .select('scheduled_amount')
+      .eq('tenant_id', tenantId)
+      .in('advance_id', advanceIds)
+      .eq('status', 'pending')
+    // Same reasoning as above: a query error here must not silently read as
+    // "fully recovered" for a departing employee's pending advance.
+    if (schedulesErr) return { error: `Failed to fetch advance recovery schedules: ${schedulesErr.message}` }
+    advanceRecovery = round2(
+      ((schedules ?? []) as any[]).reduce((s, r) => s + Number(r.scheduled_amount ?? 0), 0),
+    )
+  }
+
   return {
     gratuity_amount:         gratuity,
     gratuity_eligible:       gratuityEligible,
@@ -234,6 +296,10 @@ export async function computeFnfSettlement(
     notice_shortfall_days:   shortfallDays,
     salary_basis_basic:      basic,
     salary_basis_gross:      gross,
+    asset_recovery_amount:   assetRecovery,
+    asset_recovery_count:    assetRecoveryCount,
+    loan_recovery_amount:    loanRecovery,
+    advance_recovery_amount: advanceRecovery,
     last_payroll_amount:     0,
     other_additions:         0,
     other_deductions:        0,

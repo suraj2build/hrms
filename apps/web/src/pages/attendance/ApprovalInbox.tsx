@@ -19,6 +19,7 @@ import {
   Inbox, CheckCircle2, XCircle, Loader2,
   CalendarDays, Clock, Filter, ChevronDown, ChevronUp,
   ChevronLeft, ChevronRight, TrendingUp, ArrowUpDown, ArrowUp, ArrowDown,
+  UserPlus,
 } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -27,6 +28,8 @@ import { PageHeader }    from '@/components/layout/PageHeader'
 import { SectionCard }   from '@/components/layout/SectionCard'
 import { Badge }         from '@/components/ui/badge'
 import { Button }        from '@/components/ui/button'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Label }          from '@/components/ui/label'
 import { api }           from '@/lib/api/client'
 import { cn, fmtDate }   from '@/lib/utils'
 import { ApprovalChainStepper } from '@/components/approvals/ApprovalChainStepper'
@@ -39,6 +42,8 @@ import {
 import { ManagerTeamOvertimeRequests } from '@/pages/manager/ManagerTeamOvertimeRequests'
 import { ManagerTeamCompOff }          from '@/pages/manager/ManagerTeamCompOff'
 import { ManagerLoanApprovals }        from '@/pages/manager/ManagerLoanApprovals'
+import { LeaveApply }                  from '@/pages/attendance/LeaveApply'
+import { EmployeeSelector, type EmployeeOption } from '@/components/filters/EmployeeSelector'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -784,9 +789,88 @@ function PaginationBar({
   )
 }
 
+// ── Raise Leave on Behalf dialog ────────────────────────────────────────────────
+// HR admins may target any employee in the tenant; managers are restricted to
+// their own direct reports — enforced server-side in POST /leave-requests.
+
+function RaiseLeaveOnBehalfDialog({
+  open, onOpenChange, onRaised,
+}: { open: boolean; onOpenChange: (v: boolean) => void; onRaised: () => void }) {
+  const [targetId, setTargetId] = useState('')
+  const [targetLabel, setTargetLabel] = useState<string | null>(null)
+
+  function handleOpenChange(v: boolean) {
+    onOpenChange(v)
+    if (!v) { setTargetId(''); setTargetLabel(null) }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={handleOpenChange}>
+      <DialogContent className="sm:max-w-3xl max-h-[88vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>Raise Leave on Behalf</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4">
+          <div className="space-y-1.5">
+            <Label className="text-xs">Employee</Label>
+            <EmployeeSelector
+              value={targetId}
+              onChange={(v) => {
+                const id = v as string
+                setTargetId(id)
+              }}
+              placeholder="Search by name or employee code…"
+            />
+            <p className="text-[11px] text-muted-foreground">
+              For retail/ops staff without reliable ESS access — managers can only raise
+              leave for their own direct reports.
+            </p>
+          </div>
+          {targetId && (
+            <EmployeeLabelResolver employeeId={targetId} onLabel={setTargetLabel} />
+          )}
+          {targetId && (
+            <div className="rounded-lg border border-border overflow-hidden h-[60vh]">
+              <LeaveApply
+                key={targetId}
+                mode="sheet"
+                onBehalfEmployeeId={targetId}
+                onBehalfEmployeeLabel={targetLabel}
+                onSuccess={() => { onRaised(); handleOpenChange(false) }}
+                onClose={() => handleOpenChange(false)}
+              />
+            </div>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+/** Resolves an employee id to a "Name · CODE" label for the on-behalf banner. */
+function EmployeeLabelResolver({ employeeId, onLabel }: { employeeId: string; onLabel: (label: string) => void }) {
+  useQuery<{ data: EmployeeOption[] }>({
+    queryKey: ['employee-option-label', employeeId],
+    queryFn: async () => {
+      const res = await api.get<{ data: Array<{ id: string; first_name: string; last_name: string; employee_code?: string }> }>(
+        `/employees/options?ids=${encodeURIComponent(employeeId)}`,
+      )
+      const row = (res.data ?? [])[0]
+      if (row) {
+        const name = `${row.first_name ?? ''} ${row.last_name ?? ''}`.trim()
+        onLabel(row.employee_code ? `${name} · ${row.employee_code}` : name)
+      }
+      return { data: [] }
+    },
+    staleTime: 300_000,
+  })
+  return null
+}
+
 // ── Main component ─────────────────────────────────────────────────────────────
 
 export function ApprovalInbox() {
+  const queryClient = useQueryClient()
   const [activeTab,  setActiveTab]  = useState<FilterTab>('all')
   const [leavePage,  setLeavePage]  = useState(1)
   const [regPage,    setRegPage]    = useState(1)
@@ -796,6 +880,8 @@ export function ApprovalInbox() {
   const [regContextTarget, setRegContextTarget] = useState<RegularisationContextTarget | null>(null)
   // Leave-context drawer target; null = closed (leave tab)
   const [leaveContextTarget, setLeaveContextTarget] = useState<LeaveContextTarget | null>(null)
+  // "Raise Leave on Behalf" dialog — HR admin: any employee; manager: own direct reports (enforced server-side)
+  const [raiseLeaveOpen, setRaiseLeaveOpen] = useState(false)
 
   // Reset pages when switching tabs
   function switchTab(tab: FilterTab) {
@@ -886,6 +972,18 @@ export function ApprovalInbox() {
         ]}
         title="Approval Inbox"
         subtitle="Review and action pending approvals from your team"
+        actions={
+          <Button size="sm" variant="outline" className="gap-1.5" onClick={() => setRaiseLeaveOpen(true)}>
+            <UserPlus className="h-3.5 w-3.5" />
+            Raise Leave
+          </Button>
+        }
+      />
+
+      <RaiseLeaveOnBehalfDialog
+        open={raiseLeaveOpen}
+        onOpenChange={setRaiseLeaveOpen}
+        onRaised={() => queryClient.invalidateQueries({ queryKey: ['approvals-pending'] })}
       />
 
       {/* Filter tabs + Q3 sort-by-age toggle */}

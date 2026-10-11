@@ -1,58 +1,27 @@
 /**
  * POST /attendance/anomalies/reconcile
  *
- * Attendance-daily–driven anomaly reconciliation pass.
+ * Manual, on-demand run of the same reconciliation pass that now also runs
+ * automatically once a day for every active/trial tenant (see
+ * 'reconcile-anomalies' in index.ts) — kept for ops debugging and for HR to
+ * trigger an out-of-band pass without waiting for the next scheduled run.
+ * Core logic lives in lib/anomaly-reconciler.ts so the scheduled job and
+ * this button can't drift.
  *
- * Scans all UNRESOLVED anomalies for a period (defaults to last 90 days) and
- * auto-resolves any that are CONTRADICTED by the current attendance_daily truth.
- *
- * Contradiction rules:
- *   no_punch   → contradicted when attendance_daily.status is one of:
- *                present, late, half_day, holiday, weekly_off, leave, overtime
- *   missing_out → contradicted when attendance_daily.status is one of the same
- *                  and work_hours > 0 (punch session was eventually completed)
- *   late        → never auto-resolved (may still be factually true)
- *   excessive_hours → never auto-resolved
- *
- * Body (optional):
- *   { from_date: 'YYYY-MM-DD', to_date: 'YYYY-MM-DD' }
- *   Defaults to last 90 days if omitted.
- *
- * Response:
- *   { scanned: N, auto_resolved: N, skipped: N, details: [...] }
+ * Body (optional): { from_date, to_date, dry_run }. Defaults to the last
+ * 90 days, applied.
  *
  * Protected — hr_admin / super_admin only.
- *
- * ── Design intent ──────────────────────────────────────────────────────────────
- * This endpoint exists because the CSV upload pipeline (recomputeRange) had a
- * silent bug in syncAnomalies: when newAnomalies = [], the delete query used an
- * empty IN clause `.not('type', 'in', '()')` which is a PostgREST no-op.
- * That bug is now fixed in syncAnomalies, but historical anomalies created before
- * the fix still need to be cleaned up.
- *
- * Running this endpoint once after deploying the syncAnomalies fix will clear
- * all stale no_punch anomalies for CSV-sourced employees.
- *
- * Future recomputes will keep anomalies clean automatically via the fixed engine.
  */
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
-import { normalizeAttendanceStatus } from '../../lib/attendance-utils.js'
-import { fetchAllRows } from '../../lib/supabase-paginate.js'
 import { serverError, ErrorCode } from '../../lib/api-errors.js'
-import { fetchTenantTz } from '../../lib/attendance-engine.js'
-import { getLocalDate } from '../../lib/org-context.js'
-
-// Statuses that definitively prove attendance happened — no "no punch" is possible
-const ATTENDED_STATUSES = new Set<string>([
-  'present', 'late', 'half_day', 'holiday', 'weekly_off', 'leave', 'overtime', 'weekend',
-])
+import { reconcileAnomaliesForTenant } from '../../lib/anomaly-reconciler.js'
 
 const bodySchema = z.object({
   from_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   to_date:   z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-  /** Dry run — scan and classify without writing. Default false. */
   dry_run:   z.boolean().optional().default(false),
 })
 
@@ -65,191 +34,22 @@ export default async function anomalyReconcileRoute(fastify: FastifyInstance) {
       return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
     }
 
-    const { dry_run } = parsed.data
-    // attendance_anomalies.date is the tenant-local calendar date of the
-    // anomalous day (migration 047) — defaulting to_date from server-UTC
-    // "today" can be off by one day at the UTC/local-midnight boundary.
-    const tz = await fetchTenantTz(fastify.supabase, req.tenantId)
-    const toDate   = parsed.data.to_date   ?? getLocalDate(new Date().toISOString(), tz)
-    const fromDate = parsed.data.from_date ?? (() => {
-      const d = new Date(`${toDate}T12:00:00.000Z`)
-      d.setUTCDate(d.getUTCDate() - 90)
-      return d.toISOString().slice(0, 10)
-    })()
+    req.log.info({ event: 'anomaly_reconcile_start', ...parsed.data }, 'anomaly reconciliation pass started (manual)')
 
-    req.log.info({ event: 'anomaly_reconcile_start', from_date: fromDate, to_date: toDate, dry_run }, 'anomaly reconciliation pass started')
-
-    // ── Step 1: Fetch all unresolved no_punch / missing_out anomalies ──────────
-    type AnomalyRow = { id: string; employee_id: string; date: string; type: string; tenant_id: string }
-    let rows: AnomalyRow[]
+    let result
     try {
-      rows = await fetchAllRows((from, to) =>
-        fastify.supabase
-          .from('attendance_anomalies')
-          .select('id, employee_id, date, type, tenant_id')
-          .eq('tenant_id', req.tenantId)
-          .eq('resolved', false)
-          .in('type', ['no_punch', 'missing_out'])
-          .gte('date', fromDate)
-          .lte('date', toDate)
-          .range(from, to),
-      ) as AnomalyRow[]
-    } catch (aErr) {
-      return serverError(req, reply, aErr, ErrorCode.QUERY_FAILED, 'Failed to fetch anomalies')
-    }
-
-    if (rows.length === 0) {
-      return reply.send({
-        scanned:      0,
-        auto_resolved: 0,
-        skipped:      0,
-        details:      [],
-        dry_run,
-      })
-    }
-
-    // ── Step 2: Batch-fetch attendance_daily for all affected (employee, date) ─
-    // Build a set of unique employee_id+date pairs
-
-    const employeeIds = [...new Set(rows.map(r => r.employee_id))]
-    type DailyRow = { employee_id: string; date: string; status: string; work_hours: number; confidence_level: string | null }
-    let dailyRows: DailyRow[]
-    try {
-      dailyRows = await fetchAllRows((from, to) =>
-        fastify.supabase
-          .from('attendance_daily')
-          .select('employee_id, date, status, work_hours, confidence_level')
-          .eq('tenant_id', req.tenantId)
-          .in('employee_id', employeeIds)
-          .gte('date', fromDate)
-          .lte('date', toDate)
-          .range(from, to),
-      ) as DailyRow[]
-    } catch (dErr) {
-      return serverError(req, reply, dErr, ErrorCode.QUERY_FAILED, 'Failed to fetch attendance_daily for reconciliation')
-    }
-
-    // Build lookup: `${employee_id}:${date}` → daily row
-    const dailyMap = new Map<string, { status: string | null; work_hours: number; confidence_level: string }>()
-    for (const d of (dailyRows ?? []) as Array<{ employee_id: string; date: string; status: string; work_hours: number; confidence_level: string | null }>) {
-      const key = `${d.employee_id}:${d.date}`
-      dailyMap.set(key, {
-        status:           normalizeAttendanceStatus(d.status),
-        work_hours:       Number(d.work_hours ?? 0),
-        confidence_level: d.confidence_level ?? 'high',
-      })
-    }
-
-    // A daily row is only trustworthy enough to CONTRADICT (auto-resolve) an
-    // anomaly when its own confidence is high/medium. A low/critical-confidence
-    // row may itself be stale/inferred, so resolving against it would mask a real
-    // gap. Such anomalies are kept for human review instead.
-    const TRUSTED_CONF = new Set(['high', 'medium'])
-
-    // ── Step 3: Classify each anomaly ─────────────────────────────────────────
-    const toResolve: string[] = []
-    const details: Array<{
-      anomaly_id:  string
-      employee_id: string
-      date:        string
-      type:        string
-      daily_status: string | null
-      action:      'auto_resolve' | 'keep'
-      reason:      string
-    }> = []
-
-    for (const anomaly of rows) {
-      const key    = `${anomaly.employee_id}:${anomaly.date}`
-      const daily  = dailyMap.get(key)
-      const status = daily?.status ?? null
-      const trusted = daily ? TRUSTED_CONF.has(daily.confidence_level) : false
-
-      let action:  'auto_resolve' | 'keep' = 'keep'
-      let reason = 'no attendance_daily row found'
-
-      if (anomaly.type === 'no_punch') {
-        if (status && ATTENDED_STATUSES.has(status) && trusted) {
-          action = 'auto_resolve'
-          reason = `attendance_daily.status = '${status}' (confidence ${daily?.confidence_level}) — attendance was recorded (CSV or engine)`
-        } else if (status && ATTENDED_STATUSES.has(status)) {
-          reason = `attendance_daily.status = '${status}' but confidence is '${daily?.confidence_level}' — kept for review`
-        } else if (status) {
-          reason = `attendance_daily.status = '${status}' — not an attended status`
-        }
-      } else if (anomaly.type === 'missing_out') {
-        // Auto-resolve missing_out when attendance is present AND work_hours > 0
-        // (session was completed retroactively via CSV or correction)
-        if (status && ATTENDED_STATUSES.has(status) && (daily?.work_hours ?? 0) > 0 && trusted) {
-          action = 'auto_resolve'
-          reason = `attendance_daily.status = '${status}', work_hours = ${daily?.work_hours} (confidence ${daily?.confidence_level}) — punch session completed`
-        } else if (status && ATTENDED_STATUSES.has(status) && (daily?.work_hours ?? 0) > 0) {
-          reason = `attendance_daily.status = '${status}', work_hours = ${daily?.work_hours} but confidence is '${daily?.confidence_level}' — kept for review`
-        } else if (status) {
-          reason = `attendance_daily.status = '${status}', work_hours = ${daily?.work_hours} — session may still be open`
-        }
-      }
-
-      if (action === 'auto_resolve') toResolve.push(anomaly.id)
-
-      details.push({
-        anomaly_id:   anomaly.id,
-        employee_id:  anomaly.employee_id,
-        date:         anomaly.date,
-        type:         anomaly.type,
-        daily_status: status,
-        action,
-        reason,
-      })
-    }
-
-    // ── Step 4: Apply resolution (unless dry_run) ─────────────────────────────
-    let actualResolved = 0
-
-    if (!dry_run && toResolve.length > 0) {
-      const now = new Date().toISOString()
-      const chunkSize = 100  // Supabase IN clause limit
-      for (let i = 0; i < toResolve.length; i += chunkSize) {
-        const chunk = toResolve.slice(i, i + chunkSize)
-        const { error: resolveErr } = await fastify.supabase
-          .from('attendance_anomalies')
-          .update({
-            resolved:    true,
-            resolved_by: req.userId,
-            resolved_at: now,
-            updated_at:  now,
-          })
-          .in('id', chunk)
-          .eq('tenant_id', req.tenantId)
-          .eq('resolved', false)
-
-        if (resolveErr) {
-          req.log.error({ err: resolveErr, chunk_size: chunk.length }, 'anomaly reconcile bulk-resolve chunk failed')
-        } else {
-          actualResolved += chunk.length
-        }
-      }
+      result = await reconcileAnomaliesForTenant(fastify.supabase, req.tenantId, {
+        fromDate: parsed.data.from_date, toDate: parsed.data.to_date,
+        resolvedBy: req.userId, dryRun: parsed.data.dry_run,
+      }, req.log)
+    } catch (err) {
+      return serverError(req, reply, err, ErrorCode.QUERY_FAILED, 'Failed to reconcile anomalies')
     }
 
     req.log.info({
-      event:           'anomaly_reconcile_complete',
-      from_date:       fromDate,
-      to_date:         toDate,
-      scanned:         rows.length,
-      auto_resolved:   dry_run ? 0 : actualResolved,
-      would_resolve:   toResolve.length,
-      skipped:         rows.length - toResolve.length,
-      dry_run,
-    }, 'anomaly reconciliation pass complete')
+      event: 'anomaly_reconcile_complete', ...result, dry_run: parsed.data.dry_run,
+    }, 'anomaly reconciliation pass complete (manual)')
 
-    return reply.send({
-      from_date:     fromDate,
-      to_date:       toDate,
-      scanned:       rows.length,
-      auto_resolved: dry_run ? 0 : actualResolved,
-      would_resolve: toResolve.length,
-      skipped:       rows.length - toResolve.length,
-      dry_run,
-      details,
-    })
+    return reply.send({ ...result, dry_run: parsed.data.dry_run })
   })
 }

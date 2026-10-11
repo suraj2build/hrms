@@ -194,3 +194,71 @@ Rules to avoid breaking this:
   resolves anywhere, should only ever show a landing page that links here,
   never a live app with its own DB credentials.
 
+---
+
+## Market-readiness build priorities (2026-10-11) — DONE
+
+Source: `citykart-vs-cognixhr-comparison.md` and
+`citykart-vs-cognixhr-deep-gap-analysis.md` (both on this branch, root of
+repo) — a code-grounded gap analysis against a competitor retail-chain HRMS.
+All 4 build-order items below are implemented, each with a migration
+verified against a real Postgres 16 instance running the full migration
+history and a focused test file:
+
+1. **F&F auto-pull asset/loan recovery** — DONE. `fnf-settlement-engine.ts`
+   now queries `assets` (unreturned, assigned), `employee_loans`
+   (outstanding_balance), and `advance_recovery_schedules` (pending) and
+   feeds the amounts into `separation_ff_summary.asset_recovery_amount` /
+   `loan_recovery_amount` / `advance_recovery_amount` (migration 438); HR can
+   still override any of the three.
+2. **Raise leave on behalf** — DONE. `POST /leave-requests` accepts an
+   optional `employee_id` override: HR admins may target any employee in
+   the tenant, managers only their own direct reports
+   (`isDirectReport()`); every other role has it silently ignored.
+   `ApprovalInbox.tsx` has a "Raise Leave" entry point. The leave's actual
+   owner can also cancel their own pending request now, not only whoever
+   filed it.
+3. **Probation Confirmation workflow** — DONE. New `probation_confirmations`
+   table (migration 439): manager recommends confirm/extend with feedback
+   (`POST /manager/team/lifecycle/confirmation-recommend`) → HR decides
+   (`PATCH /probation-confirmations/:id/decide`), which sets
+   `job_history.confirmation_date` on confirm or records a new due date on
+   extend. New HR screen at `/admin/employees/probation-confirmations`.
+4. **Public recruitment intake** — DONE. `job_requisitions.is_public`
+   (migration 440, HR opt-in, separate from `status='open'`) plus
+   unauthenticated `GET/POST /careers/:tenantSlug/*` routes
+   (`public-careers.ts`) — tenant resolved fresh from `tenants.slug` on
+   every request, same `isTenantBlocked()` check the authenticated
+   write-gate uses. Public pages at `/careers/:tenantSlug` and
+   `/careers/:tenantSlug/:openingId`. `AdminRecruitment.tsx` has the
+   "List on careers page" toggle.
+
+**Admin-load philosophy, stated explicitly so it isn't re-litigated per
+feature:** don't add another manual queue for something that should mostly
+resolve itself. Concretely: `AttendanceAnomalies.tsx` has been de-emphasized
+— DONE (2026-10-11). It stays (not removed — read-only department-level
+monitoring, not a per-row triage queue) but moved out of Attendance ›
+Operations into Attendance › Analytics & Audit in `nav-config.ts`;
+regularisation is the real correction flow and keeps its own "Approvals"
+spot in Operations. The `OperationalBanner` no longer surfaces a raw
+"N open anomalies" signal on every admin page — that duplicated the
+regularisation signal's urgency without an actual action to take on the
+anomalies page itself. The reconciliation logic (auto-resolves anomalies
+the current `attendance_daily` truth already contradicts) is extracted into
+`apps/api/src/lib/anomaly-reconciler.ts` and now runs on its own daily
+scheduled job (`reconcile-anomalies`, registered in `index.ts` alongside
+`detect-absconding`/`notice-overdue-scan`) in addition to the manual
+"Reconcile Now" button — fewer anomalies ever require a human to notice
+them at all, let alone triage them.
+
+Apply the same lens to any new admin screen going forward: if a queue
+exists, it should default to "only what actually needs a human," not
+"everything, unfiltered" — the same principle already flagged for the HR
+Admin approval-queue scope gap in `citykart-vs-cognixhr-comparison.md`
+§2.7/§3.1.
+
+Deferred, needs an explicit product scope decision before building (same
+kind of call as G12/standalone-encashment): PMS (performance management) and
+Travel Desk have zero implementation — not started pending a decision on
+whether they're in scope for initial launch.
+

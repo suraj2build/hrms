@@ -560,13 +560,24 @@ interface LeaveApplyProps {
   onSuccess?: () => void
   /** Called when the user wants to dismiss the sheet (Cancel / close). */
   onClose?:   () => void
+  /**
+   * HR admin / manager override: raise this leave request on behalf of
+   * another employee rather than the caller's own. All balance/calendar/
+   * history queries and the submit call resolve against this id instead of
+   * the caller's own employee_id. Server-side authorization (HR admin: any
+   * employee; manager: own direct reports only) is the real boundary —
+   * this only changes which employee the form operates on.
+   */
+  onBehalfEmployeeId?:    string | null
+  /** Display label for the banner (e.g. "Rahul Sharma · EMP001"). */
+  onBehalfEmployeeLabel?: string | null
 }
 
-export function LeaveApply({ mode = 'page', onSuccess, onClose }: LeaveApplyProps = {}) {
+export function LeaveApply({ mode = 'page', onSuccess, onClose, onBehalfEmployeeId, onBehalfEmployeeLabel }: LeaveApplyProps = {}) {
   const navigate    = useNavigate()
   const qc          = useQueryClient()
   const { profile } = useAuthStore()
-  const employeeId  = profile?.employee_id ?? null
+  const employeeId  = onBehalfEmployeeId ?? profile?.employee_id ?? null
 
   // Stable per-form-mount UUID sent as Idempotency-Key to prevent duplicate
   // submissions on network retry. Rotated after each successful submission.
@@ -946,6 +957,7 @@ export function LeaveApply({ mode = 'page', onSuccess, onClose }: LeaveApplyProp
   const { mutate: submitLeave, isPending } = useMutation<{ data: LeaveRequest }, Error>({
     mutationFn: () =>
       api.post('/leave-requests', {
+        employee_id:     onBehalfEmployeeId ?? undefined,
         leave_type_id:   leaveTypeId,
         from_date:       fromDate,
         to_date:         effectiveToDate || fromDate,
@@ -1890,6 +1902,14 @@ export function LeaveApply({ mode = 'page', onSuccess, onClose }: LeaveApplyProp
       <div className="flex h-full overflow-hidden">
         {/* Left: scrollable form */}
         <div className="flex-1 overflow-y-auto">
+          {onBehalfEmployeeId && (
+            <div className="px-5 pt-4">
+              <div className="flex items-center gap-2 text-xs px-3 py-2 rounded-md bg-primary/10 border border-primary/20 text-primary">
+                <Users className="h-3.5 w-3.5 flex-shrink-0" />
+                Raising leave on behalf of <span className="font-semibold">{onBehalfEmployeeLabel ?? 'this employee'}</span>
+              </div>
+            </div>
+          )}
           {fromDate && periodLocked && (
             <div className="px-5 pt-4">
               <PeriodLockBanner state={periodState} month={lockMonth} />

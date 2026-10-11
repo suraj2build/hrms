@@ -8,6 +8,10 @@
  * Anomalies are resolved via the regularisation workflow (manager approval).
  * This view gives HR leadership oversight into which departments need attention.
  *
+ * A daily scheduled job (anomaly-reconciler.ts) already auto-resolves any
+ * anomaly the current attendance truth contradicts — the "Reconcile" button
+ * below triggers the same pass on demand, it isn't the only way it runs.
+ *
  * Data: GET /attendance/anomalies/summary?month=YYYY-MM
  */
 
@@ -189,10 +193,10 @@ export default function AttendanceAnomalies() {
               variant="outline" size="sm" className="h-9 gap-1.5"
               onClick={() => reconcileMut.mutate()}
               disabled={reconcileMut.isPending}
-              title="Auto-resolve stale anomalies (e.g. 'no punch' on days now marked present/leave)"
+              title="Runs now instead of waiting for the daily auto-reconcile job (e.g. 'no punch' on days now marked present/leave)"
             >
               {reconcileMut.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
-              Reconcile
+              Reconcile Now
             </Button>
 
             {/* Month navigation */}
@@ -302,7 +306,7 @@ export default function AttendanceAnomalies() {
             <div className="flex items-center gap-2.5 px-4 py-3 bg-primary/[0.04] border-b border-primary/10">
               <CheckCircle2 className="h-4 w-4 text-primary flex-shrink-0" />
               <p className="text-[12px] text-primary/80 font-medium">
-                Anomalies are resolved via the <strong>Regularisation workflow</strong> — employees submit requests, managers approve.
+                Anomalies are resolved via the <strong>Regularisation workflow</strong> — employees submit requests, managers approve. Stale anomalies (e.g. a "no punch" day later recorded as present) auto-resolve daily.
               </p>
               <Button
                 variant="outline"

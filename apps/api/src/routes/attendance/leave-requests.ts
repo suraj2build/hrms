@@ -29,7 +29,7 @@ import {
   reverseApprovedLeaveRequest,
   getPendingApprovalsForManager,
 }                               from '../../lib/approval-service.js'
-import { getDirectReportIds }   from '../../lib/manager-scope.js'
+import { getDirectReportIds, isDirectReport, isHrAdmin } from '../../lib/manager-scope.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
@@ -53,6 +53,13 @@ export default async function leaveRequestsRoutes(fastify: FastifyInstance) {
   // ── POST /leave-requests ────────────────────────────────────────────────────
   fastify.post('/leave-requests', auth, async (req: any, reply) => {
     const schema = z.object({
+      /**
+       * HR admin / manager override: raise this request on behalf of another
+       * employee. HR admins may target any employee in the tenant; managers
+       * are restricted to their own direct reports. Silently ignored (falls
+       * back to the caller's own employee_id) for every other role.
+       */
+      employee_id:     z.string().uuid().optional(),
       leave_type_id:   z.string().uuid(),
       from_date:       z.string().regex(dateRe, 'from_date must be YYYY-MM-DD'),
       to_date:         z.string().regex(dateRe, 'to_date must be YYYY-MM-DD'),
@@ -89,12 +96,42 @@ export default async function leaveRequestsRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', req.tenantId)
       .maybeSingle()
 
-    const employeeId = (profile as { employee_id: string | null } | null)?.employee_id
-    if (!employeeId) {
+    const myEmployeeId = (profile as { employee_id: string | null } | null)?.employee_id
+    if (!myEmployeeId) {
       return reply.code(400).send({
         error:   'NO_EMPLOYEE_RECORD',
         message: 'Your profile is not linked to an employee record',
       })
+    }
+
+    // On-behalf resolution: HR admins may target any employee in the
+    // tenant; managers only their own direct reports (retail/ops staff
+    // without reliable personal ESS access are the motivating case).
+    let employeeId = myEmployeeId
+    let onBehalfOf: string | null = null
+    if (parsed.data.employee_id && parsed.data.employee_id !== myEmployeeId) {
+      const targetId = parsed.data.employee_id
+      if (isHrAdmin(req.userRole)) {
+        const { data: targetEmp } = await fastify.supabase
+          .from('employees')
+          .select('id')
+          .eq('id', targetId)
+          .eq('tenant_id', req.tenantId)
+          .maybeSingle()
+        if (!targetEmp) {
+          return reply.code(400).send({ error: 'NOT_FOUND', message: 'Employee not found in your organisation' })
+        }
+        employeeId = targetId
+        onBehalfOf = targetId
+      } else if (req.userRole === 'manager') {
+        const isReport = await isDirectReport(fastify.supabase, req.tenantId, myEmployeeId, targetId)
+        if (!isReport) {
+          return reply.code(403).send({ error: 'FORBIDDEN', message: 'You may only raise leave for your own direct reports' })
+        }
+        employeeId = targetId
+        onBehalfOf = targetId
+      }
+      // Any other role: silently ignored, falls back to the caller's own employee_id.
     }
 
     // Idempotency: optional header lets callers replay on network retry
@@ -139,7 +176,7 @@ export default async function leaveRequestsRoutes(fastify: FastifyInstance) {
         tenant_id:      req.tenantId,
         actor_id:    req.userId,
         actor_type:  'user',
-        payload:     { from_date: parsed.data.from_date, to_date: parsed.data.to_date, leave_type_id: parsed.data.leave_type_id },
+        payload:     { from_date: parsed.data.from_date, to_date: parsed.data.to_date, leave_type_id: parsed.data.leave_type_id, on_behalf_of: onBehalfOf },
         correlation_id: req.correlationId ?? undefined,
       })
       const responseBody = { data: result.value }
@@ -318,11 +355,20 @@ export default async function leaveRequestsRoutes(fastify: FastifyInstance) {
     const { id } = req.params as { id: string }
 
     try {
+      const { data: callerProfile } = await fastify.supabase
+        .from('profiles')
+        .select('employee_id')
+        .eq('id', req.userId)
+        .eq('tenant_id', req.tenantId)
+        .maybeSingle()
+      const myEmployeeId = (callerProfile as { employee_id: string | null } | null)?.employee_id
+
       const result = await cancelLeaveRequest(
         fastify.supabase,
         req.tenantId,
         id,
         req.userId,
+        myEmployeeId,
       )
 
       if (!result.ok) {
