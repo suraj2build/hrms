@@ -218,6 +218,7 @@ import onboardingReadinessRoutes           from './routes/onboarding/readiness.j
 import helpdeskRoutes                      from './routes/helpdesk/index.js'
 import benefitsRoutes                      from './routes/benefits/index.js'
 import recruitmentRoutes                   from './routes/recruitment/index.js'
+import publicCareersRoutes                 from './routes/recruitment/public-careers.js'
 import certificationRoutes                 from './routes/certifications/index.js'
 import securityRoutes                      from './routes/security/index.js'
 import whatsappRoutes                      from './routes/whatsapp/index.js'
@@ -925,6 +926,7 @@ async function start() {
   await fastify.register(talentRoutes,                      { prefix: '/talent' })                        // Internal Talent Marketplace — /talent/roles + /talent/browse + /talent/interest
   await fastify.register(benefitsRoutes,                     { prefix: '/benefits' })                  // ESS-05 benefits enrolment — plans + employee enrolments
   await fastify.register(recruitmentRoutes,                  { prefix: '/recruitment' })                // RCT-01+ Recruitment & ATS — requisitions, candidates, applications, interviews
+  await fastify.register(publicCareersRoutes)                                                           // Public, unauthenticated careers page + apply form — /careers/:tenantSlug/*
   await fastify.register(certificationRoutes,               { prefix: '' })                            // Certification Governance — /certifications/*
   await fastify.register(securityRoutes,                    { prefix: '/security' })                   // Security Operations Workspace — /security/*
 

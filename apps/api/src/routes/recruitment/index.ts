@@ -530,6 +530,35 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
     return reply.send({ message: 'Requisition updated' })
   })
 
+  // Deliberately a separate endpoint from PUT /requisitions/:id above — that
+  // one only allows edits while status is draft/on_hold, but public-listing
+  // visibility is exactly the kind of thing HR wants to flip right after a
+  // requisition moves to 'open' (the only status careers.ts will ever list).
+  fastify.patch('/requisitions/:id/public', hrAdminAuth, async (req: any, reply) => {
+    const { id } = req.params as { id: string }
+    const schema = z.object({ is_public: z.boolean() })
+    const parsed = schema.safeParse(req.body)
+    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+
+    const { data, error } = await fastify.supabase
+      .from('job_requisitions')
+      .update({ is_public: parsed.data.is_public })
+      .eq('id', id)
+      .eq('tenant_id', req.tenantId)
+      .select('id')
+      .maybeSingle()
+
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update public listing status')
+    if (!data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Requisition not found' })
+
+    await logAction(fastify.supabase, {
+      tenantId: req.tenantId, tableName: 'job_requisitions', recordId: id,
+      action: 'UPDATE', performedBy: req.userId, newData: { is_public: parsed.data.is_public },
+    })
+
+    return reply.send({ message: parsed.data.is_public ? 'Listed on careers page' : 'Removed from careers page' })
+  })
+
   // Workflow transitions
 
   fastify.post('/requisitions/:id/approve', hrAdminAuth, async (req: any, reply) => {

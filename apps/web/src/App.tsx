@@ -91,6 +91,8 @@ const AdminSuccession             = lazy(() => import('./pages/admin/AdminSucces
 const AdminCalibration            = lazy(() => import('./pages/admin/AdminCalibration').then(m => ({ default: m.AdminCalibration })))
 const AdminTalentMarketplace      = lazy(() => import('./pages/admin/AdminTalentMarketplace').then(m => ({ default: m.AdminTalentMarketplace })))
 const CandidatePortal    = lazy(() => import('@/pages/portal/CandidatePortal').then(m => ({ default: m.CandidatePortal })))
+const CareersList        = lazy(() => import('@/pages/careers/CareersList').then(m => ({ default: m.CareersList })))
+const CareersApply       = lazy(() => import('@/pages/careers/CareersApply').then(m => ({ default: m.CareersApply })))
 const Documents         = lazy(() => import('@/pages/documents/Documents').then(m => ({ default: m.Documents })))
 const Reports           = lazy(() => import('@/pages/reports/Reports').then(m => ({ default: m.Reports })))
 const ReportingHub      = lazy(() => import('@/pages/reports/ReportingHub').then(m => ({ default: m.ReportingHub })))
@@ -704,6 +706,8 @@ export default function App() {
               <Route path="/auth/callback" element={<AuthCallback />} />
               <Route path="/pre-join/:token"          element={<PreJoinPortal />} />
               <Route path="/portal/candidate/:token" element={<CandidatePortal />} />
+              <Route path="/careers/:tenantSlug"              element={<CareersList />} />
+              <Route path="/careers/:tenantSlug/:openingId"   element={<CareersApply />} />
 
               {/* ── Admin portal: /admin/* ─────────────────────────────────── */}
               <Route element={<AdminShellV2 />}>
