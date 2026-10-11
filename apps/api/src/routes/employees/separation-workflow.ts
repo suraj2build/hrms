@@ -576,7 +576,7 @@ export default async function separationWorkflowRoutes(fastify: FastifyInstance)
 
     const { data: ff, error: fetchErr } = await fastify.supabase
       .from('separation_ff_summary')
-      .select('id, status, computed_at, salary_basis_gross, salary_basis_basic, gratuity_amount, leave_encashment_amount, notice_period_deduction')
+      .select('id, status, computed_at, salary_basis_gross, salary_basis_basic, gratuity_amount, leave_encashment_amount, notice_period_deduction, asset_recovery_amount, loan_recovery_amount, advance_recovery_amount')
       .eq('employee_id', req.params.id)
       .eq('tenant_id', req.tenantId)
       .maybeSingle()
@@ -596,15 +596,21 @@ export default async function separationWorkflowRoutes(fastify: FastifyInstance)
     // against what's stored — not just the salary basis. computeFnfSettlement
     // is a pure function of (separation dates/override/waiver, employment
     // category, gratuity_config, the last finalized slip, leave policy +
-    // balance); comparing its full set of derived amounts is equivalent to
+    // balance, outstanding assets, loan balances, pending advance recovery
+    // schedules); comparing its full set of derived amounts is equivalent to
     // comparing all of those inputs, without having to special-case each one.
     // A correction to a finalized slip, a later finalized run, a leave-
-    // balance adjustment, a notice-date/override/waiver edit, or a gratuity-
-    // config change between compute and approve would otherwise approve a
-    // card the employee/HR never actually reviewed the current numbers for —
-    // the exact "approving stale F&F calculations" gap the original audit
-    // finding described, which filtering the salary-basis query for
-    // status='finalized' alone does not close by itself.
+    // balance adjustment, a notice-date/override/waiver edit, a gratuity-
+    // config change, an asset return, a loan part-payment, or an advance
+    // recovery schedule update between compute and approve would otherwise
+    // approve a card the employee/HR never actually reviewed the current
+    // numbers for — the exact "approving stale F&F calculations" gap the
+    // original audit finding described, which filtering the salary-basis
+    // query for status='finalized' alone does not close by itself. The
+    // asset/loan/advance recovery amounts are exactly as time-sensitive as
+    // the original five fields: an asset returned, a loan part-paid, or an
+    // advance recovery schedule updated between compute and approve must
+    // block approval the same way a corrected payroll slip does.
     if (ff.computed_at) {
       const fresh = await computeFnfSettlement(fastify.supabase, req.tenantId, req.params.id)
       if ('error' in fresh) {
@@ -622,11 +628,17 @@ export default async function separationWorkflowRoutes(fastify: FastifyInstance)
         changedFields.leave_encashment_amount = { stored: Number((ff as any).leave_encashment_amount ?? 0), current: fresh.leave_encashment_amount }
       if (diff(fresh.notice_period_deduction, (ff as any).notice_period_deduction))
         changedFields.notice_period_deduction = { stored: Number((ff as any).notice_period_deduction ?? 0), current: fresh.notice_period_deduction }
+      if (diff(fresh.asset_recovery_amount, (ff as any).asset_recovery_amount))
+        changedFields.asset_recovery_amount = { stored: Number((ff as any).asset_recovery_amount ?? 0), current: fresh.asset_recovery_amount }
+      if (diff(fresh.loan_recovery_amount, (ff as any).loan_recovery_amount))
+        changedFields.loan_recovery_amount = { stored: Number((ff as any).loan_recovery_amount ?? 0), current: fresh.loan_recovery_amount }
+      if (diff(fresh.advance_recovery_amount, (ff as any).advance_recovery_amount))
+        changedFields.advance_recovery_amount = { stored: Number((ff as any).advance_recovery_amount ?? 0), current: fresh.advance_recovery_amount }
 
       if (Object.keys(changedFields).length > 0) {
         return reply.code(409).send({
           error:   'STALE_CALCULATION',
-          message: 'The settlement inputs have changed since this was last computed (e.g. a corrected or newly finalized payroll slip, a leave-balance adjustment, or a notice/gratuity change). Recompute via POST /separation-ff/compute and review the updated figures before approving.',
+          message: 'The settlement inputs have changed since this was last computed (e.g. a corrected or newly finalized payroll slip, a leave-balance adjustment, a notice/gratuity change, an asset return, a loan part-payment, or an advance recovery update). Recompute via POST /separation-ff/compute and review the updated figures before approving.',
           changed_fields: changedFields,
         })
       }
