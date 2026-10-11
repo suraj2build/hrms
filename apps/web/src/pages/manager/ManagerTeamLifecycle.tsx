@@ -12,6 +12,7 @@
  * Manager clearance reuses the existing PATCH separation-clearances endpoint.
  */
 
+import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import {
@@ -24,6 +25,9 @@ import { PageHeader }    from '@/components/layout/PageHeader'
 import { SectionCard }   from '@/components/layout/SectionCard'
 import { Button }        from '@/components/ui/button'
 import { Badge }         from '@/components/ui/badge'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
+import { Label }          from '@/components/ui/label'
+import { Textarea }       from '@/components/ui/textarea'
 import { cn, fmtDate }   from '@/lib/utils'
 import { useVersionConflict, withExpectedVersion } from '@/hooks/useVersionConflict'
 
@@ -32,7 +36,7 @@ import { useVersionConflict, withExpectedVersion } from '@/hooks/useVersionConfl
 interface ProbationRow {
   employee_id: string; name: string; employee_code: string | null
   joining_date?: string | null; due_date?: string; days_to_due?: number
-  bucket?: string; confirmation_state?: string; recommended?: boolean
+  bucket?: string; confirmation_state?: string; recommended?: boolean; extended?: boolean
 }
 interface NewJoiner {
   employee_id: string; name: string; employee_code: string | null; joining_date: string
@@ -79,6 +83,9 @@ const BUCKET_VARIANT: Record<string, 'destructive' | 'warning' | 'secondary'> = 
 
 export function ManagerTeamLifecycle() {
   const qc = useQueryClient()
+  const [recommendTarget, setRecommendTarget] = useState<ProbationRow | null>(null)
+  const [recommendation, setRecommendation]   = useState<'confirm' | 'extend'>('confirm')
+  const [feedback, setFeedback]               = useState('')
 
   const { data, isLoading } = useQuery<LifecycleData>({
     queryKey: ['manager-team-lifecycle', 'full'],
@@ -88,17 +95,26 @@ export function ManagerTeamLifecycle() {
 
   const invalidate = () => qc.invalidateQueries({ queryKey: ['manager-team-lifecycle'] })
 
+  function openRecommend(row: ProbationRow) {
+    setRecommendTarget(row)
+    setRecommendation('confirm')
+    setFeedback('')
+  }
+
   // Confirmation recommendation — the backend dedups against any still-open
   // (unactioned) recommendation for the same employee, so a repeat click can't
-  // spam HR with duplicate inbox notifications.
+  // spam HR with duplicate inbox notifications. The actual decision now lives
+  // in probation_confirmations (migration 439); HR decides via
+  // PATCH /probation-confirmations/:id/decide, not through this inbox item.
   const recommendMut = useMutation({
-    mutationFn: (employeeId: string) =>
-      api.post<{ ok: boolean; already_recommended?: boolean }>('/manager/team/lifecycle/confirmation-recommend', { employee_id: employeeId }),
+    mutationFn: (body: { employee_id: string; recommendation: 'confirm' | 'extend'; feedback?: string }) =>
+      api.post<{ ok: boolean; already_recommended?: boolean }>('/manager/team/lifecycle/confirmation-recommend', body),
     onSuccess: (res) => {
       toast.success(res.already_recommended
         ? 'Already recommended — HR has not actioned it yet'
-        : 'Confirmation recommended — sent to HR for review')
+        : 'Recommendation sent to HR for review')
       invalidate()
+      setRecommendTarget(null)
     },
     onError: (e: unknown) => toast.error(e instanceof Error ? e.message : 'Failed to send recommendation'),
   })
@@ -181,23 +197,22 @@ export function ManagerTeamLifecycle() {
                   <div className="min-w-0">
                     <p className="truncate text-sm font-medium">{r.name}</p>
                     <p className="text-[11px] text-muted-foreground">
-                      {r.due_date ? `Confirmation due ${fmtDate(r.due_date)} · ` : ''}
+                      {r.due_date ? `${r.extended ? 'Extended to' : 'Confirmation due'} ${fmtDate(r.due_date)} · ` : ''}
                       <span className={cn(r.confirmation_state === 'overdue' && 'text-destructive font-medium')}>
                         {r.days_to_due != null ? dueLabel(r.days_to_due) : 'on track'}
                       </span>
                     </p>
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
+                    {r.extended && <Badge variant="secondary" className="text-[9px]">Extended</Badge>}
                     {r.confirmation_state === 'overdue' && <Badge variant="destructive" className="text-[9px]">Overdue</Badge>}
                     {r.confirmation_state === 'due'      && <Badge variant="warning" className="text-[9px]">Due</Badge>}
                     {r.recommended ? (
                       <Badge variant="secondary" className="text-[9px] gap-1">
-                        <Check className="h-2.5 w-2.5" /> Recommended
+                        <Check className="h-2.5 w-2.5" /> Pending HR decision
                       </Badge>
                     ) : (
-                      <Button size="sm" variant="outline" className="h-7 text-xs"
-                        disabled={recommendMut.isPending && recommendMut.variables === r.employee_id}
-                        onClick={() => recommendMut.mutate(r.employee_id)}>
+                      <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => openRecommend(r)}>
                         <Send className="mr-1 h-3 w-3" /> Recommend
                       </Button>
                     )}
@@ -323,6 +338,51 @@ export function ManagerTeamLifecycle() {
           )}
         </SectionCard>
       </div>
+
+      {/* Recommend confirmation/extension dialog */}
+      <Dialog open={!!recommendTarget} onOpenChange={(v) => { if (!v) setRecommendTarget(null) }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Recommend for {recommendTarget?.name}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="flex gap-2">
+              <Button
+                type="button" size="sm" variant={recommendation === 'confirm' ? 'default' : 'outline'}
+                className="flex-1 gap-1.5" onClick={() => setRecommendation('confirm')}>
+                <Check className="h-3.5 w-3.5" /> Confirm
+              </Button>
+              <Button
+                type="button" size="sm" variant={recommendation === 'extend' ? 'default' : 'outline'}
+                className="flex-1 gap-1.5" onClick={() => setRecommendation('extend')}>
+                <CalendarClock className="h-3.5 w-3.5" /> Extend Probation
+              </Button>
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Feedback (optional)</Label>
+              <Textarea
+                value={feedback} onChange={e => setFeedback(e.target.value)} rows={3}
+                placeholder={recommendation === 'confirm'
+                  ? 'Performance, attendance, or other notes supporting confirmation…'
+                  : 'Why probation should be extended…'}
+              />
+            </div>
+            <p className="text-[11px] text-muted-foreground">
+              This is a recommendation — HR makes the final confirm/extend decision.
+            </p>
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" size="sm" onClick={() => setRecommendTarget(null)}>Cancel</Button>
+            <Button size="sm" disabled={recommendMut.isPending}
+              onClick={() => recommendTarget && recommendMut.mutate({
+                employee_id: recommendTarget.employee_id, recommendation, feedback: feedback.trim() || undefined,
+              })}>
+              {recommendMut.isPending && <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />}
+              <Send className="mr-1 h-3 w-3" /> Send Recommendation
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </PageContainer>
   )
 }

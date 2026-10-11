@@ -106,6 +106,7 @@ const HRReviewWorkspace    = lazy(() => import('@/pages/onboarding/HRReviewWorks
 const OnboardingModule     = lazy(() => import('@/pages/onboarding/OnboardingModule').then(m => ({ default: m.OnboardingModule })))
 const PreJoinPortal        = lazy(() => import('@/pages/onboarding/PreJoinPortal').then(m => ({ default: m.PreJoinPortal })))
 const SeparationWorkflow   = lazy(() => import('@/pages/employees/SeparationWorkflow').then(m => ({ default: m.SeparationWorkflow })))
+const ProbationConfirmations = lazy(() => import('@/pages/employees/ProbationConfirmations').then(m => ({ default: m.ProbationConfirmations })))
 
 const MusterRoll             = lazy(() => import('@/pages/attendance/MusterRoll').then(m => ({ default: m.MusterRoll })))
 const AttendanceAudit        = lazy(() => import('@/pages/attendance/AttendanceAudit').then(m => ({ default: m.AttendanceAudit })))
@@ -771,6 +772,7 @@ export default function App() {
                 <Route path="/admin/onboarding/:sessionId/review" element={<HRReviewWorkspace />} />
                 <Route path="/admin/onboarding/module"            element={<OnboardingModule />} />
                 <Route path="/admin/employees/separation"         element={<SeparationWorkflow />} />
+                <Route path="/admin/employees/probation-confirmations" element={<ProbationConfirmations />} />
 
                 {/* Attendance */}
                 <Route path="/admin/attendance"                   element={<Navigate to="/admin/attendance/center" replace />} />

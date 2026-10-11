@@ -45,6 +45,7 @@
 import {
   // Domain icons
   Users,
+  UserCheck,
   Clock,
   CalendarDays,
   DollarSign,
@@ -245,6 +246,7 @@ export const DOMAINS: Domain[] = [
       '/admin/onboarding/module',
       '/admin/onboarding/pre-joinee',
       '/admin/employees/separation',
+      '/admin/employees/probation-confirmations',
       '/admin/assets',
       '/admin/recruitment',
       '/admin/workforce/center',
@@ -274,6 +276,7 @@ export const DOMAINS: Domain[] = [
           { id: 'onboarding',            label: 'Onboarding',           route: '/admin/onboarding',            exact: true,  icon: UserPlus,     keywords: ['new hire', 'joining', 'new employee', 'induction', 'pre-joining'] },
           { id: 'onboarding-checklists', label: 'Onboarding Checklists', route: '/admin/onboarding/module',                   icon: GraduationCap, keywords: ['onboarding tasks', 'new hire checklist', 'joining checklist', 'induction tasks'] },
           { id: 'separation-workflow',   label: 'Separation',           route: '/admin/employees/separation',                 icon: LogOut,       keywords: ['exit', 'offboarding', 'resignation', 'termination', 'fnf', 'full and final', 'exit process', 'notice period'] },
+          { id: 'probation-confirmations', label: 'Probation Confirmations', route: '/admin/employees/probation-confirmations', icon: UserCheck,  keywords: ['probation', 'confirmation', 'confirm employee', 'extend probation', 'probation due', 'probation overdue', 'confirmation date'] },
           { id: 'absconding-cases',      label: 'Absconding Cases',     route: '/admin/absconding',                           icon: UserX,        badge: 'NEW', keywords: ['absconding', 'unauthorised absence', 'ua', 'no show', 'absconded', 'abandonment', 'missing employee', 'absent without leave', 'awol'] },
           { id: 'expiry-management',     label: 'Expiry Management',    route: '/admin/workforce/expiry-management',           icon: CalendarClock, keywords: ['expiry', 'lifecycle', 'document expiry', 'visa expiry', 'passport expiry', 'contract expiry', 'contract renewal', 'probation confirmation', 'probation due', 'identity expiry', 'expiring documents', 'work permit', 'renewal due'] },
           { id: 'certifications',        label: 'Certifications',       route: '/admin/workforce/certifications',              icon: BadgeCheck,    keywords: ['certification', 'license', 'professional credential', 'certificate', 'renewal', 'cert expiry', 'license renewal', 'AWS certification', 'professional development', 'compliance certification'] },
