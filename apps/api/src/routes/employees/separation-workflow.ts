@@ -27,6 +27,9 @@ const ffBodySchema = z.object({
   notice_period_deduction:  z.number(),
   other_deductions:         z.number().optional().default(0),
   other_additions:          z.number().optional().default(0),
+  asset_recovery_amount:    z.number().optional().default(0),
+  loan_recovery_amount:     z.number().optional().default(0),
+  advance_recovery_amount:  z.number().optional().default(0),
   notes:                    z.string().optional(),
   // optional — only checked against the update branch (a fresh insert has
   // no prior version to compare against).
@@ -523,6 +526,9 @@ export default async function separationWorkflowRoutes(fastify: FastifyInstance)
       notice_period_deduction: breakdown.notice_period_deduction,
       other_additions:         existing?.other_additions ?? 0,
       other_deductions:        existing?.other_deductions ?? 0,
+      asset_recovery_amount:   breakdown.asset_recovery_amount,
+      loan_recovery_amount:    breakdown.loan_recovery_amount,
+      advance_recovery_amount: breakdown.advance_recovery_amount,
       // computed metadata
       gratuity_eligible:       breakdown.gratuity_eligible,
       gratuity_years:          breakdown.gratuity_years,
