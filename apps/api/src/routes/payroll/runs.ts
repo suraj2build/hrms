@@ -41,8 +41,10 @@ import {
   fetchAttendanceSummary,
   fetchActiveCompensation,
   applyAdvanceLoanRecovery,
+  applyEncashmentPayout,
   round2,
   type PayrollSlipResult,
+  type EncashmentPayout,
 } from '../../lib/payroll-engine.js'
 import { resolveEmployeeStatutoryParams } from '../../lib/statutory/statutory-governance.js'
 import type { StatutoryTenantCache } from '../../lib/statutory/statutory-governance.js'
@@ -393,6 +395,14 @@ async function computeOneEmployee(
     return { ok: false, stage: 'unexpected', reason, details: { message: reason, stack: compErr?.stack }, eventType: 'computation_failed' }
   }
 
+  // G12: fold in any leave-encashment request HR has assigned to THIS run for
+  // this employee — fetched fresh here so it's reconstructed identically on
+  // every (re)generation, never lost by a re-run. See applyEncashmentPayout's
+  // own doc comment (lib/payroll-engine.ts) for why this must apply AFTER
+  // computeSlipWithStatutory's own TDS projection, not before.
+  const encashmentPayout = await fetchEncashmentPayout(supabase, tenantId, emp.id, opts.runId)
+  if (encashmentPayout) result = applyEncashmentPayout(result, encashmentPayout)
+
   const slipRow  = buildSlipRow(tenantId, opts.runId, result, opts.month)
   const slipValid = validatePayrollSlipPayload(slipRow, { employeeId: emp.id, month: opts.month })
 
@@ -635,6 +645,41 @@ async function fetchAdvanceLoanDeductions(
   }
 
   return results
+}
+
+/**
+ * G12: approved leave-encashment requests HR has assigned to THIS run
+ * (leave_encashment_requests.payroll_run_id = runId, status still
+ * 'approved' — the assign step never flips status, only finalize does, see
+ * the finalize route) for this employee. Queried fresh on every
+ * (re)generation — see applyEncashmentPayout()'s own doc comment for why
+ * that, not a one-off mutation after persistence, is what makes this
+ * survive a re-run.
+ */
+async function fetchEncashmentPayout(
+  supabase: any,
+  tenantId: string,
+  employeeId: string,
+  runId: string,
+): Promise<EncashmentPayout | null> {
+  const { data, error } = await supabase
+    .from('leave_encashment_requests')
+    .select('id, gross_amount, tds_amount')
+    .eq('tenant_id', tenantId)
+    .eq('employee_id', employeeId)
+    .eq('payroll_run_id', runId)
+    .eq('status', 'approved')
+  if (error) {
+    console.warn(`[payroll] fetchEncashmentPayout: query failed for employee ${employeeId} (run ${runId}):`, error.message)
+    return null
+  }
+  const rows = (data ?? []) as any[]
+  if (!rows.length) return null
+  return {
+    request_ids: rows.map(r => r.id),
+    gross:       round2fn(rows.reduce((s, r) => s + Number(r.gross_amount ?? 0), 0)),
+    tds:         round2fn(rows.reduce((s, r) => s + Number(r.tds_amount ?? 0), 0)),
+  }
 }
 
 // Max employees processed concurrently during payroll runs.
@@ -2851,6 +2896,25 @@ export default async function payrollRunsRoutes(fastify: FastifyInstance) {
       req.log.warn({ err: advLoanErr }, 'payroll finalize: advance/loan schedule marking failed (non-fatal)')
     }
 
+    // ── G12: flip assigned leave-encashment requests to 'paid' ───────────────
+    // Mirrors the advance/loan block above exactly: non-fatal, runs after
+    // slips are confirmed finalized. Until this point the request has sat at
+    // status='approved' with payroll_run_id = this run (set by the assign
+    // step) — the slip already reflects its gross/TDS (computeOneEmployee
+    // fetches it fresh every generation, see fetchEncashmentPayout's doc
+    // comment), so finalizing the run is what actually turns this into a
+    // real, locked-in payment. 'paid' only becomes true here — never at
+    // assignment time — so it can't be reported as paid while still sitting
+    // in a draft run that a re-run could still change.
+    try {
+      const { error: encPaidErr } = await fastify.supabase.rpc('fn_finalize_leave_encashments_for_run', {
+        p_tenant_id: req.tenantId, p_run_id: id,
+      })
+      if (encPaidErr) req.log.warn({ err: encPaidErr, run_id: id }, 'payroll finalize: leave encashment paid-flip failed (non-fatal)')
+    } catch (encErr: any) {
+      req.log.warn({ err: encErr, run_id: id }, 'payroll finalize: leave encashment paid-flip failed (non-fatal)')
+    }
+
     // Step 2: Mark the run as finalized (only after slips are confirmed finalized).
     // The status filter makes this an ATOMIC seal: only a draft/partial_failed run
     // can be flipped, so a concurrent or duplicated finalize request cannot
@@ -3834,6 +3898,21 @@ export default async function payrollRunsRoutes(fastify: FastifyInstance) {
       await resyncRunTotals(fastify.supabase, tenantId, id)
     } catch (resyncErr: any) {
       req.log.warn({ err: resyncErr, run_id: id }, 'payroll rollback: run-totals resync failed (non-fatal)')
+    }
+
+    // G12: a 'paid' leave-encashment request only became 'paid' because THIS
+    // run finalized (see the finalize route's own non-fatal paid-flip block) —
+    // rolling the run back to draft means it is no longer actually paid, so
+    // revert it to 'approved' (still assigned to this run — the next
+    // regeneration picks it up fresh again, see fetchEncashmentPayout).
+    // Non-fatal, same resilience pattern as the resync above.
+    try {
+      const { error: encRevertErr } = await fastify.supabase.rpc('fn_revert_leave_encashments_for_rollback', {
+        p_tenant_id: tenantId, p_run_id: id,
+      })
+      if (encRevertErr) req.log.warn({ err: encRevertErr, run_id: id }, 'payroll rollback: leave encashment revert failed (non-fatal)')
+    } catch (encErr: any) {
+      req.log.warn({ err: encErr, run_id: id }, 'payroll rollback: leave encashment revert failed (non-fatal)')
     }
 
     // If the month was frozen, also lift the freeze so the period is actually

@@ -60,12 +60,26 @@ PGDATABASE=fnf_verify node scripts/db/verify-fnf-mark-paid-atomic.mjs
 
 ## `verify-g12-encashment-atomic.mjs`
 
-Same approach, for `mark_leave_encashment_paid_atomic` and
-`reverse_leave_encashment_atomic` (migration 446, G12 standalone leave
-encashment): posting a payout into a draft payslip's gross/TDS/component
-breakdown and the owning run's aggregate totals, refusing a finalized run,
-retry-safety, and reversal (including refusing to reverse once the linked
-payslip has been finalized).
+Same approach, for migration 447's `assign_leave_encashment_to_payroll_run_atomic`,
+`fn_finalize_leave_encashments_for_run`, `fn_revert_leave_encashments_for_rollback`,
+and the replaced `reverse_leave_encashment_atomic` (G12 standalone leave
+encashment, round 2). Migration 446's original `mark_leave_encashment_paid_atomic`
+spliced the payout directly into an already-persisted `payroll_slips` row and
+flipped status to `'paid'` immediately — unsafe, since `POST /payroll/runs`
+explicitly permits deleting and recomputing every slip in a non-finalized
+("draft") run on re-run, which would silently wipe the posting. Migration 447
+fixes this by never mutating `payroll_slips` at assignment time: it records
+intent only (`payroll_run_id`), leaves slip computation to the normal
+generation pass (`fetchEncashmentPayout` + `applyEncashmentPayout`, verified
+separately at the pure-function level in `payroll-engine.test.ts`), and only
+flips to `'paid'` once the run is actually finalized. This script proves,
+against a real Postgres instance: the happy-path assign, every refusal path
+(`NOT_FOUND`/`RUN_NOT_FOUND`/`NO_PAYSLIP`/`RUN_NOT_DRAFT`/`ALREADY_ASSIGNED`/
+`ALREADY_DECIDED`/`NOT_COMPUTED`), that the payout's source data survives a
+simulated slip delete-and-recreate (the actual regeneration-survival
+property migration 446 lacked), finalize/rollback's status transitions
+scoped correctly to one run at a time, and reversal (including refusing once
+the linked run is finalized).
 
 ```bash
 createdb g12_verify

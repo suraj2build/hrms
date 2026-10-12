@@ -726,3 +726,135 @@ attendance/__tests__/leave-encashment-g12.test.ts`), not real-Supabase-RLS
 or browser E2E — those remain open per item 11 above, now unblocked for G12
 specifically (the product-scope question is resolved; what's left is the
 same staging/UAT gate every other item in this document is waiting on).
+
+---
+
+## Addendum (2026-10-12, round 2) — G12 payment-status defect fixed (migration 447); F&F-concurrency gap disclosed, NOT fixed
+
+A follow-up review of the round-1 G12 closure above (`mark_leave_encashment_
+paid_atomic`, migration 446) raised four specific points. Three are now
+closed with real-Postgres evidence; the fourth is a confirmed, deferred gap.
+
+**Point 1 — tax treatment.** No change this round. Still a flat
+marginal-slab-rate withholding, explicitly not a Section 10(10AA) exemption
+computation, as disclosed above. Unaffected by this round's fix (see
+ordering note under Point 3).
+
+**Point 2 — payment status: a real, confirmed defect, now fixed.**
+Independent re-reading of `apps/api/src/routes/payroll/runs.ts` (not just
+re-asserting the round-1 claim) found that `POST /payroll/runs` explicitly
+permits re-running a non-finalized ("draft") month: its own comment says the
+re-run path "would reset the run to 'processing', delete all slips, and
+recompute." Migration 446's `mark_leave_encashment_paid_atomic` posted the
+payout into an **already-persisted** `payroll_slips` row and immediately
+flipped `leave_encashment_requests.status` to `'paid'`. Any regeneration of
+that still-draft run after assignment would silently **wipe the posted
+gross/TDS/component lines from the slip** while the request kept claiming
+`status='paid'` — money gone from the payslip, the system still asserting it
+was paid. "Posting into a draft payroll run means scheduled for payroll, not
+actually paid" (the reviewer's framing) was exactly right, and the gap was
+worse than semantic — it was a real data-loss path.
+
+Root cause: there is no way to make a post-hoc mutation both (a) safe from
+regeneration — which can only happen to a **draft** slip — and (b) compliant
+with migration 438's finalized-value lockdown trigger, which only protects a
+**finalized** slip. Those are mutually exclusive states on the same row.
+
+Fix (migration 447, `supabase/migrations/447_leave_encashment_payroll_
+survives_regen.sql`): the payout is never stored as a separately-mutated
+value. It is computed **fresh on every (re)generation pass**, the same
+pattern this codebase already uses for advance/loan-EMI deductions —
+`apps/api/src/routes/payroll/runs.ts`'s `computeOneEmployee` now calls
+`fetchEncashmentPayout()` (queries `leave_encashment_requests` for
+`status='approved' AND payroll_run_id = this run`) and folds the result into
+the slip via `applyEncashmentPayout()` (`lib/payroll-engine.ts`) every single
+time a slip is generated — first run or the hundredth re-run, identical
+result either way. `mark_leave_encashment_paid_atomic` is replaced by
+`assign_leave_encashment_to_payroll_run_atomic`, which does the opposite of
+its predecessor: it writes **nothing** to `payroll_slips` or `payroll_runs`,
+only records `payroll_run_id` on the request and leaves `status` at
+`'approved'` — there is nothing for a regeneration to lose, because nothing
+was written to the slip at assignment time. `status` only becomes `'paid'`
+when the run is actually **finalized** (`fn_finalize_leave_encashments_for_run`,
+called non-fatally from `POST /payroll/runs/:id/finalize`, the same pattern
+already used there for advance/loan schedules) — the one point at which
+migration 438's lockdown genuinely protects the number. A symmetric
+`fn_revert_leave_encashments_for_rollback` reverts `'paid'` back to
+`'approved'` (still assigned) if that run is later rolled back to draft.
+Deleting a run needs no new code: the existing `payroll_run_id ... ON DELETE
+SET NULL` (446) plus the existing guard blocking deletion of a finalized run
+already close that case.
+
+**Point 3 — payroll consistency (TDS annual-projection risk, avoided by
+design).** While building the fix above, a second risk was found and headed
+off before it could ship: `applyTdsForRun`'s annual projection
+(`projectedAnnualGross = priorGross + remainingMonths * slip.gross_pay`)
+multiplies the **current month's** `gross_pay` by the employee's remaining
+months to project annual recurring income for TDS purposes. If the
+encashment lump sum were folded into `gross_pay` **before** this projection
+ran, a one-time payment would be wrongly multiplied by `remainingMonths`,
+grossly over-projecting annual income and over-withholding future months'
+TDS. `applyEncashmentPayout` is deliberately called **after**
+`applyTdsForRun` returns in `computeOneEmployee` — the lump sum never
+reaches the annual projection at all, consistent with real-world lump-sum
+tax treatment (a one-off withholding on the lump sum itself, not a
+retroactive adjustment to the recurring-salary annual projection). This
+ordering requirement is documented in `applyEncashmentPayout`'s own doc
+comment so a future refactor doesn't silently reorder the two calls.
+`tds_deducted` (used by IT Statement/TDS Recovery/YTD/24Q export) is derived
+automatically from `component_breakdown` by filtering `code` matching
+`/^TDS$/i`, so the encashment's `TDS`-coded line is picked up by every
+existing statutory consumer without new wiring.
+
+Evidence for points 2–3: `apps/api/src/lib/__tests__/payroll-engine.test.ts`
+(`applyEncashmentPayout` — 9 new pure-function tests: arithmetic, the
+`tds=0`/`null`/`gross<=0` no-op cases, component shape, and an explicit
+determinism check — identical inputs produce identical output on repeated
+calls, which is what makes regeneration safe); `scripts/db/verify-g12-
+encashment-atomic.mjs`, rewritten for migration 447 and **run against a real
+local Postgres 16 instance with the full migration history (000→447)
+applying cleanly** — 32 checks, including directly simulating what
+`POST /payroll/runs`'s re-run path does (`DELETE FROM payroll_slips WHERE
+run_id = ...` then re-insert) and confirming the payout's source data
+(`leave_encashment_requests`) is completely unaffected, which migration 446
+could not have survived. `scripts/db/check-schema-drift.mjs` also passes
+clean against this migration. Route-level tests
+(`leave-encashment-g12.test.ts`) updated for the renamed
+`POST /leave/encashment/:id/assign-payroll-run` endpoint, including the new
+`ALREADY_ASSIGNED` error code and a regression guard for the
+`RUN_NOT_FOUND`-contains-`NOT_FOUND` prefix-ordering gotcha. Full API suite:
+47 files / 408 tests pass; `apps/api` and `apps/web` both typecheck clean.
+UI updated to match (`LeaveAccrualAdmin.tsx`'s button/dialog renamed
+"Assign to Payroll Run", with a distinct "Assigned — awaiting payroll
+finalization" state separate from a plain unassigned "Approved" row;
+`EssLeaveBalance.tsx`'s employee-facing Encashment tab shows "Scheduled for
+payroll" for the same assigned-not-yet-paid state).
+
+**Point 4 — F&F concurrency: a real gap, identified, explicitly NOT fixed
+this round.** The reviewer's framing is correct: shared leave-balance reads
+alone do not prove duplicate-payment prevention under concurrency.
+Re-reading `mark_fnf_paid_atomic` (migration 445) confirmed it validates
+loan/advance/asset totals for drift (its `SOURCE_DRIFT` check) but has **no
+equivalent validation for leave-encashment-balance drift** — if a standalone
+encashment request is approved (deducting `employee_leave_balance`)
+concurrently with an F&F computation/approval that read the balance
+**before** that deduction landed, the F&F settlement could be approved
+against a stale, higher balance, double-counting leave days the employee no
+longer has. This is a real, confirmed gap.
+
+A concrete remediation was scoped but **not implemented**: store a
+`leave_encashment_basis` JSONB snapshot of the exact `(leave_type_id, year)`
+pairs and balances F&F's calculation read, on `separation_ff_summary`, at
+F&F-compute time; re-validate those exact rows for drift inside
+`mark_fnf_paid_atomic`, the same pattern `SOURCE_DRIFT` already uses for
+loans/advances/assets. This was deliberately deferred rather than rushed —
+`mark_fnf_paid_atomic` is the most sensitive atomic function in the F&F
+subsystem (it is what actually moves money), and a hurried, undertested
+change to it under time pressure was judged a worse risk than leaving the
+gap open and disclosed. **This gap must be closed, with the same
+real-Postgres-transaction evidence standard as the rest of this document,
+before standalone encashment and F&F can be said to be safe running
+concurrently in production.** Until then, operational mitigation is
+procedural (don't run F&F settlement and standalone encashment approval for
+the same employee in the same window) — not something this codebase
+currently enforces.

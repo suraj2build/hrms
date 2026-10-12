@@ -232,6 +232,7 @@ interface EncashmentRequest {
   created_at:    string
   approved_at:   string | null
   paid_at:       string | null
+  payroll_run_id: string | null
   reversal_reason: string | null
   leave_types:   { id: string; name: string } | null
 }
@@ -1538,6 +1539,7 @@ export function EssLeaveBalance() {
                 <div className="space-y-2">
                   {(encashmentData?.data ?? []).map(req => {
                     const meta = ENCASHMENT_STATUS_META[req.status]
+                    const assignedNotYetPaid = req.status === 'approved' && !!req.payroll_run_id
                     return (
                       <div key={req.id} className="rounded-lg border border-border px-4 py-3 space-y-1.5">
                         <div className="flex items-center justify-between gap-2">
@@ -1545,7 +1547,9 @@ export function EssLeaveBalance() {
                             <span className="text-sm font-medium text-foreground">
                               {req.leave_types?.name ?? 'Leave'} — {req.days} day{req.days !== 1 ? 's' : ''}
                             </span>
-                            <Badge variant={meta.variant} className="rounded-full text-[9px]">{meta.label}</Badge>
+                            <Badge variant={assignedNotYetPaid ? 'secondary' : meta.variant} className="rounded-full text-[9px]">
+                              {assignedNotYetPaid ? 'Scheduled for payroll' : meta.label}
+                            </Badge>
                           </div>
                           <span className="text-[10px] text-muted-foreground">
                             Requested {fmtDateShort(req.created_at)}
@@ -1557,6 +1561,9 @@ export function EssLeaveBalance() {
                             <span>TDS: <strong className="text-foreground tabular-nums">₹{req.tds_amount}</strong></span>
                             <span>Net: <strong className="text-success tabular-nums">₹{req.net_amount}</strong></span>
                           </div>
+                        )}
+                        {assignedNotYetPaid && (
+                          <p className="text-[11px] text-muted-foreground">Assigned to an upcoming payroll run — not yet paid.</p>
                         )}
                         {req.notes && <p className="text-[11px] text-muted-foreground">{req.notes}</p>}
                         {req.status === 'reversed' && req.reversal_reason && (

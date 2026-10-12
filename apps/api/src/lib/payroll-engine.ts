@@ -325,6 +325,80 @@ export function applyAdvanceLoanRecovery(
   }
 }
 
+/** A standalone leave-encashment payout (migration 446/447) to post into this
+ *  month's slip — the already-approved gross/TDS figures from
+ *  leave_encashment_requests, not something this function computes. */
+export interface EncashmentPayout {
+  request_ids: string[]
+  gross:       number
+  tds:         number
+}
+
+/**
+ * Posts an approved, run-assigned leave-encashment payout into the slip —
+ * G12's fix for the regeneration-data-loss defect a reviewer found in the
+ * original design (injecting it into an already-persisted payroll_slips row
+ * after the fact, which a re-run of POST /payroll/runs silently wipes:
+ * "the re-run upsert... would reset the run to 'processing', delete all
+ * slips, and recompute"). Fetching the payout fresh from
+ * leave_encashment_requests and applying it here, inside the same
+ * computation every (re)generation already runs, makes it survive
+ * regeneration by construction — there is no separate mutation to lose.
+ *
+ * Applied AFTER applyTdsForRun(), deliberately — folding payout.gross into
+ * gross_pay BEFORE the regular monthly TDS projection would have the
+ * projection's own `projectedAnnualGross = priorGross + remainingMonths *
+ * grossPay` multiply this ONE-TIME lump sum by every remaining month,
+ * wildly over-projecting annual income and over-withholding regular TDS
+ * for the rest of the year. Applying it after leaves the regular
+ * recurring-salary projection untouched and adds the lump sum's own
+ * (separately computed, flat-marginal-rate) withholding directly to this
+ * month's actual gross_pay/total_deductions/net_pay/component_breakdown —
+ * which is also the correct real-world tax treatment (a lump sum's
+ * withholding is a one-off computation on the lump sum itself, not a
+ * retroactive adjustment to the recurring-salary annual projection).
+ *
+ * The TDS component here uses `code: 'TDS'`, the same code buildSlipRow()
+ * (apps/api/src/routes/payroll/runs.ts) already greps component_breakdown
+ * for to derive payroll_slips.tds_deducted — so this withholding is
+ * automatically included in that column, and therefore in whatever reads
+ * it (IT Statement, TDS Recovery, YTD, 24Q export), with no separate wiring.
+ */
+export function applyEncashmentPayout(
+  slip:   PayrollSlipResult,
+  payout: EncashmentPayout | null | undefined,
+): PayrollSlipResult {
+  if (!payout || payout.gross <= 0) return slip
+
+  const components: PayrollComponentSnapshot[] = [{
+    salary_component_id: payout.request_ids[0] ?? '',
+    name: 'Leave Encashment', code: 'LEAVE_ENCASHMENT',
+    component_type: 'earning', calc_type: 'fixed',
+    value: payout.gross, monthly_amount: payout.gross, annual_amount: 0, sequence: 950,
+  }]
+  if (payout.tds > 0) {
+    components.push({
+      salary_component_id: payout.request_ids[0] ?? '',
+      name: 'TDS on Leave Encashment', code: 'TDS',
+      component_type: 'deduction', calc_type: 'fixed',
+      value: payout.tds, monthly_amount: payout.tds, annual_amount: 0, sequence: 951,
+    })
+  }
+
+  const gross_pay          = round2(slip.gross_pay + payout.gross)
+  const uncappedDeductions = round2(slip.total_deductions + payout.tds)
+  const { total_deductions, net_pay, deduction_shortfall } = finalizeDeductionsAndNet(gross_pay, uncappedDeductions)
+
+  return {
+    ...slip,
+    gross_pay,
+    total_deductions,
+    net_pay,
+    deduction_shortfall,
+    component_breakdown: [...slip.component_breakdown, ...components],
+  }
+}
+
 /** Round to 2 decimal places. Exported so callers can use the same rounding. */
 export function round2(n: number): number {
   return Math.round(n * 100) / 100

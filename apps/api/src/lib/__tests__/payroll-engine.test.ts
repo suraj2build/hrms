@@ -31,8 +31,10 @@ import {
   fetchActiveCompensation,
   computePayrollSlip,
   applyAdvanceLoanRecovery,
+  applyEncashmentPayout,
   finalizeDeductionsAndNet,
   type PayrollSlipInput,
+  type EncashmentPayout,
 } from '../payroll-engine.js'
 
 // ── Supabase stub ──────────────────────────────────────────────────────────────
@@ -280,6 +282,123 @@ describe('computePayrollSlip — lop_amount and net_pay', () => {
 
     expect(result.lop_amount).toBe(13500)
     expect(result.net_pay).toBe(90_000 - 13500)  // = 76500
+  })
+})
+
+// ── Section 2b: applyEncashmentPayout — G12 leave-encashment payout ─────────
+//
+// Context: encashment payouts are computed FRESH by this pure function on every
+// payroll generation pass (never stored on, or mutated into, a persisted
+// payroll_slips row) — this is what makes the payout survive an arbitrary
+// re-run/regeneration of a draft month. These tests exercise the function in
+// isolation; the "survives regeneration" property follows directly from
+// determinism (same base slip + same payout in → same result out, every time).
+//
+// Ordering note baked into these fixtures: applyEncashmentPayout must run AFTER
+// applyTdsForRun's annual-projection step (not tested here — that's a route-layer
+// concern) specifically so a one-time lump sum never gets multiplied into the
+// recurring-salary annual TDS projection. These tests treat the TDS amount as
+// already-computed input (a flat marginal-rate withholding on the lump sum
+// itself), not something this function derives.
+
+describe('applyEncashmentPayout — G12 leave-encashment payout', () => {
+  function payout(gross: number, tds: number, ids = ['enc-1']): EncashmentPayout {
+    return { request_ids: ids, gross, tds }
+  }
+
+  it('adds gross to gross_pay and tds to total_deductions, net_pay reflects both', () => {
+    const base = computePayrollSlip(slipInput(0, 22, 60_000, 22))
+    const result = applyEncashmentPayout(base, payout(20_000, 2_000))
+
+    expect(result.gross_pay).toBe(base.gross_pay + 20_000)
+    expect(result.total_deductions).toBe(base.total_deductions + 2_000)
+    expect(result.net_pay).toBe(result.gross_pay - result.total_deductions)
+    expect(result.net_pay).toBe(base.net_pay + 20_000 - 2_000)
+  })
+
+  it('tds = 0: no TDS component added, total_deductions unchanged, net_pay = gross_pay delta only', () => {
+    const base = computePayrollSlip(slipInput(0, 22, 60_000, 22))
+    const result = applyEncashmentPayout(base, payout(15_000, 0))
+
+    expect(result.gross_pay).toBe(base.gross_pay + 15_000)
+    expect(result.total_deductions).toBe(base.total_deductions)
+    expect(result.net_pay).toBe(base.net_pay + 15_000)
+    const tdsComponents = result.component_breakdown.filter(c => c.code === 'TDS')
+    expect(tdsComponents).toHaveLength(0)
+  })
+
+  it('no-op when payout is null', () => {
+    const base = computePayrollSlip(slipInput(0, 22, 60_000, 22))
+    const result = applyEncashmentPayout(base, null)
+    expect(result).toBe(base)
+  })
+
+  it('no-op when payout is undefined', () => {
+    const base = computePayrollSlip(slipInput(0, 22, 60_000, 22))
+    const result = applyEncashmentPayout(base, undefined)
+    expect(result).toBe(base)
+  })
+
+  it('no-op when payout.gross is 0', () => {
+    const base = computePayrollSlip(slipInput(0, 22, 60_000, 22))
+    const result = applyEncashmentPayout(base, payout(0, 0))
+    expect(result).toBe(base)
+  })
+
+  it('no-op when payout.gross is negative (defensive guard)', () => {
+    const base = computePayrollSlip(slipInput(0, 22, 60_000, 22))
+    const result = applyEncashmentPayout(base, payout(-500, 0))
+    expect(result).toBe(base)
+  })
+
+  it('component_breakdown gets a LEAVE_ENCASHMENT earning and a TDS deduction with correct shapes', () => {
+    const base = computePayrollSlip(slipInput(0, 22, 60_000, 22))
+    const result = applyEncashmentPayout(base, payout(18_500, 1_850))
+
+    const earning = result.component_breakdown.find(c => c.code === 'LEAVE_ENCASHMENT')
+    expect(earning).toBeDefined()
+    expect(earning?.component_type).toBe('earning')
+    expect(earning?.monthly_amount).toBe(18_500)
+
+    const tds = result.component_breakdown.find(c => c.code === 'TDS')
+    expect(tds).toBeDefined()
+    expect(tds?.component_type).toBe('deduction')
+    expect(tds?.monthly_amount).toBe(1_850)
+
+    // Original components are preserved, not replaced
+    expect(result.component_breakdown.length).toBe(base.component_breakdown.length + 2)
+  })
+
+  it('deductions capped at gross_pay: encashment TDS cannot push net_pay negative', () => {
+    // Base slip has a tiny gross_pay; a large TDS on the encashment alone would
+    // otherwise exceed it — finalizeDeductionsAndNet's cap must still hold.
+    const base = computePayrollSlip(slipInput(0, 22, 1_000, 22))
+    const result = applyEncashmentPayout(base, payout(500, 2_000))
+
+    expect(result.net_pay).toBeGreaterThanOrEqual(0)
+    expect(result.total_deductions).toBeLessThanOrEqual(result.gross_pay)
+  })
+
+  it('is deterministic: identical base slip + identical payout produce identical output every call', () => {
+    const base = computePayrollSlip(slipInput(0, 22, 60_000, 22))
+    const p = payout(12_345.67, 1_234.56)
+
+    const first  = applyEncashmentPayout(base, p)
+    const second = applyEncashmentPayout(base, p)
+
+    expect(second).toEqual(first)
+  })
+
+  it('composes correctly on top of applyAdvanceLoanRecovery (both additions reflected in net_pay)', () => {
+    const base = computePayrollSlip(slipInput(0, 22, 60_000, 22))
+    const withRecovery = applyAdvanceLoanRecovery(base, [
+      { type: 'loan_emi', schedule_id: 'l-1', amount: 5_000, label: 'EMI' },
+    ])
+    const result = applyEncashmentPayout(withRecovery, payout(10_000, 1_000))
+
+    expect(result.gross_pay).toBe(base.gross_pay + 10_000)
+    expect(result.total_deductions).toBe(withRecovery.total_deductions + 1_000)
+    expect(result.net_pay).toBe(result.gross_pay - result.total_deductions)
   })
 })
 

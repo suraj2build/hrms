@@ -207,7 +207,7 @@ export function LeaveAccrualAdmin() {
   })
   const encashments = encResp?.data ?? []
 
-  // Draft payroll runs — the only kind mark-paid can post an encashment into.
+  // Draft payroll runs — the only kind a request can be assigned to.
   const { data: payrollRunsResp } = useQuery<{ data: PayrollRunOption[] }>({
     queryKey: ['payroll-runs-for-encashment'],
     queryFn:  () => api.get('/payroll/runs?limit=50'),
@@ -249,15 +249,15 @@ export function LeaveAccrualAdmin() {
     onError: (e) => toast.error('Rejection failed', { description: (e as Error).message }),
   })
 
-  const [markPaidTarget, setMarkPaidTarget] = useState<EncashmentRequest | null>(null)
-  const [markPaidRunId, setMarkPaidRunId]   = useState('')
-  const markPaidMutation = useMutation({
-    mutationFn: () => api.post(`/leave/encashment/${markPaidTarget!.id}/mark-paid`, { payroll_run_id: markPaidRunId }),
+  const [assignTarget, setAssignTarget] = useState<EncashmentRequest | null>(null)
+  const [assignRunId, setAssignRunId]   = useState('')
+  const assignRunMutation = useMutation({
+    mutationFn: () => api.post(`/leave/encashment/${assignTarget!.id}/assign-payroll-run`, { payroll_run_id: assignRunId }),
     onSuccess: () => {
       refetchEnc()
       qc.invalidateQueries({ queryKey: ['payroll-runs-for-encashment'] })
-      toast.success('Posted to payroll run and marked as paid')
-      setMarkPaidTarget(null); setMarkPaidRunId('')
+      toast.success('Assigned to payroll run — not yet paid. Run (or re-run) payroll for this month, then finalize to mark paid.')
+      setAssignTarget(null); setAssignRunId('')
     },
     onError: (e) => toast.error('Failed', { description: (e as Error).message }),
   })
@@ -627,8 +627,11 @@ export function LeaveAccrualAdmin() {
                       </td>
                       <td className="px-3 py-2">
                         <Badge variant={ENC_VARIANT[enc.status]} className="rounded-full text-[10px] capitalize">
-                          {enc.status}
+                          {enc.status === 'approved' && enc.payroll_run_id ? 'Assigned' : enc.status}
                         </Badge>
+                        {enc.status === 'approved' && enc.payroll_run_id && (
+                          <p className="text-[10px] text-muted-foreground mt-0.5">Awaiting payroll finalization</p>
+                        )}
                         {enc.status === 'reversed' && enc.reversal_reason && (
                           <p className="text-[10px] text-muted-foreground mt-0.5">{enc.reversal_reason}</p>
                         )}
@@ -655,14 +658,14 @@ export function LeaveAccrualAdmin() {
                             </Button>
                           </div>
                         )}
-                        {enc.status === 'approved' && (
+                        {enc.status === 'approved' && !enc.payroll_run_id && (
                           <div className="flex items-center gap-1">
                             <Button
                               size="sm" variant="outline"
                               className="h-6 text-[10px] px-2 gap-0.5"
-                              onClick={() => { setMarkPaidTarget(enc); setMarkPaidRunId('') }}
+                              onClick={() => { setAssignTarget(enc); setAssignRunId('') }}
                             >
-                              <BadgeCheck className="h-3 w-3" /> Mark Paid
+                              <BadgeCheck className="h-3 w-3" /> Assign to Payroll Run
                             </Button>
                             <Button
                               size="sm" variant="ghost"
@@ -672,6 +675,15 @@ export function LeaveAccrualAdmin() {
                               Reverse
                             </Button>
                           </div>
+                        )}
+                        {enc.status === 'approved' && enc.payroll_run_id && (
+                          <Button
+                            size="sm" variant="ghost"
+                            className="h-6 text-[10px] px-2 text-muted-foreground"
+                            onClick={() => { setReverseTarget(enc); setReverseReason('') }}
+                          >
+                            Reverse
+                          </Button>
                         )}
                         {enc.status === 'paid' && (
                           <Button
@@ -695,14 +707,18 @@ export function LeaveAccrualAdmin() {
         </TabsContent>
       </Tabs>
 
-      {/* Mark Paid dialog — pick a draft payroll run to post this payout into */}
-      <Dialog open={!!markPaidTarget} onOpenChange={(v) => { if (!v) setMarkPaidTarget(null) }}>
+      {/* Assign to Payroll Run dialog — reserves a draft run; this does NOT mark
+          the request paid yet. Every (re)generation of that run folds the
+          payout into the employee's payslip fresh, so it survives any number
+          of re-runs; finalizing that run is what actually marks this paid. */}
+      <Dialog open={!!assignTarget} onOpenChange={(v) => { if (!v) setAssignTarget(null) }}>
         <DialogContent className="sm:max-w-md">
-          <DialogHeader><DialogTitle>Mark as Paid — {markPaidTarget?.employee_name}</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>Assign to Payroll Run — {assignTarget?.employee_name}</DialogTitle></DialogHeader>
           <div className="space-y-3">
             <p className="text-xs text-muted-foreground">
-              Net payout <strong className="text-success">₹{markPaidTarget?.net_amount}</strong> will be posted into
-              the selected draft payroll run's payslip for this employee, then this request is marked paid.
+              Net payout <strong className="text-success">₹{assignTarget?.net_amount}</strong> will be reserved for
+              the selected draft payroll run — this does not mark it paid yet. Run (or re-run) payroll for
+              this month so the payslip reflects it, then finalize that run to mark this request paid.
             </p>
             <div className="space-y-1.5">
               <Label className="text-xs">Draft payroll run</Label>
@@ -710,8 +726,8 @@ export function LeaveAccrualAdmin() {
                 <p className="text-xs text-warning">No draft payroll runs available — create or reopen one first.</p>
               ) : (
                 <select
-                  value={markPaidRunId}
-                  onChange={e => setMarkPaidRunId(e.target.value)}
+                  value={assignRunId}
+                  onChange={e => setAssignRunId(e.target.value)}
                   className="w-full h-9 text-xs rounded-md border border-input bg-background px-2 text-foreground outline-none focus:ring-1 ring-primary/50"
                 >
                   <option value="">Select a run…</option>
@@ -723,14 +739,14 @@ export function LeaveAccrualAdmin() {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="ghost" size="sm" onClick={() => setMarkPaidTarget(null)}>Cancel</Button>
+            <Button variant="ghost" size="sm" onClick={() => setAssignTarget(null)}>Cancel</Button>
             <Button
               size="sm"
-              disabled={markPaidMutation.isPending || !markPaidRunId}
-              onClick={() => markPaidMutation.mutate()}
+              disabled={assignRunMutation.isPending || !assignRunId}
+              onClick={() => assignRunMutation.mutate()}
             >
-              {markPaidMutation.isPending && <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />}
-              Post &amp; Mark Paid
+              {assignRunMutation.isPending && <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />}
+              Assign
             </Button>
           </DialogFooter>
         </DialogContent>

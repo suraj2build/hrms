@@ -422,6 +422,48 @@ on.** The two concrete paths:
   unchanged by this addendum — it closes one of four gates' *decision*,
   not the other three gates' *evidence*.
 
+  **Addendum (2026-10-12, round 2): a real defect in the round-1 "complete
+  it" build was found and fixed; one real gap was found and is explicitly
+  NOT fixed.** An independent review of the round-1 G12 build above
+  requested specific proof on four points instead of accepting the
+  "DONE" framing. Checking each against the actual code (not re-asserting
+  the prior claim) found:
+  - **Payment status (a real defect, now fixed).** `mark_leave_encashment_
+    paid_atomic` (migration 446) posted the payout into an already-
+    persisted `payroll_slips` row and flipped status to `'paid'`
+    immediately — but `POST /payroll/runs` explicitly permits deleting and
+    recomputing every slip in a non-finalized run on re-run, which would
+    have silently wiped that posting while the request kept claiming
+    `'paid'`. Migration 447 fixes this: the payout is derived fresh on
+    every (re)generation pass instead of stored-then-mutated, and `'paid'`
+    is only set once the run is actually finalized. Proven against a real
+    local Postgres 16 instance with the full migration history
+    (000→447) applying cleanly: `scripts/db/verify-g12-encashment-
+    atomic.mjs`, 32 checks, directly simulating the delete-and-recompute
+    re-run path.
+  - **Tax treatment and payroll consistency.** No change to the tax
+    treatment itself (still flat marginal-slab-rate, still not a
+    10(10AA) exemption computation). The fix above was deliberately
+    ordered to avoid a related risk: `applyEncashmentPayout` runs after
+    the TDS annual-income projection, so a one-time lump sum is never
+    multiplied into the recurring-salary annual projection.
+  - **F&F concurrency — a real gap, confirmed, explicitly NOT fixed.**
+    `mark_fnf_paid_atomic` (445) validates loan/advance/asset drift but has
+    no equivalent check for leave-encashment-balance drift, so a
+    concurrent standalone-encashment approval and F&F computation/approval
+    could let F&F be approved against a stale balance. A remediation was
+    scoped (an exact-basis snapshot re-validated at F&F mark-paid time,
+    mirroring the existing `SOURCE_DRIFT` pattern) but deliberately not
+    implemented this round — this is the most sensitive atomic function in
+    the F&F subsystem, and a rushed change to it was judged a worse risk
+    than leaving the gap open and disclosed. See `STATUS.md`'s 2026-10-12
+    round-2 addendum and `FINDINGS.csv` rows `G12-FOLLOWUP-2` and
+    `G12-FF-CONCURRENCY-GAP` for full detail. **This gap must be closed
+    before standalone encashment and F&F can be called safe running
+    concurrently in production — it is a new, additional precondition
+    layered onto the NO-GO verdict in §5, not something this addendum
+    resolves.**
+
 None of the four gates are closed by this round's local work, and none of
 them can be closed by more local work of the same kind — each needs either
 external access (Gates 1–3) or an explicit decision (Gate 4).

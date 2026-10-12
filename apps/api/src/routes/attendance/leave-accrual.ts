@@ -11,23 +11,25 @@
  * GET    /leave/accrual/ledger/:employeeId  — ledger for one employee
  *
  * Encashment (G12 — standalone leave encashment, completed end to end;
- * see migration 446 and lib/accrual-engine.ts's computeEncashmentPayout):
- * POST   /leave/encashment/request           — employee submits encashment request
- * GET    /leave/encashment/my                — employee views own encashment requests
- * GET    /leave/encashment/pending           — admin views pending encashment requests
- * GET    /leave/encashment/all?status=        — admin views requests by any status (for mark-paid/reverse)
- * POST   /leave/encashment/:id/approve       — admin approves (computes rate/gross/TDS/net)
- * POST   /leave/encashment/:id/reject        — admin rejects
- * POST   /leave/encashment/:id/mark-paid     — admin posts the payout into a named
- *                                               draft payroll run's payslip for this
- *                                               employee, then marks paid (one
- *                                               transaction — mark_leave_encashment_
- *                                               paid_atomic)
- * POST   /leave/encashment/:id/reverse       — admin reverses an approved/paid request:
- *                                               credits the leave balance back and, if
- *                                               already posted into a still-draft
- *                                               payslip, removes that posting too
- *                                               (reverse_leave_encashment_atomic)
+ * see migrations 446/447 and lib/accrual-engine.ts's computeEncashmentPayout):
+ * POST   /leave/encashment/request              — employee submits encashment request
+ * GET    /leave/encashment/my                   — employee views own encashment requests
+ * GET    /leave/encashment/pending              — admin views pending encashment requests
+ * GET    /leave/encashment/all?status=           — admin views requests by any status
+ * POST   /leave/encashment/:id/approve          — admin approves (computes rate/gross/TDS/net)
+ * POST   /leave/encashment/:id/reject           — admin rejects
+ * POST   /leave/encashment/:id/assign-payroll-run — admin reserves a draft payroll run for
+ *                                                    this request (status stays 'approved' —
+ *                                                    NOT yet paid; every (re)generation of
+ *                                                    that run folds the payout into the
+ *                                                    employee's payslip fresh, so it survives
+ *                                                    any number of re-runs; finalizing that
+ *                                                    run is what actually flips this to
+ *                                                    'paid' — see runs.ts's finalize route)
+ * POST   /leave/encashment/:id/reverse          — admin reverses an approved/paid request:
+ *                                                   credits the leave balance back; refuses
+ *                                                   if the linked run is already finalized
+ *                                                   (roll it back to draft first)
  */
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
@@ -442,40 +444,49 @@ export default async function leaveAccrualRoutes(fastify: FastifyInstance) {
     return reply.send({ message: 'Encashment request rejected' })
   })
 
-  // ── POST /leave/encashment/:id/mark-paid ──────────────────────────────────
-  // G12: this used to just flip status — no amount, no payslip, no proven
-  // disbursement path (the audit's exact G12 finding). It now posts the
-  // approved payout into a named, still-draft payroll run's payslip for
-  // this employee (a real earning + TDS line that then goes through the
-  // normal finalize flow) and flips status in the SAME transaction —
-  // mark_leave_encashment_paid_atomic, migration 446.
-  fastify.post('/leave/encashment/:id/mark-paid', hrAdminAuth, async (req: any, reply) => {
+  // ── POST /leave/encashment/:id/assign-payroll-run ─────────────────────────
+  // G12, round 2: this used to flip straight to 'paid' and splice the payout
+  // directly into an already-persisted payroll_slips row — which a
+  // regeneration of that (still-draft) run would silently wipe, since
+  // POST /payroll/runs's own re-run path deletes and recomputes all slips
+  // for a non-finalized month. Fixed by separating "reserve a run" from
+  // "actually paid": this only sets payroll_run_id (status stays
+  // 'approved') — assign_leave_encashment_to_payroll_run_atomic, migration
+  // 447. Every (re)generation of that run then folds this request's
+  // gross/TDS into the slip fresh (computeOneEmployee →
+  // fetchEncashmentPayout, apps/api/src/routes/payroll/runs.ts), so it
+  // survives any number of re-runs. The request only becomes 'paid' once
+  // that run is actually finalized (migration 447's
+  // fn_finalize_leave_encashments_for_run, called from the finalize route)
+  // — the slip's numbers are locked by migration 438's trigger at that
+  // point, so "paid" now means the number can no longer silently change.
+  fastify.post('/leave/encashment/:id/assign-payroll-run', hrAdminAuth, async (req: any, reply) => {
     const schema = z.object({ payroll_run_id: z.string().uuid() })
     const parsed = schema.safeParse(req.body)
     if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
 
-    const { data, error } = await fastify.supabase.rpc('mark_leave_encashment_paid_atomic', {
+    const { data, error } = await fastify.supabase.rpc('assign_leave_encashment_to_payroll_run_atomic', {
       p_tenant_id:      req.tenantId,
       p_request_id:     req.params.id,
       p_payroll_run_id: parsed.data.payroll_run_id,
-      p_user_id:        req.userId,
     })
 
     if (error) {
       const msg = error.message ?? ''
-      // RUN_NOT_FOUND: contains the substring "NOT_FOUND:" — check it (and
-      // every other multi-word prefix) BEFORE the plain NOT_FOUND: check,
-      // or RUN_NOT_FOUND/NO_PAYSLIP-style messages would be misclassified.
-      if (msg.includes('RUN_NOT_FOUND:'))    return notFound(reply, 'RUN_NOT_FOUND', msg.replace(/^.*RUN_NOT_FOUND:\s*/, ''))
-      if (msg.includes('NO_PAYSLIP:'))       return reply.code(409).send({ error: 'NO_PAYSLIP', message: msg.replace(/^.*NO_PAYSLIP:\s*/, '') })
-      if (msg.includes('RUN_NOT_DRAFT:'))    return reply.code(409).send({ error: 'RUN_NOT_DRAFT', message: msg.replace(/^.*RUN_NOT_DRAFT:\s*/, '') })
-      if (msg.includes('ALREADY_DECIDED:'))  return reply.code(409).send({ error: 'ALREADY_DECIDED', message: msg.replace(/^.*ALREADY_DECIDED:\s*/, '') })
-      if (msg.includes('NOT_COMPUTED:'))     return reply.code(409).send({ error: 'NOT_COMPUTED', message: msg.replace(/^.*NOT_COMPUTED:\s*/, '') })
-      if (msg.includes('NOT_FOUND:'))        return notFound(reply, 'NOT_FOUND', msg.replace(/^.*NOT_FOUND:\s*/, ''))
-      return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to mark as paid')
+      // RUN_NOT_FOUND/NO_PAYSLIP contain the substring "NOT_FOUND:" — check
+      // every multi-word prefix BEFORE the plain NOT_FOUND: check, or they'd
+      // be misclassified (confirmed regression risk — see the route tests).
+      if (msg.includes('RUN_NOT_FOUND:'))     return notFound(reply, 'RUN_NOT_FOUND', msg.replace(/^.*RUN_NOT_FOUND:\s*/, ''))
+      if (msg.includes('NO_PAYSLIP:'))        return reply.code(409).send({ error: 'NO_PAYSLIP', message: msg.replace(/^.*NO_PAYSLIP:\s*/, '') })
+      if (msg.includes('RUN_NOT_DRAFT:'))     return reply.code(409).send({ error: 'RUN_NOT_DRAFT', message: msg.replace(/^.*RUN_NOT_DRAFT:\s*/, '') })
+      if (msg.includes('ALREADY_ASSIGNED:'))  return reply.code(409).send({ error: 'ALREADY_ASSIGNED', message: msg.replace(/^.*ALREADY_ASSIGNED:\s*/, '') })
+      if (msg.includes('ALREADY_DECIDED:'))   return reply.code(409).send({ error: 'ALREADY_DECIDED', message: msg.replace(/^.*ALREADY_DECIDED:\s*/, '') })
+      if (msg.includes('NOT_COMPUTED:'))      return reply.code(409).send({ error: 'NOT_COMPUTED', message: msg.replace(/^.*NOT_COMPUTED:\s*/, '') })
+      if (msg.includes('NOT_FOUND:'))         return notFound(reply, 'NOT_FOUND', msg.replace(/^.*NOT_FOUND:\s*/, ''))
+      return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to assign to payroll run')
     }
 
-    return reply.send({ message: 'Posted to payroll run and marked as paid', data })
+    return reply.send({ message: 'Assigned to payroll run — not yet paid. Run (or re-run) payroll for this month, then finalize to mark paid.', data })
   })
 
   // ── POST /leave/encashment/:id/reverse ────────────────────────────────────

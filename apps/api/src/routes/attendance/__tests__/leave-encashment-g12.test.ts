@@ -1,20 +1,32 @@
 /**
  * G12 — standalone leave encashment, completed end to end.
  *
- * Route-level tests for the two new endpoints that delegate to migration
- * 446's atomic Postgres functions (mark_leave_encashment_paid_atomic,
+ * Route-level tests for the endpoints that delegate to migration 447's
+ * atomic Postgres functions (assign_leave_encashment_to_payroll_run_atomic,
  * reverse_leave_encashment_atomic): this file verifies the route calls the
  * RPC with the right arguments and maps every documented error prefix to
  * the right HTTP status/code, exactly as separation-ff.test.ts does for the
  * F&F mark-paid RPC. The functions' own transactional/concurrency
- * guarantees are verified separately against real Postgres — see
- * scripts/db/verify-g12-encashment-atomic.mjs — since a mocked RPC
- * response can't exercise actual transaction semantics.
+ * guarantees — plus the "survives payroll regeneration" property that
+ * migration 447 exists to fix — are verified separately against real
+ * Postgres — see scripts/db/verify-g12-encashment-atomic.mjs — since a
+ * mocked RPC response can't exercise actual transaction semantics.
+ *
+ * Migration 447 replaced the old mark_leave_encashment_paid_atomic (which
+ * mutated a persisted payroll_slips row directly — unsafe, since a draft
+ * run's slips can be deleted and regenerated at any time) with
+ * assign_leave_encashment_to_payroll_run_atomic, which only records intent
+ * (payroll_run_id) and leaves the actual slip computation to
+ * applyEncashmentPayout() inside the live payroll-generation pass (see
+ * payroll-engine.test.ts). The request only flips to 'paid' when that run
+ * is finalized (fn_finalize_leave_encashments_for_run, called from
+ * POST /payroll/runs/:id/finalize) and reverts on rollback
+ * (fn_revert_leave_encashments_for_rollback).
  *
  * Also covers the two plain-query additions: GET /leave/encashment/
  * encashable-types (the employee-facing projection the ESS request form
  * needs) and GET /leave/encashment/all?status= (admin visibility beyond
- * 'pending', needed to find a request to mark-paid or reverse).
+ * 'pending', needed to find a request to assign or reverse).
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import Fastify, { type FastifyInstance, type FastifyRequest } from 'fastify'
@@ -47,33 +59,39 @@ const HEADERS = { 'content-type': 'application/json', authorization: 'Bearer tes
 
 beforeEach(() => { vi.clearAllMocks() })
 
-describe('POST /leave/encashment/:id/mark-paid', () => {
+describe('POST /leave/encashment/:id/assign-payroll-run', () => {
   it('validates payroll_run_id is required', async () => {
     const { app } = buildApp()
     await app.register(leaveAccrualRoutes)
     await app.ready()
 
     const res = await app.inject({
-      method: 'POST', url: `/leave/encashment/${REQUEST_ID}/mark-paid`, headers: HEADERS, payload: {},
+      method: 'POST', url: `/leave/encashment/${REQUEST_ID}/assign-payroll-run`, headers: HEADERS, payload: {},
     })
     expect(res.statusCode).toBe(400)
     await app.close()
   })
 
-  it('happy path — calls the RPC with the right arguments', async () => {
-    const rpc = vi.fn().mockResolvedValue({ data: { id: REQUEST_ID, status: 'paid' }, error: null })
+  it('happy path — calls the RPC with the right arguments, response signals not-yet-paid', async () => {
+    const rpc = vi.fn().mockResolvedValue({
+      data: { id: REQUEST_ID, status: 'approved', payroll_run_id: RUN_ID },
+      error: null,
+    })
     const { app } = buildApp({ rpc })
     await app.register(leaveAccrualRoutes)
     await app.ready()
 
     const res = await app.inject({
-      method: 'POST', url: `/leave/encashment/${REQUEST_ID}/mark-paid`, headers: HEADERS,
+      method: 'POST', url: `/leave/encashment/${REQUEST_ID}/assign-payroll-run`, headers: HEADERS,
       payload: { payroll_run_id: RUN_ID },
     })
     expect(res.statusCode).toBe(200)
-    expect(rpc).toHaveBeenCalledWith('mark_leave_encashment_paid_atomic', {
-      p_tenant_id: TENANT_ID, p_request_id: REQUEST_ID, p_payroll_run_id: RUN_ID, p_user_id: 'hr-admin-001',
+    expect(rpc).toHaveBeenCalledWith('assign_leave_encashment_to_payroll_run_atomic', {
+      p_tenant_id: TENANT_ID, p_request_id: REQUEST_ID, p_payroll_run_id: RUN_ID,
     })
+    const body = JSON.parse(res.body)
+    expect(body.data.status).toBe('approved')
+    expect(body.message).toMatch(/not yet paid/i)
     await app.close()
   })
 
@@ -82,6 +100,7 @@ describe('POST /leave/encashment/:id/mark-paid', () => {
     ['RUN_NOT_FOUND: Payroll run not found', 404, 'RUN_NOT_FOUND'],
     ['NO_PAYSLIP: This employee has no payslip in that run', 409, 'NO_PAYSLIP'],
     ['RUN_NOT_DRAFT: Payroll run is finalized', 409, 'RUN_NOT_DRAFT'],
+    ['ALREADY_ASSIGNED: This request is already assigned to a payroll run', 409, 'ALREADY_ASSIGNED'],
     ['ALREADY_DECIDED: This encashment request is no longer in approved status', 409, 'ALREADY_DECIDED'],
     ['NOT_COMPUTED: This request has no computed payout amount', 409, 'NOT_COMPUTED'],
   ])('maps RPC error %s to %i %s', async (rpcMessage, expectedStatus, expectedCode) => {
@@ -91,11 +110,28 @@ describe('POST /leave/encashment/:id/mark-paid', () => {
     await app.ready()
 
     const res = await app.inject({
-      method: 'POST', url: `/leave/encashment/${REQUEST_ID}/mark-paid`, headers: HEADERS,
+      method: 'POST', url: `/leave/encashment/${REQUEST_ID}/assign-payroll-run`, headers: HEADERS,
       payload: { payroll_run_id: RUN_ID },
     })
     expect(res.statusCode).toBe(expectedStatus)
     expect(JSON.parse(res.body).error).toBe(expectedCode)
+    await app.close()
+  })
+
+  it('RUN_NOT_FOUND is classified correctly even though it contains the substring NOT_FOUND', async () => {
+    // Regression guard: prefix checks must be most-specific-first, or the
+    // generic NOT_FOUND branch would misclassify this as a 404 NOT_FOUND
+    // with the wrong (truncated) message instead of 404 RUN_NOT_FOUND.
+    const rpc = vi.fn().mockResolvedValue({ data: null, error: { message: 'RUN_NOT_FOUND: Payroll run not found' } })
+    const { app } = buildApp({ rpc })
+    await app.register(leaveAccrualRoutes)
+    await app.ready()
+
+    const res = await app.inject({
+      method: 'POST', url: `/leave/encashment/${REQUEST_ID}/assign-payroll-run`, headers: HEADERS,
+      payload: { payroll_run_id: RUN_ID },
+    })
+    expect(JSON.parse(res.body).error).toBe('RUN_NOT_FOUND')
     await app.close()
   })
 
@@ -106,7 +142,7 @@ describe('POST /leave/encashment/:id/mark-paid', () => {
     await app.ready()
 
     const res = await app.inject({
-      method: 'POST', url: `/leave/encashment/${REQUEST_ID}/mark-paid`, headers: HEADERS,
+      method: 'POST', url: `/leave/encashment/${REQUEST_ID}/assign-payroll-run`, headers: HEADERS,
       payload: { payroll_run_id: RUN_ID },
     })
     expect(res.statusCode).toBe(500)
@@ -135,7 +171,7 @@ describe('POST /leave/encashment/:id/reverse', () => {
   it.each([
     ['NOT_FOUND: Encashment request not found', 404, 'NOT_FOUND'],
     ['CONFLICT: Only an approved or paid request can be reversed (current: rejected)', 409, 'CONFLICT'],
-    ['PAYROLL_FINALIZED: This payout was posted into a payslip that is now finalized', 409, 'PAYROLL_FINALIZED'],
+    ['PAYROLL_FINALIZED: This payout was posted into a payroll run that is now finalized', 409, 'PAYROLL_FINALIZED'],
   ])('maps RPC error %s to %i %s', async (rpcMessage, expectedStatus, expectedCode) => {
     const rpc = vi.fn().mockResolvedValue({ data: null, error: { message: rpcMessage } })
     const { app } = buildApp({ rpc })

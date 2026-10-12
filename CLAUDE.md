@@ -261,21 +261,48 @@ Deferred, needs an explicit product scope decision before building: PMS
 (performance management) and Travel Desk have zero implementation — not
 started pending a decision on whether they're in scope for initial launch.
 
-**G12 (standalone leave encashment) — decided and built (2026-10-12).**
+**G12 (standalone leave encashment) — decided and built (2026-10-12),
+payment-status defect found and fixed in a round-2 review (2026-10-12).**
 Was in the same "deferred pending decision" bucket as PMS/Travel Desk above;
 the user authorized completion. Employee-initiated request UI
 (`apps/web/src/pages/ess/EssLeaveBalance.tsx`'s Encashment tab), a real
 payout + TDS computation at approval time (`computeEncashmentPayout` in
 `apps/api/src/lib/accrual-engine.ts` — a flat marginal-slab-rate
 withholding, explicitly NOT a Section 10(10AA) exemption computation; that
-needs tax/compliance sign-off before go-live), an atomic
-`mark_leave_encashment_paid_atomic` that posts the payout into a named
-draft payroll run's payslip and marks paid in one transaction, and an
-atomic `reverse_leave_encashment_atomic` (migration 446). Duplicate-payment
-prevention: payroll via that function's own status precondition, F&F via
+needs tax/compliance sign-off before go-live).
+
+Round 1 (migration 446) shipped `mark_leave_encashment_paid_atomic`, which
+posted the payout directly into an already-persisted `payroll_slips` row
+and flipped status to `'paid'` immediately. Round 2 found this was a real
+defect, not just a semantic nitpick: `POST /payroll/runs` explicitly
+permits deleting and recomputing every slip in a non-finalized ("draft")
+run on re-run, which would silently wipe that posting while the request
+kept claiming `'paid'`. Migration 447 replaces it:
+`assign_leave_encashment_to_payroll_run_atomic` only records intent
+(`payroll_run_id`; status stays `'approved'`) — every (re)generation of
+that run's slip derives the payout fresh from `leave_encashment_requests`
+(`fetchEncashmentPayout` + `applyEncashmentPayout`, `apps/api/src/routes/
+payroll/runs.ts` / `lib/payroll-engine.ts`), so regeneration can no longer
+lose it. Status only becomes `'paid'` once the run is actually finalized
+(`fn_finalize_leave_encashments_for_run`), with a symmetric revert on
+rollback (`fn_revert_leave_encashments_for_rollback`). Proven against a
+real local Postgres 16 instance with the full migration history (000→447)
+applying cleanly — see `scripts/db/verify-g12-encashment-atomic.mjs`.
+
+Duplicate-payment prevention: payroll via the above; F&F via
 `lib/fnf-settlement-engine.ts`'s leave-encashment calculation reading the
 same `employee_leave_balance` table standalone encashment already
-decrements — no second write path exists to create a double-pay gap. See
-`docs/production-readiness/STATUS.md`'s 2026-10-12 addendum for the full
-writeup and what's still open (real-Supabase-RLS/E2E staging evidence).
+decrements — **but this only prevents a second write through the same
+code path, not a genuine concurrency race.** Round 2 confirmed a real,
+NOT-yet-fixed gap: `mark_fnf_paid_atomic` (445) validates loan/advance/asset
+drift but has no equivalent check for leave-encashment-balance drift, so an
+F&F computation/approval running concurrently with a standalone-encashment
+approval could be approved against a stale balance. A remediation is
+scoped (exact-basis snapshot + re-validation, mirroring the existing
+`SOURCE_DRIFT` check) but deliberately not implemented — this is the most
+sensitive atomic function in the F&F subsystem, and a rushed change to it
+was judged a worse risk than disclosing the gap. See
+`docs/production-readiness/STATUS.md`'s 2026-10-12 addenda (both rounds)
+for the full writeup and what's still open (the F&F-concurrency fix itself,
+plus real-Supabase-RLS/E2E staging evidence).
 
