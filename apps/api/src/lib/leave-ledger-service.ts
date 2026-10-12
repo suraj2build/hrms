@@ -162,7 +162,14 @@ export async function getBalanceSummary(
       .select('id, days:delta, entry_type:txn_type, transaction_type:txn_type, days_delta:delta, created_at')
       .eq('tenant_id',     tenantId)
       .eq('employee_id',   employeeId)
-      .eq('leave_type_id', leaveTypeId),
+      .eq('leave_type_id', leaveTypeId)
+      // DEFECT-11 fix — see the matching comment in leave-replay-engine.ts.
+      // accrual-engine.ts mirrors monthly-accrual/carry-forward credits into
+      // this table for the ledger-history screen; those txn_types are
+      // already counted via leave_accrual_ledger above and must be excluded
+      // here too, or this "authoritative" summary double-counts them the
+      // same way the replay engine did before this fix.
+      .not('txn_type', 'in', '(accrual,carry_forward)'),
   ])
 
   if (accrualRes.error) throw new Error(`Failed to read accrual ledger for employee ${employeeId}: ${accrualRes.error.message}`)

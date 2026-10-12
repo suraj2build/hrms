@@ -133,6 +133,25 @@ export async function replayBalanceAsOf(
       .eq('tenant_id',     tenantId)
       .eq('employee_id',   employeeId)
       .eq('leave_type_id', leaveTypeId)
+      // DEFECT-11 fix (found during the PR #30 live-screen Attendance/Leave
+      // UAT, 2026-10-12): accrual-engine.ts's runMonthlyAccrual() and
+      // processCarryForward() each write TWO rows for the exact same credit
+      // event — one to leave_accrual_ledger (accrual_type 'monthly' /
+      // 'carry_forward', already queried above and the sole source
+      // recompute_leave_balance() sums into the authoritative
+      // employee_leave_balance cache) and a mirrored row here
+      // (txn_type 'accrual' / 'carry_forward', same employee/type/year/days,
+      // written in the same function call) for the employee-facing ledger
+      // history screen (GET /leave/accrual/ledger/:employeeId reads this
+      // table alone — that's why the mirror exists and must stay for that
+      // screen). Summing BOTH tables unfiltered double-counts every monthly
+      // accrual and every carry-forward. Every OTHER txn_type here
+      // (manual_credit, deduction, encashment, expiry, opening_balance,
+      // event_grant, reversal, payroll_adjustment, correction, lop_recovery)
+      // has no leave_accrual_ledger mirror — confirmed by reading every
+      // leave_balance_ledger write site — and must stay included, or the
+      // replay would instead start OMITTING real events.
+      .not('txn_type', 'in', '(accrual,carry_forward)')
       .order('created_at', { ascending: true }),
   ])
 
