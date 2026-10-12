@@ -1395,3 +1395,119 @@ code changes. **NO-GO still stands, unchanged** — PR #30 remains a draft.
 None of this substitutes for the still-entirely-open real-staging gates
 (browser E2E, real authenticated-role RLS, production-scale concurrent-
 user load, managed backup/restore). PMS and Travel Desk remain on hold.
+
+## Addendum (2026-10-12, round 6) — rollback genuinely serializes against ledger-post and statutory-close under real concurrency; F&F correction gains cross-tenant/concurrency proof, durable deletion audit, and a mandatory recovery-evidence field; G12 remains pending qualification
+
+A further review accepted round 5's rollback and correction fixes as real
+progress but, correctly, treated "checked, then wrote" as unproven under
+genuine concurrency, and treated disclosure of an un-audited deletion and
+an absent money-recovery control as insufficient on their own. Four items,
+all addressed with real evidence:
+
+**1. Rollback concurrency — the actual race is now closed, not just the
+single-threaded sequence.** Round 5's rollback checked `payroll_financial_
+ledgers`/`statutory_filing_closures` with a plain SELECT, then did a
+SEPARATE `UPDATE` to flip the run to `'draft'` — nothing stopped
+`POST /payroll/ledgers/:id/post` or `POST /payroll/statutory-
+reconciliation/close` from landing in the gap between that check and that
+write, creating exactly the fact the check had just confirmed didn't
+exist. Migration 452 closes this the same way every other money-safety
+function in this series does (`mark_fnf_paid_atomic`, `correct_fnf_
+payment_atomic`): all three operations now take a `SELECT ... FOR UPDATE`
+lock on the SAME `payroll_runs` row, in the SAME order (run row first,
+always), as their first action — `rollback_payroll_run_atomic`,
+`mark_ledger_posted_atomic`, `close_statutory_filing_atomic`. Whichever
+gets there first forces the others to block, re-check fresh state under
+the lock, and correctly lose.
+
+`rollback_payroll_run_atomic` also closes a related authorization TOCTOU:
+round 5's `super_admin`-only-for-finalized check read status BEFORE the
+lock; now it's re-verified AFTER the lock is held, against the row's
+actual current status.
+
+Evidence: new `scripts/db/verify-rollback-concurrency.mjs` (18 checks,
+real Postgres, two live connections per case) proves genuine blocking in
+all four directions — ledger-post holds the lock, a concurrent rollback
+blocks ~300ms then correctly fails with `LEDGER_POSTED` once the first
+commits; rollback holds the lock, a concurrent ledger-post blocks then
+fails with `RUN_NOT_FINALIZED`; rollback holds the lock, a concurrent
+statutory-close blocks then fails with `RUN_NOT_FINALIZED`; statutory-
+close holds the lock, a concurrent rollback blocks then fails with
+`STATUTORY_FILING_EXISTS` — plus the authorization-under-lock proof. Each
+case asserts the blocked call is still pending at ~300ms and only
+resolves after the first transaction commits — the same "hold the lock,
+measure the block, commit, assert the outcome" pattern already
+established for `mark_fnf_paid_atomic`'s own concurrency proof. The three
+routes (`runs.ts` rollback, `run-ledgers.ts` ledger-post, `statutory-
+recon.ts` close) now call these RPCs instead of doing their own check-
+then-write; `scripts/g12-accounting-reconciliation-check.sh`'s existing 37
+checks all still pass through the new routing, and a new route-level test
+file (`statutory-recon-close.test.ts`, 5 tests) proves the close route's
+own wiring to the RPC — merging its `skipped_already_filed` into the
+response, mapping `RUN_NOT_FINALIZED` to 409 — since no test had
+exercised that route at all before this round.
+
+**2. Correction authorization and idempotency — both now explicitly
+proven, including under genuine concurrency.** `correct_fnf_payment_
+atomic`'s tenant scoping (`WHERE employee_id = ... AND tenant_id = ...`)
+was structurally cross-tenant-safe since round 5 but never actually
+tested. New section `[M3]` in `verify-fnf-mark-paid-atomic.mjs` proves a
+call with a mismatched `tenant_id` fails with `NOT_FOUND` — not a leak,
+not a cross-tenant correction — and that the identical call with the
+correct `tenant_id` then succeeds, confirming the failure was genuinely
+about tenant scoping. New section `[N]` proves retries restore the
+balance only once under real concurrency, not just sequentially: two
+simultaneous correction calls for the same settlement, the second
+blocking on the `FOR UPDATE` lock on `separation_ff_summary` already in
+place since migration 451, resolving only after the first commits, and
+then correctly failing with `INVALID_STATE` — the leave balance ends up
+credited back exactly once, with exactly one reversal ledger row, not
+two.
+
+**3. Audit preservation for the deleted `advance_recoveries` row — now
+durable, not just deleted.** Migration 451 deleted the matched `advance_
+recoveries` row (required by migration 281's own schema — see 451's
+header) with nothing capturing what it said before it was gone. New table
+`fnf_payment_correction_log` (append-only — `INSERT`-only RLS policy,
+same pattern as `leave_balance_ledger`) now captures the row's full
+original values — `amount`, `schedule_id`, `advance_id`, `payroll_run_id`,
+`recovery_month` (its "payment linkage") — as `original_data` JSONB,
+inside the SAME transaction as the delete, one row per loan reverted /
+advance-recovery deleted / leave-balance credit. Evidence: `[M]`'s
+extended checks confirm a durable log row exists for each of the three
+correction types and that the advance-recovery log row's `original_data`
+exactly matches the deleted row's `advance_id`/`schedule_id`/`amount`.
+
+**4. Actual payment handling — a mandatory, separate recovery-evidence
+field, not implied by the reason text.** A database reversal does not
+itself reverse a bank transfer. `correct_fnf_payment_atomic` now requires
+a second mandatory parameter, `p_recovery_reference`, distinct from
+`p_reason`: `p_reason` is the business reason ("why"); `p_recovery_
+reference` is evidence the real-world money was actually handled (a bank
+reversal/UTR reference, an employee refund acknowledgement, or an
+explicit statement that no money had moved yet). An empty value raises
+`RECOVERY_REFERENCE_REQUIRED` before anything is touched. Both fields are
+stored on `separation_ff_summary` (new `recovery_reference` column,
+alongside 451's `correction_reason`) and on every `fnf_payment_
+correction_log` row, so the record can never imply the money question was
+answered when it wasn't asked. Route schema and tests updated
+accordingly (6 new/updated tests in `separation-ff.test.ts`).
+
+**Verification housekeeping:** full API suite after all of the above: 50
+files / 438 tests pass; `apps/api` typechecks clean; migration history
+(000→452) applies cleanly to a fresh local Postgres 16 (480 tables) with
+zero schema drift; `scripts/g12-accounting-reconciliation-check.sh`'s 37
+checks, `scripts/db/verify-fnf-mark-paid-atomic.mjs`'s now-86 checks, and
+the new `verify-rollback-concurrency.mjs`'s 18 checks all pass against
+real Postgres.
+
+**Net effect, stated plainly:** all four items the review named are now
+proven with real-concurrency and real-deletion-audit evidence, not
+argued from the single-threaded case. **G12 remains pending
+qualification, explicitly not closed by this round.** Remaining launch
+work, restated from the review's own list and unchanged by this round:
+encashment tax treatment/sign-off (a human process step, not an
+engineering gap), final-candidate CI and authenticated staging E2E/RLS,
+2,200+ employee reconciliation at the scale this sandbox cannot produce,
+concurrent-user load, managed recovery, and business UAT. **NO-GO stands.**
+PR #30 remains a draft. PMS and Travel Desk remain on hold.

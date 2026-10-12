@@ -658,6 +658,51 @@ on.** The two concrete paths:
     rows `G12-ROLLBACK-GL-STATUTORY-GAP` and
     `G12-FNF-PAYMENT-CORRECTION`.
 
+  **Addendum (2026-10-12, round 6): rollback genuinely serializes against
+  ledger-post and statutory-close under real concurrency, not just the
+  sequential case; F&F correction gains cross-tenant/concurrency proof, a
+  durable deletion-audit log, and a mandatory recovery-evidence field.
+  G12 remains pending qualification.** A further review accepted round
+  5's fixes as real progress but treated "checked, then wrote" as
+  unproven under genuine concurrency, and treated an un-audited deletion
+  and an absent money-recovery control as insufficient to leave disclosed.
+  - **Rollback concurrency — the actual race is closed, not just the
+    single-threaded sequence.** Round 5's rollback used a plain SELECT
+    check followed by a SEPARATE UPDATE — nothing stopped a concurrent
+    ledger-post or statutory-close from landing in that gap. Migration
+    452 adds `rollback_payroll_run_atomic`, `mark_ledger_posted_atomic`,
+    and `close_statutory_filing_atomic`, all locking the SAME
+    `payroll_runs` row, in the SAME order, as their first action — the
+    same pattern every other money-safety function in this series
+    already uses. New `scripts/db/verify-rollback-concurrency.mjs` (18
+    checks, two live Postgres connections per case) proves genuine
+    blocking in all four directions, not just that the functions reject
+    bad input sequentially.
+  - **Correction authorization/idempotency — proven under concurrency,
+    not just sequentially.** Cross-tenant isolation (already structural
+    since round 5's tenant-scoped WHERE clause) is now explicitly tested;
+    a new genuine-concurrency test proves two simultaneous correction
+    calls for the same settlement serialize on the existing row lock, with
+    the loser failing `INVALID_STATE` and the balance credited back
+    exactly once.
+  - **Durable deletion audit.** New append-only
+    `fnf_payment_correction_log` captures the deleted `advance_
+    recoveries` row's full original values (amount, schedule_id,
+    advance_id, payroll_run_id, recovery_month) inside the same
+    transaction as the correction — a database delete no longer loses the
+    record of what the original payment was.
+  - **Mandatory recovery evidence.** `correct_fnf_payment_atomic` gains a
+    second mandatory field, `recovery_reference`, distinct from `reason`
+    — evidence the real-world money was actually handled, required
+    non-empty, stored on the settlement and every correction-log row.
+  - Full API suite after this round: 50 files / 438 tests pass;
+    `apps/api` typechecks clean; migration history (000→452) applies
+    cleanly to a fresh local Postgres 16 (480 tables) with zero schema
+    drift.
+  - Full detail: `STATUS.md`'s 2026-10-12 round-6 addendum; `FINDINGS.csv`
+    rows `G12-ROLLBACK-LOCK-ORDER-RACE` and
+    `G12-FNF-CORRECTION-AUTHZ-AUDIT-RECOVERY`.
+
 None of the four gates are closed by this round's local work, and none of
 them can be closed by more local work of the same kind — each needs either
 external access (Gates 1–3) or an explicit decision (Gate 4).

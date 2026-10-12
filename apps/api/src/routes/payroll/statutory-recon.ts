@@ -297,12 +297,32 @@ export default async function payrollStatutoryReconRoutes(fastify: FastifyInstan
       filed.push(key)
     }
 
+    let actuallyFiled = filed
     if (rowsToInsert.length > 0) {
-      const { error } = await fastify.supabase
-        // lint-tenant-ok: `rowsToInsert` entries above already set tenant_id: tenantId per row (line 261)
-        .from('statutory_filing_closures')
-        .insert(rowsToInsert)
-      if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to record statutory filing')
+      // close_statutory_filing_atomic (migration 452) locks the SAME
+      // payroll_runs row (same order: run row first) rollback_payroll_run_
+      // atomic and mark_ledger_posted_atomic lock, and re-does BOTH the
+      // "is this run still finalized" check and the "already filed"
+      // idempotency check fresh, under that lock — not just the unlocked
+      // reads above. Without this, a concurrent rollback could land
+      // between this route's own checks and the INSERT that used to follow
+      // them, filing a statute against a run that's already been rolled
+      // back (or the reverse: filing here could land just after rollback's
+      // own check passed, defeating it).
+      const { data: rpcResult, error } = await fastify.supabase.rpc('close_statutory_filing_atomic', {
+        p_tenant_id: tenantId, p_run_id: result.run.id, p_rows: rowsToInsert,
+      })
+      if (error) {
+        const msg = error.message ?? ''
+        if (msg.includes('NOT_FOUND:')) return notFound(reply, 'NO_RUN', msg.replace(/^.*NOT_FOUND:\s*/, ''))
+        if (msg.includes('RUN_NOT_FINALIZED:')) return conflictError(reply, 'RUN_NOT_FINALIZED', msg.replace(/^.*RUN_NOT_FINALIZED:\s*/, ''))
+        return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to record statutory filing')
+      }
+
+      actuallyFiled = ((rpcResult as any)?.filed ?? []) as string[]
+      for (const racedStatute of ((rpcResult as any)?.skipped_already_filed ?? []) as string[]) {
+        skipped.push({ statute: racedStatute, reason: 'already_filed' })
+      }
 
       await logAction(fastify.supabase, {
         tenantId,
@@ -310,11 +330,11 @@ export default async function payrollStatutoryReconRoutes(fastify: FastifyInstan
         recordId:    result.run.id,
         action:      'INSERT',
         performedBy: req.userId ?? null,
-        newData:     { month, filed, challan_number: challan_number ?? null },
+        newData:     { month, filed: actuallyFiled, challan_number: challan_number ?? null },
       }).catch(() => {})
     }
 
-    return reply.send({ month, filed, skipped })
+    return reply.send({ month, filed: actuallyFiled, skipped })
   })
 
   // ── POST /payroll/statutory-reconciliation/confirm ─────────────────────────────

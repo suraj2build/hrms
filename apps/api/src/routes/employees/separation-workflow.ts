@@ -892,11 +892,20 @@ export default async function separationWorkflowRoutes(fastify: FastifyInstance)
   // the same terminal status through an ordinary payroll cycle). For when
   // the payment failed, was cancelled, or was recorded with the wrong
   // figures. super_admin only (money already moved once; undoing that is a
-  // bigger action than mark-paid itself, which only needs hr_admin) and
-  // requires a non-empty reason. Settlement goes back to 'draft', not
-  // 'approved' — a correction can mean the approved figures themselves were
-  // wrong, so recompute/re-approve from scratch rather than risk an
-  // unexamined re-pay of stale numbers.
+  // bigger action than mark-paid itself, which only needs hr_admin).
+  // Requires TWO separate mandatory fields, not one: `reason` (the business
+  // reason — why this is being corrected) and `recovery_reference`
+  // (evidence that the actual money was handled — a bank reversal/UTR
+  // reference, an employee refund acknowledgement, or an explicit
+  // confirmation that no money had moved yet). A database reversal alone
+  // does not reverse a bank payment; this field exists so the DB record can
+  // never imply that question was answered when it wasn't asked. Settlement
+  // goes back to 'draft', not 'approved' — a correction can mean the
+  // approved figures themselves were wrong, so recompute/re-approve from
+  // scratch rather than risk an unexamined re-pay of stale numbers. Every
+  // loan reverted / advance-recovery row deleted / leave-balance credit is
+  // durably logged to fnf_payment_correction_log (migration 452) with its
+  // full original values, inside the same transaction as the correction.
   fastify.patch('/employees/:id/separation-ff/correct-payment', hrAdminAuth, async (req: any, reply) => {
     if (req.userRole !== 'super_admin')
       return reply.code(403).send({ error: 'FORBIDDEN', message: 'Only super_admin may correct a paid F&F settlement' })
@@ -904,16 +913,20 @@ export default async function separationWorkflowRoutes(fastify: FastifyInstance)
     if (!await verifyEmployee(fastify, req.params.id, req.tenantId))
       return reply.code(404).send({ error: 'NOT_FOUND', message: 'Employee not found' })
 
-    const schema = z.object({ reason: z.string().trim().min(1, 'A reason is required') })
+    const schema = z.object({
+      reason:             z.string().trim().min(1, 'A reason is required'),
+      recovery_reference: z.string().trim().min(1, 'Recovery/refund evidence is required — a database reversal alone does not reverse a bank payment'),
+    })
     const parsed = schema.safeParse(req.body)
     if (!parsed.success)
       return reply.code(400).send({ error: 'VALIDATION', message: parsed.error.issues[0].message })
 
     const { data: rpcData, error: rpcErr } = await fastify.supabase.rpc('correct_fnf_payment_atomic', {
-      p_tenant_id:   req.tenantId,
-      p_employee_id: req.params.id,
-      p_user_id:     req.userId,
-      p_reason:      parsed.data.reason,
+      p_tenant_id:          req.tenantId,
+      p_employee_id:        req.params.id,
+      p_user_id:            req.userId,
+      p_reason:             parsed.data.reason,
+      p_recovery_reference: parsed.data.recovery_reference,
     })
 
     if (rpcErr) {
@@ -924,6 +937,8 @@ export default async function separationWorkflowRoutes(fastify: FastifyInstance)
         return reply.code(409).send({ error: 'INVALID_STATE', message: msg.replace(/^.*INVALID_STATE:\s*/, '') })
       if (msg.includes('REASON_REQUIRED:'))
         return reply.code(400).send({ error: 'REASON_REQUIRED', message: msg.replace(/^.*REASON_REQUIRED:\s*/, '') })
+      if (msg.includes('RECOVERY_REFERENCE_REQUIRED:'))
+        return reply.code(400).send({ error: 'RECOVERY_REFERENCE_REQUIRED', message: msg.replace(/^.*RECOVERY_REFERENCE_REQUIRED:\s*/, '') })
       return serverError(req, reply, rpcErr, ErrorCode.UPDATE_FAILED, 'Failed to correct F&F payment')
     }
 
@@ -943,7 +958,7 @@ export default async function separationWorkflowRoutes(fastify: FastifyInstance)
       action:      'UPDATE',
       performedBy: req.userId,
       onBehalfOf:  req.params.id,
-      newData:     { status: 'draft', corrected: true, reason: parsed.data.reason, ...(rpcData as any) },
+      newData:     { status: 'draft', corrected: true, reason: parsed.data.reason, recovery_reference: parsed.data.recovery_reference, ...(rpcData as any) },
     })
 
     return reply.send({ data: ffRow, correction: rpcData })

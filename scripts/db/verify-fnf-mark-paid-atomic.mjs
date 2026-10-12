@@ -498,21 +498,30 @@ async function main() {
     check("precondition: payment succeeded, settlement is 'paid'", paidFf.status === 'paid')
 
     let noReasonErr = null
-    try { await admin.query(`SELECT correct_fnf_payment_atomic($1, $2, $3, $4)`, [s.tenantId, s.empId, userId, '']) }
+    try { await admin.query(`SELECT correct_fnf_payment_atomic($1, $2, $3, $4, $5)`, [s.tenantId, s.empId, userId, '', 'UTR123']) }
     catch (e) { noReasonErr = e }
     check('an empty reason raises REASON_REQUIRED, nothing changed', noReasonErr && /REASON_REQUIRED/.test(noReasonErr.message))
 
+    let noRecoveryRefErr = null
+    try { await admin.query(`SELECT correct_fnf_payment_atomic($1, $2, $3, $4, $5)`, [s.tenantId, s.empId, userId, 'Bank transfer failed', '']) }
+    catch (e) { noRecoveryRefErr = e }
+    check('an empty recovery_reference raises RECOVERY_REFERENCE_REQUIRED — a DB reversal alone cannot reverse a bank payment', noRecoveryRefErr && /RECOVERY_REFERENCE_REQUIRED/.test(noRecoveryRefErr.message))
+    const stillPaid = (await admin.query(`SELECT status FROM separation_ff_summary WHERE id = $1`, [s.ffId])).rows[0]
+    check('nothing changed while recovery_reference was missing — settlement still paid', stillPaid.status === 'paid')
+
     const { rows } = await admin.query(
-      `SELECT correct_fnf_payment_atomic($1, $2, $3, $4) AS result`,
-      [s.tenantId, s.empId, userId, 'Bank transfer failed — reversing to re-run'],
+      `SELECT correct_fnf_payment_atomic($1, $2, $3, $4, $5) AS result`,
+      [s.tenantId, s.empId, userId, 'Bank transfer failed — reversing to re-run', 'Bank reversal confirmed, UTR REV2026101201'],
     )
     check('correction RPC returned a result', !!rows[0].result)
     check('result reports 1 loan reverted', Number(rows[0].result.loans_reverted) === 1)
+    check('result echoes the recovery_reference', rows[0].result.recovery_reference === 'Bank reversal confirmed, UTR REV2026101201')
 
-    const ffAfter = (await admin.query(`SELECT status, paid_by, paid_at, correction_reason, corrected_by FROM separation_ff_summary WHERE id = $1`, [s.ffId])).rows[0]
+    const ffAfter = (await admin.query(`SELECT status, paid_by, paid_at, correction_reason, recovery_reference, corrected_by FROM separation_ff_summary WHERE id = $1`, [s.ffId])).rows[0]
     check("settlement reverted to 'draft'", ffAfter.status === 'draft')
     check('paid_by/paid_at cleared', ffAfter.paid_by === null && ffAfter.paid_at === null)
     check('correction_reason and corrected_by recorded on the row itself', ffAfter.correction_reason === 'Bank transfer failed — reversing to re-run' && ffAfter.corrected_by === userId)
+    check('recovery_reference recorded on the row itself — proof the real-world money question was actually answered', ffAfter.recovery_reference === 'Bank reversal confirmed, UTR REV2026101201')
 
     const loan = (await admin.query(`SELECT status, outstanding_balance, foreclosed_at, foreclosure_amount, foreclosure_notes FROM employee_loans WHERE id = $1`, [s.loanId])).rows[0]
     check("loan reverted to 'active' (not 'disbursed' — the only status payroll's own EMI query picks up)", loan.status === 'active')
@@ -539,6 +548,24 @@ async function main() {
     // reverting to 'pending', which must be re-recoverable later).
     check('the recovery row for this schedule is gone — not append-only here, deletion is correct', advRecoveries.length === 0)
 
+    // Durable audit (migration 452): the deleted advance_recoveries row's
+    // full original values — including its "payment linkage" (advance_id,
+    // schedule_id, payroll_run_id, amount, recovery_month) — must survive
+    // the delete somewhere durable, or the correction would silently lose
+    // the record of what the original payment actually was.
+    const correctionLog = (await admin.query(
+      `SELECT correction_type, original_data, reason, recovery_reference FROM fnf_payment_correction_log WHERE separation_ff_summary_id = $1 ORDER BY created_at`,
+      [s.ffId],
+    )).rows
+    check('a durable correction-log row exists for the loan reversal', correctionLog.some(r => r.correction_type === 'loan_reverted' && r.original_data.loan_id === s.loanId))
+    const advLog = correctionLog.find(r => r.correction_type === 'advance_recovery_deleted')
+    check('a durable correction-log row captures the DELETED advance_recoveries row\'s full payment linkage (advance_id, schedule_id, payroll_run_id, amount)', !!advLog
+      && advLog.original_data.advance_id === s.advanceId
+      && advLog.original_data.schedule_id === s.advanceSchedId
+      && Number(advLog.original_data.amount) === 3000)
+    check('a durable correction-log row exists for the leave-balance credit, with the days credited back', correctionLog.some(r => r.correction_type === 'leave_balance_credited' && Number(r.original_data.days_credited_back) === 9))
+    check('every correction-log row carries the same reason and recovery_reference', correctionLog.every(r => r.reason === 'Bank transfer failed — reversing to re-run' && r.recovery_reference === 'Bank reversal confirmed, UTR REV2026101201'))
+
     const balAfter = (await admin.query(`SELECT balance FROM employee_leave_balance WHERE tenant_id=$1 AND employee_id=$2 AND leave_type_id=$3 AND year=$4`, [tenantId, s.empId, leaveTypeId, leaveYear])).rows[0]
     check('leave balance credited back to the full 9 days — the entitlement is restored, not left spent', Number(balAfter.balance) === 9)
 
@@ -550,7 +577,7 @@ async function main() {
     check('the reversal row points back at the original via reversal_of', ledgerRows[1].reversal_of !== null)
 
     let doubleCorrectErr = null
-    try { await admin.query(`SELECT correct_fnf_payment_atomic($1, $2, $3, $4)`, [s.tenantId, s.empId, userId, 'second attempt']) }
+    try { await admin.query(`SELECT correct_fnf_payment_atomic($1, $2, $3, $4, $5)`, [s.tenantId, s.empId, userId, 'second attempt', 'N/A']) }
     catch (e) { doubleCorrectErr = e }
     check("a second correction attempt on the now-'draft' settlement raises INVALID_STATE — not a silent no-op or a double-credit", doubleCorrectErr && /INVALID_STATE/.test(doubleCorrectErr.message))
 
@@ -576,13 +603,81 @@ async function main() {
     )).rows[0].id
 
     await admin.query(`SELECT mark_fnf_paid_atomic($1, $2, $3)`, [s.tenantId, s.empId, userId])
-    await admin.query(`SELECT correct_fnf_payment_atomic($1, $2, $3, $4)`, [s.tenantId, s.empId, userId, 'test scoping'])
+    await admin.query(`SELECT correct_fnf_payment_atomic($1, $2, $3, $4, $5)`, [s.tenantId, s.empId, userId, 'test scoping', 'N/A — no actual payment correction needed for this scoping check'])
 
     const unrelated = (await admin.query(`SELECT status, outstanding_balance, foreclosure_notes FROM employee_loans WHERE id = $1`, [unrelatedLoanId])).rows[0]
     check('the unrelated foreclosed loan is untouched — still foreclosed, balance still 0, notes unchanged', unrelated.status === 'foreclosed' && Number(unrelated.outstanding_balance) === 0 && unrelated.foreclosure_notes === 'Manually foreclosed by HR, unrelated to F&F')
 
     const ourLoan = (await admin.query(`SELECT status FROM employee_loans WHERE id = $1`, [s.loanId])).rows[0]
     check("the F&F-foreclosed loan WAS reverted to 'active'", ourLoan.status === 'active')
+  }
+
+  // ── M3. Cross-tenant isolation ───────────────────────────────────────────────
+  console.log('\n[M3] A caller supplying a DIFFERENT tenant_id than the settlement\'s own cannot correct it — cross-tenant calls fail closed')
+  {
+    const otherTenantId = (await admin.query(`INSERT INTO tenants (name, slug) VALUES ('fnf-verify-other-tenant', 'fnf-verify-other-tenant') RETURNING id`)).rows[0].id
+    const s = await seedEmployeeWithFnf(admin, tenantId, {
+      loanBalance: 0, advanceAmount: 0,
+      leaveEncashmentDays: 0, leaveEncashmentBasis: undefined,
+    })
+    await admin.query(`SELECT mark_fnf_paid_atomic($1, $2, $3)`, [s.tenantId, s.empId, userId])
+
+    // Every lookup in correct_fnf_payment_atomic is scoped by
+    // (employee_id, tenant_id) together — a mismatched tenant_id finds no
+    // row at all, rather than reaching across tenants to someone else's
+    // settlement.
+    let crossTenantErr = null
+    try {
+      await admin.query(`SELECT correct_fnf_payment_atomic($1, $2, $3, $4, $5)`, [otherTenantId, s.empId, userId, 'cross-tenant attempt', 'N/A'])
+    } catch (e) { crossTenantErr = e }
+    check('a cross-tenant call (correct tenant NOT supplied) raises NOT_FOUND, not a leak or a successful correction', crossTenantErr && /NOT_FOUND/.test(crossTenantErr.message))
+
+    const ff = (await admin.query(`SELECT status FROM separation_ff_summary WHERE id = $1`, [s.ffId])).rows[0]
+    check('the settlement is completely untouched by the cross-tenant attempt — still paid', ff.status === 'paid')
+
+    // The correct tenant_id still works, proving the NOT_FOUND above was
+    // genuinely about tenant scoping and not some unrelated failure.
+    const { rows } = await admin.query(`SELECT correct_fnf_payment_atomic($1, $2, $3, $4, $5) AS result`, [s.tenantId, s.empId, userId, 'legitimate correction', 'no money had moved yet'])
+    check('the SAME settlement correctly corrects once the right tenant_id is supplied', !!rows[0].result)
+  }
+
+  // ── N. Genuine concurrency on correct_fnf_payment_atomic itself ─────────────
+  console.log('\n[N] Two simultaneous correction attempts for the same settlement — exactly one succeeds, the other is serialized by the row lock and loses, not a race')
+  {
+    const s = await seedEmployeeWithFnf(admin, tenantId, {
+      loanBalance: 0, advanceAmount: 0,
+      leaveTypeId, leaveYear, leaveEncashmentDays: 6,
+      leaveEncashmentBasis: [{ leave_type_id: leaveTypeId, year: leaveYear }],
+    })
+    await admin.query(`SELECT mark_fnf_paid_atomic($1, $2, $3)`, [s.tenantId, s.empId, userId])
+
+    const connA = new Client(conn), connB = new Client(conn)
+    await connA.connect(); await connB.connect()
+
+    await connA.query('BEGIN')
+    await connA.query(`SELECT correct_fnf_payment_atomic($1, $2, $3, $4, $5)`, [s.tenantId, s.empId, userId, 'connection A', 'UTR-A'])
+    // Transaction open, uncommitted — the FOR UPDATE lock on separation_ff_
+    // summary is still held.
+
+    const start = Date.now()
+    const bPromise = connB.query(`SELECT correct_fnf_payment_atomic($1, $2, $3, $4, $5)`, [s.tenantId, s.empId, userId, 'connection B', 'UTR-B'])
+
+    await new Promise(r => setTimeout(r, 300))
+    check('connection B is still blocked ~300ms in — not racing ahead of A\'s uncommitted write', Date.now() - start >= 290)
+
+    await connA.query('COMMIT')
+    let bErr = null
+    try { await bPromise } catch (e) { bErr = e }
+    check('connection B unblocked only after A committed', Date.now() - start >= 290)
+    check('connection B correctly fails with INVALID_STATE once it sees the already-corrected (draft) settlement — not a second credit', bErr && /INVALID_STATE/.test(bErr.message))
+
+    await connA.end(); await connB.end()
+
+    const balAfter = (await admin.query(`SELECT balance FROM employee_leave_balance WHERE tenant_id=$1 AND employee_id=$2 AND leave_type_id=$3 AND year=$4`, [tenantId, s.empId, leaveTypeId, leaveYear])).rows[0]
+    check('the leave balance was credited back exactly once (6 days), not twice', Number(balAfter.balance) === 6)
+
+    const ledgerCount = (await admin.query(`SELECT count(*) FROM leave_balance_ledger WHERE tenant_id=$1 AND employee_id=$2 AND leave_type_id=$3 AND year=$4 AND txn_type='reversal'`, [tenantId, s.empId, leaveTypeId, leaveYear])).rows[0]
+    check('exactly one reversal ledger row was written, not two', Number(ledgerCount.count) === 1)
   }
 
   await admin.end()

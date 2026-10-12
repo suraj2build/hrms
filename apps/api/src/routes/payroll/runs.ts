@@ -3856,47 +3856,36 @@ export default async function payrollRunsRoutes(fastify: FastifyInstance) {
     const tenantId = req.tenantId as string
     const { reason } = (req.body ?? {}) as { reason?: string }
 
-    const { data: run, error: runErr } = await fastify.supabase
-      .from('payroll_runs')
-      .select('id, month, status, tenant_id')
-      .eq('id', id)
-      .eq('tenant_id', tenantId)
-      .maybeSingle()
+    // rollback_payroll_run_atomic (migration 452) locks the payroll_runs
+    // row FOR UPDATE as its first action and re-validates everything
+    // (processing guard, authorization against the FINALIZED status,
+    // posted-ledger check, filed-statutory check) inside that lock before
+    // flipping status to 'draft' — all in one transaction. This closes a
+    // real concurrency gap a route-level check-then-write could not: a
+    // concurrent POST /payroll/ledgers/:id/post or POST /payroll/
+    // statutory-reconciliation/close could otherwise land in the gap
+    // between an unlocked SELECT check and a separate UPDATE, creating
+    // exactly the posted-ledger/filed-closure fact the check had just
+    // confirmed didn't exist. mark_ledger_posted_atomic and close_
+    // statutory_filing_atomic lock the SAME payroll_runs row (in the same
+    // order — run row first) as their own first action, so whichever of
+    // the three operations gets there first forces the others to wait,
+    // re-check fresh state under the lock, and correctly lose.
+    const { data: rbResult, error: rbErr } = await fastify.supabase.rpc('rollback_payroll_run_atomic', {
+      p_tenant_id: tenantId, p_run_id: id, p_is_super_admin: req.userRole === 'super_admin',
+    })
 
-    if (runErr || !run) return notFound(reply, 'NOT_FOUND', 'Run not found')
-    if (run.status === 'processing') {
-      return conflictError(reply, 'PROCESSING', 'Cannot rollback a run that is currently processing')
-    }
-    if (run.status === 'finalized' && req.userRole !== 'super_admin') {
-      return forbidden(reply, 'FORBIDDEN', 'Only super_admin may rollback a finalized run')
+    if (rbErr) {
+      const msg = rbErr.message ?? ''
+      if (msg.includes('NOT_FOUND:')) return notFound(reply, 'NOT_FOUND', msg.replace(/^.*NOT_FOUND:\s*/, ''))
+      if (msg.includes('PROCESSING:')) return conflictError(reply, 'PROCESSING', msg.replace(/^.*PROCESSING:\s*/, ''))
+      if (msg.includes('FORBIDDEN:')) return forbidden(reply, 'FORBIDDEN', msg.replace(/^.*FORBIDDEN:\s*/, ''))
+      if (msg.includes('LEDGER_POSTED:')) return conflictError(reply, 'LEDGER_POSTED', msg.replace(/^.*LEDGER_POSTED:\s*/, ''))
+      if (msg.includes('STATUTORY_FILING_EXISTS:')) return conflictError(reply, 'STATUTORY_FILING_EXISTS', msg.replace(/^.*STATUTORY_FILING_EXISTS:\s*/, ''))
+      return serverError(req, reply, rbErr, ErrorCode.UPDATE_FAILED, 'Failed to roll back payroll run')
     }
 
-    // ── Guard: don't let rollback leave a financial or statutory record
-    // standing against data it's about to delete. Rollback deletes every
-    // slip for this run (below) and reverts any 'paid' leave-encashment
-    // request back to 'approved' — but a POSTED GL ledger and a FILED
-    // statutory closure are both built FROM that slip data and neither was
-    // previously checked here, so either would survive rollback pointing at
-    // slips that no longer exist, while still counting toward
-    // GET /payroll/accounting/summary's total_payroll_liability (which sums
-    // any non-reversed ledger, not only posted ones) and
-    // GET /payroll/statutory-reconciliation's filed/confirmed state. Require
-    // both be explicitly unwound first — the existing reverse/reopen actions
-    // are the controlled, audited path; rollback must not substitute for them.
-    const { data: filedClosures } = await fastify.supabase
-      .from('statutory_filing_closures')
-      .select('statutory_type, status')
-      .eq('tenant_id', tenantId)
-      .eq('month', run.month)
-      .in('status', ['filed', 'confirmed'])
-
-    if (filedClosures && filedClosures.length > 0) {
-      const statutes = [...new Set(filedClosures.map((c: any) => c.statutory_type))].join(', ')
-      return conflictError(
-        reply, 'STATUTORY_FILING_EXISTS',
-        `${run.month} has filed statutory closures (${statutes}). Reopen them first via POST /payroll/statutory-reconciliation/reopen before rolling back this run.`,
-      )
-    }
+    const run = { month: (rbResult as any).month as string }
 
     const { data: runLedgers } = await fastify.supabase
       .from('payroll_financial_ledgers')
@@ -3904,42 +3893,17 @@ export default async function payrollRunsRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', tenantId)
       .eq('run_id', id)
 
-    // A reversal ledger ALWAYS auto-posts (reversePayrollLedger sets
-    // ledger_status='posted' unconditionally) — it's the record that the
-    // original posting was undone, not a second live liability. Excluding
-    // rows with reverses_ledger_id set is what lets "reverse, then
-    // rollback" (the sanctioned sequence in step 9/10 of
-    // g12-accounting-reconciliation-check.sh) actually proceed — without
-    // it, the reversal ledger's own 'posted' status would block rollback
-    // forever, even after the original was correctly reversed.
-    const postedLedger = (runLedgers ?? []).find((l: any) => l.ledger_status === 'posted' && !l.reverses_ledger_id)
-    if (postedLedger) {
-      return conflictError(
-        reply, 'LEDGER_POSTED',
-        `This run has a posted GL ledger (${(postedLedger as any).id}). Reverse it first via POST /payroll/ledgers/:ledgerId/reverse before rolling back this run.`,
-      )
-    }
     // Never-posted ledgers ('draft'/'balanced') carry no live accounting fact
     // — they're staging artifacts that would otherwise become orphaned
     // (pointing at slips about to be deleted) and keep counting toward the
     // liability dashboard for a run no longer in that state. Safe to clean
     // up as part of rollback; 'reversed' ledgers are left alone (already
-    // neutralized, and are the historical record of what was reversed).
+    // neutralized, and are the historical record of what was reversed). The
+    // atomic RPC above already proved no 'posted', non-reversal ledger
+    // exists at this point, so only draft/balanced rows are ever found here.
     const unpostedLedgerIds = (runLedgers ?? [])
       .filter((l: any) => l.ledger_status === 'draft' || l.ledger_status === 'balanced')
       .map((l: any) => (l as any).id as string)
-
-    // Reset run to draft FIRST. The PI-1 immutability trigger (migration 263)
-    // protects slips belonging to a finalized run, so we must lift the run out
-    // of 'finalized' before deleting its slips below. finalized → draft is the
-    // sanctioned break-glass transition the trigger permits.
-    const { error: updateErr } = await fastify.supabase
-      .from('payroll_runs')
-      .update({ status: 'draft', finalized_at: null, error_message: null, failure_summary: null })
-      .eq('id', id)
-      .eq('tenant_id', tenantId)
-
-    if (updateErr) return serverError(req, reply, updateErr, ErrorCode.UPDATE_FAILED, 'Failed to reset run to draft')
 
     // Now delete the slips (parent run is 'draft' → trigger permits deletion).
     const { error: slipDelErr } = await fastify.supabase

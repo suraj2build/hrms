@@ -563,7 +563,7 @@ describe('PATCH /separation-ff/correct-payment — the controlled, audited compe
     )
     const res = await app.inject({
       method: 'PATCH', url: `/employees/${EMPLOYEE_ID}/separation-ff/correct-payment`, headers: HEADERS,
-      payload: { reason: 'Bank transfer failed' },
+      payload: { reason: 'Bank transfer failed', recovery_reference: 'UTR123' },
     })
     expect(res.statusCode).toBe(403)
     expect(JSON.parse(res.body).error).toBe('FORBIDDEN')
@@ -577,14 +577,28 @@ describe('PATCH /separation-ff/correct-payment — the controlled, audited compe
     )
     const res = await app.inject({
       method: 'PATCH', url: `/employees/${EMPLOYEE_ID}/separation-ff/correct-payment`, headers: HEADERS,
-      payload: { reason: '' },
+      payload: { reason: '', recovery_reference: 'UTR123' },
     })
     expect(res.statusCode).toBe(400)
     expect(fake.rpc).not.toHaveBeenCalled()
     await app.close()
   })
 
-  it('happy path (super_admin, real reason) — calls the RPC, reloads and returns the draft row', async () => {
+  it('a missing recovery_reference is refused before the RPC is even called — a DB reversal alone cannot reverse a bank payment', async () => {
+    const { app, fake } = await buildApp(
+      { employees: [employeeRow()], separation_ff_summary: [ffRow({ status: 'paid' })] },
+      { userRole: 'super_admin' },
+    )
+    const res = await app.inject({
+      method: 'PATCH', url: `/employees/${EMPLOYEE_ID}/separation-ff/correct-payment`, headers: HEADERS,
+      payload: { reason: 'Bank transfer failed' },
+    })
+    expect(res.statusCode).toBe(400)
+    expect(fake.rpc).not.toHaveBeenCalled()
+    await app.close()
+  })
+
+  it('happy path (super_admin, real reason, real recovery evidence) — calls the RPC, reloads and returns the draft row', async () => {
     const { app, fake } = await buildApp(
       { employees: [employeeRow()], separation_ff_summary: [ffRow({ status: 'paid' })] },
       { userRole: 'super_admin' },
@@ -594,13 +608,14 @@ describe('PATCH /separation-ff/correct-payment — the controlled, audited compe
 
     const res = await app.inject({
       method: 'PATCH', url: `/employees/${EMPLOYEE_ID}/separation-ff/correct-payment`, headers: HEADERS,
-      payload: { reason: 'Bank transfer failed — reversing to re-run' },
+      payload: { reason: 'Bank transfer failed — reversing to re-run', recovery_reference: 'Bank reversal confirmed, UTR REV2026101201' },
     })
     expect(res.statusCode).toBe(200)
     expect(JSON.parse(res.body).data.status).toBe('draft')
     expect(fake.rpc).toHaveBeenCalledWith('correct_fnf_payment_atomic', expect.objectContaining({
       p_tenant_id: TENANT_ID, p_employee_id: EMPLOYEE_ID, p_user_id: 'hr-admin-001',
       p_reason: 'Bank transfer failed — reversing to re-run',
+      p_recovery_reference: 'Bank reversal confirmed, UTR REV2026101201',
     }))
     await app.close()
   })
@@ -614,7 +629,7 @@ describe('PATCH /separation-ff/correct-payment — the controlled, audited compe
 
     const res = await app.inject({
       method: 'PATCH', url: `/employees/${EMPLOYEE_ID}/separation-ff/correct-payment`, headers: HEADERS,
-      payload: { reason: 'test' },
+      payload: { reason: 'test', recovery_reference: 'UTR123' },
     })
     expect(res.statusCode).toBe(409)
     expect(JSON.parse(res.body).error).toBe('INVALID_STATE')
@@ -631,7 +646,7 @@ describe('PATCH /separation-ff/correct-payment — the controlled, audited compe
 
     const res = await app.inject({
       method: 'PATCH', url: `/employees/${EMPLOYEE_ID}/separation-ff/correct-payment`, headers: HEADERS,
-      payload: { reason: 'test' },
+      payload: { reason: 'test', recovery_reference: 'UTR123' },
     })
     expect(res.statusCode).toBe(500)
     expect(res.body).not.toContain('advance_recoveries_pkey')
