@@ -477,7 +477,25 @@ function FnFSection({ row }: { row: SeparationRow }) {
   const paidMutation = useMutation({
     mutationFn: () => api.patch(`/employees/${row.employee_id}/separation-ff/mark-paid`, {}),
     onSuccess: () => { invalidate(); toast.success('F&F marked as paid') },
-    onError: (e: Error) => toast.error('Failed', { description: e.message }),
+    onError: (e: Error) => {
+      // SOURCE_DRIFT: a source loan/advance/asset balance changed since
+      // approval (migration 445's atomic mark-paid validates this before
+      // writing anything) — the fix is to reopen, recompute and re-approve,
+      // not just retry the same payment.
+      if (e.message?.includes('changed since this settlement was approved')) {
+        toast.error('Settlement is out of date', {
+          description: `${e.message} Use "Reopen" below to recompute and re-approve.`,
+        })
+        return
+      }
+      toast.error('Failed', { description: e.message })
+    },
+  })
+
+  const reopenMutation = useMutation({
+    mutationFn: () => api.patch(`/employees/${row.employee_id}/separation-ff/reopen`, {}),
+    onSuccess: () => { invalidate(); toast.success('F&F reopened to draft — recompute and review before re-approving') },
+    onError: (e: Error) => toast.error('Failed to reopen', { description: e.message }),
   })
 
   const computeMutation = useMutation<{ breakdown?: FfBreakdown }, unknown>({
@@ -576,12 +594,20 @@ function FnFSection({ row }: { row: SeparationRow }) {
             </Button>
           )}
           {f.status === 'approved' && (
-            <Button size="sm" variant="outline" className="h-7 text-xs border-success/40 text-success hover:bg-success/10"
-              disabled={paidMutation.isPending}
-              onClick={() => paidMutation.mutate()}>
-              {paidMutation.isPending && <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />}
-              Mark as Paid
-            </Button>
+            <>
+              <Button size="sm" variant="outline" className="h-7 text-xs border-success/40 text-success hover:bg-success/10"
+                disabled={paidMutation.isPending}
+                onClick={() => paidMutation.mutate()}>
+                {paidMutation.isPending && <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />}
+                Mark as Paid
+              </Button>
+              <Button size="sm" variant="ghost" className="h-7 text-xs text-muted-foreground"
+                disabled={reopenMutation.isPending}
+                onClick={() => reopenMutation.mutate()}>
+                {reopenMutation.isPending && <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />}
+                Reopen
+              </Button>
+            </>
           )}
         </div>
       )}

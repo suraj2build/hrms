@@ -1,19 +1,39 @@
 /**
- * F&F settlement — freeze-on-decision, version-bound approval, and the
- * paid-time recovery write-back (PR #30 follow-up fixes).
+ * F&F settlement — freeze-on-decision (enforced in the actual write, not
+ * just a prior read), version-bound approval, and the atomic, source-
+ * validated mark-paid + recovery write-back (PR #30 follow-up fixes,
+ * two rounds).
  *
- * Covers the three gaps raised against separation-workflow.ts:
+ * Covers the gaps raised against separation-workflow.ts:
  *   1. POST /separation-ff and POST /separation-ff/compute must refuse to
- *      touch a row that is no longer 'draft' (approval must freeze the
- *      reviewed figures).
+ *      WRITE a row that is no longer 'draft' — not just reject based on a
+ *      prior SELECT, which is itself racy (a concurrent approve landing
+ *      between that SELECT and the UPDATE would still let the UPDATE
+ *      through). Both UPDATEs now fold `.eq('status', 'draft')` into their
+ *      own WHERE clause.
  *   2. PATCH /separation-ff/approve's final UPDATE must bind to the exact
  *      `version` the staleness check just validated, not just `status`,
  *      so a concurrent edit landing between validation and the write can't
  *      be silently approved un-reviewed (TOCTOU).
- *   3. PATCH /separation-ff/mark-paid must reconcile outstanding
- *      employee_loans / advance_recovery_schedules so the SAME balance
- *      can't later be recovered a second time through a normal payroll
- *      run — and that write-back must be idempotent under retries.
+ *   3. PATCH /separation-ff/mark-paid must do the status flip + loan
+ *      foreclosure + advance recovery (schedules, ledger, parent status)
+ *      as ONE atomic operation, and must validate current source balances
+ *      against what was actually approved before writing anything — not
+ *      just use whatever balance happens to be there at mark-paid time.
+ *      This is now delegated entirely to the `mark_fnf_paid_atomic`
+ *      Postgres function (migration 445): the route's own job is just to
+ *      call the RPC and map its outcome to an HTTP response, so that's
+ *      what's tested here at the route level. The function's actual
+ *      transactional/concurrency guarantees (rollback on drift, no double-
+ *      ledger under retry, blocking a concurrent payroll-style write on
+ *      the same rows) are verified separately against real Postgres — see
+ *      scripts/db/verify-fnf-mark-paid-atomic.mjs and the PR description
+ *      for that run's output; a mocked RPC response can't exercise actual
+ *      transaction semantics, so this file doesn't claim to.
+ *   4. PATCH /separation-ff/reopen (new) sends an 'approved' settlement
+ *      back to 'draft' — the only way out when mark-paid's SOURCE_DRIFT
+ *      check blocks payment, since compute/manual-edit both refuse non-
+ *      draft rows.
  *
  * A hand-rolled in-memory Postgres-ish table engine stands in for
  * `fastify.supabase` so these behave like persisted read-back tests: every
@@ -131,7 +151,7 @@ function makeFakeSupabase(seed: Record<string, Row[]>, raceHooks: Record<string,
     return chain
   }
 
-  return { from: (t: string) => from(t), _db: db }
+  return { from: (t: string) => from(t), _db: db, rpc: vi.fn() }
 }
 
 type BuildAppOpts = { raceHooks?: Record<string, RaceHook[]> }
@@ -249,6 +269,48 @@ describe('F&F freeze-on-decision (POST /separation-ff, POST /separation-ff/compu
     expect(fake._db.separation_ff_summary[0].gratuity_amount).toBe(10000)
     await app.close()
   })
+
+  it('POST /separation-ff — TOCTOU: a concurrent approve lands between the LOCKED pre-check and the write — UPDATE itself must reject, not just the earlier read', async () => {
+    // The route's 1st query against separation_ff_summary is the "existing"
+    // SELECT the LOCKED pre-check reads; this hook fires right before its
+    // 2nd query (the actual UPDATE) — i.e. inside the exact window a
+    // check-then-write bug would miss — flipping status to 'approved' in
+    // between, as a concurrent PATCH /approve would.
+    const { app, fake } = await buildApp(
+      { employees: [employeeRow()], employee_separation: [separationRow()], separation_ff_summary: [ffRow({ status: 'draft', last_payroll_amount: 1111 })] },
+      { raceHooks: { separation_ff_summary: [{ after: 1, run: () => { fake._db.separation_ff_summary[0].status = 'approved' } }] } },
+    )
+
+    const res = await app.inject({
+      method: 'POST', url: `/employees/${EMPLOYEE_ID}/separation-ff`, headers: HEADERS,
+      payload: { last_payroll_amount: 9999, leave_encashment_amount: 1, gratuity_amount: 1, notice_period_deduction: 0 },
+    })
+
+    expect(res.statusCode).toBe(409)
+    expect(JSON.parse(res.body).error).toBe('LOCKED')
+    // The critical assertion: if the UPDATE's own WHERE clause didn't also
+    // require status='draft', this would have silently matched and
+    // overwritten the now-approved row with the un-reviewed 9999.
+    expect(fake._db.separation_ff_summary[0].last_payroll_amount).toBe(1111)
+    expect(fake._db.separation_ff_summary[0].status).toBe('approved')
+    await app.close()
+  })
+
+  it('POST /separation-ff/compute — TOCTOU: a concurrent approve lands between the LOCKED pre-check and the write', async () => {
+    const { app, fake } = await buildApp(
+      { employees: [employeeRow()], employee_separation: [separationRow()], separation_ff_summary: [ffRow({ status: 'draft', gratuity_amount: 777 })] },
+      { raceHooks: { separation_ff_summary: [{ after: 1, run: () => { fake._db.separation_ff_summary[0].status = 'approved' } }] } },
+    )
+
+    const res = await app.inject({
+      method: 'POST', url: `/employees/${EMPLOYEE_ID}/separation-ff/compute`, headers: HEADERS, payload: {},
+    })
+
+    expect(res.statusCode).toBe(409)
+    expect(JSON.parse(res.body).error).toBe('LOCKED')
+    expect(fake._db.separation_ff_summary[0].gratuity_amount).toBe(777)
+    await app.close()
+  })
 })
 
 describe('PATCH /separation-ff/approve — version-bound (TOCTOU) CAS', () => {
@@ -323,133 +385,138 @@ describe('PATCH /separation-ff/approve — version-bound (TOCTOU) CAS', () => {
   })
 })
 
-describe('PATCH /separation-ff/mark-paid — idempotent recovery write-back', () => {
-  function loanRow(overrides: Row = {}) {
-    return {
-      id: 'loan-1', tenant_id: TENANT_ID, employee_id: EMPLOYEE_ID,
-      status: 'active', outstanding_balance: 15000,
-      ...overrides,
-    }
-  }
-  function loanScheduleRow(overrides: Row = {}) {
-    return { id: 'sched-loan-1', tenant_id: TENANT_ID, loan_id: 'loan-1', status: 'pending', ...overrides }
-  }
-  function advanceRow(overrides: Row = {}) {
-    return { id: 'advance-1', tenant_id: TENANT_ID, employee_id: EMPLOYEE_ID, status: 'recovering', ...overrides }
-  }
-  function advanceScheduleRow(overrides: Row = {}) {
-    return {
-      id: 'sched-adv-1', tenant_id: TENANT_ID, advance_id: 'advance-1',
-      status: 'pending', recovery_month: '2026-11', scheduled_amount: 2000,
-      ...overrides,
-    }
-  }
+describe('PATCH /separation-ff/mark-paid — delegates to mark_fnf_paid_atomic (migration 445)', () => {
+  // The route's own job here is just: call the RPC, map its outcome to an
+  // HTTP response, reload the row. The RPC itself — FOR UPDATE locking,
+  // the source-drift validation, the actual foreclosure/recovery writes,
+  // and their atomicity — is real plpgsql verified against real Postgres
+  // (scripts/db/verify-fnf-mark-paid-atomic.mjs); that's not something a
+  // mocked .rpc() return value can stand in for, so these tests are scoped
+  // to what they can actually prove: the route calls the RPC with the
+  // right arguments and translates every documented error prefix correctly.
 
-  it('forecloses outstanding loans and recovers outstanding advances on mark-paid', async () => {
+  it('happy path — calls the RPC, reloads and returns the paid row', async () => {
     const { app, fake } = await buildApp({
       employees: [employeeRow()],
       separation_ff_summary: [ffRow({ status: 'approved' })],
-      employee_loans: [loanRow()],
-      loan_schedules: [loanScheduleRow()],
-      advance_salary_requests: [advanceRow()],
-      advance_recovery_schedules: [advanceScheduleRow()],
-      advance_recoveries: [],
     })
+    fake.rpc.mockResolvedValueOnce({ data: { id: FF_ID, status: 'paid' }, error: null })
+    // The RPC itself commits the status flip inside Postgres; the route
+    // reloads afterward, so the fake's own row must reflect that for the
+    // reload SELECT to return the up-to-date status.
+    fake._db.separation_ff_summary[0].status = 'paid'
 
     const res = await app.inject({
       method: 'PATCH', url: `/employees/${EMPLOYEE_ID}/separation-ff/mark-paid`, headers: HEADERS, payload: {},
     })
 
     expect(res.statusCode).toBe(200)
+    expect(JSON.parse(res.body).data.status).toBe('paid')
+    expect(fake.rpc).toHaveBeenCalledWith('mark_fnf_paid_atomic', expect.objectContaining({
+      p_tenant_id: TENANT_ID, p_employee_id: EMPLOYEE_ID, p_user_id: 'hr-admin-001',
+    }))
+    await app.close()
+  })
+
+  it('NOT_FOUND from the RPC → 404', async () => {
+    const { app, fake } = await buildApp({ employees: [employeeRow()], separation_ff_summary: [] })
+    fake.rpc.mockResolvedValueOnce({ data: null, error: { message: 'NOT_FOUND: F&F record not found' } })
+
+    const res = await app.inject({ method: 'PATCH', url: `/employees/${EMPLOYEE_ID}/separation-ff/mark-paid`, headers: HEADERS, payload: {} })
+    expect(res.statusCode).toBe(404)
+    expect(JSON.parse(res.body).error).toBe('NOT_FOUND')
+    await app.close()
+  })
+
+  it('INVALID_STATE from the RPC (never approved) → 409 INVALID_STATE', async () => {
+    const { app, fake } = await buildApp({ employees: [employeeRow()], separation_ff_summary: [ffRow({ status: 'draft' })] })
+    fake.rpc.mockResolvedValueOnce({ data: null, error: { message: "INVALID_STATE: Cannot mark as paid: F&F must be approved first (current: 'draft')" } })
+
+    const res = await app.inject({ method: 'PATCH', url: `/employees/${EMPLOYEE_ID}/separation-ff/mark-paid`, headers: HEADERS, payload: {} })
+    expect(res.statusCode).toBe(409)
+    expect(JSON.parse(res.body).error).toBe('INVALID_STATE')
+    await app.close()
+  })
+
+  it('ALREADY_DECIDED from the RPC (retry after success) → 409 ALREADY_DECIDED', async () => {
+    const { app, fake } = await buildApp({ employees: [employeeRow()], separation_ff_summary: [ffRow({ status: 'paid' })] })
+    fake.rpc.mockResolvedValueOnce({ data: null, error: { message: 'ALREADY_DECIDED: This F&F settlement is no longer in approved status (current: paid)' } })
+
+    const res = await app.inject({ method: 'PATCH', url: `/employees/${EMPLOYEE_ID}/separation-ff/mark-paid`, headers: HEADERS, payload: {} })
+    expect(res.statusCode).toBe(409)
+    expect(JSON.parse(res.body).error).toBe('ALREADY_DECIDED')
+    await app.close()
+  })
+
+  it('SOURCE_DRIFT from the RPC (a source loan/advance/asset balance changed since approval) → 409 SOURCE_DRIFT, settlement left approved', async () => {
+    const { app, fake } = await buildApp({ employees: [employeeRow()], separation_ff_summary: [ffRow({ status: 'approved', loan_recovery_amount: 15000 })] })
+    fake.rpc.mockResolvedValueOnce({ data: null, error: { message: 'SOURCE_DRIFT: Outstanding loan balance has changed since this settlement was approved (approved 15000, current 9000). Reopen, recompute and re-approve before marking as paid.' } })
+
+    const res = await app.inject({ method: 'PATCH', url: `/employees/${EMPLOYEE_ID}/separation-ff/mark-paid`, headers: HEADERS, payload: {} })
+    expect(res.statusCode).toBe(409)
+    const body = JSON.parse(res.body)
+    expect(body.error).toBe('SOURCE_DRIFT')
+    expect(body.message).toContain('15000')
+    expect(body.message).toContain('9000')
+    // The RPC's own transaction rolled back on RAISE EXCEPTION — nothing
+    // for the route to undo, and the settlement is still 'approved' here
+    // (unlike a mocked happy path, this test never mutates status to 'paid').
+    expect(fake._db.separation_ff_summary[0].status).toBe('approved')
+    await app.close()
+  })
+
+  it('an unrecognized RPC error falls back to a generic 500, never leaking the raw DB message', async () => {
+    const { app, fake } = await buildApp({ employees: [employeeRow()], separation_ff_summary: [ffRow({ status: 'approved' })] })
+    fake.rpc.mockResolvedValueOnce({ data: null, error: { message: 'duplicate key value violates unique constraint "advance_recoveries_pkey"' } })
+
+    const res = await app.inject({ method: 'PATCH', url: `/employees/${EMPLOYEE_ID}/separation-ff/mark-paid`, headers: HEADERS, payload: {} })
+    expect(res.statusCode).toBe(500)
+    expect(res.body).not.toContain('advance_recoveries_pkey')
+    await app.close()
+  })
+})
+
+describe('PATCH /separation-ff/reopen — the way out of a SOURCE_DRIFT block', () => {
+  it('approved → draft, clearing approved_by/approved_at', async () => {
+    const { app, fake } = await buildApp({
+      employees: [employeeRow()],
+      separation_ff_summary: [ffRow({ status: 'approved', approved_by: 'hr-admin-001', approved_at: '2026-01-01T00:00:00Z' })],
+    })
+
+    const res = await app.inject({ method: 'PATCH', url: `/employees/${EMPLOYEE_ID}/separation-ff/reopen`, headers: HEADERS, payload: {} })
+
+    expect(res.statusCode).toBe(200)
+    expect(fake._db.separation_ff_summary[0].status).toBe('draft')
+    expect(fake._db.separation_ff_summary[0].approved_by).toBeNull()
+    expect(fake._db.separation_ff_summary[0].approved_at).toBeNull()
+    await app.close()
+  })
+
+  it('cannot reopen a draft settlement — 409 INVALID_STATE', async () => {
+    const { app } = await buildApp({ employees: [employeeRow()], separation_ff_summary: [ffRow({ status: 'draft' })] })
+    const res = await app.inject({ method: 'PATCH', url: `/employees/${EMPLOYEE_ID}/separation-ff/reopen`, headers: HEADERS, payload: {} })
+    expect(res.statusCode).toBe(409)
+    expect(JSON.parse(res.body).error).toBe('INVALID_STATE')
+  })
+
+  it('cannot reopen a paid settlement — money has already moved, no silent way back to draft', async () => {
+    const { app, fake } = await buildApp({ employees: [employeeRow()], separation_ff_summary: [ffRow({ status: 'paid' })] })
+    const res = await app.inject({ method: 'PATCH', url: `/employees/${EMPLOYEE_ID}/separation-ff/reopen`, headers: HEADERS, payload: {} })
+    expect(res.statusCode).toBe(409)
+    expect(JSON.parse(res.body).error).toBe('INVALID_STATE')
     expect(fake._db.separation_ff_summary[0].status).toBe('paid')
-
-    // Loan: foreclosed, balance zeroed, its schedule adjusted out of the
-    // normal payroll run's own filter (status='pending' AND loan.status='active').
-    const loan = fake._db.employee_loans.find((l: Row) => l.id === 'loan-1')!
-    expect(loan.status).toBe('foreclosed')
-    expect(loan.outstanding_balance).toBe(0)
-    expect(fake._db.loan_schedules.find((s: Row) => s.id === 'sched-loan-1')!.status).toBe('adjusted')
-
-    // Advance: schedule recovered, ledger entry written, parent flipped out
-    // of the normal payroll run's own filter (status IN ('disbursed','recovering')).
-    expect(fake._db.advance_recovery_schedules.find((s: Row) => s.id === 'sched-adv-1')!.status).toBe('recovered')
-    expect(fake._db.advance_recoveries).toHaveLength(1)
-    expect(fake._db.advance_recoveries[0].amount).toBe(2000)
-    expect(fake._db.advance_salary_requests.find((a: Row) => a.id === 'advance-1')!.status).toBe('fully_recovered')
-
     await app.close()
   })
 
-  it('a loan already foreclosed by a concurrent request is left untouched — no double write', async () => {
-    const { app, fake } = await buildApp({
-      employees: [employeeRow()],
-      separation_ff_summary: [ffRow({ status: 'approved' })],
-      employee_loans: [loanRow({ status: 'foreclosed', outstanding_balance: 0, foreclosure_amount: 15000 })],
-      loan_schedules: [loanScheduleRow({ status: 'adjusted' })],
-      advance_salary_requests: [],
-      advance_recovery_schedules: [],
-      advance_recoveries: [],
-    })
-
-    const res = await app.inject({
-      method: 'PATCH', url: `/employees/${EMPLOYEE_ID}/separation-ff/mark-paid`, headers: HEADERS, payload: {},
-    })
-
-    expect(res.statusCode).toBe(200)
-    // Already-foreclosed loan is excluded from the fetch filter (status IN
-    // ('disbursed','active')) entirely — its foreclosure_amount must not be
-    // re-stamped with a second, possibly different "outstanding at the time" value.
-    expect(fake._db.employee_loans[0].foreclosure_amount).toBe(15000)
-    await app.close()
-  })
-
-  it('retrying mark-paid after it already succeeded cannot double-deduct — second call 409s before reconciliation re-runs', async () => {
-    const { app, fake } = await buildApp({
-      employees: [employeeRow()],
-      separation_ff_summary: [ffRow({ status: 'approved' })],
-      employee_loans: [loanRow()],
-      loan_schedules: [loanScheduleRow()],
-      advance_salary_requests: [advanceRow()],
-      advance_recovery_schedules: [advanceScheduleRow()],
-      advance_recoveries: [],
-    })
-
-    const first = await app.inject({ method: 'PATCH', url: `/employees/${EMPLOYEE_ID}/separation-ff/mark-paid`, headers: HEADERS, payload: {} })
-    expect(first.statusCode).toBe(200)
-    expect(fake._db.advance_recoveries).toHaveLength(1)
-
-    // Client retries the same request (timeout, double-click, etc.) — the
-    // settlement is already 'paid', so this must be rejected before the
-    // reconciliation logic runs a second time against the same balances.
-    const second = await app.inject({ method: 'PATCH', url: `/employees/${EMPLOYEE_ID}/separation-ff/mark-paid`, headers: HEADERS, payload: {} })
-    expect(second.statusCode).toBe(409)
-    expect(JSON.parse(second.body).error).toBe('INVALID_STATE')
-
-    // No second ledger entry — the retry did not re-run the recovery write-back.
-    expect(fake._db.advance_recoveries).toHaveLength(1)
-    expect(fake._db.employee_loans[0].status).toBe('foreclosed')
-    await app.close()
-  })
-
-  it('an advance with no pending schedules left is skipped without error (already fully reconciled)', async () => {
-    const { app, fake } = await buildApp({
-      employees: [employeeRow()],
-      separation_ff_summary: [ffRow({ status: 'approved' })],
-      employee_loans: [],
-      loan_schedules: [],
-      advance_salary_requests: [advanceRow({ status: 'fully_recovered' })],
-      advance_recovery_schedules: [advanceScheduleRow({ status: 'recovered' })],
-      advance_recoveries: [],
-    })
-
-    const res = await app.inject({
-      method: 'PATCH', url: `/employees/${EMPLOYEE_ID}/separation-ff/mark-paid`, headers: HEADERS, payload: {},
-    })
-
-    expect(res.statusCode).toBe(200)
-    // 'fully_recovered' is outside the fetch filter (status IN
-    // ('disbursed','recovering')) — no new ledger entry should appear.
-    expect(fake._db.advance_recoveries).toHaveLength(0)
+  it('TOCTOU: a concurrent mark-paid lands between the pre-check and the write — the UPDATE itself must reject', async () => {
+    const { app, fake } = await buildApp(
+      { employees: [employeeRow()], separation_ff_summary: [ffRow({ status: 'approved' })] },
+      { raceHooks: { separation_ff_summary: [{ after: 1, run: () => { fake._db.separation_ff_summary[0].status = 'paid' } }] } },
+    )
+    const res = await app.inject({ method: 'PATCH', url: `/employees/${EMPLOYEE_ID}/separation-ff/reopen`, headers: HEADERS, payload: {} })
+    expect(res.statusCode).toBe(409)
+    expect(JSON.parse(res.body).error).toBe('ALREADY_DECIDED')
+    expect(fake._db.separation_ff_summary[0].status).toBe('paid')
     await app.close()
   })
 })
