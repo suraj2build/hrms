@@ -85,10 +85,14 @@ function mockSupabase(opts: {
         return chain
       }
       if (table === 'leave_accrual_runs') {
+        // DEFECT-02 fix: atomic claim via INSERT — no prior run exists in
+        // any of these tests, so the insert always succeeds.
         const chain: any = {
-          select: () => chain, eq: () => chain,
-          then: (resolve: any) => resolve({ data: [], error: null }),
-          upsert: (rows: any) => { record(upserts, table, Array.isArray(rows) ? rows : [rows]); return Promise.resolve({ data: null, error: null }) },
+          select: () => chain, eq: () => chain, update: () => chain, in: () => chain,
+          insert: (row: any) => {
+            record(upserts, table, [row])
+            return { select: () => Promise.resolve({ data: [{ id: `claim-${row.leave_type_id}` }], error: null }) }
+          },
         }
         return chain
       }

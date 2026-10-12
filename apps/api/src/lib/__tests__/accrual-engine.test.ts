@@ -64,11 +64,23 @@ function mockSupabase(opts: {
         return chain
       }
       if (table === 'leave_accrual_runs') {
-        // Three chained .eq() calls before the idempotency-check SELECT resolves.
+        // DEFECT-02 fix: the idempotency check is now an atomic claim —
+        // INSERT (status='running'), succeeding unless a prior run already
+        // exists for this (tenant, run_period, leave_type) slot. None of
+        // these tests seed `existingRuns`, so the insert always succeeds —
+        // a real pre-existing row would make this mock's insert fail and
+        // fall through to the reclaim UPDATE below, matching the real
+        // 23505-then-reclaim flow.
+        const hasExisting = (ltId: string) => existingRuns.some((r) => r.leave_type_id === ltId)
         const chain: any = {
-          select: () => chain, eq: () => chain,
-          then: (resolve: any) => resolve({ data: existingRuns, error: null }),
-          upsert: (rows: any) => { record(Array.isArray(rows) ? rows : [rows]); return Promise.resolve({ data: null, error: null }) },
+          select: () => chain, eq: () => chain, update: () => chain, in: () => chain,
+          insert: (row: any) => {
+            if (hasExisting(row.leave_type_id)) {
+              return Promise.resolve({ data: null, error: { code: '23505', message: 'duplicate' } })
+            }
+            record([row])
+            return { select: () => Promise.resolve({ data: [{ id: `claim-${row.leave_type_id}` }], error: null }) }
+          },
         }
         return chain
       }

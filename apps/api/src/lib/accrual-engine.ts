@@ -57,6 +57,68 @@ function proratedDays(
   return parseFloat(((daysPerPeriod * daysWorked) / daysInMonth).toFixed(2))
 }
 
+// ── Atomic run claim (DEFECT-02, PR #30 UAT 2026-10-12) ───────────────────────
+//
+// Attempts to atomically claim the (tenant_id, run_period, leave_type_id) run
+// slot for this call alone, using leave_accrual_runs' own unique constraint as
+// the race-safe mechanism (the same claim-before-side-effects pattern
+// comp-off.ts's approval route already uses — SYSCERT_AUDIT_2026-08-02.md H6).
+//
+// Returns the claimed row's id, or null if this call should skip (a prior
+// 'success' run already exists, or another call currently holds the 'running'
+// claim). A prior 'partial' or 'failed' run is reclaimable — HR retrying a
+// failed run is a real, intended use case, not something this claim should
+// block forever.
+async function claimAccrualRun(
+  supabase:     SupabaseClient,
+  tenantId:     string,
+  runPeriod:    string,
+  leaveTypeId:  string,
+  nowIso:       string,
+): Promise<string | null> {
+  const { data: inserted, error: insertErr } = await supabase
+    .from('leave_accrual_runs')
+    .insert({
+      tenant_id:           tenantId,
+      run_period:          runPeriod,
+      leave_type_id:       leaveTypeId,
+      employees_credited:  0,
+      total_days_credited: 0,
+      status:              'running',
+      ran_at:              nowIso,
+    })
+    .select('id')
+
+  if (!insertErr && (inserted?.length ?? 0) > 0) {
+    return (inserted as Array<{ id: string }>)[0].id
+  }
+
+  // Insert lost the race (or a prior run already exists for this slot) — a
+  // real constraint violation is the only reason this should fail; anything
+  // else is a genuine error, not a race, and should not silently claim.
+  if (insertErr && insertErr.code !== '23505') {
+    return null
+  }
+
+  // Try to reclaim a previous 'partial' or 'failed' run. Matches 0 rows if
+  // the existing row is 'success' (already done — correctly skip) or
+  // 'running' (someone else's claim is live right now — correctly skip,
+  // don't race them).
+  const { data: reclaimed } = await supabase
+    .from('leave_accrual_runs')
+    .update({ status: 'running', ran_at: nowIso })
+    .eq('tenant_id', tenantId)
+    .eq('run_period', runPeriod)
+    .eq('leave_type_id', leaveTypeId)
+    .in('status', ['partial', 'failed'])
+    .select('id')
+
+  if ((reclaimed?.length ?? 0) > 0) {
+    return (reclaimed as Array<{ id: string }>)[0].id
+  }
+  return null
+}
+
 // ── Core: run monthly accrual for one tenant ─────────────────────────────────
 
 export async function runMonthlyAccrual(
@@ -116,23 +178,32 @@ export async function runMonthlyAccrual(
     return result
   }
 
-  // ── Idempotency: check if already run for this period+rule combo ───────────
-  const { data: existingRuns } = await supabase
-    .from('leave_accrual_runs')
-    .select('leave_type_id')
-    .eq('tenant_id', tenantId)
-    .eq('run_period', runPeriod)
-    .eq('status', 'success')
-
-  const alreadyRunTypes = new Set((existingRuns ?? []).map((r: { leave_type_id: string }) => r.leave_type_id))
-
   // Computed once — same for every employee in this accrual run
   const periodLastDay = new Date(Date.UTC(periodYear, periodMonth, 0)).toISOString().slice(0, 10)
   const nowIso = new Date().toISOString()
 
   // ── Process each rule ──────────────────────────────────────────────────────
   for (const rule of monthlyRules as AccrualRule[]) {
-    if (alreadyRunTypes.has(rule.leave_type_id)) {
+    // DEFECT-02 (PR #30 Attendance/Leave UAT, 2026-10-12): the old idempotency
+    // check was a pre-check SELECT against leave_accrual_runs, with the whole
+    // employee-crediting loop below it and a terminal upsert only at the very
+    // end. Two genuinely overlapping calls for the same tenant+period+rule
+    // (an HR admin double-clicking "Run Accrual", or a manual trigger
+    // overlapping a scheduled run) could both pass that pre-check — neither
+    // had written the terminal row yet — and proceed to credit employees in
+    // parallel: a lost-update race on employee_leave_balance (an absolute SET
+    // of a pre-fetched balance + days, not an atomic increment), not reliably
+    // prevented by the leave_accrual_ledger pre-check-then-insert alone (that
+    // protects only the ledger's own rows, not the balance cache). Fixed the
+    // same way comp-off.ts's approval route already does (SYSCERT_AUDIT_2026
+    // -08-02.md H6 pattern): claim the run FIRST via a real INSERT against
+    // leave_accrual_runs' own unique constraint (tenant_id, run_period,
+    // leave_type_id, migration 454 added a 'running' status to its check
+    // constraint for this) — the loser of a genuine race gets a real Postgres
+    // 23505 back immediately, before either side has touched a single
+    // employee's balance.
+    const claimedRunId = await claimAccrualRun(supabase, tenantId, runPeriod, rule.leave_type_id, nowIso)
+    if (!claimedRunId) {
       result.skipped++
       continue
     }
@@ -263,20 +334,15 @@ export async function runMonthlyAccrual(
       }
     }
 
-    // Record the run
-    await supabase.from('leave_accrual_runs').upsert(
-      {
-        tenant_id:           tenantId,
-        run_period:          runPeriod,
-        leave_type_id:       rule.leave_type_id,
-        employees_credited:  employeesCredited,
-        total_days_credited: totalDays,
-        status:              runErrors.length ? 'partial' : 'success',
-        error_message:       runErrors.length ? runErrors.join('; ') : null,
-        ran_at:              nowIso,
-      },
-      { onConflict: 'tenant_id,run_period,leave_type_id' },
-    )
+    // Finalize the claimed run — a plain UPDATE on the row this call alone
+    // claimed above, not an upsert (no one else can race this row now).
+    await supabase.from('leave_accrual_runs').update({
+      employees_credited:  employeesCredited,
+      total_days_credited: totalDays,
+      status:              runErrors.length ? 'partial' : 'success',
+      error_message:       runErrors.length ? runErrors.join('; ') : null,
+      ran_at:              nowIso,
+    }).eq('id', claimedRunId)
 
     result.employees_credited += employeesCredited
     result.total_days_credited = parseFloat((result.total_days_credited + totalDays).toFixed(2))
