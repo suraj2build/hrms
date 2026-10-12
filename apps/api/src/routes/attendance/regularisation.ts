@@ -376,12 +376,20 @@ export default async function regularisationRoute(fastify: FastifyInstance) {
               if (approved.requested_check_in) punchRows.push({ tenant_id: req.tenantId, employee_id: approved.employee_id, punched_at: approved.requested_check_in, direction: 'IN', source: 'regularisation', notes: `Regularisation ${id}` })
               if (approved.requested_check_out) punchRows.push({ tenant_id: req.tenantId, employee_id: approved.employee_id, punched_at: approved.requested_check_out, direction: 'OUT', source: 'regularisation', notes: `Regularisation ${id}` })
               if (punchRows.length > 0) {
-                await fastify.supabase.from('attendance_punch_logs').insert(punchRows).then(() => {}, () => {})
+                // Same uidx_punch_logs_dedup collision risk as the single-approve
+                // route below (e.g. a "forgot checkout" regularisation re-specifies
+                // the already-punched check-in alongside the genuinely-missing
+                // check-out) — upsert with ignoreDuplicates instead of a plain
+                // insert, so one colliding row doesn't sink the whole batch.
+                const { error: punchErr } = await fastify.supabase
+                  .from('attendance_punch_logs')
+                  .upsert(punchRows, { onConflict: 'tenant_id,employee_id,punched_at,direction', ignoreDuplicates: true })
+                if (punchErr) req.log.warn({ err: punchErr, reg_id: id }, 'punch_logs insert failed after bulk regularisation approval')
               }
               await recomputeRange(fastify.supabase, {
                 tenant_id: req.tenantId, employee_id: approved.employee_id,
                 from_date: approved.date, to_date: approved.date, changed_by: req.userId,
-              }).catch(() => {})
+              }).catch((e) => { req.log.warn({ err: e, reg_id: id }, 'attendance recompute failed after bulk regularisation approval') })
 
               // In-process event bus (PEND-75 follow-up) — mirrors the single
               // approve route's emission below; bulk-approve previously fired
@@ -607,9 +615,16 @@ export default async function regularisationRoute(fastify: FastifyInstance) {
     }
 
     if (punchRows.length > 0) {
+      // A regularisation form collects both check-in and check-out even when
+      // only one was actually missing (e.g. "forgot checkout" — the employee
+      // already has a genuine IN punch). A plain insert() of both rows as one
+      // batch fails outright on the uidx_punch_logs_dedup collision from the
+      // pre-existing punch, losing the genuinely-new row too. Upsert with
+      // ignoreDuplicates so the already-present punch is skipped and the
+      // actually-missing one still gets written.
       const { error: punchErr } = await fastify.supabase
         .from('attendance_punch_logs')
-        .insert(punchRows)
+        .upsert(punchRows, { onConflict: 'tenant_id,employee_id,punched_at,direction', ignoreDuplicates: true })
       if (punchErr) {
         req.log.warn({ err: punchErr, reg_id: id }, 'punch_logs insert failed after regularisation approval')
       }

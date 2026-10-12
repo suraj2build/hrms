@@ -80,10 +80,21 @@ function mockSupabase(opts: {
         }
         return chain
       }
-      // leave_balance_ledger (insert) / leave_accrual_ledger (upsert)
+      if (table === 'leave_accrual_ledger') {
+        // DEFECT-02 fix: a pre-check SELECT (filtered by .in('employee_id', ...))
+        // followed by an INSERT of only the not-already-present rows — no
+        // upsert() against the partial unique index anymore. This mock has no
+        // pre-existing rows to simulate, so every employee_id is "new".
+        const chain: any = {
+          select: () => chain, eq: () => chain,
+          in: () => Promise.resolve({ data: [], error: null }),
+          insert: (rows: any[]) => { record(rows); return Promise.resolve({ data: null, error: null }) },
+        }
+        return chain
+      }
+      // leave_balance_ledger (insert)
       const chain: any = {
         insert: (rows: any[]) => { record(rows); return Promise.resolve({ data: null, error: null }) },
-        upsert: (rows: any[]) => { record(rows); return Promise.resolve({ data: null, error: null }) },
       }
       return chain
     },

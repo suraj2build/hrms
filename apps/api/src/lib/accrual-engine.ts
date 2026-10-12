@@ -69,13 +69,20 @@ export async function runMonthlyAccrual(
   const result: AccrualResult = { employees_credited: 0, total_days_credited: 0, skipped: 0, errors: [] }
 
   // ── Fetch active accrual rules for the period ──────────────────────────────
+  // Standard interval-overlap check: a rule applies to this period if it was
+  // effective at ANY point during it — effective_from on or before the period's
+  // LAST day, and effective_to (if set) on or after the period's FIRST day.
+  // Comparing effective_from against the period's first day instead would wrongly
+  // exclude any rule created mid-period (e.g. an HR admin adding a rule today and
+  // running this same month's accrual — the ordinary case right after setup).
   const periodDate = `${periodYear}-${String(periodMonth).padStart(2, '0')}-01`
+  const periodEndDate = new Date(Date.UTC(periodYear, periodMonth, 0)).toISOString().slice(0, 10)
   const { data: rules, error: rulesErr } = await supabase
     .from('leave_accrual_rules')
     .select('*')
     .eq('tenant_id', tenantId)
     .eq('is_active', true)
-    .lte('effective_from', periodDate)
+    .lte('effective_from', periodEndDate)
     .or(`effective_to.is.null,effective_to.gte.${periodDate}`)
 
   if (rulesErr || !rules?.length) {
@@ -223,10 +230,37 @@ export async function runMonthlyAccrual(
         .insert(ledInserts)
       if (ledErr) runErrors.push(`Ledger batch failed: ${ledErr.message}`)
 
-      const { error: alErr } = await supabase
+      // leave_accrual_ledger's matching unique index (uidx_accrual_ledger_idempotency)
+      // is PARTIAL (scoped to a fixed list of accrual_types, which 'monthly' is
+      // one of) — Postgres can only use a partial index as an ON CONFLICT
+      // inference target when the statement itself repeats the index's WHERE
+      // predicate, which PostgREST's upsert(onConflict: '...') has no way to
+      // express. A plain onConflict column list against it fails outright
+      // ("no unique or exclusion constraint matching the ON CONFLICT
+      // specification"). Sidestep it: pre-check which of this batch's keys
+      // already exist and insert only the new ones — same idempotent effect
+      // as the upsert's ignoreDuplicates was going for, without relying on
+      // ON CONFLICT resolving against a partial index.
+      const { data: existingLedgerRows, error: alFetchErr } = await supabase
         .from('leave_accrual_ledger')
-        .upsert(alUpserts, { onConflict: 'tenant_id,employee_id,leave_type_id,year,accrual_type,accrued_on', ignoreDuplicates: true })
-      if (alErr) runErrors.push(`Accrual ledger batch failed: ${alErr.message}`)
+        .select('employee_id')
+        .eq('tenant_id', tenantId)
+        .eq('leave_type_id', rule.leave_type_id)
+        .eq('year', periodYear)
+        .eq('accrual_type', 'monthly')
+        .eq('accrued_on', periodLastDay)
+        .in('employee_id', alUpserts.map((r) => r.employee_id as string))
+
+      if (alFetchErr) {
+        runErrors.push(`Accrual ledger pre-check failed: ${alFetchErr.message}`)
+      } else {
+        const alreadyLogged = new Set((existingLedgerRows ?? []).map((r: { employee_id: string }) => r.employee_id))
+        const newAlRows = alUpserts.filter((r) => !alreadyLogged.has(r.employee_id as string))
+        if (newAlRows.length) {
+          const { error: alErr } = await supabase.from('leave_accrual_ledger').insert(newAlRows)
+          if (alErr) runErrors.push(`Accrual ledger batch failed: ${alErr.message}`)
+        }
+      }
     }
 
     // Record the run

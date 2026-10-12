@@ -282,14 +282,27 @@ export function LeaveAccrualAdmin() {
   // Rotated only after a successful trigger, so a failed-then-retried submit reuses the same key.
   const runAccrualIdempotencyKey = useRef(crypto.randomUUID())
   const runAccrualMutation = useMutation({
-    mutationFn: (period: string) => api.post('/leave/accrual/run', { period }, {
+    mutationFn: (period: string) => api.post<{ data: {
+      employees_credited: number; total_days_credited: number; skipped: number; errors: string[]
+    } }>('/leave/accrual/run', { period }, {
       headers: { 'Idempotency-Key': runAccrualIdempotencyKey.current },
     }),
-    onSuccess: () => {
+    onSuccess: (res) => {
       runAccrualIdempotencyKey.current = crypto.randomUUID()
       qc.invalidateQueries({ queryKey: ['accrual-runs'] })
       qc.invalidateQueries({ queryKey: ['leave-balance'] })
-      toast.success('Accrual run complete', { description: `Credited leave for ${accrualPeriod}` })
+      const result = res?.data
+      // A 200 response can still carry zero effect (e.g. no active rule covers
+      // the period, or every employee was already credited) — the backend
+      // surfaces that via `errors`/`employees_credited` rather than an HTTP
+      // error, so a blanket success toast here would hide it from HR.
+      if (result?.errors?.length) {
+        toast.warning('Accrual run completed with issues', { description: result.errors.join('; ') })
+      } else {
+        toast.success('Accrual run complete', {
+          description: `Credited ${result?.employees_credited ?? 0} employee(s) for ${accrualPeriod}`,
+        })
+      }
     },
     onError: (e) => toast.error('Accrual run failed', { description: (e as Error).message }),
   })

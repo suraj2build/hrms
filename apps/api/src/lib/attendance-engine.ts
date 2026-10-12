@@ -1477,6 +1477,32 @@ export async function recomputeRange(
     // approval downstream, so it never changes pay directly. Non-blocking: a failure
     // here must never abort the attendance recompute.
     try {
+      const qualifies = safeComputed.some(r => r.worked_on_weekly_off || r.worked_on_holiday)
+      // Resolve the tenant's comp-off leave type so these requests are
+      // actually approvable. Without an explicit leave_type_id here, every
+      // request created through this — the only automatic path there is,
+      // triggered by any worked holiday/weekly-off day — persists with
+      // leave_type_id = NULL and the approval route then permanently refuses
+      // it ("regenerate via a leave-type-specific comp-off generation"), but
+      // that regeneration is a same-key upsert with ignoreDuplicates — it
+      // skips the already-existing row rather than fixing it, so the
+      // documented remedy doesn't actually unblock anything. Match on the
+      // "Compensatory Off" name the standard leave-type library seeds
+      // (comp-off has no dedicated marker column); tenants without that
+      // exact type keep today's behavior (null — HR must assign one via the
+      // manual Generate flow, whose explicit leave_type_id continues to work
+      // for dates not yet auto-generated).
+      let compOffLeaveTypeId: string | null = null
+      if (qualifies) {
+        const { data: compOffType } = await supabase
+          .from('leave_types')
+          .select('id')
+          .eq('tenant_id', tenant_id)
+          .eq('name', 'Compensatory Off')
+          .eq('is_active', true)
+          .maybeSingle()
+        compOffLeaveTypeId = compOffType?.id ?? null
+      }
       await generateCompOffRequests(
         supabase,
         tenant_id,
@@ -1489,6 +1515,7 @@ export async function recomputeRange(
           days_to_credit:       r.meta?.workedFraction ?? 1.0,
         })),
         changed_by ?? null,
+        compOffLeaveTypeId,
       )
     } catch (e) {
       console.warn(`[recomputeRange] comp-off auto-generate failed for employee ${employee_id}:`, e)

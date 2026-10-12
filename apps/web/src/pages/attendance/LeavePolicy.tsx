@@ -1093,6 +1093,15 @@ export function LeavePolicy() {
   })
 
   // ── Helpers ──────────────────────────────────────────────────────────────────
+  // DECIMAL/NUMERIC-typed columns (as opposed to INTEGER ones) come back from
+  // PostgREST as JSON strings, not numbers — real Postgres/PostgREST wire
+  // behavior, to avoid float precision loss (same reason `numeric` is a string
+  // over the wire generally). The save payload's zod schema requires actual
+  // numbers, so an unmodified round-trip (load → save without touching these
+  // fields) must still coerce them, or every save of an existing policy fails.
+  function numOrNull(v: number | string | null): number | null {
+    return v == null ? null : Number(v)
+  }
   function selectType(lt: LeaveType) {
     setSelectedTypeId(lt.id)
     setActiveTab('accrual')
@@ -1100,12 +1109,12 @@ export function LeavePolicy() {
     if (existing) {
       setForm({
         accrual_type:           existing.accrual_type,
-        accrual_days_per_year:  existing.accrual_days_per_year,
-        max_accrual_balance:    existing.max_accrual_balance,
+        accrual_days_per_year:  Number(existing.accrual_days_per_year),
+        max_accrual_balance:    numOrNull(existing.max_accrual_balance),
         eligibility_days:       existing.eligibility_days,
         prorate_on_joining:     existing.prorate_on_joining,
         carry_forward_enabled:  existing.carry_forward_enabled,
-        carry_forward_max_days: existing.carry_forward_max_days,
+        carry_forward_max_days: numOrNull(existing.carry_forward_max_days),
         year_type:              existing.year_type,
         allow_past_dated_leave:               existing.allow_past_dated_leave               ?? false,
         maximum_past_days:                    existing.maximum_past_days                    ?? 0,
@@ -1117,15 +1126,15 @@ export function LeavePolicy() {
         allow_half_day:               existing.allow_half_day               ?? true,
         allow_hourly_leave:           existing.allow_hourly_leave           ?? false,
         allow_cross_session:          existing.allow_cross_session          ?? true,
-        minimum_leave_unit:           existing.minimum_leave_unit           ?? 0.5,
+        minimum_leave_unit:           Number(existing.minimum_leave_unit           ?? 0.5),
         maximum_sessions_per_day:     existing.maximum_sessions_per_day     ?? 2,
         session_calculation_mode:     existing.session_calculation_mode     ?? 'standard',
         holiday_session_handling:     existing.holiday_session_handling     ?? 'skip',
         weekoff_session_handling:     existing.weekoff_session_handling     ?? 'skip',
         fractional_rounding_mode:     existing.fractional_rounding_mode     ?? 'nearest_0_5',
-        maximum_fractional_precision: existing.maximum_fractional_precision ?? 0.5,
-        hours_per_shift:              existing.hours_per_shift              ?? 8,
-        max_hours_per_day:            existing.max_hours_per_day            ?? null,
+        maximum_fractional_precision: Number(existing.maximum_fractional_precision ?? 0.5),
+        hours_per_shift:              Number(existing.hours_per_shift              ?? 8),
+        max_hours_per_day:            numOrNull(existing.max_hours_per_day),
         accrual_earning_basis:        existing.accrual_earning_basis        ?? 'earned',
         accrual_credit_timing:        existing.accrual_credit_timing        ?? 'cycle_start',
         accrual_consumption_timing:   existing.accrual_consumption_timing   ?? 'immediate',
@@ -1137,7 +1146,7 @@ export function LeavePolicy() {
         accrual_freeze_mode:          existing.accrual_freeze_mode          ?? 'skip',
         minimum_service_days:         existing.minimum_service_days         ?? 0,
         minimum_paid_days:            existing.minimum_paid_days            ?? 0,
-        minimum_attendance_pct:       existing.minimum_attendance_pct       ?? 0,
+        minimum_attendance_pct:       Number(existing.minimum_attendance_pct       ?? 0),
         tiered_accrual_enabled:       existing.tiered_accrual_enabled       ?? false,
         service_anniversary_cycle:    existing.service_anniversary_cycle    ?? false,
       })

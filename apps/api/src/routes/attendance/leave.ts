@@ -1371,20 +1371,55 @@ export default async function leaveRoute(fastify: FastifyInstance) {
       return validationError(reply, ErrorCode.VALIDATION_ERROR, parsed.error.issues[0]?.message ?? 'Validation failed')
     }
     const year = parsed.data.year ?? new Date().getFullYear()
+
+    // DEFECT-09 (found during the PR #30 live-screen Attendance/Leave UAT,
+    // 2026-10-12): this route used to .upsert() employee_leave_balance
+    // directly, writing only the denormalized cache the UI/payroll reads —
+    // never leave_accrual_ledger, the authoritative audit trail
+    // leave-reconciliation.ts checks the cache against. Every balance set
+    // this way surfaced as a balance_drift/replay_drift reconciliation
+    // error (severity 'error') the moment the scheduler ran, for every
+    // employee it was used on. set_opening_balance() (migration 272) is the
+    // existing, already-ledger-consistent RPC for exactly this — it just
+    // REPLACES the single 'opening_balance' ledger row and recomputes the
+    // cache from the ledger's full sum, so to land on the admin's typed
+    // total we net out any other (non-opening-balance) ledger activity
+    // already on the books for this employee+type+year first — matching
+    // migration 268's own one-time reconciliation formula.
+    const { data: otherLedgerRows, error: ledgerFetchErr } = await fastify.supabase
+      .from('leave_accrual_ledger')
+      .select('days')
+      .eq('tenant_id', req.tenantId)
+      .eq('employee_id', parsed.data.employee_id)
+      .eq('leave_type_id', parsed.data.leave_type_id)
+      .eq('year', year)
+      .eq('is_expired', false)
+      .neq('accrual_type', 'opening_balance')
+
+    if (ledgerFetchErr) return serverError(req, reply, ledgerFetchErr, ErrorCode.QUERY_FAILED, 'Failed to set leave balance')
+
+    const otherLedgerSum = (otherLedgerRows ?? []).reduce((sum: number, r: { days: number }) => sum + Number(r.days), 0)
+    const openingBalanceDays = parsed.data.balance - otherLedgerSum
+
+    const { error: rpcErr } = await fastify.supabase.rpc('set_opening_balance', {
+      p_tenant_id:     req.tenantId,
+      p_employee_id:   parsed.data.employee_id,
+      p_leave_type_id: parsed.data.leave_type_id,
+      p_days:          openingBalanceDays,
+      p_year:          year,
+    })
+    if (rpcErr) return serverError(req, reply, rpcErr, ErrorCode.UPDATE_FAILED, 'Failed to set leave balance')
+
     const { data, error } = await fastify.supabase
       .from('employee_leave_balance')
-      .upsert({
-        tenant_id:     req.tenantId,
-        employee_id:   parsed.data.employee_id,
-        leave_type_id: parsed.data.leave_type_id,
-        balance:       parsed.data.balance,
-        year,
-        updated_at:    new Date().toISOString(),
-      }, { onConflict: 'tenant_id,employee_id,leave_type_id,year' })
       .select('id, balance, year')
+      .eq('tenant_id', req.tenantId)
+      .eq('employee_id', parsed.data.employee_id)
+      .eq('leave_type_id', parsed.data.leave_type_id)
+      .eq('year', year)
       .single()
 
-    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to set leave balance')
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to set leave balance')
 
     // Audit log — balance set/updated by HR admin on behalf of employee
     await logAction(fastify.supabase, {
