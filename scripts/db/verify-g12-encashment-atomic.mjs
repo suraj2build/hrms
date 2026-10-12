@@ -240,6 +240,44 @@ async function main() {
       (await db.query(`SELECT status FROM leave_encashment_requests WHERE id = $1`, [reqA])).rows[0].status === 'approved')
   }
 
+  // ── C2. Deleting the assigned draft run preserves the entitlement ───────
+  // Mirrors what POST /payroll/runs/:id (DELETE) actually does: a hard
+  // DELETE on payroll_runs for a non-finalized run (apps/api/src/routes/
+  // payroll/runs.ts ~L3956) — the FK's own ON DELETE SET NULL (446) and
+  // the payroll_slips FK's ON DELETE CASCADE are relied on for cleanup.
+  // "Cancelled/deleted runs must not lose the entitlement" means: after
+  // deletion, the request is still 'approved' and simply unassigned
+  // (payroll_run_id back to NULL) — not silently dropped, not left
+  // dangling on a run_id that no longer exists.
+  console.log('\n[C2] Deleting the assigned draft run preserves the entitlement (unassigns, does not lose it)')
+  {
+    const empDel = await seedEmployee()
+    const runDel = await seedRun('draft')
+    await seedSlip(runDel, empDel)
+    const reqDel = await seedRequest(empDel, { gross: 4200, tds: 420, days: 7 })
+    await db.query(`SELECT assign_leave_encashment_to_payroll_run_atomic($1,$2,$3)`, [tenantId, reqDel, runDel])
+
+    const before = (await db.query(`SELECT status, payroll_run_id, gross_amount, tds_amount FROM leave_encashment_requests WHERE id = $1`, [reqDel])).rows[0]
+    check('precondition: request is approved and assigned to runDel before deletion', before.status === 'approved' && before.payroll_run_id === runDel)
+
+    await db.query(`DELETE FROM payroll_runs WHERE id = $1 AND tenant_id = $2`, [runDel, tenantId])
+    const runGone = (await db.query(`SELECT 1 FROM payroll_runs WHERE id = $1`, [runDel])).rows.length === 0
+    check('the run itself is actually gone', runGone)
+
+    const after = (await db.query(`SELECT status, payroll_run_id, gross_amount, tds_amount FROM leave_encashment_requests WHERE id = $1`, [reqDel])).rows[0]
+    check('request survives the run deletion (row not cascaded away)', !!after)
+    check("status stays 'approved' — the entitlement itself is not lost", after.status === 'approved')
+    check('payroll_run_id reset to NULL — unassigned, not dangling on a deleted run', after.payroll_run_id === null)
+    check('gross/TDS figures untouched — ready to be assigned to a different run', Number(after.gross_amount) === Number(before.gross_amount) && Number(after.tds_amount) === Number(before.tds_amount))
+
+    // And it really is re-assignable afterward — proving "preserved" means
+    // actually usable, not just structurally present.
+    const runDel2 = await seedRun('draft')
+    await seedSlip(runDel2, empDel)
+    const { rows: reassign } = await db.query(`SELECT assign_leave_encashment_to_payroll_run_atomic($1,$2,$3) AS result`, [tenantId, reqDel, runDel2])
+    check('the preserved entitlement can be assigned to a fresh run afterward', !!reassign[0].result)
+  }
+
   // ── D. Finalize flips only this run's approved+assigned requests ────────
   console.log('\n[D] fn_finalize_leave_encashments_for_run')
   {

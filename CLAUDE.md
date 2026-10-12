@@ -262,7 +262,8 @@ Deferred, needs an explicit product scope decision before building: PMS
 started pending a decision on whether they're in scope for initial launch.
 
 **G12 (standalone leave encashment) — decided and built (2026-10-12),
-payment-status defect found and fixed in a round-2 review (2026-10-12).**
+payment-status defect found and fixed in round 2, F&F-concurrency fixed and
+an accounting-ledger defect found and fixed in round 3 (all 2026-10-12).**
 Was in the same "deferred pending decision" bucket as PMS/Travel Desk above;
 the user authorized completion. Employee-initiated request UI
 (`apps/web/src/pages/ess/EssLeaveBalance.tsx`'s Encashment tab), a real
@@ -292,17 +293,33 @@ applying cleanly — see `scripts/db/verify-g12-encashment-atomic.mjs`.
 Duplicate-payment prevention: payroll via the above; F&F via
 `lib/fnf-settlement-engine.ts`'s leave-encashment calculation reading the
 same `employee_leave_balance` table standalone encashment already
-decrements — **but this only prevents a second write through the same
-code path, not a genuine concurrency race.** Round 2 confirmed a real,
-NOT-yet-fixed gap: `mark_fnf_paid_atomic` (445) validates loan/advance/asset
-drift but has no equivalent check for leave-encashment-balance drift, so an
-F&F computation/approval running concurrently with a standalone-encashment
-approval could be approved against a stale balance. A remediation is
-scoped (exact-basis snapshot + re-validation, mirroring the existing
-`SOURCE_DRIFT` check) but deliberately not implemented — this is the most
-sensitive atomic function in the F&F subsystem, and a rushed change to it
-was judged a worse risk than disclosing the gap. See
-`docs/production-readiness/STATUS.md`'s 2026-10-12 addenda (both rounds)
-for the full writeup and what's still open (the F&F-concurrency fix itself,
-plus real-Supabase-RLS/E2E staging evidence).
+decrements, **plus, as of round 3, a real concurrency check** — migration
+448's extension to `mark_fnf_paid_atomic`: `computeFnfSettlement` now
+returns the exact `(leave_type_id, year)` pairs it read balances for
+(`separation_ff_summary.leave_encashment_basis`), and `mark_fnf_paid_atomic`
+re-sums exactly those rows and raises `SOURCE_DRIFT` if a standalone
+encashment approval changed the balance since F&F approval — the same
+pattern already proven for loan/advance/asset drift, closing the
+approve→mark-paid race round 2 had identified but deliberately deferred.
+
+Round 3 also found and fixed a real, previously-unnoticed defect in a
+subsystem neither round 1 nor round 2 had examined: the accounting ledger
+(`lib/payroll-accounting-engine.ts`) built every journal entry from the
+employee's *standing* compensation catalog, never from the slip's actual
+computed components — so `LEAVE_ENCASHMENT`/its `TDS` line (and,
+pre-existing, advance/loan-EMI deductions) were silently absent from every
+GL posting, and the LOP contra formula misclassified their rupee value as
+"LOP recovery" instead. Fixed generally via a new `payroll_employee_
+snapshots.adhoc_components` column (migration 449) and a named,
+tested `computeLopAmount` helper — closing the pre-existing advance/loan-EMI
+gap too, as a side effect.
+
+Two further gaps were found this round and honestly disclosed as NOT
+fixed (lower severity, operational rather than money-safety): the
+statutory TDS reconciliation screen doesn't know about one-time
+encashment payouts (shows a spurious variance, doesn't mispay or misfile);
+and `computeEncashmentPayout`'s rate-per-day could be overstated for a
+second encashment request if the first one inflated the slip it reads from.
+See `docs/production-readiness/STATUS.md`'s 2026-10-12 addenda (all three
+rounds) for the full writeup and what's still open.
 

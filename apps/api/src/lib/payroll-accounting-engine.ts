@@ -188,6 +188,30 @@ function journalRef(month: string, seq: number): string {
   return `PAY-${month}-${String(seq).padStart(4, '0')}`
 }
 
+// ── LOP amount derivation (migration 449) ─────────────────────────────────────
+
+/**
+ * payroll_employee_snapshots has no dedicated lop_amount column — it's
+ * derived here as the remainder: gross_pay - net_pay - every OTHER deduction
+ * already accounted for. Ad-hoc deductions (advance/loan EMI, a standalone
+ * leave encashment's TDS withholding — components with no
+ * employee_compensations catalog row) must be subtracted too, or their
+ * rupee value is misclassified as "LOP recovery" here instead of posted via
+ * their own Dr/Cr pair in generateLedgerEntries.
+ *
+ * Ad-hoc EARNINGS (e.g. the encashment payout itself) need no term here:
+ * they raise gross_pay and net_pay by the same amount, so they cancel out
+ * of (gross_pay - net_pay) algebraically.
+ */
+export function computeLopAmount(
+  grossPay:           number,
+  netPay:              number,
+  catalogDeductionTotal: number,
+  adhocDeductionTotal:   number,
+): number {
+  return round2(Math.max(0, grossPay - netPay - catalogDeductionTotal - adhocDeductionTotal))
+}
+
 // ── Core ledger entry builder ─────────────────────────────────────────────────
 
 export function generateLedgerEntries(params: {
@@ -620,7 +644,7 @@ export async function buildPayrollFinancialLedger(
     empSnaps = await fetchAllRows((from, to) =>
       supabase
         .from('payroll_employee_snapshots')
-        .select('employee_id, employee_code, employee_name, gross_pay, deductions, net_pay, overtime_hours, compensation_snapshot')
+        .select('employee_id, employee_code, employee_name, gross_pay, deductions, net_pay, overtime_hours, compensation_snapshot, adhoc_components')
         .eq('snapshot_id', snapshotId)
         .eq('tenant_id', tenantId)
         .order('employee_id')
@@ -704,13 +728,31 @@ export async function buildPayrollFinancialLedger(
     const comps = (emp.compensation_snapshot?.components ?? []) as Array<{
       code: string; name: string; component_type: string; monthly_amount: number
     }>
+    // Ad-hoc components (migration 449) — standalone leave encashment's
+    // LEAVE_ENCASHMENT/TDS lines, advance/loan-EMI recovery deductions —
+    // have no row in compensation_snapshot (the employee's STANDING
+    // structure) since they're synthesized per-run in payroll-engine.ts.
+    // Without posting these too, that money silently never reaches any
+    // GL account; see migration 449's header for the full defect.
+    const adhocComps = (emp.adhoc_components ?? []) as Array<{
+      code: string; name: string; component_type: string; monthly_amount: number
+    }>
+    const allComps = [...comps, ...adhocComps]
 
-    // Compute LOP amount: gross - net - statutory deductions
+    // Compute LOP amount: gross - net - statutory deductions - ad-hoc deductions.
     // gross_pay/net_pay are NUMERIC on payroll_employee_snapshots (string over the
     // wire); `-` auto-coerces so the subtraction itself is safe, but the deduction
-    // reduce below is not (G13 sweep).
+    // reduces below are not (G13 sweep).
+    //
+    // Ad-hoc EARNINGS (e.g. LEAVE_ENCASHMENT) don't need their own subtraction
+    // here: they raise gross_pay and net_pay by the same amount, so they cancel
+    // out of (gross_pay - net_pay) algebraically. Ad-hoc DEDUCTIONS do not
+    // cancel — without subtracting them too, their rupee value would be
+    // misclassified as "LOP recovery" instead of posted via their own Dr/Cr
+    // pair below (the exact bug migration 449 fixes).
     const statutoryDedTotal = comps.filter(c => c.component_type === 'deduction').reduce((s, c) => s + Number(c.monthly_amount ?? 0), 0)
-    const lopAmount = round2(Math.max(0, emp.gross_pay - emp.net_pay - statutoryDedTotal))
+    const adhocDedTotal     = adhocComps.filter(c => c.component_type === 'deduction').reduce((s, c) => s + Number(c.monthly_amount ?? 0), 0)
+    const lopAmount = computeLopAmount(emp.gross_pay, emp.net_pay, statutoryDedTotal, adhocDedTotal)
 
     const empEntries = generateLedgerEntries({
       employeeId:     emp.employee_id,
@@ -718,7 +760,7 @@ export async function buildPayrollFinancialLedger(
       employeeName:   emp.employee_name ?? '',
       month,
       seq:            ++globalSeq,
-      components:     comps,
+      components:     allComps,
       grossPay:       emp.gross_pay,
       netPay:         emp.net_pay,
       lopAmount,

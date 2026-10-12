@@ -464,6 +464,69 @@ on.** The two concrete paths:
     layered onto the NO-GO verdict in §5, not something this addendum
     resolves.**
 
+  **Addendum (2026-10-12, round 3): the F&F-concurrency gap from round 2 is
+  now FIXED, not just disclosed; a real, previously-unnoticed defect was
+  found and fixed in a subsystem no prior round examined (accounting); two
+  further gaps were found and honestly disclosed as NOT fixed.** A further
+  review asked for proof, not argument, on payment lifecycle, recomputation
+  safety across accounting/exports, and F&F concurrency.
+  - **Payment lifecycle — "cancelled/deleted runs preserve the entitlement"
+    is now proven, not just argued.** Round 2 relied on reading the
+    `ON DELETE SET NULL` FK and the existing finalized-run deletion guard.
+    This is now exercised against real Postgres: deleting a draft run with
+    an assigned request leaves it `'approved'`, unassigned, figures intact,
+    and re-assignable — 7 new checks, `scripts/db/verify-g12-encashment-
+    atomic.mjs`'s `[C2]`.
+  - **F&F-vs-standalone-encashment concurrency — FIXED (migration 448).**
+    The compute→approve window was already closed by the existing
+    approve-route staleness check; the real unclosed window was
+    approve→mark-paid. `computeFnfSettlement` now returns the exact
+    `(leave_type_id, year)` pairs it read balances for, stored as
+    `separation_ff_summary.leave_encashment_basis`; `mark_fnf_paid_atomic`
+    now re-sums exactly those rows and raises `SOURCE_DRIFT` on mismatch —
+    the identical pattern already proven for loan/advance/asset drift.
+    Proven with 10 new real-Postgres checks (`scripts/db/verify-fnf-mark-
+    paid-atomic.mjs` `[F]`–`[I]`), including that a drift abort leaves the
+    *loan in the same settlement* unforeclosed too (the abort is
+    transaction-wide). All of round 2's original loan/advance/F&F-vs-F&F/
+    payroll-vs-F&F concurrency checks still pass unchanged.
+  - **Payroll consistency — accounting: a real defect no prior round
+    looked for, found and fixed (migration 449).** The accounting ledger
+    (`payroll-accounting-engine.ts`) built every journal entry exclusively
+    from the employee's *standing* compensation catalog, never from the
+    slip's actual computed components — so standalone encashment's
+    `LEAVE_ENCASHMENT`/`TDS` lines (and, pre-existing, advance/loan-EMI
+    deductions) were silently absent from every GL posting, and the LOP
+    contra formula misclassified their rupee value as "LOP recovery"
+    instead. Fixed generally (not encashment-specific — it also closes the
+    pre-existing advance/loan-EMI gap as a side effect): the slip's ad-hoc
+    components are now captured in a new `payroll_employee_snapshots.
+    adhoc_components` column and posted via the same GL-mapping path
+    catalog components use; the LOP formula (now a named, tested
+    `computeLopAmount` helper) excludes them. 8 new unit tests prove both
+    the posting and the formula fix, including an explicit assertion of
+    what the pre-fix behavior would have misclassified.
+  - **Two further gaps found this round, disclosed, NOT fixed** (lower
+    severity, operational rather than money-safety): the statutory TDS
+    reconciliation screen (`statutory-recon.ts`) compares slip-derived TDS
+    (correct) against a separate manual projections table that doesn't
+    know about one-time encashment payouts, so an encashment month shows a
+    spurious variance needing manual review — it does not cause an
+    incorrect payment or filing (24Q/challan/IT-Statement/YTD all read the
+    slip directly and were verified correct). And `computeEncashmentPayout`
+    bases its rate on the single most recent finalized slip's `gross_pay`,
+    which could itself be inflated by a prior encashment payout, overstating
+    a *subsequent* request's rate — a real, confirmed, likely-rare edge
+    case. Full detail: `STATUS.md`'s 2026-10-12 round-3 addendum;
+    `FINDINGS.csv` rows `G12-DELETE-RUN-PRESERVATION`,
+    `G12-ACCOUNTING-LEDGER-ADHOC-GAP`, `G12-TDS-RECON-SCREEN-GAP`,
+    `G12-ENCASHMENT-RATE-COMPOUNDING-RISK`, and the updated
+    `G12-FF-CONCURRENCY-GAP` (now `FIXED`).
+  - Full API suite after this round: 48 files / 418 tests pass; `apps/api`
+    and `apps/web` both typecheck clean; full migration history (000→449)
+    verified against a fresh local Postgres 16 instance;
+    `check-schema-drift.mjs` passes clean.
+
 None of the four gates are closed by this round's local work, and none of
 them can be closed by more local work of the same kind — each needs either
 external access (Gates 1–3) or an explicit decision (Gate 4).

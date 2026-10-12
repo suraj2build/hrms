@@ -465,6 +465,31 @@ describe('PATCH /separation-ff/mark-paid — delegates to mark_fnf_paid_atomic (
     await app.close()
   })
 
+  it('SOURCE_DRIFT for a leave-encashment balance change (migration 448) → 409 SOURCE_DRIFT, settlement left approved', async () => {
+    const { app, fake } = await buildApp({ employees: [employeeRow()], separation_ff_summary: [ffRow({ status: 'approved' })] })
+    fake.rpc.mockResolvedValueOnce({ data: null, error: { message: 'SOURCE_DRIFT: Leave encashment balance has changed since this settlement was approved (approved 10 days, current 4 days — likely a standalone encashment request approved in between). Reopen, recompute and re-approve before marking as paid.' } })
+
+    const res = await app.inject({ method: 'PATCH', url: `/employees/${EMPLOYEE_ID}/separation-ff/mark-paid`, headers: HEADERS, payload: {} })
+    expect(res.statusCode).toBe(409)
+    const body = JSON.parse(res.body)
+    expect(body.error).toBe('SOURCE_DRIFT')
+    expect(body.message).toContain('10 days')
+    expect(body.message).toContain('4 days')
+    expect(fake._db.separation_ff_summary[0].status).toBe('approved')
+    await app.close()
+  })
+
+  it('LEAVE_BASIS_MISSING from the RPC (days > 0, no recorded basis) → 409 LEAVE_BASIS_MISSING, settlement left approved', async () => {
+    const { app, fake } = await buildApp({ employees: [employeeRow()], separation_ff_summary: [ffRow({ status: 'approved' })] })
+    fake.rpc.mockResolvedValueOnce({ data: null, error: { message: 'LEAVE_BASIS_MISSING: This settlement has a leave encashment amount but no recorded basis to verify it against (predates this check, or was entered manually without running Compute). Recompute via POST /separation-ff/compute, review, and re-approve before marking as paid.' } })
+
+    const res = await app.inject({ method: 'PATCH', url: `/employees/${EMPLOYEE_ID}/separation-ff/mark-paid`, headers: HEADERS, payload: {} })
+    expect(res.statusCode).toBe(409)
+    expect(JSON.parse(res.body).error).toBe('LEAVE_BASIS_MISSING')
+    expect(fake._db.separation_ff_summary[0].status).toBe('approved')
+    await app.close()
+  })
+
   it('an unrecognized RPC error falls back to a generic 500, never leaking the raw DB message', async () => {
     const { app, fake } = await buildApp({ employees: [employeeRow()], separation_ff_summary: [ffRow({ status: 'approved' })] })
     fake.rpc.mockResolvedValueOnce({ data: null, error: { message: 'duplicate key value violates unique constraint "advance_recoveries_pkey"' } })

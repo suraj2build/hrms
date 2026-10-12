@@ -26,6 +26,14 @@ export interface FnfBreakdown {
   leave_encashment_amount: number
   leave_encashment_days:   number
   leave_encashment_rate:   number
+  /** Exact (leave_type_id, year) rows this computation read `employee_leave_balance`
+   *  for — stored verbatim on `separation_ff_summary.leave_encashment_basis` so
+   *  `mark_fnf_paid_atomic` (migration 448) can re-sum precisely those rows at
+   *  mark-paid time and detect drift from a concurrent standalone-encashment
+   *  approval, without duplicating the encashable-type/leave-year resolution
+   *  logic in SQL. Empty array (not null) means "no encashable leave types for
+   *  this employee" — a real, verified zero, not "not computed yet". */
+  leave_encashment_basis:  Array<{ leave_type_id: string; year: number }>
   notice_period_deduction: number
   notice_shortfall_days:   number
   salary_basis_basic:      number
@@ -168,6 +176,7 @@ export async function computeFnfSettlement(
   if (rulesErr) return { error: `Failed to fetch encashable leave types: ${rulesErr.message}` }
   const encashableTypeIds = ((rules ?? []) as any[]).map(r => r.leave_type_id)
   let encashDays = 0
+  let leaveEncashmentBasis: Array<{ leave_type_id: string; year: number }> = []
   if (encashableTypeIds.length > 0) {
     // employee_leave_balance.year is keyed per the employee's assigned
     // policy year_type: for 'financial' (Apr–Mar) policies it stores the FY
@@ -199,6 +208,7 @@ export async function computeFnfSettlement(
     }
 
     const year = getLeaveYear(new Date(lastWorking), yearType)
+    leaveEncashmentBasis = encashableTypeIds.map((id: string) => ({ leave_type_id: id, year }))
     const { data: balances, error: balancesErr } = await supabase
       .from('employee_leave_balance')
       .select('balance, leave_type_id')
@@ -292,6 +302,7 @@ export async function computeFnfSettlement(
     leave_encashment_amount: leaveEncashment,
     leave_encashment_days:   round2(encashDays),
     leave_encashment_rate:   encashRate,
+    leave_encashment_basis:  leaveEncashmentBasis,
     notice_period_deduction: noticeDeduction,
     notice_shortfall_days:   shortfallDays,
     salary_basis_basic:      basic,

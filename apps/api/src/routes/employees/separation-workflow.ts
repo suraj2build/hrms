@@ -571,6 +571,7 @@ export default async function separationWorkflowRoutes(fastify: FastifyInstance)
       gratuity_years:          breakdown.gratuity_years,
       leave_encashment_days:   breakdown.leave_encashment_days,
       leave_encashment_rate:   breakdown.leave_encashment_rate,
+      leave_encashment_basis:  breakdown.leave_encashment_basis,
       notice_shortfall_days:   breakdown.notice_shortfall_days,
       salary_basis_basic:      breakdown.salary_basis_basic,
       salary_basis_gross:      breakdown.salary_basis_gross,
@@ -766,15 +767,27 @@ export default async function separationWorkflowRoutes(fastify: FastifyInstance)
 
     // Status flip + loan foreclosure + advance recovery (schedules + ledger
     // + parent-request status) all happen inside mark_fnf_paid_atomic
-    // (migration 445) as ONE transaction — not a sequence of independent
-    // PostgREST round-trips. It FOR UPDATE-locks the settlement row and
-    // every source loan/advance/asset row up front (so a concurrent payroll
-    // run blocks on them rather than racing this), then validates current
-    // loan/advance/asset totals against what was actually approved before
-    // writing anything — a partial repayment or asset return landing
-    // between approve and mark-paid aborts the whole call (nothing half-
-    // applied) instead of silently paying out a different recovery than
-    // what HR reviewed.
+    // (migration 445, extended by 448) as ONE transaction — not a sequence
+    // of independent PostgREST round-trips. It FOR UPDATE-locks the
+    // settlement row and every source loan/advance/asset row up front (so a
+    // concurrent payroll run blocks on them rather than racing this), then
+    // validates current loan/advance/asset totals against what was actually
+    // approved before writing anything — a partial repayment or asset
+    // return landing between approve and mark-paid aborts the whole call
+    // (nothing half-applied) instead of silently paying out a different
+    // recovery than what HR reviewed.
+    //
+    // Migration 448 closes a further gap: the compute→approve window
+    // already re-validates leave_encashment_amount via the staleness check
+    // in PATCH .../approve above, but nothing previously re-checked it
+    // again in the approve→mark-paid window. mark_fnf_paid_atomic now also
+    // FOR UPDATE-locks and re-sums employee_leave_balance for the exact
+    // (leave_type_id, year) rows captured at compute time
+    // (leave_encashment_basis) and aborts with SOURCE_DRIFT if a concurrent
+    // standalone leave-encashment approval changed the balance since this
+    // settlement was approved — the same pattern as the loan/advance/asset
+    // checks, closing the last window where F&F and standalone encashment
+    // could otherwise both pay out against the same leave days.
     const { data: rpcData, error: rpcErr } = await fastify.supabase.rpc('mark_fnf_paid_atomic', {
       p_tenant_id:   req.tenantId,
       p_employee_id: req.params.id,
@@ -791,6 +804,8 @@ export default async function separationWorkflowRoutes(fastify: FastifyInstance)
         return reply.code(409).send({ error: 'ALREADY_DECIDED', message: msg.replace(/^.*ALREADY_DECIDED:\s*/, '') })
       if (msg.includes('SOURCE_DRIFT:'))
         return reply.code(409).send({ error: 'SOURCE_DRIFT', message: msg.replace(/^.*SOURCE_DRIFT:\s*/, '') })
+      if (msg.includes('LEAVE_BASIS_MISSING:'))
+        return reply.code(409).send({ error: 'LEAVE_BASIS_MISSING', message: msg.replace(/^.*LEAVE_BASIS_MISSING:\s*/, '') })
       return serverError(req, reply, rpcErr, ErrorCode.UPDATE_FAILED, 'Failed to mark F&F settlement as paid')
     }
 

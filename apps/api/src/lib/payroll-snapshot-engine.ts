@@ -143,6 +143,18 @@ export interface EmployeeSnapshotBlob {
   attendance_snapshot:   AttendanceSnapshot
   compensation_snapshot: CompensationSnapshot
   component_snapshot:    { components: CompensationSnapshot['components']; hash: string }
+  /** Ad-hoc payroll_slips.component_breakdown lines that have NO corresponding
+   *  `employee_compensations` catalog row — e.g. a one-time standalone leave
+   *  encashment payout + its withholding (LEAVE_ENCASHMENT/TDS,
+   *  apps/api/src/lib/payroll-engine.ts's applyEncashmentPayout), or advance/
+   *  loan-EMI recovery deductions (ADVANCE_RECOVERY/LOAN_EMI,
+   *  applyAdvanceLoanRecovery). `compensation_snapshot.components` only
+   *  reflects the employee's STANDING compensation structure, so these
+   *  synthesized-at-compute-time lines never appear there — without this
+   *  field they were silently absent from the accounting ledger (migration
+   *  449's fix). Minimal shape: just what generateLedgerEntries needs to
+   *  post a Dr/Cr pair for each line via its existing GL-mapping fallback. */
+  adhoc_components:      Array<{ code: string; name: string; component_type: string; monthly_amount: number }>
   statutory_snapshot:    StatutorySnapshot
   formula_snapshot:      FormulaSnapshot
   validation_snapshot:   ValidationSnapshot
@@ -585,6 +597,17 @@ export async function buildEmployeePayrollSnapshot(
     const compBlob   = buildComponentSnapshot(compSnap.components)
     const formulaBlob = buildFormulaSnapshot(compSnap.components)
 
+    // Ad-hoc component_breakdown lines with no catalog backing (see
+    // EmployeeSnapshotBlob.adhoc_components doc comment) — identified by
+    // code, since these are synthesized directly in TS with no real
+    // salary_component_id (applyEncashmentPayout/applyAdvanceLoanRecovery
+    // both set salary_component_id to a request/schedule id, never a real
+    // salary_components.id).
+    const catalogCodes = new Set(compSnap.components.map(c => c.code))
+    const adhocComponents = (slipResult?.component_breakdown ?? [])
+      .filter(c => !catalogCodes.has(c.code))
+      .map(c => ({ code: c.code, name: c.name, component_type: c.component_type, monthly_amount: c.monthly_amount }))
+
     // Fetch employee meta for the blob
     const { data: emp } = await supabase
       .from('employees')
@@ -599,6 +622,7 @@ export async function buildEmployeePayrollSnapshot(
       attendance_snapshot:   attSnap,
       compensation_snapshot: compSnap,
       component_snapshot:    compBlob,
+      adhoc_components:      adhocComponents,
       statutory_snapshot:    statSnap,
       formula_snapshot:      formulaBlob,
       validation_snapshot:   validSnap,
@@ -639,7 +663,7 @@ export async function buildPayrollRunSnapshot(
         .from('payroll_slips')
         .select(`
           employee_id, month, gross_pay, total_deductions, net_pay,
-          payable_days, lop_days, overtime_hours, total_working_days,
+          payable_days, lop_days, overtime_hours, total_working_days, component_breakdown,
           employees ( employee_code, profiles!profile_id ( full_name ) )
         `)
         .eq('run_id', runId)
@@ -677,7 +701,11 @@ export async function buildPayrollRunSnapshot(
           total_deductions:       s.total_deductions ?? 0,
           net_pay:                s.net_pay ?? 0,
           employer_contributions: 0,
-          component_breakdown:    [],
+          // Real component lines from the finalized slip, including any ad-hoc
+          // ones (leave encashment, advance/loan EMI) with no compensation-
+          // catalog row — buildEmployeePayrollSnapshot below diffs these
+          // against the catalog to populate adhoc_components for the ledger.
+          component_breakdown:    s.component_breakdown ?? [],
           recovered_recovery_ids: [],
           deferred_recovery_ids:  [],
         }
@@ -729,6 +757,7 @@ export async function buildPayrollRunSnapshot(
     attendance_snapshot:   e.blob.attendance_snapshot,
     compensation_snapshot: e.blob.compensation_snapshot,
     component_snapshot:    e.blob.component_snapshot,
+    adhoc_components:      e.blob.adhoc_components,
     statutory_snapshot:    e.blob.statutory_snapshot,
     formula_snapshot:      e.blob.formula_snapshot,
     validation_snapshot:   e.blob.validation_snapshot,

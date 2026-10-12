@@ -858,3 +858,153 @@ concurrently in production.** Until then, operational mitigation is
 procedural (don't run F&F settlement and standalone encashment approval for
 the same employee in the same window) — not something this codebase
 currently enforces.
+
+---
+
+## Addendum (2026-10-12, round 3) — F&F-concurrency gap FIXED (migration 448); accounting-ledger gap found and FIXED (migration 449); two further gaps found and disclosed, NOT fixed
+
+A further review asked for proof — not just disclosure — on payment
+lifecycle, recomputation safety across accounting/exports, and F&F
+concurrency. Independently re-verifying each against the actual code (not
+re-asserting round 2's claims) found: one previously-disclosed gap is now
+genuinely closed with real-Postgres evidence; one NEW, real, previously
+unnoticed defect in a part of the system round 2 never looked at (the
+accounting ledger); and two further gaps, newly found and honestly
+disclosed as NOT fixed.
+
+**1. Payment lifecycle — "cancelled/deleted runs preserve the entitlement" now proven.**
+Round 2 argued from code reading (the FK's `ON DELETE SET NULL` plus the
+existing guard blocking deletion of a finalized run) that deleting a draft
+payroll run safely unassigns, rather than loses, an assigned encashment
+request. That argument was never exercised against a real database. It now
+is: `scripts/db/verify-g12-encashment-atomic.mjs`'s new `[C2]` section
+assigns a request to a draft run, calls the exact `DELETE FROM
+payroll_runs` the real route runs, and confirms the request survives with
+`status='approved'`, `payroll_run_id` reset to `NULL`, its gross/TDS
+figures untouched, and that it can be assigned to a different run
+afterward — 7 new checks, all passing against real Postgres.
+
+**2. F&F-vs-standalone-encashment concurrency — FIXED (migration 448), not
+just disclosed.** Round 2 correctly identified the gap (`mark_fnf_paid_
+atomic` had no leave-encashment drift check) but deliberately deferred the
+fix as too risky to rush. Revisiting it with a clear design: the
+compute→approve window was ALREADY closed (the existing approve-route
+staleness check in `separation-workflow.ts` recomputes
+`leave_encashment_amount` fresh and blocks on drift) — the genuinely
+unclosed window was approve→mark-paid. Fix: `computeFnfSettlement`
+(`fnf-settlement-engine.ts`) now returns the exact `(leave_type_id, year)`
+pairs it read `employee_leave_balance` for, stored verbatim as
+`separation_ff_summary.leave_encashment_basis` by `POST /separation-ff/
+compute`. `mark_fnf_paid_atomic` (migration 448) now additionally
+`FOR UPDATE`-locks and re-sums `employee_leave_balance` for exactly those
+rows and raises `SOURCE_DRIFT` if the current total differs from what was
+approved — the identical pattern already proven for loan/advance/asset
+drift. A settlement with `leave_encashment_days <= 0` skips the check
+entirely (nothing to protect); one with days > 0 but no stored basis
+(predates this migration, or entered manually without ever running
+Compute) raises a distinct `LEAVE_BASIS_MISSING` rather than silently
+skipping or guessing.
+
+Evidence: `scripts/db/verify-fnf-mark-paid-atomic.mjs` extended with 4 new
+sections (`[F]`–`[I]`, 10 checks) run against real Postgres — a clean
+leave-encashment happy path; a simulated concurrent standalone-encashment
+approval between F&F approve and mark-paid correctly raising
+`SOURCE_DRIFT`, with the *loan in the same settlement* also left
+unforeclosed (proving the abort is transaction-wide, not per-check);
+`LEAVE_BASIS_MISSING` for a basis-less settlement; and a zero-days
+settlement proceeding unaffected by the new check (no false blocks on
+ordinary loan/advance-only settlements). All of round 2's original
+loan/advance/F&F-vs-F&F/payroll-vs-F&F concurrency checks still pass
+unchanged. Route-level test coverage added in `separation-ff.test.ts` for
+both the new `SOURCE_DRIFT` (leave-encashment variant) and
+`LEAVE_BASIS_MISSING` error mappings.
+
+**3. Payroll consistency — accounting: a real, previously-unnoticed
+defect, found and fixed (migration 449).** Neither round 1 nor round 2
+traced the accounting-ledger subsystem. This round did, and found that
+`buildPayrollFinancialLedger` (`payroll-accounting-engine.ts`) builds its
+journal entries exclusively from `payroll_employee_snapshots.compensation_
+snapshot.components` — the employee's **standing** compensation structure
+(from `employee_compensation_components`), not the actual computed slip.
+Any ad-hoc component synthesized directly in `payroll-engine.ts` with no
+catalog row — standalone leave encashment's `LEAVE_ENCASHMENT` earning and
+its `TDS` withholding (migration 447), **and, pre-existing, advance/loan-EMI
+recovery deductions** — was therefore **silently absent from every GL
+posting**. Worse than omission: the LOP contra amount was computed as
+`gross_pay - net_pay - statutoryDedTotal` (catalog deductions only), an
+implicit assumption that `total_deductions` never contains anything besides
+catalog deductions and LOP — false once any ad-hoc deduction exists, so its
+rupee value was **misclassified as "LOP recovery"** instead of posted to
+its real GL bucket (e.g. TDS Payable).
+
+Fix: `payroll-snapshot-engine.ts`'s `buildPayrollRunSnapshot` now fetches
+`payroll_slips.component_breakdown`; `buildEmployeePayrollSnapshot` diffs it
+against the compensation catalog by code and stores the ad-hoc remainder on
+a new `payroll_employee_snapshots.adhoc_components` column (migration 449).
+`buildPayrollFinancialLedger` merges this into the component list
+`generateLedgerEntries` posts (so ad-hoc lines get a real Dr/Cr pair via the
+exact same GL-mapping/default-fallback path catalog components already
+use — `TDS` correctly routes to TDS Payable via the existing
+`STATUTORY_DEDUCTION_MAP`), and the LOP formula now subtracts the ad-hoc
+deduction total too (extracted into a named, tested `computeLopAmount`
+helper) so it's never double-counted into that bucket. **This fix is
+general, not encashment-specific — it also closes the same pre-existing gap
+for advance/loan-EMI deductions as a direct side effect**, something no
+prior round of this review had noticed.
+
+Evidence: new `apps/api/src/lib/__tests__/payroll-accounting-engine.test.ts`
+(8 tests) proves `computeLopAmount` correctly excludes an ad-hoc deduction
+from the LOP remainder (and that without the fix it would have been
+misclassified — asserted directly), that an ad-hoc TDS deduction posts to
+TDS Payable, that an ad-hoc earning falls back to Salary Expense/Payroll
+Payable, that an ad-hoc advance/loan-EMI deduction falls back to Other
+Statutory Payable, and that the full resulting entry set still balances
+(∑debit = ∑credit). Migration 449 verified against a fresh local Postgres
+16 instance with the full history (000→449) applying cleanly;
+`check-schema-drift.mjs` passes clean. Full API suite: 48 files / 418 tests
+pass; `apps/api` and `apps/web` both typecheck clean.
+
+**4. Two further gaps found during this round's investigation, disclosed,
+NOT fixed** (lower severity — operational/edge-case, not money-safety
+defects on the scale of points 2–3 above, and each would need its own
+dedicated review to fix safely):
+
+- **Tax reconciliation screen variance for encashment months.**
+  `statutory-recon.ts`'s TDS reconciliation compares `computed` (correctly
+  derived from `payroll_slips.component_breakdown`, so it already reflects
+  encashment TDS) against `payable` (from `tds_monthly_projections`,
+  populated by a separate manual admin workflow —
+  `POST /payroll/statutory/tds/projections/compute/:employeeId` — that has
+  no knowledge of one-time encashment payouts). Any month with an
+  encashment will show a spurious TDS variance against the reconciliation
+  screen's ₹1 threshold, which may block `/close` until manually reviewed
+  and confirmed. This does not cause an incorrect payment or filing (the
+  24Q export, challan generation, IT Statement, and YTD summary all read
+  `payroll_slips.tds_deducted`/`gross_pay` directly and were independently
+  verified to already handle the encashment TDS correctly, no action
+  needed) — it is a manual-reconciliation friction point, not a correctness
+  defect. Needs either teaching the projections-compute endpoint about
+  one-time components, or a documented reconciliation exception path for
+  lump-sum months.
+- **`computeEncashmentPayout`'s rate_per_day compounding risk.**
+  `accrual-engine.ts`'s standalone-encashment rate computation reads
+  `rate_per_day = lastSlip.gross_pay / 26` from the single most recent
+  finalized `payroll_slips` row. If an employee's most recent finalized
+  slip itself included a PRIOR encashment payout (this one or a different
+  one), that slip's `gross_pay` is inflated by that one-time amount, and a
+  SUBSEQUENT standalone encashment request computed off that slip would get
+  an overstated per-day rate. Likely rare in practice (requires the same
+  employee to request encashment more than once within a short window), but
+  a real, confirmed edge case — not fixed this round.
+
+**Net effect on the four review points:** tax treatment (point 1,
+unchanged — still a flat marginal-rate withholding, still disclosed as not
+Section 10(10AA)-compliant) and the two newly-found reconciliation/rate
+edge cases above remain open. Payment lifecycle (point 2) and payroll
+consistency / accounting (point 3) are now proven, not just argued, and the
+F&F-concurrency gap (point 4) is fixed, not just scoped. **NO-GO still
+stands** — these fixes close specific functional gaps; they do not
+substitute for the still-entirely-open real-staging gates (browser E2E,
+real authenticated-role RLS, production-scale concurrent-user load, managed
+backup/restore) every item in this document has been waiting on since
+round 1.

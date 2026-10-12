@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /**
- * Real-Postgres verification of mark_fnf_paid_atomic (migration 445).
+ * Real-Postgres verification of mark_fnf_paid_atomic (migration 445,
+ * extended by 448 for leave-encashment drift).
  *
  * Run against a throwaway database with the full migration history applied
  * (see sibling shell commands this session ran to build `fnf_verify`).
@@ -26,6 +27,18 @@
  *      same loan_schedules row must BLOCK until the F&F transaction
  *      commits, then match 0 rows (because the row is no longer
  *      'pending') — proving payroll can't race in a double deduction.
+ *   F. Leave-encashment happy path — a settlement with a real
+ *      leave_encashment_basis and matching current balance pays out clean.
+ *   G. Leave-encashment drift (migration 448) — a standalone encashment
+ *      approval decrementing the SAME balance between F&F approve and
+ *      mark-paid raises SOURCE_DRIFT, settlement stays 'approved', nothing
+ *      else half-applied (the loan in the same settlement is NOT
+ *      foreclosed either — proving the abort is transaction-wide).
+ *   H. LEAVE_BASIS_MISSING — a settlement with leave_encashment_days > 0
+ *      but no stored basis (predates 448, or entered manually) refuses
+ *      with an actionable error instead of silently skipping the check.
+ *   I. Zero leave_encashment_days skips the check entirely — no basis
+ *      needed, no false blocks on ordinary loan/advance-only settlements.
  */
 import pg from 'pg'
 
@@ -48,7 +61,10 @@ function check(label, cond) {
   }
 }
 
-async function seedEmployeeWithFnf(client, tenantId, { loanBalance, advanceAmount, ffStatus = 'approved' }) {
+async function seedEmployeeWithFnf(client, tenantId, {
+  loanBalance, advanceAmount, ffStatus = 'approved',
+  leaveTypeId = null, leaveYear = null, leaveEncashmentDays = null, leaveEncashmentBasis = undefined,
+}) {
   const empId = (await client.query(
     `INSERT INTO employees (tenant_id, employee_code, first_name, last_name, email, joining_date)
      VALUES ($1, $2, 'Test', 'Employee', $3, '2020-01-01') RETURNING id`,
@@ -59,11 +75,22 @@ async function seedEmployeeWithFnf(client, tenantId, { loanBalance, advanceAmoun
      VALUES ($1, $2, 'resignation', 'employee') RETURNING id`,
     [tenantId, empId],
   )).rows[0].id
+  // leaveEncashmentBasis: undefined -> column stays NULL (never computed, migration-448 exemption case).
+  // Pass [] explicitly for "computed, verified zero encashable types".
+  const basisParam = leaveEncashmentBasis === undefined ? null : JSON.stringify(leaveEncashmentBasis)
   const ffId = (await client.query(
-    `INSERT INTO separation_ff_summary (tenant_id, separation_id, employee_id, status, loan_recovery_amount, advance_recovery_amount, asset_recovery_amount)
-     VALUES ($1, $2, $3, $4, $5, $6, 0) RETURNING id`,
-    [tenantId, sepId, empId, ffStatus, loanBalance, advanceAmount],
+    `INSERT INTO separation_ff_summary (tenant_id, separation_id, employee_id, status, loan_recovery_amount, advance_recovery_amount, asset_recovery_amount, leave_encashment_days, leave_encashment_basis)
+     VALUES ($1, $2, $3, $4, $5, $6, 0, $7, $8) RETURNING id`,
+    [tenantId, sepId, empId, ffStatus, loanBalance, advanceAmount, leaveEncashmentDays, basisParam],
   )).rows[0].id
+
+  if (leaveTypeId && leaveYear != null) {
+    await client.query(
+      `INSERT INTO employee_leave_balance (tenant_id, employee_id, leave_type_id, year, balance)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [tenantId, empId, leaveTypeId, leaveYear, leaveEncashmentDays ?? 0],
+    )
+  }
 
   let loanId = null, loanSchedId = null
   if (loanBalance > 0) {
@@ -102,6 +129,8 @@ async function main() {
   const tenantId = (await admin.query(`INSERT INTO tenants (name, slug) VALUES ('fnf-verify', 'fnf-verify') RETURNING id`)).rows[0].id
   const userId = (await admin.query(`INSERT INTO auth.users (email) VALUES ('hr-admin@fnf-verify.test') RETURNING id`)).rows[0].id
   await admin.query(`INSERT INTO profiles (id, tenant_id, role, full_name) VALUES ($1, $2, 'hr_admin', 'HR Admin')`, [userId, tenantId])
+  const leaveTypeId = (await admin.query(`INSERT INTO leave_types (tenant_id, name, is_paid) VALUES ($1, 'Earned Leave', true) RETURNING id`, [tenantId])).rows[0].id
+  const leaveYear = new Date().getFullYear()
 
   // ── A. Happy path ──────────────────────────────────────────────────────────
   console.log('\n[A] Happy path')
@@ -207,6 +236,78 @@ async function main() {
     check("payroll write matched 0 rows — the schedule was already 'adjusted', not 'pending', so payroll can't double-process it", payrollResult.rowCount === 0)
 
     await fnfConn.end(); await payrollConn.end()
+  }
+
+  // ── F. Leave-encashment happy path ──────────────────────────────────────────
+  console.log('\n[F] Leave-encashment happy path — basis matches current balance')
+  {
+    const s = await seedEmployeeWithFnf(admin, tenantId, {
+      loanBalance: 0, advanceAmount: 0,
+      leaveTypeId, leaveYear, leaveEncashmentDays: 12,
+      leaveEncashmentBasis: [{ leave_type_id: leaveTypeId, year: leaveYear }],
+    })
+    const { rows } = await admin.query(`SELECT mark_fnf_paid_atomic($1, $2, $3) AS result`, [s.tenantId, s.empId, userId])
+    check('RPC returned a result', !!rows[0].result)
+    check('result reports the verified leave days', Number(rows[0].result.leave_encashment_days_verified) === 12)
+    const ff = (await admin.query(`SELECT status FROM separation_ff_summary WHERE id = $1`, [s.ffId])).rows[0]
+    check("settlement flipped to 'paid'", ff.status === 'paid')
+  }
+
+  // ── G. Leave-encashment drift (migration 448) ───────────────────────────────
+  console.log('\n[G] Leave-encashment drift — a concurrent standalone encashment consumed the balance since approval')
+  {
+    const s = await seedEmployeeWithFnf(admin, tenantId, {
+      loanBalance: 5000, advanceAmount: 0,
+      leaveTypeId, leaveYear, leaveEncashmentDays: 10,
+      leaveEncashmentBasis: [{ leave_type_id: leaveTypeId, year: leaveYear }],
+    })
+    // Simulate a standalone leave-encashment approval landing between F&F
+    // approve and mark-paid: it decremented the SAME balance row.
+    await admin.query(
+      `UPDATE employee_leave_balance SET balance = 4 WHERE tenant_id = $1 AND employee_id = $2 AND leave_type_id = $3 AND year = $4`,
+      [tenantId, s.empId, leaveTypeId, leaveYear],
+    )
+
+    let driftErr = null
+    try { await admin.query(`SELECT mark_fnf_paid_atomic($1, $2, $3)`, [s.tenantId, s.empId, userId]) }
+    catch (e) { driftErr = e }
+    check('raises SOURCE_DRIFT mentioning both day counts', driftErr && /SOURCE_DRIFT/.test(driftErr.message) && /10/.test(driftErr.message) && /\b4\b/.test(driftErr.message))
+
+    const ff = (await admin.query(`SELECT status FROM separation_ff_summary WHERE id = $1`, [s.ffId])).rows[0]
+    check("settlement left 'approved' — nothing half-applied", ff.status === 'approved')
+
+    const loan = (await admin.query(`SELECT status, outstanding_balance FROM employee_loans WHERE id = $1`, [s.loanId])).rows[0]
+    check('the loan in the SAME settlement is NOT foreclosed either — the abort is transaction-wide, not per-check', loan.status === 'active' && Number(loan.outstanding_balance) === 5000)
+
+    const bal = (await admin.query(`SELECT balance FROM employee_leave_balance WHERE tenant_id=$1 AND employee_id=$2 AND leave_type_id=$3 AND year=$4`, [tenantId, s.empId, leaveTypeId, leaveYear])).rows[0]
+    check('balance still at the drifted value (4) — the abort did not touch it either way', Number(bal.balance) === 4)
+  }
+
+  // ── H. LEAVE_BASIS_MISSING ───────────────────────────────────────────────────
+  console.log('\n[H] A settlement with days > 0 but no recorded basis refuses with an actionable error')
+  {
+    const s = await seedEmployeeWithFnf(admin, tenantId, {
+      loanBalance: 0, advanceAmount: 0,
+      leaveTypeId, leaveYear, leaveEncashmentDays: 8,
+      leaveEncashmentBasis: undefined, // predates 448 / manual entry — no basis stored
+    })
+    let err = null
+    try { await admin.query(`SELECT mark_fnf_paid_atomic($1, $2, $3)`, [s.tenantId, s.empId, userId]) }
+    catch (e) { err = e }
+    check('raises LEAVE_BASIS_MISSING, not a generic failure or a silent pass-through', err && /LEAVE_BASIS_MISSING/.test(err.message))
+    const ff = (await admin.query(`SELECT status FROM separation_ff_summary WHERE id = $1`, [s.ffId])).rows[0]
+    check("settlement left 'approved'", ff.status === 'approved')
+  }
+
+  // ── I. Zero leave_encashment_days skips the check entirely ──────────────────
+  console.log('\n[I] A loan/advance-only settlement (no leave encashment) is unaffected by the new check')
+  {
+    const s = await seedEmployeeWithFnf(admin, tenantId, {
+      loanBalance: 1500, advanceAmount: 0,
+      leaveEncashmentDays: 0, leaveEncashmentBasis: undefined,
+    })
+    const { rows } = await admin.query(`SELECT mark_fnf_paid_atomic($1, $2, $3) AS result`, [s.tenantId, s.empId, userId])
+    check('zero-days settlement with no basis still pays out cleanly — no false block', !!rows[0].result)
   }
 
   await admin.end()
