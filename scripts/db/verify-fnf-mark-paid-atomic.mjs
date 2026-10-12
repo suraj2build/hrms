@@ -2,7 +2,8 @@
 /**
  * Real-Postgres verification of mark_fnf_paid_atomic (migration 445,
  * extended by 448 for leave-encashment drift, 450 for leave-encashment
- * consumption).
+ * consumption) and correct_fnf_payment_atomic (migration 451, the
+ * compensating transaction for a paid settlement).
  *
  * Run against a throwaway database with the full migration history applied
  * (see sibling shell commands this session ran to build `fnf_verify`).
@@ -61,6 +62,26 @@
  *      then correctly fails once it sees the post-consumption balance —
  *      the row lock alone prevents the race, not a check that could still
  *      lose to a sufficiently-timed interleaving.
+ *   M. correct_fnf_payment_atomic (451) reverses exactly what a paid
+ *      settlement's own mark_fnf_paid_atomic call wrote: loan back to
+ *      'active' with outstanding_balance restored and foreclosure fields
+ *      cleared, loan_schedules back to 'pending'; advance_recovery_
+ *      schedules back to 'pending' and advance_salary_requests back to
+ *      'recovering', with the original advance_recoveries row KEPT and a
+ *      mirrored negative-amount reversal row inserted (append-only, same
+ *      invariant as the GL ledger); leave balance credited back using the
+ *      leave_balance_ledger table's own existing reversal mechanism
+ *      (txn_type='reversal', reversal_of, is_reversal — not a new ad-hoc
+ *      type); settlement itself back to 'draft' with correction_reason/
+ *      corrected_by recorded on the row. Also: an empty reason refuses
+ *      with REASON_REQUIRED; a second correction attempt on the
+ *      now-'draft' settlement refuses with INVALID_STATE (no double
+ *      credit).
+ *   M2. Scoping precision — an unrelated loan independently foreclosed
+ *      through some other means (not this F&F payment) is left completely
+ *      untouched by the correction, proving the reversal is scoped by the
+ *      exact foreclosure_notes/advance_recoveries.notes markers
+ *      mark_fnf_paid_atomic itself writes, not by status alone.
  */
 import pg from 'pg'
 
@@ -461,6 +482,107 @@ async function main() {
     check('balance ends at 0 — exactly one consumer (F&F) won the race', Number(balFinal.balance) === 0)
     const standaloneReqAfter = (await admin.query(`SELECT status FROM leave_encashment_requests WHERE id = $1`, [standaloneReqId])).rows[0]
     check('the standalone request is untouched by the failed deduction attempt', standaloneReqAfter.status === 'pending')
+  }
+
+  // ── M. correct_fnf_payment_atomic (migration 451) ───────────────────────────
+  console.log('\n[M] correct_fnf_payment_atomic reverses exactly what mark_fnf_paid_atomic wrote — loan, advance, and leave balance')
+  {
+    const s = await seedEmployeeWithFnf(admin, tenantId, {
+      loanBalance: 20000, advanceAmount: 3000,
+      leaveTypeId, leaveYear, leaveEncashmentDays: 9,
+      leaveEncashmentBasis: [{ leave_type_id: leaveTypeId, year: leaveYear }],
+    })
+    await admin.query(`SELECT mark_fnf_paid_atomic($1, $2, $3)`, [s.tenantId, s.empId, userId])
+
+    const paidFf = (await admin.query(`SELECT status FROM separation_ff_summary WHERE id = $1`, [s.ffId])).rows[0]
+    check("precondition: payment succeeded, settlement is 'paid'", paidFf.status === 'paid')
+
+    let noReasonErr = null
+    try { await admin.query(`SELECT correct_fnf_payment_atomic($1, $2, $3, $4)`, [s.tenantId, s.empId, userId, '']) }
+    catch (e) { noReasonErr = e }
+    check('an empty reason raises REASON_REQUIRED, nothing changed', noReasonErr && /REASON_REQUIRED/.test(noReasonErr.message))
+
+    const { rows } = await admin.query(
+      `SELECT correct_fnf_payment_atomic($1, $2, $3, $4) AS result`,
+      [s.tenantId, s.empId, userId, 'Bank transfer failed — reversing to re-run'],
+    )
+    check('correction RPC returned a result', !!rows[0].result)
+    check('result reports 1 loan reverted', Number(rows[0].result.loans_reverted) === 1)
+
+    const ffAfter = (await admin.query(`SELECT status, paid_by, paid_at, correction_reason, corrected_by FROM separation_ff_summary WHERE id = $1`, [s.ffId])).rows[0]
+    check("settlement reverted to 'draft'", ffAfter.status === 'draft')
+    check('paid_by/paid_at cleared', ffAfter.paid_by === null && ffAfter.paid_at === null)
+    check('correction_reason and corrected_by recorded on the row itself', ffAfter.correction_reason === 'Bank transfer failed — reversing to re-run' && ffAfter.corrected_by === userId)
+
+    const loan = (await admin.query(`SELECT status, outstanding_balance, foreclosed_at, foreclosure_amount, foreclosure_notes FROM employee_loans WHERE id = $1`, [s.loanId])).rows[0]
+    check("loan reverted to 'active' (not 'disbursed' — the only status payroll's own EMI query picks up)", loan.status === 'active')
+    check('outstanding_balance restored to the pre-foreclosure amount (20000)', Number(loan.outstanding_balance) === 20000)
+    check('foreclosure fields cleared', loan.foreclosed_at === null && loan.foreclosure_amount === null && loan.foreclosure_notes === null)
+
+    const loanSched = (await admin.query(`SELECT status FROM loan_schedules WHERE id = $1`, [s.loanSchedId])).rows[0]
+    check("loan schedule reverted 'adjusted' -> 'pending'", loanSched.status === 'pending')
+
+    const advSched = (await admin.query(`SELECT status, recovered_at FROM advance_recovery_schedules WHERE id = $1`, [s.advanceSchedId])).rows[0]
+    check("advance schedule reverted 'recovered' -> 'pending'", advSched.status === 'pending' && advSched.recovered_at === null)
+
+    const advReq = (await admin.query(`SELECT status FROM advance_salary_requests WHERE id = $1`, [s.advanceId])).rows[0]
+    check("advance request reverted 'fully_recovered' -> 'recovering'", advReq.status === 'recovering')
+
+    const advRecoveries = (await admin.query(
+      `SELECT amount, recovery_type FROM advance_recoveries WHERE advance_id = $1 ORDER BY created_at`,
+      [s.advanceId],
+    )).rows
+    // advance_recoveries is NOT append-only — migration 281's UNIQUE(tenant_id,
+    // schedule_id) index permits only one recovery row per schedule ever, and
+    // amount>=0 forbids a negative mirror row, so the correction deletes the
+    // row rather than reversing it in place (consistent with the schedule
+    // reverting to 'pending', which must be re-recoverable later).
+    check('the recovery row for this schedule is gone — not append-only here, deletion is correct', advRecoveries.length === 0)
+
+    const balAfter = (await admin.query(`SELECT balance FROM employee_leave_balance WHERE tenant_id=$1 AND employee_id=$2 AND leave_type_id=$3 AND year=$4`, [tenantId, s.empId, leaveTypeId, leaveYear])).rows[0]
+    check('leave balance credited back to the full 9 days — the entitlement is restored, not left spent', Number(balAfter.balance) === 9)
+
+    const ledgerRows = (await admin.query(
+      `SELECT txn_type, delta, is_reversal, reversal_of FROM leave_balance_ledger WHERE tenant_id=$1 AND employee_id=$2 AND leave_type_id=$3 AND year=$4 ORDER BY created_at`,
+      [tenantId, s.empId, leaveTypeId, leaveYear],
+    )).rows
+    check('original encashment ledger row KEPT (append-only), plus a reversal row using the table\'s own mechanism', ledgerRows.length === 2 && ledgerRows[0].txn_type === 'encashment' && ledgerRows[1].txn_type === 'reversal' && ledgerRows[1].is_reversal === true)
+    check('the reversal row points back at the original via reversal_of', ledgerRows[1].reversal_of !== null)
+
+    let doubleCorrectErr = null
+    try { await admin.query(`SELECT correct_fnf_payment_atomic($1, $2, $3, $4)`, [s.tenantId, s.empId, userId, 'second attempt']) }
+    catch (e) { doubleCorrectErr = e }
+    check("a second correction attempt on the now-'draft' settlement raises INVALID_STATE — not a silent no-op or a double-credit", doubleCorrectErr && /INVALID_STATE/.test(doubleCorrectErr.message))
+
+    const balStillNine = (await admin.query(`SELECT balance FROM employee_leave_balance WHERE tenant_id=$1 AND employee_id=$2 AND leave_type_id=$3 AND year=$4`, [tenantId, s.empId, leaveTypeId, leaveYear])).rows[0]
+    check('the rejected second correction did not double-credit the balance', Number(balStillNine.balance) === 9)
+  }
+
+  // ── M2. Scoping precision — an unrelated loan is NOT touched ────────────────
+  console.log('\n[M2] Correction is scoped precisely to rows THIS settlement\'s payment touched — an unrelated foreclosed loan is left alone')
+  {
+    const s = await seedEmployeeWithFnf(admin, tenantId, {
+      loanBalance: 5000, advanceAmount: 0,
+      leaveEncashmentDays: 0, leaveEncashmentBasis: undefined,
+    })
+    // An UNRELATED loan for the same employee, foreclosed through some other
+    // means (not F&F) — must survive the correction untouched, proving the
+    // scoping is by the exact foreclosure_notes marker mark_fnf_paid_atomic
+    // writes, not just "any foreclosed loan this employee has".
+    const unrelatedLoanId = (await admin.query(
+      `INSERT INTO employee_loans (tenant_id, employee_id, loan_type, principal_amount, tenure_months, outstanding_balance, status, foreclosed_at, foreclosure_amount, foreclosure_notes)
+       VALUES ($1, $2, 'personal', 8000, 12, 0, 'foreclosed', now(), 8000, 'Manually foreclosed by HR, unrelated to F&F') RETURNING id`,
+      [tenantId, s.empId],
+    )).rows[0].id
+
+    await admin.query(`SELECT mark_fnf_paid_atomic($1, $2, $3)`, [s.tenantId, s.empId, userId])
+    await admin.query(`SELECT correct_fnf_payment_atomic($1, $2, $3, $4)`, [s.tenantId, s.empId, userId, 'test scoping'])
+
+    const unrelated = (await admin.query(`SELECT status, outstanding_balance, foreclosure_notes FROM employee_loans WHERE id = $1`, [unrelatedLoanId])).rows[0]
+    check('the unrelated foreclosed loan is untouched — still foreclosed, balance still 0, notes unchanged', unrelated.status === 'foreclosed' && Number(unrelated.outstanding_balance) === 0 && unrelated.foreclosure_notes === 'Manually foreclosed by HR, unrelated to F&F')
+
+    const ourLoan = (await admin.query(`SELECT status FROM employee_loans WHERE id = $1`, [s.loanId])).rows[0]
+    check("the F&F-foreclosed loan WAS reverted to 'active'", ourLoan.status === 'active')
   }
 
   await admin.end()

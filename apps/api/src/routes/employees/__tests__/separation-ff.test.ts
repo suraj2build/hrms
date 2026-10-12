@@ -154,7 +154,7 @@ function makeFakeSupabase(seed: Record<string, Row[]>, raceHooks: Record<string,
   return { from: (t: string) => from(t), _db: db, rpc: vi.fn() }
 }
 
-type BuildAppOpts = { raceHooks?: Record<string, RaceHook[]> }
+type BuildAppOpts = { raceHooks?: Record<string, RaceHook[]>; userRole?: string }
 
 function employeeRow() {
   return { id: EMPLOYEE_ID, tenant_id: TENANT_ID, status: 'relieved' }
@@ -185,7 +185,7 @@ async function buildApp(seed: Record<string, Row[]>, opts: BuildAppOpts = {}) {
   app.decorate('authenticate', async (req: FastifyRequest) => {
     ;(req as any).tenantId = TENANT_ID
     ;(req as any).userId   = 'hr-admin-001'
-    ;(req as any).userRole = 'hr_admin'
+    ;(req as any).userRole = opts.userRole ?? 'hr_admin'
   })
   app.decorate('supabase', fake as any)
   await app.register(separationWorkflowRoutes)
@@ -542,6 +542,99 @@ describe('PATCH /separation-ff/reopen — the way out of a SOURCE_DRIFT block', 
     expect(res.statusCode).toBe(409)
     expect(JSON.parse(res.body).error).toBe('ALREADY_DECIDED')
     expect(fake._db.separation_ff_summary[0].status).toBe('paid')
+    await app.close()
+  })
+})
+
+describe('PATCH /separation-ff/correct-payment — the controlled, audited compensating transaction for a PAID settlement (migration 451)', () => {
+  // Same scoping as the mark-paid suite above: the route's own job is to
+  // gate on role, validate the reason, call the RPC, and map its outcome.
+  // The RPC's actual reversal of loans/advances/leave balance — scoped
+  // precisely to the rows mark_fnf_paid_atomic itself touched, never a
+  // loan/advance that reached the same terminal status some other way —
+  // is real plpgsql verified against real Postgres
+  // (scripts/db/verify-fnf-mark-paid-atomic.mjs sections [M]/[M2]); a
+  // mocked RPC response can't exercise that, so these tests don't claim to.
+
+  it('hr_admin is refused — this action is super_admin only (undoing a payment is bigger than making one)', async () => {
+    const { app } = await buildApp(
+      { employees: [employeeRow()], separation_ff_summary: [ffRow({ status: 'paid' })] },
+      { userRole: 'hr_admin' },
+    )
+    const res = await app.inject({
+      method: 'PATCH', url: `/employees/${EMPLOYEE_ID}/separation-ff/correct-payment`, headers: HEADERS,
+      payload: { reason: 'Bank transfer failed' },
+    })
+    expect(res.statusCode).toBe(403)
+    expect(JSON.parse(res.body).error).toBe('FORBIDDEN')
+    await app.close()
+  })
+
+  it('an empty reason is refused before the RPC is even called', async () => {
+    const { app, fake } = await buildApp(
+      { employees: [employeeRow()], separation_ff_summary: [ffRow({ status: 'paid' })] },
+      { userRole: 'super_admin' },
+    )
+    const res = await app.inject({
+      method: 'PATCH', url: `/employees/${EMPLOYEE_ID}/separation-ff/correct-payment`, headers: HEADERS,
+      payload: { reason: '' },
+    })
+    expect(res.statusCode).toBe(400)
+    expect(fake.rpc).not.toHaveBeenCalled()
+    await app.close()
+  })
+
+  it('happy path (super_admin, real reason) — calls the RPC, reloads and returns the draft row', async () => {
+    const { app, fake } = await buildApp(
+      { employees: [employeeRow()], separation_ff_summary: [ffRow({ status: 'paid' })] },
+      { userRole: 'super_admin' },
+    )
+    fake.rpc.mockResolvedValueOnce({ data: { id: FF_ID, status: 'draft', loans_reverted: 1 }, error: null })
+    fake._db.separation_ff_summary[0].status = 'draft'
+
+    const res = await app.inject({
+      method: 'PATCH', url: `/employees/${EMPLOYEE_ID}/separation-ff/correct-payment`, headers: HEADERS,
+      payload: { reason: 'Bank transfer failed — reversing to re-run' },
+    })
+    expect(res.statusCode).toBe(200)
+    expect(JSON.parse(res.body).data.status).toBe('draft')
+    expect(fake.rpc).toHaveBeenCalledWith('correct_fnf_payment_atomic', expect.objectContaining({
+      p_tenant_id: TENANT_ID, p_employee_id: EMPLOYEE_ID, p_user_id: 'hr-admin-001',
+      p_reason: 'Bank transfer failed — reversing to re-run',
+    }))
+    await app.close()
+  })
+
+  it('INVALID_STATE from the RPC (settlement is not paid) → 409 INVALID_STATE', async () => {
+    const { app, fake } = await buildApp(
+      { employees: [employeeRow()], separation_ff_summary: [ffRow({ status: 'approved' })] },
+      { userRole: 'super_admin' },
+    )
+    fake.rpc.mockResolvedValueOnce({ data: null, error: { message: "INVALID_STATE: Only a paid settlement can be corrected (current: approved)" } })
+
+    const res = await app.inject({
+      method: 'PATCH', url: `/employees/${EMPLOYEE_ID}/separation-ff/correct-payment`, headers: HEADERS,
+      payload: { reason: 'test' },
+    })
+    expect(res.statusCode).toBe(409)
+    expect(JSON.parse(res.body).error).toBe('INVALID_STATE')
+    expect(fake._db.separation_ff_summary[0].status).toBe('approved')
+    await app.close()
+  })
+
+  it('an unrecognized RPC error falls back to a generic 500, never leaking the raw DB message', async () => {
+    const { app, fake } = await buildApp(
+      { employees: [employeeRow()], separation_ff_summary: [ffRow({ status: 'paid' })] },
+      { userRole: 'super_admin' },
+    )
+    fake.rpc.mockResolvedValueOnce({ data: null, error: { message: 'duplicate key value violates unique constraint "advance_recoveries_pkey"' } })
+
+    const res = await app.inject({
+      method: 'PATCH', url: `/employees/${EMPLOYEE_ID}/separation-ff/correct-payment`, headers: HEADERS,
+      payload: { reason: 'test' },
+    })
+    expect(res.statusCode).toBe(500)
+    expect(res.body).not.toContain('advance_recoveries_pkey')
     await app.close()
   })
 })

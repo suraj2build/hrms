@@ -1219,3 +1219,179 @@ the still-entirely-open real-staging gates (browser E2E, real
 authenticated-role RLS, production-scale concurrent-user load, managed
 backup/restore). PR #30 remains a draft. PMS and Travel Desk remain on
 hold, out of scope for this pass.
+
+## Addendum (2026-10-12, round 5) — finalized-run rollback no longer orphans a posted GL ledger or a filed statutory closure; F&F now has a real, audited correction path for a paid settlement; tax treatment still open
+
+A further review accepted round 4's four fixes as real progress but named
+two specific, unresolved risks in the SAME financial pass, correctly
+rejecting the earlier framing of a self-consistent round-trip as proof of
+rollback safety: round 4's finalize→rollback→reversal evidence always
+reversed the GL ledger and credited the leave balance back in that exact
+order — it never proved rollback itself enforces that order, or what
+happens to a statutory filing. Separately, migration 450's leave-balance
+consumption at payment time had no correction path if the payment later
+turned out to be wrong, and disclosure of that gap (round 4) was
+correctly rejected as insufficient on its own.
+
+**1. Finalized-run rollback — two real, confirmed gaps, both FIXED.**
+`POST /payroll/runs/:id/rollback` deletes every slip for the run and
+reverts any `'paid'` leave-encashment request, but — confirmed by reading
+the route, not assumed — it checked neither `payroll_financial_ledgers`
+nor `statutory_filing_closures` at all before doing so. A GL ledger built
+and **posted** from this run's data (a real, separate HR action — the
+accounting routes don't gate on, or know about, rollback) would survive
+untouched, left `ledger_status='posted'` and counted into
+`GET /payroll/accounting/summary`'s `total_payroll_liability` (which sums
+*any* non-`'reversed'` ledger — draft, balanced, or posted) for a run that
+no longer has the slips it was built from. A **filed** statutory closure
+(`statutory_filing_closures.status IN ('filed','confirmed')` — a real
+challan/filing reference, not a draft) would be left claiming the month
+was filed against data rollback just deleted. Authorization was already
+correctly gated (`super_admin`-only for a finalized run, pre-existing,
+re-confirmed unchanged) — the gap was specifically the missing financial/
+statutory consistency check, exactly as flagged.
+
+Fix, in `runs.ts`'s rollback route: before any write, it now queries both
+tables and refuses with an actionable 409 if either blocks it —
+`STATUTORY_FILING_EXISTS` naming which statutes are filed and the
+`/statutory-reconciliation/reopen` route to clear them first;
+`LEDGER_POSTED` naming the ledger id and the `/ledgers/:id/reverse` route.
+A ledger that was built but **never posted** (`'draft'`/`'balanced'` — a
+staging artifact with no live accounting fact) is not blocked on — it is
+cleaned up as part of rollback instead (entries, then
+`payroll_cost_allocations` rows — a second, child FK the first attempt at
+this fix didn't account for and had to add — then the ledger header
+itself), since leaving it would orphan it against deleted slips and keep
+corrupting the same liability dashboard figure. The guard correctly
+excludes a ledger's own **reversal** ledger from the "posted blocks
+rollback" check — `reversePayrollLedger` always auto-posts the reversal
+it creates, so without this exclusion a already-correctly-reversed ledger
+would block rollback forever; this was caught by the real-stack script
+below actually exercising "reverse, then roll back" and failing on the
+first attempt, not reasoned out in advance.
+
+Separately: `payroll_runs.snapshot_id` pointed at the pre-rollback
+finalized snapshot and it stayed marked `replayable=true` — rollback now
+clears the run's reference and marks that snapshot `replayable=false`
+(archived, not deleted — it remains the historical record of what was
+actually finalized and then rolled back), so nothing downstream
+(`buildPayrollFinancialLedger`'s self-heal path, a future replay) can
+mistake deleted-slip-era data for a currently-valid source.
+
+Evidence: two new sections in `scripts/g12-accounting-reconciliation-
+check.sh` (now 37 checks across 12 sections, real Postgres through the
+full stack) — section 11 posts a GL ledger for a freshly finalized run,
+confirms rollback is blocked with `LEDGER_POSTED` and makes zero partial
+changes (run still `finalized`, slips still present), reverses the
+ledger, confirms rollback now succeeds, and confirms the pre-rollback
+snapshot is archived and the already-reversed ledger is left untouched;
+section 12 files a statutory closure, confirms rollback is blocked with
+`STATUTORY_FILING_EXISTS`, reopens it, confirms rollback now succeeds
+**and** cleans up the never-posted ledger and its entries. Full API suite
+after this fix: 49 files / 432 tests pass (4 new, from the next item
+below); `apps/api` typechecks clean; migration history unaffected (this
+fix is behavior-only, no new migration).
+
+**2. F&F payment correction — a real, controlled, audited compensating
+transaction now exists; disclosure alone is no longer the answer.**
+Migration 450 made F&F payment consume `employee_leave_balance`
+irreversibly — confirmed in round 4 that `PATCH /separation-ff/reopen`
+already explicitly refuses a `'paid'` settlement ("money has already
+moved, no silent way back to draft"), so there was genuinely no path to
+recover a consumed leave entitlement if a payment later failed, was
+cancelled, or was recorded with the wrong figures. New migration 451 adds
+`correct_fnf_payment_atomic`, a `SECURITY DEFINER` function scoped
+**precisely** to the rows `mark_fnf_paid_atomic` itself wrote for this
+settlement — not "any row with a matching terminal status," which would
+risk reverting an unrelated loan/advance that separately reached
+`'foreclosed'`/`'fully_recovered'` through an ordinary payroll cycle:
+
+- **Loans** — only rows with `status='foreclosed'` AND the EXACT
+  `foreclosure_notes` marker `mark_fnf_paid_atomic` writes are reverted,
+  back to `'active'` (not `'disbursed'` — `runs.ts`'s own EMI-recovery
+  query only ever picks up `status='active'`, so anything else would
+  silently strand the loan outside normal recovery going forward).
+  `outstanding_balance` restored from the stored `foreclosure_amount`;
+  foreclosure fields cleared; `loan_schedules` reverted `'adjusted'` ->
+  `'pending'`.
+- **Advances** — only `advance_recoveries` rows with the exact
+  `recovery_type`/`notes` marker identify which `advance_recovery_
+  schedules` to revert (`'recovered'` -> `'pending'`) and which
+  `advance_salary_requests` to revert (`'fully_recovered'` ->
+  `'recovering'`). This surfaced a real schema constraint that changed
+  the design mid-build: `advance_recoveries` is **not** append-only like
+  the GL ledger or `leave_balance_ledger` — migration 281's
+  `UNIQUE(tenant_id, schedule_id)` index permits at most one recovery row
+  per schedule ever, and `amount >= 0` forbids a negative mirror row. A
+  first attempt that inserted a negative-amount reversal row failed
+  outright against real Postgres on both constraints. The row is deleted
+  instead — not a departure from this table's audit model, since it
+  never supported more than one event per schedule in the first place,
+  and the real `POST /payroll/advances/recover` route already relies on
+  exactly that uniqueness to refuse double-recovering a schedule.
+- **Leave balance** — credited back using `leave_balance_ledger`'s own
+  pre-existing reversal mechanism (`txn_type='reversal'`,
+  `reversal_of`, `is_reversal` — migration 158), not a new ad-hoc type;
+  this one genuinely is append-only, so the original `'encashment'` row
+  is kept and a mirrored reversal row is inserted.
+- **The settlement itself** reverts to `'draft'`, not `'approved'` — a
+  correction can mean the approved figures themselves were wrong (one of
+  the three named triggering scenarios), so forcing a fresh compute/
+  approve/pay cycle is safer than leaving stale approved figures one
+  `mark-paid` call away from being paid again unexamined.
+
+Controlled and audited: `super_admin`-only at the route layer (undoing a
+payment is a bigger action than making one, which only needs `hr_admin`),
+a mandatory non-empty reason (`REASON_REQUIRED` if missing), `FOR UPDATE`
+locks on every row it touches up front (same pattern as 445/448/450), and
+`correction_reason`/`corrected_by`/`corrected_at` recorded directly on
+`separation_ff_summary` (new columns) in addition to the usual
+`logAction` audit trail. New route
+`PATCH /employees/:id/separation-ff/correct-payment`.
+
+Evidence: `scripts/db/verify-fnf-mark-paid-atomic.mjs` extended with
+`[M]`/`[M2]` (20 new checks, real Postgres, full 000->451 history) — a
+full loan+advance+leave-encashment settlement paid then corrected, with
+every reverted field checked individually (loan status/balance/
+foreclosure fields, loan schedule, advance schedule, advance request
+status, the advance-recovery row's deletion, the leave-balance credit-
+back, the leave-ledger reversal row and its `reversal_of` pointer); an
+empty reason refused before any write; a **second** correction attempt
+on the now-`'draft'` settlement refused with `INVALID_STATE` (no double
+credit — explicitly checked); and `[M2]` proves scoping precision by
+seeding an UNRELATED foreclosed loan for the same employee (foreclosed
+through a different, manually-marked means) and confirming the
+correction leaves it completely untouched. All of rounds 1-4's existing
+loan/advance/F&F-vs-F&F/payroll-vs-F&F/leave-consumption checks in that
+script still pass unchanged (66 checks total). Route-level test coverage
+added in `separation-ff.test.ts` (6 new tests): role gate, empty-reason
+gate, happy path, `INVALID_STATE` mapping, and the generic-500 DB-message-
+leak guard. Migration 451 applied to a fresh local Postgres 16 with the
+full history (000->451) — clean; `check-schema-drift.mjs` passes clean.
+
+**3. Tax treatment — unchanged, still explicitly open, restated rather
+than resolved.** Nothing in this round touches
+`computeEncashmentPayout`'s withholding computation. It remains a flat
+marginal-slab-rate computation, not a Section 10(10AA) exemption
+computation, and still needs a payroll/tax professional's sign-off
+before go-live — the review's own instruction this round ("assign it to
+your payroll/finance owner") is noted but cannot itself be executed by
+this review; it is a human-process step, not an engineering one.
+
+**Verification housekeeping:** full API suite after both fixes: 49 files
+/ 432 tests pass (up from 427 in round 4 — 6 new route-level tests for
+`correct-payment` in `separation-ff.test.ts`, 1 existing `advance_
+recoveries` assertion in the DB-level verify script rewritten to match
+the real delete-not-mirror behavior); `apps/api` typechecks clean;
+fresh-install migration history (000->451) applies cleanly to local
+Postgres 16 with zero schema drift.
+
+**Net effect, stated plainly:** both concrete risks the review named this
+round — rollback leaving a financial/statutory record standing, and no
+recovery procedure for a bad F&F payment — are now FIXED with real-
+Postgres evidence, not disclosed-and-deferred. Tax treatment remains the
+one item that is not an engineering gap and cannot be closed by further
+code changes. **NO-GO still stands, unchanged** — PR #30 remains a draft.
+None of this substitutes for the still-entirely-open real-staging gates
+(browser E2E, real authenticated-role RLS, production-scale concurrent-
+user load, managed backup/restore). PMS and Travel Desk remain on hold.

@@ -43,6 +43,8 @@ API_URL="${API_URL:-http://localhost:2001}"
 GATEWAY_URL="${GATEWAY_URL:-http://localhost:9000}"
 MONTH1="2026-07"   # baseline month — establishes a "normal" gross_pay to compute the encashment rate from
 MONTH2="2026-08"   # encashment month — the one under test
+MONTH3="2026-09"   # rollback-guard check: posted GL ledger must block rollback
+MONTH4="2026-06"   # rollback-guard check: filed statutory closure must block rollback; unposted ledger must be cleaned up
 PASS_COUNT=0
 FAIL_COUNT=0
 
@@ -108,6 +110,7 @@ cleanup() {
   local exit_code=$?
   echo
   echo "=== cleanup ==="
+  psqlc -c "DELETE FROM statutory_filing_closures WHERE tenant_id = '$TENANT_ID';" > /dev/null 2>&1 || true
   psqlc -c "DELETE FROM payroll_ledger_entries WHERE tenant_id = '$TENANT_ID';" > /dev/null 2>&1 || true
   psqlc -c "DELETE FROM payroll_cost_allocations WHERE ledger_id IN (SELECT id FROM payroll_financial_ledgers WHERE tenant_id='$TENANT_ID');" > /dev/null 2>&1 || true
   psqlc -c "DELETE FROM payroll_financial_ledgers WHERE tenant_id = '$TENANT_ID';" > /dev/null 2>&1 || true
@@ -180,7 +183,9 @@ VALUES ('$TENANT_ID', '$EMP_ID', '$LEAVE_TYPE_ID', EXTRACT(YEAR FROM now())::int
 
 INSERT INTO attendance_period_locks (tenant_id, period_month, state, locked_at)
 VALUES ('$TENANT_ID', '$MONTH1', 'LOCKED', now()),
-       ('$TENANT_ID', '$MONTH2', 'LOCKED', now());
+       ('$TENANT_ID', '$MONTH2', 'LOCKED', now()),
+       ('$TENANT_ID', '$MONTH3', 'LOCKED', now()),
+       ('$TENANT_ID', '$MONTH4', 'LOCKED', now());
 "
 echo "fixtures created under tenant $TENANT_ID"
 
@@ -359,6 +364,98 @@ assert_eq "payroll_run_id cleared" "$(echo "$REQ_FINAL" | cut -d'|' -f2)" ""
 
 BAL_FINAL=$(psqlc -c "SELECT balance FROM employee_leave_balance WHERE tenant_id='$TENANT_ID' AND employee_id='$EMP_ID' AND leave_type_id='$LEAVE_TYPE_ID';")
 assert_eq "leave balance credited back (0 -> 10) — the full round trip nets out exactly, no residue" "$BAL_FINAL" "10"
+
+echo
+echo "=== 11. Rollback guard: a POSTED GL ledger must block rollback, not be left standing against deleted slips ==="
+RUN3_RESP=$(http POST "$API_URL/payroll/runs" "{\"month\":\"$MONTH3\"}") || exit 1
+RUN3_ID=$(echo "$RUN3_RESP" | jq -r '.run_id // .data.run_id // empty')
+if [ -z "$RUN3_ID" ]; then echo "✗ could not extract run3_id: $RUN3_RESP" >&2; exit 1; fi
+for i in $(seq 1 30); do
+  RUN3_STATUS=$(psqlc -c "SELECT status FROM payroll_runs WHERE id = '$RUN3_ID';")
+  case "$RUN3_STATUS" in queued|processing) sleep 1 ;; *) break ;; esac
+done
+echo "  run3 status: $RUN3_STATUS"
+psqlc -c "INSERT INTO payroll_validation_runs (tenant_id, payroll_run_id, validation_month, status, is_payroll_blocked, error_count, completed_at) VALUES ('$TENANT_ID', '$RUN3_ID', '$MONTH3', 'completed', false, 0, now());"
+FIN3_RESP=$(http POST "$API_URL/payroll/runs/$RUN3_ID/finalize" '{"force_finalize":true,"override_reason":"G12 rollback-guard test month 3"}') || exit 1
+echo "  finalize3: $FIN3_RESP"
+SNAPSHOT3_ID=$(psqlc -c "SELECT snapshot_id FROM payroll_runs WHERE id='$RUN3_ID';")
+
+LEDGER3_RESP=$(http POST "$API_URL/payroll/runs/$RUN3_ID/ledger" '{}') || exit 1
+LEDGER3_ID=$(echo "$LEDGER3_RESP" | jq -r '.data.ledger_id')
+http POST "$API_URL/payroll/ledgers/$LEDGER3_ID/post" '{}' > /dev/null || exit 1
+LEDGER3_STATUS=$(psqlc -c "SELECT ledger_status FROM payroll_financial_ledgers WHERE id='$LEDGER3_ID';")
+assert_eq "precondition: ledger3 is posted" "$LEDGER3_STATUS" "posted"
+
+ROLLBACK3_RAW=$(curl -sS -w '\n%{http_code}' -X POST "$API_URL/payroll/runs/$RUN3_ID/rollback" -H "authorization: Bearer $TOKEN" -H 'content-type: application/json' -d '{"reason":"should be blocked"}')
+ROLLBACK3_CODE=$(echo "$ROLLBACK3_RAW" | tail -1)
+ROLLBACK3_BODY=$(echo "$ROLLBACK3_RAW" | sed '$d')
+echo "  blocked rollback attempt: HTTP $ROLLBACK3_CODE $ROLLBACK3_BODY"
+assert_eq "rollback is BLOCKED with 409 while a posted GL ledger exists for this run" "$ROLLBACK3_CODE" "409"
+assert_eq "error code is LEDGER_POSTED" "$(echo "$ROLLBACK3_BODY" | jq -r '.error')" "LEDGER_POSTED"
+
+RUN3_UNCHANGED=$(psqlc -c "SELECT status FROM payroll_runs WHERE id='$RUN3_ID';")
+assert_eq "the blocked rollback made no partial changes — run3 is still finalized" "$RUN3_UNCHANGED" "finalized"
+SLIPS3_STILL_THERE=$(psqlc -c "SELECT count(*) FROM payroll_slips WHERE run_id='$RUN3_ID';")
+assert_eq "slips were NOT deleted by the blocked attempt" "$SLIPS3_STILL_THERE" "1"
+
+REV3_RESP=$(http POST "$API_URL/payroll/ledgers/$LEDGER3_ID/reverse" '{"reason":"clearing the block for the next check"}') || exit 1
+echo "  ledger3 reversed: $REV3_RESP"
+
+ROLLBACK3_OK=$(http POST "$API_URL/payroll/runs/$RUN3_ID/rollback" '{"reason":"ledger now reversed, rollback should proceed"}') || exit 1
+echo "  rollback3 (after reversing the ledger): $ROLLBACK3_OK"
+RUN3_AFTER=$(psqlc -c "SELECT status||'|'||coalesce(snapshot_id::text,'') FROM payroll_runs WHERE id='$RUN3_ID';")
+assert_eq "run3 is now draft" "$(echo "$RUN3_AFTER" | cut -d'|' -f1)" "draft"
+assert_eq "run3's snapshot_id reference is cleared" "$(echo "$RUN3_AFTER" | cut -d'|' -f2)" ""
+SNAPSHOT3_REPLAYABLE=$(psqlc -c "SELECT replayable FROM payroll_run_snapshots WHERE id='$SNAPSHOT3_ID';")
+assert_eq "the pre-rollback finalized snapshot is archived (replayable=false), not left dangling as valid" "$SNAPSHOT3_REPLAYABLE" "f"
+LEDGER3_UNTOUCHED=$(psqlc -c "SELECT ledger_status FROM payroll_financial_ledgers WHERE id='$LEDGER3_ID';")
+assert_eq "the already-reversed ledger itself is untouched by rollback (historical record kept)" "$LEDGER3_UNTOUCHED" "reversed"
+
+echo
+echo "=== 12. Rollback guard: a FILED statutory closure must block rollback; an unposted (never-posted) ledger is cleaned up ==="
+RUN4_RESP=$(http POST "$API_URL/payroll/runs" "{\"month\":\"$MONTH4\"}") || exit 1
+RUN4_ID=$(echo "$RUN4_RESP" | jq -r '.run_id // .data.run_id // empty')
+if [ -z "$RUN4_ID" ]; then echo "✗ could not extract run4_id: $RUN4_RESP" >&2; exit 1; fi
+for i in $(seq 1 30); do
+  RUN4_STATUS=$(psqlc -c "SELECT status FROM payroll_runs WHERE id = '$RUN4_ID';")
+  case "$RUN4_STATUS" in queued|processing) sleep 1 ;; *) break ;; esac
+done
+psqlc -c "INSERT INTO payroll_validation_runs (tenant_id, payroll_run_id, validation_month, status, is_payroll_blocked, error_count, completed_at) VALUES ('$TENANT_ID', '$RUN4_ID', '$MONTH4', 'completed', false, 0, now());"
+FIN4_RESP=$(http POST "$API_URL/payroll/runs/$RUN4_ID/finalize" '{"force_finalize":true,"override_reason":"G12 rollback-guard test month 4"}') || exit 1
+echo "  finalize4: $FIN4_RESP"
+
+LEDGER4_RESP=$(http POST "$API_URL/payroll/runs/$RUN4_ID/ledger" '{}') || exit 1
+LEDGER4_ID=$(echo "$LEDGER4_RESP" | jq -r '.data.ledger_id')
+LEDGER4_STATUS=$(psqlc -c "SELECT ledger_status FROM payroll_financial_ledgers WHERE id='$LEDGER4_ID';")
+echo "  precondition: ledger4 built but never posted (status=$LEDGER4_STATUS)"
+
+# Directly seeding the filed closure (not going through the full statutory
+# compute/reconcile workflow — that path is proven separately; this section
+# tests rollback's OWN guard against whatever statutory_filing_closures
+# already holds for the month).
+psqlc -c "
+INSERT INTO statutory_filing_closures (tenant_id, month, statutory_type, status, run_id, computed_amount, payable_amount, variance)
+VALUES ('$TENANT_ID', '$MONTH4', 'tds', 'filed', '$RUN4_ID', 0, 0, 0);
+"
+
+ROLLBACK4_RAW=$(curl -sS -w '\n%{http_code}' -X POST "$API_URL/payroll/runs/$RUN4_ID/rollback" -H "authorization: Bearer $TOKEN" -H 'content-type: application/json' -d '{"reason":"should be blocked"}')
+ROLLBACK4_CODE=$(echo "$ROLLBACK4_RAW" | tail -1)
+ROLLBACK4_BODY=$(echo "$ROLLBACK4_RAW" | sed '$d')
+echo "  blocked rollback attempt: HTTP $ROLLBACK4_CODE $ROLLBACK4_BODY"
+assert_eq "rollback is BLOCKED with 409 while a filed statutory closure exists for this month" "$ROLLBACK4_CODE" "409"
+assert_eq "error code is STATUTORY_FILING_EXISTS" "$(echo "$ROLLBACK4_BODY" | jq -r '.error')" "STATUTORY_FILING_EXISTS"
+
+REOPEN4_RESP=$(http POST "$API_URL/payroll/statutory-reconciliation/reopen" "{\"month\":\"$MONTH4\",\"statutes\":[\"tds\"],\"reason\":\"clearing the block for the next check\"}") || exit 1
+echo "  statutory reopen: $REOPEN4_RESP"
+
+ROLLBACK4_OK=$(http POST "$API_URL/payroll/runs/$RUN4_ID/rollback" '{"reason":"filing reopened, rollback should proceed"}') || exit 1
+echo "  rollback4 (after reopening the filing): $ROLLBACK4_OK"
+RUN4_AFTER=$(psqlc -c "SELECT status FROM payroll_runs WHERE id='$RUN4_ID';")
+assert_eq "run4 is now draft" "$RUN4_AFTER" "draft"
+LEDGER4_GONE=$(psqlc -c "SELECT count(*) FROM payroll_financial_ledgers WHERE id='$LEDGER4_ID';")
+assert_eq "the never-posted ledger was cleaned up by rollback (not left orphaned, counting toward the liability dashboard for a run no longer in that state)" "$LEDGER4_GONE" "0"
+LEDGER4_ENTRIES_GONE=$(psqlc -c "SELECT count(*) FROM payroll_ledger_entries WHERE ledger_id='$LEDGER4_ID';")
+assert_eq "its entries were cleaned up too" "$LEDGER4_ENTRIES_GONE" "0"
 
 echo
 echo "=== RESULTS: $PASS_COUNT passed, $FAIL_COUNT failed ==="

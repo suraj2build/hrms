@@ -882,6 +882,73 @@ export default async function separationWorkflowRoutes(fastify: FastifyInstance)
     return reply.send({ data })
   })
 
+  // ── PATCH /employees/:id/separation-ff/correct-payment ────────────────────
+  // The controlled, audited compensating transaction reopen() explicitly
+  // defers ("money has already moved; that needs a real reversal process,
+  // not this"): reverses exactly what mark_fnf_paid_atomic wrote for a
+  // PAID settlement — foreclosed loans, recovered advances, and (migration
+  // 450) the consumed leave balance — scoped precisely to the rows that
+  // payment itself touched (never a loan/advance that separately reached
+  // the same terminal status through an ordinary payroll cycle). For when
+  // the payment failed, was cancelled, or was recorded with the wrong
+  // figures. super_admin only (money already moved once; undoing that is a
+  // bigger action than mark-paid itself, which only needs hr_admin) and
+  // requires a non-empty reason. Settlement goes back to 'draft', not
+  // 'approved' — a correction can mean the approved figures themselves were
+  // wrong, so recompute/re-approve from scratch rather than risk an
+  // unexamined re-pay of stale numbers.
+  fastify.patch('/employees/:id/separation-ff/correct-payment', hrAdminAuth, async (req: any, reply) => {
+    if (req.userRole !== 'super_admin')
+      return reply.code(403).send({ error: 'FORBIDDEN', message: 'Only super_admin may correct a paid F&F settlement' })
+
+    if (!await verifyEmployee(fastify, req.params.id, req.tenantId))
+      return reply.code(404).send({ error: 'NOT_FOUND', message: 'Employee not found' })
+
+    const schema = z.object({ reason: z.string().trim().min(1, 'A reason is required') })
+    const parsed = schema.safeParse(req.body)
+    if (!parsed.success)
+      return reply.code(400).send({ error: 'VALIDATION', message: parsed.error.issues[0].message })
+
+    const { data: rpcData, error: rpcErr } = await fastify.supabase.rpc('correct_fnf_payment_atomic', {
+      p_tenant_id:   req.tenantId,
+      p_employee_id: req.params.id,
+      p_user_id:     req.userId,
+      p_reason:      parsed.data.reason,
+    })
+
+    if (rpcErr) {
+      const msg = rpcErr.message ?? ''
+      if (msg.includes('NOT_FOUND:'))
+        return reply.code(404).send({ error: 'NOT_FOUND', message: msg.replace(/^.*NOT_FOUND:\s*/, '') })
+      if (msg.includes('INVALID_STATE:'))
+        return reply.code(409).send({ error: 'INVALID_STATE', message: msg.replace(/^.*INVALID_STATE:\s*/, '') })
+      if (msg.includes('REASON_REQUIRED:'))
+        return reply.code(400).send({ error: 'REASON_REQUIRED', message: msg.replace(/^.*REASON_REQUIRED:\s*/, '') })
+      return serverError(req, reply, rpcErr, ErrorCode.UPDATE_FAILED, 'Failed to correct F&F payment')
+    }
+
+    const { data: ffRow, error: reloadErr } = await fastify.supabase
+      .from('separation_ff_summary')
+      .select('*')
+      .eq('employee_id', req.params.id)
+      .eq('tenant_id', req.tenantId)
+      .maybeSingle()
+    if (reloadErr)
+      return serverError(req, reply, reloadErr, ErrorCode.QUERY_FAILED, 'Corrected, but failed to reload the settlement')
+
+    await logAction(fastify.supabase, {
+      tenantId:    req.tenantId,
+      tableName:   'separation_ff_summary',
+      recordId:    (rpcData as any)?.id ?? ffRow?.id,
+      action:      'UPDATE',
+      performedBy: req.userId,
+      onBehalfOf:  req.params.id,
+      newData:     { status: 'draft', corrected: true, reason: parsed.data.reason, ...(rpcData as any) },
+    })
+
+    return reply.send({ data: ffRow, correction: rpcData })
+  })
+
   // ── PATCH /employees/:id/separation/approve ───────────────────────────────
 
   fastify.patch('/employees/:id/separation/approve', hrAdminAuth, async (req: any, reply) => {

@@ -604,6 +604,60 @@ on.** The two concrete paths:
     `G12-TDS-RECON-SCREEN-GAP` / `G12-ENCASHMENT-RATE-COMPOUNDING-RISK`
     (now `FIXED`).
 
+  **Addendum (2026-10-12, round 5): finalized-run rollback no longer
+  orphans a posted GL ledger or a filed statutory closure; F&F now has a
+  real, audited correction path for a paid settlement; tax treatment
+  still open.** A further review accepted round 4's four fixes as real
+  progress but correctly rejected its finalize→rollback→reversal evidence
+  as proving only one specific, always-correctly-ordered sequence, not
+  that rollback itself enforces that order — and rejected disclosure
+  alone as an answer for a payment with no correction path.
+  - **Rollback — two real, confirmed gaps, both FIXED.**
+    `POST /payroll/runs/:id/rollback` checked neither
+    `payroll_financial_ledgers` nor `statutory_filing_closures` before
+    deleting a run's slips. A GL ledger already **posted** from this run
+    (a separate HR action the accounting routes don't gate on) would
+    survive, still counted into the liability dashboard, now pointing at
+    data no longer there; a **filed** statutory closure would be left
+    claiming the month was filed against deleted data. Authorization
+    (`super_admin`-only for a finalized run) was already correct — the
+    gap was the missing consistency check. Fixed: rollback now refuses
+    with `LEDGER_POSTED` or `STATUTORY_FILING_EXISTS` (naming the exact
+    remedy route) when either blocks it; a never-posted ledger is
+    cleaned up instead of left orphaned; the pre-rollback snapshot is
+    archived and the run's reference to it cleared. The guard correctly
+    excludes a ledger's own always-auto-posted reversal from the
+    "posted blocks rollback" check — caught only because the real-stack
+    script actually exercised "reverse, then roll back" and failed on
+    the first attempt. 16 new checks in `scripts/g12-accounting-
+    reconciliation-check.sh` (now 37 across 12 sections), real Postgres
+    through the full stack.
+  - **F&F payment correction — a real, audited compensating transaction,
+    not disclosure.** New migration 451's `correct_fnf_payment_atomic`
+    reverses exactly what `mark_fnf_paid_atomic` wrote for a paid
+    settlement — scoped by the exact markers that function itself
+    writes, never a loan/advance that independently reached the same
+    status through an ordinary payroll cycle. Building it surfaced a
+    real schema constraint mid-build: `advance_recoveries` is not
+    append-only (migration 281's `UNIQUE(tenant_id, schedule_id)` plus
+    `amount >= 0` make a mirrored negative row impossible — the matched
+    row is deleted instead, which the table's own design already
+    required). Leave balance uses `leave_balance_ledger`'s existing
+    `reversal_of`/`is_reversal` mechanism, not a new type. Settlement
+    reverts to `'draft'` (figures may need recomputing). `super_admin`-
+    only, mandatory reason, `FOR UPDATE` locks, audit columns on the row.
+    20 new checks in `scripts/db/verify-fnf-mark-paid-atomic.mjs`
+    (`[M]`/`[M2]`, 66 total) including a scoping-precision proof that an
+    unrelated foreclosed loan is left untouched; 6 new route tests.
+  - **Tax treatment** — unchanged, still open; this is a human sign-off
+    this review cannot execute, not an engineering gap.
+  - Full API suite after this round: 49 files / 432 tests pass;
+    `apps/api` typechecks clean; migration history (000→451) applies
+    cleanly to a fresh local Postgres 16 with zero schema drift.
+  - Full detail: `STATUS.md`'s 2026-10-12 round-5 addendum; `FINDINGS.csv`
+    rows `G12-ROLLBACK-GL-STATUTORY-GAP` and
+    `G12-FNF-PAYMENT-CORRECTION`.
+
 None of the four gates are closed by this round's local work, and none of
 them can be closed by more local work of the same kind — each needs either
 external access (Gates 1–3) or an explicit decision (Gate 4).
