@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 /**
  * Real-Postgres verification of mark_fnf_paid_atomic (migration 445,
- * extended by 448 for leave-encashment drift).
+ * extended by 448 for leave-encashment drift, 450 for leave-encashment
+ * consumption).
  *
  * Run against a throwaway database with the full migration history applied
  * (see sibling shell commands this session ran to build `fnf_verify`).
@@ -39,6 +40,27 @@
  *      with an actionable error instead of silently skipping the check.
  *   I. Zero leave_encashment_days skips the check entirely — no basis
  *      needed, no false blocks on ordinary loan/advance-only settlements.
+ *   J. Successful payment CONSUMES the balance (migration 450) — not just
+ *      a drift check. The exact rows named in leave_encashment_basis are
+ *      decremented by leave_encashment_days, with a leave_balance_ledger
+ *      audit row, inside the same transaction as the payment.
+ *   K. The confirmed double-pay scenario migration 450 exists to close:
+ *      a standalone encashment request submitted (pending, balance
+ *      untouched) BEFORE separation, with F&F computed/approved/paid for
+ *      the same days in the meantime (balance never consumed by anything
+ *      else, so no SOURCE_DRIFT fires), then the OLD pending request is
+ *      approved AFTER F&F already paid. Proves checked_deduct_leave_
+ *      balance (the real approval-time deduction standalone encashment
+ *      uses) now fails for insufficient balance instead of silently
+ *      succeeding — before migration 450 this would have paid twice.
+ *   L. Genuine concurrency, not just sequential drift: while mark_fnf_paid_
+ *      atomic's transaction holds its FOR UPDATE lock on the consumed
+ *      employee_leave_balance row (uncommitted), a concurrent
+ *      checked_deduct_leave_balance call (what a standalone encashment
+ *      approval actually runs) BLOCKS until the F&F transaction commits,
+ *      then correctly fails once it sees the post-consumption balance —
+ *      the row lock alone prevents the race, not a check that could still
+ *      lose to a sufficiently-timed interleaving.
  */
 import pg from 'pg'
 
@@ -246,11 +268,23 @@ async function main() {
       leaveTypeId, leaveYear, leaveEncashmentDays: 12,
       leaveEncashmentBasis: [{ leave_type_id: leaveTypeId, year: leaveYear }],
     })
+    const balBefore = (await admin.query(`SELECT balance FROM employee_leave_balance WHERE tenant_id=$1 AND employee_id=$2 AND leave_type_id=$3 AND year=$4`, [tenantId, s.empId, leaveTypeId, leaveYear])).rows[0]
+    check('precondition: balance starts at the full 12 days', Number(balBefore.balance) === 12)
+
     const { rows } = await admin.query(`SELECT mark_fnf_paid_atomic($1, $2, $3) AS result`, [s.tenantId, s.empId, userId])
     check('RPC returned a result', !!rows[0].result)
     check('result reports the verified leave days', Number(rows[0].result.leave_encashment_days_verified) === 12)
+    check('result reports the consumed leave days', Number(rows[0].result.leave_encashment_days_consumed) === 12)
     const ff = (await admin.query(`SELECT status FROM separation_ff_summary WHERE id = $1`, [s.ffId])).rows[0]
     check("settlement flipped to 'paid'", ff.status === 'paid')
+
+    // Migration 450: successful payment must CONSUME the balance, not just
+    // verify it — this is what "payment is final" actually means.
+    const balAfter = (await admin.query(`SELECT balance FROM employee_leave_balance WHERE tenant_id=$1 AND employee_id=$2 AND leave_type_id=$3 AND year=$4`, [tenantId, s.empId, leaveTypeId, leaveYear])).rows[0]
+    check('balance is consumed down to 0 — the entitlement is spent, not just checked', Number(balAfter.balance) === 0)
+
+    const ledger = (await admin.query(`SELECT txn_type, delta, balance_after FROM leave_balance_ledger WHERE tenant_id=$1 AND employee_id=$2 AND leave_type_id=$3 AND year=$4 ORDER BY created_at DESC LIMIT 1`, [tenantId, s.empId, leaveTypeId, leaveYear])).rows[0]
+    check('an audit ledger row was written for the consumption', ledger && ledger.txn_type === 'encashment' && Number(ledger.delta) === -12 && Number(ledger.balance_after) === 0)
   }
 
   // ── G. Leave-encashment drift (migration 448) ───────────────────────────────
@@ -308,6 +342,125 @@ async function main() {
     })
     const { rows } = await admin.query(`SELECT mark_fnf_paid_atomic($1, $2, $3) AS result`, [s.tenantId, s.empId, userId])
     check('zero-days settlement with no basis still pays out cleanly — no false block', !!rows[0].result)
+  }
+
+  // ── J. Multi-leave-type consumption, greedy across basis rows ───────────────
+  console.log('\n[J] Consumption spans multiple encashable leave types when the basis names more than one')
+  {
+    const leaveTypeId2 = (await admin.query(`INSERT INTO leave_types (tenant_id, name, is_paid) VALUES ($1, 'Sick Leave (Encashable)', true) RETURNING id`, [tenantId])).rows[0].id
+    const s = await seedEmployeeWithFnf(admin, tenantId, {
+      loanBalance: 0, advanceAmount: 0,
+      leaveTypeId, leaveYear, leaveEncashmentDays: 15,
+      leaveEncashmentBasis: [{ leave_type_id: leaveTypeId, year: leaveYear }, { leave_type_id: leaveTypeId2, year: leaveYear }],
+    })
+    // Override the single-type seed: split 15 days across BOTH types (10 + 5).
+    await admin.query(`UPDATE employee_leave_balance SET balance = 10 WHERE tenant_id=$1 AND employee_id=$2 AND leave_type_id=$3 AND year=$4`, [tenantId, s.empId, leaveTypeId, leaveYear])
+    await admin.query(
+      `INSERT INTO employee_leave_balance (tenant_id, employee_id, leave_type_id, year, balance) VALUES ($1, $2, $3, $4, 5)`,
+      [tenantId, s.empId, leaveTypeId2, leaveYear],
+    )
+
+    const { rows } = await admin.query(`SELECT mark_fnf_paid_atomic($1, $2, $3) AS result`, [s.tenantId, s.empId, userId])
+    check('RPC succeeds with a two-leave-type basis (10 + 5 = 15 verified)', !!rows[0].result && Number(rows[0].result.leave_encashment_days_verified) === 15)
+
+    const bal1 = (await admin.query(`SELECT balance FROM employee_leave_balance WHERE tenant_id=$1 AND employee_id=$2 AND leave_type_id=$3 AND year=$4`, [tenantId, s.empId, leaveTypeId, leaveYear])).rows[0]
+    const bal2 = (await admin.query(`SELECT balance FROM employee_leave_balance WHERE tenant_id=$1 AND employee_id=$2 AND leave_type_id=$3 AND year=$4`, [tenantId, s.empId, leaveTypeId2, leaveYear])).rows[0]
+    check('first leave type fully consumed (10 -> 0)', Number(bal1.balance) === 0)
+    check('second leave type fully consumed (5 -> 0)', Number(bal2.balance) === 0)
+
+    const ledgerRows = (await admin.query(`SELECT leave_type_id FROM leave_balance_ledger WHERE tenant_id=$1 AND employee_id=$2 AND txn_type='encashment' AND year=$3`, [tenantId, s.empId, leaveYear])).rows
+    check('a ledger row was written for EACH consumed leave type', ledgerRows.length >= 2)
+  }
+
+  // ── K. The confirmed double-pay scenario is now prevented ───────────────────
+  console.log('\n[K] A standalone encashment request pending before F&F payment cannot ALSO be approved after')
+  {
+    const s = await seedEmployeeWithFnf(admin, tenantId, {
+      loanBalance: 0, advanceAmount: 0,
+      leaveTypeId, leaveYear, leaveEncashmentDays: 9,
+      leaveEncashmentBasis: [{ leave_type_id: leaveTypeId, year: leaveYear }],
+    })
+    // The employee ALSO has an old standalone encashment request, submitted
+    // while still active, for the SAME leave type/year, still 'pending' —
+    // exactly the sequence migration 450's header describes: it was never
+    // approved (so checked_deduct_leave_balance never ran for it), the
+    // balance was never touched by it, so F&F's own SOURCE_DRIFT check has
+    // nothing to catch when F&F pays first.
+    const standaloneReqId = (await admin.query(
+      `INSERT INTO leave_encashment_requests (tenant_id, employee_id, leave_type_id, year, days, status)
+       VALUES ($1, $2, $3, $4, 9, 'pending') RETURNING id`,
+      [tenantId, s.empId, leaveTypeId, leaveYear],
+    )).rows[0].id
+
+    const { rows: payResult } = await admin.query(`SELECT mark_fnf_paid_atomic($1, $2, $3) AS result`, [s.tenantId, s.empId, userId])
+    check('F&F payment succeeds first (balance untouched by the still-pending standalone request)', !!payResult[0].result)
+
+    const balAfterFnf = (await admin.query(`SELECT balance FROM employee_leave_balance WHERE tenant_id=$1 AND employee_id=$2 AND leave_type_id=$3 AND year=$4`, [tenantId, s.empId, leaveTypeId, leaveYear])).rows[0]
+    check('F&F payment consumed the balance down to 0', Number(balAfterFnf.balance) === 0)
+
+    // HR now (too late) approves the old pending standalone request — this
+    // is exactly what accrual-engine.ts's processEncashment calls at
+    // approval time. Before migration 450, this would have succeeded
+    // (balance was still 9) and paid the same days a second time.
+    const { rows: deductResult } = await admin.query(
+      `SELECT checked_deduct_leave_balance($1, $2, $3, 9, $4) AS deducted`,
+      [tenantId, s.empId, leaveTypeId, leaveYear],
+    )
+    check('the old pending request can no longer be approved — checked_deduct_leave_balance correctly fails (balance already spent)', deductResult[0].deducted === false)
+
+    const balFinal = (await admin.query(`SELECT balance FROM employee_leave_balance WHERE tenant_id=$1 AND employee_id=$2 AND leave_type_id=$3 AND year=$4`, [tenantId, s.empId, leaveTypeId, leaveYear])).rows[0]
+    check('balance still 0 — no double deduction, no double payment', Number(balFinal.balance) === 0)
+
+    const standaloneReqAfter = (await admin.query(`SELECT status FROM leave_encashment_requests WHERE id = $1`, [standaloneReqId])).rows[0]
+    check('the standalone request itself is untouched (still pending — the route layer, not this RPC, decides what to do with the failed deduction)', standaloneReqAfter.status === 'pending')
+  }
+
+  // ── L. Genuine concurrency: a real race, not just a sequential drift check ──
+  console.log('\n[L] A concurrent checked_deduct_leave_balance call blocks on the F&F transaction\'s lock, then fails against the post-consumption balance')
+  {
+    const s = await seedEmployeeWithFnf(admin, tenantId, {
+      loanBalance: 0, advanceAmount: 0,
+      leaveTypeId, leaveYear, leaveEncashmentDays: 7,
+      leaveEncashmentBasis: [{ leave_type_id: leaveTypeId, year: leaveYear }],
+    })
+    const standaloneReqId = (await admin.query(
+      `INSERT INTO leave_encashment_requests (tenant_id, employee_id, leave_type_id, year, days, status)
+       VALUES ($1, $2, $3, $4, 7, 'pending') RETURNING id`,
+      [tenantId, s.empId, leaveTypeId, leaveYear],
+    )).rows[0].id
+
+    const fnfConn = new Client(conn), standaloneConn = new Client(conn)
+    await fnfConn.connect(); await standaloneConn.connect()
+
+    await fnfConn.query('BEGIN')
+    await fnfConn.query(`SELECT mark_fnf_paid_atomic($1, $2, $3)`, [s.tenantId, s.empId, userId])
+    // Transaction open, uncommitted — the FOR UPDATE OF elb lock on this
+    // employee_leave_balance row is still held, and the balance UPDATE
+    // (12 -> 0, in this connection's own uncommitted view) has happened but
+    // isn't visible to anyone else yet.
+
+    const standaloneStart = Date.now()
+    const standalonePromise = standaloneConn.query(
+      `SELECT checked_deduct_leave_balance($1, $2, $3, 7, $4) AS deducted`,
+      [tenantId, s.empId, leaveTypeId, leaveYear],
+    )
+
+    await new Promise(r => setTimeout(r, 300))
+    const blockedSoFar = Date.now() - standaloneStart
+    check('the standalone deduction is still blocked ~300ms in (did not run immediately)', blockedSoFar >= 290)
+
+    await fnfConn.query('COMMIT')
+    const standaloneResult = await standalonePromise
+    const totalWait = Date.now() - standaloneStart
+    check('the standalone deduction unblocked only after the F&F transaction committed', totalWait >= 290)
+    check('the standalone deduction correctly FAILS once it sees the post-consumption (0) balance — the row lock alone prevented the race', standaloneResult.rows[0].deducted === false)
+
+    await fnfConn.end(); await standaloneConn.end()
+
+    const balFinal = (await admin.query(`SELECT balance FROM employee_leave_balance WHERE tenant_id=$1 AND employee_id=$2 AND leave_type_id=$3 AND year=$4`, [tenantId, s.empId, leaveTypeId, leaveYear])).rows[0]
+    check('balance ends at 0 — exactly one consumer (F&F) won the race', Number(balFinal.balance) === 0)
+    const standaloneReqAfter = (await admin.query(`SELECT status FROM leave_encashment_requests WHERE id = $1`, [standaloneReqId])).rows[0]
+    check('the standalone request is untouched by the failed deduction attempt', standaloneReqAfter.status === 'pending')
   }
 
   await admin.end()

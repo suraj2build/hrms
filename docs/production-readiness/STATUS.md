@@ -1008,3 +1008,214 @@ substitute for the still-entirely-open real-staging gates (browser E2E,
 real authenticated-role RLS, production-scale concurrent-user load, managed
 backup/restore) every item in this document has been waiting on since
 round 1.
+
+## Addendum (2026-10-12, round 4) — payout basis + TDS reconciliation FIXED; F&F payment now consumes the leave balance atomically (migration 450); persisted accounting evidence through reversal; G12 remains OPEN
+
+A further review rejected round 3's "all four points re-proven" framing as
+an overclaim and asked for four things to be finished together, plus
+explicit evidence that the DELETE-draft-run proof's scope (deletion only)
+was extended to cancellation and recomputation. All four, plus the
+extension, were done this round. **G12 is explicitly NOT closed** — one
+item (tax treatment) stays open by its nature (it needs a human
+sign-off this review cannot produce), and this round's own fixes surfaced
+one further unrelated, pre-existing defect (below) that had to be fixed
+before the new evidence could even be collected.
+
+**1. Payout basis — FIXED.** Round 3's second disclosed gap (rate_per_day
+compounding risk) is now closed generally, not patched for one call site.
+`payroll-engine.ts` exports `computeCleanGrossPay(grossPay, components)`,
+which subtracts any component whose code is in `ONE_TIME_EARNING_CODES`
+(currently `['LEAVE_ENCASHMENT']`) from a slip's raw `gross_pay`. Both
+places that read a slip's `gross_pay` as a stand-in for "normal recurring
+salary" — `fnf-settlement-engine.ts` (gratuity/notice-shortfall/leave-
+encashment-rate basis) and `accrual-engine.ts`'s `computeEncashmentPayout`
+(the standalone-encashment `rate_per_day`) — now call it instead of reading
+`gross_pay` raw. Places that must keep reading the real, uncleaned figure
+(payroll totals, accounting, exports) were left untouched. 6 new unit tests
+in `payroll-engine.test.ts` (43 total, all passing) cover: no one-time
+components (unchanged), a single `LEAVE_ENCASHMENT` line subtracted,
+case-insensitive code matching, multiple one-time lines summed and
+excluded, an empty/undefined components array not throwing, and a TDS
+deduction line left alone (only earnings affect gross). End-to-end proof
+of "multiple requests and payroll recomputation" is in point 4 below — the
+same real-Postgres run used for the accounting evidence re-derives
+`rate_per_day` from a slip and shows it is unaffected by a one-time payout
+already folded into that slip.
+
+**2. TDS integration — the reconciliation-screen false positive is FIXED;
+the actual tax-treatment question is explicitly left OPEN (needs a human
+sign-off).** These are two different things and are reported separately so
+neither hides the other. The screen fix: `buildStatutoryRecon`
+(`statutory-recon.ts`) now adds the current run's paid
+`leave_encashment_requests.tds_amount` to the `payable` side of the TDS
+comparison — that figure is already independently confirmed (it is exactly
+what HR reviewed and approved on the standalone request itself), and
+`tds_monthly_projections` was never designed to project a one-time payout,
+so comparing `computed` against it alone always under-counted `payable` by
+exactly the encashment's TDS. 3 new tests in
+`statutory-recon-encashment.test.ts` prove: a month with a finalized
+encashment payout now shows zero variance (was -500, would wrongly flag for
+manual review); a month without encashment is unaffected (no regression);
+a genuine, unrelated recurring-TDS discrepancy still correctly surfaces as
+a variance. This fix does **not** touch the 24Q export, challan generation,
+IT Statement, or YTD summary — those already read `payroll_slips.tds_
+deducted` directly (verified correct in round 3) and were never the
+problem. **What remains genuinely open, and cannot be closed by this
+review:** `computeEncashmentPayout`'s withholding is a flat marginal-slab-
+rate computation, explicitly not a Section 10(10AA) exemption computation.
+Whether any exemption applies (government employee, actual leave-
+encashment exemption limit, etc.) is a tax-compliance determination, not an
+engineering one — it needs a payroll/tax professional's sign-off before
+go-live, which this review is not positioned to obtain or substitute for.
+This is unchanged from rounds 1–3 and is being restated, not resolved.
+
+**3. Payment concurrency — FIXED (migration 450): a successful F&F payment
+now consumes the leave balance, not merely checks it.** Round 3's
+`SOURCE_DRIFT` check (migration 448) proved a *concurrent* standalone-
+encashment approval between F&F's own approve and mark-paid steps aborts
+the payment. It did not prove the reverse scenario the review asked for:
+two settlements (an F&F payment and a standalone encashment approval)
+racing to pay against the *same, unchanged* balance — drift-detection alone
+cannot catch that, because nothing had changed to detect. The actual gap:
+F&F never wrote to `employee_leave_balance` at all, only read it. Fix:
+`mark_fnf_paid_atomic` (migration 450), after its existing drift checks
+pass, now decrements the exact `(leave_type_id, year)` rows named in
+`leave_encashment_basis` — locked via the same `FOR UPDATE OF elb` migration
+448 already takes — by `leave_encashment_days`, and writes a
+`leave_balance_ledger` row per leave type consumed. This makes "payment
+succeeded" and "entitlement spent" the same event. No new check was needed
+on the standalone-encashment side: `checked_deduct_leave_balance`'s
+pre-existing `WHERE balance >= p_days` guard is sufficient protection once
+F&F's own write actually happens.
+
+Evidence (`scripts/db/verify-fnf-mark-paid-atomic.mjs`, extended to 46
+checks against a fresh real Postgres with the full 000→450 migration
+history, all passing): section `[F]` now asserts the balance is fully
+consumed to zero and a ledger row is written; new section `[J]` proves
+consumption spans correctly across multiple encashable leave types in one
+settlement; new section `[K]` reproduces the exact double-pay scenario
+(F&F paid first, then the same leave simulated as if a pending standalone
+request were approved second) and proves the second payment is now
+rejected, where before migration 450 it would have silently succeeded;
+new section `[L]` proves **genuine concurrency**, not just sequential
+ordering — one connection holds `mark_fnf_paid_atomic` open inside an
+uncommitted transaction, a second connection's `checked_deduct_leave_
+balance` call blocks on the row lock for 300ms+, and only resolves (to
+`false`, correctly) after the first commits. All of rounds 1–3's existing
+loan/advance/F&F-vs-F&F/payroll-vs-F&F concurrency checks still pass
+unchanged.
+
+**4. Accounting evidence — a full persisted reconciliation now exists:
+request → payroll recomputation → finalized slip → GL → export →
+reversal.** Round 3's 8 accounting unit tests proved `computeLopAmount`
+and GL-mapping logic in isolation; they never exercised the real HTTP
+routes against a real database end to end. New
+`scripts/g12-accounting-reconciliation-check.sh` does, in one continuous
+run against real Postgres through the full stack (23 checks, all passing):
+a baseline month with no encashment; a 10-day standalone request approved
+(rate derived from the clean baseline slip); assignment to a second
+month's draft run; a real recomputation of that draft (not a dry run) that
+folds the payout in and correctly reproduces `gross_pay = baseline +
+encashment` with the `LEAVE_ENCASHMENT` line surviving the re-run; finalize
+(request flips to `paid`, the immutable snapshot's `adhoc_components`
+correctly captures the encashment line); GL ledger build and post (balanced,
+the encashment posts its own Dr/Cr pair, no LOP misclassification, Salary
+Expense total includes the full inflated figure); accounting summary and
+GL-summary endpoints; CSV export containing the `LEAVE_ENCASHMENT` line;
+GL ledger reversal (mirrors to zero, original entries never deleted); and
+finally **the cancellation path the previous review specifically flagged
+as unproven**: rolling a *finalized* run back to draft (reverting the
+request from `paid` to `approved`) followed by reversing the standalone
+request itself, proving the leave balance is credited back to its exact
+pre-encashment value (0 → 10) with no residue and `payroll_run_id` cleared.
+Recomputation is covered twice over — once mid-script (pre-finalize
+re-run) and once implicitly by the rollback-then-reverse path exercising
+the same "already-computed slip gets corrected" logic finalize's own
+self-heal depends on.
+
+**On F&F specifically** (the other half of "cancellation and
+recomputation" the previous review asked about): there is no
+reopen-from-`paid` path for a separation settlement at all —
+`PATCH /separation-ff/reopen` only accepts an `approved` settlement and
+explicitly 409s on `paid` ("money has already moved, no silent way back to
+draft"), already covered by an existing passing test in
+`separation-ff.test.ts`. This means migration 450's leave-balance
+consumption has **no API-reachable undo**, unlike the standalone
+encashment request's own `reverse` endpoint. This is a real asymmetry,
+being disclosed rather than fixed: F&F's `paid` state was already
+irreversible by design before this round touched it (consistent with "the
+money already moved" being a deliberate, pre-existing constraint elsewhere
+in F&F), and migration 450 simply added a new consequence to that same,
+already-irreversible transition rather than introducing new one-way state.
+Building a symmetric F&F-side credit-back would mean designing a new
+reversal workflow for an already-paid separation settlement — a materially
+larger change than this round's four scoped items — so it is named here as
+future work, not attempted.
+
+**A real, unrelated, pre-existing defect was found and fixed while building
+the accounting-evidence script above, because it blocked the evidence
+itself.** `buildPayrollRunSnapshot` (`payroll-snapshot-engine.ts`) is called
+automatically after *every* `POST /payroll/runs` computation (not only at
+finalize) "so replay/audit trace is available immediately." Because
+`payroll_run_snapshots` has `UNIQUE(run_id)`, any draft run computed more
+than once before finalize — unavoidable for every G12 encashment-to-payroll
+workflow, since `assign-payroll-run`'s own precondition requires an
+existing payslip — made every snapshot build after the first fail
+non-fatally on the unique-constraint violation, silently leaving the
+*first, pre-correction* snapshot in place forever, including the one
+finalize itself tries to build. This is exactly why the snapshot's
+`adhoc_components` failed to show the encashment line when first attempted
+this round. Fix: `buildPayrollRunSnapshot` now detects an existing manifest
+row for the run and supersedes it — but doing that safely required a
+second fix, because `payroll_runs.snapshot_id` references
+`payroll_run_snapshots(id)` with `ON DELETE CASCADE`, and the function
+itself already attaches `snapshot_id` to the run after every successful
+build (draft or finalize). A first attempt that deleted the stale manifest
+directly cascade-deleted the owning payroll run — confirmed by watching a
+run vanish mid-script. The actual fix nulls the run's `snapshot_id`
+reference first, then deletes the stale manifest's child employee rows
+(`payroll_employee_snapshots.snapshot_id` is `ON DELETE RESTRICT`) and the
+manifest itself, before the existing insert-and-reattach logic proceeds.
+This is a product-code fix (no migration needed — behavior only) and is
+unrelated to G12 specifically; it would have affected any workflow that
+recomputes a draft run more than once before finalize.
+
+**Also found and fixed, but only in the local test-harness gateway, not
+product code:** this round's end-to-end script surfaced a bug in the
+hand-built PostgREST-compatible gateway this sandbox uses in place of real
+Supabase (`/tmp/supabase-gateway.mjs` — not part of the repository). Its
+`POST` handler decided whether to return a single object or an array by
+checking whether the *request body* was an array, instead of honoring the
+client's `Accept: application/vnd.pgrst.object+json` header the way its own
+`GET`/`PATCH` handlers already did. Since `supabase-js`'s `.upsert([row])`
+always sends an array body even for one row, any `.upsert([row]).select
+('id').single()` call got back a bare array; destructuring `.id` off it
+silently produced `undefined`. This surfaced as `POST /payroll/runs/:id/
+ledger` returning `LEDGER_BUILD_FAILED` with the underlying DB error "null
+value in column \"ledger_id\"" — the ledger header's own id was undefined,
+so every entry row inserted a null foreign key. Fixed in the gateway only,
+following the same precedent already documented in `g02-lop-exceeds-
+working-days-check.sh` for fixing this throwaway infrastructure locally.
+Real PostgREST does not have this bug; it is named here for completeness
+and because it is the reason section 6 of the new script failed on the
+first attempt.
+
+**Verification housekeeping:** full API suite re-run after all of the
+above: 49 files / 427 tests pass; `apps/api` typechecks clean.
+
+**Net effect on the four review points, stated plainly:** payout basis
+(point 1) — fixed. TDS reconciliation-screen false positive (point 2) —
+fixed; the underlying Section 10(10AA) exemption-treatment question is
+unchanged and still open, waiting on a human sign-off. Payment concurrency
+(point 4 in that review's numbering) — fixed, with genuine-concurrency
+proof, not just sequential drift. Accounting evidence — the full persisted
+chain now exists, including the cancellation/recomputation extension
+specifically asked for. **G12 is explicitly not being closed.** What is
+newly true: its remaining open item is narrowed to exactly one thing (tax
+sign-off) plus one disclosed, by-design asymmetry (F&F's `paid` state has
+no reversal, so migration 450's consumption has none either). **NO-GO still
+stands, unchanged from every prior round** — none of this substitutes for
+the still-entirely-open real-staging gates (browser E2E, real
+authenticated-role RLS, production-scale concurrent-user load, managed
+backup/restore). PR #30 remains a draft. PMS and Travel Desk remain on
+hold, out of scope for this pass.

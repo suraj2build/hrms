@@ -32,6 +32,7 @@ import {
   computePayrollSlip,
   applyAdvanceLoanRecovery,
   applyEncashmentPayout,
+  computeCleanGrossPay,
   finalizeDeductionsAndNet,
   type PayrollSlipInput,
   type EncashmentPayout,
@@ -399,6 +400,64 @@ describe('applyEncashmentPayout — G12 leave-encashment payout', () => {
     expect(result.gross_pay).toBe(base.gross_pay + 10_000)
     expect(result.total_deductions).toBe(withRecovery.total_deductions + 1_000)
     expect(result.net_pay).toBe(result.gross_pay - result.total_deductions)
+  })
+})
+
+// ── Section 2c: computeCleanGrossPay — excludes one-time payouts from a ─────
+// basis reused as "normal recurring salary" (fnf-settlement-engine.ts's
+// gratuity/notice/leave-encashment-rate basis; accrual-engine.ts's own
+// standalone leave-encashment rate_per_day) so a PRIOR one-time payout
+// folded into a slip's gross_pay never compounds into a LATER computation
+// that treats that slip as "what this employee normally earns."
+
+describe('computeCleanGrossPay — excludes one-time earning components', () => {
+  it('no one-time components: returns gross_pay unchanged', () => {
+    const components = [
+      { code: 'BASIC', monthly_amount: 30_000 },
+      { code: 'HRA', monthly_amount: 15_000 },
+    ]
+    expect(computeCleanGrossPay(45_000, components)).toBe(45_000)
+  })
+
+  it('a LEAVE_ENCASHMENT line is subtracted out — the exact compounding risk this fixes', () => {
+    // A slip whose gross_pay (70,000) is a normal 50,000 recurring salary
+    // PLUS a one-time 20,000 encashment payout folded in by
+    // applyEncashmentPayout. A later computation using this slip as its
+    // "normal salary" basis must see 50,000, not 70,000.
+    const components = [
+      { code: 'BASIC', monthly_amount: 30_000 },
+      { code: 'HRA', monthly_amount: 20_000 },
+      { code: 'LEAVE_ENCASHMENT', monthly_amount: 20_000 },
+    ]
+    expect(computeCleanGrossPay(70_000, components)).toBe(50_000)
+  })
+
+  it('is case-insensitive on the component code', () => {
+    const components = [{ code: 'leave_encashment', monthly_amount: 10_000 }]
+    expect(computeCleanGrossPay(60_000, components)).toBe(50_000)
+  })
+
+  it('multiple one-time lines in the same slip are all excluded', () => {
+    const components = [
+      { code: 'LEAVE_ENCASHMENT', monthly_amount: 10_000 },
+      { code: 'LEAVE_ENCASHMENT', monthly_amount: 5_000 },
+    ]
+    expect(computeCleanGrossPay(65_000, components)).toBe(50_000)
+  })
+
+  it('an empty or missing component_breakdown does not throw and returns gross_pay unchanged', () => {
+    expect(computeCleanGrossPay(50_000, [])).toBe(50_000)
+    expect(computeCleanGrossPay(50_000, undefined as any)).toBe(50_000)
+  })
+
+  it('a TDS deduction line (not an earning) is left alone — only earnings are excluded', () => {
+    const components = [
+      { code: 'TDS', monthly_amount: 2_000 },
+      { code: 'LEAVE_ENCASHMENT', monthly_amount: 10_000 },
+    ]
+    // Only the 10,000 earning is excluded; the TDS deduction line doesn't
+    // affect gross_pay in the first place (deductions reduce net, not gross).
+    expect(computeCleanGrossPay(60_000, components)).toBe(50_000)
   })
 })
 

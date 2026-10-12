@@ -527,6 +527,83 @@ on.** The two concrete paths:
     verified against a fresh local Postgres 16 instance;
     `check-schema-drift.mjs` passes clean.
 
+  **Addendum (2026-10-12, round 4): payout basis and the TDS
+  reconciliation-screen false positive are now FIXED; F&F payment now
+  consumes the leave balance atomically, not merely checks it (migration
+  450); a full persisted accounting chain exists through reversal; the
+  tax-treatment question remains explicitly OPEN. G12 is NOT closed.**
+  A further review rejected round 3's "all four points re-proven" framing
+  as an overclaim and asked for four items finished together, plus proof
+  that the DELETE-draft-run evidence's scope (deletion only) was extended
+  to cancellation and recomputation.
+  - **Payout basis — FIXED.** `payroll-engine.ts` exports
+    `computeCleanGrossPay(grossPay, components)`, subtracting any
+    `ONE_TIME_EARNING_CODES` line (currently `LEAVE_ENCASHMENT`) from a
+    slip's `gross_pay`. Both `fnf-settlement-engine.ts`'s rate basis and
+    `accrual-engine.ts`'s `computeEncashmentPayout` now use it instead of
+    the raw figure; places that must keep the real number (payroll totals,
+    accounting, exports) were left untouched. 6 new unit tests.
+  - **TDS integration — the reconciliation screen's false positive is
+    FIXED; the actual exemption-treatment question is explicitly left
+    OPEN.** `buildStatutoryRecon` now adds the run's paid encashment
+    `tds_amount` to the "payable" side, closing a spurious variance that
+    could block `/close` on an encashment month (3 new tests). This does
+    **not** resolve whether Section 10(10AA) exemption treatment applies —
+    `computeEncashmentPayout`'s withholding remains an explicitly-flagged
+    flat marginal-slab-rate computation, and a tax/compliance sign-off for
+    that is still needed before go-live. Unchanged from rounds 1–3,
+    restated rather than resolved.
+  - **Payment concurrency — FIXED (migration 450): a successful F&F
+    payment now consumes the leave balance, not merely checks it.** Round
+    3's `SOURCE_DRIFT` check (448) proves a *concurrent change* aborts a
+    payment; it cannot catch two settlements paying against the *same,
+    unchanged* balance, since F&F never wrote to `employee_leave_balance`
+    at all. `mark_fnf_paid_atomic` now decrements the exact
+    `leave_encashment_basis` rows (same lock migration 448 already takes)
+    and writes a `leave_balance_ledger` row — "paid" and "entitlement
+    spent" are now the same event. Proven with the exact double-pay
+    scenario reproduced and blocked, and genuine lock-contention
+    concurrency (not just sequential ordering) demonstrated with two real
+    Postgres connections — `scripts/db/verify-fnf-mark-paid-atomic.mjs`,
+    now 46 checks.
+  - **Accounting evidence — a full persisted chain now exists: request →
+    recomputation → finalized slip → GL → export → reversal**, including
+    the cancellation/recomputation extension specifically asked for: a
+    new `scripts/g12-accounting-reconciliation-check.sh` (23 checks, 10
+    sections, real Postgres through the full stack) proves the entire
+    chain in one run, ending with rolling a *finalized* run back to draft
+    and reversing the standalone request, confirming the leave balance is
+    credited back to its exact pre-encashment value with no residue.
+  - **On F&F's own cancellation path specifically:** investigated and
+    disclosed, not fixed — there is no reopen-from-`paid` path for a
+    separation settlement at all (`PATCH /separation-ff/reopen` 409s on
+    `paid`, already covered by an existing test), so migration 450's
+    consumption has **no API-reachable undo**. This is a pre-existing,
+    deliberate constraint on F&F in general that migration 450 did not
+    introduce; building a symmetric credit-back would need its own
+    dedicated reversal-workflow design, out of scope for this round.
+  - **One real, unrelated, pre-existing defect was found and fixed
+    because it blocked the accounting evidence above:**
+    `buildPayrollRunSnapshot` silently left a *stale, pre-correction*
+    snapshot in place forever whenever a draft run was computed more than
+    once before finalize (unavoidable for every G12 workflow, since
+    assignment requires an existing payslip) — `payroll_run_snapshots`'s
+    `UNIQUE(run_id)` made every snapshot build after the first fail
+    non-fatally. Fixed to supersede the stale manifest instead of leaving
+    it in place; a first attempt at this fix cascade-deleted the owning
+    payroll run entirely (`payroll_runs.snapshot_id` is `ON DELETE
+    CASCADE` into the snapshot table), caught and corrected before any
+    evidence was collected under it. Behavior-only, no migration; affects
+    any multi-recompute draft run, not only G12.
+  - Full API suite after this round: 49 files / 427 tests pass; `apps/api`
+    typechecks clean.
+  - Full detail: `STATUS.md`'s 2026-10-12 round-4 addendum; `FINDINGS.csv`
+    rows `G12-FNF-LEAVE-CONSUMPTION-GAP`,
+    `G12-FNF-PAID-IRREVERSIBLE-DISCLOSURE`, `G12-SNAPSHOT-REGEN-COLLISION`,
+    `G12-ACCOUNTING-E2E-EVIDENCE`, and the updated
+    `G12-TDS-RECON-SCREEN-GAP` / `G12-ENCASHMENT-RATE-COMPOUNDING-RISK`
+    (now `FIXED`).
+
 None of the four gates are closed by this round's local work, and none of
 them can be closed by more local work of the same kind — each needs either
 external access (Gates 1–3) or an explicit decision (Gate 4).

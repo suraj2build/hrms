@@ -399,6 +399,42 @@ export function applyEncashmentPayout(
   }
 }
 
+/**
+ * Component codes `applyEncashmentPayout` (and any future one-time payout
+ * of the same shape) injects into gross_pay as a pure one-time addition —
+ * never part of an employee's recurring compensation structure.
+ *
+ * Exported so any OTHER computation that uses "last payroll slip's
+ * gross_pay" as a stand-in for recurring salary (F&F's gratuity/notice/
+ * leave-encashment-rate basis in fnf-settlement-engine.ts; standalone
+ * leave encashment's own rate_per_day in accrual-engine.ts) can exclude
+ * them via computeCleanGrossPay below, instead of silently compounding: a
+ * prior one-time encashment payout inflating a slip's gross_pay, then a
+ * LATER computation (another encashment request, a gratuity calc) using
+ * that same inflated slip as its "normal salary" basis and overstating
+ * itself in turn.
+ */
+export const ONE_TIME_EARNING_CODES = ['LEAVE_ENCASHMENT'] as const
+
+/**
+ * Derives a "clean" recurring-salary gross from a slip's raw gross_pay by
+ * subtracting any one-time earning components (see ONE_TIME_EARNING_CODES)
+ * present in its component_breakdown. Use this wherever a slip's gross_pay
+ * is being read as a stand-in for the employee's normal recurring salary
+ * (a per-day rate, a gratuity/notice basis) rather than as "what was
+ * actually paid that specific month" (payroll totals, accounting, exports
+ * — those must keep using the real, un-adjusted gross_pay).
+ */
+export function computeCleanGrossPay(
+  grossPay:   number,
+  components: Array<{ code?: string | null; monthly_amount?: number | null }>,
+): number {
+  const oneTimeTotal = (components ?? [])
+    .filter(c => ONE_TIME_EARNING_CODES.includes((c.code ?? '').toUpperCase() as any))
+    .reduce((s, c) => s + Number(c.monthly_amount ?? 0), 0)
+  return round2(grossPay - oneTimeTotal)
+}
+
 /** Round to 2 decimal places. Exported so callers can use the same rounding. */
 export function round2(n: number): number {
   return Math.round(n * 100) / 100

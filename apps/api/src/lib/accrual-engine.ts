@@ -11,7 +11,7 @@
  */
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { fetchAllRows } from './supabase-paginate.js'
-import { round2 } from './payroll-engine.js'
+import { round2, computeCleanGrossPay } from './payroll-engine.js'
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -431,7 +431,10 @@ function currentFinancialYear(d: Date): string {
  *
  * rate_per_day mirrors lib/fnf-settlement-engine.ts's own leave-encashment
  * formula (last payroll gross / 26) so an employee sees the same per-day
- * rate whether they encash standalone or at separation.
+ * rate whether they encash standalone or at separation — using the CLEAN
+ * gross (payroll-engine.ts's computeCleanGrossPay), not the raw column: an
+ * earlier one-time encashment payout folded into that same slip's gross_pay
+ * must not inflate the rate a LATER encashment request computes for itself.
  *
  * tds_amount is a FLAT withholding at the employee's current marginal tax
  * slab (looked up from their latest tds_monthly_projections row this FY +
@@ -450,13 +453,22 @@ async function computeEncashmentPayout(
 ): Promise<{ ratePerDay: number; grossAmount: number; tdsAmount: number; netAmount: number }> {
   const { data: lastSlip } = await supabase
     .from('payroll_slips')
-    .select('gross_pay, month')
+    .select('gross_pay, month, component_breakdown')
     .eq('tenant_id', tenantId)
     .eq('employee_id', employeeId)
     .order('month', { ascending: false })
     .limit(1)
     .maybeSingle()
-  const ratePerDay  = round2(Number((lastSlip as any)?.gross_pay ?? 0) / 26)
+  // Clean gross: excludes any one-time payout (e.g. an EARLIER standalone
+  // encashment, payroll-engine.ts's applyEncashmentPayout) folded into this
+  // slip's gross_pay — otherwise a second encashment request computed off
+  // the same slip would overstate its own rate_per_day using a basis that
+  // already includes someone else's one-time payment.
+  const cleanGross = computeCleanGrossPay(
+    Number((lastSlip as any)?.gross_pay ?? 0),
+    ((lastSlip as any)?.component_breakdown ?? []) as Array<{ code?: string; monthly_amount?: number }>,
+  )
+  const ratePerDay  = round2(cleanGross / 26)
   const grossAmount = round2(days * ratePerDay)
 
   const fy = currentFinancialYear(new Date())

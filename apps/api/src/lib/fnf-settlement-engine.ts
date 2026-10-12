@@ -16,7 +16,7 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { round2 } from './payroll-engine.js'
+import { round2, computeCleanGrossPay } from './payroll-engine.js'
 import { getLeaveYear } from './leave-entitlement-service.js'
 
 export interface FnfBreakdown {
@@ -147,8 +147,14 @@ export async function computeFnfSettlement(
   // — that would zero out gratuity and notice-shortfall entirely instead of
   // surfacing the failure, silently understating the settlement.
   if (slipErr) return { error: `Failed to fetch salary basis: ${slipErr.message}` }
-  const gross = Number((lastSlip as any)?.gross_pay ?? 0)
   const components = ((lastSlip as any)?.component_breakdown ?? []) as Array<{ code?: string; monthly_amount?: number }>
+  // Clean gross: excludes any one-time payout (e.g. a prior standalone leave
+  // encashment, payroll-engine.ts's applyEncashmentPayout) folded into this
+  // slip's gross_pay — using the raw figure here would let a past one-time
+  // payment inflate gratuity, notice-shortfall, and the leave-encashment
+  // rate this settlement computes, none of which are meant to reflect a
+  // one-off lump sum.
+  const gross = computeCleanGrossPay(Number((lastSlip as any)?.gross_pay ?? 0), components)
   const basic = round2(
     components
       .filter(c => (c.code ?? '').toUpperCase() === 'BASIC')

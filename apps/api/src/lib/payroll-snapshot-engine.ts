@@ -726,6 +726,42 @@ export async function buildPayrollRunSnapshot(
   const sortedBlobs = [...successful].sort((a, b) => a.employeeId.localeCompare(b.employeeId))
   const combinedHash = generateSnapshotIntegrityHash(sortedBlobs.map(e => e.blob))
 
+  // payroll_run_snapshots has UNIQUE(run_id) — only one snapshot can exist per
+  // run. This function is called twice in the normal G12 workflow (once right
+  // after the initial draft computation, "so replay/audit trace is available
+  // immediately", and again at finalize time, "the genuinely immutable
+  // artifact") and additionally on every manual re-run of a draft (e.g. after
+  // POST /leave/encashment/:id/assign-payroll-run folds an encashment payout
+  // into an existing slip). Every call after the first used to hit the unique
+  // constraint, fail non-fatally (caught by both call sites' try/catch, logged
+  // as a WARN only), and leave the FIRST — stale, pre-correction — snapshot in
+  // place forever, including at finalize time. A snapshot taken before a
+  // recompute cannot be the correct replay/audit record, so superseding it is
+  // required, not merely tidy.
+  //
+  // payroll_runs.snapshot_id -> payroll_run_snapshots(id) ON DELETE CASCADE,
+  // and the end of this function (below) always points it at whichever
+  // snapshot was just built — including from the draft-time auto-snapshot,
+  // not only at finalize. So the run row ITSELF already references the stale
+  // manifest by the time we get here; deleting that manifest first would
+  // cascade-delete the run. Null out the run's reference before deleting the
+  // stale manifest, then delete the stale manifest's child employee rows
+  // (payroll_employee_snapshots.snapshot_id has ON DELETE RESTRICT) and
+  // finally the manifest itself, so the insert below always succeeds with the
+  // latest data and the final attach-to-run step has a live run row to attach to.
+  const { data: existingSnapshot } = await supabase
+    .from('payroll_run_snapshots')
+    .select('id')
+    .eq('run_id', runId)
+    .eq('tenant_id', tenantId)
+    .maybeSingle()
+
+  if (existingSnapshot?.id) {
+    await supabase.from('payroll_runs').update({ snapshot_id: null }).eq('id', runId).eq('tenant_id', tenantId)
+    await supabase.from('payroll_employee_snapshots').delete().eq('snapshot_id', existingSnapshot.id)
+    await supabase.from('payroll_run_snapshots').delete().eq('id', existingSnapshot.id)
+  }
+
   // Insert snapshot manifest
   const { data: manifest, error: manifestErr } = await supabase
     .from('payroll_run_snapshots')

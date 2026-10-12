@@ -104,7 +104,29 @@ export default async function payrollStatutoryReconRoutes(fastify: FastifyInstan
     recon.pf.payable  = sum(epfRows, r => Number(r.employee_contribution ?? 0) + Number(r.total_employer_contribution ?? 0) + Number(r.voluntary_pf ?? 0))
     recon.esi.payable = sum(esiRows, r => Number(r.total_contribution ?? 0))
     recon.pt.payable  = sum(ptaxRows, r => Number(r.ptax_amount ?? 0))
-    recon.tds.payable = sum(tdsRows, r => Number(r.tds_this_month ?? 0))
+
+    // A standalone leave-encashment payout finalized into this run has its
+    // own one-time TDS withholding folded into the slip's TDS-coded
+    // deduction line (so recon.tds.computed below already includes it, via
+    // payroll-engine.ts's applyEncashmentPayout, migration 447), but
+    // tds_monthly_projections only ever models RECURRING monthly salary —
+    // it has no forward projection for a one-time payout. Without adding
+    // it here too, every month containing an encashment payout would show
+    // a spurious variance against this screen's ₹1 reconciled threshold,
+    // blocking /close for a reason that isn't a real discrepancy. The
+    // amount is independently confirmed already — it's exactly what HR
+    // reviewed and approved on the standalone request itself (migration
+    // 446/447) — so it needs acknowledging on the payable side, not a
+    // projection to true up against.
+    const { data: encashmentRows } = await fastify.supabase
+      .from('leave_encashment_requests')
+      .select('tds_amount')
+      .eq('tenant_id', tenantId)
+      .eq('payroll_run_id', run.id)
+      .eq('status', 'paid')
+    const encashmentTds = sum(encashmentRows, r => Number(r.tds_amount ?? 0))
+
+    recon.tds.payable = sum(tdsRows, r => Number(r.tds_this_month ?? 0)) + encashmentTds
 
     recon.pf.filed  = epfRows.length  > 0
     recon.esi.filed = esiRows.length  > 0
